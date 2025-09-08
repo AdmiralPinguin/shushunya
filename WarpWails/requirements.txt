@@ -1,0 +1,12 @@
+torch==2.3.1
+torchaudio==2.3.1
+TTS==0.22.0
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pedalboard==0.9.14
+soundfile==0.12.1
+pydub==0.25.1
+numpy==1.26.4
+transformers==4.49.0
+tokenizers==0.21.4
+omegaconf==2.3.0

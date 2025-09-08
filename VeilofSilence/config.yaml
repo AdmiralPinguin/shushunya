@@ -1,0 +1,54 @@
+# Veil of Silence configuration
+#
+# This file defines how the Veil of Silence module connects to the message
+# bus and how it behaves with respect to microphone control.  Values here
+# may be overridden on the command line or via environment variables if
+# desired.
+
+# The endpoint on which this module publishes its commands and events.  Only
+# one instance should bind to a given address.  Subscribers connect to
+# this address to receive ``io.mic`` and ``io.event`` messages.
+zmq_bind_pub: "tcp://127.0.0.1:5582"
+
+# A list of endpoints to which the subscriber socket should connect.  These
+# endpoints should be publishers of ``audio.in.*``, ``dm.state`` and
+# ``ui.cmd`` topics.  In most deployments these will point to other
+# components on localhost, but they may be remote addresses as well.
+zmq_connect_sub:
+  - "tcp://127.0.0.1:5571"  # audio_in publisher
+  - "tcp://127.0.0.1:5591"  # dm_core publisher
+  - "tcp://127.0.0.1:5599"  # UI publisher (optional)
+
+# Topics to subscribe to.  Each entry here is treated as a prefix; topics
+# beginning with the specified string will be received.
+topics_in:
+  - "audio.in.partial"
+  - "audio.in.final"
+  - "dm.state"
+  - "ui.cmd"
+
+# Whether to detect barge‑in events during TTS playback.  When true, the
+# module will monitor incoming audio messages while the dialog manager is
+# speaking and emit a ``BARGE_IN`` event if the user begins talking.
+barge_in: true
+
+# Minimum amount of time (in milliseconds) that the user must speak before
+# a barge‑in is acknowledged.  Short bursts below this threshold are
+# ignored to avoid accidental triggers.
+barge_in_min_ms: 120
+
+# Mode of operation: ``handsfree`` or ``push_to_talk``.  In handsfree
+# mode the microphone is automatically enabled whenever the dialog manager
+# is not speaking.  In push‑to‑talk mode the microphone remains disabled
+# until the user holds down a designated key (see ``push_to_talk_down``
+# and ``push_to_talk_up`` commands on the ``ui.cmd`` topic).
+mode: "handsfree"
+
+# If set to true, the module starts in the ``MUTED`` state and keeps the
+# microphone disabled until an ``unmute`` command is received.
+mute: false
+
+# Guard period (in milliseconds) after entering the ``SPEAK_LOCK`` state
+# during which barge‑in events are ignored.  This prevents spurious
+# triggers during the very beginning of playback.
+speak_guard_ms: 200

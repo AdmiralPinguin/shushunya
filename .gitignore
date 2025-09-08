@@ -1,0 +1,11 @@
+WarpWails/warpwails/
+.venv/
+venv/
+env/
+WarpWails/models/
+models/
+checkpoints/
+datasets/
+__pycache__/
+*.py[cod]
+*.pt *.pth *.safetensors *.onnx *.ckpt *.bin *.gguf *.tgz *.zip *.7z *.tar* *.wav *.mp4
