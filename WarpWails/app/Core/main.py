@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Response
+from fastapi import FastAPI
+from app.Mod3_VoxTormenta.router import router as Mod3Router, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import io, re, numpy as np, soundfile as sf
@@ -8,7 +9,8 @@ from app.Mod3_VoxTormenta.router import router as mod3
 ENG = SileroRU()
 TARGET_SR = 24000
 
-app = FastAPI(title="WarpWails Core (silero+mod3)", version="0.4.2")
+app = FastAPI
+app.include_router(Mod3Router)(title="WarpWails Core (silero+mod3)", version="0.4.2")
 app.include_router(mod3)
 
 class SpeakIn(BaseModel):

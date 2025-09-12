@@ -9,3 +9,10 @@ datasets/
 __pycache__/
 *.py[cod]
 *.pt *.pth *.safetensors *.onnx *.ckpt *.bin *.gguf *.tgz *.zip *.7z *.tar* *.wav *.mp4
+WarpWails/warpwails/
+__pycache__/
+*.pyc
+assets/warpwails/*
+assets/impulses/*
+!assets/warpwails/.gitkeep
+!assets/impulses/.gitkeep
