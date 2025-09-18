@@ -4,7 +4,7 @@ import io
 
 router = APIRouter()
 
-@router.post("/mod5_masterfx")
-async def mod5_masterfx(request: Request):
+@router.post("/mod4_sfx")
+async def mod4_sfx(request: Request):
     data = await request.body()
     return StreamingResponse(io.BytesIO(data), media_type="audio/wav")
