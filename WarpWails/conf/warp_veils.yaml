@@ -1,5 +1,5 @@
 tts:
-  speaker_default: aidar     # aidar|baya|kseniya|xenia|eugene|random
+  speaker_default: kseniya
   sr: 24000
   channels: 1
   bps: 16
