@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Body, Query, HTTPException
 from fastapi.responses import StreamingResponse
+from app.Core.config import CFG
 from typing import Optional, Generator
 import numpy as np
 import torch
@@ -11,14 +12,25 @@ _LOCK = threading.Lock()
 
 SR, CH, BPS = 24000, 1, 16
 SPEAKERS = {"aidar","baya","kseniya","xenia","eugene","random"}
+CHUNK_BYTES = int(CFG.stream.chunk_bytes)
+DEFAULT_SPK = str(CFG.tts.speaker_default)
 
 def _load_model():
+    import torch
     global _MODEL
     with _LOCK:
         if _MODEL is None:
             obj = torch.hub.load('snakers4/silero-models', 'silero_tts',
                                  language='ru', speaker='v4_ru')
             _MODEL = obj[0] if isinstance(obj, (tuple, list)) else obj
+    # device
+    dev=CFG.tts.device
+    if dev=='auto':
+        dev='cuda' if (hasattr(torch,'cuda') and torch.cuda.is_available()) else 'cpu'
+    try:
+        _MODEL.to(dev)
+    except Exception:
+        pass
     return _MODEL
 
 def _wav_header(num_samples: int, sr: int = SR, ch: int = CH, bps: int = BPS) -> bytes:
@@ -44,7 +56,7 @@ def _synthesize(text: str, speaker: str) -> np.ndarray:
     if isinstance(audio, torch.Tensor): audio = audio.detach().cpu().numpy()
     return audio.astype(np.float32)
 
-def _stream_wav(pcm: bytes, chunk: int = 8192) -> Generator[bytes, None, None]:
+def _stream_wav(pcm: bytes, chunk: int = CHUNK_BYTES) -> Generator[bytes, None, None]:
     yield _wav_header(len(pcm)//2)
     for i in range(0, len(pcm), chunk): yield pcm[i:i+chunk]
 
@@ -52,7 +64,7 @@ def _stream_wav(pcm: bytes, chunk: int = 8192) -> Generator[bytes, None, None]:
 @router.post("/speak_stream")
 def speak_stream(
     text: Optional[str] = Query(default=None),
-    speaker: str = Query(default="aidar"),
+    speaker: str = Query(default=DEFAULT_SPK),
     payload: Optional[dict] = Body(default=None),
 ):
     if not text and isinstance(payload, dict): text = payload.get("text")

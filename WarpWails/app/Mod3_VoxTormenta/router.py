@@ -1,5 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Body, Response, HTTPException
 from typing import Optional
+from app.Core.config import CFG
 import tempfile
 import subprocess
 import os
@@ -41,7 +42,7 @@ def _imp_light_chain(use_rubberband: bool) -> str:
     limit = "alimiter=limit=-3dB"
     return ",".join([pitch, hpf, lpf, comp, lnorm, limit])
 
-def _process(in_wav: str, out_wav: str, preset: str = "imp_light") -> None:
+def _process(in_wav: str, out_wav: str, preset: str = CFG.voicefx.preset_default) -> None:
     if preset != "imp_light":
         raise ValueError("unsupported preset")
     filter_chain = _imp_light_chain(_RUBBERBAND)
@@ -77,7 +78,7 @@ def _process(in_wav: str, out_wav: str, preset: str = "imp_light") -> None:
 async def mod3_voicefx(
     file: Optional[UploadFile] = File(None),
     body: Optional[bytes] = Body(default=None),
-    preset: str = "imp_light",
+    preset: str = CFG.voicefx.preset_default,
 ):
     if not file and not body:
         raise HTTPException(status_code=400, detail="provide WAV via multipart 'file' or raw body")
