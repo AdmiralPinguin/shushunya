@@ -1,0 +1,17 @@
+# venv
+/warpwails/
+
+# модели и кеши
+/models/
+/home/*/.cache/torch/
+/home/*/.cache/tts/
+**/__pycache__/
+*.pyc
+
+# аудио-артефакты и временное
+*.wav
+*.mp3
+*.flac
+/tmp/
+*.log
+/uvicorn.log

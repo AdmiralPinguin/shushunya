@@ -1,4 +1,7 @@
 from fastapi import FastAPI
+from app.Mod1_Emotion.router import router as Mod1Router
+from app.Mod4_SFXForge.router import router as Mod4Router
+from app.Mod5_MasterFX.router import router as Mod5Router
 from app.Mod3_VoxTormenta.router import router as Mod3Router, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -10,6 +13,9 @@ ENG = SileroRU()
 TARGET_SR = 24000
 
 app = FastAPI
+app.include_router(Mod1Router)
+app.include_router(Mod4Router)
+app.include_router(Mod5Router)
 app.include_router(Mod3Router)(title="WarpWails Core (silero+mod3)", version="0.4.2")
 app.include_router(mod3)
 
