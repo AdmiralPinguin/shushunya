@@ -3,8 +3,8 @@ from fastapi.responses import StreamingResponse
 import requests, io
 
 router = APIRouter()
-
 API = "http://127.0.0.1:8009"
+TO = 60  # seconds
 
 @router.post("/speak_full")
 def speak_full(payload: dict = Body(...)):
@@ -12,32 +12,44 @@ def speak_full(payload: dict = Body(...)):
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
-    # Модуль 1: эмоции (пока заглушка, текст не меняет)
-    emo = requests.post(f"{API}/mod1_emotion", json={
-        "text": text,
-        "emotion": payload.get("emotion","neutral"),
-        "intensity": payload.get("intensity",0.5)
-    }).json()
-    text2 = emo["text"]
+    # 1) Emotion (stub)
+    r = requests.post(f"{API}/mod1_emotion",
+                      json={"text": text,
+                            "emotion": payload.get("emotion","neutral"),
+                            "intensity": payload.get("intensity",0.5)},
+                      timeout=TO)
+    r.raise_for_status()
+    text2 = r.json().get("text", text)
 
-    # Модуль 2: TTS → WAV
-    dry = requests.post(f"{API}/speak",); dry.raise_for_status()
-     json={"text": text2, "speaker": payload.get("speaker") or None})
-    dry_bytes = dry.content
+    # 2) TTS → WAV
+    r = requests.post(f"{API}/speak",
+                      json={"text": text2, "speaker": payload.get("speaker")},
+                      timeout=TO)
+    r.raise_for_status()
+    dry_bytes = r.content
 
-    # Модуль 3: VoiceFX
-    wet = requests.post(f"{API}/mod3_voicefx",); wet.raise_for_status()
-     data=dry_bytes, headers={"Content-Type":"audio/wav"})
-    wet_bytes = wet.content
+    # 3) VoiceFX
+    r = requests.post(f"{API}/mod3_voicefx",
+                      data=dry_bytes,
+                      headers={"Content-Type":"audio/wav"},
+                      timeout=TO)
+    r.raise_for_status()
+    wet_bytes = r.content
 
-    # Модуль 4: SFX вставки
-    sfx = requests.post(f"{API}/mod4_sfx",); sfx.raise_for_status()
-     data=wet_bytes, headers={"Content-Type":"audio/wav"})
-    sfx_bytes = sfx.content
+    # 4) SFX (stub)
+    r = requests.post(f"{API}/mod4_sfx",
+                      data=wet_bytes,
+                      headers={"Content-Type":"audio/wav"},
+                      timeout=TO)
+    r.raise_for_status()
+    sfx_bytes = r.content
 
-    # Модуль 5: MasterFX
-    mast = requests.post(f"{API}/mod5_masterfx",); mast.raise_for_status()
-     data=sfx_bytes, headers={"Content-Type":"audio/wav"})
-    mast_bytes = mast.content
+    # 5) MasterFX (stub)
+    r = requests.post(f"{API}/mod5_masterfx",
+                      data=sfx_bytes,
+                      headers={"Content-Type":"audio/wav"},
+                      timeout=TO)
+    r.raise_for_status()
+    out_bytes = r.content
 
-    return StreamingResponse(io.BytesIO(mast_bytes), media_type="audio/wav")
+    return StreamingResponse(io.BytesIO(out_bytes), media_type="audio/wav")
