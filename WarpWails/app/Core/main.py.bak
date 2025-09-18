@@ -6,9 +6,11 @@ except Exception:
     Mod3Router = None
 
 app = FastAPI(title="WarpWails Core", version="0.2.0")
+
 app.include_router(Mod2Router)
 if Mod3Router:
     app.include_router(Mod3Router)
 
 @app.get("/healthz")
-def healthz(): return {"ok": True}
+def healthz():
+    return {"ok": True}

@@ -1,17 +1,31 @@
-# venv
-/warpwails/
-
-# модели и кеши
-/models/
-/home/*/.cache/torch/
-/home/*/.cache/tts/
-**/__pycache__/
+# venv, caches, builds
+warpwails/
+.venv/
+__pycache__/
 *.pyc
+.cache/
+.huggingface/
+*.egg-info/
+dist/
+build/
 
-# аудио-артефакты и временное
+# audio artifacts
 *.wav
 *.mp3
 *.flac
+*.ogg
 /tmp/
 *.log
-/uvicorn.log
+
+# models and big stuff
+models/
+checkpoints/
+data/
+*.pth
+*.pt
+
+# OS/editor junk
+.DS_Store
+*.swp
+.idea/
+.vscode/
