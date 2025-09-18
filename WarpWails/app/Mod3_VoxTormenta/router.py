@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Body, Response, HTTPException
+from fastapi import APIRouter, UploadFile, File, Body, Response, HTTPException, Request
 from typing import Optional
 from app.Core.config import CFG
 import tempfile
@@ -80,7 +80,8 @@ async def mod3_voicefx(
     body: Optional[bytes] = Body(default=None),
     preset: str = CFG.voicefx.preset_default,
 ):
-    if not file and not body:
+    data = await request.body()
+    if (not file) and (not data):
         raise HTTPException(status_code=400, detail="provide WAV via multipart 'file' or raw body")
 
     with tempfile.TemporaryDirectory(prefix="vox3_") as td:
@@ -89,8 +90,6 @@ async def mod3_voicefx(
 
         if file:
             data = await file.read()
-        else:
-            data = body
 
         with open(in_wav, "wb") as f:
             f.write(data)
