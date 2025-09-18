@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from app.Mod3_VoxTormenta.router import router as vox3_router
 from app.Mod2_TTS.router import router as Mod2Router
 try:
     from app.Mod3_VoxTormenta.router import router as Mod3Router
