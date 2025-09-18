@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from app.Core.pipeline_router import router as pipeline_router
 from app.Mod5_MasterFX.router import router as mod5_router
 from app.Mod4_SFX.router import router as mod4_router
 from app.Mod1_Emotion.router import router as mod1_router
@@ -15,6 +16,8 @@ app = FastAPI(title="WarpWails Core", version="0.2.0")
 
 
 
+
+app.include_router(pipeline_router)
 app.include_router(mod5_router)
 app.include_router(mod4_router)
 app.include_router(mod1_router)
