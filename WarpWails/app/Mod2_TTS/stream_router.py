@@ -7,18 +7,18 @@ router = APIRouter()
 SR = 24000
 SPEAKER_DEFAULT = "kseniya"
 
-# модель кэшируем глобально
 _model = None
 def _load():
     global _model
     if _model is None:
-        _model = torch.hub.load('snakers4/silero-models','silero_tts', language='ru', speaker='v4_ru')
+        pack = torch.hub.load('snakers4/silero-models','silero_tts', language='ru', speaker='v4_ru')
+        # pack это (model, example_text)
+        _model = pack[0] if isinstance(pack, tuple) else pack
     return _model
 
 def _split_text(t: str, max_len: int = 220) -> List[str]:
     t = re.sub(r'\s+', ' ', t).strip()
     if not t: return []
-    # сначала режем по финальным паузам
     parts = re.split(r'([\.!\?\…]+)', t)
     chunks, buf = [], ''
     for i in range(0, len(parts), 2):
@@ -34,7 +34,6 @@ def _split_text(t: str, max_len: int = 220) -> List[str]:
                 chunks.append(piece)
                 buf = ''
             else:
-                # жёсткий сплит по словам
                 words = piece.split(' ')
                 cur = ''
                 for w in words:
@@ -59,11 +58,10 @@ def _synthesize(text: str, speaker: str) -> bytes:
         raise HTTPException(status_code=400, detail="empty text after normalization")
     waves = []
     for ch in chunks:
-        wav = m.apply_tts(text=ch, speaker=speaker, sample_rate=SR)  # numpy float32 [-1,1]
+        wav = m.apply_tts(text=ch, speaker=speaker, sample_rate=SR)
         if isinstance(wav, torch.Tensor):
             wav = wav.detach().cpu().numpy()
         waves.append(wav)
-        # короткая зазвучка между фразами ~120 мс
         pad = np.zeros(int(0.12 * SR), dtype=np.float32)
         waves.append(pad)
     audio = np.concatenate(waves) if waves else np.zeros(1, np.float32)
