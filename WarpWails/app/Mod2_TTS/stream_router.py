@@ -1,74 +1,84 @@
-from fastapi import APIRouter, Body, Query, HTTPException
-from fastapi.responses import StreamingResponse
-from app.Core.config import CFG
-from typing import Optional, Generator
-import numpy as np
-import torch
-import struct, threading
+from fastapi import APIRouter, Query, HTTPException
+from fastapi.responses import StreamingResponse, Response
+import torch, re, io, numpy as np
+from typing import List
 
 router = APIRouter()
-_MODEL = None
-_LOCK = threading.Lock()
+SR = 24000
+SPEAKER_DEFAULT = "kseniya"
 
-SR, CH, BPS = 24000, 1, 16
-SPEAKERS = {"aidar","baya","kseniya","xenia","eugene","random"}
-CHUNK_BYTES = int(CFG.stream.chunk_bytes)
-DEFAULT_SPK = str(CFG.tts.speaker_default)
+# модель кэшируем глобально
+_model = None
+def _load():
+    global _model
+    if _model is None:
+        _model = torch.hub.load('snakers4/silero-models','silero_tts', language='ru', speaker='v4_ru')
+    return _model
 
-def _load_model():
-    import torch
-    global _MODEL
-    with _LOCK:
-        if _MODEL is None:
-            obj = torch.hub.load('snakers4/silero-models', 'silero_tts',
-                                 language='ru', speaker='v4_ru')
-            _MODEL = obj[0] if isinstance(obj, (tuple, list)) else obj
-    # device
-    dev=CFG.tts.device
-    if dev=='auto':
-        dev='cuda' if (hasattr(torch,'cuda') and torch.cuda.is_available()) else 'cpu'
-    try:
-        _MODEL.to(dev)
-    except Exception:
-        pass
-    return _MODEL
-
-def _wav_header(num_samples: int, sr: int = SR, ch: int = CH, bps: int = BPS) -> bytes:
-    byte_rate = sr * ch * (bps // 8); block_align = ch * (bps // 8)
-    data_size = num_samples * block_align; riff_size = 36 + data_size
-    return struct.pack('<4sI4s4sIHHIIHH4sI',
-        b'RIFF', riff_size, b'WAVE', b'fmt ', 16, 1, ch, sr,
-        byte_rate, block_align, bps, b'data', data_size)
+def _split_text(t: str, max_len: int = 220) -> List[str]:
+    t = re.sub(r'\s+', ' ', t).strip()
+    if not t: return []
+    # сначала режем по финальным паузам
+    parts = re.split(r'([\.!\?\…]+)', t)
+    chunks, buf = [], ''
+    for i in range(0, len(parts), 2):
+        sent = parts[i].strip()
+        tail = parts[i+1] if i+1 < len(parts) else ''
+        piece = (sent + (tail or '')).strip()
+        if not piece: continue
+        if len(buf) + 1 + len(piece) <= max_len:
+            buf = (buf + ' ' + piece).strip()
+        else:
+            if buf: chunks.append(buf)
+            if len(piece) <= max_len:
+                chunks.append(piece)
+                buf = ''
+            else:
+                # жёсткий сплит по словам
+                words = piece.split(' ')
+                cur = ''
+                for w in words:
+                    if len(cur) + 1 + len(w) <= max_len:
+                        cur = (cur + ' ' + w).strip()
+                    else:
+                        if cur: chunks.append(cur)
+                        cur = w
+                if cur: chunks.append(cur)
+                buf = ''
+    if buf: chunks.append(buf)
+    return chunks
 
 def _pcm_s16le(x: np.ndarray) -> bytes:
-    x = np.clip(x, -1.0, 1.0); return (x * 32767.0).astype('<i2').tobytes()
+    x = np.clip(x, -1.0, 1.0)
+    return (x * 32767.0).astype('<i2').tobytes()
 
-def _norm_speaker(s: str) -> str:
-    s = s.strip().lower()
-    if s == "aidar_v2": s = "aidar"
-    if s not in SPEAKERS:
-        raise HTTPException(status_code=400, detail=f"speaker must be one of: {', '.join(sorted(SPEAKERS))}")
-    return s
-
-def _synthesize(text: str, speaker: str) -> np.ndarray:
-    m = _load_model()
-    audio = m.apply_tts(text=text, speaker=speaker, sample_rate=SR)
-    if isinstance(audio, torch.Tensor): audio = audio.detach().cpu().numpy()
-    return audio.astype(np.float32)
-
-def _stream_wav(pcm: bytes, chunk: int = CHUNK_BYTES) -> Generator[bytes, None, None]:
-    yield _wav_header(len(pcm)//2)
-    for i in range(0, len(pcm), chunk): yield pcm[i:i+chunk]
+def _synthesize(text: str, speaker: str) -> bytes:
+    m = _load()
+    chunks = _split_text(text)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="empty text after normalization")
+    waves = []
+    for ch in chunks:
+        wav = m.apply_tts(text=ch, speaker=speaker, sample_rate=SR)  # numpy float32 [-1,1]
+        if isinstance(wav, torch.Tensor):
+            wav = wav.detach().cpu().numpy()
+        waves.append(wav)
+        # короткая зазвучка между фразами ~120 мс
+        pad = np.zeros(int(0.12 * SR), dtype=np.float32)
+        waves.append(pad)
+    audio = np.concatenate(waves) if waves else np.zeros(1, np.float32)
+    return _pcm_s16le(audio)
 
 @router.get("/speak_stream")
-@router.post("/speak_stream")
-def speak_stream(
-    text: Optional[str] = Query(default=None),
-    speaker: str = Query(default=DEFAULT_SPK),
-    payload: Optional[dict] = Body(default=None),
-):
-    if not text and isinstance(payload, dict): text = payload.get("text")
-    if not text or not text.strip(): raise HTTPException(status_code=400, detail="text is required")
-    spk = _norm_speaker(speaker)
-    pcm = _pcm_s16le(_synthesize(text.strip(), speaker=spk))
-    return StreamingResponse(_stream_wav(pcm), media_type="audio/wav")
+def speak_stream(text: str = Query(...), speaker: str = Query(SPEAKER_DEFAULT)):
+    payload = _synthesize(text.strip(), speaker or SPEAKER_DEFAULT)
+    return StreamingResponse(io.BytesIO(payload), media_type="audio/wav")
+
+@router.post("/speak")
+def speak(payload: dict):
+    text = (payload.get("text") or "").strip()
+    speaker = payload.get("speaker") or SPEAKER_DEFAULT
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    wav = _synthesize(text, speaker)
+    return Response(content=wav, media_type="audio/wav")
