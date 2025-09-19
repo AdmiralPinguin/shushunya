@@ -1,48 +1,53 @@
 from fastapi import APIRouter, Request, HTTPException, Response
-import tempfile, subprocess, shutil, os, logging
+import tempfile, subprocess, shutil, os
 
 router = APIRouter()
-LOG = logging.getLogger("MasterFX")
 FFMPEG = shutil.which("ffmpeg")
-if not FFMPEG:
-    raise RuntimeError("ffmpeg not found")
+if not FFMPEG: raise RuntimeError("ffmpeg not found")
 
 def _run(cmd): 
-    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-def _goblin_whisper(in_wav: str, out_wav: str):
-    # минимальный стабильный чейн
-    chain = ",".join([
-        "pan=stereo|c0=c0|c1=c0",              # mono → stereo
-        "highpass=f=70",
-        "lowpass=f=9000",
-        "equalizer=f=3200:t=h:width=200:g=3",
-        "aecho=0.35:0.6:18:0.25",
-        "chorus=0.4:0.7:15:0.25:0.5:2",
-        "acompressor=threshold=-14dB:ratio=3:attack=5:release=120:makeup=2:soft_knee=6",
-        "loudnorm=I=-16:TP=-1.2:LRA=10:dual_mono=false:print_format=none"
-    ])
-    cmd = [
-        FFMPEG, "-hide_banner", "-y",
-        "-i", in_wav,
-        "-filter_complex", chain,
-        "-ar", "24000", "-ac", "2", "-sample_fmt", "s16",
-        out_wav
-    ]
-    res = _run(cmd)
-    if res.returncode != 0:
-        LOG.error(res.stderr.decode("utf-8", "ignore"))
-        raise RuntimeError("ffmpeg masterfx failed")
+# проверка наличия фильтра в текущем ffmpeg
+def _have(name: str) -> bool:
+    r = _run([FFMPEG, "-hide_banner", "-filters"])
+    return r.returncode == 0 and (f" {name} " in r.stdout or r.stdout.strip().endswith(name))
+
+# собрать линейную цепь эффектов; если нет ни одного — anull
+def _build_chain() -> str:
+    fs = {k: _have(k) for k in ["pan","highpass","lowpass","equalizer","aecho","chorus","acompressor","loudnorm","alimiter"]}
+    chain = []
+    if fs["pan"]:        chain.append("pan=stereo|c0=c0|c1=c0")
+    if fs["highpass"]:   chain.append("highpass=f=70")
+    if fs["lowpass"]:    chain.append("lowpass=f=9000")
+    if fs["equalizer"]:  chain.append("equalizer=f=3200:t=h:w=200:g=3")
+    if fs["aecho"]:      chain.append("aecho=0.35:0.6:18:0.25")
+    if fs["chorus"]:     chain.append("chorus=0.4:0.7:15:0.25:0.5:2")
+    if fs["acompressor"]:chain.append("acompressor=threshold=-14dB:ratio=3:attack=5:release=120:makeup=2:soft_knee=6")
+    if fs["loudnorm"]:   chain.append("loudnorm=I=-16:TP=-1.2:LRA=10:print_format=none")
+    if fs["alimiter"]:   chain.append("alimiter=limit=-1dB")
+    if not chain:        chain.append("anull")
+    return ",".join(chain)
+
+def _master(in_wav: str, out_wav: str):
+    chain = _build_chain()
+    cmd = [FFMPEG, "-hide_banner", "-y",
+           "-i", in_wav,
+           "-af", chain,              # ЛИНЕЙНАЯ цепочка
+           "-ar", "24000", "-ac", "2", "-sample_fmt", "s16",
+           out_wav]
+    r = _run(cmd)
+    if r.returncode != 0:
+        err = (r.stderr or "").strip().splitlines()[-1] if r.stderr else "no stderr"
+        raise RuntimeError(f"ffmpeg masterfx failed: {err}")
 
 @router.post("/mod5_masterfx")
-async def mod5_masterfx(request: Request, preset: str = "GOBLIN_WHISPER"):
+async def mod5_masterfx(request: Request):
     data = await request.body()
-    if not data:
-        raise HTTPException(status_code=400, detail="no audio body")
+    if not data: raise HTTPException(status_code=400, detail="no audio body")
     with tempfile.TemporaryDirectory(prefix="m5_") as td:
-        inp = os.path.join(td, "in.wav")
-        out = os.path.join(td, "out.wav")
+        inp = os.path.join(td, "in.wav"); out = os.path.join(td, "out.wav")
         with open(inp, "wb") as f: f.write(data)
-        _goblin_whisper(inp, out)
+        _master(inp, out)
         with open(out, "rb") as f: out_bytes = f.read()
     return Response(content=out_bytes, media_type="audio/wav")
