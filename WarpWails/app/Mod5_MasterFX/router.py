@@ -9,16 +9,15 @@ if not FFMPEG:
 
 def _run(cmd): return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-# Preset: GOBLIN_WHISPER — стереорасширение, декор, компрессия, нормализация, лимитер
 def _goblin_whisper(in_wav: str, out_wav: str):
     chain = ",".join([
         "pan=stereo|c0=c0|c1=c0",              # mono → stereo
-        "highpass=f=70",                       # убрать гул
-        "lowpass=f=9000",                      # убрать ультраверх
-        "deesser=i=6:s=0.5",                   # де-эссер
-        "equalizer=f=3200:t=h:width=200:g=3",  # читаемость
-        "aecho=0.35:0.6:18:0.25",              # короткий слэп
-        "chorus=0.4:0.7:15:0.25:0.5:2",        # лёгкий хор/детюн
+        "highpass=f=70",
+        "lowpass=f=9000",
+        "deesser=f=5500:t=0.5:w=3500",         # правильный де-эссер
+        "equalizer=f=3200:t=h:width=200:g=3",
+        "aecho=0.35:0.6:18:0.25",
+        "chorus=0.4:0.7:15:0.25:0.5:2",
         "acompressor=threshold=-14dB:ratio=3:attack=5:release=120:makeup=2:soft_knee=6",
         "loudnorm=I=-16:TP=-1.2:LRA=10:dual_mono=false:print_format=none",
         "alimiter=limit=-1dB"
