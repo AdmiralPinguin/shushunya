@@ -4,26 +4,20 @@ import subprocess, tempfile, os, shutil
 router = APIRouter()
 
 def _fg() -> str:
-    # агрессивный 'демонический' профиль для kseniya
+    # 1) asetrate опускает тон+форманты ~3%
+    # 2) atempo компенсирует скорость (чтобы не растягивать)
+    # 3) пара узких выемок и подчёркнутый низ для удаления женских резонансов
+    # 4) короткие эхо для эффекта множества голосов
     return (
         "[0:a]"
-        # сильное смещение формант вбок: asetrate вниз -> rubberband сильно выше (форманты меняются)
-        "asetrate=15000,aresample=24000,"
-        "rubberband=pitch=1.6:formant=0.55,"
-        # убрать 'женские' верхние резонансы, подчеркнуть 'неродной' тембр
-        "equalizer=f=2700:width_type=h:width=450:g=-12,"
-        "equalizer=f=3200:width_type=h:width=400:g=-8,"
-        "equalizer=f=800:width_type=h:width=260:g=5,"
-        # грязь и цифровые артефакты
-        "acrusher=bits=8:mix=0.60,"
-        "asubboost=boost=6:cutoff=120:wet=0.6,"
-        # металлическая окраска, фазер для 'нереальности'
-        "aphaser=in_gain=0.7:out_gain=1.0:delay=2.0:decay=0.6:speed=1.5,"
-        # вибрато/дрожь
-        "vibrato=f=6.8:d=0.30,"
-        # микро-эхо кластер 7/12/15/17 ms (чётко слышны параллельные рты)
-        "aecho=0.88:0.84:7|12|15|17:0.70|0.52|0.40|0.28,"
-        # финальная чистка и лимит
+        "asetrate=24000*0.97,aresample=24000,atempo=1.03,"
+        "rubberband=pitch=1.00:formant=0.90,"
+        "equalizer=f=2800:width_type=h:width=350:g=-6,"
+        "equalizer=f=3200:width_type=h:width=300:g=-6,"
+        "equalizer=f=850:width_type=h:width=200:g=4,"
+        "acrusher=bits=9:mix=0.40,"
+        "vibrato=f=5.5:d=0.22,"
+        "aecho=0.85:0.80:7|12|15|17:0.6|0.45|0.35|0.25,"
         "loudnorm=I=-16:TP=-1.0:LRA=9:print_format=none,"
         "alimiter=limit=0.95[out]"
     )
