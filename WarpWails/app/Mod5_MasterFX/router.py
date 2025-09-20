@@ -3,35 +3,36 @@ import subprocess, tempfile, os, shutil
 
 router = APIRouter()
 
-# ratio = 2^(n/12)
-P_MAIN = 1.1892071150   # +3 semitones (было +4)
-P_HIGH = 1.3348398542   # +5 semitones (было +8 → ближе)
-P_LOW  = 0.5946035575   # -8 semitones (было -12 → ближе)
-P_P2   = 1.1224620483   # +2 semitones
-P_M2   = 0.9438743127   # -1 semitone (было -2 → ближе)
+# ratios = 2^(semitones/12)
+P_MAIN = 1.1892071150   # +3  — основной, высокий, но не «женский»
+P_HIGH = 1.3348398542   # +5  — верхний шёпот
+P_P2   = 1.1224620483   # +2  — микро-дубль 1
+P_P1   = 1.0594630944   # +1  — микро-дубль 2
 
 def filter_graph() -> str:
     return (
-        "asplit=5[main][hi][low][m1][m2];"
+        # 4 ветки: основной, высокий шёпот, два почти синхронных дубля
+        "asplit=4[main][wh][m1][m2];"
+        # Основной: умеренный питч вверх, прибираем «женские» форманты, чуть грязи, лёгкий вибрато
         "[main]rubberband=pitch=%0.6f,"
-        "acrusher=bits=10:mix=0.40,"
-        "equalizer=f=600:width_type=h:width=200:g=-5,"
-        "equalizer=f=3000:width_type=h:width=300:g=6"
+        "acrusher=bits=10:mix=0.45,"
+        "equalizer=f=800:width_type=h:width=250:g=-6,"
+        "equalizer=f=2200:width_type=h:width=300:g=-3,"
+        "vibrato=f=5.0:d=0.20"
         "[core];"
-        "[hi]rubberband=pitch=%0.6f,highpass=f=2000,volume=-10dB,"
-        "aecho=0.90:0.85:500|700:0.55|0.40"
-        "[wh];"
-        "[low]rubberband=pitch=%0.6f,lowpass=f=250,volume=-15dB"
-        "[shadow];"
-        "[m1]rubberband=pitch=%0.6f,adelay=15,volume=-6dB"
-        "[mini1];"
-        "[m2]rubberband=pitch=%0.6f,adelay=20,volume=-6dB"
-        "[mini2];"
-        "[core][wh][shadow][mini1][mini2]amix=inputs=5:normalize=0[mx];"
-        "[mx]aecho=0.80:0.85:180|260:0.45|0.35,"
+        # Высокий шёпот: только верх, де-эссер, длинное эхо
+        "[wh]rubberband=pitch=%0.6f,highpass=f=1800,deesser=i=0.2:s=0.5,volume=-9dB,"
+        "aecho=0.85:0.80:500:0.45"
+        "[whp];"
+        # Два микро-дубля почти синхронно, чтобы слышалось «несколько ртов»
+        "[m1]rubberband=pitch=%0.6f,adelay=12,volume=-6dB[mn1];"
+        "[m2]rubberband=pitch=%0.6f,adelay=18,volume=-8dB[mn2];"
+        # Сведение в моно + клей-эхо + финал
+        "[core][whp][mn1][mn2]amix=inputs=4:normalize=0,"
+        "aecho=0.80:0.85:180:0.35,"
         "loudnorm=I=-16:TP=-1.0:LRA=10:print_format=none,"
         "alimiter=limit=0.95[out]"
-    ) % (P_MAIN, P_HIGH, P_LOW, P_P2, P_M2)
+    ) % (P_MAIN, P_HIGH, P_P2, P_P1)
 
 @router.post("/mod5_masterfx")
 async def mod5_masterfx(request: Request, file: UploadFile | None = None):
