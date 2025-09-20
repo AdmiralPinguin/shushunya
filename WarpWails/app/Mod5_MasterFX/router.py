@@ -1,10 +1,9 @@
-from fastapi import APIRouter, UploadFile, Response
+from fastapi import APIRouter, Request, UploadFile, Response
 import subprocess, tempfile, os, shutil
 
 router = APIRouter()
 
 def filter_graph() -> str:
-    # Всё в допустимых диапазонах: нет out-of-range значений
     return (
         "[0:a]"
         "pan=stereo|c0=c0|c1=c0,"
@@ -30,31 +29,36 @@ def filter_graph() -> str:
     )
 
 @router.post("/mod5_masterfx")
-async def mod5_masterfx(file: UploadFile):
+async def mod5_masterfx(request: Request, file: UploadFile | None = None):
+    # Принимаем либо multipart (file), либо raw body audio/wav
+    if file is not None:
+        payload = await file.read()
+    else:
+        payload = await request.body()
+        if not payload:
+            return Response("empty body", status_code=400)
+
     tmpdir = tempfile.mkdtemp(prefix="m5_")
     inpath = os.path.join(tmpdir, "in.wav")
     outpath = os.path.join(tmpdir, "out.wav")
     try:
         with open(inpath, "wb") as f:
-            f.write(await file.read())
+            f.write(payload)
+
         cmd = [
-            "ffmpeg", "-hide_banner", "-y", "-i", inpath,
+            "ffmpeg", "-hide_banner", "-y",
+            "-i", inpath,
             "-filter_complex", filter_graph(),
             "-map", "[out]", "-ar", "24000", "-ac", "2", "-sample_fmt", "s16",
             outpath
         ]
         proc = subprocess.run(cmd, capture_output=True)
         if proc.returncode != 0:
-            return Response(
-                content=f"Error: {proc.stderr.decode()}",
-                status_code=500
-            )
+            err_tail = proc.stderr.decode(errors="ignore").splitlines()[-1] if proc.stderr else "ffmpeg error"
+            return Response(f"ffmpeg failed: {err_tail}", status_code=500, headers={"x-masterfx": "error"})
+
         with open(outpath, "rb") as f:
             data = f.read()
-        return Response(
-            content=data,
-            media_type="audio/wav",
-            headers={"x-masterfx": "ok"}
-        )
+        return Response(data, media_type="audio/wav", headers={"x-masterfx": "ok"})
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
