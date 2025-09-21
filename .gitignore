@@ -1,0 +1,42 @@
+# bytecode
+**/__pycache__/
+**/*.pyc
+
+# logs & caches
+**/logs/
+**/.cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# virtual envs
+**/.venv/
+**/venv/
+**/env/
+WarpWails/warpwails/
+EyeOfTerror/EyeOfTerror/
+VeilOfSilence/VeilOfSilence/
+
+# models, datasets, artifacts, outputs
+**/models/
+**/checkpoints/
+**/datasets/
+**/artifacts/
+**/outputs/
+
+# heavy file types
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.npz
+*.npy
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.wav
+*.flac
+*.mp3
+*.mp4
+*.mkv

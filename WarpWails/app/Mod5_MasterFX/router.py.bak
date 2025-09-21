@@ -1,0 +1,66 @@
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
+from fastapi.responses import FileResponse
+import tempfile, subprocess, os, yaml
+
+router = APIRouter()
+CFG_PATH = os.path.join(os.getcwd(), 'config', 'masterfx.yaml')
+
+def load_cfg():
+    try:
+        with open(CFG_PATH, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+def ffmpeg_run(inp, outp, cfg):
+    fc = cfg.get("filter_complex")
+    if not fc:
+        raise RuntimeError("filter_complex not configured")
+    ar = str(cfg.get("ar", 24000))
+    ac = str(cfg.get("ac", 2))
+    sf = cfg.get("sample_fmt", "s16")
+    cmd = ["/usr/bin/ffmpeg","-hide_banner","-y","-i",inp,
+           "-filter_complex", fc, "-map","[out]","-ar",ar,"-ac",ac,"-sample_fmt",sf, outp]
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if r.returncode != 0:
+        tail = "\n".join((r.stderr or r.stdout or "ffmpeg failed").splitlines()[-40:])
+        raise RuntimeError(f"ffmpeg failed: {tail}")
+
+@router.get("/mod5_masterfx/config")
+async def get_cfg():
+    return load_cfg()
+
+@router.post("/mod5_masterfx/config")
+async def set_cfg(req: Request):
+    data = await req.json()
+    if not isinstance(data, dict):
+        raise HTTPException(400, "Config must be an object")
+    with open(CFG_PATH, "w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, allow_unicode=True)
+    return {"ok": True}
+
+@router.post("/mod5_masterfx")
+async def masterfx(request: Request, file: UploadFile | None = File(None)):
+    cfg = load_cfg()
+    with tempfile.TemporaryDirectory(prefix="m5_") as td:
+        inp = os.path.join(td, "in.wav")
+        outp = os.path.join(td, "out.wav")
+
+        if file is not None:
+            raw = await file.read()
+        else:
+            # raw body (audio/wav или application/octet-stream)
+            raw = await request.body()
+
+        if not raw:
+            raise HTTPException(422, "Empty audio body")
+
+        with open(inp, "wb") as f:
+            f.write(raw)
+
+        try:
+            ffmpeg_run(inp, outp, cfg)
+        except RuntimeError as e:
+            raise HTTPException(500, str(e))
+
+        return FileResponse(outp, media_type="audio/wav", filename="masterfx.wav")

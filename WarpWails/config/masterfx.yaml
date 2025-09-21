@@ -1,0 +1,15 @@
+ar: 24000
+ac: 2
+sample_fmt: s16
+filter_complex: >-
+  [0:a]pan=stereo|c0=c0|c1=c0,
+  acrusher=bits=10:mix=0.40,
+  aphaser=in_gain=0.8:out_gain=0.9:delay=2.0:decay=0.6:speed=1.0,
+  vibrato=f=5.0:d=0.35,
+  chorus=0.6:0.9:30:0.4:0.25:2,
+  aecho=0.85:0.90:220|440:0.55|0.40,
+  apulsator=hz=0.4,
+  asubboost=boost=8:cutoff=110:wet=1,
+  equalizer=f=3200:width_type=h:width=200:g=6,
+  loudnorm=I=-16:TP=-1.0:LRA=10:print_format=none,
+  alimiter=limit=0.95[out]
