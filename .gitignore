@@ -40,3 +40,9 @@ VeilOfSilence/VeilOfSilence/
 *.mp3
 *.mp4
 *.mkv
+# Veil of Silence venv
+VeilofSilence/VeilofSilence/
+# кэш и мусор
+**/__pycache__/
+VeilofSilence/tmp/
+VeilofSilence/*.log
