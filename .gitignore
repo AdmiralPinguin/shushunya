@@ -46,3 +46,9 @@ VeilofSilence/VeilofSilence/
 **/__pycache__/
 VeilofSilence/tmp/
 VeilofSilence/*.log
+# Veil of Silence
+VeilofSilence/VeilofSilence/
+VeilofSilence/tmp/
+VeilofSilence/.cache/
+**/__pycache__/
+*.pyc

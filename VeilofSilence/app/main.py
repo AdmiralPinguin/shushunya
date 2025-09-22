@@ -1,3 +1,5 @@
+from fastapi import WebSocket, WebSocketDisconnect
+import json, asyncio
 import os, io, time
 from typing import List
 import numpy as np, soundfile as sf, torchaudio, webrtcvad, requests
@@ -130,3 +132,33 @@ if __name__ == "__main__":
     dotenv.load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
     uvicorn.run(app, host=os.getenv("SERVER_HOST","0.0.0.0"),
                      port=int(os.getenv("SERVER_PORT","8011")))
+
+@app.websocket("/ws/stt")
+async def ws_stt(ws: WebSocket):
+    await ws.accept()
+    try:
+        cfg_msg = await ws.receive_text()
+        cfg = json.loads(cfg_msg) if cfg_msg else {}
+    except Exception:
+        cfg = {}
+    lang = cfg.get("lang", "ru")
+    translate = bool(cfg.get("translate", False))
+
+    model = get_model()
+    buf = bytearray()
+    try:
+        while True:
+            msg = await ws.receive()
+            if "bytes" in msg and msg["bytes"] is not None:
+                buf.extend(msg["bytes"])
+                if len(buf) >= 32000:  # ~1 сек PCM16 16kHz
+                    pcm = np.frombuffer(bytes(buf), dtype=np.int16).astype(np.float32) / 32768.0
+                    buf.clear()
+                    segs, _ = model.transcribe(audio=pcm, language=lang,
+                                               beam_size=ASR_BEAM_SIZE,
+                                               task="translate" if translate else "transcribe")
+                    text = " ".join(s.text.strip() for s in segs if s.text.strip())
+                    if text:
+                        await ws.send_json({"type": "segment", "text": text})
+    except WebSocketDisconnect:
+        pass
