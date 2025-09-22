@@ -1,11 +1,10 @@
-from fastapi import WebSocket, WebSocketDisconnect
-import json, asyncio
 import os, io, time
 from typing import List
-import numpy as np, soundfile as sf, torchaudio, webrtcvad, requests
+import numpy as np, soundfile as sf, webrtcvad
 from fastapi import FastAPI, UploadFile, File, Form
 from pydantic import BaseModel
 from faster_whisper import WhisperModel
+import soxr
 
 def getenv(k, d=None):
     v = os.getenv(k, d)
@@ -22,19 +21,15 @@ ASR_MIN_SEG_MS   = getenv("ASR_MIN_SEG_MS", 1200)
 ASR_MAX_SIL_MS   = getenv("ASR_MAX_SIL_MS", 700)
 ASR_PAD_MS       = getenv("ASR_PAD_MS", 200)
 TARGET_SR        = 16000
-EYE_WEBHOOK      = os.getenv("EYE_WEBHOOK")
 
-app = FastAPI(title="Veil of Silence", version="0.1.0")
+app = FastAPI(title="Veil of Silence", version="0.1.1")
 
 def load_audio_to_mono_16k(file_bytes: bytes) -> np.ndarray:
     data, sr = sf.read(io.BytesIO(file_bytes), dtype="float32", always_2d=True)
-    mono = data.mean(axis=1)
+    mono = data.mean(axis=1).astype(np.float32)
     if sr != TARGET_SR:
-        import torch
-        mono = torchaudio.functional.resample(
-            torch.from_numpy(mono).unsqueeze(0), sr, TARGET_SR
-        ).squeeze(0).numpy()
-    return mono.astype(np.float32)
+        mono = soxr.resample(mono, sr, TARGET_SR).astype(np.float32)
+    return mono
 
 def float32_to_pcm16(x: np.ndarray) -> bytes:
     x = np.clip(x, -1.0, 1.0)
@@ -47,7 +42,8 @@ def frames_vad_pcm16(pcm16: bytes, vad_level: int, sr: int = TARGET_SR, frame_ms
     voiced = [vad.is_speech(fr, sr) if len(fr) == frame_len else False for fr in frames]
     return voiced, frame_ms
 
-def segments_from_vad(voiced: List[bool], frame_ms: int, min_seg_ms: int, max_sil_ms: int, pad_ms: int):
+def segments_from_vad(voiced: List[bool], frame_ms: int,
+                      min_seg_ms: int, max_sil_ms: int, pad_ms: int):
     segs, i, n = [], 0, len(voiced)
     min_f = int(min_seg_ms / frame_ms)
     maxsil_f = int(max_sil_ms / frame_ms)
@@ -72,6 +68,7 @@ _model: WhisperModel = None
 def get_model() -> WhisperModel:
     global _model
     if _model is None:
+        # CUDA будет использоваться CTranslate2, PyTorch не нужен
         _model = WhisperModel(ASR_MODEL_NAME, device="cuda", compute_type=ASR_COMPUTE_TYPE)
     return _model
 
@@ -111,54 +108,12 @@ async def stt(file: UploadFile = File(...), lang: str = Form("ru"), translate: b
         seg_out.append(SegmentOut(start=float(seg["start"]), end=float(seg["end"]), text=piece))
         if piece: full.append(piece)
 
-    text = " ".join(full).strip()
-    # webhook в Око ужаса
-    if EYE_WEBHOOK and text:
-        try:
-            requests.post(EYE_WEBHOOK, json={
-                "module": "veil_of_silence",
-                "text": text,
-                "segments": [s.model_dump() for s in seg_out],
-            }, timeout=3)
-        except Exception:
-            pass
-
     rt = (time.time() - t0) / max(1e-6, len(audio16k) / TARGET_SR)
     return STTResponse(model=ASR_MODEL_NAME, language=("en" if translate else lang),
-                       text=text, segments=seg_out, rt_factor=rt)
+                       text=" ".join(full).strip(), segments=seg_out, rt_factor=rt)
 
 if __name__ == "__main__":
     import uvicorn, dotenv
     dotenv.load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
     uvicorn.run(app, host=os.getenv("SERVER_HOST","0.0.0.0"),
                      port=int(os.getenv("SERVER_PORT","8011")))
-
-@app.websocket("/ws/stt")
-async def ws_stt(ws: WebSocket):
-    await ws.accept()
-    try:
-        cfg_msg = await ws.receive_text()
-        cfg = json.loads(cfg_msg) if cfg_msg else {}
-    except Exception:
-        cfg = {}
-    lang = cfg.get("lang", "ru")
-    translate = bool(cfg.get("translate", False))
-
-    model = get_model()
-    buf = bytearray()
-    try:
-        while True:
-            msg = await ws.receive()
-            if "bytes" in msg and msg["bytes"] is not None:
-                buf.extend(msg["bytes"])
-                if len(buf) >= 32000:  # ~1 сек PCM16 16kHz
-                    pcm = np.frombuffer(bytes(buf), dtype=np.int16).astype(np.float32) / 32768.0
-                    buf.clear()
-                    segs, _ = model.transcribe(audio=pcm, language=lang,
-                                               beam_size=ASR_BEAM_SIZE,
-                                               task="translate" if translate else "transcribe")
-                    text = " ".join(s.text.strip() for s in segs if s.text.strip())
-                    if text:
-                        await ws.send_json({"type": "segment", "text": text})
-    except WebSocketDisconnect:
-        pass
