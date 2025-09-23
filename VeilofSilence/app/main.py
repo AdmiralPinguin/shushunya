@@ -117,6 +117,13 @@ async def stt(file: UploadFile = File(...), lang: str = Form("ru"), translate: b
         pass
 
     rt = (time.time() - t0) / max(1e-6, len(audio16k) / TARGET_SR)
+    # ## FINAL_FORWARD
+    if dialog_active:
+        try:
+            async with httpx.AsyncClient(timeout=2.5) as client:
+                await client.post(EYE_OF_TERROR_URL, json={"text": piece.strip(), "final": True})
+        except Exception:
+            pass
     return STTResponse(model=ASR_MODEL_NAME, language=("en" if translate else lang),
                        text=" ".join(full).strip(), segments=seg_out, rt_factor=rt)
 
@@ -125,3 +132,43 @@ if __name__ == "__main__":
     dotenv.load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
     uvicorn.run(app, host=os.getenv("SERVER_HOST","0.0.0.0"),
                      port=int(os.getenv("SERVER_PORT","8011")))
+
+# ================= VAD + HOTWORD =================
+import webrtcvad
+import collections
+
+vad = webrtcvad.Vad(2)  # чувствительность 0–3 (чем выше — тем чувствительнее)
+frame_buffer = collections.deque(maxlen=50)
+
+HOTWORD = "эй шушуня"
+dialog_active = False
+
+def process_audio_frame(frame_bytes, sample_rate=16000):
+    """Обработка входного звукового фрейма (для VAD)."""
+    is_speech = vad.is_speech(frame_bytes, sample_rate)
+    frame_buffer.append((frame_bytes, is_speech))
+    return is_speech
+
+async def handle_transcript(text: str):
+    """
+    Обработка расшифровки текста.
+    - ждет хотворд
+    - при его появлении включает диалоговый режим
+    - по 'конец' или 'стоп' завершает диалог
+    """
+    global dialog_active
+    clean = text.lower().strip()
+
+    if not dialog_active:
+        if HOTWORD in clean:
+            dialog_active = True
+            print("🔥 Хотворд словлен, включаем диалоговый режим")
+            return {"event": "dialog_start"}
+    else:
+        if "конец" in clean or "стоп" in clean:
+            dialog_active = False
+            print("💤 Диалог завершён")
+            return {"event": "dialog_end"}
+        else:
+            print(f"👉 Транскрипт в диалоге: {clean}")
+            return {"event": "dialog_text", "text": clean}
