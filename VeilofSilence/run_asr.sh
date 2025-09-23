@@ -1,3 +1,8 @@
+export LD_LIBRARY_PATH=/usr/local/cuda-12.9/targets/x86_64-linux/lib:${LD_LIBRARY_PATH}
+export CUDA_HOME=/usr/local/cuda-12.9
+export CUDA_HOME=/usr/local/cuda-12.4
+export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH}
+export CT2_USE_CUDA=1
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"

@@ -5,6 +5,7 @@ from fastapi import FastAPI, UploadFile, File, Form
 from pydantic import BaseModel
 from faster_whisper import WhisperModel
 import soxr
+import httpx
 
 def getenv(k, d=None):
     v = os.getenv(k, d)
@@ -23,6 +24,7 @@ ASR_PAD_MS       = getenv("ASR_PAD_MS", 200)
 TARGET_SR        = 16000
 
 app = FastAPI(title="Veil of Silence", version="0.1.1")
+EYE_OF_TERROR_URL = os.getenv('EYE_OF_TERROR_URL','http://127.0.0.1:8010/stt_result')
 
 def load_audio_to_mono_16k(file_bytes: bytes) -> np.ndarray:
     data, sr = sf.read(io.BytesIO(file_bytes), dtype="float32", always_2d=True)
@@ -107,6 +109,12 @@ async def stt(file: UploadFile = File(...), lang: str = Form("ru"), translate: b
         piece = " ".join(sg.text.strip() for sg in segments if sg.text.strip())
         seg_out.append(SegmentOut(start=float(seg["start"]), end=float(seg["end"]), text=piece))
         if piece: full.append(piece)
+    # forward to Eye Of Terror
+    try:
+        async with httpx.AsyncClient(timeout=2.5) as client:
+            await client.post(EYE_OF_TERROR_URL, json={"text": " ".join(full).strip()})
+    except Exception:
+        pass
 
     rt = (time.time() - t0) / max(1e-6, len(audio16k) / TARGET_SR)
     return STTResponse(model=ASR_MODEL_NAME, language=("en" if translate else lang),
