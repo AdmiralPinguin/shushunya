@@ -1,1 +1,2 @@
-print("Pelena daemon placeholder — сюда пойдёт основной код, который я выше дал")
+# минимальный плейсхолдер; позже заменишь на полный код
+print("Pelena daemon ready")
