@@ -1,0 +1,13 @@
+coremad/
+__pycache__/
+*.pyc
+*.pyo
+*.env
+*.log
+models/
+checkpoints/
+*.safetensors
+*.bin
+*.pt
+.DS_Store
+Thumbs.db

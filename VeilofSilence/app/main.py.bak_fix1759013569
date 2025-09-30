@@ -1,0 +1,182 @@
+import io, os, time, threading, queue, traceback
+from typing import List, Optional
+import numpy as np, soxr, soundfile as sf, webrtcvad, httpx, sounddevice as sd
+from fastapi import FastAPI, UploadFile, File, Form, Request
+from pydantic import BaseModel
+from faster_whisper import WhisperModel
+
+# ====== конфиг ======
+def getenv(k, d=None):
+    v=os.getenv(k); 
+    if v is None: return d
+    if isinstance(d,int):
+        try: return int(v)
+        except: return d
+    return v
+
+ASR_MODEL_NAME   = getenv("ASR_MODEL_NAME","large-v3")
+ASR_COMPUTE_TYPE = getenv("ASR_COMPUTE_TYPE","int8_float16")
+ASR_BEAM_SIZE    = getenv("ASR_BEAM_SIZE",5)
+ASR_VAD_AGGR     = getenv("ASR_VAD_AGGRESSIVENESS",2)
+ASR_MIN_SEG_MS   = getenv("ASR_MIN_SEG_MS",1200)
+ASR_MAX_SIL_MS   = getenv("ASR_MAX_SIL_MS",700)
+ASR_PAD_MS       = getenv("ASR_PAD_MS",200)
+TARGET_SR        = 16_000
+DEBUG_VEIL       = getenv("DEBUG_VEIL","1")=="1"
+
+START_WORDS=[w.strip().lower() for w in getenv("START_WORDS","шушуня, окей шушуня").split(",") if w.strip()]
+STOP_WORDS =[w.strip().lower() for w in getenv("STOP_WORDS","стоп, отбой, хватит").split(",") if w.strip()]
+EYE_URL     = getenv("EYE_OF_TERROR_URL","http://127.0.0.1:8010/stt_result")
+
+# микрофон: включить=1; устройство по индексу SD_INPUT_INDEX или по имени PULSE_SOURCE
+MIC_ENABLE      = getenv("MIC_ENABLE","1")=="1"
+SD_INPUT_INDEX  = getenv("SD_INPUT_INDEX")
+PULSE_SOURCE    = getenv("PULSE_SOURCE")  # имя устройства (PipeWire/Pulse)
+
+dialog_active=False
+app=FastAPI(title="Veil of Silence",version="0.2.0")
+
+# ====== утилиты ======
+def load_audio_to_mono_16k(b: bytes)->np.ndarray:
+    data, sr = sf.read(io.BytesIO(b), dtype="float32", always_2d=True)
+    mono = data.mean(axis=1).astype(np.float32)
+    if sr != TARGET_SR:
+        mono = soxr.resample(mono, sr, TARGET_SR).astype(np.float32)
+    return mono
+
+def float32_to_pcm16(x: np.ndarray)->bytes:
+    x=np.clip(x,-1,1); return (x*32767).astype(np.int16).tobytes()
+
+def vad_frames(pcm16:bytes, level:int, sr:int=TARGET_SR, frame_ms:int=20):
+    vad=webrtcvad.Vad(level)
+    flen=int(sr*frame_ms/1000)*2
+    frames=[pcm16[i:i+flen] for i in range(0,len(pcm16),flen)]
+    voiced=[vad.is_speech(fr,sr) if len(fr)==flen else False for fr in frames]
+    return voiced, frame_ms
+
+def seg_from_vad(voiced, frame_ms, min_seg_ms, max_sil_ms, pad_ms):
+    segs=[]; i=0; n=len(voiced)
+    min_f=int(min_seg_ms/frame_ms); maxsil=int(max_sil_ms/frame_ms); pad=int(pad_ms/frame_ms)
+    while i<n:
+        while i<n and not voiced[i]: i+=1
+        if i>=n: break
+        s=i; last=i
+        while i<n:
+            if voiced[i]: last=i
+            if (i-last)>maxsil: break
+            i+=1
+        e=max(last, s+min_f-1)
+        ss=max(0, s-pad)*frame_ms/1000.0
+        ee=min(n-1, e+pad); ee=(ee+1)*frame_ms/1000.0
+        if ee-ss >= min_seg_ms/1000.0: segs.append({"start":ss,"end":ee})
+    return segs
+
+_model: Optional[WhisperModel]=None
+def get_model():
+    global _model
+    if _model is None:
+        if DEBUG_VEIL: print(f"[Veil] load {ASR_MODEL_NAME} {ASR_COMPUTE_TYPE}")
+        _model=WhisperModel(ASR_MODEL_NAME, device="cuda", compute_type=ASR_COMPUTE_TYPE)
+    return _model
+
+class SegmentOut(BaseModel):
+    start: float; end: float; text: str
+class STTResponse(BaseModel):
+    model:str; language:str; text:str; segments:list[SegmentOut]; rt_factor:float
+
+@app.get("/healthz")
+def healthz():
+    return {"ok":True,"model":ASR_MODEL_NAME,"compute":ASR_COMPUTE_TYPE,"eye":EYE_URL,
+            "start_words":START_WORDS,"stop_words":STOP_WORDS,"mic":MIC_ENABLE}
+
+@app.post("/stt", response_model=STTResponse)
+async def stt(request: Request, file: UploadFile=File(...), lang:str=Form("ru"), translate:bool=Form(False)):
+    global dialog_active
+    t0=time.time(); raw=await file.read()
+    audio=load_audio_to_mono_16k(raw); pcm=float32_to_pcm16(audio)
+    voiced, fms = vad_frames(pcm, ASR_VAD_AGGR, TARGET_SR)
+    meta=seg_from_vad(voiced, fms, ASR_MIN_SEG_MS, ASR_MAX_SIL_MS, ASR_PAD_MS)
+
+    model=get_model(); out=[]; full=[]; total=len(audio); dlg=request.query_params.get("dialog_id")
+
+    for seg in meta:
+        s=max(0,int(seg["start"]*TARGET_SR)); e=min(total,int(seg["end"]*TARGET_SR))
+        if e<=s: continue
+        chunk=audio[s:e].astype(np.float32)
+        segments,_=model.transcribe(audio=chunk, language=lang, beam_size=ASR_BEAM_SIZE,
+                                    task=("translate" if translate else "transcribe"),
+                                    vad_filter=False, word_timestamps=False)
+        piece=" ".join((sg.text or "").strip() for sg in segments if getattr(sg,"text",None) and sg.text.strip())
+        out.append(SegmentOut(start=float(seg["start"]), end=float(seg["end"]), text=piece))
+        if not piece: continue
+        full.append(piece); clean=piece.lower().strip()
+
+        if not dialog_active and any(sw and sw in clean for sw in START_WORDS):
+            dialog_active=True
+            if DEBUG_VEIL: print(f"[Veil] DIALOG START ({dlg})")
+
+        if dialog_active:
+            payload={"dialog_id":dlg,"text":piece,"start":seg["start"],"end":seg["end"],"final":False}
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as c:
+                    r=await c.post(EYE_URL, json=payload)
+                if DEBUG_VEIL: print(f"[Veil] ->Eye {r.status_code} {payload}")
+            except Exception as ex:
+                print("[Veil] Eye error:", repr(ex)); traceback.print_exc()
+
+            if any(sw and sw in clean for sw in STOP_WORDS):
+                dialog_active=False
+                if DEBUG_VEIL: print(f"[Veil] DIALOG STOP ({dlg})")
+                try:
+                    async with httpx.AsyncClient(timeout=3.0) as c:
+                        await c.post(EYE_URL, json={"dialog_id":dlg,"text":" ".join(full).strip(),"final":True})
+                except: pass
+
+    rt=(time.time()-t0)/max(1e-6, len(audio)/TARGET_SR)
+    return STTResponse(model=ASR_MODEL_NAME, language=("en" if translate else lang),
+                       text=" ".join(full).strip(), segments=out, rt_factor=rt)
+
+# ====== поток микрофона внутри Veil ======
+def _mic_thread():
+    if not MIC_ENABLE:
+        if DEBUG_VEIL: print("[Veil][MIC] disabled"); return
+    dev = int(SD_INPUT_INDEX) if SD_INPUT_INDEX else (PULSE_SOURCE or None)
+    if DEBUG_VEIL: print(f"[Veil][MIC] start device={dev}")
+
+    q = queue.Queue()
+    def cb(indata, frames, t, status):
+        if status: print("[Veil][MIC] status:", status)
+        q.put(bytes(indata))
+
+    block = int(TARGET_SR*0.02)  # 20ms 16kHz
+    with sd.RawInputStream(samplerate=TARGET_SR, blocksize=block, dtype='int16',
+                           channels=1, callback=cb, device=dev):
+        buf=b''
+        while True:
+            buf += q.get()
+            # каждые ~1.5s отправляем на /stt
+            need = TARGET_SR*2*3//2
+            if len(buf) >= need:
+                chunk, buf = buf[:need], buf[need:]
+                try:
+                    
+# упаковать RAW PCM в WAV (mono, 16k, s16le)
+import soundfile as _sf, numpy as _np
+_b = io.BytesIO()
+_arr = _np.frombuffer(chunk, dtype=_np.int16)
+_sf.write(_b, _arr, 16000, format='WAV', subtype='PCM_16')
+_b.seek(0)
+r = httpx.post(f"http://127.0.0.1:{getenv('SERVER_PORT',8011)}/stt",
+               files={"file":("mic.wav", _b.getvalue(), "audio/wav")},
+               data={"lang":"ru"}, timeout=30)
+
+                    if DEBUG_VEIL: print("[Veil][MIC]->/stt", r.status_code)
+                except Exception as e:
+                    print("[Veil][MIC] send error:", e)
+
+# запуск фонового потока при старте
+threading.Thread(target=_mic_thread, daemon=True).start()
+
+if __name__=="__main__":
+    import uvicorn
+    uvicorn.run(app, host=os.getenv("SERVER_HOST","0.0.0.0"), port=int(os.getenv("SERVER_PORT","8011")))
