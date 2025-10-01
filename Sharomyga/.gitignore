@@ -1,0 +1,24 @@
+# venv
+venv_sharomyga/
+
+# python мусор
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# секреты
+.env
+.env.*
+
+# рантайм
+logs/
+runtime/
+tmp/
+
+# прочее
+.pytest_cache/
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store

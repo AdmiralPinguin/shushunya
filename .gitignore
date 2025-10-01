@@ -35,3 +35,12 @@ logs/
 Thumbs.db
 .vscode/
 .idea/
+
+# --- Sharomyga module ---
+Sharomyga/venv_sharomyga/
+Sharomyga/**/*.pyc
+Sharomyga/**/__pycache__/
+Sharomyga/.env
+Sharomyga/logs/
+Sharomyga/runtime/
+Sharomyga/tmp/
