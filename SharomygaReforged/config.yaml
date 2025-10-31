@@ -1,0 +1,7 @@
+symbols: ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
+intervals: ["15m", "1h", "4h"]
+cycle_minutes: 5
+
+nhits_models:
+  up: "/media/acab/LMS/Shushunya/Sharomyga/models/nhits/up"
+  down: "/media/acab/LMS/Shushunya/Sharomyga/models/nhits/down"

@@ -1,34 +1,32 @@
-from __future__ import annotations
-import os, httpx
-from typing import List, Dict, Any
+import httpx
 
-MODEL_7B_BASE  = os.getenv("MODEL_7B_BASE")
-MODEL_20B_BASE = os.getenv("MODEL_20B_BASE")
+client = httpx.AsyncClient(timeout=None)
 
-async def chat_complete(route_name: str, purpose: str, user_text: str) -> Dict[str, Any]:
-    if route_name == "20b":
-        base = MODEL_20B_BASE
-        model = "shushu-20b"
-    elif route_name == "7b":
-        base = MODEL_7B_BASE
-        model = "shushu-7b"
-    else:
-        raise RuntimeError(f"unknown route model: {route_name}")
+ROUTE_MAP = {
+    "7b": "http://127.0.0.1:8021",
+    "20b": "http://127.0.0.1:8020",
+    "warp": "http://127.0.0.1:8009",
+}
 
-    if not base:
-        raise RuntimeError(f"model base not configured for {route_name}")
+def _normalize_url(base: str) -> str:
+    base = base.strip()
+    if base in ROUTE_MAP:
+        return ROUTE_MAP[base]
+    if not base.startswith("http://") and not base.startswith("https://"):
+        return "http://" + base
+    return base
 
+async def chat_complete(base: str, purpose: str, user_text: str):
+    base = _normalize_url(base)
     payload = {
-        "model": model,
+        "model": "shushunya",
         "messages": [
-            {"role":"system","content":"Отвечай кратко и по делу. Русский."},
-            {"role":"user","content": user_text or ""}
+            {"role": "system", "content": purpose},
+            {"role": "user", "content": user_text},
         ],
-        "temperature": 0.2,
-        "max_tokens": 512
+        "temperature": 0,
     }
-    async with httpx.AsyncClient(timeout=45) as client:
-        r = await client.post(f"{base}/chat/completions", json=payload)
-        r.raise_for_status()
-        content = r.json()["choices"][0]["message"]["content"]
-    return {"text": content}
+    r = await client.post(f"{base}/chat/completions", json=payload)
+    r.raise_for_status()
+    data = r.json()
+    return data["choices"][0]["message"]["content"]
