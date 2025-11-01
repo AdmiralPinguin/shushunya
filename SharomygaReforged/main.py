@@ -1,28 +1,184 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import os, time
+import numpy as np
 import pandas as pd
-from core.model_nhits import NHitsModel
-import yaml, os
+from datetime import datetime, timezone
+from binance.client import Client
+import torch
 
-print("[Sharomyga Reforged start.]")
+# ========= CONFIG =========
+SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT","BNBUSDT"]
+TF_BASE = "15m"
+TF_HIGHER = ["1h","4h"]
+ALL_TF = [TF_BASE] + TF_HIGHER
+BARS = 128
+H = 5
+API_KEY = os.getenv("BINANCE_API_KEY","")
+API_SEC = os.getenv("BINANCE_API_SECRET","")
+UP_DIR   = "/media/acab/LMS/Shushunya/SharomygaReforged/models/nhits/up"
+DOWN_DIR = "/media/acab/LMS/Shushunya/SharomygaReforged/models/nhits/down"
 
-# === Пути к весам ===
-path_up = "/media/acab/LMS/Shushunya/Sharomyga/models/nhits/up/NHITS_0.ckpt"
-path_down = "/media/acab/LMS/Shushunya/Sharomyga/models/nhits/down/NHITS_0.ckpt"
+client = Client(API_KEY, API_SEC)
+device = "cpu"
 
-if not (os.path.isfile(path_up) and os.path.isfile(path_down)):
-    raise FileNotFoundError("❌ Файлы весов NHITS не найдены! Проверь пути.")
+# ========= INDICATORS =========
+def ema(x, s): return x.ewm(span=s, adjust=False).mean()
+def sma(x, w): return x.rolling(w, min_periods=w).mean()
+def rsi(close, p=14):
+    d=close.diff(); up=d.clip(lower=0.0); dn=(-d).clip(lower=0.0)
+    ru=up.ewm(alpha=1/p, adjust=False).mean(); rd=dn.ewm(alpha=1/p, adjust=False).mean()
+    rs=ru/(rd+1e-12); return 100-(100/(1+rs))
+def macd(close,f=12,s=26,sg=9):
+    ef,es=ema(close,f),ema(close,s); m=ef-es; si=ema(m,sg); return m,si,m-si
+def stoch(h,l,c,kp=14,dp=3,sp=3):
+    ll=l.rolling(kp,min_periods=kp).min(); hh=h.rolling(kp,min_periods=kp).max()
+    k=100*(c-ll)/(hh-ll+1e-12); ks=k.rolling(sp,min_periods=sp).mean(); d=ks.rolling(dp,min_periods=dp).mean(); return ks,d
+def TR(h,l,c):
+    hl=h-l; hc=(h-c.shift()).abs(); lc=(l-c.shift()).abs()
+    return pd.concat([hl,hc,lc],axis=1).max(axis=1)
+def atr(h,l,c,p=14): return TR(h,l,c).ewm(alpha=1/p, adjust=False).mean()
+def adx(h,l,c,p=14):
+    um=h.diff(); dm=-l.diff()
+    plus=np.where((um>dm)&(um>0),um,0.0); minus=np.where((dm>um)&(dm>0),dm,0.0)
+    tr=TR(h,l,c); atr_=tr.ewm(alpha=1/p, adjust=False).mean()
+    pdi=100*pd.Series(plus,index=h.index).ewm(alpha=1/p,adjust=False).mean()/(atr_+1e-12)
+    mdi=100*pd.Series(minus,index=h.index).ewm(alpha=1/p,adjust=False).mean()/(atr_+1e-12)
+    dx=100*(pdi-mdi).abs()/(pdi+mdi+1e-12); return dx.ewm(alpha=1/p,adjust=False).mean(),pdi,mdi
+def bb(close,w=20,s=2.0):
+    mid=close.rolling(w,min_periods=w).mean(); sd=close.rolling(w,min_periods=w).std(ddof=0)
+    up=mid+s*sd; lo=mid-s*sd; width=(up-lo)/(mid+1e-12); return up,mid,lo,width
+def obv(c,v): return (np.sign(c.diff().fillna(0.0))*v).cumsum()
+def vol_ema(v,s): return v.ewm(span=s, adjust=False).mean()
 
-print("[NHITS] ⚙️ Загрузка NHITS моделей...")
-model = NHitsModel(path_up, path_down)
+def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    o=df.copy()
+    o["rsi_14"]=rsi(o["close"],14)
+    o["ema_12"]=ema(o["close"],12); o["ema_26"]=ema(o["close"],26); o["sma_50"]=sma(o["close"],50)
+    m,si,hi=macd(o["close"]); o["macd"]=m; o["macd_signal"]=si; o["macd_hist"]=hi
+    k,d=stoch(o["high"],o["low"],o["close"]); o["stoch_k"]=k; o["stoch_d"]=d
+    o["atr_14"]=atr(o["high"],o["low"],o["close"])
+    ax,pdi,mdi=adx(o["high"],o["low"],o["close"]); o["adx_14"]=ax; o["plus_di"]=pdi; o["minus_di"]=mdi
+    bu,bm,bl,bw=bb(o["close"]); o["bb_u"]=bu; o["bb_m"]=bm; o["bb_l"]=bl; o["bb_w"]=bw
+    o["obv"]=obv(o["close"],o["volume"]); o["vol_ema_20"]=vol_ema(o["volume"],20); o["vol_ema_50"]=vol_ema(o["volume"],50)
+    return o.fillna(method="ffill").fillna(0.0)
 
-print("[NHITS] ✅ Модели готовы к работе.")
+# ========= DATA =========
+def fetch_klines(symbol: str, interval: str, limit: int) -> pd.DataFrame:
+    r = client.futures_klines(symbol=symbol, interval=interval, limit=limit)
+    df = pd.DataFrame(r, columns=["t","o","h","l","c","v","ct","q","tr","tav","tbv","ig"])
+    df["t"]=pd.to_datetime(df["t"],unit="ms",utc=True)
+    for x in ["o","h","l","c","v"]: df[x]=df[x].astype(float)
+    return df.rename(columns={"t":"ds","o":"open","h":"high","l":"low","c":"close","v":"volume"})[["ds","open","high","low","close","volume"]]
 
-# === Заглушка данных для теста ===
-df = pd.read_csv("/media/acab/LMS/Shushunya/Sharomyga/data/processed/all_pairs_merged.csv")
-df = df.rename(columns={"time": "ds"})
-df["unique_id"] = df["symbol"]
-df["up_move"] = 0.0
-df["down_move"] = 0.0
+def build_live(symbol: str) -> pd.DataFrame:
+    frames={}
+    for tf in ALL_TF:
+        df = add_indicators(fetch_klines(symbol, tf, BARS))
+        pref={"15m":"m15_","1h":"h1_","4h":"h4_"}[tf]
+        df=df.rename(columns={c:pref+c for c in df.columns if c!="ds"})
+        frames[tf]=df; time.sleep(0.12)
+    base=frames["15m"].set_index("ds")
+    for tf in ["1h","4h"]:
+        hi=frames[tf].set_index("ds").reindex(base.index, method="ffill")
+        base=base.join(hi, how="left")
+    base=base.tail(BARS).reset_index()
+    base.insert(0,"symbol",symbol)
+    return base
 
-print("[Cycle start...]")
-preds = model.predict(df.tail(500))
-print(preds.head())
+# ========= LOAD NEURALFORECAST =========
+def load_nf(model_dir: str):
+    from neuralforecast import NeuralForecast
+    nf = NeuralForecast.load(model_dir)
+    # собрать список exog из всех моделей
+    exogs=[]
+    for m in nf.models:
+        fl = getattr(m, "futr_exog_list", None)
+        if fl:
+            for v in fl: 
+                if isinstance(v, (list,tuple)):
+                    exogs += list(v)
+                else:
+                    exogs.append(v)
+    exogs = sorted(set([e for e in exogs if isinstance(e,str)]))
+    return nf, exogs
+
+nf_up, exog_up = load_nf(UP_DIR)
+nf_dn, exog_dn = load_nf(DOWN_DIR)
+
+# ========= ALIGN FEATURES =========
+def align_features(df_sym: pd.DataFrame, need_cols: list[str]) -> pd.DataFrame:
+    d = df_sym.copy().rename(columns={"symbol":"unique_id"})
+    # выбросить служебные:
+    drop_cols = ["ds","unique_id"]
+    # добавить пропущенные признаки нулями
+    for col in need_cols:
+        if col not in d.columns: d[col]=0.0
+    # оставить только нужные и служебные
+    cols = ["unique_id","ds"] + need_cols
+    d = d[[c for c in cols if c in d.columns]]
+    # типы
+    for c in need_cols: d[c] = pd.to_numeric(d[c], errors="coerce").fillna(0.0)
+    return d
+
+# ========= TIME SYNC =========
+def offset_sync()->float:
+    server=client.futures_time()["serverTime"]/1000.0
+    local=time.time()
+    return server-local
+
+offset = offset_sync()
+
+# ========= BALANCE =========
+def log_balance():
+    try:
+        bal=client.futures_account_balance()
+        usdt=next(x for x in bal if x["asset"]=="USDT")
+        print(f"[BALANCE] USDT={usdt['balance']}")
+    except Exception as e:
+        print(f"[BALANCE] error: {e}")
+
+# ========= LOOP =========
+def main_loop():
+    global offset
+    print("[BOOT] SharomygaReforged online, 15m close sync")
+    while True:
+        t_local=time.time(); t_ex=t_local+offset; sec_to_close=900-(t_ex%900)
+        if sec_to_close>2: time.sleep(sec_to_close-2)
+        offset = offset_sync()
+
+        ts=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"\n=== CYCLE @ {ts} ==="); log_balance()
+
+        for sym in SYMBOLS:
+            try:
+                raw = build_live(sym)
+                price=float(raw["m15_close"].iloc[-1])
+
+                d_up = align_features(raw, exog_up)
+                d_dn = align_features(raw, exog_dn)
+
+                up_fc = nf_up.predict(d_up)  # last yhat is next-step up_move
+                dn_fc = nf_dn.predict(d_dn)
+
+                up = float(up_fc.iloc[-1]["yhat"]); dn = float(dn_fc.iloc[-1]["yhat"])
+
+                side="FLAT"
+                if up>=3*dn: side="LONG"
+                elif dn>=3*up: side="SHORT"
+
+                print(f"[PRED] {sym} price={price:.6f} up={up:.6f} dn={dn:.6f} side={side}")
+                if side=="LONG":
+                    tp=price+0.7*up; sl=price-0.42*up
+                    print(f"[PLAN] {sym} LONG TP={tp:.6f} SL={sl:.6f}")
+                elif side=="SHORT":
+                    tp=price-0.7*dn; sl=price+0.42*dn
+                    print(f"[PLAN] {sym} SHORT TP={tp:.6f} SL={sl:.6f}")
+
+            except Exception as e:
+                print(f"[ERR] {sym}: {e}")
+
+        time.sleep(5)  # защита от двойного триггера
+
+if __name__=="__main__":
+    main_loop()
