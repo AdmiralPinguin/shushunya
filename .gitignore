@@ -1,0 +1,54 @@
+# --- PYTHON ENVIRONMENTS ---
+**/venv/
+**/env/
+**/lib/
+**/bin/
+**/share/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# Named environment folders
+CoreOfMadness/kormed/
+CoreOfMadness/kormed2/
+Sharomyga/venv_sharomyga/
+WarpWails/warpwails/
+VeilofSilence/VeilofSilence/
+DemonsForge/DemonsForge/
+EyeOfTerror/EyeOfTerror/
+
+# --- LARGE DATASETS ---
+Sharomyga/data/processed/*.csv
+Sharomyga/data/raw/*.csv
+Sharomyga/temp_input.csv
+*.csv
+
+# --- MODELS ---
+**/*.bin
+**/*.gguf
+**/*.ckpt
+**/*.pth
+**/*.pt
+**/*.pkl
+**/*.npy
+**/*.npz
+models/
+ShushunyaM/models/
+
+# --- TRAINING LOGS ---
+**/lightning_logs/
+checkpoints/
+state/
+stats/
+
+# --- ANDROID ---
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.externalNativeBuild/
+
+# --- MISC ---
+.DS_Store
+Thumbs.db

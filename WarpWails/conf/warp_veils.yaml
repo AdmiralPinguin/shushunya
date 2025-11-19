@@ -1,0 +1,11 @@
+tts:
+  speaker_default: kseniya
+  sr: 24000
+  channels: 1
+  bps: 16
+  device: auto               # cuda|cpu|auto
+stream:
+  chunk_bytes: 8192
+voicefx:
+  preset_default: imp_light  # модуль 3
+  use_rubberband: auto       # true|false|auto

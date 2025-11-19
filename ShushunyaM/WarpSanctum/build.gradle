@@ -1,0 +1,45 @@
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+android {
+    namespace "com.shushunyam.warpsanctum"
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 24
+        targetSdk 34
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++17"
+            }
+        }
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+        debug {
+            minifyEnabled false
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file("src/main/cpp/CMakeLists.txt")
+        }
+    }
+
+    buildFeatures {
+        prefab false
+    }
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.24"
+}

@@ -1,0 +1,16 @@
+from fastapi import FastAPI
+from app.Mod2_TTS.router import router as Mod2Router
+try:
+    from app.Mod3_VoxTormenta.router import router as Mod3Router
+except Exception:
+    Mod3Router = None
+
+app = FastAPI(title="WarpWails Core", version="0.2.0")
+
+app.include_router(Mod2Router)
+if Mod3Router:
+    app.include_router(Mod3Router)
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
