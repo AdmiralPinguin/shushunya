@@ -1,1 +1,0 @@
-# CoreOfMadness package

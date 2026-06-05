@@ -1,8 +1,0 @@
-rootProject.name = "ShushunyaM"
-
-include(
-    ":app",
-    ":Cadia",
-    ":WarpSanctum",
-    ":VoxShadow"
-)

@@ -1,1 +1,0 @@
-# Shushunya local TTS pkg
