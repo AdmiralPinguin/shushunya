@@ -1,14 +1,14 @@
 # Local model weights
-models/*.gguf
-models/*.safetensors
-models/*.bin
+CoreOfMadness/*.gguf
+CoreOfMadness/*.safetensors
+CoreOfMadness/*.bin
 
 # Downloaded llama.cpp runtime binaries and archives
-models/llm-host/llama.cpp/
-models/llm-host/runtime/
+CoreOfMadness/llm-host/llama.cpp/
+CoreOfMadness/llm-host/runtime/
 
 # Telegram bot runtime
-models/telegram-bot/runtime/
+CoreOfMadness/telegram-bot/runtime/
 
 # Local secrets
 .env

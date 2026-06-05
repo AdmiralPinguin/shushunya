@@ -1,4 +1,4 @@
-# Shushunya Models
+# CoreOfMadness
 
 Local model storage, LLM host runtime, and Telegram bot files.
 
@@ -10,7 +10,7 @@ The project root is:
 
 All model-server related files are kept inside:
 
-`/media/shushunya/SHUSHUNYA/shushunya/models`
+`/media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness`
 
 ## Purpose
 
@@ -93,7 +93,7 @@ The Telegram bot is stored in:
 Start the LLM host first, then start the bot with a BotFather token:
 
 ```bash
-cd /media/shushunya/SHUSHUNYA/shushunya/models
+cd /media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness
 ./llm-host/scripts/start-host.sh
 TELEGRAM_BOT_TOKEN="123456:token" ./telegram-bot/start-bot.sh
 ```

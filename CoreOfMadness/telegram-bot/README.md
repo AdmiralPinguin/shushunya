@@ -10,7 +10,7 @@ Telegram bot for chatting with the local Gemma 4 host.
 ## Run
 
 ```bash
-cd /media/shushunya/SHUSHUNYA/shushunya/models
+cd /media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness
 ./llm-host/scripts/start-host.sh
 TELEGRAM_BOT_TOKEN="123456:token" ./telegram-bot/start-bot.sh
 ```
