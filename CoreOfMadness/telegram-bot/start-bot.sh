@@ -15,6 +15,12 @@ if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   exit 0
 fi
 
+ps -eo pid=,args= | awk -v script="$ROOT/bot.py" '$0 ~ "python3 " script && $0 !~ /awk/ {print $1}' | while read -r stale_pid; do
+  if [ -n "$stale_pid" ] && [ "$stale_pid" != "$$" ]; then
+    kill "$stale_pid" 2>/dev/null || true
+  fi
+done
+
 mkdir -p "$ROOT/runtime"
 
 setsid python3 "$ROOT/bot.py" >"$LOG_FILE" 2>&1 </dev/null &

@@ -17,4 +17,13 @@ else
   echo "Process $PID is not running."
 fi
 
+sleep 1
+
+ps -eo pid=,args= | awk -v script="$ROOT/bot.py" '$0 ~ "python3 " script && $0 !~ /awk/ {print $1}' | while read -r stale_pid; do
+  if [ -n "$stale_pid" ] && [ "$stale_pid" != "$$" ]; then
+    kill -9 "$stale_pid" 2>/dev/null || true
+    echo "Stopped stale Telegram bot PID $stale_pid"
+  fi
+done
+
 rm -f "$PID_FILE"

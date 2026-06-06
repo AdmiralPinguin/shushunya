@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from urllib.error import HTTPError
 
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
@@ -21,7 +22,7 @@ MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "512"))
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.4"))
 HISTORY_MESSAGES = int(os.environ.get("HISTORY_MESSAGES", "12"))
 STREAM_ENABLED = os.environ.get("STREAM_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
-STREAM_DRAFT_INTERVAL = float(os.environ.get("STREAM_DRAFT_INTERVAL", "0.8"))
+STREAM_DRAFT_INTERVAL = float(os.environ.get("STREAM_DRAFT_INTERVAL", "2.5"))
 
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 RUNNING = True
@@ -90,6 +91,20 @@ def send_draft(chat_id, draft_id, text):
             timeout=10,
         )
         return True
+    except HTTPError as exc:
+        retry_after = None
+        try:
+            payload = json.loads(exc.read().decode("utf-8"))
+            retry_after = payload.get("parameters", {}).get("retry_after")
+        except Exception:
+            payload = {"error": str(exc)}
+
+        if exc.code == 429 and retry_after:
+            print(f"Draft stream rate limited; retry after {retry_after}s", file=sys.stderr, flush=True)
+            return float(retry_after)
+
+        print(f"Draft stream unavailable: {payload}", file=sys.stderr, flush=True)
+        return False
     except Exception as exc:
         print(f"Draft stream unavailable: {exc}", file=sys.stderr, flush=True)
         return False
@@ -155,8 +170,11 @@ class DraftStreamer:
             if not text or text == self.sent_text:
                 continue
 
-            if send_draft(self.chat_id, self.draft_id, text):
+            result = send_draft(self.chat_id, self.draft_id, text)
+            if result is True:
                 self.sent_text = text
+            elif isinstance(result, (int, float)):
+                self.stop_event.wait(max(result, STREAM_DRAFT_INTERVAL))
             else:
                 self.supported = False
                 return

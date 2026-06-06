@@ -41,4 +41,4 @@ Optional environment variables:
 - `TEMPERATURE` - default `0.4`
 - `SYSTEM_PROMPT` - bot system prompt
 - `STREAM_ENABLED` - default `1`; uses Telegram `sendMessageDraft` while the model is generating
-- `STREAM_DRAFT_INTERVAL` - default `0.8`; seconds between Telegram draft updates
+- `STREAM_DRAFT_INTERVAL` - default `2.5`; seconds between Telegram draft updates
