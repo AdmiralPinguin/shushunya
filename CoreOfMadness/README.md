@@ -106,6 +106,22 @@ Stop the bot with:
 
 The bot talks to the local LLM host through `http://127.0.0.1:8080/v1/chat/completions`.
 
+## Permissions
+
+This project is used from different Linux users and desktop sessions. Keep files readable by all local users so recovery and file-manager access do not break.
+
+From the project root, run:
+
+```bash
+./fix-permissions.sh
+```
+
+Expected permissions:
+
+- Directories: `755`
+- Regular files: `644`
+- Shell/Python entrypoint scripts: `755`
+
 ## Notes
 
 Gemma 4 12B Q5 is a large model. It requires several GB of disk space and enough RAM or VRAM for inference. If the host cannot start because of memory limits, use a smaller quantization such as Q4.
