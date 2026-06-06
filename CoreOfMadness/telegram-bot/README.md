@@ -41,6 +41,7 @@ Optional environment variables:
 - `LLM_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
 - `MAX_TOKENS` - default `2048`
 - `MAX_CONTINUATIONS` - default `3`; continues automatically when the model stops because of the token limit
+- `CONTINUATION_TAIL_CHARS` - default `2500`; characters of the previous answer sent back when asking the model to continue
 - `TEMPERATURE` - default `0.4`
 - `SYSTEM_PROMPT` - bot system prompt
 - `STREAM_ENABLED` - default `1`; uses Telegram `sendMessageDraft` while the model is generating

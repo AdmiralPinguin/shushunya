@@ -20,6 +20,7 @@ SYSTEM_PROMPT = os.environ.get(
 )
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
 MAX_CONTINUATIONS = int(os.environ.get("MAX_CONTINUATIONS", "3"))
+CONTINUATION_TAIL_CHARS = int(os.environ.get("CONTINUATION_TAIL_CHARS", "2500"))
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.4"))
 HISTORY_MESSAGES = int(os.environ.get("HISTORY_MESSAGES", "12"))
 STREAM_ENABLED = os.environ.get("STREAM_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -132,6 +133,23 @@ def finish_reason(payload):
     return choices[0].get("finish_reason")
 
 
+def continuation_messages(answer_parts):
+    tail = "".join(answer_parts)[-CONTINUATION_TAIL_CHARS:]
+    return [
+        {
+            "role": "assistant",
+            "content": tail,
+        },
+        {
+            "role": "user",
+            "content": (
+                "Продолжи ответ ровно с того места, где остановился. "
+                "Не повторяй уже написанный текст."
+            ),
+        },
+    ]
+
+
 def draft_id():
     return uuid.uuid4().int % 2147483647 + 1
 
@@ -213,17 +231,23 @@ def ask_llm(chat_id, text):
     answer_parts = []
     reason = None
     for attempt in range(MAX_CONTINUATIONS + 1):
-        response = request_json(
-            f"{LLM_BASE_URL}/v1/chat/completions",
-            {
-                "model": LLM_MODEL,
-                "user": str(chat_id),
-                "messages": messages,
-                "max_tokens": MAX_TOKENS,
-                "temperature": TEMPERATURE,
-            },
-            timeout=180,
-        )
+        try:
+            response = request_json(
+                f"{LLM_BASE_URL}/v1/chat/completions",
+                {
+                    "model": LLM_MODEL,
+                    "user": str(chat_id),
+                    "messages": messages,
+                    "max_tokens": MAX_TOKENS,
+                    "temperature": TEMPERATURE,
+                },
+                timeout=180,
+            )
+        except Exception:
+            if answer_parts:
+                answer_parts.append("\n\n[Продолжение остановлено: модель отклонила слишком длинный запрос.]")
+                break
+            raise
 
         choice = response["choices"][0]
         part = choice["message"].get("content", "")
@@ -233,14 +257,7 @@ def ask_llm(chat_id, text):
         if reason != "length" or attempt >= MAX_CONTINUATIONS:
             break
 
-        partial_answer = "".join(answer_parts)
-        messages.append({"role": "assistant", "content": partial_answer})
-        messages.append(
-            {
-                "role": "user",
-                "content": "Продолжи ответ ровно с того места, где остановился. Не повторяй уже написанный текст.",
-            }
-        )
+        messages.extend(continuation_messages(answer_parts))
 
     if reason == "length":
         answer_parts.append("\n\n[Ответ остановлен по лимиту длины.]")
@@ -304,18 +321,18 @@ def stream_llm(chat_id, text):
 
     try:
         for attempt in range(MAX_CONTINUATIONS + 1):
-            reason = stream_once(messages, chat_id, draft_streamer, answer_parts)
+            try:
+                reason = stream_once(messages, chat_id, draft_streamer, answer_parts)
+            except Exception:
+                if answer_parts:
+                    answer_parts.append("\n\n[Продолжение остановлено: модель отклонила слишком длинный запрос.]")
+                    break
+                raise
+
             if reason != "length" or attempt >= MAX_CONTINUATIONS:
                 break
 
-            partial_answer = "".join(answer_parts)
-            messages.append({"role": "assistant", "content": partial_answer})
-            messages.append(
-                {
-                    "role": "user",
-                    "content": "Продолжи ответ ровно с того места, где остановился. Не повторяй уже написанный текст.",
-                }
-            )
+            messages.extend(continuation_messages(answer_parts))
 
         if reason == "length":
             answer_parts.append("\n\n[Ответ остановлен по лимиту длины.]")
