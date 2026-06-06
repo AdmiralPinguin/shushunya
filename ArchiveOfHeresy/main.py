@@ -1,0 +1,469 @@
+#!/usr/bin/env python3
+import json
+import os
+import sqlite3
+import threading
+import uuid
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+ROOT = Path(__file__).resolve().parent
+HOST = os.environ.get("ARCHIVE_HOST", "127.0.0.1")
+PORT = int(os.environ.get("ARCHIVE_PORT", "8090"))
+LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
+JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
+SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
+ARCHIVE_SYSTEM_PROMPT = os.environ.get(
+    "ARCHIVE_SYSTEM_PROMPT",
+    "Ты проходишь через ArchiveOfHeresy: слой подготовки памяти и промптов. "
+    "Отвечай по-русски ясно, сохраняй смысл запроса пользователя.",
+)
+ARCHIVE_LOCK = threading.Lock()
+
+
+def read_json(handler):
+    content_length = int(handler.headers.get("Content-Length", "0"))
+    if content_length <= 0:
+        return {}
+    raw = handler.rfile.read(content_length).decode("utf-8")
+    return json.loads(raw)
+
+
+def write_json(handler, status, payload):
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def proxy_json(method, path, payload=None, timeout=180):
+    data = None
+    headers = {}
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    request = Request(f"{LLM_BASE_URL}{path}", data=data, headers=headers, method=method)
+    with urlopen(request, timeout=timeout) as response:
+        body = response.read().decode("utf-8")
+        return response.status, json.loads(body) if body else {}
+
+
+def open_upstream(method, path, payload=None, timeout=180):
+    data = None
+    headers = {}
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    request = Request(f"{LLM_BASE_URL}{path}", data=data, headers=headers, method=method)
+    return urlopen(request, timeout=timeout)
+
+
+def now_iso():
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def prepare_messages(messages):
+    prepared = [{"role": "system", "content": ARCHIVE_SYSTEM_PROMPT}]
+    prepared.extend(messages)
+    return prepared
+
+
+def conversation_id(payload):
+    user = str(payload.get("user") or "").strip()
+    if user:
+        return user
+    return "unknown"
+
+
+def daily_jsonl_path(created_at):
+    dt = datetime.fromisoformat(created_at)
+    return JSONL_ROOT / f"{dt.year:04d}" / f"{dt.month:02d}" / f"{dt.date().isoformat()}.jsonl"
+
+
+def init_storage():
+    JSONL_ROOT.mkdir(parents=True, exist_ok=True)
+    SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(SQLITE_PATH) as db:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                external_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS turns (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                model TEXT,
+                status TEXT NOT NULL,
+                http_status INTEGER,
+                request_json TEXT NOT NULL,
+                prepared_messages_json TEXT NOT NULL,
+                response_json TEXT,
+                error TEXT,
+                FOREIGN KEY(conversation_id) REFERENCES conversations(id)
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                turn_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                source TEXT NOT NULL,
+                FOREIGN KEY(turn_id) REFERENCES turns(id),
+                FOREIGN KEY(conversation_id) REFERENCES conversations(id)
+            )
+            """
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_turns_conversation_created ON turns(conversation_id, created_at)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at)")
+
+
+def assistant_message(response):
+    choices = response.get("choices") or []
+    if not choices:
+        return None
+    message = choices[0].get("message") or {}
+    content = str(message.get("content") or "").strip()
+    if not content:
+        return None
+    return {"role": message.get("role") or "assistant", "content": content}
+
+
+def stream_delta(payload):
+    choices = payload.get("choices") or []
+    if not choices:
+        return "", None
+
+    choice = choices[0]
+    delta = choice.get("delta") or {}
+    message = choice.get("message") or {}
+    content = delta.get("content")
+    if content is None:
+        content = message.get("content")
+    return str(content or ""), choice.get("finish_reason")
+
+
+def write_archives(record):
+    with ARCHIVE_LOCK:
+        jsonl_path = daily_jsonl_path(record["created_at"])
+        jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+        with jsonl_path.open("a", encoding="utf-8") as archive:
+            archive.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+        with sqlite3.connect(SQLITE_PATH) as db:
+            db.execute(
+                """
+                INSERT INTO conversations (id, source, external_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at
+                """,
+                (
+                    record["conversation_id"],
+                    record["source"],
+                    record["conversation_id"],
+                    record["created_at"],
+                    record["created_at"],
+                ),
+            )
+            db.execute(
+                """
+                INSERT INTO turns (
+                    id, conversation_id, created_at, model, status, http_status,
+                    request_json, prepared_messages_json, response_json, error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["turn_id"],
+                    record["conversation_id"],
+                    record["created_at"],
+                    record.get("model"),
+                    record["status"],
+                    record.get("http_status"),
+                    json.dumps(record["request"], ensure_ascii=False, sort_keys=True),
+                    json.dumps(record["prepared_messages"], ensure_ascii=False, sort_keys=True),
+                    json.dumps(record.get("response"), ensure_ascii=False, sort_keys=True)
+                    if record.get("response") is not None
+                    else None,
+                    record.get("error"),
+                ),
+            )
+
+            messages = list(record["prepared_messages"])
+            reply = record.get("assistant_message")
+            if reply:
+                messages.append(reply)
+
+            for sequence, message in enumerate(messages):
+                db.execute(
+                    """
+                    INSERT INTO messages (
+                        turn_id, conversation_id, created_at, sequence, role, content, source
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record["turn_id"],
+                        record["conversation_id"],
+                        record["created_at"],
+                        sequence,
+                        str(message.get("role") or ""),
+                        str(message.get("content") or ""),
+                        "prepared" if message is not reply else "assistant_response",
+                    ),
+                )
+
+
+class ArchiveHandler(BaseHTTPRequestHandler):
+    server_version = "ArchiveOfHeresy/0.1"
+
+    def log_message(self, fmt, *args):
+        print("%s - %s" % (self.address_string(), fmt % args), flush=True)
+
+    def do_GET(self):
+        if self.path == "/health":
+            write_json(
+                self,
+                200,
+                {
+                    "status": "ok",
+                    "service": "ArchiveOfHeresy",
+                    "llm_base_url": LLM_BASE_URL,
+                    "jsonl_root": str(JSONL_ROOT),
+                    "sqlite_path": str(SQLITE_PATH),
+                },
+            )
+            return
+
+        if self.path == "/v1/models":
+            self.forward("GET", self.path)
+            return
+
+        write_json(self, 404, {"error": "Not found"})
+
+    def do_POST(self):
+        if self.path == "/v1/chat/completions":
+            self.chat_completion()
+            return
+
+        write_json(self, 404, {"error": "Not found"})
+
+    def chat_completion(self):
+        created_at = now_iso()
+        turn_id = str(uuid.uuid4())
+        payload = read_json(self)
+        payload["messages"] = list(payload.get("messages", []))
+        prepared_payload = dict(payload)
+        prepared_payload["messages"] = prepare_messages(payload["messages"])
+
+        record = {
+            "turn_id": turn_id,
+            "created_at": created_at,
+            "source": "openai-chat-completions",
+            "conversation_id": conversation_id(payload),
+            "model": payload.get("model"),
+            "request": payload,
+            "prepared_messages": prepared_payload["messages"],
+            "status": "pending",
+            "http_status": None,
+            "response": None,
+            "assistant_message": None,
+            "error": None,
+        }
+
+        try:
+            if prepared_payload.get("stream"):
+                self.stream_chat_completion(prepared_payload, record)
+                return
+
+            status, response = proxy_json("POST", self.path, payload=prepared_payload)
+            record["status"] = "ok"
+            record["http_status"] = status
+            record["response"] = response
+            record["assistant_message"] = assistant_message(response)
+            write_archives(record)
+            write_json(self, status, response)
+        except HTTPError as exc:
+            try:
+                error_payload = json.loads(exc.read().decode("utf-8"))
+            except Exception:
+                error_payload = {"error": str(exc)}
+            record["status"] = "upstream_error"
+            record["http_status"] = exc.code
+            record["response"] = error_payload
+            record["error"] = json.dumps(error_payload, ensure_ascii=False)
+            write_archives(record)
+            write_json(self, exc.code, error_payload)
+        except (TimeoutError, URLError) as exc:
+            error_payload = {"error": f"LLM host unavailable: {exc}"}
+            record["status"] = "unavailable"
+            record["http_status"] = 502
+            record["response"] = error_payload
+            record["error"] = error_payload["error"]
+            write_archives(record)
+            write_json(self, 502, error_payload)
+        except Exception as exc:
+            error_payload = {"error": str(exc)}
+            record["status"] = "archive_error"
+            record["http_status"] = 500
+            record["response"] = error_payload
+            record["error"] = error_payload["error"]
+            write_archives(record)
+            write_json(self, 500, error_payload)
+
+    def stream_chat_completion(self, prepared_payload, record):
+        assistant_parts = []
+        finish_reason = None
+        streamed_chunks = []
+
+        try:
+            with open_upstream("POST", self.path, payload=prepared_payload) as upstream:
+                self.send_response(upstream.status)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+
+                for raw_line in upstream:
+                    self.wfile.write(raw_line)
+                    self.wfile.flush()
+                    decoded = raw_line.decode("utf-8", errors="replace").strip()
+                    if not decoded.startswith("data:"):
+                        continue
+
+                    data = decoded[5:].strip()
+                    if data == "[DONE]":
+                        continue
+
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+
+                    streamed_chunks.append(chunk)
+                    delta, chunk_finish = stream_delta(chunk)
+                    if delta:
+                        assistant_parts.append(delta)
+                    if chunk_finish:
+                        finish_reason = chunk_finish
+
+            assistant_text = "".join(assistant_parts).strip()
+            response = {
+                "object": "chat.completion",
+                "model": record.get("model"),
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": finish_reason or "stop",
+                        "message": {"role": "assistant", "content": assistant_text},
+                    }
+                ],
+                "streamed_chunks": streamed_chunks,
+            }
+            record["status"] = "ok"
+            record["http_status"] = 200
+            record["response"] = response
+            record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
+            write_archives(record)
+        except HTTPError as exc:
+            try:
+                error_payload = json.loads(exc.read().decode("utf-8"))
+            except Exception:
+                error_payload = {"error": str(exc)}
+            record["status"] = "upstream_error"
+            record["http_status"] = exc.code
+            record["response"] = error_payload
+            record["error"] = json.dumps(error_payload, ensure_ascii=False)
+            write_archives(record)
+            write_json(self, exc.code, error_payload)
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            assistant_text = "".join(assistant_parts).strip()
+            record["status"] = "client_disconnected"
+            record["http_status"] = 499
+            record["response"] = {
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "client_disconnected",
+                        "message": {"role": "assistant", "content": assistant_text},
+                    }
+                ],
+                "streamed_chunks": streamed_chunks,
+            }
+            record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
+            record["error"] = str(exc)
+            write_archives(record)
+        except (TimeoutError, URLError) as exc:
+            error_payload = {"error": f"LLM host unavailable: {exc}"}
+            record["status"] = "unavailable"
+            record["http_status"] = 502
+            record["response"] = error_payload
+            record["error"] = error_payload["error"]
+            write_archives(record)
+            write_json(self, 502, error_payload)
+        except Exception as exc:
+            error_payload = {"error": str(exc)}
+            record["status"] = "archive_error"
+            record["http_status"] = 500
+            record["response"] = error_payload
+            record["error"] = error_payload["error"]
+            write_archives(record)
+            write_json(self, 500, error_payload)
+
+    def forward(self, method, path, payload=None):
+        try:
+            status, response = proxy_json(method, path, payload=payload)
+            write_json(self, status, response)
+        except HTTPError as exc:
+            try:
+                error_payload = json.loads(exc.read().decode("utf-8"))
+            except Exception:
+                error_payload = {"error": str(exc)}
+            write_json(self, exc.code, error_payload)
+        except (TimeoutError, URLError) as exc:
+            write_json(self, 502, {"error": f"LLM host unavailable: {exc}"})
+        except Exception as exc:
+            write_json(self, 500, {"error": str(exc)})
+
+
+def main():
+    init_storage()
+    server = ThreadingHTTPServer((HOST, PORT), ArchiveHandler)
+    print(f"ArchiveOfHeresy main started: http://{HOST}:{PORT}", flush=True)
+    print(f"Upstream LLM: {LLM_BASE_URL}", flush=True)
+    print(f"JSONL archive: {JSONL_ROOT}", flush=True)
+    print(f"SQLite archive: {SQLITE_PATH}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

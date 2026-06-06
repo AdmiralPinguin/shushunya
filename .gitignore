@@ -10,6 +10,11 @@ CoreOfMadness/llm-host/runtime/
 # Telegram bot runtime
 CoreOfMadness/telegram-bot/runtime/
 
+# ArchiveOfHeresy local archives
+ArchiveOfHeresy/archive/jsonl/**/*.jsonl
+ArchiveOfHeresy/archive/sqlite/*.sqlite3
+ArchiveOfHeresy/archive/sqlite/*.sqlite3-*
+
 # Local secrets
 .env
 *.env
@@ -22,6 +27,7 @@ venv/
 env/
 ENV/
 virtualenv/
+ArchiveOfHeresy/ArchiveOfHeresy/
 pip-wheel-metadata/
 *.egg-info/
 .pytest_cache/

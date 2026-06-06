@@ -22,7 +22,7 @@ This directory is intended to run a local language model server on Linux over SS
 - `llm-host/llama.cpp/` - local llama.cpp runtime files.
 - `llm-host/runtime/` - local logs and server process files.
 - `llm-host/scripts/` - helper scripts for starting, checking, and stopping the LLM host.
-- `telegram-bot/` - Telegram bot for chatting with the local model.
+- `telegram-bot/` - Telegram bot for chatting with the local model through ArchiveOfHeresy.
 
 ## Target Model
 
@@ -90,11 +90,14 @@ The Telegram bot is stored in:
 
 `telegram-bot/`
 
-Start the LLM host first, then start the bot with a BotFather token:
+Start the LLM host first, then start ArchiveOfHeresy, then start the bot with a BotFather token:
 
 ```bash
 cd /media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness
 ./llm-host/scripts/start-host.sh
+cd /media/shushunya/SHUSHUNYA/shushunya/ArchiveOfHeresy
+./start-main.sh
+cd /media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness
 TELEGRAM_BOT_TOKEN="123456:token" ./telegram-bot/start-bot.sh
 ```
 
@@ -104,7 +107,8 @@ Stop the bot with:
 ./telegram-bot/stop-bot.sh
 ```
 
-The bot talks to the local LLM host through `http://127.0.0.1:8080/v1/chat/completions`.
+The bot talks to ArchiveOfHeresy through `http://127.0.0.1:8090/v1/chat/completions`.
+ArchiveOfHeresy then talks to the local LLM host through `http://127.0.0.1:8080/v1/chat/completions`.
 
 ## Permissions
 

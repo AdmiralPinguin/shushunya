@@ -6,10 +6,11 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
 SYSTEM_PROMPT = os.environ.get(
     "SYSTEM_PROMPT",
@@ -18,6 +19,8 @@ SYSTEM_PROMPT = os.environ.get(
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "512"))
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.4"))
 HISTORY_MESSAGES = int(os.environ.get("HISTORY_MESSAGES", "12"))
+STREAM_ENABLED = os.environ.get("STREAM_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+STREAM_DRAFT_INTERVAL = float(os.environ.get("STREAM_DRAFT_INTERVAL", "0.8"))
 
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 RUNNING = True
@@ -39,6 +42,12 @@ def request_json(url, payload=None, timeout=60):
     req = urllib.request.Request(url, data=data, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def open_json_stream(url, payload, timeout=180):
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    return urllib.request.urlopen(req, timeout=timeout)
 
 
 def telegram(method, payload=None, timeout=60):
@@ -68,6 +77,40 @@ def send_typing(chat_id):
         pass
 
 
+def send_draft(chat_id, draft_id, text):
+    try:
+        telegram(
+            "sendMessageDraft",
+            {
+                "chat_id": chat_id,
+                "draft_id": draft_id,
+                "text": text[-4096:],
+            },
+            timeout=10,
+        )
+        return True
+    except Exception as exc:
+        print(f"Draft stream unavailable: {exc}", file=sys.stderr, flush=True)
+        return False
+
+
+def stream_delta(payload):
+    choices = payload.get("choices") or []
+    if not choices:
+        return ""
+    choice = choices[0]
+    delta = choice.get("delta") or {}
+    message = choice.get("message") or {}
+    content = delta.get("content")
+    if content is None:
+        content = message.get("content")
+    return str(content or "")
+
+
+def draft_id():
+    return uuid.uuid4().int % 2147483647 + 1
+
+
 def ask_llm(chat_id, text):
     chat_history = HISTORY.setdefault(chat_id, [])
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -78,6 +121,7 @@ def ask_llm(chat_id, text):
         f"{LLM_BASE_URL}/v1/chat/completions",
         {
             "model": LLM_MODEL,
+            "user": str(chat_id),
             "messages": messages,
             "max_tokens": MAX_TOKENS,
             "temperature": TEMPERATURE,
@@ -86,6 +130,62 @@ def ask_llm(chat_id, text):
     )
 
     answer = response["choices"][0]["message"].get("content", "").strip()
+    chat_history.append({"role": "user", "content": text})
+    chat_history.append({"role": "assistant", "content": answer})
+    HISTORY[chat_id] = chat_history[-HISTORY_MESSAGES:]
+    return answer
+
+
+def stream_llm(chat_id, text):
+    chat_history = HISTORY.setdefault(chat_id, [])
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(chat_history[-HISTORY_MESSAGES:])
+    messages.append({"role": "user", "content": text})
+
+    payload = {
+        "model": LLM_MODEL,
+        "user": str(chat_id),
+        "messages": messages,
+        "max_tokens": MAX_TOKENS,
+        "temperature": TEMPERATURE,
+        "stream": True,
+    }
+
+    answer_parts = []
+    current_draft_id = draft_id()
+    last_draft_at = 0.0
+    draft_supported = send_draft(chat_id, current_draft_id, "")
+
+    with open_json_stream(f"{LLM_BASE_URL}/v1/chat/completions", payload, timeout=180) as response:
+        for raw_line in response:
+            decoded = raw_line.decode("utf-8", errors="replace").strip()
+            if not decoded.startswith("data:"):
+                continue
+
+            data = decoded[5:].strip()
+            if data == "[DONE]":
+                break
+
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+
+            delta = stream_delta(chunk)
+            if not delta:
+                continue
+
+            answer_parts.append(delta)
+            if draft_supported:
+                now = time.monotonic()
+                if now - last_draft_at >= STREAM_DRAFT_INTERVAL:
+                    send_draft(chat_id, current_draft_id, "".join(answer_parts))
+                    last_draft_at = now
+
+    answer = "".join(answer_parts).strip()
+    if draft_supported and answer:
+        send_draft(chat_id, current_draft_id, answer)
+
     chat_history.append({"role": "user", "content": text})
     chat_history.append({"role": "assistant", "content": answer})
     HISTORY[chat_id] = chat_history[-HISTORY_MESSAGES:]
@@ -102,7 +202,7 @@ def handle_message(message):
     if text in ("/start", "/help"):
         send_message(
             chat_id,
-            "Я подключён к локальной Gemma 4 12B. Напиши сообщение, и я передам его модели.",
+            "Я подключён к локальной Gemma 4 12B через ArchiveOfHeresy. Напиши сообщение, и я передам его модели.",
         )
         return
 
@@ -113,7 +213,7 @@ def handle_message(message):
 
     send_typing(chat_id)
     try:
-        answer = ask_llm(chat_id, text)
+        answer = stream_llm(chat_id, text) if STREAM_ENABLED else ask_llm(chat_id, text)
         send_message(chat_id, answer)
     except urllib.error.URLError as exc:
         send_message(chat_id, f"LLM-хост недоступен: {exc}")
