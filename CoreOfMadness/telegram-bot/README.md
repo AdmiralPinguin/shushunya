@@ -39,7 +39,8 @@ Optional environment variables:
 
 - `LLM_BASE_URL` - default `http://127.0.0.1:8090`
 - `LLM_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
-- `MAX_TOKENS` - default `512`
+- `MAX_TOKENS` - default `2048`
+- `MAX_CONTINUATIONS` - default `3`; continues automatically when the model stops because of the token limit
 - `TEMPERATURE` - default `0.4`
 - `SYSTEM_PROMPT` - bot system prompt
 - `STREAM_ENABLED` - default `1`; uses Telegram `sendMessageDraft` while the model is generating

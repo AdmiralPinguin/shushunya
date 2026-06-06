@@ -18,7 +18,8 @@ SYSTEM_PROMPT = os.environ.get(
     "SYSTEM_PROMPT",
     "Ты локальный помощник. Отвечай по-русски ясно, без лишней воды.",
 )
-MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "512"))
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
+MAX_CONTINUATIONS = int(os.environ.get("MAX_CONTINUATIONS", "3"))
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.4"))
 HISTORY_MESSAGES = int(os.environ.get("HISTORY_MESSAGES", "12"))
 STREAM_ENABLED = os.environ.get("STREAM_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -124,6 +125,13 @@ def stream_delta(payload):
     return str(content or "")
 
 
+def finish_reason(payload):
+    choices = payload.get("choices") or []
+    if not choices:
+        return None
+    return choices[0].get("finish_reason")
+
+
 def draft_id():
     return uuid.uuid4().int % 2147483647 + 1
 
@@ -202,31 +210,49 @@ def ask_llm(chat_id, text):
     messages.extend(chat_history[-HISTORY_MESSAGES:])
     messages.append({"role": "user", "content": text})
 
-    response = request_json(
-        f"{LLM_BASE_URL}/v1/chat/completions",
-        {
-            "model": LLM_MODEL,
-            "user": str(chat_id),
-            "messages": messages,
-            "max_tokens": MAX_TOKENS,
-            "temperature": TEMPERATURE,
-        },
-        timeout=180,
-    )
+    answer_parts = []
+    reason = None
+    for attempt in range(MAX_CONTINUATIONS + 1):
+        response = request_json(
+            f"{LLM_BASE_URL}/v1/chat/completions",
+            {
+                "model": LLM_MODEL,
+                "user": str(chat_id),
+                "messages": messages,
+                "max_tokens": MAX_TOKENS,
+                "temperature": TEMPERATURE,
+            },
+            timeout=180,
+        )
 
-    answer = response["choices"][0]["message"].get("content", "").strip()
+        choice = response["choices"][0]
+        part = choice["message"].get("content", "")
+        if part:
+            answer_parts.append(part)
+        reason = choice.get("finish_reason")
+        if reason != "length" or attempt >= MAX_CONTINUATIONS:
+            break
+
+        partial_answer = "".join(answer_parts)
+        messages.append({"role": "assistant", "content": partial_answer})
+        messages.append(
+            {
+                "role": "user",
+                "content": "Продолжи ответ ровно с того места, где остановился. Не повторяй уже написанный текст.",
+            }
+        )
+
+    if reason == "length":
+        answer_parts.append("\n\n[Ответ остановлен по лимиту длины.]")
+
+    answer = "".join(answer_parts).strip()
     chat_history.append({"role": "user", "content": text})
     chat_history.append({"role": "assistant", "content": answer})
     HISTORY[chat_id] = chat_history[-HISTORY_MESSAGES:]
     return answer
 
 
-def stream_llm(chat_id, text):
-    chat_history = HISTORY.setdefault(chat_id, [])
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(chat_history[-HISTORY_MESSAGES:])
-    messages.append({"role": "user", "content": text})
-
+def stream_once(messages, chat_id, draft_streamer, answer_parts):
     payload = {
         "model": LLM_MODEL,
         "user": str(chat_id),
@@ -236,31 +262,63 @@ def stream_llm(chat_id, text):
         "stream": True,
     }
 
+    reason = None
+    with open_json_stream(f"{LLM_BASE_URL}/v1/chat/completions", payload, timeout=180) as response:
+        for raw_line in response:
+            decoded = raw_line.decode("utf-8", errors="replace").strip()
+            if not decoded.startswith("data:"):
+                continue
+
+            data = decoded[5:].strip()
+            if data == "[DONE]":
+                break
+
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+
+            current_reason = finish_reason(chunk)
+            if current_reason:
+                reason = current_reason
+
+            delta = stream_delta(chunk)
+            if not delta:
+                continue
+
+            answer_parts.append(delta)
+            draft_streamer.update("".join(answer_parts))
+
+    return reason
+
+
+def stream_llm(chat_id, text):
+    chat_history = HISTORY.setdefault(chat_id, [])
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(chat_history[-HISTORY_MESSAGES:])
+    messages.append({"role": "user", "content": text})
+
     answer_parts = []
     draft_streamer = DraftStreamer(chat_id)
+    reason = None
 
     try:
-        with open_json_stream(f"{LLM_BASE_URL}/v1/chat/completions", payload, timeout=180) as response:
-            for raw_line in response:
-                decoded = raw_line.decode("utf-8", errors="replace").strip()
-                if not decoded.startswith("data:"):
-                    continue
+        for attempt in range(MAX_CONTINUATIONS + 1):
+            reason = stream_once(messages, chat_id, draft_streamer, answer_parts)
+            if reason != "length" or attempt >= MAX_CONTINUATIONS:
+                break
 
-                data = decoded[5:].strip()
-                if data == "[DONE]":
-                    break
+            partial_answer = "".join(answer_parts)
+            messages.append({"role": "assistant", "content": partial_answer})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "Продолжи ответ ровно с того места, где остановился. Не повторяй уже написанный текст.",
+                }
+            )
 
-                try:
-                    chunk = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-
-                delta = stream_delta(chunk)
-                if not delta:
-                    continue
-
-                answer_parts.append(delta)
-                draft_streamer.update("".join(answer_parts))
+        if reason == "length":
+            answer_parts.append("\n\n[Ответ остановлен по лимиту длины.]")
 
         answer = "".join(answer_parts).strip()
         draft_streamer.finish(answer)
