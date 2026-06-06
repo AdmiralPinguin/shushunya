@@ -3,6 +3,7 @@ import json
 import os
 import signal
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -111,6 +112,56 @@ def draft_id():
     return uuid.uuid4().int % 2147483647 + 1
 
 
+class DraftStreamer:
+    def __init__(self, chat_id):
+        self.chat_id = chat_id
+        self.draft_id = draft_id()
+        self.latest_text = ""
+        self.sent_text = None
+        self.lock = threading.Lock()
+        self.stop_event = threading.Event()
+        self.supported = True
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def update(self, text):
+        if not self.supported:
+            return
+        with self.lock:
+            self.latest_text = text
+
+    def finish(self, text):
+        self.update(text)
+        deadline = time.monotonic() + 2.0
+        while self.supported and time.monotonic() < deadline:
+            with self.lock:
+                done = self.sent_text == self.latest_text
+            if done:
+                break
+            time.sleep(0.05)
+        self.stop_event.set()
+        self.thread.join(timeout=1.0)
+
+    def close(self):
+        self.stop_event.set()
+        self.thread.join(timeout=1.0)
+
+    def _run(self):
+        while not self.stop_event.is_set():
+            time.sleep(STREAM_DRAFT_INTERVAL)
+            with self.lock:
+                text = self.latest_text
+
+            if not text or text == self.sent_text:
+                continue
+
+            if send_draft(self.chat_id, self.draft_id, text):
+                self.sent_text = text
+            else:
+                self.supported = False
+                return
+
+
 def ask_llm(chat_id, text):
     chat_history = HISTORY.setdefault(chat_id, [])
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -152,39 +203,36 @@ def stream_llm(chat_id, text):
     }
 
     answer_parts = []
-    current_draft_id = draft_id()
-    last_draft_at = 0.0
-    draft_supported = send_draft(chat_id, current_draft_id, "")
+    draft_streamer = DraftStreamer(chat_id)
 
-    with open_json_stream(f"{LLM_BASE_URL}/v1/chat/completions", payload, timeout=180) as response:
-        for raw_line in response:
-            decoded = raw_line.decode("utf-8", errors="replace").strip()
-            if not decoded.startswith("data:"):
-                continue
+    try:
+        with open_json_stream(f"{LLM_BASE_URL}/v1/chat/completions", payload, timeout=180) as response:
+            for raw_line in response:
+                decoded = raw_line.decode("utf-8", errors="replace").strip()
+                if not decoded.startswith("data:"):
+                    continue
 
-            data = decoded[5:].strip()
-            if data == "[DONE]":
-                break
+                data = decoded[5:].strip()
+                if data == "[DONE]":
+                    break
 
-            try:
-                chunk = json.loads(data)
-            except json.JSONDecodeError:
-                continue
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
 
-            delta = stream_delta(chunk)
-            if not delta:
-                continue
+                delta = stream_delta(chunk)
+                if not delta:
+                    continue
 
-            answer_parts.append(delta)
-            if draft_supported:
-                now = time.monotonic()
-                if now - last_draft_at >= STREAM_DRAFT_INTERVAL:
-                    send_draft(chat_id, current_draft_id, "".join(answer_parts))
-                    last_draft_at = now
+                answer_parts.append(delta)
+                draft_streamer.update("".join(answer_parts))
 
-    answer = "".join(answer_parts).strip()
-    if draft_supported and answer:
-        send_draft(chat_id, current_draft_id, answer)
+        answer = "".join(answer_parts).strip()
+        draft_streamer.finish(answer)
+    except Exception:
+        draft_streamer.close()
+        raise
 
     chat_history.append({"role": "user", "content": text})
     chat_history.append({"role": "assistant", "content": answer})
