@@ -50,10 +50,11 @@ Default settings:
 
 - Host: `0.0.0.0`
 - Port: `8080`
-- Context size: `2048`
+- Context size: `8192`
 - Parallel slots: `1`
 - GPU layers: `999` by default, so Vulkan can offload to the GPU when available
 - Reasoning mode: `off` by default, so chat replies return normal `content`
+- KV cache quantization: `CACHE_TYPE_K=q4_0`, `CACHE_TYPE_V=q4_0`
 - API base URL: `http://127.0.0.1:8080`
 - Health endpoint: `GET /health`
 - Chat completions endpoint: `POST /v1/chat/completions`
@@ -82,6 +83,12 @@ Runtime settings can be overridden through environment variables:
 
 ```bash
 PORT=8081 CTX_SIZE=4096 PARALLEL=1 GPU_LAYERS=999 REASONING=off ./llm-host/scripts/start-host.sh
+```
+
+For a higher-quality but heavier KV cache profile, override the cache types:
+
+```bash
+CTX_SIZE=8192 CACHE_TYPE_K=q8_0 CACHE_TYPE_V=q8_0 ./llm-host/scripts/start-host.sh
 ```
 
 ## Telegram Bot
