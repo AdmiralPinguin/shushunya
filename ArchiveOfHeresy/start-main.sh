@@ -9,7 +9,7 @@ LOG_FILE="$RUNTIME_DIR/archive-main.log"
 
 if [ ! -x "$ENV_DIR/bin/python" ]; then
   echo "Python environment not found: $ENV_DIR" >&2
-  echo "Create it with: python3 -m venv "$ENV_DIR"" >&2
+  echo "Create it with: python3 -m venv \"$ENV_DIR\"" >&2
   exit 1
 fi
 
