@@ -23,6 +23,7 @@ TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.4"))
 HISTORY_MESSAGES = int(os.environ.get("HISTORY_MESSAGES", "12"))
 STREAM_ENABLED = os.environ.get("STREAM_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
 STREAM_DRAFT_INTERVAL = float(os.environ.get("STREAM_DRAFT_INTERVAL", "2.5"))
+STREAM_FINAL_DRAFT_TIMEOUT = float(os.environ.get("STREAM_FINAL_DRAFT_TIMEOUT", "30"))
 
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 RUNNING = True
@@ -133,6 +134,7 @@ class DraftStreamer:
         self.draft_id = draft_id()
         self.latest_text = ""
         self.sent_text = None
+        self.any_sent = False
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
         self.supported = True
@@ -147,23 +149,44 @@ class DraftStreamer:
 
     def finish(self, text):
         self.update(text)
-        deadline = time.monotonic() + 2.0
-        while self.supported and time.monotonic() < deadline:
-            with self.lock:
-                done = self.sent_text == self.latest_text
-            if done:
-                break
-            time.sleep(0.05)
         self.stop_event.set()
         self.thread.join(timeout=1.0)
+        return self._send_final(text)
 
     def close(self):
         self.stop_event.set()
         self.thread.join(timeout=1.0)
 
+    def _send_final(self, text):
+        if not self.supported:
+            return False
+        if not text:
+            return self.any_sent
+
+        deadline = time.monotonic() + STREAM_FINAL_DRAFT_TIMEOUT
+        while time.monotonic() < deadline:
+            with self.lock:
+                if self.sent_text == text:
+                    return True
+
+            result = send_draft(self.chat_id, self.draft_id, text)
+            if result is True:
+                with self.lock:
+                    self.sent_text = text
+                    self.any_sent = True
+                return True
+            if isinstance(result, (int, float)):
+                time.sleep(min(max(result, STREAM_DRAFT_INTERVAL), max(0.0, deadline - time.monotonic())))
+                continue
+            self.supported = False
+            return False
+
+        return False
+
     def _run(self):
         while not self.stop_event.is_set():
-            time.sleep(STREAM_DRAFT_INTERVAL)
+            if self.stop_event.wait(STREAM_DRAFT_INTERVAL):
+                return
             with self.lock:
                 text = self.latest_text
 
@@ -172,7 +195,9 @@ class DraftStreamer:
 
             result = send_draft(self.chat_id, self.draft_id, text)
             if result is True:
-                self.sent_text = text
+                with self.lock:
+                    self.sent_text = text
+                    self.any_sent = True
             elif isinstance(result, (int, float)):
                 self.stop_event.wait(max(result, STREAM_DRAFT_INTERVAL))
             else:
@@ -222,6 +247,7 @@ def stream_llm(chat_id, text):
 
     answer_parts = []
     draft_streamer = DraftStreamer(chat_id)
+    final_draft_sent = False
 
     try:
         with open_json_stream(f"{LLM_BASE_URL}/v1/chat/completions", payload, timeout=180) as response:
@@ -247,7 +273,7 @@ def stream_llm(chat_id, text):
                 draft_streamer.update("".join(answer_parts))
 
         answer = "".join(answer_parts).strip()
-        draft_streamer.finish(answer)
+        final_draft_sent = draft_streamer.finish(answer)
     except Exception:
         draft_streamer.close()
         raise
@@ -255,7 +281,7 @@ def stream_llm(chat_id, text):
     chat_history.append({"role": "user", "content": text})
     chat_history.append({"role": "assistant", "content": answer})
     HISTORY[chat_id] = chat_history[-HISTORY_MESSAGES:]
-    return answer
+    return answer, final_draft_sent
 
 
 def handle_message(message):
@@ -279,8 +305,12 @@ def handle_message(message):
 
     send_typing(chat_id)
     try:
-        answer = stream_llm(chat_id, text) if STREAM_ENABLED else ask_llm(chat_id, text)
-        send_message(chat_id, answer)
+        if STREAM_ENABLED:
+            answer, delivered_as_draft = stream_llm(chat_id, text)
+            if not delivered_as_draft:
+                send_message(chat_id, answer)
+        else:
+            send_message(chat_id, ask_llm(chat_id, text))
     except urllib.error.URLError as exc:
         send_message(chat_id, f"LLM-хост недоступен: {exc}")
     except Exception as exc:

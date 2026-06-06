@@ -4,6 +4,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PID_FILE="$ROOT/runtime/telegram-bot.pid"
 LOG_FILE="$ROOT/runtime/telegram-bot.log"
+ENV_FILE="$ROOT/.env"
+
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+fi
 
 if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
   echo "Set TELEGRAM_BOT_TOKEN before starting the bot." >&2

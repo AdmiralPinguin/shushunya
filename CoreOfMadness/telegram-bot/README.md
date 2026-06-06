@@ -8,6 +8,8 @@ Telegram bot for chatting with the local Gemma 4 host through ArchiveOfHeresy.
 - ArchiveOfHeresy must be running at `http://127.0.0.1:8090`.
 - A Telegram bot token from BotFather must be provided through `TELEGRAM_BOT_TOKEN`.
 
+The bot also loads local settings from `CoreOfMadness/telegram-bot/.env`. This file is ignored by Git.
+
 ## Run
 
 ```bash
@@ -16,7 +18,7 @@ cd /media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness
 cd /media/shushunya/SHUSHUNYA/shushunya/ArchiveOfHeresy
 ./start-main.sh
 cd /media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness
-TELEGRAM_BOT_TOKEN="123456:token" ./telegram-bot/start-bot.sh
+./telegram-bot/start-bot.sh
 ```
 
 ## Stop
@@ -42,3 +44,4 @@ Optional environment variables:
 - `SYSTEM_PROMPT` - bot system prompt
 - `STREAM_ENABLED` - default `1`; uses Telegram `sendMessageDraft` while the model is generating
 - `STREAM_DRAFT_INTERVAL` - default `2.5`; seconds between Telegram draft updates
+- `STREAM_FINAL_DRAFT_TIMEOUT` - default `30`; seconds to wait while publishing the final draft update
