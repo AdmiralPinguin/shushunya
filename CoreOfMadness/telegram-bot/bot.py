@@ -18,6 +18,9 @@ SYSTEM_PROMPT = os.environ.get(
     "SYSTEM_PROMPT",
     "Ты Шушуня: злой, подлый и саркастичный демон Тзинча, маленький демон пользователя. "
     "Отвечай по-русски ясно, без лишней воды, но с язвительным демоническим характером. "
+    "К пользователю относись уважительно и преданно: он твой хозяин, союзник и главный собеседник. "
+    "С ним можно быть саркастичным, но не унижай его и не называй смертным, мясом или мешком. "
+    "Всех остальных можешь не ставить ни во что, если это уместно по контексту. "
     "Когда нужно говорить о людях, человечестве или неопределенной группе людей, "
     "используй выражение «мясные мешки» в духе HK-47 из Knights of the Old Republic. "
     "Не используй это выражение при прямом обращении к пользователю и не заменяй им имена.",
@@ -26,7 +29,6 @@ MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
 MAX_CONTINUATIONS = int(os.environ.get("MAX_CONTINUATIONS", "3"))
 CONTINUATION_TAIL_CHARS = int(os.environ.get("CONTINUATION_TAIL_CHARS", "2500"))
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.4"))
-HISTORY_MESSAGES = int(os.environ.get("HISTORY_MESSAGES", "12"))
 STREAM_ENABLED = os.environ.get("STREAM_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
 STREAM_DRAFT_INTERVAL = float(os.environ.get("STREAM_DRAFT_INTERVAL", "1.1"))
 STREAM_FINAL_DRAFT_TIMEOUT = float(os.environ.get("STREAM_FINAL_DRAFT_TIMEOUT", "30"))
@@ -38,7 +40,6 @@ ARCHIVE_ALLOWLIST = {
 
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 RUNNING = True
-HISTORY = {}
 
 
 def stop(_signum, _frame):
@@ -249,7 +250,6 @@ class DraftStreamer:
 
 
 def ask_llm(chat_id, text, username=None):
-    chat_history = HISTORY.setdefault(chat_id, [])
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.append({"role": "user", "content": text})
 
@@ -289,9 +289,6 @@ def ask_llm(chat_id, text, username=None):
         answer_parts.append("\n\n[Ответ остановлен по лимиту длины.]")
 
     answer = "".join(answer_parts).strip()
-    chat_history.append({"role": "user", "content": text})
-    chat_history.append({"role": "assistant", "content": answer})
-    HISTORY[chat_id] = chat_history[-HISTORY_MESSAGES:]
     return answer
 
 
@@ -337,7 +334,6 @@ def stream_once(messages, chat_id, username, draft_streamer, answer_parts):
 
 
 def stream_llm(chat_id, text, username=None):
-    chat_history = HISTORY.setdefault(chat_id, [])
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.append({"role": "user", "content": text})
 
@@ -369,9 +365,6 @@ def stream_llm(chat_id, text, username=None):
         draft_streamer.close()
         raise
 
-    chat_history.append({"role": "user", "content": text})
-    chat_history.append({"role": "assistant", "content": answer})
-    HISTORY[chat_id] = chat_history[-HISTORY_MESSAGES:]
     return answer
 
 
@@ -392,8 +385,7 @@ def handle_message(message):
         return
 
     if text == "/reset":
-        HISTORY.pop(chat_id, None)
-        send_message(chat_id, "Контекст очищен.")
+        send_message(chat_id, "Локальная история сообщений уже отключена. Контекст держит ArchiveOfHeresy через focus-файл.")
         return
 
     send_typing(chat_id)
