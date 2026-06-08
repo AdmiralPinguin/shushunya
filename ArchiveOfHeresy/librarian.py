@@ -9,6 +9,24 @@ from pathlib import Path
 
 MAX_FOCUS_FILES = int(os.environ.get("ARCHIVE_FOCUS_MAX_FILES", "10"))
 LIBRARIAN_MODEL = os.environ.get("ARCHIVE_LIBRARIAN_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
+LIBRARIAN_SYSTEM_PROMPT = os.environ.get(
+    "ARCHIVE_LIBRARIAN_SYSTEM_PROMPT",
+    "Ты изолированный архивариус ArchiveOfHeresy. "
+    "Ты не Шушуня, не собеседник пользователя и не используешь личность основного демона. "
+    "Ты не наследуешь пользовательские промпты, стиль, шутки, эмоции или роль основного диалога. "
+    "Твоя единственная задача: аккуратно поддерживать focus-файлы памяти. "
+    "Работай сухо, структурно и консервативно. "
+    "Отвечай только валидным JSON без markdown, пояснений и художественного тона.",
+)
+LIBRARIAN_TASK_PROMPT = os.environ.get(
+    "ARCHIVE_LIBRARIAN_TASK_PROMPT",
+    "Реши, продолжает ли новый обмен текущую тему focus-файла или открывает новую тему. "
+    "Если тема продолжается, обнови summary так, чтобы оно хранило всю важную информацию по текущей теме: "
+    "решения, ограничения, имена, пути, команды, статусы, договоренности, открытые вопросы и следующие шаги. "
+    "Если тема сменилась, верни action=new и summary только для новой темы. "
+    "Не копируй лишнюю болтовню. Не добавляй факты, которых нет во входных данных. "
+    "importance от 1 до 5: 1 временное, 3 полезный рабочий контекст, 5 архитектура или долговременная память.",
+)
 
 
 def now_iso():
@@ -125,11 +143,14 @@ class Librarian:
         prompt = {
             "current_focus_file": active_text[-6000:],
             "new_exchange": {"user": user_text, "assistant": assistant_text},
+            "task": LIBRARIAN_TASK_PROMPT,
             "rules": [
                 "If the exchange continues the same topic, use action=continue.",
                 "If the user changed topic, use action=new.",
                 "Keep summary compact but preserve all useful facts, decisions, constraints, names, paths, commands, and next steps for the current topic.",
                 "importance is 1..5: 1 temporary chatter, 3 useful working context, 5 important architecture or long-term memory.",
+                "Do not imitate the assistant persona from the conversation.",
+                "Do not use the user's conversational style as your own style.",
             ],
             "output": {
                 "action": "continue|new",
@@ -144,11 +165,7 @@ class Librarian:
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "Ты библиотекарь памяти ArchiveOfHeresy. "
-                        "Отвечай только валидным JSON без markdown. "
-                        "Твоя задача: поддерживать ухоженный focus-файл текущей темы."
-                    ),
+                    "content": LIBRARIAN_SYSTEM_PROMPT,
                 },
                 {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
             ],

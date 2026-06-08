@@ -36,6 +36,8 @@ It stores conversations, turns, and messages for later memory lookup and prompt 
 
 The librarian agent runs inside ArchiveOfHeresy on the same local model. It starts after the model response has been sent back to the caller, while the user is reading the answer.
 
+The librarian is isolated from the public assistant persona. It does not use Shushunya's character prompt, does not inherit user-facing style, and has its own strict archival prompts.
+
 Chat requests are queued with a single in-process lock:
 
 ```text
@@ -104,3 +106,5 @@ Stop it:
 - `ARCHIVE_FOCUS_ROOT` - default `ArchiveOfHeresy/focus`
 - `ARCHIVE_FOCUS_MAX_FILES` - default `10`
 - `ARCHIVE_LIBRARIAN_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
+- `ARCHIVE_LIBRARIAN_SYSTEM_PROMPT` - isolated librarian system prompt
+- `ARCHIVE_LIBRARIAN_TASK_PROMPT` - isolated librarian task prompt
