@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 
 from archivist_agent import Librarian
 from archivist_agent.agent import FocusBookshelf
+from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
 
 
 ROOT = Path(__file__).resolve().parent
@@ -22,7 +23,9 @@ JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
 FOCUS_ROOT = Path(os.environ.get("ARCHIVE_FOCUS_ROOT", ROOT / "focus"))
 WIKI_ROOT = Path(os.environ.get("ARCHIVE_WIKI_ROOT", ROOT / "wiki"))
+VECTOR_ROOT = Path(os.environ.get("ARCHIVE_VECTOR_ROOT", ROOT / "vector"))
 FOCUS_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_FOCUS_CONTEXT_CHARS", "6000"))
+VECTOR_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_VECTOR_CONTEXT_CHARS", "5000"))
 ARCHIVE_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_SYSTEM_PROMPT",
     "Ты Шушуня: злой, подлый и саркастичный демон Тзинча, маленький демон пользователя. "
@@ -43,6 +46,7 @@ ARCHIVE_LOCK = threading.Lock()
 CHAT_QUEUE_LOCK = threading.Lock()
 LIBRARIAN = None
 FOCUS_BOOKSHELF = None
+VECTOR_MEMORY = None
 
 
 def read_json(handler):
@@ -122,6 +126,24 @@ def focus_context_message():
     }
 
 
+def vector_context_message(query):
+    if VECTOR_MEMORY is None:
+        return None
+    content = VECTOR_MEMORY.context_for_query(query, limit=VECTOR_TOP_K).strip()
+    if not content:
+        return None
+    content = content[-VECTOR_CONTEXT_CHARS:]
+    return {
+        "role": "system",
+        "content": (
+            "Релевантные фрагменты vector memory ArchiveOfHeresy. "
+            "Используй их как справочный долговременный контекст, если они действительно относятся к текущему вопросу. "
+            "Не считай их важнее текущего запроса и активного focus-файла.\n\n"
+            f"{content}"
+        ),
+    }
+
+
 def internal_flag(value, default=True):
     if value is None:
         return default
@@ -140,12 +162,21 @@ def maybe_update_focus_memory(record):
         update_focus_memory(record)
 
 
-def prepare_messages(messages, include_focus=True):
+def maybe_update_vector_memory(record):
+    if record.get("archive_enabled", True):
+        update_vector_memory(record)
+
+
+def prepare_messages(messages, include_focus=True, include_vector=True):
     prepared = [{"role": "system", "content": ARCHIVE_SYSTEM_PROMPT}]
     if include_focus:
         focus_message = focus_context_message()
         if focus_message:
             prepared.append(focus_message)
+    if include_vector:
+        vector_message = vector_context_message(latest_user_message(messages))
+        if vector_message:
+            prepared.append(vector_message)
     prepared.extend(messages)
     return prepared
 
@@ -320,6 +351,15 @@ def update_focus_memory(record):
         print(f"Librarian error: {exc}", flush=True)
 
 
+def update_vector_memory(record):
+    if VECTOR_MEMORY is None:
+        return
+    try:
+        VECTOR_MEMORY.index_turn(record)
+    except Exception as exc:
+        print(f"Vector memory error: {exc}", flush=True)
+
+
 class ArchiveHandler(BaseHTTPRequestHandler):
     server_version = "ArchiveOfHeresy/0.1"
 
@@ -339,6 +379,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "sqlite_path": str(SQLITE_PATH),
                     "focus_root": str(FOCUS_ROOT),
                     "wiki_root": str(WIKI_ROOT),
+                    "vector_root": str(VECTOR_ROOT),
                 },
             )
             return
@@ -352,6 +393,17 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "max_chars": FOCUS_CONTEXT_CHARS,
                 },
             )
+            return
+
+        if self.path.startswith("/archive/vector/search"):
+            query = ""
+            if "?" in self.path:
+                from urllib.parse import parse_qs, urlsplit
+
+                params = parse_qs(urlsplit(self.path).query)
+                query = (params.get("q") or [""])[0]
+            matches = VECTOR_MEMORY.search(query) if VECTOR_MEMORY and query else []
+            write_json(self, 200, {"query": query, "matches": matches})
             return
 
         if self.path == "/v1/models":
@@ -374,9 +426,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             payload = read_json(self)
             archive_enabled = internal_flag(payload.pop("archive_enabled", True), default=True)
             focus_enabled = internal_flag(payload.pop("focus_enabled", True), default=True)
+            vector_enabled = internal_flag(payload.pop("vector_enabled", focus_enabled), default=True)
             payload["messages"] = list(payload.get("messages", []))
             prepared_payload = dict(payload)
-            prepared_payload["messages"] = prepare_messages(payload["messages"], include_focus=focus_enabled)
+            prepared_payload["messages"] = prepare_messages(
+                payload["messages"],
+                include_focus=focus_enabled,
+                include_vector=vector_enabled,
+            )
 
             record = {
                 "turn_id": turn_id,
@@ -385,6 +442,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "conversation_id": conversation_id(payload),
                 "archive_enabled": archive_enabled,
                 "focus_enabled": focus_enabled,
+                "vector_enabled": vector_enabled,
                 "model": payload.get("model"),
                 "request": payload,
                 "prepared_messages": prepared_payload["messages"],
@@ -407,6 +465,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 record["assistant_message"] = assistant_message(response)
                 maybe_write_archives(record)
                 write_json(self, status, response)
+                maybe_update_vector_memory(record)
                 maybe_update_focus_memory(record)
             except HTTPError as exc:
                 try:
@@ -490,6 +549,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             record["response"] = response
             record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
             maybe_write_archives(record)
+            maybe_update_vector_memory(record)
             maybe_update_focus_memory(record)
         except HTTPError as exc:
             try:
@@ -553,9 +613,11 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    global FOCUS_BOOKSHELF, LIBRARIAN
+    global FOCUS_BOOKSHELF, LIBRARIAN, VECTOR_MEMORY
     init_storage()
     FOCUS_BOOKSHELF = FocusBookshelf(FOCUS_ROOT)
+    VECTOR_MEMORY = VectorMemory(VECTOR_ROOT)
+    vector_backfilled = VECTOR_MEMORY.backfill_from_archive(SQLITE_PATH)
     LIBRARIAN = Librarian(FOCUS_ROOT, proxy_json, wiki_root=WIKI_ROOT, sqlite_path=SQLITE_PATH)
     server = ThreadingHTTPServer((HOST, PORT), ArchiveHandler)
     print(f"ArchiveOfHeresy main started: http://{HOST}:{PORT}", flush=True)
@@ -564,6 +626,8 @@ def main():
     print(f"SQLite archive: {SQLITE_PATH}", flush=True)
     print(f"Focus files: {FOCUS_ROOT}", flush=True)
     print(f"Wiki memory: {WIKI_ROOT}", flush=True)
+    print(f"Vector memory: {VECTOR_ROOT}", flush=True)
+    print(f"Vector backfill turns: {vector_backfilled}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

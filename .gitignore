@@ -21,6 +21,8 @@ ArchiveOfHeresy/wiki/index.json
 ArchiveOfHeresy/wiki/state.json
 ArchiveOfHeresy/wiki/*.tmp
 ArchiveOfHeresy/wiki/pages/*.md
+ArchiveOfHeresy/vector/*.sqlite3
+ArchiveOfHeresy/vector/*.sqlite3-*
 
 # DemonsForge local runtimes, model weights, caches, and outputs
 DemonsForge/DemonsForge/

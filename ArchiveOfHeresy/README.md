@@ -88,12 +88,35 @@ The librarian updates wiki memory after every `ARCHIVE_WIKI_INTERVAL_MESSAGES` a
 
 New decisions should replace or supersede old decisions instead of being appended as unresolved contradictions.
 
+## Vector Memory
+
+Vector memory is the retrieval layer for old archived turns:
+
+```text
+vector/index.sqlite3
+```
+
+After a successful archived answer, ArchiveOfHeresy indexes the latest user message and assistant answer as chunks. Before the next model request, ArchiveOfHeresy embeds the current user question with the same local hashing embedder, searches similar chunks, and injects only the top matches as compact reference context.
+
+This first version intentionally has no external dependency and no network dependency. It uses stable hashed token vectors stored in SQLite. The retrieval interface can later be swapped to real embedding vectors without changing the gateway flow.
+
+On startup, ArchiveOfHeresy backfills vector memory from the existing working SQLite archive by default, so old archived turns become searchable too.
+
+Vector memory follows the same allowlist behavior as focus memory: when a client disables focus injection, vector retrieval is disabled by default too. A request can explicitly send `vector_enabled: false` to disable vector retrieval for that turn.
+
+Manual search check:
+
+```bash
+curl 'http://127.0.0.1:8090/archive/vector/search?q=memory'
+```
+
 Clients may disable archiving and focus injection per request with internal flags:
 
 ```json
 {
   "archive_enabled": false,
-  "focus_enabled": false
+  "focus_enabled": false,
+  "vector_enabled": false
 }
 ```
 
@@ -151,8 +174,15 @@ Stop it:
 - `ARCHIVE_SQLITE_PATH` - default `ArchiveOfHeresy/archive/sqlite/archive.sqlite3`
 - `ARCHIVE_FOCUS_ROOT` - default `ArchiveOfHeresy/focus`
 - `ARCHIVE_WIKI_ROOT` - default `ArchiveOfHeresy/wiki`
+- `ARCHIVE_VECTOR_ROOT` - default `ArchiveOfHeresy/vector`
 - `ARCHIVE_FOCUS_CONTEXT_CHARS` - default `6000`
+- `ARCHIVE_VECTOR_CONTEXT_CHARS` - default `5000`
 - `ARCHIVE_FOCUS_MAX_FILES` - default `10`
+- `ARCHIVE_VECTOR_DIMENSIONS` - default `384`
+- `ARCHIVE_VECTOR_CHUNK_CHARS` - default `1200`
+- `ARCHIVE_VECTOR_TOP_K` - default `5`
+- `ARCHIVE_VECTOR_MIN_SCORE` - default `0.18`
+- `ARCHIVE_VECTOR_BACKFILL_ON_START` - default `1`
 - `ARCHIVE_WIKI_INTERVAL_MESSAGES` - default `20`
 - `ARCHIVE_WIKI_MAX_RECENT_TURNS` - default `12`
 - `ARCHIVE_LIBRARIAN_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
