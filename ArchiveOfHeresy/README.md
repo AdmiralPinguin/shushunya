@@ -72,6 +72,22 @@ The archivist is instructed to keep every important decision, constraint, correc
 
 The active focus is currently global for the allowed ArchiveOfHeresy conversation flow. Non-allowlisted clients should disable focus injection so they do not read or affect this shared memory.
 
+## Wiki Memory
+
+Wiki memory is the next long-term memory layer managed by the same isolated librarian. It is stored as a second bookshelf:
+
+```text
+wiki/index.json
+wiki/state.json
+wiki/pages/*.md
+```
+
+Focus memory is optimized for the current topic. Wiki memory is optimized for durable, sorted knowledge: project architecture, active decisions, superseded decisions, user preferences, stable facts, statuses, open questions, and next steps.
+
+The librarian updates wiki memory after every `ARCHIVE_WIKI_INTERVAL_MESSAGES` archived messages. The default interval is `20`, which usually means 10 user/assistant turns. During a wiki pass the librarian receives a catalog of wiki pages and the recent archived turns since the last sync. It may request existing wiki pages through a controlled `read_wiki_page` tool before finishing with page updates.
+
+New decisions should replace or supersede old decisions instead of being appended as unresolved contradictions. The wiki prompt also tells the librarian not to preserve actionable harmful instructions; unsafe topics may be retained only as high-level safety context without operational detail.
+
 Clients may disable archiving and focus injection per request with internal flags:
 
 ```json
@@ -134,9 +150,13 @@ Stop it:
 - `ARCHIVE_JSONL_ROOT` - default `ArchiveOfHeresy/archive/jsonl`
 - `ARCHIVE_SQLITE_PATH` - default `ArchiveOfHeresy/archive/sqlite/archive.sqlite3`
 - `ARCHIVE_FOCUS_ROOT` - default `ArchiveOfHeresy/focus`
+- `ARCHIVE_WIKI_ROOT` - default `ArchiveOfHeresy/wiki`
 - `ARCHIVE_FOCUS_CONTEXT_CHARS` - default `6000`
 - `ARCHIVE_FOCUS_MAX_FILES` - default `10`
+- `ARCHIVE_WIKI_INTERVAL_MESSAGES` - default `20`
+- `ARCHIVE_WIKI_MAX_RECENT_TURNS` - default `12`
 - `ARCHIVE_LIBRARIAN_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
 - `ARCHIVE_LIBRARIAN_MAX_AGENT_STEPS` - default `4`
 - `ARCHIVE_LIBRARIAN_SYSTEM_PROMPT` - isolated librarian system prompt
 - `ARCHIVE_LIBRARIAN_TASK_PROMPT` - isolated librarian task prompt
+- `ARCHIVE_LIBRARIAN_WIKI_TASK_PROMPT` - isolated wiki-memory task prompt

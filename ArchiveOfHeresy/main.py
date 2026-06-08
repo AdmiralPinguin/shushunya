@@ -21,6 +21,7 @@ LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").r
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
 FOCUS_ROOT = Path(os.environ.get("ARCHIVE_FOCUS_ROOT", ROOT / "focus"))
+WIKI_ROOT = Path(os.environ.get("ARCHIVE_WIKI_ROOT", ROOT / "wiki"))
 FOCUS_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_FOCUS_CONTEXT_CHARS", "6000"))
 ARCHIVE_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_SYSTEM_PROMPT",
@@ -337,6 +338,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "jsonl_root": str(JSONL_ROOT),
                     "sqlite_path": str(SQLITE_PATH),
                     "focus_root": str(FOCUS_ROOT),
+                    "wiki_root": str(WIKI_ROOT),
                 },
             )
             return
@@ -554,13 +556,14 @@ def main():
     global FOCUS_BOOKSHELF, LIBRARIAN
     init_storage()
     FOCUS_BOOKSHELF = FocusBookshelf(FOCUS_ROOT)
-    LIBRARIAN = Librarian(FOCUS_ROOT, proxy_json)
+    LIBRARIAN = Librarian(FOCUS_ROOT, proxy_json, wiki_root=WIKI_ROOT, sqlite_path=SQLITE_PATH)
     server = ThreadingHTTPServer((HOST, PORT), ArchiveHandler)
     print(f"ArchiveOfHeresy main started: http://{HOST}:{PORT}", flush=True)
     print(f"Upstream LLM: {LLM_BASE_URL}", flush=True)
     print(f"JSONL archive: {JSONL_ROOT}", flush=True)
     print(f"SQLite archive: {SQLITE_PATH}", flush=True)
     print(f"Focus files: {FOCUS_ROOT}", flush=True)
+    print(f"Wiki memory: {WIKI_ROOT}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
