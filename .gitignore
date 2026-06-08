@@ -14,6 +14,16 @@ CoreOfMadness/telegram-bot/runtime/
 ArchiveOfHeresy/archive/jsonl/**/*.jsonl
 ArchiveOfHeresy/archive/sqlite/*.sqlite3
 ArchiveOfHeresy/archive/sqlite/*.sqlite3-*
+ArchiveOfHeresy/focus/index.json
+ArchiveOfHeresy/focus/*.tmp
+ArchiveOfHeresy/focus/files/*.md
+
+# DemonsForge local runtimes, model weights, caches, and outputs
+DemonsForge/DemonsForge/
+DemonsForge/hf_home/
+DemonsForge/models/
+DemonsForge/outputs/
+DemonsForge/*.log
 
 # Local secrets
 .env

@@ -32,6 +32,25 @@ archive/sqlite/archive.sqlite3
 
 It stores conversations, turns, and messages for later memory lookup and prompt assembly.
 
+## Librarian
+
+The librarian agent runs inside ArchiveOfHeresy on the same local model. It starts after the model response has been sent back to the caller, while the user is reading the answer.
+
+Chat requests are queued with a single in-process lock:
+
+```text
+request -> model response -> archive -> caller receives answer -> librarian updates focus -> next request may reach model
+```
+
+The librarian keeps compact focus files for current topics:
+
+```text
+focus/index.json
+focus/files/*.md
+```
+
+When the topic continues, it updates the active focus file. When the topic changes, it marks the previous focus as `paused` and creates a new active focus file. Each focus has importance from `1` to `5`. ArchiveOfHeresy keeps at most 10 focus files, removing the least important files first and then the oldest files when importance is equal.
+
 ## Local Environment
 
 The Python environment for this module is stored inside the module itself:
@@ -82,3 +101,6 @@ Stop it:
 - `ARCHIVE_SYSTEM_PROMPT` - archive-level system prompt prepended to chat requests
 - `ARCHIVE_JSONL_ROOT` - default `ArchiveOfHeresy/archive/jsonl`
 - `ARCHIVE_SQLITE_PATH` - default `ArchiveOfHeresy/archive/sqlite/archive.sqlite3`
+- `ARCHIVE_FOCUS_ROOT` - default `ArchiveOfHeresy/focus`
+- `ARCHIVE_FOCUS_MAX_FILES` - default `10`
+- `ARCHIVE_LIBRARIAN_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`

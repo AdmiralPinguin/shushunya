@@ -10,6 +10,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from librarian import Librarian
+
 
 ROOT = Path(__file__).resolve().parent
 HOST = os.environ.get("ARCHIVE_HOST", "127.0.0.1")
@@ -17,12 +19,15 @@ PORT = int(os.environ.get("ARCHIVE_PORT", "8090"))
 LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
+FOCUS_ROOT = Path(os.environ.get("ARCHIVE_FOCUS_ROOT", ROOT / "focus"))
 ARCHIVE_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_SYSTEM_PROMPT",
     "Ты проходишь через ArchiveOfHeresy: слой подготовки памяти и промптов. "
     "Отвечай по-русски ясно, сохраняй смысл запроса пользователя.",
 )
 ARCHIVE_LOCK = threading.Lock()
+CHAT_QUEUE_LOCK = threading.Lock()
+LIBRARIAN = None
 
 
 def read_json(handler):
@@ -237,6 +242,15 @@ def write_archives(record):
                 )
 
 
+def update_focus_memory(record):
+    if LIBRARIAN is None:
+        return
+    try:
+        LIBRARIAN.process_turn(record)
+    except Exception as exc:
+        print(f"Librarian error: {exc}", flush=True)
+
+
 class ArchiveHandler(BaseHTTPRequestHandler):
     server_version = "ArchiveOfHeresy/0.1"
 
@@ -254,6 +268,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "llm_base_url": LLM_BASE_URL,
                     "jsonl_root": str(JSONL_ROOT),
                     "sqlite_path": str(SQLITE_PATH),
+                    "focus_root": str(FOCUS_ROOT),
                 },
             )
             return
@@ -272,67 +287,69 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         write_json(self, 404, {"error": "Not found"})
 
     def chat_completion(self):
-        created_at = now_iso()
-        turn_id = str(uuid.uuid4())
-        payload = read_json(self)
-        payload["messages"] = list(payload.get("messages", []))
-        prepared_payload = dict(payload)
-        prepared_payload["messages"] = prepare_messages(payload["messages"])
+        with CHAT_QUEUE_LOCK:
+            created_at = now_iso()
+            turn_id = str(uuid.uuid4())
+            payload = read_json(self)
+            payload["messages"] = list(payload.get("messages", []))
+            prepared_payload = dict(payload)
+            prepared_payload["messages"] = prepare_messages(payload["messages"])
 
-        record = {
-            "turn_id": turn_id,
-            "created_at": created_at,
-            "source": "openai-chat-completions",
-            "conversation_id": conversation_id(payload),
-            "model": payload.get("model"),
-            "request": payload,
-            "prepared_messages": prepared_payload["messages"],
-            "status": "pending",
-            "http_status": None,
-            "response": None,
-            "assistant_message": None,
-            "error": None,
-        }
+            record = {
+                "turn_id": turn_id,
+                "created_at": created_at,
+                "source": "openai-chat-completions",
+                "conversation_id": conversation_id(payload),
+                "model": payload.get("model"),
+                "request": payload,
+                "prepared_messages": prepared_payload["messages"],
+                "status": "pending",
+                "http_status": None,
+                "response": None,
+                "assistant_message": None,
+                "error": None,
+            }
 
-        try:
-            if prepared_payload.get("stream"):
-                self.stream_chat_completion(prepared_payload, record)
-                return
-
-            status, response = proxy_json("POST", self.path, payload=prepared_payload)
-            record["status"] = "ok"
-            record["http_status"] = status
-            record["response"] = response
-            record["assistant_message"] = assistant_message(response)
-            write_archives(record)
-            write_json(self, status, response)
-        except HTTPError as exc:
             try:
-                error_payload = json.loads(exc.read().decode("utf-8"))
-            except Exception:
+                if prepared_payload.get("stream"):
+                    self.stream_chat_completion(prepared_payload, record)
+                    return
+
+                status, response = proxy_json("POST", self.path, payload=prepared_payload)
+                record["status"] = "ok"
+                record["http_status"] = status
+                record["response"] = response
+                record["assistant_message"] = assistant_message(response)
+                write_archives(record)
+                write_json(self, status, response)
+                update_focus_memory(record)
+            except HTTPError as exc:
+                try:
+                    error_payload = json.loads(exc.read().decode("utf-8"))
+                except Exception:
+                    error_payload = {"error": str(exc)}
+                record["status"] = "upstream_error"
+                record["http_status"] = exc.code
+                record["response"] = error_payload
+                record["error"] = json.dumps(error_payload, ensure_ascii=False)
+                write_archives(record)
+                write_json(self, exc.code, error_payload)
+            except (TimeoutError, URLError) as exc:
+                error_payload = {"error": f"LLM host unavailable: {exc}"}
+                record["status"] = "unavailable"
+                record["http_status"] = 502
+                record["response"] = error_payload
+                record["error"] = error_payload["error"]
+                write_archives(record)
+                write_json(self, 502, error_payload)
+            except Exception as exc:
                 error_payload = {"error": str(exc)}
-            record["status"] = "upstream_error"
-            record["http_status"] = exc.code
-            record["response"] = error_payload
-            record["error"] = json.dumps(error_payload, ensure_ascii=False)
-            write_archives(record)
-            write_json(self, exc.code, error_payload)
-        except (TimeoutError, URLError) as exc:
-            error_payload = {"error": f"LLM host unavailable: {exc}"}
-            record["status"] = "unavailable"
-            record["http_status"] = 502
-            record["response"] = error_payload
-            record["error"] = error_payload["error"]
-            write_archives(record)
-            write_json(self, 502, error_payload)
-        except Exception as exc:
-            error_payload = {"error": str(exc)}
-            record["status"] = "archive_error"
-            record["http_status"] = 500
-            record["response"] = error_payload
-            record["error"] = error_payload["error"]
-            write_archives(record)
-            write_json(self, 500, error_payload)
+                record["status"] = "archive_error"
+                record["http_status"] = 500
+                record["response"] = error_payload
+                record["error"] = error_payload["error"]
+                write_archives(record)
+                write_json(self, 500, error_payload)
 
     def stream_chat_completion(self, prepared_payload, record):
         assistant_parts = []
@@ -388,6 +405,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             record["response"] = response
             record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
             write_archives(record)
+            update_focus_memory(record)
         except HTTPError as exc:
             try:
                 error_payload = json.loads(exc.read().decode("utf-8"))
@@ -450,12 +468,15 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
 
 def main():
+    global LIBRARIAN
     init_storage()
+    LIBRARIAN = Librarian(FOCUS_ROOT, proxy_json)
     server = ThreadingHTTPServer((HOST, PORT), ArchiveHandler)
     print(f"ArchiveOfHeresy main started: http://{HOST}:{PORT}", flush=True)
     print(f"Upstream LLM: {LLM_BASE_URL}", flush=True)
     print(f"JSONL archive: {JSONL_ROOT}", flush=True)
     print(f"SQLite archive: {SQLITE_PATH}", flush=True)
+    print(f"Focus files: {FOCUS_ROOT}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
