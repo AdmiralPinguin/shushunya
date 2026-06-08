@@ -8,19 +8,24 @@ from pathlib import Path
 
 
 MAX_FOCUS_FILES = int(os.environ.get("ARCHIVE_FOCUS_MAX_FILES", "10"))
+MAX_AGENT_STEPS = int(os.environ.get("ARCHIVE_LIBRARIAN_MAX_AGENT_STEPS", "4"))
 LIBRARIAN_MODEL = os.environ.get("ARCHIVE_LIBRARIAN_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
 LIBRARIAN_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_LIBRARIAN_SYSTEM_PROMPT",
     "Ты изолированный архивариус ArchiveOfHeresy. "
     "Ты не Шушуня, не собеседник пользователя и не используешь личность основного демона. "
     "Ты не наследуешь пользовательские промпты, стиль, шутки, эмоции или роль основного диалога. "
-    "Твоя единственная задача: аккуратно поддерживать focus-файлы памяти. "
+    "Твоя единственная задача: аккуратно поддерживать focus-файлы памяти через инструменты книжной полки. "
+    "Ты физически отрезан от памяти: память для тебя существует только как книги, которые можно запросить инструментом. "
     "Работай сухо, структурно и консервативно. "
-    "Отвечай только валидным JSON без markdown, пояснений и художественного тона.",
+    "Отвечай только валидным JSON без markdown, пояснений и художественного тона. "
+    "Не притворяйся, что знаешь содержимое книги, если не запросил чтение через инструмент.",
 )
 LIBRARIAN_TASK_PROMPT = os.environ.get(
     "ARCHIVE_LIBRARIAN_TASK_PROMPT",
-    "Реши, продолжает ли новый обмен текущую тему focus-файла или открывает новую тему. "
+    "Работай агентным циклом. Сначала изучи каталог книг. "
+    "Если нужен текущий focus, запроси инструмент read_active_focus. "
+    "Потом реши, продолжает ли новый обмен текущую тему focus-файла или открывает новую тему. "
     "Если тема продолжается, обнови summary так, чтобы оно хранило всю важную информацию по текущей теме: "
     "решения, ограничения, имена, пути, команды, статусы, договоренности, открытые вопросы и следующие шаги. "
     "Если тема сменилась, верни action=new и summary только для новой темы. "
@@ -75,39 +80,12 @@ def latest_user_message(messages):
     return ""
 
 
-class Librarian:
-    def __init__(self, root, proxy_json):
+class FocusBookshelf:
+    def __init__(self, root):
         self.root = Path(root)
         self.files_dir = self.root / "files"
         self.index_path = self.root / "index.json"
-        self.proxy_json = proxy_json
         self.files_dir.mkdir(parents=True, exist_ok=True)
-
-    def process_turn(self, record):
-        if record.get("status") != "ok":
-            return
-        if record.get("conversation_id") == "archive-librarian":
-            return
-
-        user_text = latest_user_message(record.get("request", {}).get("messages", []))
-        assistant_text = str((record.get("assistant_message") or {}).get("content") or "").strip()
-        if not user_text or not assistant_text:
-            return
-
-        index = self.load_index()
-        active = self.active_focus(index)
-        decision = self.decide(record, active, user_text, assistant_text)
-
-        if not active or decision["action"] == "new":
-            if active:
-                self.pause_focus(active)
-            focus = self.create_focus(index, record, decision, user_text, assistant_text)
-        else:
-            focus = self.update_focus(active, record, decision, user_text, assistant_text)
-
-        index["active_id"] = focus["id"]
-        self.enforce_limit(index)
-        self.save_index(index)
 
     def load_index(self):
         if not self.index_path.exists():
@@ -131,6 +109,23 @@ class Librarian:
             target.write("\n")
         tmp_path.replace(self.index_path)
 
+    def catalog(self, index):
+        return {
+            "active_id": index.get("active_id"),
+            "max_focus_files": MAX_FOCUS_FILES,
+            "books": [
+                {
+                    "id": focus.get("id"),
+                    "title": focus.get("title"),
+                    "status": focus.get("status"),
+                    "importance": focus.get("importance"),
+                    "created_at": focus.get("created_at"),
+                    "updated_at": focus.get("updated_at"),
+                }
+                for focus in index.get("files", [])
+            ],
+        }
+
     def active_focus(self, index):
         active_id = index.get("active_id")
         for focus in index.get("files", []):
@@ -138,68 +133,30 @@ class Librarian:
                 return focus
         return None
 
-    def decide(self, record, active, user_text, assistant_text):
-        active_text = self.read_focus(active)
-        prompt = {
-            "current_focus_file": active_text[-6000:],
-            "new_exchange": {"user": user_text, "assistant": assistant_text},
-            "task": LIBRARIAN_TASK_PROMPT,
-            "rules": [
-                "If the exchange continues the same topic, use action=continue.",
-                "If the user changed topic, use action=new.",
-                "Keep summary compact but preserve all useful facts, decisions, constraints, names, paths, commands, and next steps for the current topic.",
-                "importance is 1..5: 1 temporary chatter, 3 useful working context, 5 important architecture or long-term memory.",
-                "Do not imitate the assistant persona from the conversation.",
-                "Do not use the user's conversational style as your own style.",
-            ],
-            "output": {
-                "action": "continue|new",
-                "title": "short topic title",
-                "importance": "integer 1..5",
-                "summary": "compact focus file body for the current topic",
-            },
-        }
-        payload = {
-            "model": record.get("model") or LIBRARIAN_MODEL,
-            "user": "archive-librarian",
-            "messages": [
-                {
-                    "role": "system",
-                    "content": LIBRARIAN_SYSTEM_PROMPT,
-                },
-                {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
-            ],
-            "max_tokens": 900,
-            "temperature": 0.1,
-        }
+    def read_focus(self, focus):
+        if not focus:
+            return ""
+        path = self.root / focus.get("path", "")
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
 
-        try:
-            _status, response = self.proxy_json("POST", "/v1/chat/completions", payload=payload, timeout=180)
-            content = response["choices"][0]["message"].get("content", "")
-            decision = extract_json(content)
-        except Exception:
-            decision = {
-                "action": "continue" if active else "new",
-                "title": active.get("title") if active else user_text[:80],
-                "importance": active.get("importance") if active else 3,
-                "summary": f"Пользователь: {user_text}\nМодель: {assistant_text}",
-            }
-
-        action = str(decision.get("action") or "").strip().lower()
-        if action not in ("continue", "new"):
-            action = "continue" if active else "new"
-
-        title = str(decision.get("title") or (active or {}).get("title") or user_text[:80]).strip()
-        summary = trim_text(decision.get("summary"), 5000)
-        if not summary:
-            summary = trim_text(f"Пользователь: {user_text}\nМодель: {assistant_text}", 5000)
-
-        return {
-            "action": action,
-            "title": title,
-            "importance": clamp_importance(decision.get("importance")),
-            "summary": summary,
-        }
+    def pause_focus(self, focus):
+        focus["status"] = "paused"
+        focus["updated_at"] = now_iso()
+        path = self.root / focus.get("path", "")
+        if not path.exists():
+            return
+        text = path.read_text(encoding="utf-8")
+        text = re.sub(r"^status: active$", "status: paused", text, count=1, flags=re.MULTILINE)
+        text = re.sub(
+            r"^updated_at: .*$",
+            f"updated_at: {focus['updated_at']}",
+            text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        path.write_text(text, encoding="utf-8")
 
     def create_focus(self, index, record, decision, user_text, assistant_text):
         created_at = now_iso()
@@ -230,31 +187,6 @@ class Librarian:
         focus["turn_id"] = record.get("turn_id")
         self.write_focus_file(focus, decision["summary"], user_text, assistant_text)
         return focus
-
-    def pause_focus(self, focus):
-        focus["status"] = "paused"
-        focus["updated_at"] = now_iso()
-        path = self.root / focus.get("path", "")
-        if not path.exists():
-            return
-        text = path.read_text(encoding="utf-8")
-        text = re.sub(r"^status: active$", "status: paused", text, count=1, flags=re.MULTILINE)
-        text = re.sub(
-            r"^updated_at: .*$",
-            f"updated_at: {focus['updated_at']}",
-            text,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        path.write_text(text, encoding="utf-8")
-
-    def read_focus(self, focus):
-        if not focus:
-            return ""
-        path = self.root / focus.get("path", "")
-        if not path.exists():
-            return ""
-        return path.read_text(encoding="utf-8")
 
     def write_focus_file(self, focus, summary, user_text, assistant_text):
         path = self.root / focus["path"]
@@ -312,3 +244,157 @@ class Librarian:
             else:
                 remaining.append(focus)
         index["files"] = remaining
+
+
+class Librarian:
+    def __init__(self, root, proxy_json):
+        self.bookshelf = FocusBookshelf(root)
+        self.proxy_json = proxy_json
+
+    def process_turn(self, record):
+        if record.get("status") != "ok":
+            return
+        if record.get("conversation_id") == "archive-librarian":
+            return
+
+        user_text = latest_user_message(record.get("request", {}).get("messages", []))
+        assistant_text = str((record.get("assistant_message") or {}).get("content") or "").strip()
+        if not user_text or not assistant_text:
+            return
+
+        index = self.bookshelf.load_index()
+        active = self.bookshelf.active_focus(index)
+        decision = self.agent_cycle(record, index, active, user_text, assistant_text)
+
+        if not active or decision["action"] == "new":
+            if active:
+                self.bookshelf.pause_focus(active)
+            focus = self.bookshelf.create_focus(index, record, decision, user_text, assistant_text)
+        else:
+            focus = self.bookshelf.update_focus(active, record, decision, user_text, assistant_text)
+
+        index["active_id"] = focus["id"]
+        self.bookshelf.enforce_limit(index)
+        self.bookshelf.save_index(index)
+
+    def agent_cycle(self, record, index, active, user_text, assistant_text):
+        messages = [
+            {"role": "system", "content": LIBRARIAN_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": json.dumps(self.agent_task(index, user_text, assistant_text), ensure_ascii=False),
+            },
+        ]
+
+        for _step in range(MAX_AGENT_STEPS):
+            try:
+                decision = self.ask_agent(record, messages)
+            except Exception:
+                return self.fallback_decision(active, user_text, assistant_text)
+            tool = str(decision.get("tool") or "").strip()
+
+            if tool == "read_active_focus":
+                observation = {
+                    "tool": "read_active_focus",
+                    "active_id": active.get("id") if active else None,
+                    "content": self.bookshelf.read_focus(active)[-6000:] if active else "",
+                }
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "TOOL_RESULT " + json.dumps(observation, ensure_ascii=False),
+                    }
+                )
+                continue
+
+            if tool == "finish":
+                return self.normalize_decision(decision, active, user_text, assistant_text)
+
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "TOOL_RESULT "
+                    + json.dumps(
+                        {
+                            "error": "unknown_tool",
+                            "available_tools": ["read_active_focus", "finish"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+
+        return self.fallback_decision(active, user_text, assistant_text)
+
+    def agent_task(self, index, user_text, assistant_text):
+        return {
+            "bookshelf_catalog": self.bookshelf.catalog(index),
+            "new_exchange": {"user": user_text, "assistant": assistant_text},
+            "task": LIBRARIAN_TASK_PROMPT,
+            "physical_isolation": (
+                "Ты не видишь память напрямую. Работай только с каталогом и результатами инструментов. "
+                "Если нужно содержимое активной книги, запроси read_active_focus."
+            ),
+            "available_tools": {
+                "read_active_focus": {
+                    "description": "Read the currently active focus book. Use before continuing an existing topic.",
+                    "arguments": {},
+                },
+                "finish": {
+                    "description": "Finish the agent cycle with the desired bookshelf action.",
+                    "arguments": {
+                        "action": "continue|new",
+                        "title": "short topic title",
+                        "importance": "integer 1..5",
+                        "summary": "compact focus book body for the current topic",
+                    },
+                },
+            },
+            "rules": [
+                "Return exactly one JSON object.",
+                "To use a tool, return {\"tool\":\"read_active_focus\"}.",
+                "To finish, return {\"tool\":\"finish\",\"action\":\"continue|new\",\"title\":\"...\",\"importance\":1..5,\"summary\":\"...\"}.",
+                "If there is an active book and the new exchange may belong to it, read it before finish.",
+                "Keep summary compact but preserve all useful facts, decisions, constraints, names, paths, commands, and next steps for the current topic.",
+                "Do not imitate the assistant persona from the conversation.",
+                "Do not use the user's conversational style as your own style.",
+            ],
+        }
+
+    def ask_agent(self, record, messages):
+        payload = {
+            "model": record.get("model") or LIBRARIAN_MODEL,
+            "user": "archive-librarian",
+            "messages": messages,
+            "max_tokens": 900,
+            "temperature": 0.1,
+        }
+
+        _status, response = self.proxy_json("POST", "/v1/chat/completions", payload=payload, timeout=180)
+        content = response["choices"][0]["message"].get("content", "")
+        return extract_json(content)
+
+    def fallback_decision(self, active, user_text, assistant_text):
+        return {
+            "action": "continue" if active else "new",
+            "title": active.get("title") if active else user_text[:80],
+            "importance": active.get("importance") if active else 3,
+            "summary": f"Пользователь: {user_text}\nМодель: {assistant_text}",
+        }
+
+    def normalize_decision(self, decision, active, user_text, assistant_text):
+        action = str(decision.get("action") or "").strip().lower()
+        if action not in ("continue", "new"):
+            action = "continue" if active else "new"
+
+        title = str(decision.get("title") or (active or {}).get("title") or user_text[:80]).strip()
+        summary = trim_text(decision.get("summary"), 5000)
+        if not summary:
+            summary = trim_text(f"Пользователь: {user_text}\nМодель: {assistant_text}", 5000)
+
+        return {
+            "action": action,
+            "title": title,
+            "importance": clamp_importance(decision.get("importance")),
+            "summary": summary,
+        }

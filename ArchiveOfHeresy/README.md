@@ -38,10 +38,18 @@ The librarian agent runs inside ArchiveOfHeresy on the same local model. It star
 
 The librarian is isolated from the public assistant persona. It does not use Shushunya's character prompt, does not inherit user-facing style, and has its own strict archival prompts.
 
+The librarian is also physically cut off from memory contents at the model level. Focus memory is exposed to it as books on a controlled bookshelf. The model only sees a catalog by default; when it needs book contents, it must request a tool such as `read_active_focus`, receive a tool result, and then finish with a structured action.
+
 Chat requests are queued with a single in-process lock:
 
 ```text
 request -> model response -> archive -> caller receives answer -> librarian updates focus -> next request may reach model
+```
+
+The librarian cycle is:
+
+```text
+catalog -> tool request -> tool result -> finish action -> bookshelf writes files
 ```
 
 The librarian keeps compact focus files for current topics:
@@ -106,5 +114,6 @@ Stop it:
 - `ARCHIVE_FOCUS_ROOT` - default `ArchiveOfHeresy/focus`
 - `ARCHIVE_FOCUS_MAX_FILES` - default `10`
 - `ARCHIVE_LIBRARIAN_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
+- `ARCHIVE_LIBRARIAN_MAX_AGENT_STEPS` - default `4`
 - `ARCHIVE_LIBRARIAN_SYSTEM_PROMPT` - isolated librarian system prompt
 - `ARCHIVE_LIBRARIAN_TASK_PROMPT` - isolated librarian task prompt
