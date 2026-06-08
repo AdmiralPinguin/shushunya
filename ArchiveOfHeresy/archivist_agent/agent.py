@@ -265,10 +265,12 @@ class FocusBookshelf:
 
 
 class Librarian:
-    def __init__(self, focus_root, proxy_json, wiki_root=None, sqlite_path=None):
+    def __init__(self, focus_root, proxy_json, wiki_root=None, sqlite_path=None, vector_memory=None, graph_memory=None):
         self.bookshelf = FocusBookshelf(focus_root)
         self.proxy_json = proxy_json
         self.wiki_memory = WikiMemory(wiki_root, proxy_json, sqlite_path) if wiki_root and sqlite_path else None
+        self.vector_memory = vector_memory
+        self.graph_memory = graph_memory
 
     def process_turn(self, record):
         if record.get("status") != "ok":
@@ -280,6 +282,9 @@ class Librarian:
         assistant_text = str((record.get("assistant_message") or {}).get("content") or "").strip()
         if not user_text or not assistant_text:
             return
+
+        if self.vector_memory is not None:
+            self.vector_memory.index_turn(record)
 
         index = self.bookshelf.load_index()
         active = self.bookshelf.active_focus(index)
@@ -297,6 +302,8 @@ class Librarian:
         self.bookshelf.save_index(index)
         if self.wiki_memory is not None:
             self.wiki_memory.process_turn(record)
+        if self.graph_memory is not None:
+            self.graph_memory.process_turn(record)
 
     def agent_cycle(self, record, index, active, user_text, assistant_text):
         messages = [

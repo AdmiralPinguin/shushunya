@@ -23,6 +23,8 @@ ArchiveOfHeresy/wiki/*.tmp
 ArchiveOfHeresy/wiki/pages/*.md
 ArchiveOfHeresy/vector/*.sqlite3
 ArchiveOfHeresy/vector/*.sqlite3-*
+ArchiveOfHeresy/graph/*.sqlite3
+ArchiveOfHeresy/graph/*.sqlite3-*
 
 # DemonsForge local runtimes, model weights, caches, and outputs
 DemonsForge/DemonsForge/

@@ -52,7 +52,14 @@ Chat requests are queued with a single in-process lock:
 request -> model response -> archive -> caller receives answer -> librarian updates focus -> next request may reach model
 ```
 
-The librarian cycle is:
+The librarian owns the active memory-maintenance cycle for the four managed memory layers:
+
+- `focus` - current-topic compact context
+- `wiki` - durable sorted knowledge
+- `vector` - similarity retrieval over archived chunks
+- `graph` - GraphRAG entities and relations
+
+The focus librarian cycle is:
 
 ```text
 catalog -> tool request -> tool result -> finish action -> bookshelf writes files
@@ -110,13 +117,34 @@ Manual search check:
 curl 'http://127.0.0.1:8090/archive/vector/search?q=memory'
 ```
 
+## GraphRAG Memory
+
+GraphRAG memory stores entities and relations extracted by the librarian:
+
+```text
+graph/graph.sqlite3
+```
+
+The graph layer is for relationships that are awkward to represent as raw chunks or isolated wiki pages: project components, agents, memory layers, decisions, dependencies, superseded decisions, ownership, storage, retrieval, and status links.
+
+After every `ARCHIVE_GRAPH_INTERVAL_MESSAGES` archived messages, the librarian reviews recent turns, extracts stable nodes and edges, and merges them into the graph. Before a model request, ArchiveOfHeresy searches the graph by the current user question and injects relevant nodes and relations as GraphRAG context.
+
+On startup, if the graph is empty, ArchiveOfHeresy asks the librarian to seed it from the latest archived turns by default.
+
+Manual graph search check:
+
+```bash
+curl 'http://127.0.0.1:8090/archive/graph/search?q=ArchiveOfHeresy'
+```
+
 Clients may disable archiving and focus injection per request with internal flags:
 
 ```json
 {
   "archive_enabled": false,
   "focus_enabled": false,
-  "vector_enabled": false
+  "vector_enabled": false,
+  "graph_enabled": false
 }
 ```
 
@@ -175,14 +203,22 @@ Stop it:
 - `ARCHIVE_FOCUS_ROOT` - default `ArchiveOfHeresy/focus`
 - `ARCHIVE_WIKI_ROOT` - default `ArchiveOfHeresy/wiki`
 - `ARCHIVE_VECTOR_ROOT` - default `ArchiveOfHeresy/vector`
+- `ARCHIVE_GRAPH_ROOT` - default `ArchiveOfHeresy/graph`
 - `ARCHIVE_FOCUS_CONTEXT_CHARS` - default `6000`
 - `ARCHIVE_VECTOR_CONTEXT_CHARS` - default `5000`
+- `ARCHIVE_GRAPH_CONTEXT_CHARS` - default `5000`
 - `ARCHIVE_FOCUS_MAX_FILES` - default `10`
 - `ARCHIVE_VECTOR_DIMENSIONS` - default `384`
 - `ARCHIVE_VECTOR_CHUNK_CHARS` - default `1200`
 - `ARCHIVE_VECTOR_TOP_K` - default `5`
 - `ARCHIVE_VECTOR_MIN_SCORE` - default `0.18`
 - `ARCHIVE_VECTOR_BACKFILL_ON_START` - default `1`
+- `ARCHIVE_GRAPH_INTERVAL_MESSAGES` - default `20`
+- `ARCHIVE_GRAPH_MAX_RECENT_TURNS` - default `12`
+- `ARCHIVE_GRAPH_TOP_K` - default `5`
+- `ARCHIVE_GRAPH_BACKFILL_ON_START` - default `1`
+- `ARCHIVE_GRAPH_SYSTEM_PROMPT` - isolated GraphRAG system prompt
+- `ARCHIVE_GRAPH_TASK_PROMPT` - isolated GraphRAG extraction prompt
 - `ARCHIVE_WIKI_INTERVAL_MESSAGES` - default `20`
 - `ARCHIVE_WIKI_MAX_RECENT_TURNS` - default `12`
 - `ARCHIVE_LIBRARIAN_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`

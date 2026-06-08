@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 
 from archivist_agent import Librarian
 from archivist_agent.agent import FocusBookshelf
+from archivist_agent.graph_memory import GRAPH_TOP_K, GraphMemory
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
 
 
@@ -24,8 +25,10 @@ SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sql
 FOCUS_ROOT = Path(os.environ.get("ARCHIVE_FOCUS_ROOT", ROOT / "focus"))
 WIKI_ROOT = Path(os.environ.get("ARCHIVE_WIKI_ROOT", ROOT / "wiki"))
 VECTOR_ROOT = Path(os.environ.get("ARCHIVE_VECTOR_ROOT", ROOT / "vector"))
+GRAPH_ROOT = Path(os.environ.get("ARCHIVE_GRAPH_ROOT", ROOT / "graph"))
 FOCUS_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_FOCUS_CONTEXT_CHARS", "6000"))
 VECTOR_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_VECTOR_CONTEXT_CHARS", "5000"))
+GRAPH_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_GRAPH_CONTEXT_CHARS", "5000"))
 ARCHIVE_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_SYSTEM_PROMPT",
     "Ты Шушуня: злой, подлый и саркастичный демон Тзинча, маленький демон пользователя. "
@@ -47,6 +50,7 @@ CHAT_QUEUE_LOCK = threading.Lock()
 LIBRARIAN = None
 FOCUS_BOOKSHELF = None
 VECTOR_MEMORY = None
+GRAPH_MEMORY = None
 
 
 def read_json(handler):
@@ -144,6 +148,24 @@ def vector_context_message(query):
     }
 
 
+def graph_context_message(query):
+    if GRAPH_MEMORY is None:
+        return None
+    content = GRAPH_MEMORY.context_for_query(query, limit=GRAPH_TOP_K).strip()
+    if not content:
+        return None
+    content = content[-GRAPH_CONTEXT_CHARS:]
+    return {
+        "role": "system",
+        "content": (
+            "Релевантный GraphRAG-контекст ArchiveOfHeresy: сущности и связи из долговременной памяти. "
+            "Используй его для понимания отношений между проектами, решениями, агентами и темами, "
+            "если он относится к текущему вопросу.\n\n"
+            f"{content}"
+        ),
+    }
+
+
 def internal_flag(value, default=True):
     if value is None:
         return default
@@ -162,21 +184,21 @@ def maybe_update_focus_memory(record):
         update_focus_memory(record)
 
 
-def maybe_update_vector_memory(record):
-    if record.get("archive_enabled", True):
-        update_vector_memory(record)
-
-
-def prepare_messages(messages, include_focus=True, include_vector=True):
+def prepare_messages(messages, include_focus=True, include_vector=True, include_graph=True):
     prepared = [{"role": "system", "content": ARCHIVE_SYSTEM_PROMPT}]
+    query = latest_user_message(messages)
     if include_focus:
         focus_message = focus_context_message()
         if focus_message:
             prepared.append(focus_message)
     if include_vector:
-        vector_message = vector_context_message(latest_user_message(messages))
+        vector_message = vector_context_message(query)
         if vector_message:
             prepared.append(vector_message)
+    if include_graph:
+        graph_message = graph_context_message(query)
+        if graph_message:
+            prepared.append(graph_message)
     prepared.extend(messages)
     return prepared
 
@@ -351,15 +373,6 @@ def update_focus_memory(record):
         print(f"Librarian error: {exc}", flush=True)
 
 
-def update_vector_memory(record):
-    if VECTOR_MEMORY is None:
-        return
-    try:
-        VECTOR_MEMORY.index_turn(record)
-    except Exception as exc:
-        print(f"Vector memory error: {exc}", flush=True)
-
-
 class ArchiveHandler(BaseHTTPRequestHandler):
     server_version = "ArchiveOfHeresy/0.1"
 
@@ -380,6 +393,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "focus_root": str(FOCUS_ROOT),
                     "wiki_root": str(WIKI_ROOT),
                     "vector_root": str(VECTOR_ROOT),
+                    "graph_root": str(GRAPH_ROOT),
                 },
             )
             return
@@ -406,6 +420,17 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             write_json(self, 200, {"query": query, "matches": matches})
             return
 
+        if self.path.startswith("/archive/graph/search"):
+            query = ""
+            if "?" in self.path:
+                from urllib.parse import parse_qs, urlsplit
+
+                params = parse_qs(urlsplit(self.path).query)
+                query = (params.get("q") or [""])[0]
+            matches = GRAPH_MEMORY.search(query) if GRAPH_MEMORY and query else {"nodes": [], "edges": []}
+            write_json(self, 200, {"query": query, "matches": matches})
+            return
+
         if self.path == "/v1/models":
             self.forward("GET", self.path)
             return
@@ -427,12 +452,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             archive_enabled = internal_flag(payload.pop("archive_enabled", True), default=True)
             focus_enabled = internal_flag(payload.pop("focus_enabled", True), default=True)
             vector_enabled = internal_flag(payload.pop("vector_enabled", focus_enabled), default=True)
+            graph_enabled = internal_flag(payload.pop("graph_enabled", focus_enabled), default=True)
             payload["messages"] = list(payload.get("messages", []))
             prepared_payload = dict(payload)
             prepared_payload["messages"] = prepare_messages(
                 payload["messages"],
                 include_focus=focus_enabled,
                 include_vector=vector_enabled,
+                include_graph=graph_enabled,
             )
 
             record = {
@@ -443,6 +470,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "archive_enabled": archive_enabled,
                 "focus_enabled": focus_enabled,
                 "vector_enabled": vector_enabled,
+                "graph_enabled": graph_enabled,
                 "model": payload.get("model"),
                 "request": payload,
                 "prepared_messages": prepared_payload["messages"],
@@ -465,7 +493,6 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 record["assistant_message"] = assistant_message(response)
                 maybe_write_archives(record)
                 write_json(self, status, response)
-                maybe_update_vector_memory(record)
                 maybe_update_focus_memory(record)
             except HTTPError as exc:
                 try:
@@ -549,7 +576,6 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             record["response"] = response
             record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
             maybe_write_archives(record)
-            maybe_update_vector_memory(record)
             maybe_update_focus_memory(record)
         except HTTPError as exc:
             try:
@@ -613,12 +639,21 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    global FOCUS_BOOKSHELF, LIBRARIAN, VECTOR_MEMORY
+    global FOCUS_BOOKSHELF, LIBRARIAN, VECTOR_MEMORY, GRAPH_MEMORY
     init_storage()
     FOCUS_BOOKSHELF = FocusBookshelf(FOCUS_ROOT)
     VECTOR_MEMORY = VectorMemory(VECTOR_ROOT)
     vector_backfilled = VECTOR_MEMORY.backfill_from_archive(SQLITE_PATH)
-    LIBRARIAN = Librarian(FOCUS_ROOT, proxy_json, wiki_root=WIKI_ROOT, sqlite_path=SQLITE_PATH)
+    GRAPH_MEMORY = GraphMemory(GRAPH_ROOT, proxy_json, SQLITE_PATH)
+    graph_backfilled = GRAPH_MEMORY.backfill_from_archive()
+    LIBRARIAN = Librarian(
+        FOCUS_ROOT,
+        proxy_json,
+        wiki_root=WIKI_ROOT,
+        sqlite_path=SQLITE_PATH,
+        vector_memory=VECTOR_MEMORY,
+        graph_memory=GRAPH_MEMORY,
+    )
     server = ThreadingHTTPServer((HOST, PORT), ArchiveHandler)
     print(f"ArchiveOfHeresy main started: http://{HOST}:{PORT}", flush=True)
     print(f"Upstream LLM: {LLM_BASE_URL}", flush=True)
@@ -627,7 +662,9 @@ def main():
     print(f"Focus files: {FOCUS_ROOT}", flush=True)
     print(f"Wiki memory: {WIKI_ROOT}", flush=True)
     print(f"Vector memory: {VECTOR_ROOT}", flush=True)
+    print(f"Graph memory: {GRAPH_ROOT}", flush=True)
     print(f"Vector backfill turns: {vector_backfilled}", flush=True)
+    print(f"Graph backfill nodes: {graph_backfilled}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
