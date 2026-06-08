@@ -36,6 +36,12 @@ It stores conversations, turns, and messages for later memory lookup and prompt 
 
 The librarian agent runs inside ArchiveOfHeresy on the same local model. It starts after the model response has been sent back to the caller, while the user is reading the answer.
 
+Agent module:
+
+```text
+archivist_agent/
+```
+
 The librarian is isolated from the public assistant persona. It does not use Shushunya's character prompt, does not inherit user-facing style, and has its own strict archival prompts.
 
 The librarian is also physically cut off from memory contents at the model level. Focus memory is exposed to it as books on a controlled bookshelf. The model only sees a catalog by default; when it needs book contents, it must request a tool such as `read_active_focus`, receive a tool result, and then finish with a structured action.

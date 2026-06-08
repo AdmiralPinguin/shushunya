@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from librarian import Librarian
+from archivist_agent import Librarian
 
 
 ROOT = Path(__file__).resolve().parent
