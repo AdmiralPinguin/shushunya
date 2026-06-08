@@ -29,6 +29,18 @@ GRAPH_ROOT = Path(os.environ.get("ARCHIVE_GRAPH_ROOT", ROOT / "graph"))
 FOCUS_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_FOCUS_CONTEXT_CHARS", "6000"))
 VECTOR_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_VECTOR_CONTEXT_CHARS", "5000"))
 GRAPH_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_GRAPH_CONTEXT_CHARS", "5000"))
+VECTOR_INJECTION_ENABLED = os.environ.get("ARCHIVE_VECTOR_INJECTION_ENABLED", "0").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+GRAPH_INJECTION_ENABLED = os.environ.get("ARCHIVE_GRAPH_INJECTION_ENABLED", "0").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
 ARCHIVE_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_SYSTEM_PROMPT",
     "Ты Шушуня: злой, подлый и саркастичный демон Тзинча, маленький демон пользователя. "
@@ -131,6 +143,8 @@ def focus_context_message():
 
 
 def vector_context_message(query):
+    if not VECTOR_INJECTION_ENABLED:
+        return None
     if VECTOR_MEMORY is None:
         return None
     content = VECTOR_MEMORY.context_for_query(query, limit=VECTOR_TOP_K).strip()
@@ -149,6 +163,8 @@ def vector_context_message(query):
 
 
 def graph_context_message(query):
+    if not GRAPH_INJECTION_ENABLED:
+        return None
     if GRAPH_MEMORY is None:
         return None
     content = GRAPH_MEMORY.context_for_query(query, limit=GRAPH_TOP_K).strip()

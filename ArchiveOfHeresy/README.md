@@ -103,7 +103,7 @@ Vector memory is the retrieval layer for old archived turns:
 vector/index.sqlite3
 ```
 
-After a successful archived answer, ArchiveOfHeresy indexes the latest user message and assistant answer as chunks. Before the next model request, ArchiveOfHeresy embeds the current user question with the same local hashing embedder, searches similar chunks, and injects only the top matches as compact reference context.
+After a successful archived answer, the librarian indexes the latest user message and assistant answer as chunks. Vector context injection is disabled by default for now, so this layer keeps accumulating data without being added to model prompts unless `ARCHIVE_VECTOR_INJECTION_ENABLED=1`.
 
 This first version intentionally has no external dependency and no network dependency. It uses stable hashed token vectors stored in SQLite. The retrieval interface can later be swapped to real embedding vectors without changing the gateway flow.
 
@@ -127,7 +127,7 @@ graph/graph.sqlite3
 
 The graph layer is for relationships that are awkward to represent as raw chunks or isolated wiki pages: project components, agents, memory layers, decisions, dependencies, superseded decisions, ownership, storage, retrieval, and status links.
 
-After every `ARCHIVE_GRAPH_INTERVAL_MESSAGES` archived messages, the librarian reviews recent turns, extracts stable nodes and edges, and merges them into the graph. Before a model request, ArchiveOfHeresy searches the graph by the current user question and injects relevant nodes and relations as GraphRAG context.
+After every `ARCHIVE_GRAPH_INTERVAL_MESSAGES` archived messages, the librarian reviews recent turns, extracts stable nodes and edges, and merges them into the graph. Graph context injection is disabled by default for now, so this layer keeps accumulating data without being added to model prompts unless `ARCHIVE_GRAPH_INJECTION_ENABLED=1`.
 
 On startup, if the graph is empty, ArchiveOfHeresy asks the librarian to seed it from the latest archived turns by default.
 
@@ -207,6 +207,8 @@ Stop it:
 - `ARCHIVE_FOCUS_CONTEXT_CHARS` - default `6000`
 - `ARCHIVE_VECTOR_CONTEXT_CHARS` - default `5000`
 - `ARCHIVE_GRAPH_CONTEXT_CHARS` - default `5000`
+- `ARCHIVE_VECTOR_INJECTION_ENABLED` - default `0`
+- `ARCHIVE_GRAPH_INJECTION_ENABLED` - default `0`
 - `ARCHIVE_FOCUS_MAX_FILES` - default `10`
 - `ARCHIVE_VECTOR_DIMENSIONS` - default `384`
 - `ARCHIVE_VECTOR_CHUNK_CHARS` - default `1200`
