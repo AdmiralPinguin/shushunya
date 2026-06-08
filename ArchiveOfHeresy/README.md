@@ -67,6 +67,21 @@ focus/files/*.md
 
 When the topic continues, it updates the active focus file. When the topic changes, it marks the previous focus as `paused` and creates a new active focus file. Each focus has importance from `1` to `5`. ArchiveOfHeresy keeps at most 10 focus files, removing the least important files first and then the oldest files when importance is equal.
 
+ArchiveOfHeresy injects the active focus file into model requests as compact context. Clients should not send long tails of previous chat messages; the active focus file replaces that history pressure.
+
+The active focus is currently global for the allowed ArchiveOfHeresy conversation flow. Non-allowlisted clients should disable focus injection so they do not read or affect this shared memory.
+
+Clients may disable archiving and focus injection per request with internal flags:
+
+```json
+{
+  "archive_enabled": false,
+  "focus_enabled": false
+}
+```
+
+These flags are consumed by ArchiveOfHeresy and are not forwarded to the model host.
+
 ## Local Environment
 
 The Python environment for this module is stored inside the module itself:
@@ -118,6 +133,7 @@ Stop it:
 - `ARCHIVE_JSONL_ROOT` - default `ArchiveOfHeresy/archive/jsonl`
 - `ARCHIVE_SQLITE_PATH` - default `ArchiveOfHeresy/archive/sqlite/archive.sqlite3`
 - `ARCHIVE_FOCUS_ROOT` - default `ArchiveOfHeresy/focus`
+- `ARCHIVE_FOCUS_CONTEXT_CHARS` - default `6000`
 - `ARCHIVE_FOCUS_MAX_FILES` - default `10`
 - `ARCHIVE_LIBRARIAN_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
 - `ARCHIVE_LIBRARIAN_MAX_AGENT_STEPS` - default `4`

@@ -11,6 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from archivist_agent import Librarian
+from archivist_agent.agent import FocusBookshelf
 
 
 ROOT = Path(__file__).resolve().parent
@@ -20,6 +21,7 @@ LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").r
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
 FOCUS_ROOT = Path(os.environ.get("ARCHIVE_FOCUS_ROOT", ROOT / "focus"))
+FOCUS_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_FOCUS_CONTEXT_CHARS", "6000"))
 ARCHIVE_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_SYSTEM_PROMPT",
     "Ты Шушуня: злой, подлый и саркастичный демон Тзинча, маленький демон пользователя. "
@@ -33,6 +35,7 @@ ARCHIVE_SYSTEM_PROMPT = os.environ.get(
 ARCHIVE_LOCK = threading.Lock()
 CHAT_QUEUE_LOCK = threading.Lock()
 LIBRARIAN = None
+FOCUS_BOOKSHELF = None
 
 
 def read_json(handler):
@@ -80,8 +83,62 @@ def now_iso():
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def prepare_messages(messages):
+def active_focus_context():
+    if FOCUS_BOOKSHELF is None:
+        return ""
+
+    index = FOCUS_BOOKSHELF.load_index()
+    active = FOCUS_BOOKSHELF.active_focus(index)
+    if not active:
+        return ""
+
+    content = FOCUS_BOOKSHELF.read_focus(active).strip()
+    if not content:
+        return ""
+
+    return content[-FOCUS_CONTEXT_CHARS:]
+
+
+def focus_context_message():
+    content = active_focus_context()
+    if not content:
+        return None
+
+    return {
+        "role": "system",
+        "content": (
+            "Активный focus-файл ArchiveOfHeresy для текущей темы. "
+            "Используй его как компактный контекст вместо длинной истории прошлых сообщений. "
+            "Если текущий вопрос меняет тему, не пытайся насильно притянуть старый focus.\n\n"
+            f"{content}"
+        ),
+    }
+
+
+def internal_flag(value, default=True):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("0", "false", "no", "off")
+
+
+def maybe_write_archives(record):
+    if record.get("archive_enabled", True):
+        write_archives(record)
+
+
+def maybe_update_focus_memory(record):
+    if record.get("archive_enabled", True):
+        update_focus_memory(record)
+
+
+def prepare_messages(messages, include_focus=True):
     prepared = [{"role": "system", "content": ARCHIVE_SYSTEM_PROMPT}]
+    if include_focus:
+        focus_message = focus_context_message()
+        if focus_message:
+            prepared.append(focus_message)
     prepared.extend(messages)
     return prepared
 
@@ -278,6 +335,17 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if self.path == "/archive/focus/active":
+            write_json(
+                self,
+                200,
+                {
+                    "focus_context": active_focus_context(),
+                    "max_chars": FOCUS_CONTEXT_CHARS,
+                },
+            )
+            return
+
         if self.path == "/v1/models":
             self.forward("GET", self.path)
             return
@@ -296,15 +364,19 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             created_at = now_iso()
             turn_id = str(uuid.uuid4())
             payload = read_json(self)
+            archive_enabled = internal_flag(payload.pop("archive_enabled", True), default=True)
+            focus_enabled = internal_flag(payload.pop("focus_enabled", True), default=True)
             payload["messages"] = list(payload.get("messages", []))
             prepared_payload = dict(payload)
-            prepared_payload["messages"] = prepare_messages(payload["messages"])
+            prepared_payload["messages"] = prepare_messages(payload["messages"], include_focus=focus_enabled)
 
             record = {
                 "turn_id": turn_id,
                 "created_at": created_at,
                 "source": "openai-chat-completions",
                 "conversation_id": conversation_id(payload),
+                "archive_enabled": archive_enabled,
+                "focus_enabled": focus_enabled,
                 "model": payload.get("model"),
                 "request": payload,
                 "prepared_messages": prepared_payload["messages"],
@@ -325,9 +397,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 record["http_status"] = status
                 record["response"] = response
                 record["assistant_message"] = assistant_message(response)
-                write_archives(record)
+                maybe_write_archives(record)
                 write_json(self, status, response)
-                update_focus_memory(record)
+                maybe_update_focus_memory(record)
             except HTTPError as exc:
                 try:
                     error_payload = json.loads(exc.read().decode("utf-8"))
@@ -337,7 +409,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 record["http_status"] = exc.code
                 record["response"] = error_payload
                 record["error"] = json.dumps(error_payload, ensure_ascii=False)
-                write_archives(record)
+                maybe_write_archives(record)
                 write_json(self, exc.code, error_payload)
             except (TimeoutError, URLError) as exc:
                 error_payload = {"error": f"LLM host unavailable: {exc}"}
@@ -345,7 +417,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 record["http_status"] = 502
                 record["response"] = error_payload
                 record["error"] = error_payload["error"]
-                write_archives(record)
+                maybe_write_archives(record)
                 write_json(self, 502, error_payload)
             except Exception as exc:
                 error_payload = {"error": str(exc)}
@@ -353,7 +425,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 record["http_status"] = 500
                 record["response"] = error_payload
                 record["error"] = error_payload["error"]
-                write_archives(record)
+                maybe_write_archives(record)
                 write_json(self, 500, error_payload)
 
     def stream_chat_completion(self, prepared_payload, record):
@@ -409,8 +481,8 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             record["http_status"] = 200
             record["response"] = response
             record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
-            write_archives(record)
-            update_focus_memory(record)
+            maybe_write_archives(record)
+            maybe_update_focus_memory(record)
         except HTTPError as exc:
             try:
                 error_payload = json.loads(exc.read().decode("utf-8"))
@@ -420,7 +492,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             record["http_status"] = exc.code
             record["response"] = error_payload
             record["error"] = json.dumps(error_payload, ensure_ascii=False)
-            write_archives(record)
+            maybe_write_archives(record)
             write_json(self, exc.code, error_payload)
         except (BrokenPipeError, ConnectionResetError) as exc:
             assistant_text = "".join(assistant_parts).strip()
@@ -438,14 +510,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             }
             record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
             record["error"] = str(exc)
-            write_archives(record)
+            maybe_write_archives(record)
         except (TimeoutError, URLError) as exc:
             error_payload = {"error": f"LLM host unavailable: {exc}"}
             record["status"] = "unavailable"
             record["http_status"] = 502
             record["response"] = error_payload
             record["error"] = error_payload["error"]
-            write_archives(record)
+            maybe_write_archives(record)
             write_json(self, 502, error_payload)
         except Exception as exc:
             error_payload = {"error": str(exc)}
@@ -453,7 +525,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             record["http_status"] = 500
             record["response"] = error_payload
             record["error"] = error_payload["error"]
-            write_archives(record)
+            maybe_write_archives(record)
             write_json(self, 500, error_payload)
 
     def forward(self, method, path, payload=None):
@@ -473,8 +545,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    global LIBRARIAN
+    global FOCUS_BOOKSHELF, LIBRARIAN
     init_storage()
+    FOCUS_BOOKSHELF = FocusBookshelf(FOCUS_ROOT)
     LIBRARIAN = Librarian(FOCUS_ROOT, proxy_json)
     server = ThreadingHTTPServer((HOST, PORT), ArchiveHandler)
     print(f"ArchiveOfHeresy main started: http://{HOST}:{PORT}", flush=True)

@@ -30,6 +30,11 @@ HISTORY_MESSAGES = int(os.environ.get("HISTORY_MESSAGES", "12"))
 STREAM_ENABLED = os.environ.get("STREAM_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
 STREAM_DRAFT_INTERVAL = float(os.environ.get("STREAM_DRAFT_INTERVAL", "1.1"))
 STREAM_FINAL_DRAFT_TIMEOUT = float(os.environ.get("STREAM_FINAL_DRAFT_TIMEOUT", "30"))
+ARCHIVE_ALLOWLIST = {
+    item.strip().lower()
+    for item in os.environ.get("TELEGRAM_ARCHIVE_ALLOWLIST", "7791909246,@Ebuchaya_psina").split(",")
+    if item.strip()
+}
 
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 RUNNING = True
@@ -137,6 +142,23 @@ def finish_reason(payload):
     return choices[0].get("finish_reason")
 
 
+def archive_allowed(chat_id, username=None):
+    candidates = {str(chat_id).lower()}
+    if username:
+        clean_username = str(username).strip().lower().lstrip("@")
+        candidates.add(clean_username)
+        candidates.add(f"@{clean_username}")
+    return bool(candidates & ARCHIVE_ALLOWLIST)
+
+
+def archive_flags(chat_id, username=None):
+    allowed = archive_allowed(chat_id, username=username)
+    return {
+        "archive_enabled": allowed,
+        "focus_enabled": allowed,
+    }
+
+
 def continuation_messages(answer_parts):
     tail = "".join(answer_parts)[-CONTINUATION_TAIL_CHARS:]
     return [
@@ -226,10 +248,9 @@ class DraftStreamer:
                 return
 
 
-def ask_llm(chat_id, text):
+def ask_llm(chat_id, text, username=None):
     chat_history = HISTORY.setdefault(chat_id, [])
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(chat_history[-HISTORY_MESSAGES:])
     messages.append({"role": "user", "content": text})
 
     answer_parts = []
@@ -241,6 +262,7 @@ def ask_llm(chat_id, text):
                 {
                     "model": LLM_MODEL,
                     "user": str(chat_id),
+                    **archive_flags(chat_id, username=username),
                     "messages": messages,
                     "max_tokens": MAX_TOKENS,
                     "temperature": TEMPERATURE,
@@ -273,10 +295,11 @@ def ask_llm(chat_id, text):
     return answer
 
 
-def stream_once(messages, chat_id, draft_streamer, answer_parts):
+def stream_once(messages, chat_id, username, draft_streamer, answer_parts):
     payload = {
         "model": LLM_MODEL,
         "user": str(chat_id),
+        **archive_flags(chat_id, username=username),
         "messages": messages,
         "max_tokens": MAX_TOKENS,
         "temperature": TEMPERATURE,
@@ -313,10 +336,9 @@ def stream_once(messages, chat_id, draft_streamer, answer_parts):
     return reason
 
 
-def stream_llm(chat_id, text):
+def stream_llm(chat_id, text, username=None):
     chat_history = HISTORY.setdefault(chat_id, [])
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(chat_history[-HISTORY_MESSAGES:])
     messages.append({"role": "user", "content": text})
 
     answer_parts = []
@@ -326,7 +348,7 @@ def stream_llm(chat_id, text):
     try:
         for attempt in range(MAX_CONTINUATIONS + 1):
             try:
-                reason = stream_once(messages, chat_id, draft_streamer, answer_parts)
+                reason = stream_once(messages, chat_id, username, draft_streamer, answer_parts)
             except Exception:
                 if answer_parts:
                     answer_parts.append("\n\n[Продолжение остановлено: модель отклонила слишком длинный запрос.]")
@@ -355,7 +377,9 @@ def stream_llm(chat_id, text):
 
 def handle_message(message):
     chat = message.get("chat") or {}
+    sender = message.get("from") or {}
     chat_id = chat.get("id")
+    username = sender.get("username")
     text = (message.get("text") or "").strip()
     if not chat_id or not text:
         return
@@ -375,9 +399,9 @@ def handle_message(message):
     send_typing(chat_id)
     try:
         if STREAM_ENABLED:
-            send_message(chat_id, stream_llm(chat_id, text))
+            send_message(chat_id, stream_llm(chat_id, text, username=username))
         else:
-            send_message(chat_id, ask_llm(chat_id, text))
+            send_message(chat_id, ask_llm(chat_id, text, username=username))
     except urllib.error.URLError as exc:
         send_message(chat_id, f"LLM-хост недоступен: {exc}")
     except Exception as exc:

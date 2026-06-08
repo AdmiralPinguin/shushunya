@@ -2,6 +2,8 @@
 
 Telegram bot for chatting with the local Gemma 4 host through ArchiveOfHeresy.
 
+Only allowlisted Telegram chats are archived and receive focus-memory context. Other chats still get model replies, but their requests disable ArchiveOfHeresy JSONL/SQLite writes, librarian updates, and focus injection.
+
 ## Requirements
 
 - The LLM host must be running at `http://127.0.0.1:8080`.
@@ -31,7 +33,7 @@ cd /media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness
 
 - `/start` - show a short greeting.
 - `/help` - show a short greeting.
-- `/reset` - clear in-memory conversation context for the current chat.
+- `/reset` - clear the local in-memory reply cache for the current chat.
 
 ## Settings
 
@@ -47,3 +49,5 @@ Optional environment variables:
 - `STREAM_ENABLED` - default `1`; uses Telegram `sendMessageDraft` while the model is generating
 - `STREAM_DRAFT_INTERVAL` - default `1.1`; seconds between Telegram draft updates
 - `STREAM_FINAL_DRAFT_TIMEOUT` - default `30`; seconds to wait while publishing the final draft update
+- `HISTORY_MESSAGES` - default `12`; local cache retention only. Previous Telegram messages are no longer sent to the model because ArchiveOfHeresy injects the active focus file instead.
+- `TELEGRAM_ARCHIVE_ALLOWLIST` - comma-separated chat ids or usernames allowed to use ArchiveOfHeresy memory; default `7791909246,@Ebuchaya_psina`
