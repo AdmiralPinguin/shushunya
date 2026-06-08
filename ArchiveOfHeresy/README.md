@@ -86,7 +86,7 @@ Focus memory is optimized for the current topic. Wiki memory is optimized for du
 
 The librarian updates wiki memory after every `ARCHIVE_WIKI_INTERVAL_MESSAGES` archived messages. The default interval is `20`, which usually means 10 user/assistant turns. During a wiki pass the librarian receives a catalog of wiki pages and the recent archived turns since the last sync. It may request existing wiki pages through a controlled `read_wiki_page` tool before finishing with page updates.
 
-New decisions should replace or supersede old decisions instead of being appended as unresolved contradictions. The wiki prompt also tells the librarian not to preserve actionable harmful instructions; unsafe topics may be retained only as high-level safety context without operational detail.
+New decisions should replace or supersede old decisions instead of being appended as unresolved contradictions.
 
 Clients may disable archiving and focus injection per request with internal flags:
 

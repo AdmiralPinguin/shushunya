@@ -48,8 +48,6 @@ LIBRARIAN_WIKI_TASK_PROMPT = os.environ.get(
     "Рассортируй информацию по тематическим страницам. Если новые сообщения меняют старое решение, "
     "интегрируй новое как актуальное, а старое пометь как superseded только если это полезно для истории. "
     "Не копируй переписку подряд и не складывай противоречия без статуса актуальности. "
-    "Не сохраняй прикладные инструкции для вреда, сокрытия следов, насилия или обхода безопасности; "
-    "такие темы можно фиксировать только как высокоуровневый safety-факт без операционных деталей. "
     "Пиши сухо, кратко, проверяемо. Не добавляй фактов, которых нет во входных данных.",
 )
 
@@ -712,7 +710,7 @@ class WikiMemory:
                                 "operation": "upsert",
                                 "id": "optional existing page id",
                                 "title": "page title",
-                                "kind": "project|decision|preference|topic|entity|safety|note",
+                                "kind": "project|decision|preference|topic|entity|note",
                                 "importance": "integer 1..5",
                                 "body": "complete updated markdown body for the page",
                             }
@@ -727,7 +725,6 @@ class WikiMemory:
                 "Read an existing page before overwriting it when the catalog suggests the topic already exists.",
                 "Each page body must represent the current integrated state, not a raw transcript.",
                 "Use explicit sections such as Current Facts, Active Decisions, Superseded, Open Questions, Next Steps when useful.",
-                "Do not preserve actionable harmful instructions; keep only high-level safety context for such topics.",
             ],
         }
 
