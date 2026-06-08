@@ -98,7 +98,7 @@ Stop it:
 - `ARCHIVE_HOST` - default `127.0.0.1`
 - `ARCHIVE_PORT` - default `8090`
 - `ARCHIVE_LLM_BASE_URL` - default `http://127.0.0.1:8080`
-- `ARCHIVE_SYSTEM_PROMPT` - archive-level system prompt prepended to chat requests
+- `ARCHIVE_SYSTEM_PROMPT` - archive-level system prompt prepended to chat requests; default personality is Shushunya, a sarcastic daemon of Tzeentch
 - `ARCHIVE_JSONL_ROOT` - default `ArchiveOfHeresy/archive/jsonl`
 - `ARCHIVE_SQLITE_PATH` - default `ArchiveOfHeresy/archive/sqlite/archive.sqlite3`
 - `ARCHIVE_FOCUS_ROOT` - default `ArchiveOfHeresy/focus`
