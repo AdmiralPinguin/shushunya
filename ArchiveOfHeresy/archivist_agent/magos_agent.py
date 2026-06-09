@@ -11,6 +11,9 @@ from archivist_agent.graph_memory import GRAPH_TOP_K
 
 MAGOS_MODEL = os.environ.get("ARCHIVE_MAGOS_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
 MAGOS_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_MAGOS_CONTEXT_CHARS", "6000"))
+MAGOS_MIN_WIKI_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_WIKI_SCORE", "0.35"))
+MAGOS_MIN_VECTOR_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_VECTOR_SCORE", "0.32"))
+MAGOS_MIN_GRAPH_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_GRAPH_SCORE", "0.12"))
 MAGOS_ENABLED = os.environ.get("ARCHIVE_MAGOS_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
 MAGOS_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_MAGOS_SYSTEM_PROMPT",
@@ -25,7 +28,9 @@ MAGOS_TASK_PROMPT = os.environ.get(
     "Сначала оцени существующие focus-файлы. Если один из них подходит текущему запросу, выбери его. "
     "Если тема полностью новая или старый focus будет мешать, выбери создание нового пустого focus. "
     "Затем собери memory_context: только факты, решения, статусы, связи и ограничения, которые помогут ответу. "
-    "Используй focus, wiki, vector и graph данные по необходимости, но не тащи лишнюю историю. "
+    "Используй focus, wiki, vector и graph данные только при прямой релевантности текущему запросу. "
+    "Если связь слабая, косвенная или сомнительная, не добавляй этот фрагмент в memory_context. "
+    "Лучше вернуть пустой memory_context, чем подмешать шум. "
     "Новый пустой focus должен иметь короткий title, importance 1..5 и reason.",
 )
 
@@ -66,6 +71,15 @@ class Magos:
             wiki_context = self.wiki_context(query)
             vector_context = self.vector_context(query)
             graph_context = self.graph_context(query)
+            context_sources = [
+                name
+                for name, value in (
+                    ("wiki", wiki_context),
+                    ("vector", vector_context),
+                    ("graph", graph_context),
+                )
+                if value
+            ]
 
             decision = self.ask_magos(
                 model,
@@ -97,6 +111,7 @@ class Magos:
                 "created_empty_focus": focus_result.get("created_empty_focus", False),
                 "reason": decision.get("reason"),
                 "memory_context_chars": len(decision.get("memory_context") or ""),
+                "context_sources": context_sources,
             }
             print(
                 "Magos decision: "
@@ -152,7 +167,7 @@ class Magos:
                 continue
             content = path.read_text(encoding="utf-8")
             score = token_overlap(query, " ".join([page.get("title", ""), page.get("kind", ""), content]))
-            if score > 0:
+            if score >= MAGOS_MIN_WIKI_SCORE:
                 scored.append((score, page, content))
         scored.sort(key=lambda item: (-item[0], item[1].get("updated_at") or ""))
         lines = []
@@ -163,12 +178,44 @@ class Magos:
     def vector_context(self, query):
         if self.vector_memory is None:
             return ""
-        return self.vector_memory.context_for_query(query, limit=VECTOR_TOP_K)
+        matches = self.vector_memory.search(query, limit=VECTOR_TOP_K, min_score=MAGOS_MIN_VECTOR_SCORE)
+        if not matches:
+            return ""
+        lines = ["# Vector Memory Matches", ""]
+        for index, match in enumerate(matches, 1):
+            lines.append(
+                f"{index}. score={match['score']:.3f}; role={match['role']}; created_at={match['created_at']}\n"
+                f"   {trim_text(match['content'], 700).replace(chr(10), chr(10) + '   ')}"
+            )
+        return "\n\n".join(lines)
 
     def graph_context(self, query):
         if self.graph_memory is None:
             return ""
-        return self.graph_memory.context_for_query(query, limit=GRAPH_TOP_K)
+        result = self.graph_memory.search(query, limit=GRAPH_TOP_K)
+        nodes = [node for node in result.get("nodes", []) if float(node.get("score") or 0) >= MAGOS_MIN_GRAPH_SCORE]
+        if not nodes:
+            return ""
+        node_ids = {node.get("id") for node in nodes}
+        edges = [
+            edge
+            for edge in result.get("edges", [])
+            if edge.get("source_id") in node_ids or edge.get("target_id") in node_ids
+        ]
+        lines = ["# GraphRAG Memory", "", "## Nodes"]
+        for node in nodes:
+            lines.append(
+                f"- {node['name']} ({node['kind']}, score={node['score']:.3f}, status={node['status']}): "
+                f"{trim_text(node['summary'], 400)}"
+            )
+        if edges:
+            lines.extend(["", "## Relations"])
+            for edge in edges[: GRAPH_TOP_K * 2]:
+                lines.append(
+                    f"- {edge['source_name']} --{edge['relation']}--> {edge['target_name']} "
+                    f"(status={edge['status']}, weight={edge['weight']}): {trim_text(edge['summary'], 300)}"
+                )
+        return "\n".join(lines)
 
     def ask_magos(self, model, task):
         payload = {

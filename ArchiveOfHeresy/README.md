@@ -66,6 +66,8 @@ Magos may consult focus, wiki, vector, and graph memory to build a small `Magos 
 
 Magos is fail-soft. If it fails, ArchiveOfHeresy continues the model request without Magos context. Magos decisions are logged to the Archive runtime log. If Magos created an empty focus and the main model request fails, ArchiveOfHeresy pauses that empty focus so it does not remain active without a real answer for the librarian to process.
 
+Magos uses relevance thresholds for lower memory layers before showing them to the model-agent. Weak wiki, vector, or graph matches are discarded before the Magos prompt is assembled. This keeps noisy lower-layer memory from leaking into Shushunya's prompt.
+
 The librarian is also physically cut off from memory contents at the model level. Focus memory is exposed to it as books on a controlled bookshelf. The model only sees a catalog by default; when it needs book contents, it must request a tool such as `read_active_focus`, receive a tool result, and then finish with a structured action.
 
 Chat requests are queued with a single in-process lock:
@@ -246,6 +248,9 @@ Stop it:
 - `ARCHIVE_MAGOS_ENABLED` - default `1`
 - `ARCHIVE_MAGOS_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
 - `ARCHIVE_MAGOS_CONTEXT_CHARS` - default `6000`
+- `ARCHIVE_MAGOS_MIN_WIKI_SCORE` - default `0.35`
+- `ARCHIVE_MAGOS_MIN_VECTOR_SCORE` - default `0.32`
+- `ARCHIVE_MAGOS_MIN_GRAPH_SCORE` - default `0.12`
 - `ARCHIVE_MAGOS_SYSTEM_PROMPT` - isolated Magos system prompt
 - `ARCHIVE_MAGOS_TASK_PROMPT` - isolated Magos task prompt
 - `ARCHIVE_WIKI_INTERVAL_MESSAGES` - default `20`
