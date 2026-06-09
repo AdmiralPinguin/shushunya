@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 from archivist_agent import Librarian
 from archivist_agent.agent import FocusBookshelf
 from archivist_agent.graph_memory import GRAPH_TOP_K, GraphMemory
+from archivist_agent.magos_agent import Magos
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
 
 
@@ -60,6 +61,7 @@ ARCHIVE_SYSTEM_PROMPT = os.environ.get(
 ARCHIVE_LOCK = threading.Lock()
 CHAT_QUEUE_LOCK = threading.Lock()
 LIBRARIAN = None
+MAGOS = None
 FOCUS_BOOKSHELF = None
 VECTOR_MEMORY = None
 GRAPH_MEMORY = None
@@ -200,13 +202,15 @@ def maybe_update_focus_memory(record):
         update_focus_memory(record)
 
 
-def prepare_messages(messages, include_focus=True, include_vector=True, include_graph=True):
+def prepare_messages(messages, include_focus=True, include_vector=True, include_graph=True, magos_message=None):
     prepared = [{"role": "system", "content": ARCHIVE_SYSTEM_PROMPT}]
     query = latest_user_message(messages)
     if include_focus:
         focus_message = focus_context_message()
         if focus_message:
             prepared.append(focus_message)
+    if magos_message:
+        prepared.append(magos_message)
     if include_vector:
         vector_message = vector_context_message(query)
         if vector_message:
@@ -470,12 +474,21 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             vector_enabled = internal_flag(payload.pop("vector_enabled", focus_enabled), default=True)
             graph_enabled = internal_flag(payload.pop("graph_enabled", focus_enabled), default=True)
             payload["messages"] = list(payload.get("messages", []))
+            magos_message = None
+            if focus_enabled and MAGOS is not None:
+                magos_message = MAGOS.prepare_request(
+                    payload["messages"],
+                    model=payload.get("model"),
+                    conversation_id=conversation_id(payload),
+                    turn_id=turn_id,
+                )
             prepared_payload = dict(payload)
             prepared_payload["messages"] = prepare_messages(
                 payload["messages"],
                 include_focus=focus_enabled,
                 include_vector=vector_enabled,
                 include_graph=graph_enabled,
+                magos_message=magos_message,
             )
 
             record = {
@@ -487,6 +500,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "focus_enabled": focus_enabled,
                 "vector_enabled": vector_enabled,
                 "graph_enabled": graph_enabled,
+                "magos_enabled": bool(magos_message),
                 "model": payload.get("model"),
                 "request": payload,
                 "prepared_messages": prepared_payload["messages"],
@@ -655,7 +669,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    global FOCUS_BOOKSHELF, LIBRARIAN, VECTOR_MEMORY, GRAPH_MEMORY
+    global FOCUS_BOOKSHELF, LIBRARIAN, MAGOS, VECTOR_MEMORY, GRAPH_MEMORY
     init_storage()
     FOCUS_BOOKSHELF = FocusBookshelf(FOCUS_ROOT)
     VECTOR_MEMORY = VectorMemory(VECTOR_ROOT)
@@ -670,6 +684,7 @@ def main():
         vector_memory=VECTOR_MEMORY,
         graph_memory=GRAPH_MEMORY,
     )
+    MAGOS = Magos(FOCUS_ROOT, WIKI_ROOT, proxy_json, vector_memory=VECTOR_MEMORY, graph_memory=GRAPH_MEMORY)
     server = ThreadingHTTPServer((HOST, PORT), ArchiveHandler)
     print(f"ArchiveOfHeresy main started: http://{HOST}:{PORT}", flush=True)
     print(f"Upstream LLM: {LLM_BASE_URL}", flush=True)

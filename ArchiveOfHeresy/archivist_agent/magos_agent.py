@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+import json
+import os
+import re
+from pathlib import Path
+
+from archivist_agent.agent import FocusBookshelf, clamp_importance, extract_json, now_iso, trim_text
+from archivist_agent.vector_memory import VECTOR_TOP_K, latest_user_message, tokenize
+from archivist_agent.graph_memory import GRAPH_TOP_K
+
+
+MAGOS_MODEL = os.environ.get("ARCHIVE_MAGOS_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
+MAGOS_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_MAGOS_CONTEXT_CHARS", "6000"))
+MAGOS_ENABLED = os.environ.get("ARCHIVE_MAGOS_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+MAGOS_SYSTEM_PROMPT = os.environ.get(
+    "ARCHIVE_MAGOS_SYSTEM_PROMPT",
+    "Ты Магос ArchiveOfHeresy: изолированный агент извлечения памяти перед ответом модели. "
+    "Ты не Шушуня и не архивариус-писатель после ответа. "
+    "Твоя задача: выбрать подходящий focus-файл или открыть новый пустой focus для новой темы, "
+    "а также собрать короткий набор релевантных фактов из памяти. "
+    "Отвечай только валидным JSON без markdown и художественного тона.",
+)
+MAGOS_TASK_PROMPT = os.environ.get(
+    "ARCHIVE_MAGOS_TASK_PROMPT",
+    "Сначала оцени существующие focus-файлы. Если один из них подходит текущему запросу, выбери его. "
+    "Если тема полностью новая или старый focus будет мешать, выбери создание нового пустого focus. "
+    "Затем собери memory_context: только факты, решения, статусы, связи и ограничения, которые помогут ответу. "
+    "Используй focus, wiki, vector и graph данные по необходимости, но не тащи лишнюю историю. "
+    "Новый пустой focus должен иметь короткий title, importance 1..5 и reason.",
+)
+
+
+def safe_title(value):
+    value = re.sub(r"\s+", " ", str(value or "")).strip()
+    return value[:90] or "New Focus"
+
+
+def token_overlap(left, right):
+    left_tokens = set(tokenize(left))
+    right_tokens = set(tokenize(right))
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / max(1, min(len(left_tokens), len(right_tokens)))
+
+
+class Magos:
+    def __init__(self, focus_root, wiki_root, proxy_json, vector_memory=None, graph_memory=None):
+        self.focus = FocusBookshelf(focus_root)
+        self.wiki_root = Path(wiki_root)
+        self.proxy_json = proxy_json
+        self.vector_memory = vector_memory
+        self.graph_memory = graph_memory
+
+    def prepare_request(self, messages, model=None, conversation_id=None, turn_id=None):
+        if not MAGOS_ENABLED:
+            return None
+        query = latest_user_message(messages)
+        if not query:
+            return None
+
+        index = self.focus.load_index()
+        focus_candidates = self.focus_candidates(index)
+        wiki_context = self.wiki_context(query)
+        vector_context = self.vector_context(query)
+        graph_context = self.graph_context(query)
+
+        decision = self.ask_magos(
+            model,
+            {
+                "task": MAGOS_TASK_PROMPT,
+                "query": query,
+                "focus_candidates": focus_candidates,
+                "wiki_context": wiki_context,
+                "vector_context": vector_context,
+                "graph_context": graph_context,
+                "schema": {
+                    "focus_action": "use_existing|new_empty|keep_active",
+                    "focus_id": "required for use_existing",
+                    "new_title": "required for new_empty",
+                    "new_importance": "1..5",
+                    "reason": "short reason",
+                    "memory_context": "compact facts to pass into the model",
+                },
+            },
+        )
+        if decision is None:
+            decision = self.fallback_decision(query, focus_candidates, wiki_context, vector_context, graph_context)
+
+        self.apply_focus_decision(index, decision, conversation_id, turn_id)
+        memory_context = trim_text(decision.get("memory_context"), MAGOS_CONTEXT_CHARS)
+        if not memory_context:
+            return None
+        return {
+            "role": "system",
+            "content": (
+                "Magos memory context from ArchiveOfHeresy. "
+                "Это предответная выжимка релевантных фактов из focus/wiki/vector/graph. "
+                "Используй её только если она относится к текущему вопросу.\n\n"
+                f"{memory_context}"
+            ),
+        }
+
+    def focus_candidates(self, index):
+        candidates = []
+        for focus in index.get("files", []):
+            content = self.focus.read_focus(focus)
+            candidates.append(
+                {
+                    "id": focus.get("id"),
+                    "title": focus.get("title"),
+                    "status": focus.get("status"),
+                    "importance": focus.get("importance"),
+                    "updated_at": focus.get("updated_at"),
+                    "excerpt": trim_text(content, 1800),
+                }
+            )
+        return candidates
+
+    def wiki_context(self, query, limit=4):
+        index_path = self.wiki_root / "index.json"
+        if not index_path.exists():
+            return ""
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+        scored = []
+        for page in index.get("pages", []):
+            path = self.wiki_root / page.get("path", "")
+            if not path.exists():
+                continue
+            content = path.read_text(encoding="utf-8")
+            score = token_overlap(query, " ".join([page.get("title", ""), page.get("kind", ""), content]))
+            if score > 0:
+                scored.append((score, page, content))
+        scored.sort(key=lambda item: (-item[0], item[1].get("updated_at") or ""))
+        lines = []
+        for score, page, content in scored[:limit]:
+            lines.append(f"## {page.get('title')} score={score:.3f}\n{trim_text(content, 1200)}")
+        return "\n\n".join(lines)
+
+    def vector_context(self, query):
+        if self.vector_memory is None:
+            return ""
+        return self.vector_memory.context_for_query(query, limit=VECTOR_TOP_K)
+
+    def graph_context(self, query):
+        if self.graph_memory is None:
+            return ""
+        return self.graph_memory.context_for_query(query, limit=GRAPH_TOP_K)
+
+    def ask_magos(self, model, task):
+        payload = {
+            "model": model or MAGOS_MODEL,
+            "user": "archive-magos",
+            "messages": [
+                {"role": "system", "content": MAGOS_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(task, ensure_ascii=False)},
+            ],
+            "max_tokens": 1400,
+            "temperature": 0.1,
+        }
+        try:
+            _status, response = self.proxy_json("POST", "/v1/chat/completions", payload=payload, timeout=180)
+            return self.normalize_decision(extract_json(response["choices"][0]["message"].get("content", "")))
+        except Exception:
+            return None
+
+    def normalize_decision(self, decision):
+        action = str(decision.get("focus_action") or "").strip().lower()
+        if action not in ("use_existing", "new_empty", "keep_active"):
+            action = "keep_active"
+        return {
+            "focus_action": action,
+            "focus_id": str(decision.get("focus_id") or "").strip(),
+            "new_title": safe_title(decision.get("new_title")),
+            "new_importance": clamp_importance(decision.get("new_importance")),
+            "reason": trim_text(decision.get("reason"), 500),
+            "memory_context": trim_text(decision.get("memory_context"), MAGOS_CONTEXT_CHARS),
+        }
+
+    def fallback_decision(self, query, focus_candidates, wiki_context, vector_context, graph_context):
+        best = None
+        for focus in focus_candidates:
+            score = token_overlap(query, f"{focus.get('title', '')}\n{focus.get('excerpt', '')}")
+            if best is None or score > best[0]:
+                best = (score, focus)
+
+        action = "keep_active"
+        focus_id = ""
+        if best and best[0] >= 0.18:
+            action = "use_existing"
+            focus_id = best[1].get("id") or ""
+        elif not any(item.get("status") == "active" for item in focus_candidates):
+            action = "new_empty"
+
+        memory_parts = [part for part in [wiki_context, vector_context, graph_context] if part]
+        return {
+            "focus_action": action,
+            "focus_id": focus_id,
+            "new_title": safe_title(query),
+            "new_importance": 3,
+            "reason": "fallback token-overlap focus routing",
+            "memory_context": trim_text("\n\n".join(memory_parts), MAGOS_CONTEXT_CHARS),
+        }
+
+    def apply_focus_decision(self, index, decision, conversation_id, turn_id):
+        active = self.focus.active_focus(index)
+        target = None
+        if decision["focus_action"] == "use_existing":
+            for focus in index.get("files", []):
+                if focus.get("id") == decision.get("focus_id"):
+                    target = focus
+                    break
+        elif decision["focus_action"] == "new_empty":
+            target = self.focus.create_empty_focus(
+                index,
+                decision.get("new_title") or "New Focus",
+                importance=decision.get("new_importance") or 3,
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+                reason=decision.get("reason"),
+            )
+
+        if target:
+            if active and active.get("id") != target.get("id"):
+                self.focus.pause_focus(active)
+            self.activate_focus(target)
+            index["active_id"] = target.get("id")
+            self.focus.enforce_limit(index)
+            self.focus.save_index(index)
+
+    def activate_focus(self, focus):
+        focus["status"] = "active"
+        focus["updated_at"] = now_iso()
+        path = self.focus.root / focus.get("path", "")
+        if not path.exists():
+            return
+        text = path.read_text(encoding="utf-8")
+        text = re.sub(r"^status: .*$", "status: active", text, count=1, flags=re.MULTILINE)
+        text = re.sub(
+            r"^updated_at: .*$",
+            f"updated_at: {focus['updated_at']}",
+            text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        path.write_text(text, encoding="utf-8")

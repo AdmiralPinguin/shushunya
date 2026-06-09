@@ -44,6 +44,26 @@ archivist_agent/
 
 The librarian is isolated from the public assistant persona. It does not use Shushunya's character prompt, does not inherit user-facing style, and has its own strict archival prompts.
 
+## Magos
+
+Magos is the pre-answer memory retrieval agent. It runs before ArchiveOfHeresy builds the model prompt.
+
+Magos has one public job:
+
+```text
+current request -> inspect memory -> select/create focus -> return compact memory context
+```
+
+It first reviews existing focus files. If a paused or active focus matches the request, Magos activates that focus before prompt assembly. If the topic is new or should be fully refreshed, Magos creates a new empty focus file marked with:
+
+```text
+created_by: magos
+```
+
+The librarian sees those files after the answer and fills them with real post-answer context. Normal focus limits still apply, so extra focus files are removed by the same importance/age policy.
+
+Magos may consult focus, wiki, vector, and graph memory to build a small `Magos memory context` message. This keeps raw vector/graph injection disabled while still allowing one controlled retrieval agent to pull useful facts when needed.
+
 The librarian is also physically cut off from memory contents at the model level. Focus memory is exposed to it as books on a controlled bookshelf. The model only sees a catalog by default; when it needs book contents, it must request a tool such as `read_active_focus`, receive a tool result, and then finish with a structured action.
 
 Chat requests are queued with a single in-process lock:
@@ -221,6 +241,11 @@ Stop it:
 - `ARCHIVE_GRAPH_BACKFILL_ON_START` - default `1`
 - `ARCHIVE_GRAPH_SYSTEM_PROMPT` - isolated GraphRAG system prompt
 - `ARCHIVE_GRAPH_TASK_PROMPT` - isolated GraphRAG extraction prompt
+- `ARCHIVE_MAGOS_ENABLED` - default `1`
+- `ARCHIVE_MAGOS_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
+- `ARCHIVE_MAGOS_CONTEXT_CHARS` - default `6000`
+- `ARCHIVE_MAGOS_SYSTEM_PROMPT` - isolated Magos system prompt
+- `ARCHIVE_MAGOS_TASK_PROMPT` - isolated Magos task prompt
 - `ARCHIVE_WIKI_INTERVAL_MESSAGES` - default `20`
 - `ARCHIVE_WIKI_MAX_RECENT_TURNS` - default `12`
 - `ARCHIVE_LIBRARIAN_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`

@@ -196,6 +196,32 @@ class FocusBookshelf:
         self.write_focus_file(focus, decision["summary"], user_text, assistant_text)
         return focus
 
+    def create_empty_focus(self, index, title, importance=3, conversation_id=None, turn_id=None, reason=None):
+        created_at = now_iso()
+        focus_id = str(uuid.uuid4())
+        file_name = f"{created_at[:10]}-{safe_slug(title)}-{focus_id[:8]}.md"
+        focus = {
+            "id": focus_id,
+            "title": title,
+            "path": str((self.files_dir / file_name).relative_to(self.root)),
+            "status": "active",
+            "importance": clamp_importance(importance),
+            "created_at": created_at,
+            "updated_at": created_at,
+            "conversation_id": conversation_id,
+            "turn_id": turn_id,
+            "created_by": "magos",
+        }
+        index.setdefault("files", []).append(focus)
+        summary = (
+            "Magos opened this focus before the model answer because the current request appears to need "
+            "a new or fully refreshed topic context. The librarian must populate this focus after the answer."
+        )
+        if reason:
+            summary += f"\n\nMagos reason: {reason}"
+        self.write_focus_file(focus, summary, "", "")
+        return focus
+
     def update_focus(self, focus, record, decision, user_text, assistant_text):
         focus["status"] = "active"
         focus["title"] = decision["title"] or focus.get("title") or "Focus"
@@ -219,21 +245,27 @@ class FocusBookshelf:
             f"updated_at: {focus['updated_at']}",
             f"conversation_id: {focus.get('conversation_id')}",
             f"turn_id: {focus.get('turn_id')}",
-            "---",
-            "",
-            "# Focus",
-            "",
-            trim_text(summary, 8000),
-            "",
-            "## Last Exchange",
-            "",
-            "User:",
-            trim_text(user_text, 1800),
-            "",
-            "Assistant:",
-            trim_text(assistant_text, 2600),
-            "",
         ]
+        if focus.get("created_by"):
+            body.append(f"created_by: {focus.get('created_by')}")
+        body.extend(
+            [
+                "---",
+                "",
+                "# Focus",
+                "",
+                trim_text(summary, 8000),
+                "",
+                "## Last Exchange",
+                "",
+                "User:",
+                trim_text(user_text, 1800),
+                "",
+                "Assistant:",
+                trim_text(assistant_text, 2600),
+                "",
+            ]
+        )
         path.write_text("\n".join(body), encoding="utf-8")
 
     def enforce_limit(self, index):
