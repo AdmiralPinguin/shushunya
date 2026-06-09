@@ -211,6 +211,7 @@ class FocusBookshelf:
             "conversation_id": conversation_id,
             "turn_id": turn_id,
             "created_by": "magos",
+            "needs_librarian_fill": "true",
         }
         index.setdefault("files", []).append(focus)
         summary = (
@@ -229,6 +230,8 @@ class FocusBookshelf:
         focus["updated_at"] = now_iso()
         focus["conversation_id"] = record.get("conversation_id")
         focus["turn_id"] = record.get("turn_id")
+        if focus.get("created_by") == "magos":
+            focus["needs_librarian_fill"] = "false"
         self.write_focus_file(focus, decision["summary"], user_text, assistant_text)
         return focus
 
@@ -248,6 +251,8 @@ class FocusBookshelf:
         ]
         if focus.get("created_by"):
             body.append(f"created_by: {focus.get('created_by')}")
+        if focus.get("needs_librarian_fill"):
+            body.append(f"needs_librarian_fill: {focus.get('needs_librarian_fill')}")
         body.extend(
             [
                 "---",

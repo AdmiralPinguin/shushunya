@@ -393,6 +393,17 @@ def update_focus_memory(record):
         print(f"Librarian error: {exc}", flush=True)
 
 
+def maybe_abandon_magos_focus(record):
+    if MAGOS is None:
+        return
+    if record.get("status") == "ok":
+        return
+    try:
+        MAGOS.abandon_created_focus(record.get("turn_id"), f"model request ended with status={record.get('status')}")
+    except Exception as exc:
+        print(f"Magos abandon error: {exc}", flush=True)
+
+
 class ArchiveHandler(BaseHTTPRequestHandler):
     server_version = "ArchiveOfHeresy/0.1"
 
@@ -476,12 +487,16 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             payload["messages"] = list(payload.get("messages", []))
             magos_message = None
             if focus_enabled and MAGOS is not None:
-                magos_message = MAGOS.prepare_request(
-                    payload["messages"],
-                    model=payload.get("model"),
-                    conversation_id=conversation_id(payload),
-                    turn_id=turn_id,
-                )
+                try:
+                    magos_message = MAGOS.prepare_request(
+                        payload["messages"],
+                        model=payload.get("model"),
+                        conversation_id=conversation_id(payload),
+                        turn_id=turn_id,
+                    )
+                except Exception as exc:
+                    print(f"Magos hard fail-soft: {exc}", flush=True)
+                    magos_message = None
             prepared_payload = dict(payload)
             prepared_payload["messages"] = prepare_messages(
                 payload["messages"],
@@ -533,6 +548,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 record["http_status"] = exc.code
                 record["response"] = error_payload
                 record["error"] = json.dumps(error_payload, ensure_ascii=False)
+                maybe_abandon_magos_focus(record)
                 maybe_write_archives(record)
                 write_json(self, exc.code, error_payload)
             except (TimeoutError, URLError) as exc:
@@ -541,6 +557,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 record["http_status"] = 502
                 record["response"] = error_payload
                 record["error"] = error_payload["error"]
+                maybe_abandon_magos_focus(record)
                 maybe_write_archives(record)
                 write_json(self, 502, error_payload)
             except Exception as exc:
@@ -549,6 +566,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 record["http_status"] = 500
                 record["response"] = error_payload
                 record["error"] = error_payload["error"]
+                maybe_abandon_magos_focus(record)
                 maybe_write_archives(record)
                 write_json(self, 500, error_payload)
 
@@ -616,6 +634,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             record["http_status"] = exc.code
             record["response"] = error_payload
             record["error"] = json.dumps(error_payload, ensure_ascii=False)
+            maybe_abandon_magos_focus(record)
             maybe_write_archives(record)
             write_json(self, exc.code, error_payload)
         except (BrokenPipeError, ConnectionResetError) as exc:
@@ -634,6 +653,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             }
             record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
             record["error"] = str(exc)
+            maybe_abandon_magos_focus(record)
             maybe_write_archives(record)
         except (TimeoutError, URLError) as exc:
             error_payload = {"error": f"LLM host unavailable: {exc}"}
@@ -641,6 +661,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             record["http_status"] = 502
             record["response"] = error_payload
             record["error"] = error_payload["error"]
+            maybe_abandon_magos_focus(record)
             maybe_write_archives(record)
             write_json(self, 502, error_payload)
         except Exception as exc:
@@ -649,6 +670,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             record["http_status"] = 500
             record["response"] = error_payload
             record["error"] = error_payload["error"]
+            maybe_abandon_magos_focus(record)
             maybe_write_archives(record)
             write_json(self, 500, error_payload)
 

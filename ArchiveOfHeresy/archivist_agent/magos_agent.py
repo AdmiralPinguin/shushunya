@@ -50,55 +50,76 @@ class Magos:
         self.proxy_json = proxy_json
         self.vector_memory = vector_memory
         self.graph_memory = graph_memory
+        self.last_result = None
 
     def prepare_request(self, messages, model=None, conversation_id=None, turn_id=None):
-        if not MAGOS_ENABLED:
-            return None
-        query = latest_user_message(messages)
-        if not query:
-            return None
+        self.last_result = None
+        try:
+            if not MAGOS_ENABLED:
+                return None
+            query = latest_user_message(messages)
+            if not query:
+                return None
 
-        index = self.focus.load_index()
-        focus_candidates = self.focus_candidates(index)
-        wiki_context = self.wiki_context(query)
-        vector_context = self.vector_context(query)
-        graph_context = self.graph_context(query)
+            index = self.focus.load_index()
+            focus_candidates = self.focus_candidates(index)
+            wiki_context = self.wiki_context(query)
+            vector_context = self.vector_context(query)
+            graph_context = self.graph_context(query)
 
-        decision = self.ask_magos(
-            model,
-            {
-                "task": MAGOS_TASK_PROMPT,
-                "query": query,
-                "focus_candidates": focus_candidates,
-                "wiki_context": wiki_context,
-                "vector_context": vector_context,
-                "graph_context": graph_context,
-                "schema": {
-                    "focus_action": "use_existing|new_empty|keep_active",
-                    "focus_id": "required for use_existing",
-                    "new_title": "required for new_empty",
-                    "new_importance": "1..5",
-                    "reason": "short reason",
-                    "memory_context": "compact facts to pass into the model",
+            decision = self.ask_magos(
+                model,
+                {
+                    "task": MAGOS_TASK_PROMPT,
+                    "query": query,
+                    "focus_candidates": focus_candidates,
+                    "wiki_context": wiki_context,
+                    "vector_context": vector_context,
+                    "graph_context": graph_context,
+                    "schema": {
+                        "focus_action": "use_existing|new_empty|keep_active",
+                        "focus_id": "required for use_existing",
+                        "new_title": "required for new_empty",
+                        "new_importance": "1..5",
+                        "reason": "short reason",
+                        "memory_context": "compact facts to pass into the model",
+                    },
                 },
-            },
-        )
-        if decision is None:
-            decision = self.fallback_decision(query, focus_candidates, wiki_context, vector_context, graph_context)
+            )
+            if decision is None:
+                decision = self.fallback_decision(query, focus_candidates, wiki_context, vector_context, graph_context)
 
-        self.apply_focus_decision(index, decision, conversation_id, turn_id)
-        memory_context = trim_text(decision.get("memory_context"), MAGOS_CONTEXT_CHARS)
-        if not memory_context:
+            focus_result = self.apply_focus_decision(index, decision, conversation_id, turn_id)
+            self.last_result = {
+                "turn_id": turn_id,
+                "action": decision.get("focus_action"),
+                "focus_id": focus_result.get("focus_id"),
+                "created_empty_focus": focus_result.get("created_empty_focus", False),
+                "reason": decision.get("reason"),
+                "memory_context_chars": len(decision.get("memory_context") or ""),
+            }
+            print(
+                "Magos decision: "
+                + json.dumps(self.last_result, ensure_ascii=False, sort_keys=True),
+                flush=True,
+            )
+
+            memory_context = trim_text(decision.get("memory_context"), MAGOS_CONTEXT_CHARS)
+            if not memory_context:
+                return None
+            return {
+                "role": "system",
+                "content": (
+                    "Magos memory context from ArchiveOfHeresy. "
+                    "Это предответная выжимка релевантных фактов из focus/wiki/vector/graph. "
+                    "Используй её только если она относится к текущему вопросу.\n\n"
+                    f"{memory_context}"
+                ),
+            }
+        except Exception as exc:
+            print(f"Magos fail-soft: {exc}", flush=True)
+            self.last_result = {"turn_id": turn_id, "error": str(exc), "created_empty_focus": False}
             return None
-        return {
-            "role": "system",
-            "content": (
-                "Magos memory context from ArchiveOfHeresy. "
-                "Это предответная выжимка релевантных фактов из focus/wiki/vector/graph. "
-                "Используй её только если она относится к текущему вопросу.\n\n"
-                f"{memory_context}"
-            ),
-        }
 
     def focus_candidates(self, index):
         candidates = []
@@ -188,7 +209,10 @@ class Magos:
 
         action = "keep_active"
         focus_id = ""
-        if best and best[0] >= 0.18:
+        if best and best[0] >= 0.34 and best[1].get("status") == "active":
+            action = "use_existing"
+            focus_id = best[1].get("id") or ""
+        elif best and best[0] >= 0.55:
             action = "use_existing"
             focus_id = best[1].get("id") or ""
         elif not any(item.get("status") == "active" for item in focus_candidates):
@@ -200,13 +224,14 @@ class Magos:
             "focus_id": focus_id,
             "new_title": safe_title(query),
             "new_importance": 3,
-            "reason": "fallback token-overlap focus routing",
+            "reason": f"fallback token-overlap focus routing; best_score={(best or [0])[0]:.3f}",
             "memory_context": trim_text("\n\n".join(memory_parts), MAGOS_CONTEXT_CHARS),
         }
 
     def apply_focus_decision(self, index, decision, conversation_id, turn_id):
         active = self.focus.active_focus(index)
         target = None
+        created_empty_focus = False
         if decision["focus_action"] == "use_existing":
             for focus in index.get("files", []):
                 if focus.get("id") == decision.get("focus_id"):
@@ -221,6 +246,7 @@ class Magos:
                 turn_id=turn_id,
                 reason=decision.get("reason"),
             )
+            created_empty_focus = True
 
         if target:
             if active and active.get("id") != target.get("id"):
@@ -228,6 +254,39 @@ class Magos:
             self.activate_focus(target)
             index["active_id"] = target.get("id")
             self.focus.enforce_limit(index)
+            self.focus.save_index(index)
+        return {"focus_id": target.get("id") if target else None, "created_empty_focus": created_empty_focus}
+
+    def abandon_created_focus(self, turn_id, reason):
+        index = self.focus.load_index()
+        changed = False
+        for focus in index.get("files", []):
+            if (
+                focus.get("created_by") == "magos"
+                and focus.get("needs_librarian_fill") == "true"
+                and focus.get("turn_id") == turn_id
+                and focus.get("status") == "active"
+            ):
+                focus["status"] = "paused"
+                focus["updated_at"] = now_iso()
+                path = self.focus.root / focus.get("path", "")
+                if path.exists():
+                    text = path.read_text(encoding="utf-8")
+                    text = re.sub(r"^status: .*$", "status: paused", text, count=1, flags=re.MULTILINE)
+                    text = re.sub(
+                        r"^updated_at: .*$",
+                        f"updated_at: {focus['updated_at']}",
+                        text,
+                        count=1,
+                        flags=re.MULTILINE,
+                    )
+                    text = text.rstrip() + f"\n\n## Magos Abandoned\n\n{trim_text(reason, 500)}\n"
+                    path.write_text(text, encoding="utf-8")
+                if index.get("active_id") == focus.get("id"):
+                    index["active_id"] = None
+                changed = True
+                print(f"Magos abandoned empty focus {focus.get('id')}: {reason}", flush=True)
+        if changed:
             self.focus.save_index(index)
 
     def activate_focus(self, focus):

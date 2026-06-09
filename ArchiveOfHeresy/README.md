@@ -64,6 +64,8 @@ The librarian sees those files after the answer and fills them with real post-an
 
 Magos may consult focus, wiki, vector, and graph memory to build a small `Magos memory context` message. This keeps raw vector/graph injection disabled while still allowing one controlled retrieval agent to pull useful facts when needed.
 
+Magos is fail-soft. If it fails, ArchiveOfHeresy continues the model request without Magos context. Magos decisions are logged to the Archive runtime log. If Magos created an empty focus and the main model request fails, ArchiveOfHeresy pauses that empty focus so it does not remain active without a real answer for the librarian to process.
+
 The librarian is also physically cut off from memory contents at the model level. Focus memory is exposed to it as books on a controlled bookshelf. The model only sees a catalog by default; when it needs book contents, it must request a tool such as `read_active_focus`, receive a tool result, and then finish with a structured action.
 
 Chat requests are queued with a single in-process lock:
