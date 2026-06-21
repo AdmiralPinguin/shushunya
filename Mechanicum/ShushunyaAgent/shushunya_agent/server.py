@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from .agent_runner import AgentConfig, archive_request, compact_resume_events, read_task_journal, run_agent, safe_task_id
 
@@ -188,32 +189,41 @@ class AgentHandler(BaseHTTPRequestHandler):
         print(f'{self.address_string()} - {fmt % args}', file=os.sys.stderr, flush=True)
 
     def do_GET(self) -> None:
-        if self.path == "/health":
+        parsed_path = urlparse(self.path)
+        if parsed_path.path == "/health":
             config = AgentConfig()
             try:
                 archive = archive_request(config, "GET", "/health", timeout=5)
-                write_json(self, 200, {"status": "ok", "service": "ShushunyaAgent", "archive": archive})
+                detail = (parse_qs(parsed_path.query).get("detail") or ["0"])[0] in {"1", "true", "yes"}
+                if detail and not authorized(self):
+                    write_json(self, 401, {"error": "unauthorized"})
+                    return
+                payload = {
+                    "status": "ok",
+                    "service": "ShushunyaAgent",
+                    "archive_status": archive.get("status", "unknown"),
+                }
+                if detail:
+                    payload["archive"] = archive
+                write_json(self, 200, payload)
             except Exception as exc:
                 write_json(self, 503, {"status": "error", "service": "ShushunyaAgent", "error": str(exc)})
             return
-        if self.path == "/tools":
+        if parsed_path.path == "/tools":
             schema_path = ROOT / "tool_schema.json"
             write_json(self, 200, json.loads(schema_path.read_text(encoding="utf-8")))
             return
-        if self.path == "/state":
+        if parsed_path.path == "/state":
             if not authorized(self):
                 write_json(self, 401, {"error": "unauthorized"})
                 return
             write_json(self, 200, {"ok": True, "service": "ShushunyaAgent", "state": runtime_state()})
             return
-        if self.path.startswith("/task-journal"):
-            from urllib.parse import parse_qs, urlparse
-
+        if parsed_path.path == "/task-journal":
             if not authorized(self):
                 write_json(self, 401, {"error": "unauthorized"})
                 return
-            parsed = urlparse(self.path)
-            params = parse_qs(parsed.query)
+            params = parse_qs(parsed_path.query)
             task_id = (params.get("task_id") or [""])[0].strip() or None
             limit = int_field({"limit": (params.get("limit") or [80])[0]}, "limit", 80, 1, 500)
             payload = read_task_journal(task_id, limit=limit)

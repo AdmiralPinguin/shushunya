@@ -139,6 +139,15 @@ def main() -> int:
     if "busy" not in state or state.get("max_request_bytes", 0) <= 0:
         raise AssertionError(f"runtime state missing expected fields: {state}")
     print("[ok] runtime state payload")
+    health_archive = {"status": "ok", "jsonl_root": "/private/archive/path"}
+    minimal_health = {
+        "status": "ok",
+        "service": "ShushunyaAgent",
+        "archive_status": health_archive.get("status", "unknown"),
+    }
+    if "archive" in minimal_health or "jsonl_root" in json.dumps(minimal_health):
+        raise AssertionError(f"minimal health leaked archive details: {minimal_health}")
+    print("[ok] minimal health shape")
     server.RUN_LOCK.acquire()
     try:
         busy_payload = server.reject_if_busy({"wait_for_slot": False})

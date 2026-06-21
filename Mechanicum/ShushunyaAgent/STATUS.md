@@ -13,6 +13,8 @@ Last verified: 2026-06-21 18:08 KST.
 
 - Archive health is `ok`.
 - Agent API health is `ok`.
+- Agent API `/health` is minimal by default; full Archive details require
+  `/health?detail=1`.
 - Archive health reports `default` and `agent` memory namespaces.
 - Agent namespace memory smoke run completed and wrote focus/vector/event data.
 - Sandbox hides `/media` and `/root`.
