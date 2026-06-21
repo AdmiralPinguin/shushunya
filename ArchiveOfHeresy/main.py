@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from archivist_agent import Librarian
-from archivist_agent.agent import FocusBookshelf
+from archivist_agent.agent import FocusBookshelf, WikiBookshelf
 from archivist_agent.graph_memory import GRAPH_TOP_K, GraphMemory
 from archivist_agent.magos_agent import Magos
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
@@ -188,6 +188,71 @@ def known_memory_namespaces():
     namespaces.update(existing_child_namespaces(WIKI_ROOT))
     namespaces.update(existing_child_namespaces(GRAPH_ROOT))
     return sorted(namespaces)
+
+
+def wiki_bookshelf_for_namespace(namespace):
+    return WikiBookshelf(wiki_root_for_namespace(namespace))
+
+
+def find_focus(index, focus_id=None, active=False):
+    target_id = index.get("active_id") if active else focus_id
+    for focus in index.get("files", []):
+        if focus.get("id") == target_id:
+            return focus
+    return None
+
+
+def vector_stats(memory_namespace):
+    if VECTOR_MEMORY is None or not VECTOR_MEMORY.db_path.exists():
+        return {"chunks": 0, "turns": 0}
+    with sqlite3.connect(VECTOR_MEMORY.db_path) as db:
+        row = db.execute(
+            """
+            SELECT count(*) AS chunks, count(DISTINCT turn_id) AS turns
+            FROM vector_chunks
+            WHERE memory_namespace = ?
+            """,
+            (memory_namespace,),
+        ).fetchone()
+    return {"chunks": int(row[0] or 0), "turns": int(row[1] or 0)}
+
+
+def graph_stats(memory_namespace):
+    graph_memory = graph_memory_for_namespace(memory_namespace)
+    if graph_memory is None or not graph_memory.db_path.exists():
+        return {"nodes": 0, "edges": 0}
+    with sqlite3.connect(graph_memory.db_path) as db:
+        nodes = int(db.execute("SELECT count(*) FROM graph_nodes").fetchone()[0] or 0)
+        edges = int(db.execute("SELECT count(*) FROM graph_edges").fetchone()[0] or 0)
+    return {"nodes": nodes, "edges": edges}
+
+
+def memory_catalog(memory_namespace):
+    namespace = safe_memory_namespace(memory_namespace)
+    bookshelf = focus_components(namespace)["bookshelf"]
+    focus_index = bookshelf.load_index()
+    wiki_bookshelf = wiki_bookshelf_for_namespace(namespace)
+    wiki_index = wiki_bookshelf.load_index()
+    return {
+        "memory_namespace": namespace,
+        "gateway": {
+            "read_endpoints": [
+                "/archive/memory/catalog",
+                "/archive/memory/focus",
+                "/archive/memory/wiki",
+                "/archive/vector/search",
+                "/archive/graph/search",
+                "/archive/memory/events",
+            ],
+            "write_endpoint": "/archive/memory/propose-change",
+            "write_policy": "Agents propose changes; ArchiveOfHeresy records the proposal and the librarian decides how to update memory.",
+        },
+        "focus": bookshelf.catalog(focus_index),
+        "wiki": wiki_bookshelf.catalog(wiki_index),
+        "vector": vector_stats(namespace),
+        "graph": graph_stats(namespace),
+        "recent_events": recent_memory_events(limit=5, memory_namespace=namespace),
+    }
 
 
 def graph_memory_for_namespace(namespace):
@@ -735,6 +800,70 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if self.path.startswith("/archive/memory/catalog"):
+            namespace = "default"
+            if "?" in self.path:
+                params = parse_qs(urlsplit(self.path).query)
+                namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
+            write_json(self, 200, memory_catalog(namespace))
+            return
+
+        if self.path.startswith("/archive/memory/focus"):
+            namespace = "default"
+            focus_id = ""
+            active = False
+            if "?" in self.path:
+                params = parse_qs(urlsplit(self.path).query)
+                namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
+                focus_id = (params.get("id") or [""])[0]
+                active = focus_id in ("", "active")
+            bookshelf = focus_components(namespace)["bookshelf"]
+            index = bookshelf.load_index()
+            focus = find_focus(index, focus_id=focus_id, active=active)
+            if not focus:
+                write_json(self, 404, {"error": "Focus not found", "memory_namespace": namespace, "id": focus_id or "active"})
+                return
+            write_json(
+                self,
+                200,
+                {
+                    "memory_namespace": namespace,
+                    "focus": focus,
+                    "content": bookshelf.read_focus(focus),
+                },
+            )
+            return
+
+        if self.path.startswith("/archive/memory/wiki"):
+            namespace = "default"
+            page_id = ""
+            title = ""
+            if "?" in self.path:
+                params = parse_qs(urlsplit(self.path).query)
+                namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
+                page_id = (params.get("id") or [""])[0]
+                title = (params.get("title") or [""])[0]
+            bookshelf = wiki_bookshelf_for_namespace(namespace)
+            index = bookshelf.load_index()
+            page = bookshelf.find_page(index, page_id=page_id or None, title=title or None)
+            if not page:
+                write_json(
+                    self,
+                    404,
+                    {"error": "Wiki page not found", "memory_namespace": namespace, "id": page_id, "title": title},
+                )
+                return
+            write_json(
+                self,
+                200,
+                {
+                    "memory_namespace": namespace,
+                    "page": page,
+                    "content": bookshelf.read_page(page),
+                },
+            )
+            return
+
         if self.path == "/v1/models":
             self.forward("GET", self.path)
             return
@@ -749,7 +878,111 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             self.chat_completion()
             return
 
+        if self.path == "/archive/memory/propose-change":
+            self.memory_propose_change()
+            return
+
         write_json(self, 404, {"error": "Not found"})
+
+    def memory_propose_change(self):
+        with CHAT_QUEUE_LOCK:
+            created_at = now_iso()
+            turn_id = str(uuid.uuid4())
+            try:
+                payload = read_json(self)
+            except json.JSONDecodeError as exc:
+                write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
+                return
+
+            namespace = safe_memory_namespace(payload.get("namespace") or payload.get("memory_namespace") or "default")
+            requester = str(payload.get("requester") or "memory-gateway").strip()[:80] or "memory-gateway"
+            proposal = str(payload.get("proposal") or "").strip()
+            if not proposal:
+                write_json(self, 400, {"error": "Missing required field: proposal", "memory_namespace": namespace})
+                return
+
+            target = str(payload.get("target") or "auto").strip().lower()[:40] or "auto"
+            evidence = str(payload.get("evidence") or "").strip()
+            importance = payload.get("importance", 3)
+            try:
+                importance = max(1, min(5, int(importance)))
+            except (TypeError, ValueError):
+                importance = 3
+
+            proposal_payload = {
+                "type": "memory_change_proposal",
+                "requester": requester,
+                "memory_namespace": namespace,
+                "target": target,
+                "importance": importance,
+                "proposal": proposal,
+                "evidence": evidence,
+                "instruction": (
+                    "This is a proposed memory update from an agent through Memory Gateway. "
+                    "Do not apply it blindly. Evaluate it as a normal archived turn and let the librarian decide "
+                    "what belongs in focus, wiki, vector, and graph memory."
+                ),
+            }
+            request_payload = {
+                "user": f"memory-gateway:{requester}",
+                "memory_namespace": namespace,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": json.dumps(proposal_payload, ensure_ascii=False, indent=2),
+                    }
+                ],
+            }
+            assistant_text = (
+                "Memory Gateway accepted the proposal for ArchiveOfHeresy librarian review. "
+                "The requester does not receive direct write access to memory files."
+            )
+            response = {
+                "object": "archive.memory.proposal",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "accepted",
+                        "message": {"role": "assistant", "content": assistant_text},
+                    }
+                ],
+            }
+            record = {
+                "turn_id": turn_id,
+                "created_at": created_at,
+                "source": "memory-gateway-proposal",
+                "conversation_id": f"memory-gateway:{requester}",
+                "memory_namespace": namespace,
+                "archive_enabled": True,
+                "focus_enabled": True,
+                "vector_enabled": True,
+                "graph_enabled": True,
+                "magos_enabled": False,
+                "magos_result": None,
+                "model": "archive-memory-gateway",
+                "request": request_payload,
+                "prepared_messages": request_payload["messages"],
+                "status": "ok",
+                "http_status": 202,
+                "response": response,
+                "assistant_message": {"role": "assistant", "content": assistant_text},
+                "error": None,
+            }
+
+            maybe_write_archives(record)
+            maybe_update_focus_memory(record)
+            write_json(
+                self,
+                202,
+                {
+                    "ok": True,
+                    "turn_id": turn_id,
+                    "memory_namespace": namespace,
+                    "requester": requester,
+                    "target": target,
+                    "message": "Proposal queued through ArchiveOfHeresy librarian cycle.",
+                },
+            )
 
     def chat_completion(self):
         with CHAT_QUEUE_LOCK:
