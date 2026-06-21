@@ -15,6 +15,7 @@ from urllib.error import HTTPError
 from . import agent_runner
 from . import server
 from . import task_journal
+from . import web_tools
 from .agent_runner import (
     AgentConfig,
     archive_memory_gateway,
@@ -121,9 +122,9 @@ def main() -> int:
     except ValueError:
         print("[ok] validate_public_url blocks credentials")
 
-    old_searxng_url = agent_runner.SEARXNG_URL
+    old_searxng_url = web_tools.SEARXNG_URL
     try:
-        agent_runner.SEARXNG_URL = "http://127.0.0.1:8888"
+        web_tools.SEARXNG_URL = "http://127.0.0.1:8888"
         validate_configured_searxng_url("http://127.0.0.1:8888/search?q=test&format=json")
         print("[ok] configured SearXNG localhost URL allowed")
         try:
@@ -132,7 +133,7 @@ def main() -> int:
         except ValueError:
             print("[ok] configured SearXNG scheme mismatch blocked")
     finally:
-        agent_runner.SEARXNG_URL = old_searxng_url
+        web_tools.SEARXNG_URL = old_searxng_url
 
     try:
         web_fetch(config, "http://127.0.0.1:8888/search?q=test&format=json")
@@ -149,11 +150,11 @@ def main() -> int:
         raise AssertionError(f"web_fetch charset fallback failed: text={decoded_text}, encoding={decoded_encoding}")
     print("[ok] web_fetch charset fallback")
 
-    old_provider_env = agent_runner.SEARCH_PROVIDERS
-    old_brave_key = agent_runner.BRAVE_SEARCH_API_KEY
+    old_provider_env = web_tools.SEARCH_PROVIDERS
+    old_brave_key = web_tools.BRAVE_SEARCH_API_KEY
     try:
-        agent_runner.SEARCH_PROVIDERS = "searxng,marginalia,wikipedia"
-        agent_runner.BRAVE_SEARCH_API_KEY = "fake-key-must-not-be-called"
+        web_tools.SEARCH_PROVIDERS = "searxng,marginalia,wikipedia"
+        web_tools.BRAVE_SEARCH_API_KEY = "fake-key-must-not-be-called"
         calls: list[str] = []
 
         def fake_provider(name: str, ok: bool = False):
@@ -162,16 +163,16 @@ def main() -> int:
                 return {"ok": ok, "provider": name, "results": [], "truncated": False}
             return _provider
 
-        with mock.patch.object(agent_runner, "web_search_searxng", fake_provider("searxng")), \
-                mock.patch.object(agent_runner, "web_search_marginalia", fake_provider("marginalia")), \
-                mock.patch.object(agent_runner, "web_search_wikipedia", fake_provider("wikipedia")):
+        with mock.patch.object(web_tools, "web_search_searxng", fake_provider("searxng")), \
+                mock.patch.object(web_tools, "web_search_marginalia", fake_provider("marginalia")), \
+                mock.patch.object(web_tools, "web_search_wikipedia", fake_provider("wikipedia")):
             result = web_search(config, "provider-order-test", 3)
         if calls != ["searxng", "marginalia", "wikipedia"] or "brave" in calls:
             raise AssertionError(f"unexpected provider calls with brave disabled: {calls}, result={result}")
         print("[ok] brave not called when absent from SHUSHUNYA_AGENT_SEARCH_PROVIDERS")
     finally:
-        agent_runner.SEARCH_PROVIDERS = old_provider_env
-        agent_runner.BRAVE_SEARCH_API_KEY = old_brave_key
+        web_tools.SEARCH_PROVIDERS = old_provider_env
+        web_tools.BRAVE_SEARCH_API_KEY = old_brave_key
 
     large_result = {"ok": True, "content": "x" * 50000, "size": 50000}
     compacted_result = result_for_model("read_file", large_result, config)

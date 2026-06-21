@@ -74,6 +74,8 @@ Last verified: 2026-06-21 23:01 KST.
   out-of-range numeric limits before dispatch.
 - Shared truncation/JSON compaction helpers and task journal code live outside
   the runner module while preserving the public runner imports used by the API.
+- Web fetch/search providers and URL safety checks live in a dedicated web tools
+  module while preserving public runner imports for integrations.
 - Agent runs have a total runtime limit through `max_runtime_sec` /
   `SHUSHUNYA_AGENT_MAX_RUNTIME_SEC`.
 - `GET /task-journal?task_id=...` can inspect recent journal events, and

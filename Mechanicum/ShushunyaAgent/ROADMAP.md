@@ -26,6 +26,8 @@
   sandbox path shape, and bounded numeric fields.
 - Shared truncation/JSON compaction helpers and task journal code split out of
   the runner module.
+- Web fetch/search providers and URL safety checks split out of the runner
+  module.
 - Repeated identical action guard.
 - JSON output mode for integration.
 - Streaming progress events with task id and duration metadata.
