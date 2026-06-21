@@ -226,6 +226,22 @@ def validate_public_url(raw_url: str) -> str:
     return raw_url
 
 
+def validate_configured_searxng_url(raw_url: str) -> str:
+    parsed = urlparse(str(raw_url).strip())
+    configured = urlparse(SEARXNG_URL)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("only http and https URLs are allowed")
+    if not parsed.hostname or not configured.hostname:
+        raise ValueError("SearXNG hostname is required")
+    if parsed.hostname != configured.hostname:
+        raise ValueError("SearXNG request host does not match configured host")
+    if (parsed.port or (443 if parsed.scheme == "https" else 80)) != (
+        configured.port or (443 if configured.scheme == "https" else 80)
+    ):
+        raise ValueError("SearXNG request port does not match configured port")
+    return raw_url
+
+
 class SafeRedirectHandler(HTTPRedirectHandler):
     def redirect_request(self, req: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Request | None:
         validate_public_url(newurl)
@@ -372,7 +388,7 @@ def web_search_searxng(query: str, limit: int) -> dict[str, Any]:
     if not SEARXNG_URL:
         return {"ok": False, "provider": "searxng", "error": "SEARXNG_URL is not configured"}
     url = SEARXNG_URL + "/search?" + urlencode({"q": query, "format": "json", "language": "auto"})
-    validate_public_url(url)
+    validate_configured_searxng_url(url)
     request = Request(url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "application/json"})
     with build_opener(SafeRedirectHandler).open(request, timeout=25) as response:
         data, truncated = read_limited_response(response, 600000)

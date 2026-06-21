@@ -1,0 +1,6 @@
+bootstrap/
+config/settings.yml
+python-userbase/
+runtime/
+searxng-src/
+venv/

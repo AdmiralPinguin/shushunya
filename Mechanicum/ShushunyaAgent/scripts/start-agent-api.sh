@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="$ROOT/runtime"
 PID_FILE="$RUNTIME_DIR/agent-api.pid"
 LOG_FILE="$RUNTIME_DIR/agent-api.log"
+PYTHON="$ROOT/ShushunyaAgent/bin/python"
 
 if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   echo "ShushunyaAgent API is already running with PID $(cat "$PID_FILE")"
@@ -14,7 +15,14 @@ fi
 mkdir -p "$RUNTIME_DIR"
 cd "$ROOT"
 
-setsid python3 -m shushunya_agent.server >"$LOG_FILE" 2>&1 </dev/null &
+if [[ ! -x "$PYTHON" ]]; then
+  echo "Missing agent Python environment: $PYTHON" >&2
+  echo "Create it at $ROOT/ShushunyaAgent before starting the API." >&2
+  exit 1
+fi
+
+export SHUSHUNYA_AGENT_SEARXNG_URL="${SHUSHUNYA_AGENT_SEARXNG_URL:-http://127.0.0.1:8888}"
+setsid "$PYTHON" -m shushunya_agent.server >"$LOG_FILE" 2>&1 </dev/null &
 echo "$!" > "$PID_FILE"
 
 echo "ShushunyaAgent API started: PID $(cat "$PID_FILE"), http://${SHUSHUNYA_AGENT_HOST:-127.0.0.1}:${SHUSHUNYA_AGENT_PORT:-8095}"

@@ -9,6 +9,9 @@ cd "$PROJECT_ROOT/CoreOfMadness"
 cd "$PROJECT_ROOT/ArchiveOfHeresy"
 ./start-main.sh
 
+cd "$PROJECT_ROOT/Mechanicum/SearXNG"
+./scripts/start-searxng.sh
+
 cd "$PROJECT_ROOT/Mechanicum/ShushunyaAgent"
 ./scripts/start-agent-api.sh
 ./scripts/check-agent.sh

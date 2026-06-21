@@ -6,6 +6,9 @@ PROJECT_ROOT="/media/shushunya/SHUSHUNYA/shushunya"
 cd "$PROJECT_ROOT/Mechanicum/ShushunyaAgent"
 ./scripts/stop-agent-api.sh
 
+cd "$PROJECT_ROOT/Mechanicum/SearXNG"
+./scripts/stop-searxng.sh
+
 cd "$PROJECT_ROOT/ArchiveOfHeresy"
 ./stop-main.sh
 
