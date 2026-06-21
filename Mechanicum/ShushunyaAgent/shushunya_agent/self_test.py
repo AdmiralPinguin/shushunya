@@ -209,8 +209,38 @@ def main() -> int:
             return self.authorization if key == "Authorization" else default
 
     class FakeHandler:
-        def __init__(self, authorization: str = "") -> None:
+        def __init__(self, authorization: str = "", body: bytes = b"") -> None:
             self.headers = FakeHeaders(authorization)
+            self.rfile = io.BytesIO(body)
+            if body:
+                self.headers.content_length = str(len(body))
+
+    class FakeJsonHeaders(FakeHeaders):
+        def __init__(self, body: bytes) -> None:
+            super().__init__("")
+            self.body = body
+
+        def get(self, key: str, default: str = "") -> str:
+            if key == "Content-Length":
+                return str(len(self.body))
+            return super().get(key, default)
+
+    class FakeJsonHandler:
+        def __init__(self, body: bytes) -> None:
+            self.headers = FakeJsonHeaders(body)
+            self.rfile = io.BytesIO(body)
+
+    if server.read_json(FakeJsonHandler(b"")) != {}:
+        raise AssertionError("empty JSON request body should parse as an empty object")
+    if server.read_json(FakeJsonHandler(b'{"task":"ok"}')).get("task") != "ok":
+        raise AssertionError("JSON object request body did not parse")
+    try:
+        server.read_json(FakeJsonHandler(b'["not", "object"]'))
+        raise AssertionError("JSON array request body should be rejected")
+    except server.RequestError as exc:
+        if exc.status != 400:
+            raise AssertionError(f"JSON array request body returned wrong status: {exc.status}")
+    print("[ok] HTTP JSON body must be an object")
 
     old_api_key = server.API_KEY
     try:

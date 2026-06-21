@@ -88,9 +88,12 @@ def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
         )
     raw = handler.rfile.read(length)
     try:
-        return json.loads(raw.decode("utf-8"))
+        payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RequestError(400, {"ok": False, "error": "invalid JSON body", "detail": str(exc)}) from exc
+    if not isinstance(payload, dict):
+        raise RequestError(400, {"ok": False, "error": "JSON body must be an object"})
+    return payload
 
 
 def authorized(handler: BaseHTTPRequestHandler) -> bool:
