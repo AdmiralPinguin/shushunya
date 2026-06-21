@@ -316,6 +316,12 @@ Run the local self-test:
 ./scripts/self-test.sh
 ```
 
+Run the self-test without touching ArchiveOfHeresy:
+
+```bash
+SHUSHUNYA_AGENT_SELF_TEST_OFFLINE=1 ./scripts/self-test.sh
+```
+
 Check the whole stack:
 
 ```bash
@@ -324,6 +330,21 @@ Check the whole stack:
 
 The stack check verifies LLM host, ArchiveOfHeresy, local SearXNG, Agent API,
 and the agent self-test.
+
+When ArchiveOfHeresy is being changed, use the offline check instead:
+
+```bash
+./scripts/check-agent-offline.sh
+```
+
+The offline check uses `/state` instead of `/health`, skips Archive integration
+tests, and still verifies sandbox, file tools, web URL guards, queue guards, and
+model JSON handling. To start the API without using Archive-backed `/health` as
+the readiness probe, set:
+
+```bash
+SHUSHUNYA_AGENT_START_CHECK_PATH=/state ./scripts/start-agent-api.sh
+```
 
 Stop the model host and archive gateway:
 

@@ -7,13 +7,18 @@ PID_FILE="$RUNTIME_DIR/agent-api.pid"
 LOG_FILE="$RUNTIME_DIR/agent-api.log"
 PYTHON="$ROOT/ShushunyaAgent/bin/python"
 BASE_URL="http://${SHUSHUNYA_AGENT_HOST:-127.0.0.1}:${SHUSHUNYA_AGENT_PORT:-8095}"
+HEALTH_PATH="${SHUSHUNYA_AGENT_START_CHECK_PATH:-/health}"
+AUTH_ARGS=()
+if [[ -n "${SHUSHUNYA_AGENT_API_KEY:-}" ]]; then
+  AUTH_ARGS=(-H "Authorization: Bearer $SHUSHUNYA_AGENT_API_KEY")
+fi
 
 if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   echo "ShushunyaAgent API is already running with PID $(cat "$PID_FILE")"
-  if curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
+  if curl -fsS "${AUTH_ARGS[@]}" "$BASE_URL$HEALTH_PATH" >/dev/null 2>&1; then
     exit 0
   fi
-  echo "Existing ShushunyaAgent API PID is alive but health check failed: $BASE_URL/health" >&2
+  echo "Existing ShushunyaAgent API PID is alive but health check failed: $BASE_URL$HEALTH_PATH" >&2
   exit 1
 fi
 
@@ -35,7 +40,7 @@ echo "ShushunyaAgent API started: PID $(cat "$PID_FILE"), $BASE_URL"
 echo "Log: $LOG_FILE"
 
 for _ in {1..30}; do
-  if curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
+  if curl -fsS "${AUTH_ARGS[@]}" "$BASE_URL$HEALTH_PATH" >/dev/null 2>&1; then
     exit 0
   fi
   sleep 0.2

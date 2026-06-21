@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -52,6 +53,9 @@ def assert_ok(label: str, payload: dict) -> None:
 
 def main() -> int:
     config = AgentConfig()
+    offline = os.environ.get("SHUSHUNYA_AGENT_SELF_TEST_OFFLINE", "").strip().lower() in {"1", "true", "yes", "on"}
+    if offline:
+        print("[ok] offline self-test mode: Archive integration checks skipped")
     test_journal_tmp = tempfile.TemporaryDirectory()
     agent_runner.TASK_JOURNAL_DIR = Path(test_journal_tmp.name)
     if "runtime/task-journals" in str(agent_runner.TASK_JOURNAL_DIR):
@@ -532,79 +536,82 @@ def main() -> int:
         raise AssertionError(f"tool exception was not fail-soft: code={tool_error_code}, payload={tool_error_payload}, events={tool_error_events}")
     print("[ok] tool exception fail-soft")
 
-    health = archive_request(config, "GET", "/health", timeout=10)
-    if health.get("status") != "ok":
-        raise AssertionError(f"Archive health failed: {health}")
-    print("[ok] archive health")
-    assert_ok("archive status tool", archive_status(config))
-    memory_events = archive_memory_events(config, limit=1)
-    assert_ok("archive memory events tool", memory_events)
-    if memory_events.get("memory_namespace") != config.memory_namespace:
-        raise AssertionError(f"unexpected memory namespace in events response: {memory_events}")
-    print("[ok] archive memory events namespace")
-    gateway_events = archive_memory_events(config, limit=5, component="memory_gateway", requester="shushunya-agent")
-    assert_ok("archive memory events component filter", gateway_events)
-    if gateway_events.get("component") != "memory_gateway" or gateway_events.get("requester") != "shushunya-agent":
-        raise AssertionError(f"unexpected component filter in events response: {gateway_events}")
-    manifest = archive_memory_gateway(config)
-    assert_ok("archive memory gateway manifest tool", manifest)
-    if manifest.get("service") != "ArchiveOfHeresy Memory Gateway" or manifest.get("version") != 1:
-        raise AssertionError(f"unexpected memory gateway manifest: {manifest}")
-    if "magos_context_layers" not in manifest:
-        raise AssertionError(f"memory gateway manifest missing magos_context_layers: {manifest}")
-    print("[ok] archive memory gateway manifest")
-    catalog = archive_memory_catalog(config)
-    assert_ok("archive memory catalog tool", catalog)
-    if catalog.get("memory_namespace") != config.memory_namespace:
-        raise AssertionError(f"unexpected memory namespace in catalog response: {catalog}")
-    print("[ok] archive memory catalog namespace")
-    memory_search = archive_memory_search(config, "agent memory", limit=2)
-    assert_ok("archive memory search tool", memory_search)
-    if memory_search.get("memory_namespace") != config.memory_namespace:
-        raise AssertionError(f"unexpected memory namespace in memory search response: {memory_search}")
-    counts = memory_search.get("counts")
-    if not isinstance(counts, dict) or "focus" not in counts or "vector" not in counts:
-        raise AssertionError(f"archive memory search missing counts: {memory_search}")
-    if memory_search.get("include_content") is not False:
-        raise AssertionError(f"archive memory search should be compact by default: {memory_search}")
-    for match in memory_search.get("vector", []) or []:
-        if "content" in match:
-            raise AssertionError(f"compact archive memory search leaked raw vector content: {memory_search}")
-    print("[ok] archive memory search namespace")
-    focus_only_search = archive_memory_search(config, "agent memory", limit=2, layers="focus")
-    assert_ok("archive memory focus-only search tool", focus_only_search)
-    if focus_only_search.get("layers") != ["focus"]:
-        raise AssertionError(f"archive memory focus-only search did not preserve layers: {focus_only_search}")
-    focus_only_counts = focus_only_search.get("counts") or {}
-    if focus_only_counts.get("vector") != 0 or focus_only_counts.get("graph_nodes") != 0:
-        raise AssertionError(f"archive memory focus-only search leaked lower layers: {focus_only_search}")
-    print("[ok] archive memory search layers")
-    focus_read = archive_memory_read(config, "focus", "active", max_chars=1000)
-    assert_ok("archive memory focus read tool", focus_read)
-    if focus_read.get("memory_namespace") != config.memory_namespace:
-        raise AssertionError(f"unexpected memory namespace in focus read response: {focus_read}")
-    if focus_read.get("max_chars") != 1000 or "content_chars" not in focus_read:
-        raise AssertionError(f"focus read did not include size metadata: {focus_read}")
-    print("[ok] archive memory focus read namespace")
-    missing_wiki = archive_memory_read(config, "wiki", title="__agent_self_test_missing__")
-    if missing_wiki.get("ok") is not False or missing_wiki.get("http_status") != 404:
-        raise AssertionError(f"missing wiki should be a fail-soft tool result: {missing_wiki}")
-    print("[ok] archive memory missing wiki fail-soft")
-    with mock.patch.object(
-        agent_runner,
-        "archive_request",
-        return_value={"ok": True, "turn_id": "mock-turn", "memory_namespace": config.memory_namespace},
-    ) as mocked_archive:
-        proposal = archive_memory_propose(config, {"proposal": "self-test proposal", "target": "focus", "importance": 2})
-    assert_ok("archive memory proposal tool", proposal)
-    called_payload = mocked_archive.call_args.kwargs["payload"]
-    if called_payload.get("namespace") != config.memory_namespace or called_payload.get("proposal") != "self-test proposal":
-        raise AssertionError(f"unexpected proposal payload: {called_payload}")
-    print("[ok] archive memory proposal payload")
-    bad_proposal = archive_memory_propose(config, {"proposal": "bad target self-test", "target": "focuz"})
-    if bad_proposal.get("ok") is not False or bad_proposal.get("http_status") != 400:
-        raise AssertionError(f"bad proposal should be a fail-soft tool result: {bad_proposal}")
-    print("[ok] archive memory bad proposal fail-soft")
+    if offline:
+        print("[skip] archive integration")
+    else:
+        health = archive_request(config, "GET", "/health", timeout=10)
+        if health.get("status") != "ok":
+            raise AssertionError(f"Archive health failed: {health}")
+        print("[ok] archive health")
+        assert_ok("archive status tool", archive_status(config))
+        memory_events = archive_memory_events(config, limit=1)
+        assert_ok("archive memory events tool", memory_events)
+        if memory_events.get("memory_namespace") != config.memory_namespace:
+            raise AssertionError(f"unexpected memory namespace in events response: {memory_events}")
+        print("[ok] archive memory events namespace")
+        gateway_events = archive_memory_events(config, limit=5, component="memory_gateway", requester="shushunya-agent")
+        assert_ok("archive memory events component filter", gateway_events)
+        if gateway_events.get("component") != "memory_gateway" or gateway_events.get("requester") != "shushunya-agent":
+            raise AssertionError(f"unexpected component filter in events response: {gateway_events}")
+        manifest = archive_memory_gateway(config)
+        assert_ok("archive memory gateway manifest tool", manifest)
+        if manifest.get("service") != "ArchiveOfHeresy Memory Gateway" or manifest.get("version") != 1:
+            raise AssertionError(f"unexpected memory gateway manifest: {manifest}")
+        if "magos_context_layers" not in manifest:
+            raise AssertionError(f"memory gateway manifest missing magos_context_layers: {manifest}")
+        print("[ok] archive memory gateway manifest")
+        catalog = archive_memory_catalog(config)
+        assert_ok("archive memory catalog tool", catalog)
+        if catalog.get("memory_namespace") != config.memory_namespace:
+            raise AssertionError(f"unexpected memory namespace in catalog response: {catalog}")
+        print("[ok] archive memory catalog namespace")
+        memory_search = archive_memory_search(config, "agent memory", limit=2)
+        assert_ok("archive memory search tool", memory_search)
+        if memory_search.get("memory_namespace") != config.memory_namespace:
+            raise AssertionError(f"unexpected memory namespace in memory search response: {memory_search}")
+        counts = memory_search.get("counts")
+        if not isinstance(counts, dict) or "focus" not in counts or "vector" not in counts:
+            raise AssertionError(f"archive memory search missing counts: {memory_search}")
+        if memory_search.get("include_content") is not False:
+            raise AssertionError(f"archive memory search should be compact by default: {memory_search}")
+        for match in memory_search.get("vector", []) or []:
+            if "content" in match:
+                raise AssertionError(f"compact archive memory search leaked raw vector content: {memory_search}")
+        print("[ok] archive memory search namespace")
+        focus_only_search = archive_memory_search(config, "agent memory", limit=2, layers="focus")
+        assert_ok("archive memory focus-only search tool", focus_only_search)
+        if focus_only_search.get("layers") != ["focus"]:
+            raise AssertionError(f"archive memory focus-only search did not preserve layers: {focus_only_search}")
+        focus_only_counts = focus_only_search.get("counts") or {}
+        if focus_only_counts.get("vector") != 0 or focus_only_counts.get("graph_nodes") != 0:
+            raise AssertionError(f"archive memory focus-only search leaked lower layers: {focus_only_search}")
+        print("[ok] archive memory search layers")
+        focus_read = archive_memory_read(config, "focus", "active", max_chars=1000)
+        assert_ok("archive memory focus read tool", focus_read)
+        if focus_read.get("memory_namespace") != config.memory_namespace:
+            raise AssertionError(f"unexpected memory namespace in focus read response: {focus_read}")
+        if focus_read.get("max_chars") != 1000 or "content_chars" not in focus_read:
+            raise AssertionError(f"focus read did not include size metadata: {focus_read}")
+        print("[ok] archive memory focus read namespace")
+        missing_wiki = archive_memory_read(config, "wiki", title="__agent_self_test_missing__")
+        if missing_wiki.get("ok") is not False or missing_wiki.get("http_status") != 404:
+            raise AssertionError(f"missing wiki should be a fail-soft tool result: {missing_wiki}")
+        print("[ok] archive memory missing wiki fail-soft")
+        with mock.patch.object(
+            agent_runner,
+            "archive_request",
+            return_value={"ok": True, "turn_id": "mock-turn", "memory_namespace": config.memory_namespace},
+        ) as mocked_archive:
+            proposal = archive_memory_propose(config, {"proposal": "self-test proposal", "target": "focus", "importance": 2})
+        assert_ok("archive memory proposal tool", proposal)
+        called_payload = mocked_archive.call_args.kwargs["payload"]
+        if called_payload.get("namespace") != config.memory_namespace or called_payload.get("proposal") != "self-test proposal":
+            raise AssertionError(f"unexpected proposal payload: {called_payload}")
+        print("[ok] archive memory proposal payload")
+        bad_proposal = archive_memory_propose(config, {"proposal": "bad target self-test", "target": "focuz"})
+        if bad_proposal.get("ok") is not False or bad_proposal.get("http_status") != 400:
+            raise AssertionError(f"bad proposal should be a fail-soft tool result: {bad_proposal}")
+        print("[ok] archive memory bad proposal fail-soft")
 
     status = sandbox_status(config)
     assert_ok("sandbox status", status)

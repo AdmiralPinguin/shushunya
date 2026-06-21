@@ -30,6 +30,8 @@
 - Bounded run queue with `SHUSHUNYA_AGENT_MAX_QUEUE`.
 - API request guards reject invalid or non-object JSON with `400`.
 - `/run-stream` returns queue overflow as HTTP `429` before opening NDJSON.
+- Offline self-test and check scripts can validate local agent hardening without
+  touching ArchiveOfHeresy.
 - Privileged task journal and resume access behind API-key bearer auth.
 - Self-test covering Archive, sandbox paths, file tools, Python, and network isolation.
 - Android agent mode calls `/run-stream`, uses the `agent` memory namespace, and

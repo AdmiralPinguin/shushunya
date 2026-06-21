@@ -278,6 +278,14 @@
     "http_task_memory_field": "task_memory",
     "default_max_model_tokens": 1024
   },
+  "test_policy": {
+    "offline_self_test_env": "SHUSHUNYA_AGENT_SELF_TEST_OFFLINE",
+    "offline_check_script": "scripts/check-agent-offline.sh",
+    "offline_start_check_path_env": "SHUSHUNYA_AGENT_START_CHECK_PATH",
+    "offline_start_check_path": "/state",
+    "offline_mode_skips": ["ArchiveOfHeresy health", "Archive memory gateway integration"],
+    "offline_mode_checks": ["API /state", "sandbox", "file tools", "web URL guards", "queue guards", "model JSON handling"]
+  },
   "web_policy": {
     "tools": ["web_search", "web_fetch"],
     "search_provider_chain": ["searxng", "marginalia_public", "wikipedia_opensearch", "brave_api"],

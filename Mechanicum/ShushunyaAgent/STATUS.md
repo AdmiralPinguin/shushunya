@@ -16,10 +16,14 @@ Last verified: 2026-06-21 21:36 KST.
 - Agent API health is `ok`.
 - `scripts/check-agent.sh` verifies local SearXNG in addition to LLM, Archive,
   Agent API, and self-test.
+- `scripts/check-agent-offline.sh` verifies Agent API `/state` plus offline
+  self-test without touching ArchiveOfHeresy.
 - `scripts/start-agent-tunnel.sh` fails fast if the configured `cloudflared`
   executable is missing.
 - `scripts/start-agent-api.sh` verifies `/health` when a PID file already points
   at a running process.
+- `scripts/start-agent-api.sh` can use `SHUSHUNYA_AGENT_START_CHECK_PATH=/state`
+  when Archive-backed `/health` must be avoided.
 - Agent API `/health` is minimal by default; full Archive details through
   `/health?detail=1` require a configured API key and bearer auth.
 - Archive health reports `default` and `agent` memory namespaces.
