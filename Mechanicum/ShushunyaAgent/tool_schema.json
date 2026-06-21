@@ -21,6 +21,13 @@
         "action": "archive_status"
       }
     },
+    "archive_memory_events": {
+      "required": ["action"],
+      "properties": {
+        "action": "archive_memory_events",
+        "limit": "integer"
+      }
+    },
     "archive_search": {
       "required": ["action", "kind", "query"],
       "properties": {

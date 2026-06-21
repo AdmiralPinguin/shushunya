@@ -116,11 +116,14 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 6. Проверить статус ArchiveOfHeresy без чтения памяти:
 {"action":"archive_status"}
 
-7. Искать и читать публичный интернет через supervisor:
+7. Посмотреть последние события обслуживания памяти текущего agent namespace:
+{"action":"archive_memory_events","limit":20}
+
+8. Искать и читать публичный интернет через supervisor:
 {"action":"web_search","query":"поисковый запрос","limit":5}
 {"action":"web_fetch","url":"https://example.com/page","max_bytes":200000}
 
-8. Завершить задачу:
+9. Завершить задачу:
 {"action":"final","message":"короткий итог для пользователя"}
 
 Правила:
@@ -1140,6 +1143,21 @@ def archive_status(config: AgentConfig) -> dict[str, Any]:
     return {"ok": payload.get("status") == "ok", **payload}
 
 
+def archive_memory_events(config: AgentConfig, limit: int | None = None) -> dict[str, Any]:
+    try:
+        safe_limit = max(1, min(int(limit or 20), 100))
+    except (TypeError, ValueError):
+        safe_limit = 20
+    payload = archive_request(
+        config,
+        "GET",
+        f"/archive/memory/events?namespace={quote(config.memory_namespace)}&limit={safe_limit}",
+        timeout=30,
+    )
+    payload["ok"] = True
+    return payload
+
+
 def action_fingerprint(action: dict[str, Any]) -> str:
     normalized = {key: value for key, value in action.items() if key not in {"reason"}}
     return json.dumps(normalized, ensure_ascii=False, sort_keys=True)
@@ -1198,6 +1216,9 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
         return str(result.get("status") or result.get("ok"))
     if action_type == "archive_search":
         return "archive context received"
+    if action_type == "archive_memory_events":
+        events = result.get("events", []) if isinstance(result.get("events"), list) else []
+        return f"{len(events)} memory event(s)"
     if action_type == "web_search":
         count = len(result.get("results", [])) if isinstance(result.get("results"), list) else 0
         return f"{count} result(s)"
@@ -1305,6 +1326,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             result = archive_search(config, str(action.get("kind", "")), str(action.get("query", "")))
         elif action_type == "archive_status":
             result = archive_status(config)
+        elif action_type == "archive_memory_events":
+            result = archive_memory_events(config, action.get("limit"))
         else:
             result = {"ok": False, "error": f"unsupported action: {action_type}"}
 

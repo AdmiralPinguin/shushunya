@@ -82,6 +82,12 @@ Check ArchiveOfHeresy status without reading memory:
 {"action":"archive_status"}
 ```
 
+Inspect recent memory maintenance events for the current agent namespace:
+
+```json
+{"action":"archive_memory_events","limit":20}
+```
+
 Search or inspect memory explicitly:
 
 ```json
