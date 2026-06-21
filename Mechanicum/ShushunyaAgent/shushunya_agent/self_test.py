@@ -130,6 +130,9 @@ def main() -> int:
     assert_ok("archive memory search tool", memory_search)
     if memory_search.get("memory_namespace") != config.memory_namespace:
         raise AssertionError(f"unexpected memory namespace in memory search response: {memory_search}")
+    counts = memory_search.get("counts")
+    if not isinstance(counts, dict) or "focus" not in counts or "vector" not in counts:
+        raise AssertionError(f"archive memory search missing counts: {memory_search}")
     print("[ok] archive memory search namespace")
     focus_read = archive_memory_read(config, "focus", "active", max_chars=1000)
     assert_ok("archive memory focus read tool", focus_read)
