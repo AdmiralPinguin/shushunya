@@ -62,6 +62,8 @@ Last verified: 2026-06-21 18:08 KST.
 - `web_fetch` detects binary responses and returns metadata without decoded
   binary text.
 - `web_fetch` falls back to UTF-8 when a response declares an unknown charset.
+- Web URL validation rejects credential-bearing URLs and SearXNG scheme
+  mismatches.
 - Invalid JSON request bodies return `400`; oversized request bodies return
   `413` before the agent loop starts.
 - Transient model HTTP errors `429`, `502`, `503`, and `504` are retried before

@@ -545,6 +545,8 @@ def validate_public_url(raw_url: str) -> str:
         raise ValueError("only http and https URLs are allowed")
     if not parsed.hostname:
         raise ValueError("URL hostname is required")
+    if parsed.username or parsed.password:
+        raise ValueError("URL credentials are not allowed")
     host = parsed.hostname
     try:
         infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
@@ -565,6 +567,10 @@ def validate_configured_searxng_url(raw_url: str) -> str:
         raise ValueError("only http and https URLs are allowed")
     if not parsed.hostname or not configured.hostname:
         raise ValueError("SearXNG hostname is required")
+    if parsed.username or parsed.password:
+        raise ValueError("SearXNG URL credentials are not allowed")
+    if parsed.scheme != configured.scheme:
+        raise ValueError("SearXNG request scheme does not match configured scheme")
     if parsed.hostname != configured.hostname:
         raise ValueError("SearXNG request host does not match configured host")
     if (parsed.port or (443 if parsed.scheme == "https" else 80)) != (

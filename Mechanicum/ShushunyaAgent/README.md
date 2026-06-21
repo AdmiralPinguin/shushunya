@@ -254,15 +254,16 @@ matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
   `"shell_enabled": false` in the HTTP API payload.
 - Web browsing is exposed as `web_search` and `web_fetch`. The supervisor blocks
   localhost, private, loopback, link-local, multicast, reserved, and unspecified
-  IP targets, including redirects.
+  IP targets, URL credentials, and unsafe redirects.
 - `web_search` uses `SHUSHUNYA_AGENT_SEARCH_PROVIDERS`, defaulting to
   `searxng,marginalia,wikipedia,brave`. Brave Search API is only an optional
   fallback and is not called unless `brave` is present in that provider list,
   even when `SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY` is set.
 - `web_fetch` always uses strict public URL validation and cannot fetch
   localhost, private, loopback, link-local, multicast, reserved, or unspecified
-  addresses. The local SearXNG localhost exception applies only inside the
-  configured `web_search_searxng` provider.
+  addresses or credential-bearing URLs. The local SearXNG localhost exception
+  applies only inside the configured `web_search_searxng` provider and only for
+  the configured scheme, host, and port.
 - `web_fetch` keeps binary responses out of model context and returns
   `is_binary=true` with byte metadata instead of decoded garbage.
 

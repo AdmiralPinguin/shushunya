@@ -82,12 +82,22 @@ def main() -> int:
         raise AssertionError("validate_public_url allowed 127.0.0.1")
     except ValueError:
         print("[ok] validate_public_url blocks 127.0.0.1")
+    try:
+        validate_public_url("https://user:pass@example.com/")
+        raise AssertionError("validate_public_url allowed URL credentials")
+    except ValueError:
+        print("[ok] validate_public_url blocks credentials")
 
     old_searxng_url = agent_runner.SEARXNG_URL
     try:
         agent_runner.SEARXNG_URL = "http://127.0.0.1:8888"
         validate_configured_searxng_url("http://127.0.0.1:8888/search?q=test&format=json")
         print("[ok] configured SearXNG localhost URL allowed")
+        try:
+            validate_configured_searxng_url("https://127.0.0.1:8888/search?q=test&format=json")
+            raise AssertionError("configured SearXNG validator allowed scheme mismatch")
+        except ValueError:
+            print("[ok] configured SearXNG scheme mismatch blocked")
     finally:
         agent_runner.SEARXNG_URL = old_searxng_url
 
