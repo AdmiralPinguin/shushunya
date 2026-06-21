@@ -176,7 +176,9 @@ so concurrent callers do not mutate the same sandbox at the same time.
 Set `"wait_for_slot": false` on `/run` or `/run-stream` when a caller wants an
 immediate `409 agent busy` response instead of waiting for the serialized runner.
 Waiting callers are bounded by `SHUSHUNYA_AGENT_MAX_QUEUE`, default `3`; once
-full, new runs fail with `429 agent queue full`.
+full, new runs fail with `429 agent queue full`. `/run-stream` returns that
+`429` before opening an NDJSON stream, so clients can handle queue overflow as a
+normal HTTP error.
 HTTP requests cannot enable the shell tool unless `SHUSHUNYA_AGENT_API_KEY` is
 configured or `SHUSHUNYA_AGENT_HTTP_ALLOW_SHELL_WITHOUT_API_KEY=1` is set.
 The phone client sends `shell_enabled=false`.
@@ -244,7 +246,8 @@ matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
 - `POST /cancel` requests cooperative cancellation for the current task or a
   supplied `task_id`.
 - `/run-stream` emits `heartbeat` events during long in-flight model/tool calls.
-- Bad JSON request bodies return `400`; oversized bodies return `413`.
+- Bad or non-object JSON request bodies return `400`; oversized bodies return
+  `413`.
 - Internal agent steps are archived by default and receive automatic
   ArchiveOfHeresy memory handling in the isolated `agent` memory namespace.
   Tool results are included in the following model step, so Magos and the

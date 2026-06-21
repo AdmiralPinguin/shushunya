@@ -1,6 +1,6 @@
 # ShushunyaAgent Status
 
-Last verified: 2026-06-21 21:19 KST.
+Last verified: 2026-06-21 21:31 KST.
 
 ## Running Services
 
@@ -71,6 +71,8 @@ Last verified: 2026-06-21 21:19 KST.
   behind another active or queued run.
 - Waiting runs are bounded by `SHUSHUNYA_AGENT_MAX_QUEUE`; overflow returns
   `429 agent queue full`.
+- `/run-stream` returns queue overflow as HTTP `429` before opening an NDJSON
+  stream.
 - `POST /cancel` requests cooperative cancellation for the current task or a
   supplied `task_id`; the runner stops between agent steps and reports
   `cancelled=true`.
@@ -82,8 +84,8 @@ Last verified: 2026-06-21 21:19 KST.
 - `web_fetch` falls back to UTF-8 when a response declares an unknown charset.
 - Web URL validation rejects credential-bearing URLs and SearXNG scheme
   mismatches.
-- Invalid JSON request bodies return `400`; oversized request bodies return
-  `413` before the agent loop starts.
+- Invalid or non-object JSON request bodies return `400`; oversized request
+  bodies return `413` before the agent loop starts.
 - Oversized `task` text returns `413` before the agent loop starts.
 - Transient model HTTP errors `429`, `502`, `503`, and `504` are retried before
   the agent step fails.
