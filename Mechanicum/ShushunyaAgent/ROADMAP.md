@@ -28,6 +28,8 @@
 - Task journals and compact `resume_task_id` continuation context.
 - Cooperative cancellation through `POST /cancel`.
 - Bounded run queue with `SHUSHUNYA_AGENT_MAX_QUEUE`.
+- API request guards reject invalid or non-object JSON with `400`.
+- `/run-stream` returns queue overflow as HTTP `429` before opening NDJSON.
 - Privileged task journal and resume access behind API-key bearer auth.
 - Self-test covering Archive, sandbox paths, file tools, Python, and network isolation.
 - Android agent mode calls `/run-stream`, uses the `agent` memory namespace, and
