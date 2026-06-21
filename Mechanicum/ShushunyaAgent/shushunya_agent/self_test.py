@@ -231,6 +231,24 @@ def main() -> int:
     finally:
         agent_runner.TASK_JOURNAL_DIR = old_journal_dir
 
+    old_journal_dir = agent_runner.TASK_JOURNAL_DIR
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agent_runner.TASK_JOURNAL_DIR = Path(tmpdir)
+            task_id = safe_task_id("self-test-large-journal")
+            path = agent_runner.task_journal_path(task_id)
+            with path.open("w", encoding="utf-8") as fh:
+                for index in range(25):
+                    fh.write(json.dumps({"type": "event", "index": index}) + "\n")
+            journal_tail = read_task_journal(task_id, limit=3)
+            assert_ok("large task journal tail", journal_tail)
+            indexes = [event.get("index") for event in journal_tail.get("events", [])]
+            if journal_tail.get("event_count") != 25 or indexes != [22, 23, 24]:
+                raise AssertionError(f"journal tail read failed: {journal_tail}")
+        print("[ok] task journal tail read")
+    finally:
+        agent_runner.TASK_JOURNAL_DIR = old_journal_dir
+
     with mock.patch.object(agent_runner, "chat", return_value='{"action":"final","message":"repaired"}'):
         repaired_action = repair_action_json(config, "```json\n{\"action\":\"final\",\"message\":\"broken\"", ValueError("broken"))
     if repaired_action != {"action": "final", "message": "repaired"}:

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -345,9 +346,18 @@ def read_task_journal(task_id: str | None = None, limit: int = 80) -> dict[str, 
         path = task_journal_path(safe_id)
         if not path.is_file():
             return {"ok": False, "error": "task journal not found", "task_id": safe_id}
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        records = [json.loads(line) for line in lines[-max(1, min(limit, 500)):]]
-        return {"ok": True, "task_id": safe_id, "path": str(path), "events": records, "event_count": len(lines)}
+        safe_limit = max(1, min(limit, 500))
+        tail: deque[str] = deque(maxlen=safe_limit)
+        event_count = 0
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                clean = line.strip()
+                if not clean:
+                    continue
+                event_count += 1
+                tail.append(clean)
+        records = [json.loads(line) for line in tail]
+        return {"ok": True, "task_id": safe_id, "path": str(path), "events": records, "event_count": event_count}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "task_id": task_id or ""}
 

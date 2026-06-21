@@ -143,8 +143,9 @@ curl -N -sS http://127.0.0.1:8095/run-stream \
   -d '{"task":"продолжи предыдущую задачу","resume_task_id":"agent-memory-check","technical":true}'
 ```
 
-Resume context is compacted before it is appended to the prompt, so a long task
-journal cannot be replayed into the model wholesale.
+Resume context is compacted before it is appended to the prompt. Large journals
+are read as bounded tails, so they cannot be loaded or replayed into the model
+wholesale.
 Journal retention keeps the newest `SHUSHUNYA_AGENT_TASK_JOURNAL_MAX_FILES`
 JSONL files, default `500`.
 

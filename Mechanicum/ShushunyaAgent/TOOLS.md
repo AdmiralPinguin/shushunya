@@ -154,8 +154,8 @@ GET /task-journal?task_id=stable-task-id&limit=80
 ```
 
 Resume context is compacted before it is appended to the next prompt. A large
-journal remains inspectable through `/task-journal`, but it is not replayed into
-the model wholesale.
+journal remains inspectable through `/task-journal`, but it is read as a bounded
+tail and is not replayed into the model wholesale.
 
 ## Runtime State
 
