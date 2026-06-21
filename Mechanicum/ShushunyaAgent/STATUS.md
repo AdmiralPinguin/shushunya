@@ -38,6 +38,8 @@ Last verified: 2026-06-21 21:19 KST.
 - `/run` is serialized by process-local and file locks.
 - Local web search source is `searxng` when SearXNG is running.
 - Default search providers are `searxng,marginalia,wikipedia,brave`.
+- `scripts/run-agent.sh` and `scripts/start-agent-api.sh` default to local
+  SearXNG and the same provider chain unless env overrides are supplied.
 - Brave is an optional fallback only and is skipped unless `brave` is present in
   `SHUSHUNYA_AGENT_SEARCH_PROVIDERS`.
 - Archive Memory Gateway tools are available: `archive_memory_gateway`,
