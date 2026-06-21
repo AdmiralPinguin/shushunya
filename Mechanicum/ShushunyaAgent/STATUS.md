@@ -126,8 +126,9 @@ SHUSHUNYA_AGENT_SEARCH_PROVIDERS=searxng,marginalia,wikipedia,brave
 
 - The `500G` limit is enforced by structured file tools as a soft policy.
 - Shell and Python tools can only be hard-limited by enabling ext4 project quota.
-- Hard quota helper is available as `scripts/setup-hard-quota.sh`, but applying
-  it requires sudo and quota tools such as `xfs_quota`.
+- Hard quota helper is available as `scripts/setup-hard-quota.sh`; dry-run mode
+  validates sandbox/mount paths and project id/name conflicts, but applying it
+  requires sudo and quota tools such as `xfs_quota`.
 - The API is bound to localhost by default. If exposed beyond localhost, set
   `SHUSHUNYA_AGENT_API_KEY`.
 - Graph/wiki long-term layers update by message interval, so a fresh namespace

@@ -374,6 +374,10 @@ Prepare hard project quota commands for the `ARCHIVE` sandbox:
 ./scripts/setup-hard-quota.sh
 ```
 
+The dry run validates that the sandbox path and mount point exist, shows the
+current filesystem mount, and refuses conflicting `/etc/projects` or
+`/etc/projid` assignments.
+
 Apply hard quota only after reviewing the dry run:
 
 ```bash

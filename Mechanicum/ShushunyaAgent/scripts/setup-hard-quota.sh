@@ -7,6 +7,20 @@ PROJECT_ID="${PROJECT_ID:-4242}"
 PROJECT_NAME="${PROJECT_NAME:-shushunya-agent-sandbox}"
 LIMIT="${LIMIT:-500G}"
 
+validate_project_files() {
+  local project_line name_line
+  project_line="$(grep -E "^${PROJECT_ID}:" /etc/projects 2>/dev/null || true)"
+  name_line="$(grep -E "^${PROJECT_NAME}:" /etc/projid 2>/dev/null || true)"
+  if [[ -n "$project_line" && "$project_line" != "$PROJECT_ID:$SANDBOX_ROOT" ]]; then
+    echo "Project id $PROJECT_ID is already assigned differently in /etc/projects: $project_line" >&2
+    exit 1
+  fi
+  if [[ -n "$name_line" && "$name_line" != "$PROJECT_NAME:$PROJECT_ID" ]]; then
+    echo "Project name $PROJECT_NAME is already assigned differently in /etc/projid: $name_line" >&2
+    exit 1
+  fi
+}
+
 cat <<EOF
 This prepares ext4 project quota for:
   sandbox: $SANDBOX_ROOT
@@ -23,8 +37,29 @@ This script may edit /etc/projects and /etc/projid and remount $MOUNT_POINT.
 Run with CONFIRM=1 to apply.
 EOF
 
+if [[ ! -d "$SANDBOX_ROOT" ]]; then
+  echo "Sandbox root does not exist: $SANDBOX_ROOT" >&2
+  exit 1
+fi
+
+if [[ ! -d "$MOUNT_POINT" ]]; then
+  echo "Mount point does not exist: $MOUNT_POINT" >&2
+  exit 1
+fi
+
+if ! findmnt -T "$SANDBOX_ROOT" >/dev/null; then
+  echo "Could not resolve filesystem mount for sandbox root: $SANDBOX_ROOT" >&2
+  exit 1
+fi
+
+validate_project_files
+
 if [[ "${CONFIRM:-0}" != "1" ]]; then
+  current_mount="$(findmnt -no TARGET,FSTYPE,OPTIONS -T "$SANDBOX_ROOT" || true)"
   cat <<EOF
+
+Current sandbox filesystem:
+  $current_mount
 
 Dry run. Commands that would be used:
   sudo mount -o remount,prjquota "$MOUNT_POINT"
