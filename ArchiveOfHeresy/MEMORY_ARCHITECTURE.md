@@ -116,6 +116,10 @@ agent memory browsing visible without turning every read into a full archive
 turn. Event reads can be filtered by `component`, `event_action`, and
 `requester`.
 
+Unified memory search returns separate `focus`, `wiki`, `vector`, and `graph`
+sections plus a `counts` summary. Agents should use `counts` to decide whether
+the gateway found enough relevant memory before reading full focus/wiki books.
+
 Unknown namespaces are rejected on read endpoints unless `create=1` is passed
 explicitly. Chat/proposal writes can still create namespace memory through the
 normal librarian path.
