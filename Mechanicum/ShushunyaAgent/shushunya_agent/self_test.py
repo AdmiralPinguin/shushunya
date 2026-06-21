@@ -139,6 +139,14 @@ def main() -> int:
         if "content" in match:
             raise AssertionError(f"compact archive memory search leaked raw vector content: {memory_search}")
     print("[ok] archive memory search namespace")
+    focus_only_search = archive_memory_search(config, "agent memory", limit=2, layers="focus")
+    assert_ok("archive memory focus-only search tool", focus_only_search)
+    if focus_only_search.get("layers") != ["focus"]:
+        raise AssertionError(f"archive memory focus-only search did not preserve layers: {focus_only_search}")
+    focus_only_counts = focus_only_search.get("counts") or {}
+    if focus_only_counts.get("vector") != 0 or focus_only_counts.get("graph_nodes") != 0:
+        raise AssertionError(f"archive memory focus-only search leaked lower layers: {focus_only_search}")
+    print("[ok] archive memory search layers")
     focus_read = archive_memory_read(config, "focus", "active", max_chars=1000)
     assert_ok("archive memory focus read tool", focus_read)
     if focus_read.get("memory_namespace") != config.memory_namespace:

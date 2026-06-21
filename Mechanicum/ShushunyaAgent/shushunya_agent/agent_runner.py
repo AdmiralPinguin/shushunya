@@ -125,7 +125,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 8. Читать память через Memory Gateway без доступа к файлам:
 {"action":"archive_memory_gateway"}
 {"action":"archive_memory_catalog"}
-{"action":"archive_memory_search","query":"что искать","limit":5,"include_content":false}
+{"action":"archive_memory_search","query":"что искать","limit":5,"layers":"focus,wiki,vector,graph","include_content":false}
 {"action":"archive_memory_read","kind":"focus","id":"active","max_chars":12000}
 {"action":"archive_memory_read","kind":"wiki","id":"wiki-page-id","max_chars":12000}
 
@@ -1214,6 +1214,7 @@ def archive_memory_search(
     query: str,
     limit: int | None = None,
     include_content: bool | None = None,
+    layers: str | list[str] | None = None,
 ) -> dict[str, Any]:
     query = str(query or "").strip()
     if not query:
@@ -1223,13 +1224,23 @@ def archive_memory_search(
     except (TypeError, ValueError):
         safe_limit = 5
     raw_content = "1" if parse_bool(include_content, default=False) else "0"
+    if isinstance(layers, list):
+        raw_layers = ",".join(str(layer).strip() for layer in layers if str(layer).strip())
+    else:
+        raw_layers = str(layers or "").strip()
+    query_params = {
+        "namespace": config.memory_namespace,
+        "q": query,
+        "limit": str(safe_limit),
+        "include_content": raw_content,
+        "requester": "shushunya-agent",
+    }
+    if raw_layers:
+        query_params["layers"] = raw_layers
     payload = archive_tool_request(
         config,
         "GET",
-        (
-            f"/archive/memory/search?namespace={quote(config.memory_namespace)}"
-            f"&q={quote(query)}&limit={safe_limit}&include_content={raw_content}&requester=shushunya-agent"
-        ),
+        "/archive/memory/search?" + urlencode(query_params),
         timeout=30,
     )
     payload["ok"] = bool(payload.get("ok", True))
@@ -1546,6 +1557,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 str(action.get("query", "")),
                 action.get("limit"),
                 action.get("include_content"),
+                action.get("layers"),
             )
         elif action_type == "archive_memory_read":
             result = archive_memory_read(

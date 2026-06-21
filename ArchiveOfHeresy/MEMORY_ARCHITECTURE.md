@@ -93,7 +93,7 @@ Read endpoints:
 ```text
 GET /archive/memory/gateway
 GET /archive/memory/catalog?namespace=agent&requester=name
-GET /archive/memory/search?namespace=agent&q=query&limit=5&include_content=0&requester=name
+GET /archive/memory/search?namespace=agent&q=query&limit=5&layers=focus,wiki,vector,graph&include_content=0&requester=name
 GET /archive/memory/focus?namespace=agent&id=active&requester=name
 GET /archive/memory/wiki?namespace=agent&id=page-id&requester=name
 GET /archive/memory/events?namespace=agent&limit=20&component=memory_gateway&requester=shushunya-agent
@@ -121,6 +121,8 @@ sections plus a `counts` summary. Agents should use `counts` to decide whether
 the gateway found enough relevant memory before reading full focus/wiki books.
 Search defaults to compact snippets; pass `include_content=1` only after the
 compact result looks relevant and raw vector chunk text is actually needed.
+Use `layers=focus,wiki,vector,graph` to restrict scope when a lower layer would
+add noise.
 
 Unknown namespaces are rejected on read endpoints unless `create=1` is passed
 explicitly. Chat/proposal writes can still create namespace memory through the

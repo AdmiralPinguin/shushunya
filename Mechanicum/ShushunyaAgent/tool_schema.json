@@ -57,6 +57,7 @@
         "action": "archive_memory_search",
         "query": "string",
         "limit": "integer",
+        "layers": "comma string or string array: focus,wiki,vector,graph",
         "include_content": "boolean"
       }
     },

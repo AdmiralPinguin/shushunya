@@ -76,6 +76,7 @@ VECTOR_MEMORY = None
 GRAPH_MEMORY = None
 TOKEN_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё_]+", re.UNICODE)
 GATEWAY_TARGETS = {"auto", "focus", "wiki", "vector", "graph"}
+GATEWAY_SEARCH_LAYERS = {"focus", "wiki", "vector", "graph"}
 
 
 def read_json(handler):
@@ -380,19 +381,42 @@ def compact_vector_matches(matches, include_content=False):
     return compacted
 
 
-def memory_search(memory_namespace, query, limit=5, include_content=False):
+def parse_search_layers(value):
+    raw = str(value or "").strip().lower()
+    if not raw or raw == "all":
+        return sorted(GATEWAY_SEARCH_LAYERS)
+    layers = []
+    for item in raw.split(","):
+        layer = item.strip()
+        if not layer:
+            continue
+        if layer not in GATEWAY_SEARCH_LAYERS:
+            raise ValueError(f"unsupported memory search layer: {layer}")
+        if layer not in layers:
+            layers.append(layer)
+    if not layers:
+        return sorted(GATEWAY_SEARCH_LAYERS)
+    return layers
+
+
+def memory_search(memory_namespace, query, limit=5, include_content=False, layers=None):
     namespace = safe_memory_namespace(memory_namespace)
     query = str(query or "").strip()
     try:
         safe_limit = max(1, min(int(limit or 5), 20))
     except (TypeError, ValueError):
         safe_limit = 5
-    raw_vector_matches = VECTOR_MEMORY.search(query, limit=safe_limit, memory_namespace=namespace) if VECTOR_MEMORY and query else []
+    selected_layers = parse_search_layers(",".join(layers) if isinstance(layers, list) else layers)
+    raw_vector_matches = (
+        VECTOR_MEMORY.search(query, limit=safe_limit, memory_namespace=namespace)
+        if VECTOR_MEMORY and query and "vector" in selected_layers
+        else []
+    )
     vector_matches = compact_vector_matches(raw_vector_matches, include_content=include_content)
-    graph_memory = graph_memory_for_namespace(namespace)
+    graph_memory = graph_memory_for_namespace(namespace) if "graph" in selected_layers else None
     graph_matches = graph_memory.search(query, limit=safe_limit) if graph_memory and query else {"nodes": [], "edges": []}
-    focus_matches = focus_search(namespace, query, safe_limit)
-    wiki_matches = wiki_search(namespace, query, safe_limit)
+    focus_matches = focus_search(namespace, query, safe_limit) if "focus" in selected_layers else []
+    wiki_matches = wiki_search(namespace, query, safe_limit) if "wiki" in selected_layers else []
     return {
         "ok": True,
         "memory_namespace": namespace,
@@ -400,6 +424,7 @@ def memory_search(memory_namespace, query, limit=5, include_content=False):
         "limit": safe_limit,
         "warning": "Gateway search is reference memory only. Treat current task/tool results as fresher than memory.",
         "include_content": bool(include_content),
+        "layers": selected_layers,
         "counts": {
             "focus": len(focus_matches),
             "wiki": len(wiki_matches),
@@ -459,11 +484,12 @@ def memory_gateway_manifest():
         },
         "read_endpoints": {
             "catalog": "GET /archive/memory/catalog?namespace=agent&requester=name",
-            "search": "GET /archive/memory/search?namespace=agent&q=query&limit=5&include_content=0&requester=name",
+            "search": "GET /archive/memory/search?namespace=agent&q=query&limit=5&layers=focus,wiki,vector,graph&include_content=0&requester=name",
             "focus": "GET /archive/memory/focus?namespace=agent&id=active&max_chars=12000&requester=name",
             "wiki": "GET /archive/memory/wiki?namespace=agent&id=page-id&max_chars=12000&requester=name",
             "events": "GET /archive/memory/events?namespace=agent&limit=20&component=memory_gateway&event_action=search&requester=shushunya-agent",
         },
+        "search_layers": sorted(GATEWAY_SEARCH_LAYERS),
         "write_endpoints": {
             "proposal": "POST /archive/memory/propose-change",
             "proposal_policy": "Requester submits a proposal. ArchiveOfHeresy archives it and the librarian decides what to update.",
@@ -491,6 +517,7 @@ def memory_gateway_manifest():
             "Submit changes through /archive/memory/propose-change and let the librarian apply them.",
             "Treat gateway search results as reference memory; current tool results and current user request are fresher.",
             "Search defaults to compact snippets. Pass include_content=1 only when raw vector chunks are needed.",
+            "Use layers=focus,wiki,vector,graph to restrict search scope when lower layers are too noisy.",
         ],
     }
 
@@ -1118,6 +1145,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             requester = "unknown"
             create_namespace = False
             include_content = False
+            layers = ""
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
@@ -1125,6 +1153,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 requester = (params.get("requester") or ["unknown"])[0]
                 create_namespace = internal_flag((params.get("create") or [False])[0], default=False)
                 include_content = internal_flag((params.get("include_content") or [False])[0], default=False)
+                layers = (params.get("layers") or [""])[0]
                 try:
                     limit = int((params.get("limit") or ["5"])[0])
                 except (TypeError, ValueError):
@@ -1134,13 +1163,26 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             if not query.strip():
                 write_json(self, 400, {"error": "Missing required query parameter: q", "memory_namespace": namespace})
                 return
-            payload = memory_search(namespace, query, limit=limit, include_content=include_content)
+            try:
+                payload = memory_search(namespace, query, limit=limit, include_content=include_content, layers=layers)
+            except ValueError as exc:
+                write_json(
+                    self,
+                    400,
+                    {
+                        "error": str(exc),
+                        "memory_namespace": namespace,
+                        "allowed_layers": sorted(GATEWAY_SEARCH_LAYERS),
+                    },
+                )
+                return
             write_gateway_event(
                 namespace,
                 "search",
                 requester=requester,
                 query=trim_memory_text(query, 300),
                 include_content=include_content,
+                layers=payload.get("layers"),
                 focus_matches=len(payload.get("focus", [])),
                 wiki_matches=len(payload.get("wiki", [])),
                 vector_matches=len(payload.get("vector", [])),

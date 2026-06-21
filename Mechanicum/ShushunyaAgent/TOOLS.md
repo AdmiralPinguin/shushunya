@@ -98,7 +98,7 @@ Search or inspect memory explicitly:
 {"action":"archive_search","kind":"graph","query":"search terms"}
 {"action":"archive_memory_gateway"}
 {"action":"archive_memory_catalog"}
-{"action":"archive_memory_search","query":"search terms","limit":5,"include_content":false}
+{"action":"archive_memory_search","query":"search terms","limit":5,"layers":"focus,wiki,vector,graph","include_content":false}
 {"action":"archive_memory_read","kind":"focus","id":"active","max_chars":12000}
 {"action":"archive_memory_read","kind":"wiki","title":"page title","max_chars":12000}
 ```
@@ -111,6 +111,8 @@ results on HTTP 400/404 instead of crashing the agent loop.
 Gateway search returns compact snippets by default. Set `include_content` to
 `true` only when the compact result is relevant and raw vector chunk text is
 needed.
+Use `layers` to narrow noisy searches, for example `focus,wiki` for curated
+context or `vector` for raw archive recall.
 
 To request a memory change, submit a proposal:
 
