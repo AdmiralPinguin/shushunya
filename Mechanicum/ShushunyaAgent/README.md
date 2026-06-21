@@ -101,8 +101,8 @@ curl -sS http://127.0.0.1:8095/state
 ```
 
 `/state` reports whether the serialized runner is busy, queued request count,
-current task id, last completed task id, git revision, and the request size
-limit.
+current task id, last completed task id, git revision, API uptime, and the
+request size limit.
 `/health` is intentionally minimal by default and reports only the agent service
 status, git revision, plus Archive status. Use `/health?detail=1` for the full
 Archive health payload when authorized.

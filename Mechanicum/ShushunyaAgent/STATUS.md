@@ -56,6 +56,7 @@ Last verified: 2026-06-21 18:08 KST.
 - Task journal reads use a bounded tail instead of loading whole journal files.
 - Resume context is compacted before entering the model prompt.
 - `GET /state` reports runner busy/queue/current/last task state.
+- `GET /state` and `/health` include Agent API uptime.
 - `wait_for_slot=false` can fail fast with `409 agent busy` instead of waiting
   behind another active or queued run.
 - `POST /cancel` requests cooperative cancellation for the current task or a

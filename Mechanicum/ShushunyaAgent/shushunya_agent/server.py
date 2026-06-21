@@ -24,6 +24,7 @@ API_KEY = os.environ.get("SHUSHUNYA_AGENT_API_KEY", "").strip()
 ROOT = Path(__file__).resolve().parents[1]
 MAX_REQUEST_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_REQUEST_BYTES", "1048576"))
 STREAM_HEARTBEAT_SEC = max(5.0, float(os.environ.get("SHUSHUNYA_AGENT_STREAM_HEARTBEAT_SEC", "15")))
+SERVICE_STARTED_AT = time.time()
 RUN_LOCK = threading.Lock()
 RUN_LOCK_FILE = ROOT / "runtime" / "agent-run.lock"
 STATE_LOCK = threading.Lock()
@@ -133,6 +134,8 @@ def runtime_state() -> dict[str, Any]:
         payload["last_finished_ago_sec"] = round(now - float(payload["last_finished_at"]), 3)
     payload["max_request_bytes"] = MAX_REQUEST_BYTES
     payload["revision"] = service_revision()
+    payload["started_at"] = SERVICE_STARTED_AT
+    payload["uptime_sec"] = round(now - SERVICE_STARTED_AT, 3)
     return payload
 
 
@@ -255,6 +258,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "service": "ShushunyaAgent",
                     "revision": service_revision(),
+                    "uptime_sec": round(time.time() - SERVICE_STARTED_AT, 3),
                     "archive_status": archive.get("status", "unknown"),
                 }
                 if detail:

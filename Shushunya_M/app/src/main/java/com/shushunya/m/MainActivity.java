@@ -1326,6 +1326,7 @@ public class MainActivity extends Activity {
         if (!revision.isEmpty()) {
             out.append("\nRevision: ").append(revision);
         }
+        out.append("\nUptime: ").append(state.optDouble("uptime_sec", 0.0)).append("s");
         out.append("\nОчередь: ").append(state.optInt("queued", 0));
         int cancelledTaskCount = state.optInt("cancelled_task_count", 0);
         if (cancelledTaskCount > 0) {

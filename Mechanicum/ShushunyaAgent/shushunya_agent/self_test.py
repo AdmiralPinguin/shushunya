@@ -183,6 +183,8 @@ def main() -> int:
         raise AssertionError(f"runtime state missing expected fields: {state}")
     if not state.get("revision"):
         raise AssertionError(f"runtime state missing revision: {state}")
+    if state.get("uptime_sec", -1) < 0 or state.get("started_at", 0) <= 0:
+        raise AssertionError(f"runtime state missing uptime: {state}")
     print("[ok] runtime state payload")
     if server.STREAM_HEARTBEAT_SEC < 5.0:
         raise AssertionError(f"stream heartbeat interval is unsafe: {server.STREAM_HEARTBEAT_SEC}")
