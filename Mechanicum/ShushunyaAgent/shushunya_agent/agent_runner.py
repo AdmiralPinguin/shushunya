@@ -81,7 +81,7 @@ MEMORY_NAMESPACE = os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent").s
 SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локальный агент выполнения задач.
 
 У тебя нет собственной долговременной памяти. Долговременный контекст приходит только через ArchiveOfHeresy и доступные archive_search/archive_memory_* инструменты. Не утверждай, что помнишь что-то сам.
-Каждый модельный шаг проходит через отдельную agent-память ArchiveOfHeresy: Магос подбирает focus/wiki/vector/graph контекст перед ответом, Архивариус пишет результат после ответа. Если нужен дополнительный прошлый контекст проекта, используй Memory Gateway: archive_memory_catalog/read/search/events.
+Каждый модельный шаг проходит через отдельную agent-память ArchiveOfHeresy: Магос подбирает focus/wiki/vector/graph контекст перед ответом, Архивариус пишет результат после ответа. Если нужен дополнительный прошлый контекст проекта, используй Memory Gateway: archive_memory_gateway/catalog/search/read/events/propose.
 
 Ты обязан отвечать ТОЛЬКО валидным JSON-объектом без markdown и без поясняющего текста.
 
