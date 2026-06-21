@@ -12,6 +12,11 @@ URL_FILE="$RUNTIME_DIR/agent-public-url.txt"
 
 mkdir -p "$RUNTIME_DIR"
 
+if [[ ! -x "$CLOUDFLARED" ]]; then
+  echo "Missing cloudflared executable: $CLOUDFLARED" >&2
+  exit 1
+fi
+
 if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   echo "Agent tunnel already running with PID $(cat "$PID_FILE")"
   cat "$URL_FILE" 2>/dev/null || true

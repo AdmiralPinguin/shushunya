@@ -16,6 +16,8 @@ Last verified: 2026-06-21 18:08 KST.
 - Agent API health is `ok`.
 - `scripts/check-agent.sh` verifies local SearXNG in addition to LLM, Archive,
   Agent API, and self-test.
+- `scripts/start-agent-tunnel.sh` fails fast if the configured `cloudflared`
+  executable is missing.
 - Agent API `/health` is minimal by default; full Archive details require
   `/health?detail=1`.
 - Archive health reports `default` and `agent` memory namespaces.
