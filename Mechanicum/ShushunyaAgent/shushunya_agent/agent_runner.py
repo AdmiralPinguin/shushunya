@@ -999,6 +999,8 @@ try:
 
     if action == "list_files":
         max_depth = max(0, min(int(payload.get("max_depth", 2)), 8))
+        limit = max(1, min(int(payload.get("limit", 500)), 1000))
+        offset = max(0, int(payload.get("offset", 0)))
         if not path.exists():
             respond({"ok": False, "error": "path does not exist", "path": str(path)})
         elif not path.is_dir():
@@ -1017,7 +1019,9 @@ try:
                         items.append(describe(child))
                     except OSError as exc:
                         items.append({"path": str(child), "exists": False, "error": str(exc)})
-            respond({"ok": True, "path": str(path), "items": items[:500], "truncated": len(items) > 500})
+            page = items[offset:offset + limit]
+            next_offset = offset + len(page) if offset + len(page) < len(items) else None
+            respond({"ok": True, "path": str(path), "items": page, "total_count": len(items), "offset": offset, "limit": limit, "next_offset": next_offset, "truncated": next_offset is not None})
 
     elif action == "read_file":
         max_bytes = max(1, min(int(payload.get("max_bytes", 20000)), 200000))
@@ -1105,11 +1109,16 @@ try:
     elif action == "find_files":
         pattern = str(payload.get("pattern") or "*")
         max_depth = max(0, min(int(payload.get("max_depth", 4)), 12))
+        limit = max(1, min(int(payload.get("limit", 500)), 1000))
+        offset = max(0, int(payload.get("offset", 0)))
         if not path.exists():
             respond({"ok": False, "error": "path does not exist", "path": str(path)})
         elif path.is_file():
             match = fnmatch.fnmatch(path.name, pattern)
-            respond({"ok": True, "path": str(path), "pattern": pattern, "items": [describe(path)] if match else []})
+            items = [describe(path)] if match else []
+            page = items[offset:offset + limit]
+            next_offset = offset + len(page) if offset + len(page) < len(items) else None
+            respond({"ok": True, "path": str(path), "pattern": pattern, "items": page, "total_count": len(items), "offset": offset, "limit": limit, "next_offset": next_offset, "truncated": next_offset is not None})
         elif not path.is_dir():
             respond({"ok": False, "error": "path is not searchable", "path": str(path)})
         else:
@@ -1127,7 +1136,9 @@ try:
                             items.append(describe(child))
                         except OSError as exc:
                             items.append({"path": str(child), "exists": False, "error": str(exc)})
-            respond({"ok": True, "path": str(path), "pattern": pattern, "items": items[:500], "truncated": len(items) > 500})
+            page = items[offset:offset + limit]
+            next_offset = offset + len(page) if offset + len(page) < len(items) else None
+            respond({"ok": True, "path": str(path), "pattern": pattern, "items": page, "total_count": len(items), "offset": offset, "limit": limit, "next_offset": next_offset, "truncated": next_offset is not None})
 
     elif action == "search_text":
         query = str(payload.get("query") or "")

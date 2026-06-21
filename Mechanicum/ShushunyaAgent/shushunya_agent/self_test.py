@@ -438,6 +438,18 @@ def main() -> int:
         raise AssertionError(f"created file is absent from listing: {list_result}")
     print("[ok] file listing")
 
+    assert_ok("write_file page fixture a", file_tool(config, {"action": "write_file", "path": "/work/self-test/page-a.txt", "content": "a"}))
+    assert_ok("write_file page fixture b", file_tool(config, {"action": "write_file", "path": "/work/self-test/page-b.txt", "content": "b"}))
+    paged_listing = file_tool(config, {"action": "list_files", "path": "/work/self-test", "max_depth": 1, "limit": 1, "offset": 1})
+    assert_ok("list_files page", paged_listing)
+    if len(paged_listing.get("items", [])) != 1 or paged_listing.get("offset") != 1 or paged_listing.get("total_count", 0) < 3:
+        raise AssertionError(f"list_files pagination failed: {paged_listing}")
+    paged_find = file_tool(config, {"action": "find_files", "path": "/work/self-test", "pattern": "page-*.txt", "limit": 1, "offset": 1})
+    assert_ok("find_files page", paged_find)
+    if len(paged_find.get("items", [])) != 1 or paged_find.get("offset") != 1 or paged_find.get("total_count") != 2:
+        raise AssertionError(f"find_files pagination failed: {paged_find}")
+    print("[ok] file pagination")
+
     python_result = python_tool(config, {"action": "python", "code": "print(sum(range(1, 6)))", "timeout": 30})
     assert_ok("python", python_result)
     if python_result.get("stdout", "").strip() != "15":

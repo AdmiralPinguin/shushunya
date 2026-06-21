@@ -22,7 +22,7 @@ Paths must be inside sandbox writable roots. Relative paths resolve under
 `/work`.
 
 ```json
-{"action":"list_files","path":"/work","max_depth":2}
+{"action":"list_files","path":"/work","max_depth":2,"limit":100,"offset":0}
 {"action":"read_file","path":"/work/file.txt","max_bytes":20000,"offset":0}
 {"action":"write_file","path":"/work/file.txt","content":"text"}
 {"action":"append_file","path":"/work/file.txt","content":"text"}
@@ -30,7 +30,7 @@ Paths must be inside sandbox writable roots. Relative paths resolve under
 {"action":"mkdir","path":"/work/dir"}
 {"action":"remove_file","path":"/work/file.txt"}
 {"action":"file_info","path":"/work/file.txt","sha256":true,"max_hash_bytes":50000000}
-{"action":"find_files","path":"/work","pattern":"*.txt","max_depth":4}
+{"action":"find_files","path":"/work","pattern":"*.txt","max_depth":4,"limit":100,"offset":0}
 {"action":"search_text","path":"/work","query":"needle","case_sensitive":false,"max_matches":50}
 ```
 
@@ -41,6 +41,8 @@ For large files, call `file_info` or `search_text` first, then use `read_file`
 with explicit `max_bytes` and `offset` slices. `read_file` reports `next_offset`
 when more content remains, plus `is_binary` and `encoding` metadata for the
 returned slice.
+For large directories, `list_files` and `find_files` accept `limit` and `offset`
+and return `total_count` plus `next_offset` for pagination.
 `file_info` can compute a bounded SHA-256 digest with `sha256=true`; this is
 useful for identity/change checks without reading the file content into the
 model context.
