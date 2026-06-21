@@ -155,7 +155,7 @@
     "memory_namespace_default": "agent",
     "focus_limit_per_namespace": 10,
     "explicit_memory_tool": "archive_search",
-    "warning": "Archive memory is reference context only and may be stale. Agent focus memory is isolated from the default chat focus namespace."
+    "warning": "Archive memory is reference context only and may be stale. Agent focus/wiki/vector/graph memory is isolated from the default chat memory namespace."
   },
   "storage_policy": {
     "limit_bytes": 536870912000,

@@ -16,7 +16,9 @@ By default every model step is archived through `ArchiveOfHeresy` with
 `memory_namespace=agent`, `user=shushunya-agent`, automatic Magos retrieval
 enabled, and Librarian post-processing enabled. The agent therefore has its own
 focus bookshelf under the archive focus root with the same 10-file limit as the
-normal chat, while wiki/vector/graph stay shared long-term memory layers.
+normal chat. Wiki, vector, and GraphRAG memory are also scoped to that same
+namespace, so agent tool loops remain long-term searchable by the agent without
+leaking into the default chat memory context.
 
 ## Requirements
 
@@ -140,7 +142,7 @@ For an interactive prompt:
 - Long-term memory stays in `ArchiveOfHeresy`; this runner stores no persistent
   memory of its own.
 - Internal agent steps are archived by default and receive automatic
-  ArchiveOfHeresy memory handling in the isolated `agent` focus namespace.
+  ArchiveOfHeresy memory handling in the isolated `agent` memory namespace.
   Tool results are included in the following model step, so Magos and the
   Librarian can account for the whole agent loop. The agent can also request
   memory explicitly with the `archive_search` action.
@@ -174,7 +176,7 @@ Disable archiving internal steps only for debugging:
 SHUSHUNYA_AGENT_ARCHIVE_INTERNAL_STEPS=0 ./scripts/run-agent.sh "задача"
 ```
 
-Use another focus namespace for a separate agent memory shelf:
+Use another memory namespace for a separate agent memory shelf:
 
 ```bash
 SHUSHUNYA_AGENT_MEMORY_NAMESPACE=agent-lab ./scripts/run-agent.sh "задача"
