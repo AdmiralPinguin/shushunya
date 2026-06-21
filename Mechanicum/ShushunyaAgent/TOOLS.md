@@ -179,6 +179,10 @@ start a model request.
 
 HTTP callers can set `wait_for_slot=false` on `/run` or `/run-stream` to fail
 fast with `409 agent busy` instead of waiting behind another active run.
+Waiting callers are bounded by `SHUSHUNYA_AGENT_MAX_QUEUE`; queue overflow
+returns HTTP `429` before `/run-stream` opens an NDJSON response.
+Request bodies must be JSON objects. Invalid JSON and non-object JSON bodies
+return HTTP `400`.
 
 `/run-stream` emits a `heartbeat` event during long in-flight model or tool
 calls. The default interval is 15 seconds and can be changed with
