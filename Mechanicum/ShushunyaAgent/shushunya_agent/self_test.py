@@ -118,7 +118,7 @@ def main() -> int:
         raise AssertionError(f"unexpected component filter in events response: {gateway_events}")
     manifest = archive_memory_gateway(config)
     assert_ok("archive memory gateway manifest tool", manifest)
-    if manifest.get("service") != "ArchiveOfHeresy Memory Gateway":
+    if manifest.get("service") != "ArchiveOfHeresy Memory Gateway" or manifest.get("version") != 1:
         raise AssertionError(f"unexpected memory gateway manifest: {manifest}")
     print("[ok] archive memory gateway manifest")
     catalog = archive_memory_catalog(config)
