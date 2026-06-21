@@ -7,6 +7,11 @@ BASE_URL="${ARCHIVE_BASE_URL:-http://127.0.0.1:$PORT}"
 NAMESPACE="${1:-agent}"
 QUERY="${2:-memory gateway}"
 REQUESTER="${ARCHIVE_GATEWAY_REQUESTER:-check-memory-gateway}"
+MANIFEST_ONLY=0
+if [ "$NAMESPACE" = "--manifest-only" ]; then
+  MANIFEST_ONLY=1
+  NAMESPACE="agent"
+fi
 ENV_FILE="$ROOT/.env"
 
 if [ -f "$ENV_FILE" ]; then
@@ -19,6 +24,12 @@ fi
 AUTH_ARGS=()
 if [ -n "${ARCHIVE_API_KEY:-}" ]; then
   AUTH_ARGS=(-H "Authorization: Bearer $ARCHIVE_API_KEY")
+fi
+
+if [ "$MANIFEST_ONLY" = "1" ]; then
+  curl -fsS "${AUTH_ARGS[@]}" "$BASE_URL/archive/memory/gateway"
+  echo
+  exit 0
 fi
 
 echo "Archive health:"
