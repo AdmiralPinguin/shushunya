@@ -1,0 +1,37 @@
+{
+  "provider": "elevenlabs",
+  "model_id": "eleven_v3",
+  "language_code": "ru",
+  "output_format": "pcm_44100",
+  "voice_settings": {
+    "stability": 0.32,
+    "similarity_boost": 0.82,
+    "style": 0.78,
+    "use_speaker_boost": true
+  },
+  "default_direction": "[low, intimate, sardonic, predatory calm]",
+  "emotion_tags": {
+    "сарказм": "[sarcastic][smirks]",
+    "ехидно": "[mocking][amused]",
+    "шепот": "[whispers][close to the microphone]",
+    "ярость": "[angry][tense]",
+    "угроза": "[menacing][slowly]",
+    "смех": "[dark chuckle][amused]",
+    "устало": "[tired][dry]",
+    "драма": "[dramatic tone][ominous]",
+    "холодно": "[cold][emotionless]",
+    "безумие": "[unhinged][laughs softly]"
+  },
+  "warp_effect": {
+    "drive": 1.9,
+    "low_voice_mix": 0.34,
+    "echoes": [
+      { "delay_ms": 145, "decay": 0.38 },
+      { "delay_ms": 390, "decay": 0.24 },
+      { "delay_ms": 730, "decay": 0.13 }
+    ],
+    "shimmer_depth": 0.09,
+    "shimmer_hz": 5.7,
+    "wet": 0.82
+  }
+}

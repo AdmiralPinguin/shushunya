@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>shushunya.com</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --fg: #fff3e8;
+      --red: #ff2424;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      display: grid;
+      min-height: 100vh;
+      place-items: center;
+      overflow: hidden;
+      background:
+        linear-gradient(rgba(0, 0, 0, 0.28), rgba(0, 0, 0, 0.48)),
+        url("./background.jpg") center / cover no-repeat,
+        radial-gradient(circle at 50% 48%, rgba(255, 36, 36, 0.28), transparent 42%),
+        linear-gradient(145deg, #020202 0%, #17100d 52%, #020202 100%);
+      color: var(--fg);
+      font-family: Impact, Haettenschweiler, "Arial Black", sans-serif;
+    }
+
+    main {
+      width: min(100vw, 1900px);
+      padding: clamp(18px, 4vw, 72px);
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(66px, 16vw, 280px);
+      font-weight: 900;
+      line-height: 0.86;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      text-wrap: balance;
+      text-shadow:
+        0 0 18px rgba(255, 36, 36, 0.72),
+        0 12px 0 #000,
+        0 28px 54px rgba(0, 0, 0, 0.9);
+    }
+
+    span {
+      display: block;
+      color: var(--red);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Вован <span>хуй сосал</span></h1>
+  </main>
+</body>
+</html>

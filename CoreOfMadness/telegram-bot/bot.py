@@ -8,11 +8,13 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from pathlib import Path
 from urllib.error import HTTPError
 
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "").strip()
 LLM_MODEL = os.environ.get("LLM_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
 SYSTEM_PROMPT = os.environ.get(
     "SYSTEM_PROMPT",
@@ -42,6 +44,8 @@ ARCHIVE_ALLOWLIST = {
 }
 
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SITE_BACKGROUND_PATH = Path(os.environ.get("SHUSHUNYA_SITE_BACKGROUND_PATH", PROJECT_ROOT / "ShushunyaSite" / "background.jpg"))
 RUNNING = True
 
 
@@ -56,6 +60,8 @@ def request_json(url, payload=None, timeout=60):
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    if LLM_API_KEY and url.startswith(LLM_BASE_URL):
+        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
 
     req = urllib.request.Request(url, data=data, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as response:
@@ -64,12 +70,27 @@ def request_json(url, payload=None, timeout=60):
 
 def open_json_stream(url, payload, timeout=180):
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    if LLM_API_KEY and url.startswith(LLM_BASE_URL):
+        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+    req = urllib.request.Request(url, data=data, headers=headers)
     return urllib.request.urlopen(req, timeout=timeout)
 
 
 def telegram(method, payload=None, timeout=60):
     return request_json(f"{API_URL}/{method}", payload, timeout)
+
+
+def download_telegram_file(file_id, destination):
+    file_info = telegram("getFile", {"file_id": file_id}, timeout=30)
+    file_path = (file_info.get("result") or {}).get("file_path")
+    if not file_path:
+        raise RuntimeError("Telegram did not return file_path")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+    with urllib.request.urlopen(url, timeout=60) as response:
+        destination.write_bytes(response.read())
 
 
 def send_message(chat_id, text):
@@ -377,6 +398,16 @@ def handle_message(message):
     chat_id = chat.get("id")
     username = sender.get("username")
     text = (message.get("text") or "").strip()
+    photos = message.get("photo") or []
+    if chat_id and photos:
+        largest_photo = max(photos, key=lambda item: item.get("file_size") or item.get("width", 0) * item.get("height", 0))
+        try:
+            download_telegram_file(largest_photo["file_id"], SITE_BACKGROUND_PATH)
+            send_message(chat_id, "Фон shushunya.com обновлен.")
+        except Exception as exc:
+            send_message(chat_id, f"Не смог обновить фон: {exc}")
+        return
+
     if not chat_id or not text:
         return
 

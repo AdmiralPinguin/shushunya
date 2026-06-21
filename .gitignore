@@ -2,10 +2,12 @@
 CoreOfMadness/*.gguf
 CoreOfMadness/*.safetensors
 CoreOfMadness/*.bin
+CoreOfMadness/vision/
 
 # Downloaded llama.cpp runtime binaries and archives
 CoreOfMadness/llm-host/llama.cpp/
 CoreOfMadness/llm-host/runtime/
+CoreOfMadness/llm-host/scripts/*.bak-*
 
 # Telegram bot runtime
 CoreOfMadness/telegram-bot/runtime/
@@ -45,6 +47,7 @@ DemonsForge/outputs/
 DemonsForge/*.log
 
 # Local secrets
+.secrets/
 .env
 *.env
 .env.*
@@ -82,7 +85,40 @@ build/
 .vite/
 coverage/
 
+# Android/Gradle local caches, generated APKs, and bundled toolchains
+.gradle-home/
+.gradle/
+**/.gradle/
+**/app/build/
+*.apk
+Shushunya_M/stt-models/
+android-tools/
+
+# Downloaded external kernel/driver tooling
+tools/
+
+# Mechanicum local runtimes, virtualenvs, models, cloned apps, and generated media
+Mechanicum/RoxDub/RoxDub/
+Mechanicum/RoxDub/.roxdub-server-token
+Mechanicum/RoxDub/bin/
+Mechanicum/RoxDub/models/
+Mechanicum/RoxDub/runs/
+Mechanicum/RoxDub/runtime/
+Mechanicum/RoxDub/tmp/
+Mechanicum/RoxDub/videos/
+Mechanicum/RoxDub/cloudflared
+Mechanicum/RoxDub/*.apk
+Mechanicum/ShushunyaAgent/ShushunyaAgent/
+Mechanicum/ShushunyaAgent/runtime/
+Mechanicum/SearXNG/runtime/
+Mechanicum/SearXNG/searxng-src/
+Mechanicum/SearXNG/bootstrap/get-pip.py
+
+# PalatineConsole local runtime
+PalatineConsole/runtime/
+
 # Generic local runtime/cache
+runtime/
 tmp/
 temp/
 cache/

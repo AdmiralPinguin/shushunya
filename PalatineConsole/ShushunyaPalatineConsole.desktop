@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Shushunya Palatine Console
+Comment=Launch Shushunya service control panel
+Exec=/media/shushunya/SHUSHUNYA/shushunya/PalatineConsole/start-console.sh
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=true

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shushunya Palatine Console</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <aside class="rail" aria-label="Разделы">
+      <div class="sigil" aria-hidden="true">
+        <svg viewBox="0 0 64 64" role="img">
+          <path d="M32 4 54 17v29L32 60 10 46V17L32 4Z"></path>
+          <path d="M22 42c10 7 24-1 24-13 0-8-6-14-14-14-6 0-11 4-13 9 4-3 12-2 16 3 4 6-1 15-13 15Z"></path>
+        </svg>
+      </div>
+      <button class="nav active" data-tab="overview" title="Главная">
+        <span class="icon">◆</span><span>Главная</span>
+      </button>
+      <button class="nav" data-tab="core" title="Ядро">
+        <span class="icon">◈</span><span>Ядро</span>
+      </button>
+      <button class="nav" data-tab="translation" title="Переводчик и речь">
+        <span class="icon">◇</span><span>Перевод</span>
+      </button>
+      <button class="nav" data-tab="public" title="Сайт и туннели">
+        <span class="icon">◒</span><span>Публично</span>
+      </button>
+      <button class="nav" data-tab="image" title="Генерация изображений">
+        <span class="icon">✦</span><span>Кузня</span>
+      </button>
+      <button class="nav" data-tab="mechanicum" title="RoxDub">
+        <span class="icon">⬡</span><span>RoxDub</span>
+      </button>
+      <button class="nav" data-tab="logs" title="Логи">
+        <span class="icon">▤</span><span>Логи</span>
+      </button>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">III Legion Control Surface</p>
+          <h1>Shushunya Palatine Console</h1>
+        </div>
+        <div class="health-strip" id="healthStrip"></div>
+      </header>
+
+      <section class="tab active" id="tab-overview">
+        <div class="command-band">
+          <div class="command-copy">
+            <p class="eyebrow">После перезагрузки</p>
+            <h2>Поднять Шушуню</h2>
+            <p>Запускает LLM host, ArchiveOfHeresy и Telegram-бота. RoxDub, DemonsForge и публичные туннели не включаются автоматически.</p>
+          </div>
+          <div class="command-actions">
+            <button class="primary" data-bundle="shushunya_core" data-action="start">Запустить ядро</button>
+            <button class="secondary" data-bundle="shushunya_core" data-action="stop">Остановить ядро</button>
+          </div>
+        </div>
+
+        <div class="quick-grid">
+          <button class="quick" data-bundle="translator_stack" data-action="start">
+            <span>Переводчик + STT</span>
+            <small>Локальные серверы без туннелей</small>
+          </button>
+          <button class="quick" data-bundle="public_surface" data-action="start">
+            <span>Сайт + домены</span>
+            <small>ShushunyaSite и named Cloudflare tunnel</small>
+          </button>
+          <button class="quick" data-bundle="image_forge" data-action="start">
+            <span>DemonsForge SDXL</span>
+            <small>Отдельно, чтобы не есть ресурсы случайно</small>
+          </button>
+          <button class="quick" data-bundle="roxdub_stack" data-action="start">
+            <span>RoxDub</span>
+            <small>LLM host + сервер дубляжа</small>
+          </button>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Состояние контуров</h2>
+            <button class="ghost" id="refreshOverview">Обновить</button>
+          </div>
+          <div class="service-grid compact" id="overviewServices"></div>
+        </div>
+      </section>
+
+      <section class="tab" id="tab-core">
+        <div class="section-title">
+          <h2>Ядро Шушуни</h2>
+          <p>Модель, архив ереси и Telegram-бот.</p>
+        </div>
+        <div class="service-grid" data-group="core"></div>
+      </section>
+
+      <section class="tab" id="tab-translation">
+        <div class="section-title">
+          <h2>Переводчик и речь</h2>
+          <p>Translator, STT и временные туннели для внешнего доступа.</p>
+        </div>
+        <div class="bundle-row">
+          <button class="primary small" data-bundle="translator_public" data-action="start">Запустить с туннелями</button>
+          <button class="secondary small" data-bundle="translator_public" data-action="stop">Остановить контур</button>
+        </div>
+        <div class="service-grid" data-group="translation"></div>
+      </section>
+
+      <section class="tab" id="tab-public">
+        <div class="section-title">
+          <h2>Публичный контур</h2>
+          <p>Локальный сайт и Cloudflare-домены для внешних клиентов.</p>
+        </div>
+        <div class="service-grid" data-group="public"></div>
+      </section>
+
+      <section class="tab" id="tab-image">
+        <div class="section-title">
+          <h2>DemonsForge</h2>
+          <p>Генераторы изображений запускаются вручную, потому что они тяжелые.</p>
+        </div>
+        <div class="service-grid" data-group="image"></div>
+      </section>
+
+      <section class="tab" id="tab-mechanicum">
+        <div class="section-title">
+          <h2>Mechanicum / RoxDub</h2>
+          <p>Отдельный контур дубляжа с Android-клиентом и своим туннелем.</p>
+        </div>
+        <div class="service-grid" data-group="mechanicum"></div>
+      </section>
+
+      <section class="tab" id="tab-logs">
+        <div class="log-layout">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Логи</h2>
+              <button class="ghost" id="refreshLogs">Обновить</button>
+            </div>
+            <select id="logSelect"></select>
+            <pre id="logOutput">Выбери сервис.</pre>
+          </div>
+          <div class="panel">
+            <h2>Последняя команда</h2>
+            <pre id="commandOutput">Команд еще не было.</pre>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
