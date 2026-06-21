@@ -164,6 +164,8 @@ public class MainActivity extends Activity {
     private Bitmap pendingImagePreview;
     private ValueAnimator scrollAnimator;
     private int lastKeyboardHeight;
+    private final Object keepAliveLock = new Object();
+    private int activeKeepAliveJobs;
     private float downX;
     private float downY;
 
@@ -937,14 +939,18 @@ public class MainActivity extends Activity {
         addAgentMessage(true, clean, true);
         agentLiveBubble = addAgentMessage(false, "", true);
         appendAgentLog("Запускаю агента...");
+        progress.setVisibility(View.VISIBLE);
+        startAnswerKeepAlive();
 
         new Thread(() -> {
+            PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
             try {
                 String result = requestAgentRunStream(clean);
                 main.post(() -> {
                     agentRunning = false;
                     agentRunButton.setEnabled(true);
                     agentRunButton.animate().alpha(1f).setDuration(160).start();
+                    progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
                     agentStatus.setText("Готово.");
                     agentLiveBubble = null;
                     showAnswerNotification(result);
@@ -954,10 +960,16 @@ public class MainActivity extends Activity {
                     agentRunning = false;
                     agentRunButton.setEnabled(true);
                     agentRunButton.animate().alpha(1f).setDuration(160).start();
+                    progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
                     agentStatus.setText("Ошибка агента: " + exc.getMessage());
                     appendAgentLog("! Ошибка агента: " + exc.getMessage());
                     agentLiveBubble = null;
                 });
+            } finally {
+                if (wakeLock != null && wakeLock.isHeld()) {
+                    wakeLock.release();
+                }
+                stopAnswerKeepAlive();
             }
         }).start();
     }
@@ -1686,6 +1698,12 @@ public class MainActivity extends Activity {
     }
 
     private void startAnswerKeepAlive() {
+        synchronized (keepAliveLock) {
+            activeKeepAliveJobs += 1;
+            if (activeKeepAliveJobs > 1) {
+                return;
+            }
+        }
         Intent intent = new Intent(this, KeepAliveService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent);
@@ -1695,6 +1713,14 @@ public class MainActivity extends Activity {
     }
 
     private void stopAnswerKeepAlive() {
+        synchronized (keepAliveLock) {
+            if (activeKeepAliveJobs > 0) {
+                activeKeepAliveJobs -= 1;
+            }
+            if (activeKeepAliveJobs > 0) {
+                return;
+            }
+        }
         stopService(new Intent(this, KeepAliveService.class));
     }
 
