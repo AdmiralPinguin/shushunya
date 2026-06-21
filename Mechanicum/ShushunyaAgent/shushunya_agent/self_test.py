@@ -187,6 +187,24 @@ def main() -> int:
         raise AssertionError(f"final event did not include duration: {final_events}")
     print("[ok] final event duration")
 
+    limit_stdout = io.StringIO()
+    limit_config = AgentConfig(
+        task_id=safe_task_id("self-test-runtime-limit"),
+        json_output=True,
+        max_steps=1,
+        max_runtime_sec=-1,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat") as mocked_chat, \
+            contextlib.redirect_stdout(limit_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        limit_code = run_agent("should stop before model", limit_config)
+    limit_payload = json.loads(limit_stdout.getvalue())
+    if limit_code != 2 or limit_payload.get("ok") is not False or mocked_chat.called:
+        raise AssertionError(f"runtime limit did not stop before model: code={limit_code}, payload={limit_payload}")
+    print("[ok] runtime limit")
+
     health = archive_request(config, "GET", "/health", timeout=10)
     if health.get("status") != "ok":
         raise AssertionError(f"Archive health failed: {health}")

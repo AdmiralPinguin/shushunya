@@ -73,6 +73,8 @@ HTTP request bodies are capped by `SHUSHUNYA_AGENT_MAX_REQUEST_BYTES`, default
 `1048576`, so broken clients fail with `413` before entering the agent loop.
 Transient model HTTP errors `429`, `502`, `503`, and `504` are retried up to
 `SHUSHUNYA_AGENT_LLM_RETRIES`, default `3`.
+Total agent runtime is capped by `SHUSHUNYA_AGENT_MAX_RUNTIME_SEC`, default
+`1800`, and can be overridden per HTTP request with `max_runtime_sec`.
 
 Streaming HTTP API for Codex-style progress:
 
@@ -174,8 +176,8 @@ For an interactive prompt:
 ./scripts/run-agent.sh
 ```
 
-CLI runs also accept `--max-tokens` and `--llm-retries`, matching the HTTP
-`max_tokens` and `llm_retries` fields.
+CLI runs also accept `--max-tokens`, `--max-runtime-sec`, and `--llm-retries`,
+matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
 
 ## Safety Boundaries
 

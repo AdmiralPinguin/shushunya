@@ -34,6 +34,7 @@ SANDBOX_RUNNER = os.environ.get(
     "/media/shushunya/ARCHIVE/shushunya-agent-sandbox/profile/run-in-sandbox.sh",
 )
 MAX_STEPS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_STEPS", "12"))
+MAX_RUNTIME_SEC = int(os.environ.get("SHUSHUNYA_AGENT_MAX_RUNTIME_SEC", "1800"))
 MAX_MODEL_TOKENS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "1024"))
 MAX_CONTEXT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_CONTEXT_CHARS", "14000"))
 SHELL_TIMEOUT = int(os.environ.get("SHUSHUNYA_AGENT_SHELL_TIMEOUT", "60"))
@@ -180,6 +181,7 @@ class AgentConfig:
     sandbox_group: str = SANDBOX_GROUP
     sandbox_runner: str = SANDBOX_RUNNER
     max_steps: int = MAX_STEPS
+    max_runtime_sec: int = MAX_RUNTIME_SEC
     max_context_chars: int = MAX_CONTEXT_CHARS
     shell_timeout: int = SHELL_TIMEOUT
     max_tool_output_chars: int = MAX_TOOL_OUTPUT_CHARS
@@ -1575,11 +1577,23 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             "memory_namespace": config.memory_namespace,
             "archive_user": config.archive_user,
             "max_steps": config.max_steps,
+            "max_runtime_sec": config.max_runtime_sec,
         },
     )
     emit(event_sink, {"type": "task", "task_id": config.task_id, "memory_namespace": config.memory_namespace})
 
     for step in range(1, config.max_steps + 1):
+        elapsed_sec = time.time() - run_started
+        if elapsed_sec > config.max_runtime_sec:
+            duration_sec = round(elapsed_sec, 3)
+            message = f"Агент остановлен: достигнут лимит времени {config.max_runtime_sec}s."
+            emit(event_sink, {"type": "final", "ok": False, "message": message, "duration_sec": duration_sec})
+            write_task_journal(config, "final", {"ok": False, "message": message, "duration_sec": duration_sec})
+            if config.json_output:
+                print(json.dumps({"ok": False, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
+            else:
+                print(message, file=sys.stderr)
+            return 2
         print(f"\n[agent] step {step}/{config.max_steps}", file=sys.stderr)
         emit(event_sink, {"type": "step", "step": step, "max_steps": config.max_steps, "message": "думаю над следующим действием"})
         write_task_journal(config, "step", {"step": step, "max_steps": config.max_steps})
@@ -1754,6 +1768,7 @@ def read_task_from_stdin() -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Shushunya as a sandboxed tool-using agent.")
     parser.add_argument("--max-steps", type=int, default=None, help="Override the agent step limit.")
+    parser.add_argument("--max-runtime-sec", type=int, default=None, help="Override total agent runtime limit in seconds.")
     parser.add_argument("--max-tokens", type=int, default=None, help="Override max model reply tokens.")
     parser.add_argument("--llm-retries", type=int, default=None, help="Retry count for transient model HTTP errors.")
     parser.add_argument("--inject-memory", action="store_true", help="Enable automatic ArchiveOfHeresy memory injection.")
@@ -1780,6 +1795,8 @@ def main(argv: list[str] | None = None) -> int:
     config = AgentConfig()
     if args.max_steps is not None:
         config.max_steps = args.max_steps
+    if args.max_runtime_sec is not None:
+        config.max_runtime_sec = max(30, min(args.max_runtime_sec, 7200))
     if args.max_tokens is not None:
         config.max_model_tokens = max(128, min(args.max_tokens, 4096))
     if args.llm_retries is not None:

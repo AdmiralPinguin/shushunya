@@ -35,6 +35,8 @@ Last verified: 2026-06-21 18:08 KST.
 - Agent runs emit `task` stream events and write compact JSONL task journals in
   `runtime/task-journals/`.
 - Stream `tool_result` and `final` events include `duration_sec`.
+- Agent runs have a total runtime limit through `max_runtime_sec` /
+  `SHUSHUNYA_AGENT_MAX_RUNTIME_SEC`.
 - `GET /task-journal?task_id=...` can inspect recent journal events, and
   `resume_task_id` can feed recent journal context into a follow-up run.
 - Resume context is compacted before entering the model prompt.
