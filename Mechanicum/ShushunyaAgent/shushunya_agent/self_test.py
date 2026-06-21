@@ -76,6 +76,8 @@ def main() -> int:
     print("[ok] tool schema matches runtime actions")
     if '"limit":100' not in agent_runner.SYSTEM_PROMPT or "is_binary=true" not in agent_runner.SYSTEM_PROMPT:
         raise AssertionError("system prompt missing file pagination or binary web_fetch guidance")
+    if "Текущая user task всегда главнее Archive memory" not in agent_runner.SYSTEM_PROMPT:
+        raise AssertionError("system prompt missing current-task-over-memory guidance")
     print("[ok] system prompt tool guidance")
     if parse_action('{"action":"final","message":"ok"}').get("action") != "final":
         raise AssertionError("parse_action failed to parse a valid JSON object")

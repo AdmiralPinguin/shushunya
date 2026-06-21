@@ -60,6 +60,8 @@ Last verified: 2026-06-21 22:46 KST.
   `archive_memory_propose`, and filtered `archive_memory_events`.
 - Archive memory tools are fail-soft: HTTP 400/404 responses become tool results
   with `ok=false`.
+- Agent prompt treats current user task as authoritative over stale Archive
+  memory context.
 - Agent runs emit `task` stream events and write compact JSONL task journals in
   `runtime/task-journals/`.
 - Stream `tool_result` and `final` events include `duration_sec`.

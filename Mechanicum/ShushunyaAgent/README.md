@@ -250,6 +250,8 @@ matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
   return `killed_process_group=true`.
 - Long-term memory stays in `ArchiveOfHeresy`; this runner stores no persistent
   memory of its own.
+- Current user tasks are authoritative over Archive memory; retrieved memory is
+  context only and must not replace the current task.
 - Task journals are operational traces, not long-term memory. They are used for
   resume/debugging and can be inspected with `GET /task-journal`.
 - `GET /state` exposes process-local runner state for UI/ops checks without
