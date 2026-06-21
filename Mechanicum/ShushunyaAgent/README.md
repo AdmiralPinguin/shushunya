@@ -355,6 +355,12 @@ Run a lightweight API watchdog that does not touch ArchiveOfHeresy:
 The watchdog checks `/state` every `SHUSHUNYA_AGENT_WATCH_INTERVAL_SEC`
 seconds, default `15`. After `SHUSHUNYA_AGENT_WATCH_MAX_FAILURES` failed checks,
 default `2`, it restarts the API and uses `/state` as the readiness probe.
+Run it in the background with:
+
+```bash
+./scripts/start-agent-watchdog.sh
+./scripts/stop-agent-watchdog.sh
+```
 
 Stop the model host and archive gateway:
 

@@ -288,6 +288,8 @@
   },
   "ops_policy": {
     "api_watchdog_script": "scripts/watch-agent-api.sh",
+    "api_watchdog_start_script": "scripts/start-agent-watchdog.sh",
+    "api_watchdog_stop_script": "scripts/stop-agent-watchdog.sh",
     "api_watchdog_probe": "GET /state",
     "api_watchdog_interval_env": "SHUSHUNYA_AGENT_WATCH_INTERVAL_SEC",
     "api_watchdog_max_failures_env": "SHUSHUNYA_AGENT_WATCH_MAX_FAILURES",

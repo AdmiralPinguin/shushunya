@@ -26,6 +26,8 @@ Last verified: 2026-06-21 21:36 KST.
   when Archive-backed `/health` must be avoided.
 - `scripts/watch-agent-api.sh` can monitor and restart the Agent API through
   `/state` without touching ArchiveOfHeresy.
+- `scripts/start-agent-watchdog.sh` and `scripts/stop-agent-watchdog.sh` manage
+  the watchdog as a background process.
 - Agent API `/health` is minimal by default; full Archive details through
   `/health?detail=1` require a configured API key and bearer auth.
 - Archive health reports `default` and `agent` memory namespaces.
