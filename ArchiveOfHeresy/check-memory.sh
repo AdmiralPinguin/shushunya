@@ -26,20 +26,20 @@ echo
 echo
 
 echo "Active focus namespace=$NAMESPACE:"
-curl -fsS "${AUTH_ARGS[@]}" "$BASE_URL/archive/focus/active?namespace=$NAMESPACE"
+curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" "$BASE_URL/archive/focus/active"
 echo
 echo
 
 echo "Vector search namespace=$NAMESPACE query=$QUERY:"
-curl -fsS "${AUTH_ARGS[@]}" "$BASE_URL/archive/vector/search?namespace=$NAMESPACE&q=$QUERY"
+curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" --data-urlencode "q=$QUERY" "$BASE_URL/archive/vector/search"
 echo
 echo
 
 echo "Graph search namespace=$NAMESPACE query=$QUERY:"
-curl -fsS "${AUTH_ARGS[@]}" "$BASE_URL/archive/graph/search?namespace=$NAMESPACE&q=$QUERY"
+curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" --data-urlencode "q=$QUERY" "$BASE_URL/archive/graph/search"
 echo
 echo
 
 echo "Recent memory events namespace=$NAMESPACE:"
-curl -fsS "${AUTH_ARGS[@]}" "$BASE_URL/archive/memory/events?namespace=$NAMESPACE&limit=5"
+curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" --data-urlencode "limit=5" "$BASE_URL/archive/memory/events"
 echo
