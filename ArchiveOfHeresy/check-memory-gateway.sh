@@ -8,6 +8,20 @@ NAMESPACE="${1:-agent}"
 QUERY="${2:-memory gateway}"
 REQUESTER="${ARCHIVE_GATEWAY_REQUESTER:-check-memory-gateway}"
 MANIFEST_ONLY=0
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  cat <<'USAGE'
+Usage:
+  ./check-memory-gateway.sh [namespace] [query]
+  ./check-memory-gateway.sh --manifest-only
+
+Environment:
+  ARCHIVE_BASE_URL           Override archive URL, default http://127.0.0.1:8090
+  ARCHIVE_API_KEY            Bearer token when archive auth is enabled
+  ARCHIVE_GATEWAY_REQUESTER  Audit requester label, default check-memory-gateway
+  ARCHIVE_GATEWAY_PROPOSE=1  Also submit a write proposal smoke test
+USAGE
+  exit 0
+fi
 if [ "$NAMESPACE" = "--manifest-only" ]; then
   MANIFEST_ONLY=1
   NAMESPACE="agent"
