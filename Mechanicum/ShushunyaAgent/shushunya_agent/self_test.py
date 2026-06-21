@@ -278,6 +278,25 @@ def main() -> int:
     finally:
         agent_runner.TASK_JOURNAL_DIR = old_journal_dir
 
+    old_journal_dir = agent_runner.TASK_JOURNAL_DIR
+    old_journal_max_bytes = agent_runner.TASK_JOURNAL_MAX_BYTES
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agent_runner.TASK_JOURNAL_DIR = Path(tmpdir)
+            agent_runner.TASK_JOURNAL_MAX_BYTES = 128
+            rotate_config = AgentConfig(task_id=safe_task_id("self-test-journal-rotate"))
+            write_task_journal(rotate_config, "large", {"content": "x" * 1000})
+            write_task_journal(rotate_config, "after_rotate", {"ok": True})
+            rotated = read_task_journal(rotate_config.task_id, limit=5)
+            assert_ok("task journal size rotation", rotated)
+            event_types = [event.get("type") for event in rotated.get("events", [])]
+            if "journal_rotated" not in event_types or event_types[-1] != "after_rotate":
+                raise AssertionError(f"journal size rotation failed: {rotated}")
+        print("[ok] task journal size cap")
+    finally:
+        agent_runner.TASK_JOURNAL_DIR = old_journal_dir
+        agent_runner.TASK_JOURNAL_MAX_BYTES = old_journal_max_bytes
+
     with mock.patch.object(agent_runner, "chat", return_value='{"action":"final","message":"repaired"}'):
         repaired_action = repair_action_json(config, "```json\n{\"action\":\"final\",\"message\":\"broken\"", ValueError("broken"))
     if repaired_action != {"action": "final", "message": "repaired"}:

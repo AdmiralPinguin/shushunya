@@ -54,6 +54,8 @@ Last verified: 2026-06-21 18:08 KST.
   `resume_task_id` can feed recent journal context into a follow-up run.
 - Task journal retention keeps the newest configured JSONL journals.
 - Task journal reads use a bounded tail instead of loading whole journal files.
+- Individual task journals are capped by `SHUSHUNYA_AGENT_TASK_JOURNAL_MAX_BYTES`
+  and restart with a `journal_rotated` marker when exceeded.
 - Resume context is compacted before entering the model prompt.
 - `GET /state` reports runner busy/queue/current/last task state.
 - `GET /state` and `/health` include Agent API uptime.

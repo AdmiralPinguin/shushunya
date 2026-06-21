@@ -247,6 +247,7 @@
     "http_task_id_field": "task_id",
     "http_resume_task_id_field": "resume_task_id",
     "http_task_journal_endpoint": "GET /task-journal?task_id=<id>&limit=80",
+    "http_task_journal_max_bytes_env": "SHUSHUNYA_AGENT_TASK_JOURNAL_MAX_BYTES",
     "http_state_endpoint": "GET /state",
     "http_state_uptime_fields": ["started_at", "uptime_sec"],
     "http_cancel_endpoint": "POST /cancel",

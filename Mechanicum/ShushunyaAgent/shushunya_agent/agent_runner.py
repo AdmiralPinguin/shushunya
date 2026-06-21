@@ -85,6 +85,7 @@ MEMORY_NAMESPACE = os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent").s
 AGENT_ROOT = Path(__file__).resolve().parents[1]
 TASK_JOURNAL_DIR = Path(os.environ.get("SHUSHUNYA_AGENT_TASK_JOURNAL_DIR", str(AGENT_ROOT / "runtime" / "task-journals")))
 TASK_JOURNAL_MAX_FILES = int(os.environ.get("SHUSHUNYA_AGENT_TASK_JOURNAL_MAX_FILES", "500"))
+TASK_JOURNAL_MAX_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_TASK_JOURNAL_MAX_BYTES", "10485760"))
 
 
 SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локальный агент выполнения задач.
@@ -310,13 +311,24 @@ def write_task_journal(config: AgentConfig, event_type: str, payload: dict[str, 
         return
     try:
         TASK_JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
+        path = task_journal_path(config.task_id)
+        max_bytes = max(1024, int(TASK_JOURNAL_MAX_BYTES))
+        if path.is_file() and path.stat().st_size > max_bytes:
+            rotation_record = {
+                "ts": utc_now_iso(),
+                "task_id": config.task_id,
+                "type": "journal_rotated",
+                "previous_size": path.stat().st_size,
+                "max_bytes": max_bytes,
+            }
+            path.write_text(json.dumps(rotation_record, ensure_ascii=False) + "\n", encoding="utf-8")
         record = {
             "ts": utc_now_iso(),
             "task_id": config.task_id,
             "type": event_type,
             **compact_json_value(payload, string_limit=6000, list_limit=80),
         }
-        with task_journal_path(config.task_id).open("a", encoding="utf-8") as fh:
+        with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
         latest = TASK_JOURNAL_DIR / "latest"
         tmp_latest = TASK_JOURNAL_DIR / ".latest.tmp"
