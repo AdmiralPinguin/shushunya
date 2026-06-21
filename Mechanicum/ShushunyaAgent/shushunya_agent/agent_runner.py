@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import datetime as dt
 import html
 import ipaddress
 import json
@@ -13,17 +12,28 @@ import socket
 import subprocess
 import sys
 import time
-import uuid
-from collections import deque
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
-
-from .validation import validate_action as validate_action_schema
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+
+from .task_journal import (
+    TASK_JOURNAL_DIR,
+    TASK_JOURNAL_MAX_BYTES,
+    TASK_JOURNAL_MAX_FILES,
+    compact_resume_events,
+    prune_task_journals,
+    read_task_journal,
+    safe_task_id,
+    task_journal_path,
+    utc_now_iso,
+    write_task_journal,
+)
+from .utils import compact_json_value, truncate
+from .validation import validate_action as validate_action_schema
 
 
 ARCHIVE_BASE_URL = os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_URL", "http://127.0.0.1:8090").rstrip("/")
@@ -91,9 +101,6 @@ INJECT_MEMORY = os.environ.get("SHUSHUNYA_AGENT_INJECT_MEMORY", "1").strip().low
 ARCHIVE_USER = os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_USER", "shushunya-agent").strip() or "shushunya-agent"
 MEMORY_NAMESPACE = os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent").strip() or "agent"
 AGENT_ROOT = Path(__file__).resolve().parents[1]
-TASK_JOURNAL_DIR = Path(os.environ.get("SHUSHUNYA_AGENT_TASK_JOURNAL_DIR", str(AGENT_ROOT / "runtime" / "task-journals")))
-TASK_JOURNAL_MAX_FILES = int(os.environ.get("SHUSHUNYA_AGENT_TASK_JOURNAL_MAX_FILES", "500"))
-TASK_JOURNAL_MAX_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_TASK_JOURNAL_MAX_BYTES", "10485760"))
 
 
 SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локальный агент выполнения задач.
@@ -215,27 +222,6 @@ class AgentConfig:
     shell_approval_required: bool = SHELL_APPROVAL_REQUIRED
 
 
-def truncate(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    return text[: limit // 2] + "\n...[truncated]...\n" + text[-limit // 2 :]
-
-
-def compact_json_value(value: Any, string_limit: int = 4000, list_limit: int = 40, depth: int = 0) -> Any:
-    if depth > 6:
-        return truncate(str(value), string_limit)
-    if isinstance(value, str):
-        return truncate(value, string_limit)
-    if isinstance(value, list):
-        compacted = [compact_json_value(item, string_limit, list_limit, depth + 1) for item in value[:list_limit]]
-        if len(value) > list_limit:
-            compacted.append({"truncated_items": len(value) - list_limit})
-        return compacted
-    if isinstance(value, dict):
-        return {str(key): compact_json_value(item, string_limit, list_limit, depth + 1) for key, item in value.items()}
-    return value
-
-
 def result_for_model(action_type: str, result: dict[str, Any], config: AgentConfig) -> dict[str, Any]:
     if not isinstance(result, dict):
         return {"ok": False, "error": truncate(str(result), 2000)}
@@ -296,108 +282,6 @@ def compact_messages_for_model(messages: list[dict[str, str]], config: AgentConf
         }
         return [system, user, summary, *tail]
     return [system, user, *tail]
-
-
-def utc_now_iso() -> str:
-    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def safe_task_id(raw: str | None = None) -> str:
-    text = str(raw or "").strip()
-    cleaned = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in text)
-    cleaned = "-".join(part for part in cleaned.split("-") if part)
-    if cleaned:
-        return cleaned[:96]
-    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
-    return f"{stamp}-{uuid.uuid4().hex[:8]}"
-
-
-def task_journal_path(task_id: str) -> Path:
-    return TASK_JOURNAL_DIR / f"{safe_task_id(task_id)}.jsonl"
-
-
-def write_task_journal(config: AgentConfig, event_type: str, payload: dict[str, Any]) -> None:
-    if not config.task_id:
-        return
-    try:
-        TASK_JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
-        path = task_journal_path(config.task_id)
-        max_bytes = max(1024, int(TASK_JOURNAL_MAX_BYTES))
-        if path.is_file() and path.stat().st_size > max_bytes:
-            rotation_record = {
-                "ts": utc_now_iso(),
-                "task_id": config.task_id,
-                "type": "journal_rotated",
-                "previous_size": path.stat().st_size,
-                "max_bytes": max_bytes,
-            }
-            path.write_text(json.dumps(rotation_record, ensure_ascii=False) + "\n", encoding="utf-8")
-        record = {
-            "ts": utc_now_iso(),
-            "task_id": config.task_id,
-            "type": event_type,
-            **compact_json_value(payload, string_limit=6000, list_limit=80),
-        }
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-        latest = TASK_JOURNAL_DIR / "latest"
-        tmp_latest = TASK_JOURNAL_DIR / ".latest.tmp"
-        tmp_latest.write_text(config.task_id + "\n", encoding="utf-8")
-        tmp_latest.replace(latest)
-        if event_type == "final":
-            prune_task_journals(TASK_JOURNAL_MAX_FILES)
-    except OSError:
-        return
-
-
-def prune_task_journals(max_files: int) -> None:
-    try:
-        max_files = max(1, int(max_files))
-        journals = sorted(
-            (path for path in TASK_JOURNAL_DIR.glob("*.jsonl") if path.is_file()),
-            key=lambda path: path.stat().st_mtime,
-        )
-        for path in journals[:-max_files]:
-            path.unlink(missing_ok=True)
-    except OSError:
-        return
-
-
-def read_task_journal(task_id: str | None = None, limit: int = 80) -> dict[str, Any]:
-    try:
-        if not task_id:
-            task_id = (TASK_JOURNAL_DIR / "latest").read_text(encoding="utf-8").strip()
-        safe_id = safe_task_id(task_id)
-        path = task_journal_path(safe_id)
-        if not path.is_file():
-            return {"ok": False, "error": "task journal not found", "task_id": safe_id}
-        safe_limit = max(1, min(limit, 500))
-        tail: deque[str] = deque(maxlen=safe_limit)
-        event_count = 0
-        with path.open("r", encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                clean = line.strip()
-                if not clean:
-                    continue
-                event_count += 1
-                tail.append(clean)
-        records = [json.loads(line) for line in tail]
-        return {"ok": True, "task_id": safe_id, "path": str(path), "events": records, "event_count": event_count}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc), "task_id": task_id or ""}
-
-
-def compact_resume_events(events: list[Any], max_chars: int = 20000) -> list[Any]:
-    selected: list[Any] = []
-    total = 2
-    for event in reversed(events):
-        compacted = compact_json_value(event, string_limit=1200, list_limit=20)
-        text = json.dumps(compacted, ensure_ascii=False, separators=(",", ":"))
-        if selected and total + len(text) + 1 > max_chars:
-            break
-        selected.append(compacted)
-        total += len(text) + 1
-    return list(reversed(selected))
 
 
 def archive_request(config: AgentConfig, method: str, path: str, payload: dict[str, Any] | None = None, timeout: int = 180) -> dict[str, Any]:

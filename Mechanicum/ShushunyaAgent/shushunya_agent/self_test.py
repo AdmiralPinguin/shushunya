@@ -14,6 +14,7 @@ from urllib.error import HTTPError
 
 from . import agent_runner
 from . import server
+from . import task_journal
 from .agent_runner import (
     AgentConfig,
     archive_memory_gateway,
@@ -57,8 +58,8 @@ def main() -> int:
     if offline:
         print("[ok] offline self-test mode: Archive integration checks skipped")
     test_journal_tmp = tempfile.TemporaryDirectory()
-    agent_runner.TASK_JOURNAL_DIR = Path(test_journal_tmp.name)
-    if "runtime/task-journals" in str(agent_runner.TASK_JOURNAL_DIR):
+    task_journal.TASK_JOURNAL_DIR = Path(test_journal_tmp.name)
+    if "runtime/task-journals" in str(task_journal.TASK_JOURNAL_DIR):
         raise AssertionError("self-test must not write task journals into runtime/task-journals")
     print("[ok] self-test journal isolation")
 
@@ -444,25 +445,25 @@ def main() -> int:
         raise AssertionError(f"unexpected task journal payload: {journal}")
     print("[ok] task journal write/read")
 
-    old_journal_dir = agent_runner.TASK_JOURNAL_DIR
+    old_journal_dir = task_journal.TASK_JOURNAL_DIR
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            agent_runner.TASK_JOURNAL_DIR = Path(tmpdir)
+            task_journal.TASK_JOURNAL_DIR = Path(tmpdir)
             for index in range(5):
-                path = agent_runner.TASK_JOURNAL_DIR / f"journal-{index}.jsonl"
+                path = task_journal.TASK_JOURNAL_DIR / f"journal-{index}.jsonl"
                 path.write_text("{}\n", encoding="utf-8")
             prune_task_journals(2)
-            remaining = sorted(path.name for path in agent_runner.TASK_JOURNAL_DIR.glob("*.jsonl"))
+            remaining = sorted(path.name for path in task_journal.TASK_JOURNAL_DIR.glob("*.jsonl"))
             if len(remaining) != 2:
                 raise AssertionError(f"journal retention kept wrong files: {remaining}")
         print("[ok] task journal retention")
     finally:
-        agent_runner.TASK_JOURNAL_DIR = old_journal_dir
+        task_journal.TASK_JOURNAL_DIR = old_journal_dir
 
-    old_journal_dir = agent_runner.TASK_JOURNAL_DIR
+    old_journal_dir = task_journal.TASK_JOURNAL_DIR
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            agent_runner.TASK_JOURNAL_DIR = Path(tmpdir)
+            task_journal.TASK_JOURNAL_DIR = Path(tmpdir)
             task_id = safe_task_id("self-test-large-journal")
             path = agent_runner.task_journal_path(task_id)
             with path.open("w", encoding="utf-8") as fh:
@@ -475,14 +476,14 @@ def main() -> int:
                 raise AssertionError(f"journal tail read failed: {journal_tail}")
         print("[ok] task journal tail read")
     finally:
-        agent_runner.TASK_JOURNAL_DIR = old_journal_dir
+        task_journal.TASK_JOURNAL_DIR = old_journal_dir
 
-    old_journal_dir = agent_runner.TASK_JOURNAL_DIR
-    old_journal_max_bytes = agent_runner.TASK_JOURNAL_MAX_BYTES
+    old_journal_dir = task_journal.TASK_JOURNAL_DIR
+    old_journal_max_bytes = task_journal.TASK_JOURNAL_MAX_BYTES
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            agent_runner.TASK_JOURNAL_DIR = Path(tmpdir)
-            agent_runner.TASK_JOURNAL_MAX_BYTES = 128
+            task_journal.TASK_JOURNAL_DIR = Path(tmpdir)
+            task_journal.TASK_JOURNAL_MAX_BYTES = 128
             rotate_config = AgentConfig(task_id=safe_task_id("self-test-journal-rotate"))
             write_task_journal(rotate_config, "large", {"content": "x" * 1000})
             write_task_journal(rotate_config, "after_rotate", {"ok": True})
@@ -493,8 +494,8 @@ def main() -> int:
                 raise AssertionError(f"journal size rotation failed: {rotated}")
         print("[ok] task journal size cap")
     finally:
-        agent_runner.TASK_JOURNAL_DIR = old_journal_dir
-        agent_runner.TASK_JOURNAL_MAX_BYTES = old_journal_max_bytes
+        task_journal.TASK_JOURNAL_DIR = old_journal_dir
+        task_journal.TASK_JOURNAL_MAX_BYTES = old_journal_max_bytes
 
     with mock.patch.object(agent_runner, "chat", return_value='{"action":"final","message":"repaired"}'):
         repaired_action = repair_action_json(config, "```json\n{\"action\":\"final\",\"message\":\"broken\"", ValueError("broken"))

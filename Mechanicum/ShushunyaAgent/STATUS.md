@@ -72,6 +72,8 @@ Last verified: 2026-06-21 23:01 KST.
 - Runtime action schema validation rejects unsupported actions, unknown fields,
   bad field types, enum mismatches, unsafe absolute sandbox paths, and
   out-of-range numeric limits before dispatch.
+- Shared truncation/JSON compaction helpers and task journal code live outside
+  the runner module while preserving the public runner imports used by the API.
 - Agent runs have a total runtime limit through `max_runtime_sec` /
   `SHUSHUNYA_AGENT_MAX_RUNTIME_SEC`.
 - `GET /task-journal?task_id=...` can inspect recent journal events, and
