@@ -14,6 +14,8 @@ Last verified: 2026-06-21 18:08 KST.
 
 - Archive health is `ok`.
 - Agent API health is `ok`.
+- `scripts/check-agent.sh` verifies local SearXNG in addition to LLM, Archive,
+  Agent API, and self-test.
 - Agent API `/health` is minimal by default; full Archive details require
   `/health?detail=1`.
 - Archive health reports `default` and `agent` memory namespaces.

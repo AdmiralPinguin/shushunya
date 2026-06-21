@@ -305,6 +305,9 @@ Check the whole stack:
 ./scripts/check-agent.sh
 ```
 
+The stack check verifies LLM host, ArchiveOfHeresy, local SearXNG, Agent API,
+and the agent self-test.
+
 Stop the model host and archive gateway:
 
 ```bash
