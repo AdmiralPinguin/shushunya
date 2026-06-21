@@ -19,12 +19,16 @@ from .agent_runner import (
     configured_search_providers,
     file_tool,
     python_tool,
+    read_task_journal,
+    repair_action_json,
     result_for_model,
     sandbox_status,
+    safe_task_id,
     validate_configured_searxng_url,
     validate_public_url,
     web_fetch,
     web_search,
+    write_task_journal,
 )
 
 
@@ -101,6 +105,24 @@ def main() -> int:
     if total_context_chars > 9000 or len(compacted_messages) >= len(messages):
         raise AssertionError(f"context messages were not compacted: chars={total_context_chars}, count={len(compacted_messages)}")
     print("[ok] model context compacted")
+
+    if safe_task_id("bad id / with spaces") != "bad-id-with-spaces":
+        raise AssertionError("safe_task_id did not normalize spaces and slashes")
+    print("[ok] task id normalization")
+
+    journal_config = AgentConfig(task_id=safe_task_id("self test journal"))
+    write_task_journal(journal_config, "self_test", {"large": "z" * 20000})
+    journal = read_task_journal(journal_config.task_id, limit=5)
+    assert_ok("task journal read", journal)
+    if journal.get("task_id") != journal_config.task_id or not journal.get("events"):
+        raise AssertionError(f"unexpected task journal payload: {journal}")
+    print("[ok] task journal write/read")
+
+    with mock.patch.object(agent_runner, "chat", return_value='{"action":"final","message":"repaired"}'):
+        repaired_action = repair_action_json(config, "```json\n{\"action\":\"final\",\"message\":\"broken\"", ValueError("broken"))
+    if repaired_action != {"action": "final", "message": "repaired"}:
+        raise AssertionError(f"unexpected repaired action: {repaired_action}")
+    print("[ok] JSON repair helper")
 
     health = archive_request(config, "GET", "/health", timeout=10)
     if health.get("status") != "ok":

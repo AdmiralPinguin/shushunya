@@ -78,8 +78,32 @@ curl -N -sS http://127.0.0.1:8095/run-stream \
   -d '{"task":"проверь sandbox_status","technical":true,"shell_enabled":false}'
 ```
 
-`/run-stream` returns one NDJSON object per event: `start`, `step`, `action`,
-`tool_result`, `warning`, `final`, and `done`.
+`/run-stream` returns one NDJSON object per event: `start`, `task`, `step`,
+`action`, `tool_result`, `warning`, `final`, and `done`. The `task` event
+includes the stable `task_id` and `memory_namespace`.
+
+Every run writes a compact JSONL journal under `runtime/task-journals/`.
+Pass a stable task id when a caller wants resumable task history:
+
+```bash
+curl -N -sS http://127.0.0.1:8095/run-stream \
+  -H 'Content-Type: application/json' \
+  -d '{"task":"проверь память агента","task_id":"agent-memory-check","technical":true}'
+```
+
+Inspect the journal:
+
+```bash
+curl -sS 'http://127.0.0.1:8095/task-journal?task_id=agent-memory-check&limit=80'
+```
+
+Continue with recent journal context:
+
+```bash
+curl -N -sS http://127.0.0.1:8095/run-stream \
+  -H 'Content-Type: application/json' \
+  -d '{"task":"продолжи предыдущую задачу","resume_task_id":"agent-memory-check","technical":true}'
+```
 
 Optional API key:
 
@@ -139,8 +163,12 @@ For an interactive prompt:
 - The sandbox hides host `/media`, `/home`, `/root`, and the project disk.
 - Network is disabled inside the sandbox by default.
 - The runner rejects non-JSON model replies and asks the model to repair them.
+- If a model step returns malformed JSON, the runner first attempts a minimal
+  JSON repair pass with memory disabled before spending another normal step.
 - Long-term memory stays in `ArchiveOfHeresy`; this runner stores no persistent
   memory of its own.
+- Task journals are operational traces, not long-term memory. They are used for
+  resume/debugging and can be inspected with `GET /task-journal`.
 - Internal agent steps are archived by default and receive automatic
   ArchiveOfHeresy memory handling in the isolated `agent` memory namespace.
   Tool results are included in the following model step, so Magos and the

@@ -1002,6 +1002,13 @@ public class MainActivity extends Activity {
             appendAgentLog("• " + event.optString("message", "старт"));
             return;
         }
+        if ("task".equals(type)) {
+            String taskId = event.optString("task_id", "").trim();
+            String namespace = event.optString("memory_namespace", "agent").trim();
+            agentStatus.setText(taskId.isEmpty() ? "Агент получил задачу." : "Задача " + taskId);
+            appendAgentLog("• Память: " + namespace + (taskId.isEmpty() ? "" : ", task_id=" + taskId));
+            return;
+        }
         if ("step".equals(type)) {
             int step = event.optInt("step", 0);
             int maxSteps = event.optInt("max_steps", 0);
@@ -1050,6 +1057,9 @@ public class MainActivity extends Activity {
         payload.put("task", task);
         payload.put("technical", true);
         payload.put("max_steps", 12);
+        payload.put("memory_namespace", "agent");
+        payload.put("archive_task", true);
+        payload.put("task_memory", true);
         payload.put("include_stderr", false);
         payload.put("shell_enabled", false);
 
@@ -1104,6 +1114,9 @@ public class MainActivity extends Activity {
         payload.put("task", task);
         payload.put("technical", true);
         payload.put("max_steps", 12);
+        payload.put("memory_namespace", "agent");
+        payload.put("archive_task", true);
+        payload.put("task_memory", true);
         payload.put("include_steps", false);
         payload.put("include_stderr", false);
         payload.put("shell_enabled", false);

@@ -32,6 +32,12 @@ Last verified: 2026-06-21 18:08 KST.
   `archive_memory_propose`, and filtered `archive_memory_events`.
 - Archive memory tools are fail-soft: HTTP 400/404 responses become tool results
   with `ok=false`.
+- Agent runs emit `task` stream events and write compact JSONL task journals in
+  `runtime/task-journals/`.
+- `GET /task-journal?task_id=...` can inspect recent journal events, and
+  `resume_task_id` can feed recent journal context into a follow-up run.
+- Malformed model JSON gets a minimal repair pass with memory disabled before
+  the runner spends another normal step.
 
 ## Local SearXNG
 

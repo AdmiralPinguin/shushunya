@@ -127,3 +127,22 @@ Normal agent runs also pass every model step through `ArchiveOfHeresy` with
 `memory_namespace=agent`, so the agent has a separate focus bookshelf with the
 same 10-file limit as the default chat focus bookshelf, plus namespace-scoped
 wiki/vector/graph memory.
+
+## Task Journals
+
+Agent API runs write compact operational journals under
+`runtime/task-journals/`. They are not long-term memory and are meant for
+debugging and resume.
+
+HTTP callers can set:
+
+```json
+{"task_id":"stable-task-id"}
+{"resume_task_id":"stable-task-id"}
+```
+
+Read a journal through:
+
+```text
+GET /task-journal?task_id=stable-task-id&limit=80
+```

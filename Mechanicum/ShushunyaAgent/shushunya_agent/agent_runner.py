@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import datetime as dt
 import html
 import ipaddress
 import json
@@ -12,8 +13,10 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
@@ -76,6 +79,8 @@ INJECT_MEMORY = os.environ.get("SHUSHUNYA_AGENT_INJECT_MEMORY", "1").strip().low
 )
 ARCHIVE_USER = os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_USER", "shushunya-agent").strip() or "shushunya-agent"
 MEMORY_NAMESPACE = os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent").strip() or "agent"
+AGENT_ROOT = Path(__file__).resolve().parents[1]
+TASK_JOURNAL_DIR = Path(os.environ.get("SHUSHUNYA_AGENT_TASK_JOURNAL_DIR", str(AGENT_ROOT / "runtime" / "task-journals")))
 
 
 SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локальный агент выполнения задач.
@@ -183,6 +188,7 @@ class AgentConfig:
     inject_memory: bool = INJECT_MEMORY
     archive_user: str = ARCHIVE_USER
     memory_namespace: str = MEMORY_NAMESPACE
+    task_id: str = ""
     json_output: bool = False
     technical_output: bool = False
     shell_enabled: bool = SHELL_ENABLED
@@ -269,6 +275,60 @@ def compact_messages_for_model(messages: list[dict[str, str]], config: AgentConf
         }
         return [system, user, summary, *tail]
     return [system, user, *tail]
+
+
+def utc_now_iso() -> str:
+    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def safe_task_id(raw: str | None = None) -> str:
+    text = str(raw or "").strip()
+    cleaned = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in text)
+    cleaned = "-".join(part for part in cleaned.split("-") if part)
+    if cleaned:
+        return cleaned[:96]
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+    return f"{stamp}-{uuid.uuid4().hex[:8]}"
+
+
+def task_journal_path(task_id: str) -> Path:
+    return TASK_JOURNAL_DIR / f"{safe_task_id(task_id)}.jsonl"
+
+
+def write_task_journal(config: AgentConfig, event_type: str, payload: dict[str, Any]) -> None:
+    if not config.task_id:
+        return
+    try:
+        TASK_JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": utc_now_iso(),
+            "task_id": config.task_id,
+            "type": event_type,
+            **compact_json_value(payload, string_limit=6000, list_limit=80),
+        }
+        with task_journal_path(config.task_id).open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        latest = TASK_JOURNAL_DIR / "latest"
+        tmp_latest = TASK_JOURNAL_DIR / ".latest.tmp"
+        tmp_latest.write_text(config.task_id + "\n", encoding="utf-8")
+        tmp_latest.replace(latest)
+    except OSError:
+        return
+
+
+def read_task_journal(task_id: str | None = None, limit: int = 80) -> dict[str, Any]:
+    try:
+        if not task_id:
+            task_id = (TASK_JOURNAL_DIR / "latest").read_text(encoding="utf-8").strip()
+        safe_id = safe_task_id(task_id)
+        path = task_journal_path(safe_id)
+        if not path.is_file():
+            return {"ok": False, "error": "task journal not found", "task_id": safe_id}
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        records = [json.loads(line) for line in lines[-max(1, min(limit, 500)):]]
+        return {"ok": True, "task_id": safe_id, "path": str(path), "events": records, "event_count": len(lines)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "task_id": task_id or ""}
 
 
 def archive_request(config: AgentConfig, method: str, path: str, payload: dict[str, Any] | None = None, timeout: int = 180) -> dict[str, Any]:
@@ -362,6 +422,30 @@ def parse_action(raw: str) -> dict[str, Any]:
     if not isinstance(action, dict):
         raise ValueError("model returned non-object JSON")
     return action
+
+
+def repair_action_json(config: AgentConfig, raw: str, error: Exception) -> dict[str, Any]:
+    repair_messages = [
+        {
+            "role": "system",
+            "content": (
+                "You repair malformed agent JSON. Return exactly one valid JSON object and nothing else. "
+                "Do not invent missing task facts. If the intended action is unclear, return "
+                "{\"action\":\"final\",\"message\":\"Не смог разобрать действие агента.\"}."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "JSON parse error: "
+                + str(error)
+                + "\nMalformed model output:\n"
+                + truncate(raw, 8000)
+            ),
+        },
+    ]
+    repaired = chat(config, repair_messages, inject_memory=False, archive_enabled=False)
+    return parse_action(repaired)
 
 
 def parse_bool(value: Any, default: bool = False) -> bool:
@@ -1447,6 +1531,8 @@ def emit(event_sink: AgentEventSink | None, payload: dict[str, Any]) -> None:
 
 
 def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None = None) -> int:
+    if not config.task_id:
+        config.task_id = safe_task_id()
     system_prompt = SYSTEM_PROMPT
     if config.technical_output:
         system_prompt += (
@@ -1460,10 +1546,22 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     ]
     action_counts: dict[str, int] = {}
     trace: list[dict[str, Any]] = []
+    write_task_journal(
+        config,
+        "start",
+        {
+            "task": task,
+            "memory_namespace": config.memory_namespace,
+            "archive_user": config.archive_user,
+            "max_steps": config.max_steps,
+        },
+    )
+    emit(event_sink, {"type": "task", "task_id": config.task_id, "memory_namespace": config.memory_namespace})
 
     for step in range(1, config.max_steps + 1):
         print(f"\n[agent] step {step}/{config.max_steps}", file=sys.stderr)
         emit(event_sink, {"type": "step", "step": step, "max_steps": config.max_steps, "message": "думаю над следующим действием"})
+        write_task_journal(config, "step", {"step": step, "max_steps": config.max_steps})
         step_memory = config.inject_memory or (config.task_memory and step == 1)
         step_archive = config.archive_internal_steps or (config.archive_task and step == 1)
         raw = chat(config, messages, inject_memory=step_memory, archive_enabled=step_archive)
@@ -1472,15 +1570,23 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         try:
             action = parse_action(raw)
         except Exception as exc:
-            emit(event_sink, {"type": "warning", "step": step, "message": f"модель вернула невалидный JSON: {exc}"})
-            messages.append({"role": "assistant", "content": raw})
-            messages.append(
-                {
-                    "role": "user",
-                    "content": f"Твой ответ не был валидным JSON. Ошибка: {exc}. Верни ровно один JSON-объект.",
-                }
-            )
-            continue
+            emit(event_sink, {"type": "warning", "step": step, "message": f"модель вернула невалидный JSON, пробую repair: {exc}"})
+            write_task_journal(config, "json_parse_error", {"step": step, "error": str(exc), "raw": truncate(raw, 4000)})
+            try:
+                action = repair_action_json(config, raw, exc)
+                emit(event_sink, {"type": "warning", "step": step, "message": "JSON восстановлен repair-проходом"})
+                write_task_journal(config, "json_repaired", {"step": step, "action": action})
+            except Exception as repair_exc:
+                emit(event_sink, {"type": "warning", "step": step, "message": f"repair не помог: {repair_exc}"})
+                write_task_journal(config, "json_repair_failed", {"step": step, "error": str(repair_exc)})
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"Твой ответ не был валидным JSON. Ошибка: {exc}. Верни ровно один JSON-объект.",
+                    }
+                )
+                continue
 
         action_type = str(action.get("action", "")).strip().lower()
         validation = validate_action(action)
@@ -1498,8 +1604,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if action_type == "final":
             message = str(action.get("message", "")).strip()
             emit(event_sink, {"type": "final", "step": step, "ok": True, "message": message})
+            write_task_journal(config, "final", {"step": step, "ok": True, "message": message})
             if config.json_output:
-                print(json.dumps({"ok": True, "message": message, "steps": trace}, ensure_ascii=False, indent=2))
+                print(json.dumps({"ok": True, "task_id": config.task_id, "message": message, "steps": trace}, ensure_ascii=False, indent=2))
             else:
                 print(message)
             return 0
@@ -1514,6 +1621,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "reason": str(action.get("reason", "")).strip(),
             },
         )
+        write_task_journal(config, "action", {"step": step, "action": action})
         fingerprint = action_fingerprint(action)
         action_counts[fingerprint] = action_counts.get(fingerprint, 0) + 1
         if action_counts[fingerprint] >= 3:
@@ -1582,6 +1690,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "message": result_summary(action_type, result if isinstance(result, dict) else {"error": str(result)}),
             },
         )
+        write_task_journal(config, "tool_result", {"step": step, "action": action_type, "result": result_for_model(action_type, result, config)})
         trace.append({"step": step, "action": action, "result": result})
 
         messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
@@ -1594,8 +1703,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
 
     message = "Агент остановлен: достигнут лимит шагов без final."
     emit(event_sink, {"type": "final", "ok": False, "message": message})
+    write_task_journal(config, "final", {"ok": False, "message": message})
     if config.json_output:
-        print(json.dumps({"ok": False, "message": message, "steps": trace}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": False, "task_id": config.task_id, "message": message, "steps": trace}, ensure_ascii=False, indent=2))
     else:
         print(message, file=sys.stderr)
     return 2
@@ -1613,7 +1723,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-inject-memory", action="store_true", help="Disable automatic ArchiveOfHeresy memory injection.")
     parser.add_argument("--archive-internal-steps", action="store_true", help="Archive internal agent steps for debugging.")
     parser.add_argument("--no-archive-internal-steps", action="store_true", help="Disable archiving internal agent steps.")
+    parser.add_argument("--archive-task", action="store_true", help="Archive at least the first task step.")
+    parser.add_argument("--no-archive-task", action="store_true", help="Disable first-step task archiving.")
+    parser.add_argument("--task-memory", action="store_true", help="Inject memory on at least the first task step.")
+    parser.add_argument("--no-task-memory", action="store_true", help="Disable first-step task memory injection.")
     parser.add_argument("--memory-namespace", default=None, help="ArchiveOfHeresy memory namespace to use.")
+    parser.add_argument("--task-id", default=None, help="Stable id for this agent run journal.")
+    parser.add_argument("--resume-task-id", default=None, help="Append recent journal context from a previous task id.")
     parser.add_argument("--json", action="store_true", help="Print final result and trace as JSON.")
     parser.add_argument("--technical", action="store_true", help="Ask the model for a concise technical final response.")
     parser.add_argument("task", nargs="*", help="Task text. If omitted, stdin is used.")
@@ -1635,8 +1751,27 @@ def main(argv: list[str] | None = None) -> int:
         config.archive_internal_steps = True
     if args.no_archive_internal_steps:
         config.archive_internal_steps = False
+    if args.archive_task:
+        config.archive_task = True
+    if args.no_archive_task:
+        config.archive_task = False
+    if args.task_memory:
+        config.task_memory = True
+    if args.no_task_memory:
+        config.task_memory = False
     if args.memory_namespace:
         config.memory_namespace = args.memory_namespace
+    if args.task_id:
+        config.task_id = safe_task_id(args.task_id)
+    if args.resume_task_id:
+        journal = read_task_journal(args.resume_task_id, limit=80)
+        compact_events = journal.get("events", [])[-40:] if journal.get("ok") else []
+        task += (
+            "\n\nResume context from previous agent task journal "
+            + str(journal.get("task_id") or args.resume_task_id)
+            + ":\n"
+            + json.dumps(compact_events, ensure_ascii=False, indent=2)
+        )
     if args.json:
         config.json_output = True
     if args.technical:
