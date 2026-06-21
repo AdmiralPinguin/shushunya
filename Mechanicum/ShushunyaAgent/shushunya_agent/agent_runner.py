@@ -1369,7 +1369,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Shushunya as a sandboxed tool-using agent.")
     parser.add_argument("--max-steps", type=int, default=None, help="Override the agent step limit.")
     parser.add_argument("--inject-memory", action="store_true", help="Enable automatic ArchiveOfHeresy memory injection.")
+    parser.add_argument("--no-inject-memory", action="store_true", help="Disable automatic ArchiveOfHeresy memory injection.")
     parser.add_argument("--archive-internal-steps", action="store_true", help="Archive internal agent steps for debugging.")
+    parser.add_argument("--no-archive-internal-steps", action="store_true", help="Disable archiving internal agent steps.")
+    parser.add_argument("--memory-namespace", default=None, help="ArchiveOfHeresy memory namespace to use.")
     parser.add_argument("--json", action="store_true", help="Print final result and trace as JSON.")
     parser.add_argument("--technical", action="store_true", help="Ask the model for a concise technical final response.")
     parser.add_argument("task", nargs="*", help="Task text. If omitted, stdin is used.")
@@ -1385,8 +1388,14 @@ def main(argv: list[str] | None = None) -> int:
         config.max_steps = args.max_steps
     if args.inject_memory:
         config.inject_memory = True
+    if args.no_inject_memory:
+        config.inject_memory = False
     if args.archive_internal_steps:
         config.archive_internal_steps = True
+    if args.no_archive_internal_steps:
+        config.archive_internal_steps = False
+    if args.memory_namespace:
+        config.memory_namespace = args.memory_namespace
     if args.json:
         config.json_output = True
     if args.technical:

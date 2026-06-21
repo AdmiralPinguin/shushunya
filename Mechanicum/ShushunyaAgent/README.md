@@ -179,8 +179,10 @@ SHUSHUNYA_AGENT_ARCHIVE_INTERNAL_STEPS=0 ./scripts/run-agent.sh "задача"
 Use another memory namespace for a separate agent memory shelf:
 
 ```bash
-SHUSHUNYA_AGENT_MEMORY_NAMESPACE=agent-lab ./scripts/run-agent.sh "задача"
+./scripts/run-agent.sh --memory-namespace agent-lab "задача"
 ```
+
+The same can be set with `SHUSHUNYA_AGENT_MEMORY_NAMESPACE=agent-lab`.
 
 Run the local self-test:
 
