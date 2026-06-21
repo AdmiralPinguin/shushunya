@@ -169,6 +169,27 @@ def wiki_root_for_namespace(namespace):
     return WIKI_ROOT / "namespaces" / namespace
 
 
+def existing_child_namespaces(root):
+    namespace_root = Path(root) / "namespaces"
+    if not namespace_root.exists():
+        return set()
+    return {
+        safe_memory_namespace(path.name)
+        for path in namespace_root.iterdir()
+        if path.is_dir() and safe_memory_namespace(path.name) != "default"
+    }
+
+
+def known_memory_namespaces():
+    namespaces = {"default"}
+    namespaces.update(FOCUS_COMPONENTS.keys())
+    namespaces.update(GRAPH_COMPONENTS.keys())
+    namespaces.update(existing_child_namespaces(FOCUS_ROOT))
+    namespaces.update(existing_child_namespaces(WIKI_ROOT))
+    namespaces.update(existing_child_namespaces(GRAPH_ROOT))
+    return sorted(namespaces)
+
+
 def graph_memory_for_namespace(namespace):
     namespace = safe_memory_namespace(namespace)
     cached = GRAPH_COMPONENTS.get(namespace)
@@ -619,6 +640,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
+            namespaces = known_memory_namespaces()
             write_json(
                 self,
                 200,
@@ -631,19 +653,19 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "sqlite_path": str(SQLITE_PATH),
                     "focus_root": str(FOCUS_ROOT),
                     "focus_namespaces": {
-                        namespace: str(components["root"])
-                        for namespace, components in sorted(FOCUS_COMPONENTS.items())
+                        namespace: str(focus_root_for_namespace(namespace))
+                        for namespace in namespaces
                     },
                     "wiki_root": str(WIKI_ROOT),
                     "wiki_namespaces": {
                         namespace: str(wiki_root_for_namespace(namespace))
-                        for namespace in sorted(FOCUS_COMPONENTS.keys())
+                        for namespace in namespaces
                     },
                     "vector_root": str(VECTOR_ROOT),
                     "graph_root": str(GRAPH_ROOT),
                     "graph_namespaces": {
-                        namespace: str(graph_memory.root)
-                        for namespace, graph_memory in sorted(GRAPH_COMPONENTS.items())
+                        namespace: str(graph_root_for_namespace(namespace))
+                        for namespace in namespaces
                     },
                 },
             )
