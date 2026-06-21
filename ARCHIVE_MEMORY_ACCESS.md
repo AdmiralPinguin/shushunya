@@ -42,6 +42,11 @@ ArchiveOfHeresy writes daily memory quality reports at 04:00 when enabled.
 Reports are runtime artifacts under `ArchiveOfHeresy/reports/memory_quality/`
 and are intentionally ignored by git.
 
+Vector memory prefers local semantic embeddings through the OpenAI-compatible
+`/v1/embeddings` endpoint. The local llama.cpp host must be started with
+`--embeddings --pooling mean`; current backend/version are visible in
+`/health.vector_embedding`.
+
 ## HTTP Gateway
 
 Manifest:

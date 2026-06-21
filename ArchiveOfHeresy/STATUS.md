@@ -45,16 +45,19 @@ the daemon schedules daily at 04:00. Reports are written to
 
 ## Known Weak Spots
 
-- Vector memory currently uses stable hashed sparse token and character n-gram
-  vectors, not true semantic embeddings. Retrieval is better than plain keyword
-  matching, but still weaker than local embedding search. Later, replace it with
-  local embeddings without external APIs.
+- Vector memory now prefers local semantic embeddings from the OpenAI-compatible
+  `/v1/embeddings` endpoint and falls back to stable hashed sparse token and
+  character n-gram vectors when the local host does not expose embeddings. Check
+  `/health.vector_embedding` to confirm whether the resolved version is
+  `openai:*` or `sparse:*`. The local llama.cpp host must run with
+  `--embeddings --pooling mean` for the semantic path.
 - Focus and wiki search currently use token plus character n-gram overlap.
   Rephrased ideas are still harder than exact lexical matches until a stronger
   retrieval layer is added.
-- Vector backfill is incremental by indexed turn ID and embedding version. A
-  future migration should add explicit migration tooling and progress reporting
-  for very large archives.
+- Vector backfill is incremental by indexed turn ID and embedding version, and
+  capped by `ARCHIVE_VECTOR_BACKFILL_MAX_TURNS` per start. A future migration
+  should add explicit migration tooling and progress reporting for very large
+  archives.
 - `CHAT_QUEUE_LOCK` now covers the main request/response path, while
   Librarian/wiki/graph maintenance runs after the answer under
   `MAINTENANCE_LOCK`. This reduces response blocking, but maintenance is still

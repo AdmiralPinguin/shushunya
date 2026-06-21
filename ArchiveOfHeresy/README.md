@@ -129,9 +129,13 @@ vector/index.sqlite3
 
 After a successful archived answer, the librarian indexes the latest user message and assistant answer as chunks. The local starter enables direct vector context injection with `ARCHIVE_VECTOR_INJECTION_ENABLED=1`, so this layer is currently active in model prompts while the memory is still small.
 
-This first version intentionally has no external dependency and no network dependency. It uses stable hashed token and character n-gram sparse vectors stored in SQLite. The retrieval interface can later be swapped to real embedding vectors without changing the gateway flow.
+The preferred vector backend is a local OpenAI-compatible `/v1/embeddings`
+endpoint, normally served by the local llama.cpp host with `--embeddings`.
+When that endpoint is unavailable, ArchiveOfHeresy falls back to stable hashed
+token and character n-gram sparse vectors. Both modes are versioned in SQLite so
+dense semantic vectors are not mixed with sparse fallback vectors.
 
-On startup, ArchiveOfHeresy incrementally backfills vector memory from the existing working SQLite archive by default, so old archived turns become searchable too without reprocessing turns already indexed with the current embedding version.
+On startup, ArchiveOfHeresy incrementally backfills vector memory from the existing working SQLite archive by default, so old archived turns become searchable too without reprocessing turns already indexed with the current embedding version. Backfill is capped per start by `ARCHIVE_VECTOR_BACKFILL_MAX_TURNS`.
 
 Vector memory follows the same allowlist behavior as focus memory: when a client disables focus injection, vector retrieval is disabled by default too. A request can explicitly send `vector_enabled: false` to disable vector retrieval for that turn.
 
@@ -236,11 +240,16 @@ Stop it:
 - `ARCHIVE_GRAPH_INJECTION_ENABLED` - default `0`
 - `ARCHIVE_FOCUS_MAX_FILES` - default `10`
 - `ARCHIVE_VECTOR_DIMENSIONS` - default `384`
-- `ARCHIVE_VECTOR_EMBEDDING_VERSION` - default `hashed-token-chargram-v2`
+- `ARCHIVE_VECTOR_EMBEDDING_BACKEND` - default `openai`
+- `ARCHIVE_VECTOR_EMBEDDING_FALLBACK` - default `1`
+- `ARCHIVE_EMBEDDING_BASE_URL` - default `http://127.0.0.1:8080`
+- `ARCHIVE_EMBEDDING_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
+- `ARCHIVE_SPARSE_EMBEDDING_VERSION` - default `hashed-token-chargram-v2`
 - `ARCHIVE_VECTOR_CHUNK_CHARS` - default `1200`
 - `ARCHIVE_VECTOR_TOP_K` - default `5`
 - `ARCHIVE_VECTOR_MIN_SCORE` - default `0.18`
 - `ARCHIVE_VECTOR_BACKFILL_ON_START` - default `1`
+- `ARCHIVE_VECTOR_BACKFILL_MAX_TURNS` - default `200`, set `0` for unlimited
 - `ARCHIVE_GRAPH_INTERVAL_MESSAGES` - default `20`
 - `ARCHIVE_GRAPH_MAX_RECENT_TURNS` - default `12`
 - `ARCHIVE_GRAPH_TOP_K` - default `5`

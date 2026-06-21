@@ -242,7 +242,7 @@ def find_focus(index, focus_id=None, active=False):
 
 def vector_stats(memory_namespace):
     if VECTOR_MEMORY is None or not VECTOR_MEMORY.db_path.exists():
-        return {"chunks": 0, "turns": 0}
+        return {"chunks": 0, "turns": 0, "embedding": {}}
     with sqlite3.connect(VECTOR_MEMORY.db_path) as db:
         row = db.execute(
             """
@@ -252,7 +252,11 @@ def vector_stats(memory_namespace):
             """,
             (memory_namespace,),
         ).fetchone()
-    return {"chunks": int(row[0] or 0), "turns": int(row[1] or 0)}
+    return {
+        "chunks": int(row[0] or 0),
+        "turns": int(row[1] or 0),
+        "embedding": VECTOR_MEMORY.embedding_status(),
+    }
 
 
 def graph_stats(memory_namespace):
@@ -1134,6 +1138,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                         "vector": VECTOR_INJECTION_ENABLED,
                         "graph": GRAPH_INJECTION_ENABLED,
                     },
+                    "vector_embedding": VECTOR_MEMORY.embedding_status() if VECTOR_MEMORY else {},
                     "memory_quality_report": {
                         "enabled": MEMORY_QUALITY_REPORT_ENABLED,
                         "hour": MEMORY_QUALITY_REPORT_HOUR,

@@ -70,6 +70,15 @@ def catalog(namespace):
 for namespace in ("default", "agent"):
     catalog(namespace)
 
+health = request("/health")
+embedding = health.get("vector_embedding") or {}
+print(
+    "vector_embedding: "
+    f"backend={embedding.get('backend')}, "
+    f"resolved={embedding.get('resolved_version')}, "
+    f"last={embedding.get('last_backend')}"
+)
+
 for namespace in ("default", "agent"):
     search = request(
         "/archive/memory/search",

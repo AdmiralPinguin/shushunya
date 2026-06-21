@@ -6,10 +6,21 @@ import os
 import re
 import sqlite3
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
 VECTOR_DIMENSIONS = int(os.environ.get("ARCHIVE_VECTOR_DIMENSIONS", "384"))
-VECTOR_EMBEDDING_VERSION = os.environ.get("ARCHIVE_VECTOR_EMBEDDING_VERSION", "hashed-token-chargram-v2")
+SPARSE_EMBEDDING_VERSION = os.environ.get("ARCHIVE_SPARSE_EMBEDDING_VERSION", "hashed-token-chargram-v2")
+VECTOR_EMBEDDING_BACKEND = os.environ.get("ARCHIVE_VECTOR_EMBEDDING_BACKEND", "openai").strip().lower() or "openai"
+VECTOR_EMBEDDING_FALLBACK = os.environ.get("ARCHIVE_VECTOR_EMBEDDING_FALLBACK", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+VECTOR_EMBEDDING_BASE_URL = os.environ.get("ARCHIVE_EMBEDDING_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
+VECTOR_EMBEDDING_MODEL = os.environ.get("ARCHIVE_EMBEDDING_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
 VECTOR_CHUNK_CHARS = int(os.environ.get("ARCHIVE_VECTOR_CHUNK_CHARS", "1200"))
 VECTOR_TOP_K = int(os.environ.get("ARCHIVE_VECTOR_TOP_K", "5"))
 VECTOR_MIN_SCORE = float(os.environ.get("ARCHIVE_VECTOR_MIN_SCORE", "0.18"))
@@ -19,6 +30,7 @@ VECTOR_BACKFILL_ON_START = os.environ.get("ARCHIVE_VECTOR_BACKFILL_ON_START", "1
     "no",
     "off",
 )
+VECTOR_BACKFILL_MAX_TURNS = int(os.environ.get("ARCHIVE_VECTOR_BACKFILL_MAX_TURNS", "200"))
 TOKEN_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё_]+", re.UNICODE)
 
 
@@ -54,7 +66,15 @@ def stable_hash(value):
     return int.from_bytes(digest, "big", signed=False)
 
 
-def embed_text(text, dimensions=VECTOR_DIMENSIONS):
+def sparse_embedding_version():
+    return f"sparse:{SPARSE_EMBEDDING_VERSION}:{VECTOR_DIMENSIONS}"
+
+
+def openai_embedding_version(model=VECTOR_EMBEDDING_MODEL):
+    return f"openai:{model}"
+
+
+def embed_sparse_text(text, dimensions=VECTOR_DIMENSIONS):
     vector = {}
     for feature, weight in embed_features(text):
         hashed = stable_hash(feature)
@@ -68,12 +88,70 @@ def embed_text(text, dimensions=VECTOR_DIMENSIONS):
     return {str(index): value / norm for index, value in vector.items()}
 
 
+def normalize_dense(values):
+    dense = [float(value) for value in values]
+    norm = math.sqrt(sum(value * value for value in dense))
+    if norm <= 0:
+        return []
+    return [value / norm for value in dense]
+
+
+def embed_openai_text(text, base_url=VECTOR_EMBEDDING_BASE_URL, model=VECTOR_EMBEDDING_MODEL, timeout=60):
+    payload = {"model": model, "input": str(text or "")}
+    request = Request(
+        f"{base_url}/v1/embeddings",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(request, timeout=timeout) as response:
+        body = json.loads(response.read().decode("utf-8") or "{}")
+    data = body.get("data") or []
+    if not data:
+        raise RuntimeError("embedding response did not include data")
+    embedding = data[0].get("embedding")
+    if not isinstance(embedding, list):
+        raise RuntimeError("embedding response did not include a dense vector")
+    normalized = normalize_dense(embedding)
+    if not normalized:
+        raise RuntimeError("embedding response vector was empty")
+    return normalized
+
+
+def embed_text(text, backend=VECTOR_EMBEDDING_BACKEND):
+    if backend == "sparse":
+        return embed_sparse_text(text), sparse_embedding_version(), "sparse"
+    if backend == "openai":
+        try:
+            return embed_openai_text(text), openai_embedding_version(), "openai"
+        except (HTTPError, URLError, TimeoutError, RuntimeError, json.JSONDecodeError, OSError) as exc:
+            if not VECTOR_EMBEDDING_FALLBACK:
+                raise
+            return embed_sparse_text(text), sparse_embedding_version(), f"sparse_fallback:{exc}"
+    return embed_sparse_text(text), sparse_embedding_version(), "sparse"
+
+
 def cosine_sparse(left, right):
     if not left or not right:
         return 0.0
     if len(left) > len(right):
         left, right = right, left
     return sum(value * right.get(index, 0.0) for index, value in left.items())
+
+
+def cosine_dense(left, right):
+    if not left or not right:
+        return 0.0
+    count = min(len(left), len(right))
+    return sum(float(left[index]) * float(right[index]) for index in range(count))
+
+
+def cosine_embedding(left, right):
+    if isinstance(left, list) and isinstance(right, list):
+        return cosine_dense(left, right)
+    if isinstance(left, dict) and isinstance(right, dict):
+        return cosine_sparse(left, right)
+    return 0.0
 
 
 def split_chunks(text, limit=VECTOR_CHUNK_CHARS):
@@ -113,6 +191,9 @@ class VectorMemory:
     def __init__(self, root):
         self.root = Path(root)
         self.db_path = self.root / "index.sqlite3"
+        self.last_backend = None
+        self.last_embedding_version = None
+        self.resolved_embedding_version = None
         self.root.mkdir(parents=True, exist_ok=True)
         self.init_storage()
 
@@ -187,11 +268,15 @@ class VectorMemory:
             entries.append(("assistant", assistant_text))
 
         rows = []
+        active_version = None
         for role, text in entries:
             for chunk_index, chunk in enumerate(split_chunks(text)):
-                embedding = embed_text(chunk)
+                embedding, embedding_version, backend = embed_text(chunk)
                 if not embedding:
                     continue
+                active_version = embedding_version
+                self.last_backend = backend
+                self.last_embedding_version = embedding_version
                 chunk_id = f"{turn_id}:{role}:{chunk_index}"
                 rows.append(
                     (
@@ -203,7 +288,7 @@ class VectorMemory:
                         role,
                         chunk_index,
                         chunk,
-                        VECTOR_EMBEDDING_VERSION,
+                        embedding_version,
                         json.dumps(embedding, ensure_ascii=False, sort_keys=True),
                     )
                 )
@@ -226,21 +311,72 @@ class VectorMemory:
                 INSERT OR REPLACE INTO vector_indexed_turns (turn_id, memory_namespace, indexed_at, embedding_version, chunks)
                 VALUES (?, ?, datetime('now'), ?, ?)
                 """,
-                (turn_id, memory_namespace, VECTOR_EMBEDDING_VERSION, len(rows)),
+                (turn_id, memory_namespace, active_version or sparse_embedding_version(), len(rows)),
             )
         return len(rows)
 
     def indexed_turn_ids(self):
         if not self.db_path.exists():
             return set()
+        version = self.resolve_embedding_version()
         with sqlite3.connect(self.db_path) as db:
             return {
                 row[0]
                 for row in db.execute(
                     "SELECT turn_id FROM vector_indexed_turns WHERE embedding_version = ?",
-                    (VECTOR_EMBEDDING_VERSION,),
+                    (version,),
                 )
             }
+
+    def current_embedding_version(self):
+        if VECTOR_EMBEDDING_BACKEND == "sparse":
+            return sparse_embedding_version()
+        if VECTOR_EMBEDDING_BACKEND == "openai":
+            return openai_embedding_version()
+        return sparse_embedding_version()
+
+    def resolve_embedding_version(self):
+        if self.resolved_embedding_version:
+            return self.resolved_embedding_version
+        if VECTOR_EMBEDDING_BACKEND == "openai":
+            try:
+                embed_openai_text("ArchiveOfHeresy embedding backend probe", timeout=20)
+                self.last_backend = "openai"
+                self.resolved_embedding_version = openai_embedding_version()
+            except Exception as exc:
+                if not VECTOR_EMBEDDING_FALLBACK:
+                    raise
+                self.last_backend = f"sparse_fallback:{exc}"
+                self.resolved_embedding_version = sparse_embedding_version()
+            self.last_embedding_version = self.resolved_embedding_version
+            return self.resolved_embedding_version
+        self.last_backend = "sparse"
+        self.resolved_embedding_version = sparse_embedding_version()
+        self.last_embedding_version = self.resolved_embedding_version
+        return self.resolved_embedding_version
+
+    def embedding_status(self):
+        versions = {}
+        if self.db_path.exists():
+            with sqlite3.connect(self.db_path) as db:
+                try:
+                    rows = db.execute(
+                        "SELECT embedding_version, count(*) FROM vector_chunks GROUP BY embedding_version"
+                    ).fetchall()
+                    versions = {row[0]: int(row[1]) for row in rows}
+                except sqlite3.Error:
+                    versions = {}
+        return {
+            "backend": VECTOR_EMBEDDING_BACKEND,
+            "fallback_enabled": VECTOR_EMBEDDING_FALLBACK,
+            "base_url": VECTOR_EMBEDDING_BASE_URL,
+            "model": VECTOR_EMBEDDING_MODEL,
+            "current_version": self.current_embedding_version(),
+            "resolved_version": self.resolved_embedding_version,
+            "last_backend": self.last_backend,
+            "last_embedding_version": self.last_embedding_version,
+            "versions": versions,
+        }
 
     def backfill_from_archive(self, archive_sqlite_path):
         archive_sqlite_path = Path(archive_sqlite_path)
@@ -264,9 +400,11 @@ class VectorMemory:
                 )
             )
 
-        for row in rows:
-            if row["id"] in known_turns:
-                continue
+        pending_rows = [row for row in rows if row["id"] not in known_turns]
+        if VECTOR_BACKFILL_MAX_TURNS > 0:
+            pending_rows = pending_rows[:VECTOR_BACKFILL_MAX_TURNS]
+
+        for row in pending_rows:
             try:
                 request = json.loads(row["request_json"] or "{}")
             except json.JSONDecodeError:
@@ -303,16 +441,20 @@ class VectorMemory:
         return {"role": message.get("role") or "assistant", "content": content}
 
     def search(self, query, limit=VECTOR_TOP_K, min_score=VECTOR_MIN_SCORE, exclude_turn_id=None, memory_namespace=None):
-        query_embedding = embed_text(query)
+        query_embedding, query_version, backend = embed_text(query)
+        self.last_backend = backend
+        self.last_embedding_version = query_version
         if not query_embedding or not self.db_path.exists():
             return []
 
         results = []
         params = []
-        where = ""
+        where_parts = ["embedding_version = ?"]
+        params.append(query_version)
         if memory_namespace:
-            where = "WHERE memory_namespace = ?"
+            where_parts.append("memory_namespace = ?")
             params.append(str(memory_namespace))
+        where = "WHERE " + " AND ".join(where_parts)
         with sqlite3.connect(self.db_path) as db:
             db.row_factory = sqlite3.Row
             for row in db.execute(
@@ -330,12 +472,14 @@ class VectorMemory:
                     embedding = json.loads(row["embedding_json"])
                 except json.JSONDecodeError:
                     continue
-                score = cosine_sparse(query_embedding, embedding)
+                score = cosine_embedding(query_embedding, embedding)
                 if score < min_score:
                     continue
                 results.append(
                     {
                         "score": score,
+                        "embedding_version": query_version,
+                        "embedding_backend": backend,
                         "turn_id": row["turn_id"],
                         "conversation_id": row["conversation_id"],
                         "memory_namespace": row["memory_namespace"],
