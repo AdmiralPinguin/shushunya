@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import sys
+from pathlib import Path
 from unittest import mock
 from urllib.error import HTTPError
 
@@ -48,6 +49,19 @@ def assert_ok(label: str, payload: dict) -> None:
 
 def main() -> int:
     config = AgentConfig()
+
+    schema_path = Path(__file__).resolve().parents[1] / "tool_schema.json"
+    schema_actions = set(json.loads(schema_path.read_text(encoding="utf-8")).get("actions", {}))
+    runtime_actions = set(agent_runner.REQUIRED_FIELDS) | agent_runner.FILE_ACTIONS | {
+        "sandbox_status",
+        "archive_status",
+        "archive_memory_gateway",
+        "archive_memory_catalog",
+        "archive_memory_events",
+    }
+    if schema_actions != runtime_actions:
+        raise AssertionError(f"tool schema/runtime mismatch: missing={sorted(runtime_actions - schema_actions)}, extra={sorted(schema_actions - runtime_actions)}")
+    print("[ok] tool schema matches runtime actions")
 
     if configured_search_providers()[0] != "searxng":
         raise AssertionError(f"search providers must start with searxng: {configured_search_providers()}")
