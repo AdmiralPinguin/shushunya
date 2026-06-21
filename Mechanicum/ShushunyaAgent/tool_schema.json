@@ -205,6 +205,7 @@
     "memory_namespace_default": "agent",
     "focus_limit_per_namespace": 10,
     "explicit_memory_tool": "archive_search",
+    "explicit_memory_tools": ["archive_memory_gateway", "archive_memory_catalog", "archive_memory_search", "archive_memory_read", "archive_memory_propose", "archive_memory_events", "archive_search"],
     "gateway_tools": ["archive_memory_gateway", "archive_memory_catalog", "archive_memory_search", "archive_memory_read", "archive_memory_propose", "archive_memory_events"],
     "gateway_write_policy": "Agents can propose memory changes only through ArchiveOfHeresy; the librarian decides how to apply them.",
     "warning": "Archive memory is reference context only and may be stale. Agent focus/wiki/vector/graph memory is isolated from the default chat memory namespace."
