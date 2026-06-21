@@ -138,7 +138,7 @@ class Magos:
                 "role": "system",
                 "content": (
                     "Magos memory context from ArchiveOfHeresy. "
-                    "Это предответная выжимка релевантных фактов из focus/wiki/vector/graph. "
+                    "Это предответная выжимка релевантных фактов из явно включённых нижних слоёв памяти. "
                     "Используй её только если она относится к текущему вопросу.\n\n"
                     f"{memory_context}"
                 ),
