@@ -444,6 +444,7 @@ def memory_gateway_manifest():
             "proposal_policy": "Requester submits a proposal. ArchiveOfHeresy archives it and the librarian decides what to update.",
         },
         "agent_actions": [
+            "archive_memory_gateway",
             "archive_memory_catalog",
             "archive_memory_search",
             "archive_memory_read",
