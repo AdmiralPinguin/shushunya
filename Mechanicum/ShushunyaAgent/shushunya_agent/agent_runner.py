@@ -58,6 +58,12 @@ SHELL_ENABLED = os.environ.get("SHUSHUNYA_AGENT_SHELL_ENABLED", "1").strip().low
     "no",
     "off",
 )
+SHELL_APPROVAL_REQUIRED = os.environ.get("SHUSHUNYA_AGENT_SHELL_APPROVAL_REQUIRED", "0").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 ARCHIVE_INTERNAL_STEPS = os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_INTERNAL_STEPS", "1").strip().lower() not in (
     "0",
     "false",
@@ -205,6 +211,7 @@ class AgentConfig:
     json_output: bool = False
     technical_output: bool = False
     shell_enabled: bool = SHELL_ENABLED
+    shell_approval_required: bool = SHELL_APPROVAL_REQUIRED
 
 
 def truncate(text: str, limit: int) -> str:
@@ -905,9 +912,11 @@ def web_search(config: AgentConfig, query: str, limit: int | None = None) -> dic
     }
 
 
-def run_shell(config: AgentConfig, cmd: str, timeout: int | None = None) -> dict[str, Any]:
+def run_shell(config: AgentConfig, cmd: str, timeout: int | None = None, approved: bool = False) -> dict[str, Any]:
     if not config.shell_enabled:
         return {"ok": False, "error": "shell tool is disabled by supervisor policy"}
+    if config.shell_approval_required and not approved:
+        return {"ok": False, "error": "shell action requires explicit approval", "approval_required": True}
     timeout = min(int(timeout or config.shell_timeout), 300)
     forbidden = ("sudo", "su ", "systemctl", "mount", "umount", "chroot", "nsenter", "docker", "podman", "ssh ")
     lowered = f" {cmd.lower()} "
@@ -1817,7 +1826,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "instruction": "Choose a different action based on previous tool results, or return final if enough work is done.",
                 }
             elif action_type == "shell":
-                result = run_shell(config, str(action.get("cmd", "")), action.get("timeout"))
+                result = run_shell(config, str(action.get("cmd", "")), action.get("timeout"), bool(action.get("approved", False)))
             elif action_type in FILE_ACTIONS:
                 result = file_tool(config, action)
             elif action_type == "python":

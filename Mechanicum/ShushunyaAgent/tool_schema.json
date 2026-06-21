@@ -93,6 +93,7 @@
         "action": "shell",
         "cmd": "string",
         "timeout": "integer",
+        "approved": "boolean",
         "reason": "string"
       }
     },
@@ -246,6 +247,9 @@
   "supervisor_policy": {
     "shell_enabled_default": true,
     "subprocess_timeout_policy": "sandbox subprocess timeouts kill the spawned process group and return killed_process_group=true",
+    "shell_approval_required_env": "SHUSHUNYA_AGENT_SHELL_APPROVAL_REQUIRED",
+    "http_shell_approval_required_field": "shell_approval_required",
+    "shell_approval_field": "approved",
     "http_shell_enabled_default": false,
     "http_shell_requires_api_key_or_env_override": true,
     "http_shell_override_env": "SHUSHUNYA_AGENT_HTTP_ALLOW_SHELL_WITHOUT_API_KEY",

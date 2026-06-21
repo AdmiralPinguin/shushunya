@@ -17,6 +17,7 @@
 - Structured Python tool.
 - Sandbox subprocess timeout kills the spawned process group.
 - AppArmor launcher profile template and dry-run installer are available.
+- Optional shell approval gate can require `approved=true` before shell dispatch.
 - Optional shell fallback with supervisor denylist.
 - SearXNG-first web search and guarded public `web_fetch`.
 - Stream heartbeat events for long model/tool calls.
@@ -51,7 +52,7 @@
   at `scripts/setup-hard-quota.sh`; applying it still needs sudo and quota tools
   such as `xfs_quota`.
 - Apply AppArmor enforcement for the sandbox launcher after local profile review.
-- Add an approval gate for risky tools before enabling broader shell access.
+- Extend approval gates to any future browser/admin tools before enabling them.
 - Add a durable service manager wrapper for boot-time startup and log rotation.
 - Add mobile support for bearer auth, then require `SHUSHUNYA_AGENT_API_KEY`
   before exposing broader public agent controls.

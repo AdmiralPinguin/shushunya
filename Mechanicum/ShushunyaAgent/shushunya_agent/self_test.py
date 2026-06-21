@@ -198,6 +198,13 @@ def main() -> int:
     if server.config_from_payload({"shell_enabled": True}).shell_enabled:
         raise AssertionError("HTTP shell should be disabled without API key or explicit env override")
     print("[ok] HTTP shell default locked")
+    shell_gate_config = AgentConfig(shell_enabled=True, shell_approval_required=True)
+    shell_gate_result = agent_runner.run_shell(shell_gate_config, "echo should-not-run", timeout=1, approved=False)
+    if shell_gate_result.get("ok") is not False or shell_gate_result.get("approval_required") is not True:
+        raise AssertionError(f"shell approval gate failed: {shell_gate_result}")
+    if not agent_runner.validate_action({"action": "shell", "cmd": "echo ok", "approved": True}).get("ok"):
+        raise AssertionError("shell approved field should be valid")
+    print("[ok] shell approval gate")
     if server.validate_task_text("").get("status") != 400:
         raise AssertionError("empty task should fail validation")
     old_max_task_chars = server.MAX_TASK_CHARS

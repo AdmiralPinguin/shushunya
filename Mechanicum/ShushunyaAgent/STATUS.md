@@ -44,6 +44,9 @@ Last verified: 2026-06-21 22:46 KST.
 - `shell_enabled=false` blocks shell execution.
 - HTTP shell is locked by default: payload `shell_enabled=true` is ignored unless
   API key auth or an explicit env override allows it.
+- Optional shell approval gate requires `approved=true` on shell actions when
+  `SHUSHUNYA_AGENT_SHELL_APPROVAL_REQUIRED=1` or HTTP
+  `shell_approval_required=true` is set.
 - `/run` returns JSON trace and omits stderr unless requested.
 - `/run` is serialized by process-local and file locks.
 - Local web search source is `searxng` when SearXNG is running.

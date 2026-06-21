@@ -305,6 +305,7 @@ def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
         memory_namespace=str(payload.get("memory_namespace") or os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent")),
         task_id=safe_task_id(task_id),
         shell_enabled=http_shell_enabled(payload),
+        shell_approval_required=bool_field(payload, "shell_approval_required", env_bool("SHUSHUNYA_AGENT_SHELL_APPROVAL_REQUIRED", False)),
     )
 
 

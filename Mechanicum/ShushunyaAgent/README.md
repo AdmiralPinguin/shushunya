@@ -184,6 +184,9 @@ normal HTTP error.
 HTTP requests cannot enable the shell tool unless `SHUSHUNYA_AGENT_API_KEY` is
 configured or `SHUSHUNYA_AGENT_HTTP_ALLOW_SHELL_WITHOUT_API_KEY=1` is set.
 The phone client sends `shell_enabled=false`.
+Set `SHUSHUNYA_AGENT_SHELL_APPROVAL_REQUIRED=1` or
+`"shell_approval_required": true` when shell actions must include
+`"approved": true` before execution.
 
 Add `"include_stderr": true` to a `/run` payload when debugging the internal
 step log.
