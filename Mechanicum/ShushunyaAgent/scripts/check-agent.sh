@@ -22,9 +22,14 @@ curl -fsS "http://127.0.0.1:8095/health"
 echo
 
 echo "ShushunyaAgent API request guards:"
+auth_args=()
+if [[ -n "${SHUSHUNYA_AGENT_API_KEY:-}" ]]; then
+  auth_args=(-H "Authorization: Bearer $SHUSHUNYA_AGENT_API_KEY")
+fi
 bad_json_status="$(
   curl -sS -o /dev/null -w "%{http_code}" \
     -X POST "http://127.0.0.1:8095/run" \
+    "${auth_args[@]}" \
     -H "Content-Type: application/json" \
     --data '["not-object"]'
 )"
