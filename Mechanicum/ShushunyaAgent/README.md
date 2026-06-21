@@ -136,6 +136,9 @@ curl -sS http://127.0.0.1:8095/run \
 
 `POST /run` is serialized with both a process-local lock and a runtime file lock
 so concurrent callers do not mutate the same sandbox at the same time.
+HTTP requests cannot enable the shell tool unless `SHUSHUNYA_AGENT_API_KEY` is
+configured or `SHUSHUNYA_AGENT_HTTP_ALLOW_SHELL_WITHOUT_API_KEY=1` is set.
+The phone client sends `shell_enabled=false`.
 
 Add `"include_stderr": true` to a `/run` payload when debugging the internal
 step log.

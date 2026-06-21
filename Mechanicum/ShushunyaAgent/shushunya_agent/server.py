@@ -106,6 +106,15 @@ def int_field(payload: dict[str, Any], key: str, default: int, minimum: int, max
     return max(minimum, min(value, maximum))
 
 
+def http_shell_enabled(payload: dict[str, Any]) -> bool:
+    requested = bool_field(payload, "shell_enabled", env_bool("SHUSHUNYA_AGENT_HTTP_SHELL_ENABLED", False))
+    if not requested:
+        return False
+    if API_KEY or env_bool("SHUSHUNYA_AGENT_HTTP_ALLOW_SHELL_WITHOUT_API_KEY", False):
+        return True
+    return False
+
+
 def runtime_state() -> dict[str, Any]:
     with STATE_LOCK:
         payload = dict(RUN_STATE)
@@ -138,7 +147,7 @@ def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
         archive_user=str(payload.get("archive_user") or os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_USER", "shushunya-agent")),
         memory_namespace=str(payload.get("memory_namespace") or os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent")),
         task_id=safe_task_id(task_id),
-        shell_enabled=bool_field(payload, "shell_enabled", True),
+        shell_enabled=http_shell_enabled(payload),
     )
 
 

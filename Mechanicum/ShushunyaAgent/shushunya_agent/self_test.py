@@ -121,6 +121,9 @@ def main() -> int:
     if not server_config.task_id:
         raise AssertionError("server did not assign a task_id")
     print("[ok] server assigns task id")
+    if server.config_from_payload({"shell_enabled": True}).shell_enabled:
+        raise AssertionError("HTTP shell should be disabled without API key or explicit env override")
+    print("[ok] HTTP shell default locked")
 
     compact_resume = server.compact_resume_events(
         [{"type": "tool_result", "result": {"content": "r" * 10000}, "index": index} for index in range(30)],
