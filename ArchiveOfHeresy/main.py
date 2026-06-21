@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import sqlite3
 import threading
 import uuid
@@ -70,6 +71,7 @@ FOCUS_COMPONENTS = {}
 GRAPH_COMPONENTS = {}
 VECTOR_MEMORY = None
 GRAPH_MEMORY = None
+TOKEN_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё_]+", re.UNICODE)
 
 
 def read_json(handler):
@@ -227,6 +229,110 @@ def graph_stats(memory_namespace):
     return {"nodes": nodes, "edges": edges}
 
 
+def memory_tokens(value):
+    return {token.lower() for token in TOKEN_RE.findall(str(value or "")) if len(token) > 1}
+
+
+def memory_overlap_score(query_tokens, value):
+    if not query_tokens:
+        return 0.0
+    target = memory_tokens(value)
+    if not target:
+        return 0.0
+    return len(query_tokens & target) / max(1, min(len(query_tokens), len(target)))
+
+
+def trim_memory_text(value, limit=1200):
+    value = str(value or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[:limit].rstrip() + "\n..."
+
+
+def wiki_search(memory_namespace, query, limit=5):
+    query_tokens = memory_tokens(query)
+    if not query_tokens:
+        return []
+    bookshelf = wiki_bookshelf_for_namespace(memory_namespace)
+    index = bookshelf.load_index()
+    matches = []
+    for page in index.get("pages", []):
+        content = bookshelf.read_page(page)
+        score = memory_overlap_score(
+            query_tokens,
+            " ".join([str(page.get("title") or ""), str(page.get("kind") or ""), content]),
+        )
+        if score <= 0:
+            continue
+        matches.append(
+            {
+                "score": score,
+                "id": page.get("id"),
+                "title": page.get("title"),
+                "kind": page.get("kind"),
+                "importance": page.get("importance"),
+                "updated_at": page.get("updated_at"),
+                "excerpt": trim_memory_text(content, 1400),
+            }
+        )
+    matches.sort(key=lambda item: (-item["score"], -int(item.get("importance") or 0), item.get("updated_at") or ""))
+    return matches[:limit]
+
+
+def focus_search(memory_namespace, query, limit=5):
+    query_tokens = memory_tokens(query)
+    if not query_tokens:
+        return []
+    bookshelf = focus_components(memory_namespace)["bookshelf"]
+    index = bookshelf.load_index()
+    matches = []
+    for focus in index.get("files", []):
+        content = bookshelf.read_focus(focus)
+        score = memory_overlap_score(
+            query_tokens,
+            " ".join([str(focus.get("title") or ""), str(focus.get("status") or ""), content]),
+        )
+        if score <= 0 and focus.get("id") != index.get("active_id"):
+            continue
+        matches.append(
+            {
+                "score": score,
+                "id": focus.get("id"),
+                "title": focus.get("title"),
+                "status": focus.get("status"),
+                "importance": focus.get("importance"),
+                "updated_at": focus.get("updated_at"),
+                "active": focus.get("id") == index.get("active_id"),
+                "excerpt": trim_memory_text(content, 1400),
+            }
+        )
+    matches.sort(key=lambda item: (not item["active"], -item["score"], -int(item.get("importance") or 0), item.get("updated_at") or ""))
+    return matches[:limit]
+
+
+def memory_search(memory_namespace, query, limit=5):
+    namespace = safe_memory_namespace(memory_namespace)
+    query = str(query or "").strip()
+    try:
+        safe_limit = max(1, min(int(limit or 5), 20))
+    except (TypeError, ValueError):
+        safe_limit = 5
+    vector_matches = VECTOR_MEMORY.search(query, limit=safe_limit, memory_namespace=namespace) if VECTOR_MEMORY and query else []
+    graph_memory = graph_memory_for_namespace(namespace)
+    graph_matches = graph_memory.search(query, limit=safe_limit) if graph_memory and query else {"nodes": [], "edges": []}
+    return {
+        "ok": True,
+        "memory_namespace": namespace,
+        "query": query,
+        "limit": safe_limit,
+        "warning": "Gateway search is reference memory only. Treat current task/tool results as fresher than memory.",
+        "focus": focus_search(namespace, query, safe_limit),
+        "wiki": wiki_search(namespace, query, safe_limit),
+        "vector": vector_matches,
+        "graph": graph_matches,
+    }
+
+
 def memory_catalog(memory_namespace):
     namespace = safe_memory_namespace(memory_namespace)
     bookshelf = focus_components(namespace)["bookshelf"]
@@ -240,6 +346,7 @@ def memory_catalog(memory_namespace):
                 "/archive/memory/catalog",
                 "/archive/memory/focus",
                 "/archive/memory/wiki",
+                "/archive/memory/search",
                 "/archive/vector/search",
                 "/archive/graph/search",
                 "/archive/memory/events",
@@ -806,6 +913,24 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
             write_json(self, 200, memory_catalog(namespace))
+            return
+
+        if self.path.startswith("/archive/memory/search"):
+            namespace = "default"
+            query = ""
+            limit = 5
+            if "?" in self.path:
+                params = parse_qs(urlsplit(self.path).query)
+                namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
+                query = (params.get("q") or [""])[0]
+                try:
+                    limit = int((params.get("limit") or ["5"])[0])
+                except (TypeError, ValueError):
+                    limit = 5
+            if not query.strip():
+                write_json(self, 400, {"error": "Missing required query parameter: q", "memory_namespace": namespace})
+                return
+            write_json(self, 200, memory_search(namespace, query, limit=limit))
             return
 
         if self.path.startswith("/archive/memory/focus"):

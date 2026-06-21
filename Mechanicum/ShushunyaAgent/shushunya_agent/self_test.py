@@ -11,6 +11,7 @@ from .agent_runner import (
     archive_memory_events,
     archive_memory_propose,
     archive_memory_read,
+    archive_memory_search,
     archive_request,
     archive_status,
     compact_messages_for_model,
@@ -115,6 +116,11 @@ def main() -> int:
     if catalog.get("memory_namespace") != config.memory_namespace:
         raise AssertionError(f"unexpected memory namespace in catalog response: {catalog}")
     print("[ok] archive memory catalog namespace")
+    memory_search = archive_memory_search(config, "agent memory", limit=2)
+    assert_ok("archive memory search tool", memory_search)
+    if memory_search.get("memory_namespace") != config.memory_namespace:
+        raise AssertionError(f"unexpected memory namespace in memory search response: {memory_search}")
+    print("[ok] archive memory search namespace")
     focus_read = archive_memory_read(config, "focus", "active")
     assert_ok("archive memory focus read tool", focus_read)
     if focus_read.get("memory_namespace") != config.memory_namespace:
