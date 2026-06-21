@@ -237,6 +237,12 @@
     "structured_file_write_enforced": true,
     "hard_quota_required_for_shell_and_python": true
   },
+  "apparmor_policy": {
+    "profile_template": "profiles/apparmor/usr.local.bin.shushunya-agent-shell",
+    "setup_script": "scripts/setup-apparmor.sh",
+    "apply_requires": "sudo CONFIRM=1",
+    "default_mode": "enforce"
+  },
   "supervisor_policy": {
     "shell_enabled_default": true,
     "subprocess_timeout_policy": "sandbox subprocess timeouts kill the spawned process group and return killed_process_group=true",

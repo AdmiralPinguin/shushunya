@@ -137,6 +137,9 @@ SHUSHUNYA_AGENT_SEARCH_PROVIDERS=searxng,marginalia,wikipedia,brave
 - Hard quota helper is available as `scripts/setup-hard-quota.sh`; dry-run mode
   validates sandbox/mount paths and project id/name conflicts, but applying it
   requires sudo and quota tools such as `xfs_quota`.
+- AppArmor launcher profile template is available under `profiles/apparmor/`;
+  `scripts/setup-apparmor.sh` dry-runs install/reload commands before requiring
+  sudo with `CONFIRM=1`.
 - The API is bound to localhost by default. If exposed beyond localhost, set
   `SHUSHUNYA_AGENT_API_KEY`.
 - Graph/wiki long-term layers update by message interval, so a fresh namespace

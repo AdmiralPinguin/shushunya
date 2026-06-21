@@ -392,6 +392,19 @@ Apply hard quota only after reviewing the dry run:
 sudo CONFIRM=1 ./scripts/setup-hard-quota.sh
 ```
 
+Prepare AppArmor launcher profile commands:
+
+```bash
+./scripts/setup-apparmor.sh
+```
+
+Apply the profile only after reviewing the template under
+`profiles/apparmor/`:
+
+```bash
+sudo CONFIRM=1 ./scripts/setup-apparmor.sh
+```
+
 ## Tools
 
 The supported action contract is documented in `TOOLS.md` and
