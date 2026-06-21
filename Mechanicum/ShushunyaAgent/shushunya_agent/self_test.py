@@ -51,6 +51,11 @@ def assert_ok(label: str, payload: dict) -> None:
 
 def main() -> int:
     config = AgentConfig()
+    test_journal_tmp = tempfile.TemporaryDirectory()
+    agent_runner.TASK_JOURNAL_DIR = Path(test_journal_tmp.name)
+    if "runtime/task-journals" in str(agent_runner.TASK_JOURNAL_DIR):
+        raise AssertionError("self-test must not write task journals into runtime/task-journals")
+    print("[ok] self-test journal isolation")
 
     schema_path = Path(__file__).resolve().parents[1] / "tool_schema.json"
     schema_actions = set(json.loads(schema_path.read_text(encoding="utf-8")).get("actions", {}))
