@@ -21,6 +21,20 @@ echo "ShushunyaAgent API:"
 curl -fsS "http://127.0.0.1:8095/health"
 echo
 
+echo "ShushunyaAgent API request guards:"
+bad_json_status="$(
+  curl -sS -o /dev/null -w "%{http_code}" \
+    -X POST "http://127.0.0.1:8095/run" \
+    -H "Content-Type: application/json" \
+    --data '["not-object"]'
+)"
+if [[ "$bad_json_status" != "400" ]]; then
+  echo "expected non-object JSON request to return 400, got $bad_json_status" >&2
+  exit 1
+fi
+echo "ok"
+echo
+
 echo "Sandbox self-test:"
 cd "$AGENT_ROOT"
 export SHUSHUNYA_AGENT_SEARXNG_URL="${SHUSHUNYA_AGENT_SEARXNG_URL:-http://127.0.0.1:8888}"
