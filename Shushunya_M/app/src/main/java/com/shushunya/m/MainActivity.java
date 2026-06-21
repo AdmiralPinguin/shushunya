@@ -143,6 +143,8 @@ public class MainActivity extends Activity {
     private ImageButton agentRunButton;
     private volatile boolean recording;
     private volatile boolean streamingAnswer;
+    private volatile boolean agentCancelRequested;
+    private String currentAgentTaskId;
     private String pendingSpeechLanguage;
     private EditText pendingSpeechOutput;
     private String pendingSpeechTitle;
@@ -652,7 +654,13 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams runLp = new LinearLayout.LayoutParams(dp(48), dp(50));
         runLp.leftMargin = dp(6);
         agentComposer.addView(agentRunButton, runLp);
-        agentRunButton.setOnClickListener(v -> submitAgentTask());
+        agentRunButton.setOnClickListener(v -> {
+            if (agentRunning) {
+                cancelAgentTask();
+            } else {
+                submitAgentTask();
+            }
+        });
 
         return view;
     }
@@ -940,9 +948,11 @@ public class MainActivity extends Activity {
         if (clean.isEmpty() || agentRunning) {
             return;
         }
+        String taskId = "mobile-" + System.currentTimeMillis();
+        currentAgentTaskId = taskId;
+        agentCancelRequested = false;
         agentRunning = true;
-        agentRunButton.setEnabled(false);
-        agentRunButton.animate().alpha(0.55f).setDuration(160).start();
+        setAgentRunButtonRunning(true);
         agentStatus.setText("Агент выполняет задачу в песочнице...");
         addAgentMessage(true, clean, true);
         agentLiveBubble = addAgentMessage(false, "", true);
@@ -953,21 +963,23 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
             try {
-                String result = requestAgentRunStream(clean);
+                String result = requestAgentRunStream(clean, taskId);
                 main.post(() -> {
                     agentRunning = false;
-                    agentRunButton.setEnabled(true);
-                    agentRunButton.animate().alpha(1f).setDuration(160).start();
+                    agentCancelRequested = false;
+                    currentAgentTaskId = "";
+                    setAgentRunButtonRunning(false);
                     progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
-                    agentStatus.setText("Готово.");
+                    agentStatus.setText(result.toLowerCase().contains("остановлен") ? "Отменено." : "Готово.");
                     agentLiveBubble = null;
                     showAnswerNotification(result);
                 });
             } catch (Exception exc) {
                 main.post(() -> {
                     agentRunning = false;
-                    agentRunButton.setEnabled(true);
-                    agentRunButton.animate().alpha(1f).setDuration(160).start();
+                    agentCancelRequested = false;
+                    currentAgentTaskId = "";
+                    setAgentRunButtonRunning(false);
                     progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
                     agentStatus.setText("Ошибка агента: " + exc.getMessage());
                     appendAgentLog("! Ошибка агента: " + exc.getMessage());
@@ -978,6 +990,50 @@ public class MainActivity extends Activity {
                     wakeLock.release();
                 }
                 stopAnswerKeepAlive();
+            }
+        }).start();
+    }
+
+    private void setAgentRunButtonRunning(boolean running) {
+        if (agentRunButton == null) {
+            return;
+        }
+        agentRunButton.setEnabled(true);
+        agentRunButton.setImageResource(running ? android.R.drawable.ic_menu_close_clear_cancel : android.R.drawable.ic_menu_upload);
+        agentRunButton.setColorFilter(running ? Color.rgb(255, 232, 204) : Color.rgb(5, 13, 31));
+        agentRunButton.setBackground(running
+                ? pill(Color.rgb(87, 23, 33), Color.rgb(231, 95, 69), dp(16))
+                : pill(Color.rgb(201, 156, 58), Color.rgb(29, 191, 183), dp(16)));
+        agentRunButton.animate().alpha(agentCancelRequested ? 0.55f : 1f).setDuration(160).start();
+    }
+
+    private void cancelAgentTask() {
+        if (!agentRunning || agentCancelRequested) {
+            return;
+        }
+        String taskId = currentAgentTaskId == null ? "" : currentAgentTaskId.trim();
+        if (taskId.isEmpty()) {
+            agentStatus.setText("Нет task_id для отмены.");
+            return;
+        }
+        agentCancelRequested = true;
+        setAgentRunButtonRunning(true);
+        agentStatus.setText("Отправляю отмену...");
+        appendAgentLog("! Запрошена отмена задачи " + taskId);
+        new Thread(() -> {
+            try {
+                String message = requestAgentCancel(taskId);
+                main.post(() -> {
+                    agentStatus.setText(message.isEmpty() ? "Отмена отправлена." : message);
+                    appendAgentLog("! Отмена принята сервером.");
+                });
+            } catch (Exception exc) {
+                main.post(() -> {
+                    agentCancelRequested = false;
+                    setAgentRunButtonRunning(true);
+                    agentStatus.setText("Ошибка отмены: " + exc.getMessage());
+                    appendAgentLog("! Ошибка отмены: " + exc.getMessage());
+                });
             }
         }).start();
     }
@@ -1037,6 +1093,9 @@ public class MainActivity extends Activity {
         if ("task".equals(type)) {
             String taskId = event.optString("task_id", "").trim();
             String namespace = event.optString("memory_namespace", "agent").trim();
+            if (!taskId.isEmpty()) {
+                currentAgentTaskId = taskId;
+            }
             agentStatus.setText(taskId.isEmpty() ? "Агент получил задачу." : "Задача " + taskId);
             appendAgentLog("• Память: " + namespace + (taskId.isEmpty() ? "" : ", task_id=" + taskId));
             return;
@@ -1073,9 +1132,15 @@ public class MainActivity extends Activity {
         if ("final".equals(type)) {
             String message = event.optString("message", "").trim();
             double duration = event.optDouble("duration_sec", -1.0);
+            boolean cancelled = event.optBoolean("cancelled", false);
             appendAgentLog("");
-            appendAgentLog(duration >= 0.0 ? "Результат (" + duration + "s):" : "Результат:");
+            appendAgentLog(cancelled
+                    ? (duration >= 0.0 ? "Остановлено (" + duration + "s):" : "Остановлено:")
+                    : (duration >= 0.0 ? "Результат (" + duration + "s):" : "Результат:"));
             appendAgentLog(message.isEmpty() ? "Агент вернул пустой ответ." : message);
+            if (cancelled) {
+                agentStatus.setText("Отменено.");
+            }
             return;
         }
         if ("error".equals(type)) {
@@ -1083,13 +1148,16 @@ public class MainActivity extends Activity {
             return;
         }
         if ("done".equals(type)) {
-            agentStatus.setText(event.optBoolean("ok", false) ? "Готово." : "Агент завершился с ошибкой.");
+            JSONObject result = event.optJSONObject("result");
+            boolean cancelled = result != null && result.optBoolean("cancelled", false);
+            agentStatus.setText(cancelled ? "Отменено." : event.optBoolean("ok", false) ? "Готово." : "Агент завершился с ошибкой.");
         }
     }
 
-    private String requestAgentRunStream(String task) throws Exception {
+    private String requestAgentRunStream(String task, String taskId) throws Exception {
         JSONObject payload = new JSONObject();
         payload.put("task", task);
+        payload.put("task_id", taskId);
         payload.put("technical", true);
         payload.put("max_steps", 12);
         payload.put("memory_namespace", "agent");
@@ -1124,6 +1192,7 @@ public class MainActivity extends Activity {
 
         String finalMessage = "";
         boolean ok = true;
+        boolean cancelled = false;
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
@@ -1135,7 +1204,8 @@ public class MainActivity extends Activity {
                 String type = event.optString("type", "");
                 if ("final".equals(type)) {
                     finalMessage = event.optString("message", "").trim();
-                    ok = event.optBoolean("ok", true);
+                    cancelled = event.optBoolean("cancelled", false);
+                    ok = cancelled || event.optBoolean("ok", true);
                 } else if ("error".equals(type)) {
                     ok = false;
                     finalMessage = event.optString("message", "Ошибка агента");
@@ -1146,7 +1216,39 @@ public class MainActivity extends Activity {
         if (!ok) {
             throw new IllegalStateException(finalMessage.isEmpty() ? "agent stream failed" : finalMessage);
         }
+        if (cancelled && finalMessage.isEmpty()) {
+            return "Агент остановлен: задача отменена.";
+        }
         return finalMessage.isEmpty() ? "Агент вернул пустой ответ." : finalMessage;
+    }
+
+    private String requestAgentCancel(String taskId) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("task_id", taskId);
+        byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+        URL url = new URL(DEFAULT_AGENT_URL + "/cancel");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setConnectTimeout(12000);
+        conn.setReadTimeout(30000);
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        conn.setRequestProperty("Accept", "application/json");
+        try (OutputStream out = conn.getOutputStream()) {
+            out.write(body);
+        }
+
+        int code = conn.getResponseCode();
+        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
+        String response = readAll(stream);
+        if (code < 200 || code >= 300) {
+            throw new IllegalStateException("HTTP " + code + ": " + response);
+        }
+        JSONObject json = new JSONObject(response);
+        if (!json.optBoolean("ok", false)) {
+            throw new IllegalStateException(json.optString("error", response));
+        }
+        return json.optString("message", "Отмена отправлена.");
     }
 
     private String requestAgentRun(String task) throws Exception {
