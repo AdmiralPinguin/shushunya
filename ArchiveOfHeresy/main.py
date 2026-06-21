@@ -274,6 +274,17 @@ def trim_memory_text(value, limit=1200):
     return value[:limit].rstrip() + "\n..."
 
 
+def focus_summary_text(content):
+    text = str(content or "").strip()
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) == 3:
+            text = parts[2].strip()
+    if "## Last Exchange" in text:
+        text = text.split("## Last Exchange", 1)[0].strip()
+    return text
+
+
 def wiki_search(memory_namespace, query, limit=5):
     query_tokens = memory_tokens(query)
     if not query_tokens:
@@ -313,9 +324,10 @@ def focus_search(memory_namespace, query, limit=5):
     matches = []
     for focus in index.get("files", []):
         content = bookshelf.read_focus(focus)
+        summary = focus_summary_text(content)
         score = memory_overlap_score(
             query_tokens,
-            " ".join([str(focus.get("title") or ""), str(focus.get("status") or ""), content]),
+            " ".join([str(focus.get("title") or ""), str(focus.get("status") or ""), summary]),
         )
         if score <= 0:
             continue
@@ -328,7 +340,7 @@ def focus_search(memory_namespace, query, limit=5):
                 "importance": focus.get("importance"),
                 "updated_at": focus.get("updated_at"),
                 "active": focus.get("id") == index.get("active_id"),
-                "excerpt": trim_memory_text(content, 1400),
+                "excerpt": trim_memory_text(summary, 1400),
             }
         )
     matches.sort(key=lambda item: (not item["active"], -item["score"], -int(item.get("importance") or 0), item.get("updated_at") or ""))
