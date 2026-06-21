@@ -317,7 +317,7 @@ def focus_search(memory_namespace, query, limit=5):
             query_tokens,
             " ".join([str(focus.get("title") or ""), str(focus.get("status") or ""), content]),
         )
-        if score <= 0 and focus.get("id") != index.get("active_id"):
+        if score <= 0:
             continue
         matches.append(
             {
