@@ -126,6 +126,10 @@ def main() -> int:
     if focus_read.get("memory_namespace") != config.memory_namespace:
         raise AssertionError(f"unexpected memory namespace in focus read response: {focus_read}")
     print("[ok] archive memory focus read namespace")
+    missing_wiki = archive_memory_read(config, "wiki", title="__agent_self_test_missing__")
+    if missing_wiki.get("ok") is not False or missing_wiki.get("http_status") != 404:
+        raise AssertionError(f"missing wiki should be a fail-soft tool result: {missing_wiki}")
+    print("[ok] archive memory missing wiki fail-soft")
     with mock.patch.object(
         agent_runner,
         "archive_request",
@@ -133,10 +137,14 @@ def main() -> int:
     ) as mocked_archive:
         proposal = archive_memory_propose(config, {"proposal": "self-test proposal", "target": "focus", "importance": 2})
     assert_ok("archive memory proposal tool", proposal)
-    called_payload = mocked_archive.call_args.args[3]
+    called_payload = mocked_archive.call_args.kwargs["payload"]
     if called_payload.get("namespace") != config.memory_namespace or called_payload.get("proposal") != "self-test proposal":
         raise AssertionError(f"unexpected proposal payload: {called_payload}")
     print("[ok] archive memory proposal payload")
+    bad_proposal = archive_memory_propose(config, {"proposal": "bad target self-test", "target": "focuz"})
+    if bad_proposal.get("ok") is not False or bad_proposal.get("http_status") != 400:
+        raise AssertionError(f"bad proposal should be a fail-soft tool result: {bad_proposal}")
+    print("[ok] archive memory bad proposal fail-soft")
 
     status = sandbox_status(config)
     assert_ok("sandbox status", status)

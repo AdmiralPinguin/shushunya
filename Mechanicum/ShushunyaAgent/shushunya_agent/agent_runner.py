@@ -280,6 +280,29 @@ def archive_request(config: AgentConfig, method: str, path: str, payload: dict[s
         return json.loads(body) if body else {}
 
 
+def archive_tool_request(config: AgentConfig, method: str, path: str, payload: dict[str, Any] | None = None, timeout: int = 180) -> dict[str, Any]:
+    try:
+        response = archive_request(config, method, path, payload=payload, timeout=timeout)
+        response["ok"] = bool(response.get("ok", True))
+        return response
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            parsed = {"raw": truncate(body, 2000)}
+        return {
+            "ok": False,
+            "http_status": exc.code,
+            "error": parsed.get("error") or str(exc),
+            "response": parsed,
+        }
+    except (TimeoutError, URLError) as exc:
+        return {"ok": False, "error": f"ArchiveOfHeresy unavailable: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def chat(
     config: AgentConfig,
     messages: list[dict[str, str]],
@@ -1104,7 +1127,7 @@ print(json.dumps(payload, ensure_ascii=False))
         payload = json.loads(result.get("stdout", "{}"))
     except json.JSONDecodeError:
         return {"ok": False, "error": "sandbox status returned invalid JSON", "raw": result}
-    payload["ok"] = True
+    payload["ok"] = bool(payload.get("ok", True))
     payload["policy"] = {
         "storage_limit_bytes": config.sandbox_storage_limit_bytes,
         "storage_limit_human": "500G",
@@ -1123,7 +1146,7 @@ def archive_search(config: AgentConfig, kind: str, query: str) -> dict[str, Any]
         )
     }
     if kind == "focus":
-        payload = archive_request(
+        payload = archive_tool_request(
             config,
             "GET",
             f"/archive/memory/focus?namespace={quote(config.memory_namespace)}&id=active&requester=shushunya-agent",
@@ -1132,7 +1155,7 @@ def archive_search(config: AgentConfig, kind: str, query: str) -> dict[str, Any]
         payload.update(warning)
         return payload
     if kind == "vector":
-        payload = archive_request(
+        payload = archive_tool_request(
             config,
             "GET",
             f"/archive/vector/search?q={quote(query)}&namespace={quote(config.memory_namespace)}",
@@ -1141,7 +1164,7 @@ def archive_search(config: AgentConfig, kind: str, query: str) -> dict[str, Any]
         payload.update(warning)
         return payload
     if kind == "graph":
-        payload = archive_request(
+        payload = archive_tool_request(
             config,
             "GET",
             f"/archive/graph/search?q={quote(query)}&namespace={quote(config.memory_namespace)}",
@@ -1149,17 +1172,17 @@ def archive_search(config: AgentConfig, kind: str, query: str) -> dict[str, Any]
         )
         payload.update(warning)
         return payload
-    return {"error": f"unsupported archive_search kind: {kind}"}
+    return {"ok": False, "error": f"unsupported archive_search kind: {kind}"}
 
 
 def archive_memory_catalog(config: AgentConfig) -> dict[str, Any]:
-    payload = archive_request(
+    payload = archive_tool_request(
         config,
         "GET",
         f"/archive/memory/catalog?namespace={quote(config.memory_namespace)}&requester=shushunya-agent",
         timeout=30,
     )
-    payload["ok"] = True
+    payload["ok"] = bool(payload.get("ok", True))
     return payload
 
 
@@ -1171,7 +1194,7 @@ def archive_memory_search(config: AgentConfig, query: str, limit: int | None = N
         safe_limit = max(1, min(int(limit or 5), 20))
     except (TypeError, ValueError):
         safe_limit = 5
-    payload = archive_request(
+    payload = archive_tool_request(
         config,
         "GET",
         f"/archive/memory/search?namespace={quote(config.memory_namespace)}&q={quote(query)}&limit={safe_limit}&requester=shushunya-agent",
@@ -1185,13 +1208,13 @@ def archive_memory_read(config: AgentConfig, kind: str, item_id: str | None = No
     kind = str(kind or "").strip().lower()
     if kind == "focus":
         target_id = str(item_id or "active").strip() or "active"
-        payload = archive_request(
+        payload = archive_tool_request(
             config,
             "GET",
             f"/archive/memory/focus?namespace={quote(config.memory_namespace)}&id={quote(target_id)}&requester=shushunya-agent",
             timeout=30,
         )
-        payload["ok"] = True
+        payload["ok"] = bool(payload.get("ok", True))
         return payload
     if kind == "wiki":
         params = {"namespace": config.memory_namespace, "requester": "shushunya-agent"}
@@ -1199,8 +1222,8 @@ def archive_memory_read(config: AgentConfig, kind: str, item_id: str | None = No
             params["id"] = str(item_id)
         if title:
             params["title"] = str(title)
-        payload = archive_request(config, "GET", "/archive/memory/wiki?" + urlencode(params), timeout=30)
-        payload["ok"] = True
+        payload = archive_tool_request(config, "GET", "/archive/memory/wiki?" + urlencode(params), timeout=30)
+        payload["ok"] = bool(payload.get("ok", True))
         return payload
     return {"ok": False, "error": f"unsupported archive_memory_read kind: {kind}"}
 
@@ -1214,13 +1237,13 @@ def archive_memory_propose(config: AgentConfig, action: dict[str, Any]) -> dict[
         "proposal": str(action.get("proposal") or ""),
         "evidence": str(action.get("evidence") or ""),
     }
-    response = archive_request(config, "POST", "/archive/memory/propose-change", payload, timeout=240)
+    response = archive_tool_request(config, "POST", "/archive/memory/propose-change", payload, timeout=240)
     response["ok"] = bool(response.get("ok", True))
     return response
 
 
 def archive_status(config: AgentConfig) -> dict[str, Any]:
-    payload = archive_request(config, "GET", "/health", timeout=10)
+    payload = archive_tool_request(config, "GET", "/health", timeout=10)
     return {"ok": payload.get("status") == "ok", **payload}
 
 
@@ -1229,13 +1252,13 @@ def archive_memory_events(config: AgentConfig, limit: int | None = None) -> dict
         safe_limit = max(1, min(int(limit or 20), 100))
     except (TypeError, ValueError):
         safe_limit = 20
-    payload = archive_request(
+    payload = archive_tool_request(
         config,
         "GET",
         f"/archive/memory/events?namespace={quote(config.memory_namespace)}&limit={safe_limit}",
         timeout=30,
     )
-    payload["ok"] = True
+    payload["ok"] = bool(payload.get("ok", True))
     return payload
 
 
