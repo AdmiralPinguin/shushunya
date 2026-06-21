@@ -137,7 +137,8 @@ curl -N -sS http://127.0.0.1:8095/run-stream \
 Inspect the journal:
 
 ```bash
-curl -sS 'http://127.0.0.1:8095/task-journal?task_id=agent-memory-check&limit=80'
+curl -sS 'http://127.0.0.1:8095/task-journal?task_id=agent-memory-check&limit=80' \
+  -H "Authorization: Bearer $SHUSHUNYA_AGENT_API_KEY"
 ```
 
 `/task-journal` and `resume_task_id` require `SHUSHUNYA_AGENT_API_KEY` plus a
