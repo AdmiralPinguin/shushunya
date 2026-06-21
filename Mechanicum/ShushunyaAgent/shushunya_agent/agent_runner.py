@@ -194,6 +194,7 @@ class AgentConfig:
     archive_user: str = ARCHIVE_USER
     memory_namespace: str = MEMORY_NAMESPACE
     task_id: str = ""
+    cancel_check: Callable[[], bool] | None = None
     json_output: bool = False
     technical_output: bool = False
     shell_enabled: bool = SHELL_ENABLED
@@ -1626,6 +1627,16 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     emit(event_sink, {"type": "task", "task_id": config.task_id, "memory_namespace": config.memory_namespace})
 
     for step in range(1, config.max_steps + 1):
+        if config.cancel_check is not None and config.cancel_check():
+            duration_sec = round(time.time() - run_started, 3)
+            message = "Агент остановлен: задача отменена."
+            emit(event_sink, {"type": "final", "ok": False, "cancelled": True, "message": message, "duration_sec": duration_sec})
+            write_task_journal(config, "final", {"ok": False, "cancelled": True, "message": message, "duration_sec": duration_sec})
+            if config.json_output:
+                print(json.dumps({"ok": False, "cancelled": True, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
+            else:
+                print(message, file=sys.stderr)
+            return 2
         elapsed_sec = time.time() - run_started
         if elapsed_sec > config.max_runtime_sec:
             duration_sec = round(elapsed_sec, 3)

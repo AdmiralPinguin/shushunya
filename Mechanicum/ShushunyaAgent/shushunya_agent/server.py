@@ -25,6 +25,7 @@ MAX_REQUEST_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_REQUEST_BYTES", "104
 RUN_LOCK = threading.Lock()
 RUN_LOCK_FILE = ROOT / "runtime" / "agent-run.lock"
 STATE_LOCK = threading.Lock()
+CANCELLED_TASK_IDS: set[str] = set()
 RUN_STATE: dict[str, Any] = {
     "busy": False,
     "current_task_id": "",
@@ -122,6 +123,7 @@ def http_shell_enabled(payload: dict[str, Any]) -> bool:
 def runtime_state() -> dict[str, Any]:
     with STATE_LOCK:
         payload = dict(RUN_STATE)
+        payload["cancelled_task_count"] = len(CANCELLED_TASK_IDS)
     now = time.time()
     if payload.get("busy") and payload.get("current_task_started_at"):
         payload["current_task_duration_sec"] = round(now - float(payload["current_task_started_at"]), 3)
@@ -130,6 +132,23 @@ def runtime_state() -> dict[str, Any]:
     payload["max_request_bytes"] = MAX_REQUEST_BYTES
     payload["revision"] = service_revision()
     return payload
+
+
+def is_task_cancelled(task_id: str) -> bool:
+    with STATE_LOCK:
+        return safe_task_id(task_id) in CANCELLED_TASK_IDS
+
+
+def mark_task_cancelled(task_id: str) -> str:
+    safe_id = safe_task_id(task_id)
+    with STATE_LOCK:
+        CANCELLED_TASK_IDS.add(safe_id)
+    return safe_id
+
+
+def clear_task_cancelled(task_id: str) -> None:
+    with STATE_LOCK:
+        CANCELLED_TASK_IDS.discard(safe_task_id(task_id))
 
 
 def service_revision() -> str:
@@ -190,6 +209,11 @@ def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
         task_id=safe_task_id(task_id),
         shell_enabled=http_shell_enabled(payload),
     )
+
+
+def attach_cancel_check(config: AgentConfig) -> AgentConfig:
+    config.cancel_check = lambda task_id=config.task_id: is_task_cancelled(task_id)
+    return config
 
 
 def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]) -> str:
@@ -268,6 +292,10 @@ class AgentHandler(BaseHTTPRequestHandler):
             self.run_stream()
             return
 
+        if self.path == "/cancel":
+            self.cancel_run()
+            return
+
         if self.path != "/run":
             write_json(self, 404, {"error": "not found"})
             return
@@ -283,7 +311,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                 write_json(self, 409, busy)
                 return
 
-            config = config_from_payload(payload)
+            config = attach_cancel_check(config_from_payload(payload))
             task = apply_resume_context(task, config, payload)
 
             stdout = io.StringIO()
@@ -315,6 +343,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                             RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
                             RUN_STATE["current_task_id"] = ""
                             RUN_STATE["current_task_started_at"] = 0.0
+                        clear_task_cancelled(config.task_id)
 
             text = stdout.getvalue().strip()
             try:
@@ -344,7 +373,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                 write_json(self, 409, busy)
                 return
 
-            config = config_from_payload(payload)
+            config = attach_cancel_check(config_from_payload(payload))
             task = apply_resume_context(task, config, payload)
 
             self.send_response(200)
@@ -384,6 +413,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                             RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
                             RUN_STATE["current_task_id"] = ""
                             RUN_STATE["current_task_started_at"] = 0.0
+                        clear_task_cancelled(config.task_id)
 
             if code != 0:
                 text = stdout.getvalue().strip()
@@ -404,6 +434,23 @@ class AgentHandler(BaseHTTPRequestHandler):
                 write_ndjson(self, {"type": "done", "ok": False, "exit_code": 1})
             except Exception:
                 pass
+
+    def cancel_run(self) -> None:
+        try:
+            payload = read_json(self)
+            task_id = str(payload.get("task_id") or "").strip()
+            if not task_id:
+                with STATE_LOCK:
+                    task_id = str(RUN_STATE.get("current_task_id") or "").strip()
+            if not task_id:
+                write_json(self, 400, {"ok": False, "error": "missing task_id and no current task"})
+                return
+            safe_id = mark_task_cancelled(task_id)
+            write_json(self, 200, {"ok": True, "task_id": safe_id, "message": "cancel requested"})
+        except RequestError as exc:
+            write_json(self, exc.status, exc.payload)
+        except Exception as exc:
+            write_json(self, 500, {"ok": False, "error": str(exc)})
 
 
 def main() -> int:

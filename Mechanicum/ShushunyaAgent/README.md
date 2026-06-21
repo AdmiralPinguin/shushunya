@@ -104,6 +104,19 @@ limit.
 status, git revision, plus Archive status. Use `/health?detail=1` for the full
 Archive health payload when authorized.
 
+Cooperative cancellation:
+
+```bash
+curl -sS http://127.0.0.1:8095/cancel \
+  -H 'Content-Type: application/json' \
+  -d '{"task_id":"agent-memory-check"}'
+```
+
+If `task_id` is omitted, `/cancel` targets the currently running task. The
+runner checks cancellation between agent steps and returns a structured
+`cancelled=true` final event; in-flight model or tool calls are allowed to
+finish first.
+
 Every run writes a compact JSONL journal under `runtime/task-journals/`.
 Pass a stable task id when a caller wants resumable task history:
 
@@ -208,6 +221,8 @@ matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
   resume/debugging and can be inspected with `GET /task-journal`.
 - `GET /state` exposes process-local runner state for UI/ops checks without
   starting a model request.
+- `POST /cancel` requests cooperative cancellation for the current task or a
+  supplied `task_id`.
 - Bad JSON request bodies return `400`; oversized bodies return `413`.
 - Internal agent steps are archived by default and receive automatic
   ArchiveOfHeresy memory handling in the isolated `agent` memory namespace.

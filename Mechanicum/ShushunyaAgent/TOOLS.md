@@ -170,3 +170,14 @@ start a model request.
 
 HTTP callers can set `wait_for_slot=false` on `/run` or `/run-stream` to fail
 fast with `409 agent busy` instead of waiting behind another active run.
+
+Long runs can be cancelled cooperatively:
+
+```text
+POST /cancel
+{"task_id":"stable-task-id"}
+```
+
+When `task_id` is omitted, the API targets the current task. Cancellation is
+checked between agent steps, so an in-flight model request or tool call may
+finish before the runner emits its `cancelled=true` final event.

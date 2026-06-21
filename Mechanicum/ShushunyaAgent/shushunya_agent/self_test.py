@@ -157,6 +157,36 @@ def main() -> int:
     if not state.get("revision"):
         raise AssertionError(f"runtime state missing revision: {state}")
     print("[ok] runtime state payload")
+
+    cancelled_task_id = server.mark_task_cancelled("self test cancel registry")
+    if not server.is_task_cancelled(cancelled_task_id):
+        raise AssertionError("cancel registry did not preserve marked task")
+    server.clear_task_cancelled(cancelled_task_id)
+    if server.is_task_cancelled(cancelled_task_id):
+        raise AssertionError("cancel registry did not clear marked task")
+    print("[ok] cancel registry")
+
+    cancel_events: list[dict] = []
+    cancel_stdout = io.StringIO()
+    cancel_config = AgentConfig(
+        task_id=safe_task_id("self-test-cancel"),
+        json_output=True,
+        max_steps=1,
+        cancel_check=lambda: True,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat") as mocked_chat, \
+            contextlib.redirect_stdout(cancel_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        cancel_code = run_agent("should cancel before model", cancel_config, event_sink=cancel_events.append)
+    cancel_payload = json.loads(cancel_stdout.getvalue())
+    if cancel_code != 2 or cancel_payload.get("cancelled") is not True or mocked_chat.called:
+        raise AssertionError(f"cooperative cancel failed: code={cancel_code}, payload={cancel_payload}")
+    if not any(event.get("type") == "final" and event.get("cancelled") is True for event in cancel_events):
+        raise AssertionError(f"cancel event missing: {cancel_events}")
+    print("[ok] cooperative cancel")
+
     health_archive = {"status": "ok", "jsonl_root": "/private/archive/path"}
     minimal_health = {
         "status": "ok",
