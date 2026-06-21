@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import sys
@@ -317,6 +318,13 @@ def main() -> int:
     if replaced_read.get("content") != "hello-updated":
         raise AssertionError(f"unexpected replaced content: {replaced_read}")
     print("[ok] replaced file content")
+
+    info_result = file_tool(config, {"action": "file_info", "path": "/work/self-test/hello.txt", "sha256": True})
+    assert_ok("file_info sha256", info_result)
+    expected_hash = hashlib.sha256(b"hello-updated").hexdigest()
+    if info_result.get("sha256") != expected_hash or info_result.get("hash_bytes") != len("hello-updated"):
+        raise AssertionError(f"unexpected file_info hash metadata: {info_result}")
+    print("[ok] file hash metadata")
 
     list_result = file_tool(config, {"action": "list_files", "path": "/work/self-test", "max_depth": 1})
     assert_ok("list_files", list_result)

@@ -29,7 +29,7 @@ Paths must be inside sandbox writable roots. Relative paths resolve under
 {"action":"replace_in_file","path":"/work/file.txt","old":"old text","new":"new text","count":1}
 {"action":"mkdir","path":"/work/dir"}
 {"action":"remove_file","path":"/work/file.txt"}
-{"action":"file_info","path":"/work/file.txt"}
+{"action":"file_info","path":"/work/file.txt","sha256":true,"max_hash_bytes":50000000}
 {"action":"find_files","path":"/work","pattern":"*.txt","max_depth":4}
 {"action":"search_text","path":"/work","query":"needle","case_sensitive":false,"max_matches":50}
 ```
@@ -40,6 +40,9 @@ mobile callers that disable shell execution.
 For large files, call `file_info` or `search_text` first, then use `read_file`
 with explicit `max_bytes` and `offset` slices. `read_file` reports `next_offset`
 when more content remains.
+`file_info` can compute a bounded SHA-256 digest with `sha256=true`; this is
+useful for identity/change checks without reading the file content into the
+model context.
 
 ## Python
 

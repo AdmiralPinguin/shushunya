@@ -881,6 +881,7 @@ def run_sandbox_argv(
 FILE_TOOL_SCRIPT = r'''
 import base64
 import fnmatch
+import hashlib
 import json
 import os
 import shutil
@@ -931,7 +932,26 @@ def describe(path):
         "type": "dir" if path.is_dir() else "file" if path.is_file() else "other",
         "size": stat.st_size,
         "mode": oct(stat.st_mode & 0o777),
+        "mtime": stat.st_mtime,
     }
+
+
+def file_hash(path, max_bytes):
+    digest = hashlib.sha256()
+    total = 0
+    truncated = False
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(min(1024 * 1024, max_bytes - total + 1))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                digest.update(chunk[:len(chunk) - (total - max_bytes)])
+                truncated = True
+                break
+            digest.update(chunk)
+    return {"sha256": digest.hexdigest(), "hash_bytes": min(total, max_bytes), "hash_truncated": truncated}
 
 
 def usage_bytes():
@@ -1054,7 +1074,11 @@ try:
 
     elif action == "file_info":
         if path.exists():
-            respond({"ok": True, **describe(path)})
+            info = {"ok": True, **describe(path)}
+            if path.is_file() and payload.get("sha256") is True:
+                max_hash_bytes = max(1, min(int(payload.get("max_hash_bytes", 50000000)), 200000000))
+                info.update(file_hash(path, max_hash_bytes))
+            respond(info)
         else:
             respond({"ok": True, "path": str(path), "exists": False})
 

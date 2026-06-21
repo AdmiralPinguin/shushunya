@@ -176,7 +176,9 @@
       "required": ["action", "path"],
       "properties": {
         "action": "file_info",
-        "path": "sandbox_path"
+        "path": "sandbox_path",
+        "sha256": "boolean",
+        "max_hash_bytes": "integer"
       }
     },
     "find_files": {

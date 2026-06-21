@@ -216,6 +216,8 @@ matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
   Python tools still require hard filesystem quota for kernel-level enforcement.
 - `read_file` reads bounded slices with `max_bytes` and `offset`; it no longer
   loads the whole file before truncating.
+- `file_info` can return bounded SHA-256 metadata with `sha256=true`, so the
+  agent can verify file identity without reading content into context.
 - Arbitrary shell can be disabled with `SHUSHUNYA_AGENT_SHELL_ENABLED=0` or
   `"shell_enabled": false` in the HTTP API payload.
 - Web browsing is exposed as `web_search` and `web_fetch`. The supervisor blocks
