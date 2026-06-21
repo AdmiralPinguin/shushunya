@@ -83,6 +83,55 @@ The Librarian runs after successful model answers. It:
 - periodically updates graph;
 - writes memory maintenance events under `archive/memory_events`.
 
+## Memory Gateway
+
+ArchiveOfHeresy exposes a controlled Memory Gateway on the archive HTTP port.
+Agents should use this port instead of reading or writing memory files.
+
+Read endpoints:
+
+```text
+GET /archive/memory/gateway
+GET /archive/memory/catalog?namespace=agent&requester=name
+GET /archive/memory/search?namespace=agent&q=query&limit=5&requester=name
+GET /archive/memory/focus?namespace=agent&id=active&requester=name
+GET /archive/memory/wiki?namespace=agent&id=page-id&requester=name
+GET /archive/memory/events?namespace=agent&limit=20&component=librarian
+```
+
+Write endpoint:
+
+```text
+POST /archive/memory/propose-change
+```
+
+`propose-change` accepts a requested `target` of `auto`, `focus`, `wiki`,
+`vector`, or `graph`, clamps `importance` to 1-5, trims oversized proposal
+payloads, archives the proposal as a normal turn, and then lets the Librarian
+decide what should actually change. It does not grant direct file write access
+to the requester.
+
+Read-only gateway operations are audited as `memory_gateway` events. This makes
+agent memory browsing visible without turning every read into a full archive
+turn. Event reads can be filtered by `component` and `event_action`.
+
+Unknown namespaces are rejected on read endpoints unless `create=1` is passed
+explicitly. Chat/proposal writes can still create namespace memory through the
+normal librarian path.
+
+ShushunyaAgent tools over this gateway:
+
+```text
+archive_memory_catalog
+archive_memory_search
+archive_memory_read
+archive_memory_propose
+archive_memory_events
+```
+
+The agent tools are fail-soft: HTTP 400/404/503 responses become tool results
+with `ok=false` instead of crashing the agent loop.
+
 ## Prompt Injection Policy
 
 The model receives:
@@ -101,11 +150,12 @@ Use:
 
 ```bash
 ./check-memory.sh agent "memory query"
+./check-memory-gateway.sh agent "memory gateway"
 ./check-namespace-smoke.py
 ```
 
 The memory event API is:
 
 ```text
-GET /archive/memory/events?namespace=agent&limit=20
+GET /archive/memory/events?namespace=agent&limit=20&component=librarian
 ```
