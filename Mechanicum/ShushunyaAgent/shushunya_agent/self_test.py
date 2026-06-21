@@ -138,6 +138,14 @@ def main() -> int:
     if "busy" not in state or state.get("max_request_bytes", 0) <= 0:
         raise AssertionError(f"runtime state missing expected fields: {state}")
     print("[ok] runtime state payload")
+    server.RUN_LOCK.acquire()
+    try:
+        busy_payload = server.reject_if_busy({"wait_for_slot": False})
+    finally:
+        server.RUN_LOCK.release()
+    if not busy_payload or busy_payload.get("error") != "agent busy":
+        raise AssertionError(f"wait_for_slot=false did not reject busy runner: {busy_payload}")
+    print("[ok] wait_for_slot busy rejection")
 
     journal_config = AgentConfig(task_id=safe_task_id("self test journal"))
     write_task_journal(journal_config, "self_test", {"large": "z" * 20000})

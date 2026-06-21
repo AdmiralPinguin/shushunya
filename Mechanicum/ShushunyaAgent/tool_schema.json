@@ -236,6 +236,8 @@
     "http_resume_task_id_field": "resume_task_id",
     "http_task_journal_endpoint": "GET /task-journal?task_id=<id>&limit=80",
     "http_state_endpoint": "GET /state",
+    "http_wait_for_slot_field": "wait_for_slot",
+    "http_busy_status": "409 when wait_for_slot=false and another run is active or queued",
     "stream_duration_field": "duration_sec on tool_result and final events",
     "http_max_request_bytes_env": "SHUSHUNYA_AGENT_MAX_REQUEST_BYTES",
     "http_llm_retries_env": "SHUSHUNYA_AGENT_LLM_RETRIES",

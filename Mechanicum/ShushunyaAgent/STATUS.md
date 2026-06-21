@@ -43,6 +43,8 @@ Last verified: 2026-06-21 18:08 KST.
   `resume_task_id` can feed recent journal context into a follow-up run.
 - Resume context is compacted before entering the model prompt.
 - `GET /state` reports runner busy/queue/current/last task state.
+- `wait_for_slot=false` can fail fast with `409 agent busy` instead of waiting
+  behind another active or queued run.
 - Invalid JSON request bodies return `400`; oversized request bodies return
   `413` before the agent loop starts.
 - Transient model HTTP errors `429`, `502`, `503`, and `504` are retried before

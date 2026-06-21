@@ -127,6 +127,19 @@ def runtime_state() -> dict[str, Any]:
     return payload
 
 
+def runner_is_busy() -> bool:
+    with STATE_LOCK:
+        return bool(RUN_STATE.get("busy")) or int(RUN_STATE.get("queued", 0)) > 0
+
+
+def reject_if_busy(payload: dict[str, Any]) -> dict[str, Any] | None:
+    if bool_field(payload, "wait_for_slot", True):
+        return None
+    if not runner_is_busy() and not RUN_LOCK.locked():
+        return None
+    return {"ok": False, "error": "agent busy", "state": runtime_state()}
+
+
 def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
     task_id = str(payload.get("task_id") or payload.get("resume_task_id") or "").strip()
     return AgentConfig(
@@ -227,6 +240,10 @@ class AgentHandler(BaseHTTPRequestHandler):
             if not task:
                 write_json(self, 400, {"error": "missing task"})
                 return
+            busy = reject_if_busy(payload)
+            if busy is not None:
+                write_json(self, 409, busy)
+                return
 
             config = config_from_payload(payload)
             task = apply_resume_context(task, config, payload)
@@ -280,6 +297,10 @@ class AgentHandler(BaseHTTPRequestHandler):
             task = str(payload.get("task", "")).strip()
             if not task:
                 write_json(self, 400, {"error": "missing task"})
+                return
+            busy = reject_if_busy(payload)
+            if busy is not None:
+                write_json(self, 409, busy)
                 return
 
             config = config_from_payload(payload)
