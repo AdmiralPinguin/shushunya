@@ -19,7 +19,11 @@ fi
 
 if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   echo "Agent tunnel already running with PID $(cat "$PID_FILE")"
-  cat "$URL_FILE" 2>/dev/null || true
+  if [[ -s "$URL_FILE" ]]; then
+    cat "$URL_FILE"
+  else
+    echo "Public URL file is missing; inspect log: $LOG_FILE" >&2
+  fi
   exit 0
 fi
 
