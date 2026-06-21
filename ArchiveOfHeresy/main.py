@@ -35,6 +35,8 @@ GRAPH_ROOT = Path(os.environ.get("ARCHIVE_GRAPH_ROOT", ROOT / "graph"))
 FOCUS_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_FOCUS_CONTEXT_CHARS", "6000"))
 VECTOR_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_VECTOR_CONTEXT_CHARS", "5000"))
 GRAPH_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_GRAPH_CONTEXT_CHARS", "5000"))
+GATEWAY_PROPOSAL_CHARS = int(os.environ.get("ARCHIVE_GATEWAY_PROPOSAL_CHARS", "12000"))
+GATEWAY_EVIDENCE_CHARS = int(os.environ.get("ARCHIVE_GATEWAY_EVIDENCE_CHARS", "6000"))
 VECTOR_INJECTION_ENABLED = os.environ.get("ARCHIVE_VECTOR_INJECTION_ENABLED", "0").strip().lower() not in (
     "0",
     "false",
@@ -73,6 +75,7 @@ GRAPH_COMPONENTS = {}
 VECTOR_MEMORY = None
 GRAPH_MEMORY = None
 TOKEN_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё_]+", re.UNICODE)
+GATEWAY_TARGETS = {"auto", "focus", "wiki", "vector", "graph"}
 
 
 def read_json(handler):
@@ -1173,13 +1176,26 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
             namespace = safe_memory_namespace(payload.get("namespace") or payload.get("memory_namespace") or "default")
             requester = str(payload.get("requester") or "memory-gateway").strip()[:80] or "memory-gateway"
-            proposal = str(payload.get("proposal") or "").strip()
+            raw_proposal = str(payload.get("proposal") or "").strip()
+            proposal = trim_memory_text(raw_proposal, GATEWAY_PROPOSAL_CHARS)
             if not proposal:
                 write_json(self, 400, {"error": "Missing required field: proposal", "memory_namespace": namespace})
                 return
 
             target = str(payload.get("target") or "auto").strip().lower()[:40] or "auto"
-            evidence = str(payload.get("evidence") or "").strip()
+            if target not in GATEWAY_TARGETS:
+                write_json(
+                    self,
+                    400,
+                    {
+                        "error": "Unsupported memory proposal target",
+                        "target": target,
+                        "allowed_targets": sorted(GATEWAY_TARGETS),
+                    },
+                )
+                return
+            raw_evidence = str(payload.get("evidence") or "").strip()
+            evidence = trim_memory_text(raw_evidence, GATEWAY_EVIDENCE_CHARS)
             importance = payload.get("importance", 3)
             try:
                 importance = max(1, min(5, int(importance)))
@@ -1192,6 +1208,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "memory_namespace": namespace,
                 "target": target,
                 "importance": importance,
+                "truncated": {
+                    "proposal": len(raw_proposal) > len(proposal),
+                    "evidence": len(raw_evidence) > len(evidence),
+                },
                 "proposal": proposal,
                 "evidence": evidence,
                 "instruction": (
