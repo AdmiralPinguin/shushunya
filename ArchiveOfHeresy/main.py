@@ -25,10 +25,14 @@ HOST = os.environ.get("ARCHIVE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("ARCHIVE_PORT", "8090"))
 ARCHIVE_BASE_URL = os.environ.get("ARCHIVE_BASE_URL", f"http://127.0.0.1:{PORT}").rstrip("/")
 ARCHIVE_API_KEY = os.environ.get("ARCHIVE_API_KEY", "").strip()
+ARCHIVE_MOBILE_API_KEY = os.environ.get("ARCHIVE_MOBILE_API_KEY", "").strip()
 LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
 MEMORY_EVENTS_ROOT = Path(os.environ.get("ARCHIVE_MEMORY_EVENTS_ROOT", ROOT / "archive" / "memory_events"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
+CHAT_HISTORY_LIMIT = int(os.environ.get("ARCHIVE_CHAT_HISTORY_LIMIT", "80"))
+CHAT_CONTEXT_MESSAGES = int(os.environ.get("ARCHIVE_CHAT_CONTEXT_MESSAGES", "16"))
+CHAT_MESSAGE_CHARS = int(os.environ.get("ARCHIVE_CHAT_MESSAGE_CHARS", "5000"))
 REPORTS_ROOT = Path(os.environ.get("ARCHIVE_REPORTS_ROOT", ROOT / "reports"))
 FOCUS_ROOT = Path(os.environ.get("ARCHIVE_FOCUS_ROOT", ROOT / "focus"))
 WIKI_ROOT = Path(os.environ.get("ARCHIVE_WIKI_ROOT", ROOT / "wiki"))
@@ -106,17 +110,23 @@ def write_json(handler, status, payload):
     handler.wfile.write(body)
 
 
-def authorized(handler):
-    if not ARCHIVE_API_KEY:
+def authorized(handler, allow_mobile=False):
+    if not ARCHIVE_API_KEY and not ARCHIVE_MOBILE_API_KEY:
         return True
 
     auth = handler.headers.get("Authorization", "").strip()
-    expected = f"Bearer {ARCHIVE_API_KEY}"
-    return auth == expected
+    if ARCHIVE_API_KEY and auth == f"Bearer {ARCHIVE_API_KEY}":
+        return True
+    mobile_key = handler.headers.get("X-Shushunya-Mobile-Key", "").strip()
+    if allow_mobile and ARCHIVE_MOBILE_API_KEY and (
+        auth == f"Bearer {ARCHIVE_MOBILE_API_KEY}" or mobile_key == ARCHIVE_MOBILE_API_KEY
+    ):
+        return True
+    return False
 
 
-def require_auth(handler):
-    if authorized(handler):
+def require_auth(handler, allow_mobile=False):
+    if authorized(handler, allow_mobile=allow_mobile):
         return True
     write_json(
         handler,
@@ -715,6 +725,100 @@ def text_from_content(content):
     return "\n".join(parts).strip()
 
 
+def trim_chat_text(text, limit=CHAT_MESSAGE_CHARS):
+    text = str(text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
+def safe_chat_session_id(value):
+    cleaned = re.sub(r"[^0-9A-Za-zА-Яа-яЁё_.:@-]+", "-", str(value or "default").strip())
+    cleaned = cleaned.strip(".-:_@")
+    return cleaned[:120] or "default"
+
+
+def chat_history(session_id, limit=CHAT_HISTORY_LIMIT):
+    session_id = safe_chat_session_id(session_id)
+    try:
+        safe_limit = max(1, min(int(limit or CHAT_HISTORY_LIMIT), 300))
+    except (TypeError, ValueError):
+        safe_limit = CHAT_HISTORY_LIMIT
+    with sqlite3.connect(SQLITE_PATH) as db:
+        db.row_factory = sqlite3.Row
+        rows = db.execute(
+            """
+            SELECT id, session_id, role, content, created_at, asset_id
+            FROM mobile_chat_messages
+            WHERE session_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (session_id, safe_limit),
+        ).fetchall()
+    rows = list(reversed(rows))
+    return [
+        {
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "role": row["role"],
+            "content": row["content"],
+            "created_at": row["created_at"],
+            "asset_id": row["asset_id"],
+        }
+        for row in rows
+    ]
+
+
+def append_chat_message(session_id, role, content, asset_id=None, created_at=None):
+    session_id = safe_chat_session_id(session_id)
+    role = "assistant" if role == "assistant" else "user"
+    content = trim_chat_text(content)
+    created_at = created_at or now_iso()
+    with ARCHIVE_LOCK:
+        with sqlite3.connect(SQLITE_PATH) as db:
+            db.execute(
+                """
+                INSERT INTO mobile_chat_sessions (id, created_at, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at
+                """,
+                (session_id, created_at, created_at),
+            )
+            db.execute(
+                """
+                INSERT INTO mobile_chat_messages (session_id, role, content, created_at, asset_id)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (session_id, role, content, created_at, asset_id),
+            )
+
+
+def messages_for_chat_context(session_id, system_prompt, user_text, image_data_url=None):
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": str(system_prompt)})
+    for item in chat_history(session_id, limit=CHAT_CONTEXT_MESSAGES):
+        content = trim_chat_text(item.get("content") or "")
+        if content:
+            messages.append({"role": item.get("role") or "user", "content": content})
+    user_content = user_text
+    if image_data_url:
+        user_content = [
+            {
+                "type": "text",
+                "text": user_text or "Посмотри картинку и ответь по ней.",
+            },
+            {
+                "type": "image_url",
+                "image_url": {"url": image_data_url},
+            },
+        ]
+    messages.append({"role": "user", "content": user_content})
+    return messages
+
+
+
 def sanitize_messages_for_memory(messages):
     sanitized = []
     for message in messages or []:
@@ -848,6 +952,29 @@ def init_storage():
         db.execute("CREATE INDEX IF NOT EXISTS idx_turns_conversation_created ON turns(conversation_id, created_at)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_turns_namespace_created ON turns(memory_namespace, created_at)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at)")
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mobile_chat_sessions (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mobile_chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                asset_id TEXT,
+                FOREIGN KEY(session_id) REFERENCES mobile_chat_sessions(id)
+            )
+            """
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_mobile_chat_messages_session_id ON mobile_chat_messages(session_id, id)")
 
 
 def assistant_message(response):
@@ -1166,6 +1293,29 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if self.path.startswith("/archive/chat/messages"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            session_id = "default"
+            limit = CHAT_HISTORY_LIMIT
+            if "?" in self.path:
+                params = parse_qs(urlsplit(self.path).query)
+                session_id = safe_chat_session_id((params.get("session_id") or ["default"])[0])
+                try:
+                    limit = int((params.get("limit") or [CHAT_HISTORY_LIMIT])[0])
+                except (TypeError, ValueError):
+                    limit = CHAT_HISTORY_LIMIT
+            write_json(
+                self,
+                200,
+                {
+                    "session_id": session_id,
+                    "messages": chat_history(session_id, limit=limit),
+                    "source_of_truth": "server",
+                },
+            )
+            return
+
         if not require_auth(self):
             return
 
@@ -1427,11 +1577,19 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         write_json(self, 404, {"error": "Not found"})
 
     def do_POST(self):
-        if not require_auth(self):
+        if self.path == "/archive/chat/completions":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_chat_completion()
             return
 
         if self.path == "/v1/chat/completions":
+            if not require_auth(self):
+                return
             self.chat_completion()
+            return
+
+        if not require_auth(self):
             return
 
         if self.path == "/archive/memory/propose-change":
@@ -1564,6 +1722,254 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "message": "Proposal queued through ArchiveOfHeresy librarian cycle.",
                 },
             )
+
+    def mobile_chat_completion(self):
+        maintenance_record = None
+        with CHAT_QUEUE_LOCK:
+            created_at = now_iso()
+            turn_id = str(uuid.uuid4())
+            try:
+                payload = read_json(self)
+            except json.JSONDecodeError as exc:
+                write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
+                return
+
+            session_id = safe_chat_session_id(payload.get("session_id") or payload.get("user") or "default")
+            text = trim_chat_text(payload.get("text") or payload.get("message") or "")
+            image_data_url = str(payload.get("image_data_url") or "").strip()
+            if not text and not image_data_url:
+                write_json(self, 400, {"error": "Missing text or image_data_url", "session_id": session_id})
+                return
+
+            archive_enabled = internal_flag(payload.get("archive_enabled", True), default=True)
+            focus_enabled = internal_flag(payload.get("focus_enabled", True), default=True)
+            vector_enabled = internal_flag(payload.get("vector_enabled", focus_enabled), default=True)
+            graph_enabled = internal_flag(payload.get("graph_enabled", focus_enabled), default=True)
+            archive_system_prompt_enabled = internal_flag(payload.get("archive_system_prompt_enabled", True), default=True)
+            memory_namespace = safe_memory_namespace(payload.get("memory_namespace") or "default")
+            stream = internal_flag(payload.get("stream", True), default=True)
+            model = payload.get("model") or "gemma-4-12b-it-UD-Q5_K_XL.gguf"
+            system_prompt = payload.get("system_prompt") or ""
+            max_tokens = int(payload.get("max_tokens") or 2048)
+            temperature = float(payload.get("temperature") or 0.4)
+
+            request_messages = messages_for_chat_context(session_id, system_prompt, text, image_data_url=image_data_url)
+            append_chat_message(
+                session_id,
+                "user",
+                text if not image_data_url else f"{text}\n[image attached server-side]",
+                created_at=created_at,
+            )
+            mobile_payload = {
+                "model": model,
+                "user": f"mobile:{session_id}",
+                "archive_enabled": archive_enabled,
+                "focus_enabled": focus_enabled,
+                "vector_enabled": vector_enabled,
+                "graph_enabled": graph_enabled,
+                "archive_system_prompt_enabled": archive_system_prompt_enabled,
+                "memory_namespace": memory_namespace,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": stream,
+                "messages": request_messages,
+            }
+            memory_messages = sanitize_messages_for_memory(request_messages)
+            magos_message = None
+            magos_result = None
+            magos = focus_components(memory_namespace)["magos"]
+            if focus_enabled and magos is not None:
+                try:
+                    magos_message = magos.prepare_request(
+                        memory_messages,
+                        model=model,
+                        conversation_id=f"mobile:{session_id}",
+                        turn_id=turn_id,
+                        memory_namespace=memory_namespace,
+                    )
+                    magos_result = magos.last_result
+                except Exception as exc:
+                    print(f"Magos hard fail-soft mobile chat: {exc}", flush=True)
+                    magos_result = {"error": str(exc)}
+
+            prepared_payload = dict(mobile_payload)
+            prepared_payload["messages"] = prepare_messages(
+                request_messages,
+                include_focus=focus_enabled,
+                include_vector=vector_enabled,
+                include_graph=graph_enabled,
+                include_system_prompt=archive_system_prompt_enabled,
+                magos_message=magos_message,
+                query_messages=memory_messages,
+                memory_namespace=memory_namespace,
+            )
+            archive_prepared_messages = prepare_messages(
+                memory_messages,
+                include_focus=focus_enabled,
+                include_vector=vector_enabled,
+                include_graph=graph_enabled,
+                include_system_prompt=archive_system_prompt_enabled,
+                magos_message=magos_message,
+                query_messages=memory_messages,
+                memory_namespace=memory_namespace,
+            )
+
+            record = {
+                "turn_id": turn_id,
+                "created_at": created_at,
+                "source": "mobile-chat-session",
+                "conversation_id": f"mobile:{session_id}",
+                "memory_namespace": memory_namespace,
+                "archive_enabled": archive_enabled,
+                "focus_enabled": focus_enabled,
+                "vector_enabled": vector_enabled,
+                "graph_enabled": graph_enabled,
+                "archive_system_prompt_enabled": archive_system_prompt_enabled,
+                "magos_enabled": bool(magos_message),
+                "magos_result": magos_result,
+                "model": model,
+                "request": {
+                    "session_id": session_id,
+                    "text": text,
+                    "has_image": bool(image_data_url),
+                    "stream": stream,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                },
+                "prepared_messages": archive_prepared_messages,
+                "status": "pending",
+                "http_status": None,
+                "response": None,
+                "assistant_message": None,
+                "error": None,
+            }
+
+            try:
+                if stream:
+                    self.stream_mobile_chat_completion(prepared_payload, record, session_id)
+                    if record.get("status") == "ok":
+                        maintenance_record = record
+                else:
+                    status, response = proxy_json("POST", "/v1/chat/completions", payload=prepared_payload)
+                    assistant = assistant_message(response)
+                    if assistant:
+                        append_chat_message(session_id, "assistant", assistant.get("content") or "")
+                    record["status"] = "ok"
+                    record["http_status"] = status
+                    record["response"] = response
+                    record["assistant_message"] = assistant
+                    maybe_write_archives(record)
+                    write_json(self, status, response)
+                    maintenance_record = record
+            except HTTPError as exc:
+                try:
+                    error_payload = json.loads(exc.read().decode("utf-8"))
+                except Exception:
+                    error_payload = {"error": str(exc)}
+                record["status"] = "upstream_error"
+                record["http_status"] = exc.code
+                record["response"] = error_payload
+                record["error"] = json.dumps(error_payload, ensure_ascii=False)
+                maybe_abandon_magos_focus(record)
+                maybe_write_archives(record)
+                write_json(self, exc.code, error_payload)
+            except (TimeoutError, URLError) as exc:
+                error_payload = {"error": f"LLM host unavailable: {exc}"}
+                record["status"] = "unavailable"
+                record["http_status"] = 502
+                record["response"] = error_payload
+                record["error"] = error_payload["error"]
+                maybe_abandon_magos_focus(record)
+                maybe_write_archives(record)
+                write_json(self, 502, error_payload)
+            except Exception as exc:
+                error_payload = {"error": str(exc)}
+                record["status"] = "archive_error"
+                record["http_status"] = 500
+                record["response"] = error_payload
+                record["error"] = error_payload["error"]
+                maybe_abandon_magos_focus(record)
+                maybe_write_archives(record)
+                write_json(self, 500, error_payload)
+        if maintenance_record is not None:
+            maybe_update_focus_memory(maintenance_record)
+
+    def stream_mobile_chat_completion(self, prepared_payload, record, session_id):
+        assistant_parts = []
+        finish_reason = None
+        streamed_chunks = []
+
+        try:
+            with open_upstream("POST", "/v1/chat/completions", payload=prepared_payload) as upstream:
+                self.send_response(upstream.status)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+
+                for raw_line in upstream:
+                    self.wfile.write(raw_line)
+                    self.wfile.flush()
+                    decoded = raw_line.decode("utf-8", errors="replace").strip()
+                    if not decoded.startswith("data:"):
+                        continue
+
+                    data = decoded[5:].strip()
+                    if data == "[DONE]":
+                        continue
+
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+
+                    streamed_chunks.append(chunk)
+                    delta, chunk_finish = stream_delta(chunk)
+                    if delta:
+                        assistant_parts.append(delta)
+                    if chunk_finish:
+                        finish_reason = chunk_finish
+
+            assistant_text = "".join(assistant_parts).strip()
+            if assistant_text:
+                append_chat_message(session_id, "assistant", assistant_text)
+            response = {
+                "object": "chat.completion",
+                "model": record.get("model"),
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": finish_reason or "stop",
+                        "message": {"role": "assistant", "content": assistant_text},
+                    }
+                ],
+                "streamed_chunks": streamed_chunks,
+            }
+            record["status"] = "ok"
+            record["http_status"] = 200
+            record["response"] = response
+            record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
+            maybe_write_archives(record)
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            assistant_text = "".join(assistant_parts).strip()
+            if assistant_text:
+                append_chat_message(session_id, "assistant", assistant_text)
+            record["status"] = "client_disconnected"
+            record["http_status"] = 499
+            record["response"] = {
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "client_disconnected",
+                        "message": {"role": "assistant", "content": assistant_text},
+                    }
+                ],
+                "streamed_chunks": streamed_chunks,
+            }
+            record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
+            record["error"] = str(exc)
+            maybe_abandon_magos_focus(record)
+            maybe_write_archives(record)
 
     def chat_completion(self):
         maintenance_record = None

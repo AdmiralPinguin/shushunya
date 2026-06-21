@@ -74,6 +74,7 @@ public class MainActivity extends Activity {
     private static final String CHAT_HISTORY_KEY = "chat_history";
     private static final String NOTIFICATION_CHANNEL_ID = "shushunya_answers";
     private static final int CHAT_HISTORY_LIMIT = 120;
+    private static final String SERVER_CHAT_SESSION_ID = "redmagic9-shushunya-m";
     private static final int REQUEST_NOTIFICATIONS = 42;
     private static final String DEFAULT_BASE_URL = "https://chat.shushunya.com";
     private static final String DEFAULT_AGENT_URL = "https://technologies-numerous-passport-aspect.trycloudflare.com";
@@ -180,9 +181,8 @@ public class MainActivity extends Activity {
         requestNotificationPermissionIfNeeded();
         baseUrl = DEFAULT_BASE_URL;
         buildUi();
-        if (!restoreChatHistory()) {
-            addMessage(false, "Шушуня здесь. Пиши, брат, пока нити судьбы не спутались окончательно.", false);
-        }
+        addMessage(false, "Шушуня здесь. Пиши, брат, пока нити судьбы не спутались окончательно.", false);
+        loadServerChatHistory();
     }
 
     @Override
@@ -1943,21 +1943,22 @@ public class MainActivity extends Activity {
 
     private void streamAnswer(String text, String imageDataUrl, StreamingBubble liveBubble) throws Exception {
         JSONObject payload = new JSONObject();
+        payload.put("session_id", SERVER_CHAT_SESSION_ID);
         payload.put("model", MODEL);
-        payload.put("user", "redmagic9-shushunya-m");
+        payload.put("user", SERVER_CHAT_SESSION_ID);
         payload.put("archive_enabled", true);
         payload.put("focus_enabled", true);
         payload.put("max_tokens", 2048);
         payload.put("temperature", 0.4);
         payload.put("stream", true);
-
-        JSONArray arr = new JSONArray();
-        arr.put(new JSONObject().put("role", "system").put("content", SYSTEM_PROMPT));
-        arr.put(new JSONObject().put("role", "user").put("content", userContent(text, imageDataUrl)));
-        payload.put("messages", arr);
+        payload.put("system_prompt", SYSTEM_PROMPT);
+        payload.put("text", text);
+        if (imageDataUrl != null && !imageDataUrl.isEmpty()) {
+            payload.put("image_data_url", imageDataUrl);
+        }
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/v1/chat/completions");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/chat/completions");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1965,6 +1966,7 @@ public class MainActivity extends Activity {
         conn.setDoOutput(true);
         conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         conn.setRequestProperty("Accept", "text/event-stream");
+        applyMobileAuth(conn);
         try (OutputStream out = conn.getOutputStream()) {
             out.write(body);
         }
@@ -2001,6 +2003,14 @@ public class MainActivity extends Activity {
         String finalText = liveBubble.targetText();
         saveChatMessage(false, finalText);
         showAnswerNotification(finalText);
+    }
+
+    private void applyMobileAuth(HttpURLConnection conn) {
+        String apiKey = BuildConfig.MOBILE_API_KEY == null ? "" : BuildConfig.MOBILE_API_KEY.trim();
+        if (!apiKey.isEmpty()) {
+            conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+            conn.setRequestProperty("X-Shushunya-Mobile-Key", apiKey);
+        }
     }
 
     private String streamDelta(String data) {
@@ -2196,56 +2206,46 @@ public class MainActivity extends Activity {
         return bubble;
     }
 
-    private boolean restoreChatHistory() {
-        String raw = getSharedPreferences(PREFS, MODE_PRIVATE).getString(CHAT_HISTORY_KEY, "");
-        if (raw == null || raw.trim().isEmpty()) {
-            return false;
-        }
-        try {
-            JSONArray history = new JSONArray(raw);
-            if (history.length() == 0) {
-                return false;
-            }
-            for (int i = 0; i < history.length(); i++) {
-                JSONObject item = history.optJSONObject(i);
-                if (item == null) {
-                    continue;
+    private void loadServerChatHistory() {
+        new Thread(() -> {
+            try {
+                URL url = new URL(trimSlash(baseUrl) + "/archive/chat/messages?session_id=" + SERVER_CHAT_SESSION_ID + "&limit=" + CHAT_HISTORY_LIMIT);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(12000);
+                conn.setReadTimeout(30000);
+                applyMobileAuth(conn);
+                int code = conn.getResponseCode();
+                if (code < 200 || code >= 300) {
+                    return;
                 }
-                String role = item.optString("role", "");
-                String text = item.optString("text", "");
-                if (!text.isEmpty()) {
-                    addMessage("user".equals(role), text, false);
+                JSONObject payload = new JSONObject(readAll(conn.getInputStream()));
+                JSONArray history = payload.optJSONArray("messages");
+                if (history == null || history.length() == 0) {
+                    return;
                 }
+                main.post(() -> {
+                    messageList.removeAllViews();
+                    for (int i = 0; i < history.length(); i++) {
+                        JSONObject item = history.optJSONObject(i);
+                        if (item == null) {
+                            continue;
+                        }
+                        String role = item.optString("role", "");
+                        String text = item.optString("content", "");
+                        if (!text.isEmpty()) {
+                            addMessage("user".equals(role), text, false);
+                        }
+                    }
+                    maybeScrollToBottom(true);
+                });
+            } catch (Exception ignored) {
             }
-            return true;
-        } catch (Exception ignored) {
-            return false;
-        }
+        }).start();
     }
 
     private void saveChatMessage(boolean fromUser, String text) {
-        String clean = text == null ? "" : text.trim();
-        if (clean.isEmpty()) {
-            return;
-        }
-        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        JSONArray history;
-        try {
-            history = new JSONArray(prefs.getString(CHAT_HISTORY_KEY, "[]"));
-        } catch (Exception ignored) {
-            history = new JSONArray();
-        }
-        JSONObject item = new JSONObject();
-        try {
-            item.put("role", fromUser ? "user" : "assistant");
-            item.put("text", clean);
-            history.put(item);
-            while (history.length() > CHAT_HISTORY_LIMIT) {
-                history.remove(0);
-            }
-            prefs.edit().putString(CHAT_HISTORY_KEY, history.toString()).apply();
-        } catch (Exception ignored) {
-        }
+        // Server-side chat history is the source of truth.
     }
 
     private boolean isAtChatBottom() {
