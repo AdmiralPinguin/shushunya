@@ -83,6 +83,7 @@ ARCHIVE_USER = os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_USER", "shushunya-agent")
 MEMORY_NAMESPACE = os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent").strip() or "agent"
 AGENT_ROOT = Path(__file__).resolve().parents[1]
 TASK_JOURNAL_DIR = Path(os.environ.get("SHUSHUNYA_AGENT_TASK_JOURNAL_DIR", str(AGENT_ROOT / "runtime" / "task-journals")))
+TASK_JOURNAL_MAX_FILES = int(os.environ.get("SHUSHUNYA_AGENT_TASK_JOURNAL_MAX_FILES", "500"))
 
 
 SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локальный агент выполнения задач.
@@ -316,6 +317,21 @@ def write_task_journal(config: AgentConfig, event_type: str, payload: dict[str, 
         tmp_latest = TASK_JOURNAL_DIR / ".latest.tmp"
         tmp_latest.write_text(config.task_id + "\n", encoding="utf-8")
         tmp_latest.replace(latest)
+        if event_type == "final":
+            prune_task_journals(TASK_JOURNAL_MAX_FILES)
+    except OSError:
+        return
+
+
+def prune_task_journals(max_files: int) -> None:
+    try:
+        max_files = max(1, int(max_files))
+        journals = sorted(
+            (path for path in TASK_JOURNAL_DIR.glob("*.jsonl") if path.is_file()),
+            key=lambda path: path.stat().st_mtime,
+        )
+        for path in journals[:-max_files]:
+            path.unlink(missing_ok=True)
     except OSError:
         return
 

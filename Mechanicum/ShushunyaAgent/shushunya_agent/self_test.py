@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import sys
+import tempfile
 from pathlib import Path
 from unittest import mock
 from urllib.error import HTTPError
@@ -28,6 +29,7 @@ from .agent_runner import (
     file_tool,
     python_tool,
     read_task_journal,
+    prune_task_journals,
     repair_action_json,
     result_for_model,
     run_agent,
@@ -180,6 +182,21 @@ def main() -> int:
     if journal.get("task_id") != journal_config.task_id or not journal.get("events"):
         raise AssertionError(f"unexpected task journal payload: {journal}")
     print("[ok] task journal write/read")
+
+    old_journal_dir = agent_runner.TASK_JOURNAL_DIR
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agent_runner.TASK_JOURNAL_DIR = Path(tmpdir)
+            for index in range(5):
+                path = agent_runner.TASK_JOURNAL_DIR / f"journal-{index}.jsonl"
+                path.write_text("{}\n", encoding="utf-8")
+            prune_task_journals(2)
+            remaining = sorted(path.name for path in agent_runner.TASK_JOURNAL_DIR.glob("*.jsonl"))
+            if len(remaining) != 2:
+                raise AssertionError(f"journal retention kept wrong files: {remaining}")
+        print("[ok] task journal retention")
+    finally:
+        agent_runner.TASK_JOURNAL_DIR = old_journal_dir
 
     with mock.patch.object(agent_runner, "chat", return_value='{"action":"final","message":"repaired"}'):
         repaired_action = repair_action_json(config, "```json\n{\"action\":\"final\",\"message\":\"broken\"", ValueError("broken"))

@@ -46,6 +46,7 @@ Last verified: 2026-06-21 18:08 KST.
   `SHUSHUNYA_AGENT_MAX_RUNTIME_SEC`.
 - `GET /task-journal?task_id=...` can inspect recent journal events, and
   `resume_task_id` can feed recent journal context into a follow-up run.
+- Task journal retention keeps the newest configured JSONL journals.
 - Resume context is compacted before entering the model prompt.
 - `GET /state` reports runner busy/queue/current/last task state.
 - `wait_for_slot=false` can fail fast with `409 agent busy` instead of waiting

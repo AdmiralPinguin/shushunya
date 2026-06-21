@@ -129,6 +129,8 @@ curl -N -sS http://127.0.0.1:8095/run-stream \
 
 Resume context is compacted before it is appended to the prompt, so a long task
 journal cannot be replayed into the model wholesale.
+Journal retention keeps the newest `SHUSHUNYA_AGENT_TASK_JOURNAL_MAX_FILES`
+JSONL files, default `500`.
 
 Optional API key:
 
