@@ -6,6 +6,7 @@ import fcntl
 import io
 import json
 import os
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -34,6 +35,7 @@ RUN_STATE: dict[str, Any] = {
     "last_exit_code": None,
     "last_finished_at": 0.0,
 }
+REVISION_CACHE = ""
 
 
 class RequestError(Exception):
@@ -125,7 +127,31 @@ def runtime_state() -> dict[str, Any]:
     if payload.get("last_finished_at"):
         payload["last_finished_ago_sec"] = round(now - float(payload["last_finished_at"]), 3)
     payload["max_request_bytes"] = MAX_REQUEST_BYTES
+    payload["revision"] = service_revision()
     return payload
+
+
+def service_revision() -> str:
+    global REVISION_CACHE
+    if REVISION_CACHE:
+        return REVISION_CACHE
+    env_revision = os.environ.get("SHUSHUNYA_AGENT_REVISION", "").strip()
+    if env_revision:
+        REVISION_CACHE = env_revision
+        return REVISION_CACHE
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+        REVISION_CACHE = completed.stdout.strip() if completed.returncode == 0 else "unknown"
+    except Exception:
+        REVISION_CACHE = "unknown"
+    return REVISION_CACHE
 
 
 def runner_is_busy() -> bool:
@@ -201,6 +227,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                 payload = {
                     "status": "ok",
                     "service": "ShushunyaAgent",
+                    "revision": service_revision(),
                     "archive_status": archive.get("status", "unknown"),
                 }
                 if detail:

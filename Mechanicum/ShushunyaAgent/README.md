@@ -96,10 +96,11 @@ curl -sS http://127.0.0.1:8095/state
 ```
 
 `/state` reports whether the serialized runner is busy, queued request count,
-current task id, last completed task id, and the request size limit.
+current task id, last completed task id, git revision, and the request size
+limit.
 `/health` is intentionally minimal by default and reports only the agent service
-status plus Archive status. Use `/health?detail=1` for the full Archive health
-payload when authorized.
+status, git revision, plus Archive status. Use `/health?detail=1` for the full
+Archive health payload when authorized.
 
 Every run writes a compact JSONL journal under `runtime/task-journals/`.
 Pass a stable task id when a caller wants resumable task history:

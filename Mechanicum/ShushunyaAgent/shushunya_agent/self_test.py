@@ -138,6 +138,8 @@ def main() -> int:
     state = server.runtime_state()
     if "busy" not in state or state.get("max_request_bytes", 0) <= 0:
         raise AssertionError(f"runtime state missing expected fields: {state}")
+    if not state.get("revision"):
+        raise AssertionError(f"runtime state missing revision: {state}")
     print("[ok] runtime state payload")
     health_archive = {"status": "ok", "jsonl_root": "/private/archive/path"}
     minimal_health = {

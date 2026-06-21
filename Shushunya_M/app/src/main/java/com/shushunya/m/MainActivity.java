@@ -1213,6 +1213,10 @@ public class MainActivity extends Activity {
         }
         StringBuilder out = new StringBuilder();
         out.append("State: ").append(state.optBoolean("busy", false) ? "busy" : "idle");
+        String revision = state.optString("revision", "").trim();
+        if (!revision.isEmpty()) {
+            out.append("\nRevision: ").append(revision);
+        }
         out.append("\nОчередь: ").append(state.optInt("queued", 0));
         String currentTask = state.optString("current_task_id", "").trim();
         if (!currentTask.isEmpty()) {
