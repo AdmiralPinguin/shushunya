@@ -17,6 +17,7 @@
 - Structured Python tool.
 - Optional shell fallback with supervisor denylist.
 - SearXNG-first web search and guarded public `web_fetch`.
+- Stream heartbeat events for long model/tool calls.
 - Runtime required-field validation.
 - Repeated identical action guard.
 - JSON output mode for integration.
@@ -25,9 +26,10 @@
 - `/run` serialization in the Agent API with process-local and runtime file locks.
 - `/state` runtime endpoint for UI/ops checks.
 - Task journals and compact `resume_task_id` continuation context.
+- Cooperative cancellation through `POST /cancel`.
 - Self-test covering Archive, sandbox paths, file tools, Python, and network isolation.
 - Android agent mode calls `/run-stream`, uses the `agent` memory namespace, and
-  includes a state check button.
+  includes state and cancel controls.
 
 ## Next
 
@@ -39,4 +41,4 @@
 - Add a service wrapper for long-running agent sessions.
 - If binding Agent API outside localhost, require `SHUSHUNYA_AGENT_API_KEY`.
 - Keep monitoring stale Archive focus files as namespaces accumulate.
-- Add richer queue/cancel controls for long-running phone-driven tasks.
+- Add richer queue controls for long-running phone-driven tasks.

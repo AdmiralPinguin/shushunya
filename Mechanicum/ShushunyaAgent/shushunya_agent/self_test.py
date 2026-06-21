@@ -69,6 +69,9 @@ def main() -> int:
     if schema_actions != runtime_actions:
         raise AssertionError(f"tool schema/runtime mismatch: missing={sorted(runtime_actions - schema_actions)}, extra={sorted(schema_actions - runtime_actions)}")
     print("[ok] tool schema matches runtime actions")
+    if '"limit":100' not in agent_runner.SYSTEM_PROMPT or "is_binary=true" not in agent_runner.SYSTEM_PROMPT:
+        raise AssertionError("system prompt missing file pagination or binary web_fetch guidance")
+    print("[ok] system prompt tool guidance")
 
     if configured_search_providers()[0] != "searxng":
         raise AssertionError(f"search providers must start with searxng: {configured_search_providers()}")
