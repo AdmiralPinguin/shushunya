@@ -127,7 +127,7 @@ Vector memory is the retrieval layer for old archived turns:
 vector/index.sqlite3
 ```
 
-After a successful archived answer, the librarian indexes the latest user message and assistant answer as chunks. Vector context injection is disabled by default for now, so this layer keeps accumulating data without being added to model prompts unless `ARCHIVE_VECTOR_INJECTION_ENABLED=1`.
+After a successful archived answer, the librarian indexes the latest user message and assistant answer as chunks. The local starter enables direct vector context injection with `ARCHIVE_VECTOR_INJECTION_ENABLED=1`, so this layer is currently active in model prompts while the memory is still small.
 
 This first version intentionally has no external dependency and no network dependency. It uses stable hashed token vectors stored in SQLite. The retrieval interface can later be swapped to real embedding vectors without changing the gateway flow.
 
@@ -151,7 +151,7 @@ graph/graph.sqlite3
 
 The graph layer is for relationships that are awkward to represent as raw chunks or isolated wiki pages: project components, agents, memory layers, decisions, dependencies, superseded decisions, ownership, storage, retrieval, and status links.
 
-After every `ARCHIVE_GRAPH_INTERVAL_MESSAGES` archived messages, the librarian reviews recent turns, extracts stable nodes and edges, and merges them into the graph. Graph context injection is disabled by default for now, so this layer keeps accumulating data without being added to model prompts unless `ARCHIVE_GRAPH_INJECTION_ENABLED=1`.
+After every `ARCHIVE_GRAPH_INTERVAL_MESSAGES` archived messages, the librarian reviews recent turns, extracts stable nodes and edges, and merges them into the graph. The local starter enables direct graph context injection with `ARCHIVE_GRAPH_INJECTION_ENABLED=1`, so this layer is currently active in model prompts while the memory is still small.
 
 On startup, if the graph is empty, ArchiveOfHeresy asks the librarian to seed it from the latest archived turns by default.
 
@@ -220,6 +220,7 @@ Stop it:
 
 - `ARCHIVE_HOST` - default `127.0.0.1`
 - `ARCHIVE_PORT` - default `8090`
+- `ARCHIVE_API_KEY` - optional Bearer API key required for `/v1/*` and `/archive/*` endpoints when set
 - `ARCHIVE_LLM_BASE_URL` - default `http://127.0.0.1:8080`
 - `ARCHIVE_SYSTEM_PROMPT` - archive-level system prompt prepended to chat requests; default personality is Shushunya, a sarcastic daemon of Tzeentch
 - `ARCHIVE_JSONL_ROOT` - default `ArchiveOfHeresy/archive/jsonl`
@@ -261,3 +262,9 @@ Stop it:
 - `ARCHIVE_LIBRARIAN_SYSTEM_PROMPT` - isolated librarian system prompt
 - `ARCHIVE_LIBRARIAN_TASK_PROMPT` - isolated librarian task prompt
 - `ARCHIVE_LIBRARIAN_WIKI_TASK_PROMPT` - isolated wiki-memory task prompt
+
+`start-main.sh` currently activates memory aggressively for the local daemon:
+`ARCHIVE_MAGOS_CONTEXT_LAYERS=wiki,vector,graph`,
+`ARCHIVE_VECTOR_INJECTION_ENABLED=1`, `ARCHIVE_GRAPH_INJECTION_ENABLED=1`,
+`ARCHIVE_MAGOS_ENABLED=1`, `ARCHIVE_VECTOR_BACKFILL_ON_START=1`, and
+`ARCHIVE_GRAPH_BACKFILL_ON_START=1`, unless `.env` overrides them.

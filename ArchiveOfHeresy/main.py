@@ -483,6 +483,10 @@ def memory_gateway_manifest():
             "write_unknown_namespace": "allowed only through chat/proposal paths that let the librarian create memory",
         },
         "magos_context_layers": sorted(MAGOS_CONTEXT_LAYERS),
+        "direct_injection": {
+            "vector": VECTOR_INJECTION_ENABLED,
+            "graph": GRAPH_INJECTION_ENABLED,
+        },
         "read_endpoints": {
             "catalog": "GET /archive/memory/catalog?namespace=agent&requester=name",
             "search": "GET /archive/memory/search?namespace=agent&q=query&limit=5&layers=focus,wiki,vector,graph&include_content=0&requester=name",
@@ -1015,6 +1019,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "memory_events_root": str(MEMORY_EVENTS_ROOT),
                     "sqlite_path": str(SQLITE_PATH),
                     "magos_context_layers": sorted(MAGOS_CONTEXT_LAYERS),
+                    "direct_injection": {
+                        "vector": VECTOR_INJECTION_ENABLED,
+                        "graph": GRAPH_INJECTION_ENABLED,
+                    },
                     "focus_root": str(FOCUS_ROOT),
                     "focus_namespaces": {
                         namespace: str(focus_root_for_namespace(namespace))
