@@ -432,6 +432,7 @@ def memory_catalog(memory_namespace):
 def memory_gateway_manifest():
     return {
         "service": "ArchiveOfHeresy Memory Gateway",
+        "version": 1,
         "base_url": ARCHIVE_BASE_URL,
         "auth": "Authorization: Bearer $ARCHIVE_API_KEY when ARCHIVE_API_KEY is configured",
         "known_namespaces": known_memory_namespaces(),
