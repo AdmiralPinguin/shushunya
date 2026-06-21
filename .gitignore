@@ -15,6 +15,7 @@ ArchiveOfHeresy/archive/jsonl/**/*.jsonl
 ArchiveOfHeresy/archive/memory_events/**/*.jsonl
 ArchiveOfHeresy/archive/sqlite/*.sqlite3
 ArchiveOfHeresy/archive/sqlite/*.sqlite3-*
+ArchiveOfHeresy/reports/
 ArchiveOfHeresy/focus/index.json
 ArchiveOfHeresy/focus/*.tmp
 ArchiveOfHeresy/focus/files/*.md

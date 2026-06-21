@@ -129,9 +129,9 @@ vector/index.sqlite3
 
 After a successful archived answer, the librarian indexes the latest user message and assistant answer as chunks. The local starter enables direct vector context injection with `ARCHIVE_VECTOR_INJECTION_ENABLED=1`, so this layer is currently active in model prompts while the memory is still small.
 
-This first version intentionally has no external dependency and no network dependency. It uses stable hashed token vectors stored in SQLite. The retrieval interface can later be swapped to real embedding vectors without changing the gateway flow.
+This first version intentionally has no external dependency and no network dependency. It uses stable hashed token and character n-gram sparse vectors stored in SQLite. The retrieval interface can later be swapped to real embedding vectors without changing the gateway flow.
 
-On startup, ArchiveOfHeresy backfills vector memory from the existing working SQLite archive by default, so old archived turns become searchable too.
+On startup, ArchiveOfHeresy incrementally backfills vector memory from the existing working SQLite archive by default, so old archived turns become searchable too without reprocessing turns already indexed with the current embedding version.
 
 Vector memory follows the same allowlist behavior as focus memory: when a client disables focus injection, vector retrieval is disabled by default too. A request can explicitly send `vector_enabled: false` to disable vector retrieval for that turn.
 
@@ -236,6 +236,7 @@ Stop it:
 - `ARCHIVE_GRAPH_INJECTION_ENABLED` - default `0`
 - `ARCHIVE_FOCUS_MAX_FILES` - default `10`
 - `ARCHIVE_VECTOR_DIMENSIONS` - default `384`
+- `ARCHIVE_VECTOR_EMBEDDING_VERSION` - default `hashed-token-chargram-v2`
 - `ARCHIVE_VECTOR_CHUNK_CHARS` - default `1200`
 - `ARCHIVE_VECTOR_TOP_K` - default `5`
 - `ARCHIVE_VECTOR_MIN_SCORE` - default `0.18`
@@ -262,9 +263,14 @@ Stop it:
 - `ARCHIVE_LIBRARIAN_SYSTEM_PROMPT` - isolated librarian system prompt
 - `ARCHIVE_LIBRARIAN_TASK_PROMPT` - isolated librarian task prompt
 - `ARCHIVE_LIBRARIAN_WIKI_TASK_PROMPT` - isolated wiki-memory task prompt
+- `ARCHIVE_MEMORY_QUALITY_REPORT_ENABLED` - default `1`
+- `ARCHIVE_MEMORY_QUALITY_REPORT_HOUR` - default `4`
+- `ARCHIVE_REPORTS_ROOT` - default `ArchiveOfHeresy/reports`
 
 `start-main.sh` currently activates memory aggressively for the local daemon:
 `ARCHIVE_MAGOS_CONTEXT_LAYERS=wiki,vector,graph`,
 `ARCHIVE_VECTOR_INJECTION_ENABLED=1`, `ARCHIVE_GRAPH_INJECTION_ENABLED=1`,
 `ARCHIVE_MAGOS_ENABLED=1`, `ARCHIVE_VECTOR_BACKFILL_ON_START=1`, and
-`ARCHIVE_GRAPH_BACKFILL_ON_START=1`, unless `.env` overrides them.
+`ARCHIVE_GRAPH_BACKFILL_ON_START=1`. It also enables the daily memory quality
+report at 04:00 with `ARCHIVE_MEMORY_QUALITY_REPORT_ENABLED=1` and
+`ARCHIVE_MEMORY_QUALITY_REPORT_HOUR=4`, unless `.env` overrides them.

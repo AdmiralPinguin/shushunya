@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 VECTOR_DIMENSIONS = int(os.environ.get("ARCHIVE_VECTOR_DIMENSIONS", "384"))
+VECTOR_EMBEDDING_VERSION = os.environ.get("ARCHIVE_VECTOR_EMBEDDING_VERSION", "hashed-token-chargram-v2")
 VECTOR_CHUNK_CHARS = int(os.environ.get("ARCHIVE_VECTOR_CHUNK_CHARS", "1200"))
 VECTOR_TOP_K = int(os.environ.get("ARCHIVE_VECTOR_TOP_K", "5"))
 VECTOR_MIN_SCORE = float(os.environ.get("ARCHIVE_VECTOR_MIN_SCORE", "0.18"))
@@ -32,6 +33,22 @@ def tokenize(text):
     return [token.lower() for token in TOKEN_RE.findall(str(text or "")) if len(token) > 1]
 
 
+def chargrams(token, size=3):
+    token = str(token or "").lower()
+    if len(token) < size + 1:
+        return []
+    return [token[index : index + size] for index in range(0, len(token) - size + 1)]
+
+
+def embed_features(text):
+    features = []
+    for token in tokenize(text):
+        features.append((f"tok:{token}", 1.0))
+        for gram in chargrams(token):
+            features.append((f"chr:{gram}", 0.35))
+    return features
+
+
 def stable_hash(value):
     digest = hashlib.blake2b(value.encode("utf-8"), digest_size=8).digest()
     return int.from_bytes(digest, "big", signed=False)
@@ -39,11 +56,11 @@ def stable_hash(value):
 
 def embed_text(text, dimensions=VECTOR_DIMENSIONS):
     vector = {}
-    for token in tokenize(text):
-        hashed = stable_hash(token)
+    for feature, weight in embed_features(text):
+        hashed = stable_hash(feature)
         index = hashed % dimensions
         sign = -1.0 if (hashed >> 63) else 1.0
-        vector[index] = vector.get(index, 0.0) + sign
+        vector[index] = vector.get(index, 0.0) + sign * weight
 
     norm = math.sqrt(sum(value * value for value in vector.values()))
     if norm <= 0:
@@ -113,6 +130,7 @@ class VectorMemory:
                     role TEXT NOT NULL,
                     chunk_index INTEGER NOT NULL,
                     content TEXT NOT NULL,
+                    embedding_version TEXT NOT NULL DEFAULT 'legacy',
                     embedding_json TEXT NOT NULL
                 )
                 """
@@ -120,6 +138,8 @@ class VectorMemory:
             columns = {row[1] for row in db.execute("PRAGMA table_info(vector_chunks)")}
             if "memory_namespace" not in columns:
                 db.execute("ALTER TABLE vector_chunks ADD COLUMN memory_namespace TEXT NOT NULL DEFAULT 'default'")
+            if "embedding_version" not in columns:
+                db.execute("ALTER TABLE vector_chunks ADD COLUMN embedding_version TEXT NOT NULL DEFAULT 'legacy'")
             db.execute(
                 """
                 UPDATE vector_chunks
@@ -131,6 +151,21 @@ class VectorMemory:
             db.execute("CREATE INDEX IF NOT EXISTS idx_vector_chunks_turn ON vector_chunks(turn_id)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_vector_chunks_conversation ON vector_chunks(conversation_id)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_vector_chunks_namespace_created ON vector_chunks(memory_namespace, created_at)")
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS vector_indexed_turns (
+                    turn_id TEXT PRIMARY KEY,
+                    memory_namespace TEXT NOT NULL DEFAULT 'default',
+                    indexed_at TEXT NOT NULL,
+                    embedding_version TEXT NOT NULL DEFAULT 'legacy',
+                    chunks INTEGER NOT NULL
+                )
+                """
+            )
+            indexed_columns = {row[1] for row in db.execute("PRAGMA table_info(vector_indexed_turns)")}
+            if "embedding_version" not in indexed_columns:
+                db.execute("ALTER TABLE vector_indexed_turns ADD COLUMN embedding_version TEXT NOT NULL DEFAULT 'legacy'")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_vector_indexed_namespace ON vector_indexed_turns(memory_namespace)")
 
     def index_turn(self, record):
         if record.get("status") != "ok":
@@ -168,6 +203,7 @@ class VectorMemory:
                         role,
                         chunk_index,
                         chunk,
+                        VECTOR_EMBEDDING_VERSION,
                         json.dumps(embedding, ensure_ascii=False, sort_keys=True),
                     )
                 )
@@ -179,13 +215,32 @@ class VectorMemory:
             db.executemany(
                 """
                 INSERT OR REPLACE INTO vector_chunks (
-                    id, turn_id, conversation_id, memory_namespace, created_at, role, chunk_index, content, embedding_json
+                    id, turn_id, conversation_id, memory_namespace, created_at, role, chunk_index, content, embedding_version, embedding_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
+            db.execute(
+                """
+                INSERT OR REPLACE INTO vector_indexed_turns (turn_id, memory_namespace, indexed_at, embedding_version, chunks)
+                VALUES (?, ?, datetime('now'), ?, ?)
+                """,
+                (turn_id, memory_namespace, VECTOR_EMBEDDING_VERSION, len(rows)),
+            )
         return len(rows)
+
+    def indexed_turn_ids(self):
+        if not self.db_path.exists():
+            return set()
+        with sqlite3.connect(self.db_path) as db:
+            return {
+                row[0]
+                for row in db.execute(
+                    "SELECT turn_id FROM vector_indexed_turns WHERE embedding_version = ?",
+                    (VECTOR_EMBEDDING_VERSION,),
+                )
+            }
 
     def backfill_from_archive(self, archive_sqlite_path):
         archive_sqlite_path = Path(archive_sqlite_path)
@@ -193,6 +248,7 @@ class VectorMemory:
             return 0
 
         indexed = 0
+        known_turns = self.indexed_turn_ids()
         with sqlite3.connect(archive_sqlite_path) as archive_db:
             archive_db.row_factory = sqlite3.Row
             turn_columns = {row[1] for row in archive_db.execute("PRAGMA table_info(turns)")}
@@ -209,6 +265,8 @@ class VectorMemory:
             )
 
         for row in rows:
+            if row["id"] in known_turns:
+                continue
             try:
                 request = json.loads(row["request_json"] or "{}")
             except json.JSONDecodeError:

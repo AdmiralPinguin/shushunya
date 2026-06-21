@@ -5,7 +5,7 @@ import re
 import sqlite3
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -16,6 +16,7 @@ from archivist_agent import Librarian
 from archivist_agent.agent import FocusBookshelf, WikiBookshelf
 from archivist_agent.graph_memory import GRAPH_TOP_K, GraphMemory
 from archivist_agent.magos_agent import MAGOS_CONTEXT_LAYERS, Magos
+from archivist_agent.quality_report import generate_quality_report
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
 
 
@@ -28,6 +29,7 @@ LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").r
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
 MEMORY_EVENTS_ROOT = Path(os.environ.get("ARCHIVE_MEMORY_EVENTS_ROOT", ROOT / "archive" / "memory_events"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
+REPORTS_ROOT = Path(os.environ.get("ARCHIVE_REPORTS_ROOT", ROOT / "reports"))
 FOCUS_ROOT = Path(os.environ.get("ARCHIVE_FOCUS_ROOT", ROOT / "focus"))
 WIKI_ROOT = Path(os.environ.get("ARCHIVE_WIKI_ROOT", ROOT / "wiki"))
 VECTOR_ROOT = Path(os.environ.get("ARCHIVE_VECTOR_ROOT", ROOT / "vector"))
@@ -49,6 +51,13 @@ GRAPH_INJECTION_ENABLED = os.environ.get("ARCHIVE_GRAPH_INJECTION_ENABLED", "0")
     "no",
     "off",
 )
+MEMORY_QUALITY_REPORT_ENABLED = os.environ.get("ARCHIVE_MEMORY_QUALITY_REPORT_ENABLED", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+MEMORY_QUALITY_REPORT_HOUR = int(os.environ.get("ARCHIVE_MEMORY_QUALITY_REPORT_HOUR", "4"))
 ARCHIVE_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_SYSTEM_PROMPT",
     "Ты Шушуня: злой, подлый и саркастичный демон Тзинча, маленький демон пользователя. "
@@ -67,6 +76,7 @@ ARCHIVE_SYSTEM_PROMPT = os.environ.get(
 )
 ARCHIVE_LOCK = threading.Lock()
 CHAT_QUEUE_LOCK = threading.Lock()
+MAINTENANCE_LOCK = threading.Lock()
 LIBRARIAN = None
 MAGOS = None
 FOCUS_BOOKSHELF = None
@@ -259,13 +269,34 @@ def memory_tokens(value):
     return {token.lower() for token in TOKEN_RE.findall(str(value or "")) if len(token) > 1}
 
 
+def memory_chargrams(value, size=3):
+    grams = set()
+    for token in memory_tokens(value):
+        if len(token) < size + 1:
+            continue
+        for index in range(0, len(token) - size + 1):
+            grams.add(token[index : index + size])
+    return grams
+
+
 def memory_overlap_score(query_tokens, value):
     if not query_tokens:
         return 0.0
     target = memory_tokens(value)
-    if not target:
-        return 0.0
-    return len(query_tokens & target) / max(1, min(len(query_tokens), len(target)))
+    token_score = 0.0
+    if target:
+        token_score = len(query_tokens & target) / max(1, min(len(query_tokens), len(target)))
+    query_grams = set()
+    for token in query_tokens:
+        if len(token) < 4:
+            continue
+        for index in range(0, len(token) - 2):
+            query_grams.add(token[index : index + 3])
+    target_grams = memory_chargrams(value)
+    gram_score = 0.0
+    if query_grams and target_grams:
+        gram_score = len(query_grams & target_grams) / max(1, min(len(query_grams), len(target_grams)))
+    return max(token_score, gram_score * 0.75)
 
 
 def trim_memory_text(value, limit=1200):
@@ -476,6 +507,11 @@ def memory_gateway_manifest():
         "base_url": ARCHIVE_BASE_URL,
         "auth": "Authorization: Bearer $ARCHIVE_API_KEY when ARCHIVE_API_KEY is configured",
         "known_namespaces": known_memory_namespaces(),
+        "memory_quality_report": {
+            "enabled": MEMORY_QUALITY_REPORT_ENABLED,
+            "hour": MEMORY_QUALITY_REPORT_HOUR,
+            "reports_root": str(REPORTS_ROOT),
+        },
         "namespace_policy": {
             "default": "normal Telegram/chat memory",
             "agent": "ShushunyaAgent memory",
@@ -691,7 +727,8 @@ def maybe_write_archives(record):
 
 def maybe_update_focus_memory(record):
     if record.get("archive_enabled", True):
-        update_focus_memory(record)
+        with MAINTENANCE_LOCK:
+            update_focus_memory(record)
 
 
 def prepare_messages(
@@ -939,6 +976,79 @@ def write_gateway_event(memory_namespace, action, requester=None, **details):
     )
 
 
+def memory_report_catalogs():
+    catalogs = {}
+    for namespace in known_memory_namespaces():
+        try:
+            catalog = memory_catalog(namespace)
+        except Exception as exc:
+            catalogs[namespace] = {"error": str(exc)}
+            continue
+        focus = catalog.get("focus", {})
+        wiki = catalog.get("wiki", {})
+        catalogs[namespace] = {
+            "focus_count": len(focus.get("books", []) or []),
+            "active_focus_id": focus.get("active_id"),
+            "wiki_pages": len(wiki.get("pages", []) or []),
+            "vector": catalog.get("vector", {}),
+            "graph": catalog.get("graph", {}),
+        }
+    return catalogs
+
+
+def run_memory_quality_report(report_date=None):
+    result = generate_quality_report(
+        proxy_json,
+        JSONL_ROOT,
+        MEMORY_EVENTS_ROOT,
+        REPORTS_ROOT,
+        report_date=report_date,
+        catalogs=memory_report_catalogs(),
+    )
+    record = {
+        "created_at": now_iso(),
+        "turn_id": str(uuid.uuid4()),
+        "conversation_id": "archive-memory-quality",
+        "memory_namespace": "default",
+    }
+    write_memory_event(
+        record,
+        {
+            "component": "memory_quality",
+            "action": "daily_report",
+            "date": result.get("date"),
+            "score": (result.get("assessment") or {}).get("score"),
+            "paths": result.get("paths"),
+        },
+    )
+    print(f"Memory quality report: {json.dumps(result.get('paths'), ensure_ascii=False)}", flush=True)
+    return result
+
+
+def seconds_until_quality_report():
+    now = datetime.now().astimezone()
+    target = now.replace(hour=MEMORY_QUALITY_REPORT_HOUR, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return max(60, int((target - now).total_seconds()))
+
+
+def memory_quality_report_loop():
+    while MEMORY_QUALITY_REPORT_ENABLED:
+        threading.Event().wait(seconds_until_quality_report())
+        try:
+            run_memory_quality_report()
+        except Exception as exc:
+            record = {
+                "created_at": now_iso(),
+                "turn_id": str(uuid.uuid4()),
+                "conversation_id": "archive-memory-quality",
+                "memory_namespace": "default",
+            }
+            write_memory_event(record, {"component": "memory_quality", "status": "error", "error": str(exc)})
+            print(f"Memory quality report error: {exc}", flush=True)
+
+
 def recent_memory_events(limit=50, memory_namespace=None, component=None, event_action=None, requester=None):
     limit = max(1, min(int(limit or 50), 500))
     component = str(component or "").strip()
@@ -1018,10 +1128,15 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "jsonl_root": str(JSONL_ROOT),
                     "memory_events_root": str(MEMORY_EVENTS_ROOT),
                     "sqlite_path": str(SQLITE_PATH),
+                    "reports_root": str(REPORTS_ROOT),
                     "magos_context_layers": sorted(MAGOS_CONTEXT_LAYERS),
                     "direct_injection": {
                         "vector": VECTOR_INJECTION_ENABLED,
                         "graph": GRAPH_INJECTION_ENABLED,
+                    },
+                    "memory_quality_report": {
+                        "enabled": MEMORY_QUALITY_REPORT_ENABLED,
+                        "hour": MEMORY_QUALITY_REPORT_HOUR,
                     },
                     "focus_root": str(FOCUS_ROOT),
                     "focus_namespaces": {
@@ -1443,6 +1558,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
 
     def chat_completion(self):
+        maintenance_record = None
         with CHAT_QUEUE_LOCK:
             created_at = now_iso()
             turn_id = str(uuid.uuid4())
@@ -1518,16 +1634,17 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             try:
                 if prepared_payload.get("stream"):
                     self.stream_chat_completion(prepared_payload, record)
-                    return
-
-                status, response = proxy_json("POST", self.path, payload=prepared_payload)
-                record["status"] = "ok"
-                record["http_status"] = status
-                record["response"] = response
-                record["assistant_message"] = assistant_message(response)
-                maybe_write_archives(record)
-                write_json(self, status, response)
-                maybe_update_focus_memory(record)
+                    if record.get("status") == "ok":
+                        maintenance_record = record
+                else:
+                    status, response = proxy_json("POST", self.path, payload=prepared_payload)
+                    record["status"] = "ok"
+                    record["http_status"] = status
+                    record["response"] = response
+                    record["assistant_message"] = assistant_message(response)
+                    maybe_write_archives(record)
+                    write_json(self, status, response)
+                    maintenance_record = record
             except HTTPError as exc:
                 try:
                     error_payload = json.loads(exc.read().decode("utf-8"))
@@ -1558,6 +1675,8 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 maybe_abandon_magos_focus(record)
                 maybe_write_archives(record)
                 write_json(self, 500, error_payload)
+        if maintenance_record is not None:
+            maybe_update_focus_memory(maintenance_record)
 
     def stream_chat_completion(self, prepared_payload, record):
         assistant_parts = []
@@ -1613,7 +1732,6 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             record["response"] = response
             record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
             maybe_write_archives(record)
-            maybe_update_focus_memory(record)
         except HTTPError as exc:
             try:
                 error_payload = json.loads(exc.read().decode("utf-8"))
@@ -1704,6 +1822,9 @@ def main():
     print(f"Graph memory: {GRAPH_ROOT}", flush=True)
     print(f"Vector backfill turns: {vector_backfilled}", flush=True)
     print(f"Graph backfill nodes: {graph_backfilled}", flush=True)
+    if MEMORY_QUALITY_REPORT_ENABLED:
+        threading.Thread(target=memory_quality_report_loop, daemon=True, name="memory-quality-report").start()
+        print(f"Memory quality report: enabled at {MEMORY_QUALITY_REPORT_HOUR:02d}:00", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

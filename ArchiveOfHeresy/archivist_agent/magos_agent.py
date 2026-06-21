@@ -51,7 +51,23 @@ def token_overlap(left, right):
     right_tokens = set(tokenize(right))
     if not left_tokens or not right_tokens:
         return 0.0
-    return len(left_tokens & right_tokens) / max(1, min(len(left_tokens), len(right_tokens)))
+    token_score = len(left_tokens & right_tokens) / max(1, min(len(left_tokens), len(right_tokens)))
+    left_grams = chargrams(left_tokens)
+    right_grams = chargrams(right_tokens)
+    gram_score = 0.0
+    if left_grams and right_grams:
+        gram_score = len(left_grams & right_grams) / max(1, min(len(left_grams), len(right_grams)))
+    return max(token_score, gram_score * 0.75)
+
+
+def chargrams(tokens, size=3):
+    grams = set()
+    for token in tokens:
+        if len(token) < size + 1:
+            continue
+        for index in range(0, len(token) - size + 1):
+            grams.add(token[index : index + size])
+    return grams
 
 
 class Magos:

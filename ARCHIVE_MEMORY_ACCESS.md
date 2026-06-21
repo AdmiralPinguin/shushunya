@@ -33,6 +33,15 @@ collecting data, but are not injected into the model unless explicitly enabled
 or queried through the gateway. Check `magos_context_layers` in `/health` or
 `/archive/memory/gateway`.
 
+Current local daemon mode may override that conservative default in
+`ArchiveOfHeresy/start-main.sh`: Magos lower layers plus direct vector/graph
+injection can be enabled while memory is small. Check `/health` for
+`direct_injection`.
+
+ArchiveOfHeresy writes daily memory quality reports at 04:00 when enabled.
+Reports are runtime artifacts under `ArchiveOfHeresy/reports/memory_quality/`
+and are intentionally ignored by git.
+
 ## HTTP Gateway
 
 Manifest:
@@ -143,6 +152,8 @@ ArchiveOfHeresy/check-memory-gateway.sh --manifest-only
 ArchiveOfHeresy/check-memory-gateway.sh agent 'memory gateway'
 ArchiveOfHeresy/check-memory.sh agent 'memory gateway'
 ArchiveOfHeresy/check-namespace-smoke.py
+ArchiveOfHeresy/memory-report.sh agent
+ArchiveOfHeresy/memory-quality-report.sh
 cd Mechanicum/ShushunyaAgent && ./ShushunyaAgent/bin/python -m shushunya_agent.self_test
 ```
 
