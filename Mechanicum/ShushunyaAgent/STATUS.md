@@ -27,9 +27,9 @@ Last verified: 2026-06-21 18:08 KST.
 - Default search providers are `searxng,marginalia,wikipedia,brave`.
 - Brave is an optional fallback only and is skipped unless `brave` is present in
   `SHUSHUNYA_AGENT_SEARCH_PROVIDERS`.
-- Archive Memory Gateway tools are available: `archive_memory_catalog`,
-  `archive_memory_search`, `archive_memory_read`, `archive_memory_propose`, and
-  filtered `archive_memory_events`.
+- Archive Memory Gateway tools are available: `archive_memory_gateway`,
+  `archive_memory_catalog`, `archive_memory_search`, `archive_memory_read`,
+  `archive_memory_propose`, and filtered `archive_memory_events`.
 - Archive memory tools are fail-soft: HTTP 400/404 responses become tool results
   with `ok=false`.
 

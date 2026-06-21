@@ -122,6 +122,7 @@ normal librarian path.
 ShushunyaAgent tools over this gateway:
 
 ```text
+archive_memory_gateway
 archive_memory_catalog
 archive_memory_search
 archive_memory_read
