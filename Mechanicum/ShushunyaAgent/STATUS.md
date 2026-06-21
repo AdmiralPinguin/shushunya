@@ -1,6 +1,6 @@
 # ShushunyaAgent Status
 
-Last verified: 2026-06-21 12:01 KST.
+Last verified: 2026-06-21 17:24 KST.
 
 ## Running Services
 
@@ -13,6 +13,8 @@ Last verified: 2026-06-21 12:01 KST.
 
 - Archive health is `ok`.
 - Agent API health is `ok`.
+- Archive health reports `default` and `agent` memory namespaces.
+- Agent namespace memory smoke run completed and wrote focus/vector/event data.
 - Sandbox hides `/media` and `/root`.
 - Sandbox network is blocked by default.
 - Structured file tools work.
@@ -25,6 +27,7 @@ Last verified: 2026-06-21 12:01 KST.
 - Default search providers are `searxng,marginalia,wikipedia,brave`.
 - Brave is an optional fallback only and is skipped unless `brave` is present in
   `SHUSHUNYA_AGENT_SEARCH_PROVIDERS`.
+- `archive_memory_events` is available as an agent diagnostic tool.
 
 ## Local SearXNG
 
@@ -52,3 +55,5 @@ SHUSHUNYA_AGENT_SEARCH_PROVIDERS=searxng,marginalia,wikipedia,brave
   it requires sudo and quota tools such as `xfs_quota`.
 - The API is bound to localhost by default. If exposed beyond localhost, set
   `SHUSHUNYA_AGENT_API_KEY`.
+- Graph/wiki long-term layers update by message interval, so a fresh namespace
+  may show pending status before the first interval sync.

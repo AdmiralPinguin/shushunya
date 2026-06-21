@@ -4,7 +4,9 @@
 
 - Model loop through `ArchiveOfHeresy`.
 - No persistent runner-owned memory.
-- Explicit Archive memory tools: `archive_status`, `archive_search`.
+- Explicit Archive memory tools: `archive_status`, `archive_search`,
+  `archive_memory_events`.
+- Automatic Archive memory for agent runs in the `agent` namespace.
 - Isolated sandbox execution through `bubblewrap`.
 - Default sandbox network isolation.
 - Structured file tools.
@@ -28,4 +30,4 @@
 - Add a service wrapper for long-running agent sessions.
 - Add a UI or Telegram command path that calls `run-agent.sh --json --technical`.
 - If binding Agent API outside localhost, require `SHUSHUNYA_AGENT_API_KEY`.
-- Clean or rotate stale Archive focus that contains failed bootstrap attempts.
+- Keep monitoring stale Archive focus files as namespaces accumulate.
