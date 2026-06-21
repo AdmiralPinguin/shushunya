@@ -123,6 +123,12 @@ public class MainActivity extends Activity {
     private LinearLayout chatView;
     private LinearLayout translatorView;
     private LinearLayout agentView;
+    private LinearLayout agentMessageList;
+    private LinearLayout agentInputPanel;
+    private LinearLayout agentComposer;
+    private ScrollView agentScrollView;
+    private EditText agentInput;
+    private TextView agentLiveBubble;
     private EditText translatorSourceText;
     private EditText translatorResultText;
     private TextView speechStatus;
@@ -134,9 +140,7 @@ public class MainActivity extends Activity {
     private Button speechButton;
     private Button translateButton;
     private TextView agentStatus;
-    private EditText agentTaskText;
-    private EditText agentResultText;
-    private Button agentRunButton;
+    private ImageButton agentRunButton;
     private volatile boolean recording;
     private volatile boolean streamingAnswer;
     private String pendingSpeechLanguage;
@@ -481,10 +485,16 @@ public class MainActivity extends Activity {
                 return;
             }
             lastKeyboardHeight = keyboardHeight;
-            if (TAB_TRANSLATOR.equals(currentTab) || TAB_AGENT.equals(currentTab)) {
+            if (TAB_TRANSLATOR.equals(currentTab)) {
                 inputPanel.animate().translationY(0f).setDuration(120).start();
                 scrollView.setPadding(0, 0, 0, 0);
                 updateToolKeyboardPadding();
+                return;
+            }
+            if (TAB_AGENT.equals(currentTab)) {
+                inputPanel.animate().translationY(0f).setDuration(120).start();
+                scrollView.setPadding(0, 0, 0, 0);
+                updateAgentKeyboardLift();
                 return;
             }
             float lift = keyboardHeight > 0 ? -keyboardHeight + dp(10) : 0f;
@@ -519,80 +529,129 @@ public class MainActivity extends Activity {
     private LinearLayout buildAgentView() {
         LinearLayout view = new LinearLayout(this);
         view.setOrientation(LinearLayout.VERTICAL);
-        view.setPadding(0, dp(10), 0, 0);
+        view.setPadding(0, dp(6), 0, 0);
 
         agentStatus = new TextView(this);
-        agentStatus.setText("Агент пишет ход выполнения ниже. Shell выключен для запросов из телефона.");
+        agentStatus.setText("Shell выключен для запросов из телефона. Ход выполнения идет в чате.");
         agentStatus.setTextColor(Color.rgb(132, 219, 212));
-        agentStatus.setTextSize(14);
-        agentStatus.setPadding(dp(4), 0, dp(4), dp(8));
+        agentStatus.setTextSize(13);
+        agentStatus.setSingleLine(true);
+        agentStatus.setEllipsize(TextUtils.TruncateAt.END);
+        agentStatus.setPadding(dp(4), 0, dp(4), dp(6));
         view.addView(agentStatus, new LinearLayout.LayoutParams(-1, -2));
 
-        agentTaskText = translatorEdit("Задача агенту");
-        LinearLayout.LayoutParams taskLp = new LinearLayout.LayoutParams(-1, 0, 1);
-        taskLp.topMargin = dp(4);
-        view.addView(translatorFieldBox(agentTaskText), taskLp);
+        agentScrollView = new ScrollView(this);
+        agentScrollView.setFillViewport(false);
+        agentScrollView.setClipToPadding(false);
+        agentScrollView.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        agentScrollView.setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                chatTouchActive = true;
+                userPinnedScroll = true;
+                if (scrollAnimator != null) {
+                    scrollAnimator.cancel();
+                    scrollAnimator = null;
+                }
+            }
+            if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+                chatTouchActive = false;
+                userPinnedScroll = !isAtAgentBottom();
+            }
+            return false;
+        });
+        agentMessageList = new LinearLayout(this);
+        agentMessageList.setOrientation(LinearLayout.VERTICAL);
+        agentMessageList.setPadding(0, dp(8), 0, dp(8));
+        agentScrollView.addView(agentMessageList, new ScrollView.LayoutParams(-1, -2));
+        view.addView(agentScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        agentResultText = translatorEdit("Результат агента");
-        agentResultText.setFocusable(false);
-        agentResultText.setFocusableInTouchMode(false);
-        LinearLayout.LayoutParams resultLp = new LinearLayout.LayoutParams(-1, 0, 1);
-        resultLp.topMargin = dp(10);
-        view.addView(translatorFieldBox(agentResultText), resultLp);
+        addAgentMessage(false, "Агент готов. Пиши задачу, я покажу ход выполнения и итог здесь.", false);
 
-        LinearLayout actionRow = new LinearLayout(this);
-        actionRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(-1, dp(54));
-        actionLp.topMargin = dp(8);
-        view.addView(actionRow, actionLp);
-
-        Button statusButton = new Button(this);
-        statusButton.setText("STATUS");
-        statusButton.setTextColor(Color.rgb(5, 13, 31));
-        statusButton.setTextSize(13);
-        statusButton.setTypeface(Typeface.DEFAULT_BOLD);
-        statusButton.setBackground(pill(Color.rgb(29, 191, 183), Color.rgb(244, 217, 137), dp(16)));
-        actionRow.addView(statusButton, new LinearLayout.LayoutParams(dp(104), dp(52)));
-        statusButton.setOnClickListener(v -> runAgentTask("Проверь sandbox_status и archive_status. Ответь коротко технически."));
-
-        agentRunButton = new Button(this);
-        agentRunButton.setText("ЗАПУСТИТЬ");
-        agentRunButton.setTextColor(Color.rgb(5, 13, 31));
-        agentRunButton.setTextSize(13);
-        agentRunButton.setTypeface(Typeface.DEFAULT_BOLD);
-        agentRunButton.setBackground(pill(Color.rgb(201, 156, 58), Color.rgb(29, 191, 183), dp(16)));
-        LinearLayout.LayoutParams runLp = new LinearLayout.LayoutParams(0, dp(52), 1);
-        runLp.leftMargin = dp(10);
-        actionRow.addView(agentRunButton, runLp);
-        agentRunButton.setOnClickListener(v -> runAgentTask(agentTaskText.getText().toString().trim()));
+        agentInputPanel = new LinearLayout(this);
+        agentInputPanel.setOrientation(LinearLayout.VERTICAL);
+        agentInputPanel.setPadding(0, dp(6), 0, 0);
+        view.addView(agentInputPanel, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout quickRow = new LinearLayout(this);
         quickRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams quickLp = new LinearLayout.LayoutParams(-1, dp(48));
-        quickLp.topMargin = dp(4);
-        view.addView(quickRow, quickLp);
+        LinearLayout.LayoutParams quickLp = new LinearLayout.LayoutParams(-1, dp(44));
+        quickLp.bottomMargin = dp(6);
+        agentInputPanel.addView(quickRow, quickLp);
 
-        Button workButton = agentQuickButton("WORK");
-        quickRow.addView(workButton, new LinearLayout.LayoutParams(0, dp(44), 1));
+        Button statusButton = new Button(this);
+        statusButton.setText("STATUS");
+        styleAgentQuickButton(statusButton);
+        quickRow.addView(statusButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+        statusButton.setOnClickListener(v -> runAgentTask("Проверь sandbox_status и archive_status. Ответь коротко технически."));
+
+        Button workButton = new Button(this);
+        workButton.setText("WORK");
+        styleAgentQuickButton(workButton);
+        LinearLayout.LayoutParams workLp = new LinearLayout.LayoutParams(0, dp(42), 1);
+        workLp.leftMargin = dp(8);
+        quickRow.addView(workButton, workLp);
         workButton.setOnClickListener(v -> runAgentTask("Покажи список /work через list_files. Ответь кратко, что там лежит."));
 
-        Button focusButton = agentQuickButton("ФОКУС");
-        LinearLayout.LayoutParams focusLp = new LinearLayout.LayoutParams(0, dp(44), 1);
+        Button focusButton = new Button(this);
+        focusButton.setText("ФОКУС");
+        styleAgentQuickButton(focusButton);
+        LinearLayout.LayoutParams focusLp = new LinearLayout.LayoutParams(0, dp(42), 1);
         focusLp.leftMargin = dp(8);
         quickRow.addView(focusButton, focusLp);
         focusButton.setOnClickListener(v -> runAgentTask("Через archive_search kind=focus query=active кратко скажи текущий фокус."));
 
+        agentComposer = new LinearLayout(this);
+        agentComposer.setOrientation(LinearLayout.HORIZONTAL);
+        agentComposer.setGravity(Gravity.BOTTOM);
+        agentInputPanel.addView(agentComposer, new LinearLayout.LayoutParams(-1, -2));
+
+        agentInput = new EditText(this);
+        agentInput.setMinLines(1);
+        agentInput.setMaxLines(7);
+        agentInput.setMinHeight(dp(54));
+        agentInput.setMaxHeight(dp(178));
+        agentInput.setTextColor(Color.rgb(240, 246, 255));
+        agentInput.setHintTextColor(Color.rgb(116, 143, 164));
+        agentInput.setHint("Задача агенту");
+        agentInput.setTextSize(16);
+        agentInput.setGravity(Gravity.TOP | Gravity.START);
+        agentInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        agentInput.setSingleLine(false);
+        agentInput.setVerticalScrollBarEnabled(true);
+        agentInput.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        agentInput.setScroller(new Scroller(this));
+        agentInput.setBackground(pill(Color.rgb(8, 17, 43), Color.rgb(40, 171, 165), dp(16)));
+        agentInput.setPadding(dp(14), dp(10), dp(14), dp(10));
+        agentInput.setOnTouchListener((v, event) -> {
+            if (agentInput.canScrollVertically(1) || agentInput.canScrollVertically(-1)) {
+                v.getParent().requestDisallowInterceptTouchEvent(true);
+                if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+                    v.getParent().requestDisallowInterceptTouchEvent(false);
+                }
+            }
+            return false;
+        });
+        agentComposer.addView(agentInput, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        agentRunButton = new ImageButton(this);
+        agentRunButton.setImageResource(android.R.drawable.ic_menu_upload);
+        agentRunButton.setColorFilter(Color.rgb(5, 13, 31));
+        agentRunButton.setScaleType(ImageView.ScaleType.CENTER);
+        agentRunButton.setPadding(dp(9), dp(9), dp(9), dp(9));
+        agentRunButton.setBackground(pill(Color.rgb(201, 156, 58), Color.rgb(29, 191, 183), dp(16)));
+        LinearLayout.LayoutParams runLp = new LinearLayout.LayoutParams(dp(48), dp(50));
+        runLp.leftMargin = dp(6);
+        agentComposer.addView(agentRunButton, runLp);
+        agentRunButton.setOnClickListener(v -> submitAgentTask());
+
         return view;
     }
 
-    private Button agentQuickButton(String text) {
-        Button button = new Button(this);
-        button.setText(text);
+    private void styleAgentQuickButton(Button button) {
         button.setTextColor(Color.rgb(244, 217, 137));
         button.setTextSize(12);
         button.setTypeface(Typeface.DEFAULT_BOLD);
         button.setBackground(pill(Color.rgb(10, 25, 55), Color.rgb(48, 84, 116), dp(14)));
-        return button;
     }
 
     private LinearLayout buildTranslatorView() {
@@ -875,7 +934,8 @@ public class MainActivity extends Activity {
         agentRunButton.setEnabled(false);
         agentRunButton.animate().alpha(0.55f).setDuration(160).start();
         agentStatus.setText("Агент выполняет задачу в песочнице...");
-        agentResultText.setText("");
+        addAgentMessage(true, clean, true);
+        agentLiveBubble = addAgentMessage(false, "", true);
         appendAgentLog("Запускаю агента...");
 
         new Thread(() -> {
@@ -886,6 +946,7 @@ public class MainActivity extends Activity {
                     agentRunButton.setEnabled(true);
                     agentRunButton.animate().alpha(1f).setDuration(160).start();
                     agentStatus.setText("Готово.");
+                    agentLiveBubble = null;
                     showAnswerNotification(result);
                 });
             } catch (Exception exc) {
@@ -894,18 +955,32 @@ public class MainActivity extends Activity {
                     agentRunButton.setEnabled(true);
                     agentRunButton.animate().alpha(1f).setDuration(160).start();
                     agentStatus.setText("Ошибка агента: " + exc.getMessage());
+                    appendAgentLog("! Ошибка агента: " + exc.getMessage());
+                    agentLiveBubble = null;
                 });
             }
         }).start();
     }
 
-    private void appendAgentLog(String line) {
-        if (agentResultText == null || line == null || line.trim().isEmpty()) {
+    private void submitAgentTask() {
+        if (agentInput == null) {
             return;
         }
-        String prefix = agentResultText.getText().length() == 0 ? "" : "\n";
-        agentResultText.append(prefix + line);
-        agentResultText.setSelection(agentResultText.getText().length());
+        String text = agentInput.getText().toString().trim();
+        if (text.isEmpty() || agentRunning) {
+            return;
+        }
+        agentInput.setText("");
+        runAgentTask(text);
+    }
+
+    private void appendAgentLog(String line) {
+        if (agentLiveBubble == null || line == null || line.trim().isEmpty()) {
+            return;
+        }
+        String prefix = agentLiveBubble.getText().length() == 0 ? "" : "\n";
+        agentLiveBubble.append(prefix + line);
+        maybeScrollAgentToBottom(false);
     }
 
     private void handleAgentEvent(JSONObject event) {
@@ -1301,10 +1376,14 @@ public class MainActivity extends Activity {
         agentView.setVisibility(agent ? View.VISIBLE : View.GONE);
         if (chat) {
             translatorView.setPadding(0, dp(10), 0, 0);
-            agentView.setPadding(0, dp(10), 0, 0);
+            agentView.setPadding(0, dp(6), 0, 0);
             scrollView.setPadding(0, 0, 0, lastKeyboardHeight > 0 ? lastKeyboardHeight + inputPanel.getHeight() + dp(14) : 0);
             float lift = lastKeyboardHeight > 0 ? -lastKeyboardHeight + dp(10) : 0f;
             inputPanel.animate().translationY(lift).setDuration(120).start();
+        } else if (agent) {
+            inputPanel.animate().translationY(0f).setDuration(120).start();
+            scrollView.setPadding(0, 0, 0, 0);
+            updateAgentKeyboardLift();
         } else {
             inputPanel.animate().translationY(0f).setDuration(120).start();
             scrollView.setPadding(0, 0, 0, 0);
@@ -1318,9 +1397,23 @@ public class MainActivity extends Activity {
         if (translatorView != null) {
             translatorView.setPadding(0, dp(10), 0, bottom);
         }
-        if (agentView != null) {
-            agentView.setPadding(0, dp(10), 0, bottom);
+    }
+
+    private void updateAgentKeyboardLift() {
+        if (agentInputPanel == null || agentScrollView == null) {
+            return;
         }
+        agentInputPanel.post(() -> {
+            float lift = lastKeyboardHeight > 0 ? -lastKeyboardHeight + dp(10) : 0f;
+            int bottomPadding = lastKeyboardHeight > 0 ? lastKeyboardHeight + agentInputPanel.getHeight() + dp(14) : 0;
+            agentScrollView.setPadding(0, 0, 0, bottomPadding);
+            agentInputPanel.animate()
+                    .translationY(lift)
+                    .setDuration(120)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
+            maybeScrollAgentToBottom(false);
+        });
     }
 
     private void updateDrawerSelection() {
@@ -1749,6 +1842,39 @@ public class MainActivity extends Activity {
         return addMessage(fromUser, text, true);
     }
 
+    private TextView addAgentMessage(boolean fromUser, String text, boolean animate) {
+        TextView bubble = new TextView(this);
+        bubble.setText(text);
+        bubble.setTextSize(16);
+        bubble.setLineSpacing(dp(2), 1.0f);
+        bubble.setTextColor(fromUser ? Color.rgb(247, 240, 221) : Color.rgb(224, 250, 247));
+        bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
+        bubble.setBackground(fromUser
+                ? pill(Color.rgb(78, 43, 105), Color.rgb(205, 160, 61), dp(18))
+                : pill(Color.rgb(9, 35, 57), Color.rgb(33, 190, 181), dp(18)));
+        bubble.setAlpha(animate ? 0f : 1f);
+        bubble.setTranslationY(animate ? dp(10) : 0f);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                Math.min(getResources().getDisplayMetrics().widthPixels - dp(74), dp(560)),
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.gravity = fromUser ? Gravity.RIGHT : Gravity.LEFT;
+        lp.topMargin = dp(6);
+        lp.bottomMargin = dp(6);
+        agentMessageList.addView(bubble, lp);
+
+        if (animate) {
+            bubble.animate()
+                    .alpha(1f)
+                    .translationY(0f)
+                    .setDuration(210)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
+        }
+        maybeScrollAgentToBottom(true);
+        return bubble;
+    }
+
     private void addImageMessage(String text, Bitmap image, String fallbackLabel) {
         LinearLayout bubble = new LinearLayout(this);
         bubble.setOrientation(LinearLayout.VERTICAL);
@@ -1889,6 +2015,14 @@ public class MainActivity extends Activity {
         return range - scrollView.getScrollY() <= dp(24);
     }
 
+    private boolean isAtAgentBottom() {
+        if (agentMessageList == null || agentScrollView == null) {
+            return true;
+        }
+        int range = Math.max(0, agentMessageList.getHeight() + agentScrollView.getPaddingBottom() - agentScrollView.getHeight());
+        return range - agentScrollView.getScrollY() <= dp(24);
+    }
+
     private void maybeScrollToBottom(boolean force) {
         if (!force && (chatTouchActive || userPinnedScroll)) {
             return;
@@ -1911,6 +2045,22 @@ public class MainActivity extends Activity {
             scrollAnimator.setInterpolator(new DecelerateInterpolator());
             scrollAnimator.addUpdateListener(a -> scrollView.scrollTo(0, (int) a.getAnimatedValue()));
             scrollAnimator.start();
+        }, 60);
+    }
+
+    private void maybeScrollAgentToBottom(boolean force) {
+        if (agentScrollView == null || agentMessageList == null) {
+            return;
+        }
+        if (!force && (chatTouchActive || userPinnedScroll)) {
+            return;
+        }
+        if (force) {
+            userPinnedScroll = false;
+        }
+        main.postDelayed(() -> {
+            int target = Math.max(0, agentMessageList.getBottom() + agentScrollView.getPaddingBottom() - agentScrollView.getHeight());
+            agentScrollView.scrollTo(0, target);
         }, 60);
     }
 

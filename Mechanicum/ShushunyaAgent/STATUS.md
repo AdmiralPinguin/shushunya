@@ -7,6 +7,7 @@ Last verified: 2026-06-21 12:01 KST.
 - LLM host: `http://127.0.0.1:8080`
 - ArchiveOfHeresy: `http://127.0.0.1:8090`
 - ShushunyaAgent API: `http://127.0.0.1:8095`
+- SearXNG: `http://127.0.0.1:8888`
 
 ## Verified
 
@@ -20,6 +21,28 @@ Last verified: 2026-06-21 12:01 KST.
 - `shell_enabled=false` blocks shell execution.
 - `/run` returns JSON trace and omits stderr unless requested.
 - `/run` is serialized by process-local and file locks.
+- Local web search source is `searxng` when SearXNG is running.
+- Default search providers are `searxng,marginalia,wikipedia,brave`.
+- Brave is an optional fallback only and is skipped unless `brave` is present in
+  `SHUSHUNYA_AGENT_SEARCH_PROVIDERS`.
+
+## Local SearXNG
+
+Setup and run:
+
+```bash
+cd /media/shushunya/SHUSHUNYA/shushunya/Mechanicum/SearXNG
+./scripts/setup-searxng.sh
+./scripts/start-searxng.sh
+./scripts/check-searxng.sh
+```
+
+Agent env:
+
+```bash
+SHUSHUNYA_AGENT_SEARXNG_URL=http://127.0.0.1:8888
+SHUSHUNYA_AGENT_SEARCH_PROVIDERS=searxng,marginalia,wikipedia,brave
+```
 
 ## Known Limits
 

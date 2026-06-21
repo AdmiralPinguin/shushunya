@@ -172,8 +172,14 @@
   },
   "web_policy": {
     "tools": ["web_search", "web_fetch"],
-    "search_provider_chain": ["brave_api", "searxng", "marginalia_public", "wikipedia_opensearch"],
-    "optional_env": ["SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY", "SHUSHUNYA_AGENT_SEARXNG_URL"],
+    "search_provider_chain": ["searxng", "marginalia_public", "wikipedia_opensearch", "brave_api"],
+    "optional_env": [
+      "SHUSHUNYA_AGENT_SEARXNG_URL",
+      "SHUSHUNYA_AGENT_SEARCH_PROVIDERS",
+      "SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY"
+    ],
+    "default_search_providers": "searxng,marginalia,wikipedia,brave",
+    "brave_policy": "optional fallback; not called unless brave is present in SHUSHUNYA_AGENT_SEARCH_PROVIDERS",
     "allowed_schemes": ["http", "https"],
     "blocked_targets": ["localhost", "private_ip", "loopback", "link_local", "multicast", "reserved", "unspecified"],
     "default_max_bytes": 200000

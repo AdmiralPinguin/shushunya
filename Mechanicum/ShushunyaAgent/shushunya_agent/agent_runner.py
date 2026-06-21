@@ -37,6 +37,7 @@ MAX_TOOL_OUTPUT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_TOOL_OUTPUT_CHAR
 MAX_WEB_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_WEB_BYTES", "200000"))
 BRAVE_SEARCH_API_KEY = os.environ.get("SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY", "").strip()
 SEARXNG_URL = os.environ.get("SHUSHUNYA_AGENT_SEARXNG_URL", "").strip().rstrip("/")
+SEARCH_PROVIDERS = os.environ.get("SHUSHUNYA_AGENT_SEARCH_PROVIDERS", "searxng,marginalia,wikipedia,brave")
 WEB_USER_AGENT = os.environ.get(
     "SHUSHUNYA_AGENT_WEB_USER_AGENT",
     "ShushunyaAgent/0.1 (+https://github.com/AdmiralPinguin/shushunya)",
@@ -248,6 +249,12 @@ class SafeRedirectHandler(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+class SearxngRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Request | None:
+        validate_configured_searxng_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 class WebTextExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -359,6 +366,21 @@ def dedupe_results(results: list[dict[str, str]], limit: int) -> list[dict[str, 
     return deduped
 
 
+def configured_search_providers() -> list[str]:
+    providers: list[str] = []
+    for raw in SEARCH_PROVIDERS.split(","):
+        name = raw.strip().lower()
+        if not name:
+            continue
+        if name == "brave_api":
+            name = "brave"
+        if name not in {"searxng", "marginalia", "wikipedia", "brave"}:
+            continue
+        if name not in providers:
+            providers.append(name)
+    return providers or ["searxng", "marginalia", "wikipedia", "brave"]
+
+
 def web_search_brave(query: str, limit: int) -> dict[str, Any]:
     if not BRAVE_SEARCH_API_KEY:
         return {"ok": False, "provider": "brave", "error": "BRAVE_SEARCH_API_KEY is not configured"}
@@ -390,7 +412,8 @@ def web_search_searxng(query: str, limit: int) -> dict[str, Any]:
     url = SEARXNG_URL + "/search?" + urlencode({"q": query, "format": "json", "language": "auto"})
     validate_configured_searxng_url(url)
     request = Request(url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "application/json"})
-    with build_opener(SafeRedirectHandler).open(request, timeout=25) as response:
+    with build_opener(SearxngRedirectHandler).open(request, timeout=25) as response:
+        validate_configured_searxng_url(response.geturl())
         data, truncated = read_limited_response(response, 600000)
         payload = json.loads(data.decode("utf-8", errors="replace"))
     results = []
@@ -478,8 +501,14 @@ def web_search(config: AgentConfig, query: str, limit: int | None = None) -> dic
         return {"ok": False, "error": "query must not be empty"}
     limit = max(1, min(int(limit or 5), 10))
     provider_errors: list[dict[str, str]] = []
-    providers = [web_search_brave, web_search_searxng, web_search_marginalia, web_search_wikipedia]
-    for provider in providers:
+    provider_map: dict[str, Callable[[str, int], dict[str, Any]]] = {
+        "searxng": web_search_searxng,
+        "marginalia": web_search_marginalia,
+        "wikipedia": web_search_wikipedia,
+        "brave": web_search_brave,
+    }
+    for provider_name in configured_search_providers():
+        provider = provider_map[provider_name]
         try:
             payload = provider(query, limit)
         except Exception as exc:

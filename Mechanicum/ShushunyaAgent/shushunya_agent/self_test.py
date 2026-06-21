@@ -2,8 +2,22 @@
 from __future__ import annotations
 
 import sys
+from unittest import mock
 
-from .agent_runner import AgentConfig, archive_request, archive_status, file_tool, python_tool, sandbox_status
+from . import agent_runner
+from .agent_runner import (
+    AgentConfig,
+    archive_request,
+    archive_status,
+    configured_search_providers,
+    file_tool,
+    python_tool,
+    sandbox_status,
+    validate_configured_searxng_url,
+    validate_public_url,
+    web_fetch,
+    web_search,
+)
 
 
 def assert_ok(label: str, payload: dict) -> None:
@@ -14,6 +28,54 @@ def assert_ok(label: str, payload: dict) -> None:
 
 def main() -> int:
     config = AgentConfig()
+
+    if configured_search_providers()[0] != "searxng":
+        raise AssertionError(f"search providers must start with searxng: {configured_search_providers()}")
+    print("[ok] search provider order starts with searxng")
+
+    try:
+        validate_public_url("http://127.0.0.1")
+        raise AssertionError("validate_public_url allowed 127.0.0.1")
+    except ValueError:
+        print("[ok] validate_public_url blocks 127.0.0.1")
+
+    old_searxng_url = agent_runner.SEARXNG_URL
+    try:
+        agent_runner.SEARXNG_URL = "http://127.0.0.1:8888"
+        validate_configured_searxng_url("http://127.0.0.1:8888/search?q=test&format=json")
+        print("[ok] configured SearXNG localhost URL allowed")
+    finally:
+        agent_runner.SEARXNG_URL = old_searxng_url
+
+    try:
+        web_fetch(config, "http://127.0.0.1:8888/search?q=test&format=json")
+        raise AssertionError("web_fetch allowed localhost")
+    except ValueError:
+        print("[ok] web_fetch blocks localhost")
+
+    old_provider_env = agent_runner.SEARCH_PROVIDERS
+    old_brave_key = agent_runner.BRAVE_SEARCH_API_KEY
+    try:
+        agent_runner.SEARCH_PROVIDERS = "searxng,marginalia,wikipedia"
+        agent_runner.BRAVE_SEARCH_API_KEY = "fake-key-must-not-be-called"
+        calls: list[str] = []
+
+        def fake_provider(name: str, ok: bool = False):
+            def _provider(query: str, limit: int) -> dict:
+                calls.append(name)
+                return {"ok": ok, "provider": name, "results": [], "truncated": False}
+            return _provider
+
+        with mock.patch.object(agent_runner, "web_search_searxng", fake_provider("searxng")), \
+                mock.patch.object(agent_runner, "web_search_marginalia", fake_provider("marginalia")), \
+                mock.patch.object(agent_runner, "web_search_wikipedia", fake_provider("wikipedia")):
+            result = web_search(config, "provider-order-test", 3)
+        if calls != ["searxng", "marginalia", "wikipedia"] or "brave" in calls:
+            raise AssertionError(f"unexpected provider calls with brave disabled: {calls}, result={result}")
+        print("[ok] brave not called when absent from SHUSHUNYA_AGENT_SEARCH_PROVIDERS")
+    finally:
+        agent_runner.SEARCH_PROVIDERS = old_provider_env
+        agent_runner.BRAVE_SEARCH_API_KEY = old_brave_key
 
     health = archive_request(config, "GET", "/health", timeout=10)
     if health.get("status") != "ok":

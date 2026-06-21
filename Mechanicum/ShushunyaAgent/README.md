@@ -96,6 +96,29 @@ Set `"shell_enabled": false` for mobile or public clients; the agent can still
 use structured file/search tools, Python, sandbox status, archive tools, and
 supervised public web tools.
 
+## Local Search
+
+Local SearXNG is the primary search provider. It runs on localhost:
+
+```bash
+cd /media/shushunya/SHUSHUNYA/shushunya/Mechanicum/SearXNG
+./scripts/setup-searxng.sh
+./scripts/start-searxng.sh
+./scripts/check-searxng.sh
+```
+
+Default endpoint:
+
+```bash
+export SHUSHUNYA_AGENT_SEARXNG_URL=http://127.0.0.1:8888
+export SHUSHUNYA_AGENT_SEARCH_PROVIDERS=searxng,marginalia,wikipedia,brave
+```
+
+`scripts/start-agent-api.sh` sets `SHUSHUNYA_AGENT_SEARXNG_URL` to
+`http://127.0.0.1:8888` when it is not already set. To confirm the active
+provider, run a web search and inspect the returned `source`; it should be
+`searxng` while local SearXNG is running.
+
 For an interactive prompt:
 
 ```bash
@@ -122,12 +145,14 @@ For an interactive prompt:
 - Web browsing is exposed as `web_search` and `web_fetch`. The supervisor blocks
   localhost, private, loopback, link-local, multicast, reserved, and unspecified
   IP targets, including redirects.
-- `web_search` uses a provider chain: Brave Search API when
-  `SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY` is set, SearXNG when
-  `SHUSHUNYA_AGENT_SEARXNG_URL` is set, then public Marginalia search, then
-  Wikipedia opensearch. For production-quality general web search, configure
-  Brave or a private SearXNG instance instead of relying only on public fallback
-  providers.
+- `web_search` uses `SHUSHUNYA_AGENT_SEARCH_PROVIDERS`, defaulting to
+  `searxng,marginalia,wikipedia,brave`. Brave Search API is only an optional
+  fallback and is not called unless `brave` is present in that provider list,
+  even when `SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY` is set.
+- `web_fetch` always uses strict public URL validation and cannot fetch
+  localhost, private, loopback, link-local, multicast, reserved, or unspecified
+  addresses. The local SearXNG localhost exception applies only inside the
+  configured `web_search_searxng` provider.
 
 Enable automatic memory injection for experiments:
 
