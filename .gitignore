@@ -12,19 +12,29 @@ CoreOfMadness/telegram-bot/runtime/
 
 # ArchiveOfHeresy local archives
 ArchiveOfHeresy/archive/jsonl/**/*.jsonl
+ArchiveOfHeresy/archive/memory_events/**/*.jsonl
 ArchiveOfHeresy/archive/sqlite/*.sqlite3
 ArchiveOfHeresy/archive/sqlite/*.sqlite3-*
 ArchiveOfHeresy/focus/index.json
 ArchiveOfHeresy/focus/*.tmp
 ArchiveOfHeresy/focus/files/*.md
+ArchiveOfHeresy/focus/namespaces/**/index.json
+ArchiveOfHeresy/focus/namespaces/**/*.tmp
+ArchiveOfHeresy/focus/namespaces/**/files/*.md
 ArchiveOfHeresy/wiki/index.json
 ArchiveOfHeresy/wiki/state.json
 ArchiveOfHeresy/wiki/*.tmp
 ArchiveOfHeresy/wiki/pages/*.md
+ArchiveOfHeresy/wiki/namespaces/**/index.json
+ArchiveOfHeresy/wiki/namespaces/**/state.json
+ArchiveOfHeresy/wiki/namespaces/**/*.tmp
+ArchiveOfHeresy/wiki/namespaces/**/pages/*.md
 ArchiveOfHeresy/vector/*.sqlite3
 ArchiveOfHeresy/vector/*.sqlite3-*
 ArchiveOfHeresy/graph/*.sqlite3
 ArchiveOfHeresy/graph/*.sqlite3-*
+ArchiveOfHeresy/graph/namespaces/**/*.sqlite3
+ArchiveOfHeresy/graph/namespaces/**/*.sqlite3-*
 
 # DemonsForge local runtimes, model weights, caches, and outputs
 DemonsForge/DemonsForge/
