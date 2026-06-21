@@ -1376,6 +1376,12 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
         wiki = result.get("wiki", {}) if isinstance(result.get("wiki"), dict) else {}
         return f"focus={len(focus.get('books', []) or [])}, wiki={len(wiki.get('pages', []) or [])}"
     if action_type == "archive_memory_search":
+        counts = result.get("counts") if isinstance(result.get("counts"), dict) else None
+        if counts:
+            return (
+                f"focus={counts.get('focus', 0)}, wiki={counts.get('wiki', 0)}, "
+                f"vector={counts.get('vector', 0)}, graph_nodes={counts.get('graph_nodes', 0)}"
+            )
         focus = result.get("focus", []) if isinstance(result.get("focus"), list) else []
         wiki = result.get("wiki", []) if isinstance(result.get("wiki"), list) else []
         vector = result.get("vector", []) if isinstance(result.get("vector"), list) else []
