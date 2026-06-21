@@ -252,6 +252,8 @@ matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
   `total_count` plus `next_offset` for large directories.
 - `search_text` reports `scanned_files` and `truncated_files`, so the agent can
   tell when a search may need a larger `max_bytes_per_file`.
+- `replace_in_file` has a bounded `max_file_bytes` guard and is intended for
+  small text files.
 - Arbitrary shell can be disabled with `SHUSHUNYA_AGENT_SHELL_ENABLED=0` or
   `"shell_enabled": false` in the HTTP API payload.
 - Web browsing is exposed as `web_search` and `web_fetch`. The supervisor blocks

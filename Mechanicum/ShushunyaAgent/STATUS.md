@@ -45,6 +45,7 @@ Last verified: 2026-06-21 18:08 KST.
 - `list_files` and `find_files` support `limit`/`offset` pagination for large
   directories.
 - `search_text` reports scanned and per-file-truncated file counts.
+- `replace_in_file` has a bounded file-size guard for small text edits.
 - Agent runs have a total runtime limit through `max_runtime_sec` /
   `SHUSHUNYA_AGENT_MAX_RUNTIME_SEC`.
 - `GET /task-journal?task_id=...` can inspect recent journal events, and

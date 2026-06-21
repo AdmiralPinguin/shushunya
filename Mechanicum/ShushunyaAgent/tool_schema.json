@@ -159,7 +159,8 @@
         "path": "sandbox_path",
         "old": "string",
         "new": "string",
-        "count": "integer"
+        "count": "integer",
+        "max_file_bytes": "integer"
       }
     },
     "mkdir": {

@@ -104,7 +104,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 {"action":"read_file","path":"/work/file.txt","max_bytes":20000,"offset":0}
 {"action":"write_file","path":"/work/file.txt","content":"текст"}
 {"action":"append_file","path":"/work/file.txt","content":"текст"}
-{"action":"replace_in_file","path":"/work/file.txt","old":"старый текст","new":"новый текст","count":1}
+{"action":"replace_in_file","path":"/work/file.txt","old":"старый текст","new":"новый текст","count":1,"max_file_bytes":5000000}
 {"action":"mkdir","path":"/work/dir"}
 {"action":"remove_file","path":"/work/file.txt"}
 {"action":"file_info","path":"/work/file.txt","sha256":true,"max_hash_bytes":50000000}
@@ -153,6 +153,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Не пытайся обходить изоляцию, sudo, mount, chroot, nsenter, systemctl, docker, ssh или сетевые туннели.
 - Для файлов предпочитай структурированные file tools вместо shell.
 - Перед чтением неизвестного или большого файла сначала используй file_info/find_files/search_text. Не читай файл целиком; используй read_file с max_bytes и offset небольшими кусками.
+- replace_in_file предназначен для небольших текстовых файлов; если файл большой, сначала используй read_file/search_text и меняй подход.
 - Для больших директорий используй limit/offset в list_files/find_files и продолжай с next_offset, если нужно.
 - Для путей используй относительные пути в /work или явные sandbox-пути вида /work/name.
 - Для вычислений и преобразований текста предпочитай python tool вместо shell.
@@ -1120,10 +1121,13 @@ try:
         old = decode(payload.get("old_b64", ""))
         new = decode(payload.get("new_b64", ""))
         count = int(payload.get("count", -1))
+        max_file_bytes = max(1, min(int(payload.get("max_file_bytes", 5000000)), 20000000))
         if not path.is_file():
             respond({"ok": False, "error": "path is not a file", "path": str(path)})
         elif old == "":
             respond({"ok": False, "error": "old text must not be empty", "path": str(path)})
+        elif path.stat().st_size > max_file_bytes:
+            respond({"ok": False, "error": "file too large for replace_in_file", "path": str(path), "size": path.stat().st_size, "max_file_bytes": max_file_bytes})
         else:
             text = path.read_text(encoding="utf-8", errors="replace")
             occurrences = text.count(old)

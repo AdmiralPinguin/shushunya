@@ -26,7 +26,7 @@ Paths must be inside sandbox writable roots. Relative paths resolve under
 {"action":"read_file","path":"/work/file.txt","max_bytes":20000,"offset":0}
 {"action":"write_file","path":"/work/file.txt","content":"text"}
 {"action":"append_file","path":"/work/file.txt","content":"text"}
-{"action":"replace_in_file","path":"/work/file.txt","old":"old text","new":"new text","count":1}
+{"action":"replace_in_file","path":"/work/file.txt","old":"old text","new":"new text","count":1,"max_file_bytes":5000000}
 {"action":"mkdir","path":"/work/dir"}
 {"action":"remove_file","path":"/work/file.txt"}
 {"action":"file_info","path":"/work/file.txt","sha256":true,"max_hash_bytes":50000000}
@@ -45,6 +45,8 @@ For large directories, `list_files` and `find_files` accept `limit` and `offset`
 and return `total_count` plus `next_offset` for pagination.
 `search_text` returns `scanned_files` and `truncated_files` so callers can judge
 whether `max_bytes_per_file` was enough.
+`replace_in_file` is bounded by `max_file_bytes` and is meant for small text
+files.
 `file_info` can compute a bounded SHA-256 digest with `sha256=true`; this is
 useful for identity/change checks without reading the file content into the
 model context.

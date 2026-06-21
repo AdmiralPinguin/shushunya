@@ -458,6 +458,13 @@ def main() -> int:
     if replaced_read.get("content") != "hello-updated":
         raise AssertionError(f"unexpected replaced content: {replaced_read}")
     print("[ok] replaced file content")
+    replace_large_guard = file_tool(
+        config,
+        {"action": "replace_in_file", "path": "/work/self-test/hello.txt", "old": "hello-updated", "new": "x", "max_file_bytes": 4},
+    )
+    if replace_large_guard.get("ok") is not False or replace_large_guard.get("error") != "file too large for replace_in_file":
+        raise AssertionError(f"replace_in_file large file guard failed: {replace_large_guard}")
+    print("[ok] replace_in_file size guard")
 
     info_result = file_tool(config, {"action": "file_info", "path": "/work/self-test/hello.txt", "sha256": True})
     assert_ok("file_info sha256", info_result)
