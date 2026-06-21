@@ -1,0 +1,11 @@
+.gradle/
+build/
+app/build/
+app/.cxx/
+local.properties
+*.iml
+runtime/
+
+*.hprof
+*.apk
+stt-models/

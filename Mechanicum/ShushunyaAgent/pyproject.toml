@@ -1,0 +1,18 @@
+[project]
+name = "shushunya-agent"
+version = "0.1.0"
+description = "Sandboxed tool-using agent runner for Shushunya."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+shushunya-agent = "shushunya_agent.agent_runner:main"
+shushunya-agent-self-test = "shushunya_agent.self_test:main"
+shushunya-agent-server = "shushunya_agent.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["shushunya_agent"]

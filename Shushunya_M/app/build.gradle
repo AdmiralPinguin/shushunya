@@ -1,0 +1,16 @@
+plugins {
+    id("com.android.application")
+}
+
+android {
+    namespace = "com.shushunya.m"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.shushunya.m"
+        minSdk = 34
+        targetSdk = 35
+        versionCode = 22
+        versionName = "2.1.1"
+    }
+}

@@ -1,0 +1,154 @@
+{
+  "version": 1,
+  "response_contract": "exactly_one_json_object_per_step",
+  "actions": {
+    "final": {
+      "required": ["action", "message"],
+      "properties": {
+        "action": "final",
+        "message": "string"
+      }
+    },
+    "sandbox_status": {
+      "required": ["action"],
+      "properties": {
+        "action": "sandbox_status"
+      }
+    },
+    "archive_status": {
+      "required": ["action"],
+      "properties": {
+        "action": "archive_status"
+      }
+    },
+    "archive_search": {
+      "required": ["action", "kind", "query"],
+      "properties": {
+        "action": "archive_search",
+        "kind": ["focus", "vector", "graph"],
+        "query": "string"
+      }
+    },
+    "shell": {
+      "required": ["action", "cmd"],
+      "properties": {
+        "action": "shell",
+        "cmd": "string",
+        "timeout": "integer",
+        "reason": "string"
+      }
+    },
+    "python": {
+      "required": ["action", "code"],
+      "properties": {
+        "action": "python",
+        "code": "string",
+        "timeout": "integer"
+      }
+    },
+    "list_files": {
+      "required": ["action", "path"],
+      "properties": {
+        "action": "list_files",
+        "path": "sandbox_path",
+        "max_depth": "integer"
+      }
+    },
+    "read_file": {
+      "required": ["action", "path"],
+      "properties": {
+        "action": "read_file",
+        "path": "sandbox_path",
+        "max_bytes": "integer"
+      }
+    },
+    "write_file": {
+      "required": ["action", "path", "content"],
+      "properties": {
+        "action": "write_file",
+        "path": "sandbox_path",
+        "content": "string"
+      }
+    },
+    "append_file": {
+      "required": ["action", "path", "content"],
+      "properties": {
+        "action": "append_file",
+        "path": "sandbox_path",
+        "content": "string"
+      }
+    },
+    "replace_in_file": {
+      "required": ["action", "path", "old", "new"],
+      "properties": {
+        "action": "replace_in_file",
+        "path": "sandbox_path",
+        "old": "string",
+        "new": "string",
+        "count": "integer"
+      }
+    },
+    "mkdir": {
+      "required": ["action", "path"],
+      "properties": {
+        "action": "mkdir",
+        "path": "sandbox_path"
+      }
+    },
+    "remove_file": {
+      "required": ["action", "path"],
+      "properties": {
+        "action": "remove_file",
+        "path": "sandbox_path",
+        "recursive": "boolean"
+      }
+    },
+    "file_info": {
+      "required": ["action", "path"],
+      "properties": {
+        "action": "file_info",
+        "path": "sandbox_path"
+      }
+    },
+    "find_files": {
+      "required": ["action", "path", "pattern"],
+      "properties": {
+        "action": "find_files",
+        "path": "sandbox_path",
+        "pattern": "glob",
+        "max_depth": "integer"
+      }
+    },
+    "search_text": {
+      "required": ["action", "path", "query"],
+      "properties": {
+        "action": "search_text",
+        "path": "sandbox_path",
+        "query": "string",
+        "case_sensitive": "boolean",
+        "max_matches": "integer",
+        "max_bytes_per_file": "integer"
+      }
+    }
+  },
+  "sandbox_path_roots": ["/work", "/sandbox-tmp", "/artifacts", "/state", "/logs", "/models", "/tools", "/home/agent"],
+  "memory_policy": {
+    "automatic_injection_default": false,
+    "explicit_memory_tool": "archive_search",
+    "warning": "Archive memory is reference context only and may be stale."
+  },
+  "storage_policy": {
+    "limit_bytes": 536870912000,
+    "limit_human": "500G",
+    "mode": "soft",
+    "structured_file_write_enforced": true,
+    "hard_quota_required_for_shell_and_python": true
+  },
+  "supervisor_policy": {
+    "shell_enabled_default": true,
+    "shell_can_be_disabled": true,
+    "http_payload_field": "shell_enabled",
+    "http_debug_stderr_field": "include_stderr",
+    "http_steps_field": "include_steps"
+  }
+}
