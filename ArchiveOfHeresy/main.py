@@ -422,6 +422,13 @@ def init_storage():
             db.execute("ALTER TABLE turns ADD COLUMN memory_namespace TEXT NOT NULL DEFAULT 'default'")
         db.execute(
             """
+            UPDATE turns
+            SET memory_namespace = 'agent'
+            WHERE conversation_id = 'shushunya-agent' AND memory_namespace = 'default'
+            """
+        )
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 turn_id TEXT NOT NULL,

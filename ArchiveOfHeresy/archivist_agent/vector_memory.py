@@ -120,6 +120,13 @@ class VectorMemory:
             columns = {row[1] for row in db.execute("PRAGMA table_info(vector_chunks)")}
             if "memory_namespace" not in columns:
                 db.execute("ALTER TABLE vector_chunks ADD COLUMN memory_namespace TEXT NOT NULL DEFAULT 'default'")
+            db.execute(
+                """
+                UPDATE vector_chunks
+                SET memory_namespace = 'agent'
+                WHERE conversation_id = 'shushunya-agent' AND memory_namespace = 'default'
+                """
+            )
             db.execute("CREATE INDEX IF NOT EXISTS idx_vector_chunks_created ON vector_chunks(created_at)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_vector_chunks_turn ON vector_chunks(turn_id)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_vector_chunks_conversation ON vector_chunks(conversation_id)")
