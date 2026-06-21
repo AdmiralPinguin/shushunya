@@ -10,7 +10,7 @@ android {
         applicationId = "com.shushunya.m"
         minSdk = 34
         targetSdk = 35
-        versionCode = 31
-        versionName = "2.2.8"
+        versionCode = 32
+        versionName = "2.2.9"
     }
 }

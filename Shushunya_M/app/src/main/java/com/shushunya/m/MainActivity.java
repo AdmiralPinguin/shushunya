@@ -1327,6 +1327,10 @@ public class MainActivity extends Activity {
             out.append("\nRevision: ").append(revision);
         }
         out.append("\nОчередь: ").append(state.optInt("queued", 0));
+        int cancelledTaskCount = state.optInt("cancelled_task_count", 0);
+        if (cancelledTaskCount > 0) {
+            out.append("\nCancel flags: ").append(cancelledTaskCount);
+        }
         String currentTask = state.optString("current_task_id", "").trim();
         if (!currentTask.isEmpty()) {
             out.append("\nТекущая задача: ").append(currentTask);
