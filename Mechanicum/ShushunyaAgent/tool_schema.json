@@ -112,7 +112,7 @@
         "action": "web_fetch",
         "url": "public_http_url",
         "max_bytes": "integer",
-        "returns": "text/title for textual responses; is_binary and bytes_read without decoded text for binary responses"
+        "returns": "text/title/encoding for textual responses; is_binary and bytes_read without decoded text for binary responses"
       }
     },
     "list_files": {

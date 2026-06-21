@@ -531,6 +531,14 @@ def is_textual_content(content_type: str, data: bytes) -> bool:
     return control / max(1, len(sample)) < 0.05
 
 
+def decode_web_text(data: bytes, charset: str | None) -> tuple[str, str]:
+    encoding = charset or "utf-8"
+    try:
+        return data.decode(encoding, errors="replace"), encoding
+    except LookupError:
+        return data.decode("utf-8", errors="replace"), "utf-8"
+
+
 def validate_public_url(raw_url: str) -> str:
     parsed = urlparse(str(raw_url).strip())
     if parsed.scheme not in {"http", "https"}:
@@ -812,8 +820,7 @@ def web_fetch(config: AgentConfig, url: str, max_bytes: int | None = None) -> di
                 "text": "",
                 "note": "binary response was not decoded into model context",
             }
-        charset = response.headers.get_content_charset() or "utf-8"
-        text = data.decode(charset, errors="replace")
+        text, charset = decode_web_text(data, response.headers.get_content_charset())
         title = ""
         if "html" in content_type.lower() or "<html" in text[:500].lower():
             parser = WebTextExtractor()
@@ -824,6 +831,7 @@ def web_fetch(config: AgentConfig, url: str, max_bytes: int | None = None) -> di
             "url": final_url,
             "status": getattr(response, "status", 200),
             "content_type": content_type,
+            "encoding": charset,
             "title": title,
             "truncated": truncated,
             "bytes_read": len(data),

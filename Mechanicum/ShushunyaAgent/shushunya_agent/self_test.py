@@ -101,6 +101,10 @@ def main() -> int:
     if agent_runner.is_textual_content("image/png", b"\x89PNG\r\n\x1a\n\x00\x00"):
         raise AssertionError("binary content was detected as textual")
     print("[ok] web_fetch binary detection")
+    decoded_text, decoded_encoding = agent_runner.decode_web_text("привет".encode("utf-8"), "not-a-real-charset")
+    if decoded_text != "привет" or decoded_encoding != "utf-8":
+        raise AssertionError(f"web_fetch charset fallback failed: text={decoded_text}, encoding={decoded_encoding}")
+    print("[ok] web_fetch charset fallback")
 
     old_provider_env = agent_runner.SEARCH_PROVIDERS
     old_brave_key = agent_runner.BRAVE_SEARCH_API_KEY
