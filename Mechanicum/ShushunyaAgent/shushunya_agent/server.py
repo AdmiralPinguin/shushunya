@@ -23,6 +23,7 @@ PORT = int(os.environ.get("SHUSHUNYA_AGENT_PORT", "8095"))
 API_KEY = os.environ.get("SHUSHUNYA_AGENT_API_KEY", "").strip()
 ROOT = Path(__file__).resolve().parents[1]
 MAX_REQUEST_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_REQUEST_BYTES", "1048576"))
+MAX_TASK_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_TASK_CHARS", "50000"))
 STREAM_HEARTBEAT_SEC = max(5.0, float(os.environ.get("SHUSHUNYA_AGENT_STREAM_HEARTBEAT_SEC", "15")))
 SERVICE_STARTED_AT = time.time()
 RUN_LOCK = threading.Lock()
@@ -141,6 +142,7 @@ def runtime_state() -> dict[str, Any]:
     if payload.get("last_finished_at"):
         payload["last_finished_ago_sec"] = round(now - float(payload["last_finished_at"]), 3)
     payload["max_request_bytes"] = MAX_REQUEST_BYTES
+    payload["max_task_chars"] = MAX_TASK_CHARS
     payload["revision"] = service_revision()
     payload["started_at"] = SERVICE_STARTED_AT
     payload["uptime_sec"] = round(now - SERVICE_STARTED_AT, 3)
@@ -198,6 +200,17 @@ def reject_if_busy(payload: dict[str, Any]) -> dict[str, Any] | None:
     if not runner_is_busy() and not RUN_LOCK.locked():
         return None
     return {"ok": False, "error": "agent busy", "state": runtime_state()}
+
+
+def validate_task_text(task: str) -> dict[str, Any] | None:
+    if not task:
+        return {"status": 400, "payload": {"error": "missing task"}}
+    if len(task) > MAX_TASK_CHARS:
+        return {
+            "status": 413,
+            "payload": {"ok": False, "error": "task is too large", "max_chars": MAX_TASK_CHARS},
+        }
+    return None
 
 
 def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
@@ -323,8 +336,9 @@ class AgentHandler(BaseHTTPRequestHandler):
         try:
             payload = read_json(self)
             task = str(payload.get("task", "")).strip()
-            if not task:
-                write_json(self, 400, {"error": "missing task"})
+            task_error = validate_task_text(task)
+            if task_error is not None:
+                write_json(self, int(task_error["status"]), task_error["payload"])
                 return
             if str(payload.get("resume_task_id") or "").strip() and not privileged_api_allowed(self):
                 write_json(self, 401, {"error": "resume_task_id requires API key"})
@@ -388,8 +402,9 @@ class AgentHandler(BaseHTTPRequestHandler):
         try:
             payload = read_json(self)
             task = str(payload.get("task", "")).strip()
-            if not task:
-                write_json(self, 400, {"error": "missing task"})
+            task_error = validate_task_text(task)
+            if task_error is not None:
+                write_json(self, int(task_error["status"]), task_error["payload"])
                 return
             if str(payload.get("resume_task_id") or "").strip() and not privileged_api_allowed(self):
                 write_json(self, 401, {"error": "resume_task_id requires API key"})

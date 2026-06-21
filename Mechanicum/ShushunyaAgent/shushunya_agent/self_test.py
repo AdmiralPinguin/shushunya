@@ -168,6 +168,17 @@ def main() -> int:
     if server.config_from_payload({"shell_enabled": True}).shell_enabled:
         raise AssertionError("HTTP shell should be disabled without API key or explicit env override")
     print("[ok] HTTP shell default locked")
+    if server.validate_task_text("").get("status") != 400:
+        raise AssertionError("empty task should fail validation")
+    old_max_task_chars = server.MAX_TASK_CHARS
+    try:
+        server.MAX_TASK_CHARS = 4
+        task_error = server.validate_task_text("x" * 5)
+        if not task_error or task_error.get("status") != 413:
+            raise AssertionError(f"oversized task should fail validation: {task_error}")
+    finally:
+        server.MAX_TASK_CHARS = old_max_task_chars
+    print("[ok] HTTP task size validation")
 
     class FakeHeaders:
         def __init__(self, authorization: str = "") -> None:
@@ -212,6 +223,8 @@ def main() -> int:
     state = server.runtime_state()
     if "busy" not in state or state.get("max_request_bytes", 0) <= 0:
         raise AssertionError(f"runtime state missing expected fields: {state}")
+    if state.get("max_task_chars", 0) <= 0:
+        raise AssertionError(f"runtime state missing max_task_chars: {state}")
     if not state.get("revision"):
         raise AssertionError(f"runtime state missing revision: {state}")
     if state.get("uptime_sec", -1) < 0 or state.get("started_at", 0) <= 0:

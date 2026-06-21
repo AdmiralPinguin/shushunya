@@ -77,6 +77,7 @@ Last verified: 2026-06-21 18:08 KST.
   mismatches.
 - Invalid JSON request bodies return `400`; oversized request bodies return
   `413` before the agent loop starts.
+- Oversized `task` text returns `413` before the agent loop starts.
 - Transient model HTTP errors `429`, `502`, `503`, and `504` are retried before
   the agent step fails.
 - Malformed model JSON gets a minimal repair pass with memory disabled before
