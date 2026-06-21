@@ -207,12 +207,12 @@ def focus_context_message(namespace="default"):
     }
 
 
-def vector_context_message(query):
+def vector_context_message(query, memory_namespace="default"):
     if not VECTOR_INJECTION_ENABLED:
         return None
     if VECTOR_MEMORY is None:
         return None
-    content = VECTOR_MEMORY.context_for_query(query, limit=VECTOR_TOP_K).strip()
+    content = VECTOR_MEMORY.context_for_query(query, limit=VECTOR_TOP_K, memory_namespace=memory_namespace).strip()
     if not content:
         return None
     content = content[-VECTOR_CONTEXT_CHARS:]
@@ -315,7 +315,7 @@ def prepare_messages(
     if magos_message:
         prepared.append(magos_message)
     if include_vector:
-        vector_message = vector_context_message(query)
+        vector_message = vector_context_message(query, memory_namespace=memory_namespace)
         if vector_message:
             prepared.append(vector_message)
     if include_graph:
@@ -359,6 +359,7 @@ def init_storage():
             CREATE TABLE IF NOT EXISTS turns (
                 id TEXT PRIMARY KEY,
                 conversation_id TEXT NOT NULL,
+                memory_namespace TEXT NOT NULL DEFAULT 'default',
                 created_at TEXT NOT NULL,
                 model TEXT,
                 status TEXT NOT NULL,
@@ -371,6 +372,9 @@ def init_storage():
             )
             """
         )
+        turn_columns = {row[1] for row in db.execute("PRAGMA table_info(turns)")}
+        if "memory_namespace" not in turn_columns:
+            db.execute("ALTER TABLE turns ADD COLUMN memory_namespace TEXT NOT NULL DEFAULT 'default'")
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS messages (
@@ -388,6 +392,7 @@ def init_storage():
             """
         )
         db.execute("CREATE INDEX IF NOT EXISTS idx_turns_conversation_created ON turns(conversation_id, created_at)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_turns_namespace_created ON turns(memory_namespace, created_at)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at)")
 
 
@@ -441,14 +446,15 @@ def write_archives(record):
             db.execute(
                 """
                 INSERT INTO turns (
-                    id, conversation_id, created_at, model, status, http_status,
+                    id, conversation_id, memory_namespace, created_at, model, status, http_status,
                     request_json, prepared_messages_json, response_json, error
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record["turn_id"],
                     record["conversation_id"],
+                    record.get("memory_namespace") or "default",
                     record["created_at"],
                     record.get("model"),
                     record["status"],
@@ -561,11 +567,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
         if self.path.startswith("/archive/vector/search"):
             query = ""
+            namespace = "default"
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 query = (params.get("q") or [""])[0]
-            matches = VECTOR_MEMORY.search(query) if VECTOR_MEMORY and query else []
-            write_json(self, 200, {"query": query, "matches": matches})
+                namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
+            matches = VECTOR_MEMORY.search(query, memory_namespace=namespace) if VECTOR_MEMORY and query else []
+            write_json(self, 200, {"query": query, "memory_namespace": namespace, "matches": matches})
             return
 
         if self.path.startswith("/archive/graph/search"):
@@ -614,6 +622,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                         model=payload.get("model"),
                         conversation_id=conversation_id(payload),
                         turn_id=turn_id,
+                        memory_namespace=memory_namespace,
                     )
                 except Exception as exc:
                     print(f"Magos hard fail-soft: {exc}", flush=True)

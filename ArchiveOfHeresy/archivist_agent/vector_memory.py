@@ -108,6 +108,7 @@ class VectorMemory:
                     id TEXT PRIMARY KEY,
                     turn_id TEXT NOT NULL,
                     conversation_id TEXT NOT NULL,
+                    memory_namespace TEXT NOT NULL DEFAULT 'default',
                     created_at TEXT NOT NULL,
                     role TEXT NOT NULL,
                     chunk_index INTEGER NOT NULL,
@@ -116,15 +117,20 @@ class VectorMemory:
                 )
                 """
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(vector_chunks)")}
+            if "memory_namespace" not in columns:
+                db.execute("ALTER TABLE vector_chunks ADD COLUMN memory_namespace TEXT NOT NULL DEFAULT 'default'")
             db.execute("CREATE INDEX IF NOT EXISTS idx_vector_chunks_created ON vector_chunks(created_at)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_vector_chunks_turn ON vector_chunks(turn_id)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_vector_chunks_conversation ON vector_chunks(conversation_id)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_vector_chunks_namespace_created ON vector_chunks(memory_namespace, created_at)")
 
     def index_turn(self, record):
         if record.get("status") != "ok":
             return
         turn_id = record.get("turn_id")
         conversation_id = record.get("conversation_id") or "unknown"
+        memory_namespace = record.get("memory_namespace") or "default"
         created_at = record.get("created_at")
         if not turn_id or not created_at:
             return
@@ -150,6 +156,7 @@ class VectorMemory:
                         chunk_id,
                         turn_id,
                         conversation_id,
+                        memory_namespace,
                         created_at,
                         role,
                         chunk_index,
@@ -165,9 +172,9 @@ class VectorMemory:
             db.executemany(
                 """
                 INSERT OR REPLACE INTO vector_chunks (
-                    id, turn_id, conversation_id, created_at, role, chunk_index, content, embedding_json
+                    id, turn_id, conversation_id, memory_namespace, created_at, role, chunk_index, content, embedding_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
@@ -180,10 +187,12 @@ class VectorMemory:
         indexed = 0
         with sqlite3.connect(archive_sqlite_path) as archive_db:
             archive_db.row_factory = sqlite3.Row
+            turn_columns = {row[1] for row in archive_db.execute("PRAGMA table_info(turns)")}
+            namespace_select = "memory_namespace" if "memory_namespace" in turn_columns else "'default' AS memory_namespace"
             rows = list(
                 archive_db.execute(
-                    """
-                    SELECT id, conversation_id, created_at, model, status, http_status, request_json, response_json, error
+                    f"""
+                    SELECT id, conversation_id, {namespace_select}, created_at, model, status, http_status, request_json, response_json, error
                     FROM turns
                     WHERE status = 'ok'
                     ORDER BY created_at
@@ -203,6 +212,7 @@ class VectorMemory:
             record = {
                 "turn_id": row["id"],
                 "conversation_id": row["conversation_id"],
+                "memory_namespace": row["memory_namespace"] if "memory_namespace" in row.keys() else "default",
                 "created_at": row["created_at"],
                 "model": row["model"],
                 "status": row["status"],
@@ -226,20 +236,27 @@ class VectorMemory:
             return None
         return {"role": message.get("role") or "assistant", "content": content}
 
-    def search(self, query, limit=VECTOR_TOP_K, min_score=VECTOR_MIN_SCORE, exclude_turn_id=None):
+    def search(self, query, limit=VECTOR_TOP_K, min_score=VECTOR_MIN_SCORE, exclude_turn_id=None, memory_namespace=None):
         query_embedding = embed_text(query)
         if not query_embedding or not self.db_path.exists():
             return []
 
         results = []
+        params = []
+        where = ""
+        if memory_namespace:
+            where = "WHERE memory_namespace = ?"
+            params.append(str(memory_namespace))
         with sqlite3.connect(self.db_path) as db:
             db.row_factory = sqlite3.Row
             for row in db.execute(
-                """
-                SELECT id, turn_id, conversation_id, created_at, role, chunk_index, content, embedding_json
+                f"""
+                SELECT id, turn_id, conversation_id, memory_namespace, created_at, role, chunk_index, content, embedding_json
                 FROM vector_chunks
+                {where}
                 ORDER BY created_at DESC
-                """
+                """,
+                params,
             ):
                 if exclude_turn_id and row["turn_id"] == exclude_turn_id:
                     continue
@@ -255,6 +272,7 @@ class VectorMemory:
                         "score": score,
                         "turn_id": row["turn_id"],
                         "conversation_id": row["conversation_id"],
+                        "memory_namespace": row["memory_namespace"],
                         "created_at": row["created_at"],
                         "role": row["role"],
                         "content": row["content"],
@@ -264,8 +282,8 @@ class VectorMemory:
         results.sort(key=lambda item: (-item["score"], item["created_at"]))
         return results[:limit]
 
-    def context_for_query(self, query, limit=VECTOR_TOP_K):
-        matches = self.search(query, limit=limit)
+    def context_for_query(self, query, limit=VECTOR_TOP_K, memory_namespace=None):
+        matches = self.search(query, limit=limit, memory_namespace=memory_namespace)
         if not matches:
             return ""
         lines = ["# Vector Memory Matches", ""]

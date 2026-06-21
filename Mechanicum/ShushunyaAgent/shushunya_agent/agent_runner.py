@@ -1115,7 +1115,12 @@ def archive_search(config: AgentConfig, kind: str, query: str) -> dict[str, Any]
         payload.update(warning)
         return payload
     if kind == "vector":
-        payload = archive_request(config, "GET", f"/archive/vector/search?q={quote(query)}", timeout=30)
+        payload = archive_request(
+            config,
+            "GET",
+            f"/archive/vector/search?q={quote(query)}&namespace={quote(config.memory_namespace)}",
+            timeout=30,
+        )
         payload.update(warning)
         return payload
     if kind == "graph":

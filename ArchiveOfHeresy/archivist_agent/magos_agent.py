@@ -57,7 +57,7 @@ class Magos:
         self.graph_memory = graph_memory
         self.last_result = None
 
-    def prepare_request(self, messages, model=None, conversation_id=None, turn_id=None):
+    def prepare_request(self, messages, model=None, conversation_id=None, turn_id=None, memory_namespace="default"):
         self.last_result = None
         try:
             if not MAGOS_ENABLED:
@@ -69,7 +69,7 @@ class Magos:
             index = self.focus.load_index()
             focus_candidates = self.focus_candidates(index)
             wiki_context = self.wiki_context(query)
-            vector_context = self.vector_context(query)
+            vector_context = self.vector_context(query, memory_namespace=memory_namespace)
             graph_context = self.graph_context(query)
             context_sources = [
                 name
@@ -175,10 +175,15 @@ class Magos:
             lines.append(f"## {page.get('title')} score={score:.3f}\n{trim_text(content, 1200)}")
         return "\n\n".join(lines)
 
-    def vector_context(self, query):
+    def vector_context(self, query, memory_namespace="default"):
         if self.vector_memory is None:
             return ""
-        matches = self.vector_memory.search(query, limit=VECTOR_TOP_K, min_score=MAGOS_MIN_VECTOR_SCORE)
+        matches = self.vector_memory.search(
+            query,
+            limit=VECTOR_TOP_K,
+            min_score=MAGOS_MIN_VECTOR_SCORE,
+            memory_namespace=memory_namespace,
+        )
         if not matches:
             return ""
         lines = ["# Vector Memory Matches", ""]
