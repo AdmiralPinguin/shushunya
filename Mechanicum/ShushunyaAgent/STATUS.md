@@ -1,6 +1,6 @@
 # ShushunyaAgent Status
 
-Last verified: 2026-06-22 07:12 KST.
+Last verified: 2026-06-22 07:26 KST.
 
 ## Running Services
 
@@ -62,6 +62,8 @@ Last verified: 2026-06-22 07:12 KST.
   with `ok=false`.
 - Agent prompt treats current user task as authoritative over stale Archive
   memory context.
+- Agent chat requests disable the generic Archive persona system prompt so the
+  agent JSON contract remains the highest-priority system instruction.
 - Agent runs emit `task` stream events and write compact JSONL task journals in
   `runtime/task-journals/`.
 - Stream `tool_result` and `final` events include `duration_sec`.
@@ -119,6 +121,8 @@ Last verified: 2026-06-22 07:12 KST.
   the agent step fails.
 - Malformed model JSON gets a minimal repair pass with memory disabled before
   the runner spends another normal step.
+- Non-JSON prose without an actionable JSON object is treated as a failed repair
+  and retried instead of becoming a false successful final.
 - Context-size model `400` responses are retried with compacted messages and
   then with Archive memory injection disabled.
 - Tool exceptions become fail-soft `ok=false` tool results instead of crashing

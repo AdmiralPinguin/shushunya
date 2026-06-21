@@ -19,6 +19,10 @@ The architecture remains unchanged: Magos runs before the answer, the Librarian
 runs after the answer, and external agents only propose writes through Memory
 Gateway.
 
+`/v1/chat/completions` supports `archive_system_prompt_enabled=false` for agent
+callers that must keep their own system prompt as the top-priority instruction
+while still using Archive memory and journaling.
+
 ## Diagnostics
 
 Use:

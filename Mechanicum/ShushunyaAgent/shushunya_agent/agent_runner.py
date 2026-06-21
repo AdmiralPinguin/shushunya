@@ -356,6 +356,7 @@ def chat(
                 "temperature": 0.1,
                 "max_tokens": config.max_model_tokens,
                 "archive_enabled": should_archive,
+                "archive_system_prompt_enabled": False,
                 "focus_enabled": profile_memory_enabled,
                 "vector_enabled": profile_memory_enabled,
                 "graph_enabled": profile_memory_enabled,
@@ -400,6 +401,8 @@ def parse_action(raw: str) -> dict[str, Any]:
 
 
 def repair_action_json(config: AgentConfig, raw: str, error: Exception) -> dict[str, Any]:
+    if "{" not in raw:
+        raise ValueError("model output contained no JSON object to repair")
     repair_messages = [
         {
             "role": "system",
@@ -420,7 +423,13 @@ def repair_action_json(config: AgentConfig, raw: str, error: Exception) -> dict[
         },
     ]
     repaired = chat(config, repair_messages, inject_memory=False, archive_enabled=False)
-    return parse_action(repaired)
+    action = parse_action(repaired)
+    if (
+        str(action.get("action", "")).strip().lower() == "final"
+        and str(action.get("message", "")).strip() == "Не смог разобрать действие агента."
+    ):
+        raise ValueError("repair could not infer an actionable JSON object")
+    return action
 
 
 def parse_bool(value: Any, default: bool = False) -> bool:

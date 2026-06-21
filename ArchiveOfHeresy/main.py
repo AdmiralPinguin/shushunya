@@ -740,11 +740,14 @@ def prepare_messages(
     include_focus=True,
     include_vector=True,
     include_graph=True,
+    include_system_prompt=True,
     magos_message=None,
     query_messages=None,
     memory_namespace="default",
 ):
-    prepared = [{"role": "system", "content": ARCHIVE_SYSTEM_PROMPT}]
+    prepared = []
+    if include_system_prompt:
+        prepared.append({"role": "system", "content": ARCHIVE_SYSTEM_PROMPT})
     query = latest_user_message(query_messages if query_messages is not None else messages)
     if include_focus:
         focus_message = focus_context_message(memory_namespace)
@@ -1572,6 +1575,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             focus_enabled = internal_flag(payload.pop("focus_enabled", True), default=True)
             vector_enabled = internal_flag(payload.pop("vector_enabled", focus_enabled), default=True)
             graph_enabled = internal_flag(payload.pop("graph_enabled", focus_enabled), default=True)
+            archive_system_prompt_enabled = internal_flag(payload.pop("archive_system_prompt_enabled", True), default=True)
             memory_namespace = safe_memory_namespace(payload.pop("memory_namespace", "default"))
             payload["messages"] = list(payload.get("messages", []))
             memory_messages = sanitize_messages_for_memory(payload["messages"])
@@ -1598,6 +1602,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 include_focus=focus_enabled,
                 include_vector=vector_enabled,
                 include_graph=graph_enabled,
+                include_system_prompt=archive_system_prompt_enabled,
                 magos_message=magos_message,
                 query_messages=memory_messages,
                 memory_namespace=memory_namespace,
@@ -1609,6 +1614,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 include_focus=focus_enabled,
                 include_vector=vector_enabled,
                 include_graph=graph_enabled,
+                include_system_prompt=archive_system_prompt_enabled,
                 magos_message=magos_message,
                 query_messages=memory_messages,
                 memory_namespace=memory_namespace,
@@ -1624,6 +1630,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "focus_enabled": focus_enabled,
                 "vector_enabled": vector_enabled,
                 "graph_enabled": graph_enabled,
+                "archive_system_prompt_enabled": archive_system_prompt_enabled,
                 "magos_enabled": bool(magos_message),
                 "magos_result": magos_result,
                 "model": payload.get("model"),

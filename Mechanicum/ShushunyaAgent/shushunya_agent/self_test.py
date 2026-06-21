@@ -502,7 +502,26 @@ def main() -> int:
         repaired_action = repair_action_json(config, "```json\n{\"action\":\"final\",\"message\":\"broken\"", ValueError("broken"))
     if repaired_action != {"action": "final", "message": "repaired"}:
         raise AssertionError(f"unexpected repaired action: {repaired_action}")
+    try:
+        repair_action_json(config, "Обычный чатовый ответ без JSON action", ValueError("not json"))
+        raise AssertionError("JSON repair should reject non-JSON chat prose")
+    except ValueError:
+        pass
     print("[ok] JSON repair helper")
+
+    captured_payloads: list[dict] = []
+
+    def capture_archive_payload(config_arg, method, path, payload=None, timeout=180):
+        captured_payloads.append(payload or {})
+        return {"choices": [{"message": {"content": '{"action":"final","message":"payload ok"}'}}]}
+
+    with mock.patch.object(agent_runner, "archive_request", side_effect=capture_archive_payload):
+        payload_reply = chat(config, [{"role": "user", "content": "payload"}], inject_memory=True, archive_enabled=True)
+    if payload_reply != '{"action":"final","message":"payload ok"}':
+        raise AssertionError(f"unexpected payload reply: {payload_reply}")
+    if not captured_payloads or captured_payloads[0].get("archive_system_prompt_enabled") is not False:
+        raise AssertionError(f"agent chat did not disable Archive persona prompt: {captured_payloads}")
+    print("[ok] agent chat disables Archive persona prompt")
 
     transient_error = HTTPError(
         url="http://archive/v1/chat/completions",
@@ -582,11 +601,12 @@ def main() -> int:
     tool_error_config = AgentConfig(
         task_id=safe_task_id("self-test-tool-error"),
         json_output=True,
-        max_steps=2,
+        max_steps=3,
         inject_memory=False,
         archive_internal_steps=False,
     )
     with mock.patch.object(agent_runner, "chat", side_effect=[
+        "Обычный чатовый ответ вместо JSON action",
         '{"action":"web_fetch","url":"http://127.0.0.1:8095/health"}',
         '{"action":"final","message":"handled"}',
     ]), contextlib.redirect_stdout(tool_error_stdout), contextlib.redirect_stderr(io.StringIO()):
@@ -595,6 +615,8 @@ def main() -> int:
     failed_tool_events = [event for event in tool_error_events if event.get("type") == "tool_result" and event.get("ok") is False]
     if tool_error_code != 0 or tool_error_payload.get("message") != "handled" or not failed_tool_events:
         raise AssertionError(f"tool exception was not fail-soft: code={tool_error_code}, payload={tool_error_payload}, events={tool_error_events}")
+    if not any(event.get("code") == "json_repair_failed" for event in tool_error_events):
+        raise AssertionError(f"non-JSON model output did not force retry: {tool_error_events}")
     print("[ok] tool exception fail-soft")
 
     if offline:
