@@ -1,6 +1,6 @@
 # ShushunyaAgent Status
 
-Last verified: 2026-06-21 23:15 KST.
+Last verified: 2026-06-22 07:12 KST.
 
 ## Running Services
 
@@ -76,6 +76,9 @@ Last verified: 2026-06-21 23:15 KST.
   the runner module while preserving the public runner imports used by the API.
 - Web fetch/search providers and URL safety checks live in a dedicated web tools
   module while preserving public runner imports for integrations.
+- Sandbox process execution, shell/python wrappers, and structured file tools
+  live in a dedicated sandbox tools module while preserving public runner
+  imports for integrations.
 - Agent runs have a total runtime limit through `max_runtime_sec` /
   `SHUSHUNYA_AGENT_MAX_RUNTIME_SEC`.
 - `GET /task-journal?task_id=...` can inspect recent journal events, and

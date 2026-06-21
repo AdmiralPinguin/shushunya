@@ -28,6 +28,8 @@
   the runner module.
 - Web fetch/search providers and URL safety checks split out of the runner
   module.
+- Sandbox process execution, shell/python wrappers, and structured file tools
+  split out of the runner module.
 - Repeated identical action guard.
 - JSON output mode for integration.
 - Streaming progress events with task id and duration metadata.
