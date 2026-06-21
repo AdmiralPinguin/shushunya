@@ -122,6 +122,8 @@ If `task_id` is omitted, `/cancel` targets the currently running task. The
 runner checks cancellation between agent steps and returns a structured
 `cancelled=true` final event; in-flight model or tool calls are allowed to
 finish first.
+Omitting `task_id` requires `SHUSHUNYA_AGENT_API_KEY` plus bearer auth; public
+clients should cancel the explicit task id they received from `/run-stream`.
 
 Every run writes a compact JSONL journal under `runtime/task-journals/`.
 Pass a stable task id when a caller wants resumable task history:

@@ -541,6 +541,9 @@ class AgentHandler(BaseHTTPRequestHandler):
             payload = read_json(self)
             task_id = str(payload.get("task_id") or "").strip()
             if not task_id:
+                if not privileged_api_allowed(self):
+                    write_json(self, 401, {"ok": False, "error": "cancel without task_id requires API key"})
+                    return
                 with STATE_LOCK:
                     task_id = str(RUN_STATE.get("current_task_id") or "").strip()
             if not task_id:

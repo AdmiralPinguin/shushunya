@@ -72,6 +72,7 @@ Last verified: 2026-06-21 21:19 KST.
 - `POST /cancel` requests cooperative cancellation for the current task or a
   supplied `task_id`; the runner stops between agent steps and reports
   `cancelled=true`.
+- Cancelling without an explicit `task_id` requires API-key bearer auth.
 - `/run-stream` emits `heartbeat` events during long in-flight model/tool calls
   so mobile and tunnel clients can keep the connection observable.
 - `web_fetch` detects binary responses and returns metadata without decoded
