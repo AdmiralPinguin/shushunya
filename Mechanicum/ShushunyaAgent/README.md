@@ -122,6 +122,12 @@ For an interactive prompt:
 - Web browsing is exposed as `web_search` and `web_fetch`. The supervisor blocks
   localhost, private, loopback, link-local, multicast, reserved, and unspecified
   IP targets, including redirects.
+- `web_search` uses a provider chain: Brave Search API when
+  `SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY` is set, SearXNG when
+  `SHUSHUNYA_AGENT_SEARXNG_URL` is set, then public Marginalia search, then
+  Wikipedia opensearch. For production-quality general web search, configure
+  Brave or a private SearXNG instance instead of relying only on public fallback
+  providers.
 
 Enable automatic memory injection for experiments:
 

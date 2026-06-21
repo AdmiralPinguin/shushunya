@@ -60,6 +60,9 @@ Web tools run through the supervisor, not through sandbox shell. They allow only
 public `http` and `https` URLs and reject localhost, private, loopback,
 link-local, multicast, reserved, and unspecified IP targets. `web_fetch` returns
 status, final URL, content type, title, extracted text, and truncation status.
+`web_search` uses configured providers first: Brave Search API
+(`SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY`), SearXNG (`SHUSHUNYA_AGENT_SEARXNG_URL`),
+then public fallback providers.
 
 ## Shell
 

@@ -35,6 +35,8 @@ MAX_MODEL_TOKENS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "1024"
 SHELL_TIMEOUT = int(os.environ.get("SHUSHUNYA_AGENT_SHELL_TIMEOUT", "60"))
 MAX_TOOL_OUTPUT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_TOOL_OUTPUT_CHARS", "12000"))
 MAX_WEB_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_WEB_BYTES", "200000"))
+BRAVE_SEARCH_API_KEY = os.environ.get("SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY", "").strip()
+SEARXNG_URL = os.environ.get("SHUSHUNYA_AGENT_SEARXNG_URL", "").strip().rstrip("/")
 WEB_USER_AGENT = os.environ.get(
     "SHUSHUNYA_AGENT_WEB_USER_AGENT",
     "ShushunyaAgent/0.1 (+https://github.com/AdmiralPinguin/shushunya)",
@@ -314,6 +316,118 @@ def normalize_duckduckgo_url(raw_url: str) -> str:
     return raw_url
 
 
+def clean_search_result(title: Any, url: Any, snippet: Any = "") -> dict[str, str] | None:
+    title_text = " ".join(str(title or "").split())
+    url_text = str(url or "").strip()
+    snippet_text = " ".join(str(snippet or "").split())
+    if not title_text or not url_text:
+        return None
+    try:
+        validate_public_url(url_text)
+    except Exception:
+        return None
+    return {"title": title_text, "url": url_text, "snippet": snippet_text}
+
+
+def dedupe_results(results: list[dict[str, str]], limit: int) -> list[dict[str, str]]:
+    deduped: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for result in results:
+        url = result.get("url", "")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        deduped.append(result)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def web_search_brave(query: str, limit: int) -> dict[str, Any]:
+    if not BRAVE_SEARCH_API_KEY:
+        return {"ok": False, "provider": "brave", "error": "BRAVE_SEARCH_API_KEY is not configured"}
+    url = "https://api.search.brave.com/res/v1/web/search?" + urlencode({"q": query, "count": limit})
+    validate_public_url(url)
+    request = Request(
+        url,
+        headers={
+            "User-Agent": WEB_USER_AGENT,
+            "Accept": "application/json",
+            "X-Subscription-Token": BRAVE_SEARCH_API_KEY,
+        },
+    )
+    with build_opener(SafeRedirectHandler).open(request, timeout=20) as response:
+        data, truncated = read_limited_response(response, 500000)
+        payload = json.loads(data.decode("utf-8", errors="replace"))
+    raw_results = payload.get("web", {}).get("results", [])
+    results = []
+    for item in raw_results:
+        cleaned = clean_search_result(item.get("title"), item.get("url"), item.get("description", ""))
+        if cleaned:
+            results.append(cleaned)
+    return {"ok": True, "provider": "brave", "results": dedupe_results(results, limit), "truncated": truncated}
+
+
+def web_search_searxng(query: str, limit: int) -> dict[str, Any]:
+    if not SEARXNG_URL:
+        return {"ok": False, "provider": "searxng", "error": "SEARXNG_URL is not configured"}
+    url = SEARXNG_URL + "/search?" + urlencode({"q": query, "format": "json", "language": "auto"})
+    validate_public_url(url)
+    request = Request(url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "application/json"})
+    with build_opener(SafeRedirectHandler).open(request, timeout=25) as response:
+        data, truncated = read_limited_response(response, 600000)
+        payload = json.loads(data.decode("utf-8", errors="replace"))
+    results = []
+    for item in payload.get("results", []):
+        cleaned = clean_search_result(item.get("title"), item.get("url"), item.get("content", ""))
+        if cleaned:
+            results.append(cleaned)
+    return {"ok": True, "provider": "searxng", "results": dedupe_results(results, limit), "truncated": truncated}
+
+
+def web_search_marginalia(query: str, limit: int) -> dict[str, Any]:
+    url = "https://api.marginalia.nu/public/search/" + quote(query, safe="")
+    validate_public_url(url)
+    request = Request(url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "application/json"})
+    with build_opener(SafeRedirectHandler).open(request, timeout=25) as response:
+        data, truncated = read_limited_response(response, 600000)
+        payload = json.loads(data.decode("utf-8", errors="replace"))
+    results = []
+    for item in payload.get("results", []):
+        cleaned = clean_search_result(item.get("title"), item.get("url"), item.get("description", ""))
+        if cleaned:
+            results.append(cleaned)
+    return {"ok": True, "provider": "marginalia", "results": dedupe_results(results, limit), "truncated": truncated}
+
+
+def web_search_wikipedia(query: str, limit: int) -> dict[str, Any]:
+    wiki_url = "https://en.wikipedia.org/w/api.php?" + urlencode(
+        {
+            "action": "opensearch",
+            "search": query,
+            "limit": limit,
+            "namespace": 0,
+            "format": "json",
+        }
+    )
+    validate_public_url(wiki_url)
+    request = Request(wiki_url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "application/json"})
+    with build_opener(SafeRedirectHandler).open(request, timeout=20) as response:
+        data, truncated = read_limited_response(response, 200000)
+        payload = json.loads(data.decode("utf-8", errors="replace"))
+    titles = payload[1] if len(payload) > 1 and isinstance(payload[1], list) else []
+    snippets = payload[2] if len(payload) > 2 and isinstance(payload[2], list) else []
+    urls = payload[3] if len(payload) > 3 and isinstance(payload[3], list) else []
+    results = []
+    for index, title in enumerate(titles[:limit]):
+        if index >= len(urls):
+            continue
+        cleaned = clean_search_result(title, urls[index], snippets[index] if index < len(snippets) else "")
+        if cleaned:
+            results.append(cleaned)
+    return {"ok": True, "provider": "wikipedia_opensearch", "results": dedupe_results(results, limit), "truncated": truncated}
+
+
 def web_fetch(config: AgentConfig, url: str, max_bytes: int | None = None) -> dict[str, Any]:
     max_bytes = max(1024, min(int(max_bytes or MAX_WEB_BYTES), 1000000))
     validate_public_url(url)
@@ -347,54 +461,32 @@ def web_search(config: AgentConfig, query: str, limit: int | None = None) -> dic
     if not query:
         return {"ok": False, "error": "query must not be empty"}
     limit = max(1, min(int(limit or 5), 10))
-    search_url = "https://html.duckduckgo.com/html/?" + urlencode({"q": query})
-    validate_public_url(search_url)
-    opener = build_opener(SafeRedirectHandler)
-    request = Request(search_url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "text/html"})
-    with opener.open(request, timeout=30) as response:
-        final_url = response.geturl()
-        validate_public_url(final_url)
-        data, response_truncated = read_limited_response(response, 300000)
-        charset = response.headers.get_content_charset() or "utf-8"
-        body = data.decode(charset, errors="replace")
-    parser = DuckDuckGoParser(limit)
-    parser.feed(body)
-    results = parser.results[:limit]
-    source = "duckduckgo_html"
-    if not results:
-        wiki_url = "https://en.wikipedia.org/w/api.php?" + urlencode(
-            {
-                "action": "opensearch",
-                "search": query,
-                "limit": limit,
-                "namespace": 0,
-                "format": "json",
+    provider_errors: list[dict[str, str]] = []
+    providers = [web_search_brave, web_search_searxng, web_search_marginalia, web_search_wikipedia]
+    for provider in providers:
+        try:
+            payload = provider(query, limit)
+        except Exception as exc:
+            provider_errors.append({"provider": provider.__name__.replace("web_search_", ""), "error": str(exc)})
+            continue
+        if not payload.get("ok"):
+            provider_errors.append({"provider": str(payload.get("provider", "unknown")), "error": str(payload.get("error", "search failed"))})
+            continue
+        results = payload.get("results", [])
+        if results:
+            return {
+                "ok": True,
+                "query": query,
+                "source": payload.get("provider", "unknown"),
+                "results": results,
+                "truncated": bool(payload.get("truncated", False)),
+                "provider_errors": provider_errors,
             }
-        )
-        validate_public_url(wiki_url)
-        request = Request(wiki_url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "application/json"})
-        with build_opener(SafeRedirectHandler).open(request, timeout=30) as response:
-            data, response_truncated = read_limited_response(response, 200000)
-            payload = json.loads(data.decode("utf-8", errors="replace"))
-        titles = payload[1] if len(payload) > 1 and isinstance(payload[1], list) else []
-        snippets = payload[2] if len(payload) > 2 and isinstance(payload[2], list) else []
-        urls = payload[3] if len(payload) > 3 and isinstance(payload[3], list) else []
-        results = [
-            {
-                "title": str(title),
-                "url": str(urls[index]),
-                "snippet": str(snippets[index]) if index < len(snippets) else "",
-            }
-            for index, title in enumerate(titles[:limit])
-            if index < len(urls)
-        ]
-        source = "wikipedia_opensearch"
     return {
-        "ok": True,
+        "ok": False,
         "query": query,
-        "source": source,
-        "results": results,
-        "truncated": response_truncated,
+        "error": "all search providers failed or returned no results",
+        "provider_errors": provider_errors,
     }
 
 

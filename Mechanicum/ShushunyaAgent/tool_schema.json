@@ -172,6 +172,8 @@
   },
   "web_policy": {
     "tools": ["web_search", "web_fetch"],
+    "search_provider_chain": ["brave_api", "searxng", "marginalia_public", "wikipedia_opensearch"],
+    "optional_env": ["SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY", "SHUSHUNYA_AGENT_SEARXNG_URL"],
     "allowed_schemes": ["http", "https"],
     "blocked_targets": ["localhost", "private_ip", "loopback", "link_local", "multicast", "reserved", "unspecified"],
     "default_max_bytes": 200000
