@@ -118,6 +118,8 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 
 7. Посмотреть последние события обслуживания памяти текущего agent namespace:
 {"action":"archive_memory_events","limit":20}
+{"action":"archive_memory_events","component":"librarian","limit":20}
+{"action":"archive_memory_events","component":"memory_gateway","event_action":"search","limit":20}
 
 8. Читать память через Memory Gateway без доступа к файлам:
 {"action":"archive_memory_catalog"}
@@ -1247,15 +1249,28 @@ def archive_status(config: AgentConfig) -> dict[str, Any]:
     return {"ok": payload.get("status") == "ok", **payload}
 
 
-def archive_memory_events(config: AgentConfig, limit: int | None = None) -> dict[str, Any]:
+def archive_memory_events(
+    config: AgentConfig,
+    limit: int | None = None,
+    component: str | None = None,
+    event_action: str | None = None,
+) -> dict[str, Any]:
     try:
         safe_limit = max(1, min(int(limit or 20), 100))
     except (TypeError, ValueError):
         safe_limit = 20
+    params = {
+        "namespace": config.memory_namespace,
+        "limit": str(safe_limit),
+    }
+    if component:
+        params["component"] = str(component)
+    if event_action:
+        params["event_action"] = str(event_action)
     payload = archive_tool_request(
         config,
         "GET",
-        f"/archive/memory/events?namespace={quote(config.memory_namespace)}&limit={safe_limit}",
+        "/archive/memory/events?" + urlencode(params),
         timeout=30,
     )
     payload["ok"] = bool(payload.get("ok", True))
@@ -1458,7 +1473,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         elif action_type == "archive_status":
             result = archive_status(config)
         elif action_type == "archive_memory_events":
-            result = archive_memory_events(config, action.get("limit"))
+            result = archive_memory_events(config, action.get("limit"), action.get("component"), action.get("event_action"))
         elif action_type == "archive_memory_catalog":
             result = archive_memory_catalog(config)
         elif action_type == "archive_memory_search":

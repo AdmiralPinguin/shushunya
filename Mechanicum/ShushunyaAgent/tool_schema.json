@@ -25,7 +25,9 @@
       "required": ["action"],
       "properties": {
         "action": "archive_memory_events",
-        "limit": "integer"
+        "limit": "integer",
+        "component": ["librarian", "memory_gateway"],
+        "event_action": "string"
       }
     },
     "archive_search": {
