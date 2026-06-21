@@ -88,11 +88,12 @@ def overlap_score(query_tokens, text):
 
 
 class GraphMemory:
-    def __init__(self, root, proxy_json, sqlite_path):
+    def __init__(self, root, proxy_json, sqlite_path, memory_namespace="default"):
         self.root = Path(root)
         self.db_path = self.root / "graph.sqlite3"
         self.proxy_json = proxy_json
         self.archive_sqlite_path = Path(sqlite_path)
+        self.memory_namespace = str(memory_namespace or "default")
         self.root.mkdir(parents=True, exist_ok=True)
         self.init_storage()
 
@@ -221,6 +222,11 @@ class GraphMemory:
             WHERE status = 'ok'
         """
         params = []
+        with sqlite3.connect(self.archive_sqlite_path) as db:
+            turn_columns = {row[1] for row in db.execute("PRAGMA table_info(turns)")}
+        if "memory_namespace" in turn_columns:
+            sql += " AND memory_namespace = ?"
+            params.append(self.memory_namespace)
         if last_sync_at:
             sql += " AND created_at > ?"
             params.append(last_sync_at)

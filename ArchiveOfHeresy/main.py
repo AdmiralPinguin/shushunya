@@ -66,6 +66,7 @@ LIBRARIAN = None
 MAGOS = None
 FOCUS_BOOKSHELF = None
 FOCUS_COMPONENTS = {}
+GRAPH_COMPONENTS = {}
 VECTOR_MEMORY = None
 GRAPH_MEMORY = None
 
@@ -153,6 +154,28 @@ def focus_root_for_namespace(namespace):
     return FOCUS_ROOT / "namespaces" / namespace
 
 
+def graph_root_for_namespace(namespace):
+    namespace = safe_memory_namespace(namespace)
+    if namespace == "default":
+        return GRAPH_ROOT
+    return GRAPH_ROOT / "namespaces" / namespace
+
+
+def graph_memory_for_namespace(namespace):
+    namespace = safe_memory_namespace(namespace)
+    cached = GRAPH_COMPONENTS.get(namespace)
+    if cached is not None:
+        return cached
+    graph_memory = GraphMemory(
+        graph_root_for_namespace(namespace),
+        proxy_json,
+        SQLITE_PATH,
+        memory_namespace=namespace,
+    )
+    GRAPH_COMPONENTS[namespace] = graph_memory
+    return graph_memory
+
+
 def focus_components(namespace):
     namespace = safe_memory_namespace(namespace)
     cached = FOCUS_COMPONENTS.get(namespace)
@@ -166,9 +189,9 @@ def focus_components(namespace):
         wiki_root=WIKI_ROOT,
         sqlite_path=SQLITE_PATH,
         vector_memory=VECTOR_MEMORY,
-        graph_memory=GRAPH_MEMORY,
+        graph_memory=graph_memory_for_namespace(namespace),
     )
-    magos = Magos(root, WIKI_ROOT, proxy_json, vector_memory=VECTOR_MEMORY, graph_memory=GRAPH_MEMORY)
+    magos = Magos(root, WIKI_ROOT, proxy_json, vector_memory=VECTOR_MEMORY, graph_memory=graph_memory_for_namespace(namespace))
     cached = {"bookshelf": bookshelf, "librarian": librarian, "magos": magos, "root": root}
     FOCUS_COMPONENTS[namespace] = cached
     return cached
@@ -227,12 +250,13 @@ def vector_context_message(query, memory_namespace="default"):
     }
 
 
-def graph_context_message(query):
+def graph_context_message(query, memory_namespace="default"):
     if not GRAPH_INJECTION_ENABLED:
         return None
-    if GRAPH_MEMORY is None:
+    graph_memory = graph_memory_for_namespace(memory_namespace)
+    if graph_memory is None:
         return None
-    content = GRAPH_MEMORY.context_for_query(query, limit=GRAPH_TOP_K).strip()
+    content = graph_memory.context_for_query(query, limit=GRAPH_TOP_K).strip()
     if not content:
         return None
     content = content[-GRAPH_CONTEXT_CHARS:]
@@ -319,7 +343,7 @@ def prepare_messages(
         if vector_message:
             prepared.append(vector_message)
     if include_graph:
-        graph_message = graph_context_message(query)
+        graph_message = graph_context_message(query, memory_namespace=memory_namespace)
         if graph_message:
             prepared.append(graph_message)
     prepared.extend(messages)
@@ -542,6 +566,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "wiki_root": str(WIKI_ROOT),
                     "vector_root": str(VECTOR_ROOT),
                     "graph_root": str(GRAPH_ROOT),
+                    "graph_namespaces": {
+                        namespace: str(graph_memory.root)
+                        for namespace, graph_memory in sorted(GRAPH_COMPONENTS.items())
+                    },
                 },
             )
             return
@@ -578,11 +606,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
         if self.path.startswith("/archive/graph/search"):
             query = ""
+            namespace = "default"
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 query = (params.get("q") or [""])[0]
-            matches = GRAPH_MEMORY.search(query) if GRAPH_MEMORY and query else {"nodes": [], "edges": []}
-            write_json(self, 200, {"query": query, "matches": matches})
+                namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
+            graph_memory = graph_memory_for_namespace(namespace)
+            matches = graph_memory.search(query) if graph_memory and query else {"nodes": [], "edges": []}
+            write_json(self, 200, {"query": query, "memory_namespace": namespace, "matches": matches})
             return
 
         if self.path == "/v1/models":
@@ -835,12 +866,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    global FOCUS_BOOKSHELF, LIBRARIAN, MAGOS, VECTOR_MEMORY, GRAPH_MEMORY, FOCUS_COMPONENTS
+    global FOCUS_BOOKSHELF, LIBRARIAN, MAGOS, VECTOR_MEMORY, GRAPH_MEMORY, FOCUS_COMPONENTS, GRAPH_COMPONENTS
     init_storage()
     FOCUS_COMPONENTS = {}
+    GRAPH_COMPONENTS = {}
     VECTOR_MEMORY = VectorMemory(VECTOR_ROOT)
     vector_backfilled = VECTOR_MEMORY.backfill_from_archive(SQLITE_PATH)
-    GRAPH_MEMORY = GraphMemory(GRAPH_ROOT, proxy_json, SQLITE_PATH)
+    GRAPH_MEMORY = graph_memory_for_namespace("default")
     graph_backfilled = GRAPH_MEMORY.backfill_from_archive()
     default_components = focus_components("default")
     FOCUS_BOOKSHELF = default_components["bookshelf"]
