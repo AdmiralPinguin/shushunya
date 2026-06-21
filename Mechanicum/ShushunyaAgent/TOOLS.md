@@ -91,4 +91,7 @@ Search or inspect memory explicitly:
 ```
 
 The runner has no long-term memory. It can ask `ArchiveOfHeresy` for memory
-through these explicit actions.
+through these explicit actions. Normal agent runs also pass every model step
+through `ArchiveOfHeresy` with `memory_namespace=agent`, so the agent has a
+separate focus bookshelf with the same 10-file limit as the default chat focus
+bookshelf.

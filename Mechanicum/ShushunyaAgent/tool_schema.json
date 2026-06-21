@@ -150,9 +150,12 @@
   },
   "sandbox_path_roots": ["/work", "/sandbox-tmp", "/artifacts", "/state", "/logs", "/models", "/tools", "/home/agent"],
   "memory_policy": {
-    "automatic_injection_default": false,
+    "automatic_injection_default": true,
+    "archive_internal_steps_default": true,
+    "memory_namespace_default": "agent",
+    "focus_limit_per_namespace": 10,
     "explicit_memory_tool": "archive_search",
-    "warning": "Archive memory is reference context only and may be stale."
+    "warning": "Archive memory is reference context only and may be stale. Agent focus memory is isolated from the default chat focus namespace."
   },
   "storage_policy": {
     "limit_bytes": 536870912000,
@@ -168,6 +171,9 @@
     "http_debug_stderr_field": "include_stderr",
     "http_steps_field": "include_steps",
     "http_max_tokens_field": "max_tokens",
+    "http_memory_namespace_field": "memory_namespace",
+    "http_inject_memory_field": "inject_memory",
+    "http_archive_internal_steps_field": "archive_internal_steps",
     "default_max_model_tokens": 1024
   },
   "web_policy": {

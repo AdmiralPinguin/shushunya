@@ -9,8 +9,14 @@ sandbox on the `ARCHIVE` disk.
 Default flow:
 
 ```text
-task -> ArchiveOfHeresy -> JSON action -> sandbox executor -> tool result -> ArchiveOfHeresy -> final
+task -> ArchiveOfHeresy(agent memory) -> JSON action -> sandbox executor -> tool result -> ArchiveOfHeresy(agent memory) -> final
 ```
+
+By default every model step is archived through `ArchiveOfHeresy` with
+`memory_namespace=agent`, `user=shushunya-agent`, automatic Magos retrieval
+enabled, and Librarian post-processing enabled. The agent therefore has its own
+focus bookshelf under the archive focus root with the same 10-file limit as the
+normal chat, while wiki/vector/graph stay shared long-term memory layers.
 
 ## Requirements
 
@@ -133,9 +139,11 @@ For an interactive prompt:
 - The runner rejects non-JSON model replies and asks the model to repair them.
 - Long-term memory stays in `ArchiveOfHeresy`; this runner stores no persistent
   memory of its own.
-- Internal agent steps are not archived by default and do not receive automatic
-  focus/vector/graph injection. The agent can request memory explicitly with the
-  `archive_search` action.
+- Internal agent steps are archived by default and receive automatic
+  ArchiveOfHeresy memory handling in the isolated `agent` focus namespace.
+  Tool results are included in the following model step, so Magos and the
+  Librarian can account for the whole agent loop. The agent can also request
+  memory explicitly with the `archive_search` action.
 - Structured file writes enforce the configured `500G` soft limit. Shell and
   Python tools still require hard filesystem quota for kernel-level enforcement.
 - `read_file` reads bounded slices with `max_bytes` and `offset`; it no longer
@@ -154,16 +162,22 @@ For an interactive prompt:
   addresses. The local SearXNG localhost exception applies only inside the
   configured `web_search_searxng` provider.
 
-Enable automatic memory injection for experiments:
+Disable automatic memory injection only for debugging:
 
 ```bash
-SHUSHUNYA_AGENT_INJECT_MEMORY=1 ./scripts/run-agent.sh "задача"
+SHUSHUNYA_AGENT_INJECT_MEMORY=0 ./scripts/run-agent.sh "задача"
 ```
 
-Archive internal steps for debugging:
+Disable archiving internal steps only for debugging:
 
 ```bash
-SHUSHUNYA_AGENT_ARCHIVE_INTERNAL_STEPS=1 ./scripts/run-agent.sh "задача"
+SHUSHUNYA_AGENT_ARCHIVE_INTERNAL_STEPS=0 ./scripts/run-agent.sh "задача"
+```
+
+Use another focus namespace for a separate agent memory shelf:
+
+```bash
+SHUSHUNYA_AGENT_MEMORY_NAMESPACE=agent-lab ./scripts/run-agent.sh "задача"
 ```
 
 Run the local self-test:

@@ -50,24 +50,38 @@ SHELL_ENABLED = os.environ.get("SHUSHUNYA_AGENT_SHELL_ENABLED", "1").strip().low
     "no",
     "off",
 )
-ARCHIVE_INTERNAL_STEPS = os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_INTERNAL_STEPS", "0").strip().lower() not in (
+ARCHIVE_INTERNAL_STEPS = os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_INTERNAL_STEPS", "1").strip().lower() not in (
     "0",
     "false",
     "no",
     "off",
 )
-INJECT_MEMORY = os.environ.get("SHUSHUNYA_AGENT_INJECT_MEMORY", "0").strip().lower() not in (
+ARCHIVE_TASK = os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_TASK", "1").strip().lower() not in (
     "0",
     "false",
     "no",
     "off",
 )
+TASK_MEMORY = os.environ.get("SHUSHUNYA_AGENT_TASK_MEMORY", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+INJECT_MEMORY = os.environ.get("SHUSHUNYA_AGENT_INJECT_MEMORY", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+ARCHIVE_USER = os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_USER", "shushunya-agent").strip() or "shushunya-agent"
+MEMORY_NAMESPACE = os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent").strip() or "agent"
 
 
 SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локальный агент выполнения задач.
 
 У тебя нет собственной долговременной памяти. Долговременный контекст приходит только через ArchiveOfHeresy и доступные archive_search/focus инструменты. Не утверждай, что помнишь что-то сам.
-Автоматическая память в обычных шагах отключена. Если тебе нужен прошлый контекст проекта, сначала вызови archive_search.
+Каждый модельный шаг проходит через отдельную agent-память ArchiveOfHeresy: Магос подбирает focus/wiki/vector/graph контекст перед ответом, Архивариус пишет результат после ответа. Если нужен дополнительный прошлый контекст проекта, вызови archive_search.
 
 Ты обязан отвечать ТОЛЬКО валидным JSON-объектом без markdown и без поясняющего текста.
 
@@ -146,7 +160,11 @@ class AgentConfig:
     max_tool_output_chars: int = MAX_TOOL_OUTPUT_CHARS
     sandbox_storage_limit_bytes: int = SANDBOX_STORAGE_LIMIT_BYTES
     archive_internal_steps: bool = ARCHIVE_INTERNAL_STEPS
+    archive_task: bool = ARCHIVE_TASK
+    task_memory: bool = TASK_MEMORY
     inject_memory: bool = INJECT_MEMORY
+    archive_user: str = ARCHIVE_USER
+    memory_namespace: str = MEMORY_NAMESPACE
     json_output: bool = False
     technical_output: bool = False
     shell_enabled: bool = SHELL_ENABLED
@@ -248,9 +266,17 @@ def archive_request(config: AgentConfig, method: str, path: str, payload: dict[s
         return json.loads(body) if body else {}
 
 
-def chat(config: AgentConfig, messages: list[dict[str, str]]) -> str:
+def chat(
+    config: AgentConfig,
+    messages: list[dict[str, str]],
+    *,
+    inject_memory: bool | None = None,
+    archive_enabled: bool | None = None,
+) -> str:
     budgets = [config.max_context_chars, 10000, 7000]
     last_error = ""
+    memory_enabled = config.inject_memory if inject_memory is None else inject_memory
+    should_archive = config.archive_internal_steps if archive_enabled is None else archive_enabled
     for budget in budgets:
         compacted_messages = compact_messages_for_model(messages, config, budget)
         payload = {
@@ -258,10 +284,12 @@ def chat(config: AgentConfig, messages: list[dict[str, str]]) -> str:
             "messages": compacted_messages,
             "temperature": 0.1,
             "max_tokens": config.max_model_tokens,
-            "archive_enabled": config.archive_internal_steps,
-            "focus_enabled": config.inject_memory,
-            "vector_enabled": config.inject_memory,
-            "graph_enabled": config.inject_memory,
+            "archive_enabled": should_archive,
+            "focus_enabled": memory_enabled,
+            "vector_enabled": memory_enabled,
+            "graph_enabled": memory_enabled,
+            "user": config.archive_user,
+            "memory_namespace": config.memory_namespace,
         }
         try:
             response = archive_request(config, "POST", "/v1/chat/completions", payload, timeout=240)
@@ -1078,7 +1106,12 @@ def archive_search(config: AgentConfig, kind: str, query: str) -> dict[str, Any]
         )
     }
     if kind == "focus":
-        payload = archive_request(config, "GET", "/archive/focus/active", timeout=30)
+        payload = archive_request(
+            config,
+            "GET",
+            f"/archive/focus/active?namespace={quote(config.memory_namespace)}",
+            timeout=30,
+        )
         payload.update(warning)
         return payload
     if kind == "vector":
@@ -1187,7 +1220,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     for step in range(1, config.max_steps + 1):
         print(f"\n[agent] step {step}/{config.max_steps}", file=sys.stderr)
         emit(event_sink, {"type": "step", "step": step, "max_steps": config.max_steps, "message": "думаю над следующим действием"})
-        raw = chat(config, messages)
+        step_memory = config.inject_memory or (config.task_memory and step == 1)
+        step_archive = config.archive_internal_steps or (config.archive_task and step == 1)
+        raw = chat(config, messages, inject_memory=step_memory, archive_enabled=step_archive)
         print(f"[model] {raw}", file=sys.stderr)
 
         try:

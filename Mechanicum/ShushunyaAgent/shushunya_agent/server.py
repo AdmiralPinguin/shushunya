@@ -22,6 +22,13 @@ RUN_LOCK = threading.Lock()
 RUN_LOCK_FILE = ROOT / "runtime" / "agent-run.lock"
 
 
+def env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off", ""}
+
+
 def write_json(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
@@ -113,8 +120,16 @@ class AgentHandler(BaseHTTPRequestHandler):
                 max_model_tokens=int_field(payload, "max_tokens", int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "1024")), 128, 4096),
                 json_output=True,
                 technical_output=bool_field(payload, "technical", True),
-                inject_memory=bool_field(payload, "inject_memory", False),
-                archive_internal_steps=bool_field(payload, "archive_internal_steps", False),
+                inject_memory=bool_field(payload, "inject_memory", env_bool("SHUSHUNYA_AGENT_INJECT_MEMORY", True)),
+                archive_internal_steps=bool_field(
+                    payload,
+                    "archive_internal_steps",
+                    env_bool("SHUSHUNYA_AGENT_ARCHIVE_INTERNAL_STEPS", True),
+                ),
+                archive_task=bool_field(payload, "archive_task", env_bool("SHUSHUNYA_AGENT_ARCHIVE_TASK", True)),
+                task_memory=bool_field(payload, "task_memory", env_bool("SHUSHUNYA_AGENT_TASK_MEMORY", True)),
+                archive_user=str(payload.get("archive_user") or os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_USER", "shushunya-agent")),
+                memory_namespace=str(payload.get("memory_namespace") or os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent")),
                 shell_enabled=bool_field(payload, "shell_enabled", True),
             )
 
@@ -157,8 +172,16 @@ class AgentHandler(BaseHTTPRequestHandler):
                 max_model_tokens=int_field(payload, "max_tokens", int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "1024")), 128, 4096),
                 json_output=True,
                 technical_output=bool_field(payload, "technical", True),
-                inject_memory=bool_field(payload, "inject_memory", False),
-                archive_internal_steps=bool_field(payload, "archive_internal_steps", False),
+                inject_memory=bool_field(payload, "inject_memory", env_bool("SHUSHUNYA_AGENT_INJECT_MEMORY", True)),
+                archive_internal_steps=bool_field(
+                    payload,
+                    "archive_internal_steps",
+                    env_bool("SHUSHUNYA_AGENT_ARCHIVE_INTERNAL_STEPS", True),
+                ),
+                archive_task=bool_field(payload, "archive_task", env_bool("SHUSHUNYA_AGENT_ARCHIVE_TASK", True)),
+                task_memory=bool_field(payload, "task_memory", env_bool("SHUSHUNYA_AGENT_TASK_MEMORY", True)),
+                archive_user=str(payload.get("archive_user") or os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_USER", "shushunya-agent")),
+                memory_namespace=str(payload.get("memory_namespace") or os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent")),
                 shell_enabled=bool_field(payload, "shell_enabled", True),
             )
 

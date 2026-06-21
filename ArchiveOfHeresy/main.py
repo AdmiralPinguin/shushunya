@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -20,6 +21,7 @@ from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_use
 ROOT = Path(__file__).resolve().parent
 HOST = os.environ.get("ARCHIVE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("ARCHIVE_PORT", "8090"))
+ARCHIVE_API_KEY = os.environ.get("ARCHIVE_API_KEY", "").strip()
 LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
@@ -63,6 +65,7 @@ CHAT_QUEUE_LOCK = threading.Lock()
 LIBRARIAN = None
 MAGOS = None
 FOCUS_BOOKSHELF = None
+FOCUS_COMPONENTS = {}
 VECTOR_MEMORY = None
 GRAPH_MEMORY = None
 
@@ -82,6 +85,31 @@ def write_json(handler, status, payload):
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def authorized(handler):
+    if not ARCHIVE_API_KEY:
+        return True
+
+    auth = handler.headers.get("Authorization", "").strip()
+    expected = f"Bearer {ARCHIVE_API_KEY}"
+    return auth == expected
+
+
+def require_auth(handler):
+    if authorized(handler):
+        return True
+    write_json(
+        handler,
+        401,
+        {
+            "error": {
+                "message": "Missing or invalid API key",
+                "type": "authentication_error",
+            }
+        },
+    )
+    return False
 
 
 def proxy_json(method, path, payload=None, timeout=180):
@@ -112,24 +140,59 @@ def now_iso():
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def active_focus_context():
-    if FOCUS_BOOKSHELF is None:
+def safe_memory_namespace(value):
+    raw = str(value or "default").strip().lower()
+    safe = "".join(char if char.isalnum() or char in ("-", "_") else "-" for char in raw).strip("-_")
+    return safe[:64] or "default"
+
+
+def focus_root_for_namespace(namespace):
+    namespace = safe_memory_namespace(namespace)
+    if namespace == "default":
+        return FOCUS_ROOT
+    return FOCUS_ROOT / "namespaces" / namespace
+
+
+def focus_components(namespace):
+    namespace = safe_memory_namespace(namespace)
+    cached = FOCUS_COMPONENTS.get(namespace)
+    if cached is not None:
+        return cached
+    root = focus_root_for_namespace(namespace)
+    bookshelf = FocusBookshelf(root)
+    librarian = Librarian(
+        root,
+        proxy_json,
+        wiki_root=WIKI_ROOT,
+        sqlite_path=SQLITE_PATH,
+        vector_memory=VECTOR_MEMORY,
+        graph_memory=GRAPH_MEMORY,
+    )
+    magos = Magos(root, WIKI_ROOT, proxy_json, vector_memory=VECTOR_MEMORY, graph_memory=GRAPH_MEMORY)
+    cached = {"bookshelf": bookshelf, "librarian": librarian, "magos": magos, "root": root}
+    FOCUS_COMPONENTS[namespace] = cached
+    return cached
+
+
+def active_focus_context(namespace="default"):
+    bookshelf = focus_components(namespace)["bookshelf"]
+    if bookshelf is None:
         return ""
 
-    index = FOCUS_BOOKSHELF.load_index()
-    active = FOCUS_BOOKSHELF.active_focus(index)
+    index = bookshelf.load_index()
+    active = bookshelf.active_focus(index)
     if not active:
         return ""
 
-    content = FOCUS_BOOKSHELF.read_focus(active).strip()
+    content = bookshelf.read_focus(active).strip()
     if not content:
         return ""
 
     return content[-FOCUS_CONTEXT_CHARS:]
 
 
-def focus_context_message():
-    content = active_focus_context()
+def focus_context_message(namespace="default"):
+    content = active_focus_context(namespace)
     if not content:
         return None
 
@@ -192,6 +255,38 @@ def internal_flag(value, default=True):
     return str(value).strip().lower() not in ("0", "false", "no", "off")
 
 
+def text_from_content(content):
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return str(content or "").strip()
+
+    parts = []
+    image_count = 0
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type == "text":
+            text = str(item.get("text") or "").strip()
+            if text:
+                parts.append(text)
+        elif item_type == "image_url":
+            image_count += 1
+    if image_count:
+        parts.append(f"[Пользователь приложил изображение: {image_count} шт. Содержимое изображения доступно Шушуне, но не анализируется Magos/памятью.]")
+    return "\n".join(parts).strip()
+
+
+def sanitize_messages_for_memory(messages):
+    sanitized = []
+    for message in messages or []:
+        copy = dict(message)
+        copy["content"] = text_from_content(copy.get("content"))
+        sanitized.append(copy)
+    return sanitized
+
+
 def maybe_write_archives(record):
     if record.get("archive_enabled", True):
         write_archives(record)
@@ -202,11 +297,19 @@ def maybe_update_focus_memory(record):
         update_focus_memory(record)
 
 
-def prepare_messages(messages, include_focus=True, include_vector=True, include_graph=True, magos_message=None):
+def prepare_messages(
+    messages,
+    include_focus=True,
+    include_vector=True,
+    include_graph=True,
+    magos_message=None,
+    query_messages=None,
+    memory_namespace="default",
+):
     prepared = [{"role": "system", "content": ARCHIVE_SYSTEM_PROMPT}]
-    query = latest_user_message(messages)
+    query = latest_user_message(query_messages if query_messages is not None else messages)
     if include_focus:
-        focus_message = focus_context_message()
+        focus_message = focus_context_message(memory_namespace)
         if focus_message:
             prepared.append(focus_message)
     if magos_message:
@@ -385,23 +488,27 @@ def write_archives(record):
 
 
 def update_focus_memory(record):
-    if LIBRARIAN is None:
+    namespace = record.get("memory_namespace") or "default"
+    librarian = focus_components(namespace)["librarian"]
+    if librarian is None:
         return
     try:
-        LIBRARIAN.process_turn(record)
+        librarian.process_turn(record)
     except Exception as exc:
-        print(f"Librarian error: {exc}", flush=True)
+        print(f"Librarian error namespace={namespace}: {exc}", flush=True)
 
 
 def maybe_abandon_magos_focus(record):
-    if MAGOS is None:
+    namespace = record.get("memory_namespace") or "default"
+    magos = focus_components(namespace)["magos"]
+    if magos is None:
         return
     if record.get("status") == "ok":
         return
     try:
-        MAGOS.abandon_created_focus(record.get("turn_id"), f"model request ended with status={record.get('status')}")
+        magos.abandon_created_focus(record.get("turn_id"), f"model request ended with status={record.get('status')}")
     except Exception as exc:
-        print(f"Magos abandon error: {exc}", flush=True)
+        print(f"Magos abandon error namespace={namespace}: {exc}", flush=True)
 
 
 class ArchiveHandler(BaseHTTPRequestHandler):
@@ -422,6 +529,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "jsonl_root": str(JSONL_ROOT),
                     "sqlite_path": str(SQLITE_PATH),
                     "focus_root": str(FOCUS_ROOT),
+                    "focus_namespaces": {
+                        namespace: str(components["root"])
+                        for namespace, components in sorted(FOCUS_COMPONENTS.items())
+                    },
                     "wiki_root": str(WIKI_ROOT),
                     "vector_root": str(VECTOR_ROOT),
                     "graph_root": str(GRAPH_ROOT),
@@ -429,12 +540,20 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if self.path == "/archive/focus/active":
+        if not require_auth(self):
+            return
+
+        if self.path.startswith("/archive/focus/active"):
+            namespace = "default"
+            if "?" in self.path:
+                params = parse_qs(urlsplit(self.path).query)
+                namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
             write_json(
                 self,
                 200,
                 {
-                    "focus_context": active_focus_context(),
+                    "memory_namespace": namespace,
+                    "focus_context": active_focus_context(namespace),
                     "max_chars": FOCUS_CONTEXT_CHARS,
                 },
             )
@@ -443,8 +562,6 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/archive/vector/search"):
             query = ""
             if "?" in self.path:
-                from urllib.parse import parse_qs, urlsplit
-
                 params = parse_qs(urlsplit(self.path).query)
                 query = (params.get("q") or [""])[0]
             matches = VECTOR_MEMORY.search(query) if VECTOR_MEMORY and query else []
@@ -454,8 +571,6 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/archive/graph/search"):
             query = ""
             if "?" in self.path:
-                from urllib.parse import parse_qs, urlsplit
-
                 params = parse_qs(urlsplit(self.path).query)
                 query = (params.get("q") or [""])[0]
             matches = GRAPH_MEMORY.search(query) if GRAPH_MEMORY and query else {"nodes": [], "edges": []}
@@ -469,6 +584,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         write_json(self, 404, {"error": "Not found"})
 
     def do_POST(self):
+        if not require_auth(self):
+            return
+
         if self.path == "/v1/chat/completions":
             self.chat_completion()
             return
@@ -484,12 +602,15 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             focus_enabled = internal_flag(payload.pop("focus_enabled", True), default=True)
             vector_enabled = internal_flag(payload.pop("vector_enabled", focus_enabled), default=True)
             graph_enabled = internal_flag(payload.pop("graph_enabled", focus_enabled), default=True)
+            memory_namespace = safe_memory_namespace(payload.pop("memory_namespace", "default"))
             payload["messages"] = list(payload.get("messages", []))
+            memory_messages = sanitize_messages_for_memory(payload["messages"])
             magos_message = None
-            if focus_enabled and MAGOS is not None:
+            magos = focus_components(memory_namespace)["magos"]
+            if focus_enabled and magos is not None:
                 try:
-                    magos_message = MAGOS.prepare_request(
-                        payload["messages"],
+                    magos_message = magos.prepare_request(
+                        memory_messages,
                         model=payload.get("model"),
                         conversation_id=conversation_id(payload),
                         turn_id=turn_id,
@@ -504,6 +625,19 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 include_vector=vector_enabled,
                 include_graph=graph_enabled,
                 magos_message=magos_message,
+                query_messages=memory_messages,
+                memory_namespace=memory_namespace,
+            )
+            sanitized_payload = dict(payload)
+            sanitized_payload["messages"] = memory_messages
+            archive_prepared_messages = prepare_messages(
+                memory_messages,
+                include_focus=focus_enabled,
+                include_vector=vector_enabled,
+                include_graph=graph_enabled,
+                magos_message=magos_message,
+                query_messages=memory_messages,
+                memory_namespace=memory_namespace,
             )
 
             record = {
@@ -511,14 +645,15 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "created_at": created_at,
                 "source": "openai-chat-completions",
                 "conversation_id": conversation_id(payload),
+                "memory_namespace": memory_namespace,
                 "archive_enabled": archive_enabled,
                 "focus_enabled": focus_enabled,
                 "vector_enabled": vector_enabled,
                 "graph_enabled": graph_enabled,
                 "magos_enabled": bool(magos_message),
                 "model": payload.get("model"),
-                "request": payload,
-                "prepared_messages": prepared_payload["messages"],
+                "request": sanitized_payload,
+                "prepared_messages": archive_prepared_messages,
                 "status": "pending",
                 "http_status": None,
                 "response": None,
@@ -691,22 +826,17 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    global FOCUS_BOOKSHELF, LIBRARIAN, MAGOS, VECTOR_MEMORY, GRAPH_MEMORY
+    global FOCUS_BOOKSHELF, LIBRARIAN, MAGOS, VECTOR_MEMORY, GRAPH_MEMORY, FOCUS_COMPONENTS
     init_storage()
-    FOCUS_BOOKSHELF = FocusBookshelf(FOCUS_ROOT)
+    FOCUS_COMPONENTS = {}
     VECTOR_MEMORY = VectorMemory(VECTOR_ROOT)
     vector_backfilled = VECTOR_MEMORY.backfill_from_archive(SQLITE_PATH)
     GRAPH_MEMORY = GraphMemory(GRAPH_ROOT, proxy_json, SQLITE_PATH)
     graph_backfilled = GRAPH_MEMORY.backfill_from_archive()
-    LIBRARIAN = Librarian(
-        FOCUS_ROOT,
-        proxy_json,
-        wiki_root=WIKI_ROOT,
-        sqlite_path=SQLITE_PATH,
-        vector_memory=VECTOR_MEMORY,
-        graph_memory=GRAPH_MEMORY,
-    )
-    MAGOS = Magos(FOCUS_ROOT, WIKI_ROOT, proxy_json, vector_memory=VECTOR_MEMORY, graph_memory=GRAPH_MEMORY)
+    default_components = focus_components("default")
+    FOCUS_BOOKSHELF = default_components["bookshelf"]
+    LIBRARIAN = default_components["librarian"]
+    MAGOS = default_components["magos"]
     server = ThreadingHTTPServer((HOST, PORT), ArchiveHandler)
     print(f"ArchiveOfHeresy main started: http://{HOST}:{PORT}", flush=True)
     print(f"Upstream LLM: {LLM_BASE_URL}", flush=True)
