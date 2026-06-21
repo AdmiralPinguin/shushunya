@@ -58,7 +58,8 @@
         "action": "archive_memory_read",
         "kind": ["focus", "wiki"],
         "id": "string",
-        "title": "string"
+        "title": "string",
+        "max_chars": "integer"
       }
     },
     "archive_memory_propose": {

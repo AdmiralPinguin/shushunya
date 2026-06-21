@@ -124,8 +124,8 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 8. Читать память через Memory Gateway без доступа к файлам:
 {"action":"archive_memory_catalog"}
 {"action":"archive_memory_search","query":"что искать","limit":5}
-{"action":"archive_memory_read","kind":"focus","id":"active"}
-{"action":"archive_memory_read","kind":"wiki","id":"wiki-page-id"}
+{"action":"archive_memory_read","kind":"focus","id":"active","max_chars":12000}
+{"action":"archive_memory_read","kind":"wiki","id":"wiki-page-id","max_chars":12000}
 
 9. Предложить изменение памяти через Memory Gateway. Архивариус сам решит, применять ли его:
 {"action":"archive_memory_propose","target":"focus","importance":3,"proposal":"что нужно сохранить","evidence":"почему это факт"}
@@ -1206,20 +1206,33 @@ def archive_memory_search(config: AgentConfig, query: str, limit: int | None = N
     return payload
 
 
-def archive_memory_read(config: AgentConfig, kind: str, item_id: str | None = None, title: str | None = None) -> dict[str, Any]:
+def archive_memory_read(
+    config: AgentConfig,
+    kind: str,
+    item_id: str | None = None,
+    title: str | None = None,
+    max_chars: int | None = None,
+) -> dict[str, Any]:
     kind = str(kind or "").strip().lower()
+    try:
+        safe_max_chars = max(1000, min(int(max_chars or 12000), 50000))
+    except (TypeError, ValueError):
+        safe_max_chars = 12000
     if kind == "focus":
         target_id = str(item_id or "active").strip() or "active"
         payload = archive_tool_request(
             config,
             "GET",
-            f"/archive/memory/focus?namespace={quote(config.memory_namespace)}&id={quote(target_id)}&requester=shushunya-agent",
+            (
+                f"/archive/memory/focus?namespace={quote(config.memory_namespace)}"
+                f"&id={quote(target_id)}&max_chars={safe_max_chars}&requester=shushunya-agent"
+            ),
             timeout=30,
         )
         payload["ok"] = bool(payload.get("ok", True))
         return payload
     if kind == "wiki":
-        params = {"namespace": config.memory_namespace, "requester": "shushunya-agent"}
+        params = {"namespace": config.memory_namespace, "requester": "shushunya-agent", "max_chars": str(safe_max_chars)}
         if item_id:
             params["id"] = str(item_id)
         if title:
@@ -1479,7 +1492,13 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         elif action_type == "archive_memory_search":
             result = archive_memory_search(config, str(action.get("query", "")), action.get("limit"))
         elif action_type == "archive_memory_read":
-            result = archive_memory_read(config, str(action.get("kind", "")), action.get("id"), action.get("title"))
+            result = archive_memory_read(
+                config,
+                str(action.get("kind", "")),
+                action.get("id"),
+                action.get("title"),
+                action.get("max_chars"),
+            )
         elif action_type == "archive_memory_propose":
             result = archive_memory_propose(config, action)
         else:

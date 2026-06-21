@@ -274,6 +274,26 @@ def trim_memory_text(value, limit=1200):
     return value[:limit].rstrip() + "\n..."
 
 
+def parse_max_chars(value, default=12000, upper=50000):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1000, min(parsed, upper))
+
+
+def gateway_book_payload(content, max_chars):
+    content = str(content or "")
+    if len(content) <= max_chars:
+        return {"content": content, "content_chars": len(content), "truncated": False, "max_chars": max_chars}
+    return {
+        "content": content[:max_chars].rstrip() + "\n...",
+        "content_chars": len(content),
+        "truncated": True,
+        "max_chars": max_chars,
+    }
+
+
 def focus_summary_text(content):
     text = str(content or "").strip()
     if text.startswith("---"):
@@ -415,8 +435,8 @@ def memory_gateway_manifest():
         "read_endpoints": {
             "catalog": "GET /archive/memory/catalog?namespace=agent&requester=name",
             "search": "GET /archive/memory/search?namespace=agent&q=query&limit=5&requester=name",
-            "focus": "GET /archive/memory/focus?namespace=agent&id=active&requester=name",
-            "wiki": "GET /archive/memory/wiki?namespace=agent&id=page-id&requester=name",
+            "focus": "GET /archive/memory/focus?namespace=agent&id=active&max_chars=12000&requester=name",
+            "wiki": "GET /archive/memory/wiki?namespace=agent&id=page-id&max_chars=12000&requester=name",
             "events": "GET /archive/memory/events?namespace=agent&limit=20&component=memory_gateway&event_action=search",
         },
         "write_endpoints": {
@@ -1090,6 +1110,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             active = False
             requester = "unknown"
             create_namespace = False
+            max_chars = 12000
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
@@ -1097,6 +1118,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 active = focus_id in ("", "active")
                 requester = (params.get("requester") or ["unknown"])[0]
                 create_namespace = internal_flag((params.get("create") or [False])[0], default=False)
+                max_chars = parse_max_chars((params.get("max_chars") or [12000])[0])
             if not allow_gateway_namespace(self, namespace, create=create_namespace):
                 return
             bookshelf = focus_components(namespace)["bookshelf"]
@@ -1113,13 +1135,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 title=focus.get("title"),
                 active=focus.get("id") == index.get("active_id"),
             )
+            content_payload = gateway_book_payload(bookshelf.read_focus(focus), max_chars)
             write_json(
                 self,
                 200,
                 {
                     "memory_namespace": namespace,
                     "focus": focus,
-                    "content": bookshelf.read_focus(focus),
+                    **content_payload,
                 },
             )
             return
@@ -1130,6 +1153,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             title = ""
             requester = "unknown"
             create_namespace = False
+            max_chars = 12000
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
@@ -1137,6 +1161,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 title = (params.get("title") or [""])[0]
                 requester = (params.get("requester") or ["unknown"])[0]
                 create_namespace = internal_flag((params.get("create") or [False])[0], default=False)
+                max_chars = parse_max_chars((params.get("max_chars") or [12000])[0])
             if not allow_gateway_namespace(self, namespace, create=create_namespace):
                 return
             bookshelf = wiki_bookshelf_for_namespace(namespace)
@@ -1163,13 +1188,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 page_id=page.get("id"),
                 title=page.get("title"),
             )
+            content_payload = gateway_book_payload(bookshelf.read_page(page), max_chars)
             write_json(
                 self,
                 200,
                 {
                     "memory_namespace": namespace,
                     "page": page,
-                    "content": bookshelf.read_page(page),
+                    **content_payload,
                 },
             )
             return

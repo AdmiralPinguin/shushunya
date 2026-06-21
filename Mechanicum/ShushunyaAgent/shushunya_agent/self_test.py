@@ -125,10 +125,12 @@ def main() -> int:
     if memory_search.get("memory_namespace") != config.memory_namespace:
         raise AssertionError(f"unexpected memory namespace in memory search response: {memory_search}")
     print("[ok] archive memory search namespace")
-    focus_read = archive_memory_read(config, "focus", "active")
+    focus_read = archive_memory_read(config, "focus", "active", max_chars=1000)
     assert_ok("archive memory focus read tool", focus_read)
     if focus_read.get("memory_namespace") != config.memory_namespace:
         raise AssertionError(f"unexpected memory namespace in focus read response: {focus_read}")
+    if focus_read.get("max_chars") != 1000 or "content_chars" not in focus_read:
+        raise AssertionError(f"focus read did not include size metadata: {focus_read}")
     print("[ok] archive memory focus read namespace")
     missing_wiki = archive_memory_read(config, "wiki", title="__agent_self_test_missing__")
     if missing_wiki.get("ok") is not False or missing_wiki.get("http_status") != 404:
