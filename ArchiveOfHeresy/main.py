@@ -754,6 +754,26 @@ def write_memory_event(record, event):
             archive.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def write_gateway_event(memory_namespace, action, requester=None, **details):
+    namespace = safe_memory_namespace(memory_namespace)
+    requester = str(requester or "unknown").strip()[:80] or "unknown"
+    record = {
+        "created_at": now_iso(),
+        "turn_id": str(uuid.uuid4()),
+        "conversation_id": f"memory-gateway:{requester}",
+        "memory_namespace": namespace,
+    }
+    write_memory_event(
+        record,
+        {
+            "component": "memory_gateway",
+            "action": action,
+            "requester": requester,
+            **details,
+        },
+    )
+
+
 def recent_memory_events(limit=50, memory_namespace=None):
     limit = max(1, min(int(limit or 50), 500))
     events = []
@@ -909,20 +929,32 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
         if self.path.startswith("/archive/memory/catalog"):
             namespace = "default"
+            requester = "unknown"
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
-            write_json(self, 200, memory_catalog(namespace))
+                requester = (params.get("requester") or ["unknown"])[0]
+            payload = memory_catalog(namespace)
+            write_gateway_event(
+                namespace,
+                "catalog",
+                requester=requester,
+                focus_books=len(payload.get("focus", {}).get("books", [])),
+                wiki_pages=len(payload.get("wiki", {}).get("pages", [])),
+            )
+            write_json(self, 200, payload)
             return
 
         if self.path.startswith("/archive/memory/search"):
             namespace = "default"
             query = ""
             limit = 5
+            requester = "unknown"
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
                 query = (params.get("q") or [""])[0]
+                requester = (params.get("requester") or ["unknown"])[0]
                 try:
                     limit = int((params.get("limit") or ["5"])[0])
                 except (TypeError, ValueError):
@@ -930,24 +962,45 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             if not query.strip():
                 write_json(self, 400, {"error": "Missing required query parameter: q", "memory_namespace": namespace})
                 return
-            write_json(self, 200, memory_search(namespace, query, limit=limit))
+            payload = memory_search(namespace, query, limit=limit)
+            write_gateway_event(
+                namespace,
+                "search",
+                requester=requester,
+                query=trim_memory_text(query, 300),
+                focus_matches=len(payload.get("focus", [])),
+                wiki_matches=len(payload.get("wiki", [])),
+                vector_matches=len(payload.get("vector", [])),
+                graph_nodes=len(payload.get("graph", {}).get("nodes", [])),
+            )
+            write_json(self, 200, payload)
             return
 
         if self.path.startswith("/archive/memory/focus"):
             namespace = "default"
             focus_id = ""
             active = False
+            requester = "unknown"
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
                 focus_id = (params.get("id") or [""])[0]
                 active = focus_id in ("", "active")
+                requester = (params.get("requester") or ["unknown"])[0]
             bookshelf = focus_components(namespace)["bookshelf"]
             index = bookshelf.load_index()
             focus = find_focus(index, focus_id=focus_id, active=active)
             if not focus:
                 write_json(self, 404, {"error": "Focus not found", "memory_namespace": namespace, "id": focus_id or "active"})
                 return
+            write_gateway_event(
+                namespace,
+                "read_focus",
+                requester=requester,
+                focus_id=focus.get("id"),
+                title=focus.get("title"),
+                active=focus.get("id") == index.get("active_id"),
+            )
             write_json(
                 self,
                 200,
@@ -963,21 +1016,37 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             namespace = "default"
             page_id = ""
             title = ""
+            requester = "unknown"
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
                 page_id = (params.get("id") or [""])[0]
                 title = (params.get("title") or [""])[0]
+                requester = (params.get("requester") or ["unknown"])[0]
             bookshelf = wiki_bookshelf_for_namespace(namespace)
             index = bookshelf.load_index()
             page = bookshelf.find_page(index, page_id=page_id or None, title=title or None)
             if not page:
+                write_gateway_event(
+                    namespace,
+                    "read_wiki_miss",
+                    requester=requester,
+                    page_id=page_id,
+                    title=title,
+                )
                 write_json(
                     self,
                     404,
                     {"error": "Wiki page not found", "memory_namespace": namespace, "id": page_id, "title": title},
                 )
                 return
+            write_gateway_event(
+                namespace,
+                "read_wiki",
+                requester=requester,
+                page_id=page.get("id"),
+                title=page.get("title"),
+            )
             write_json(
                 self,
                 200,
@@ -1095,6 +1164,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             }
 
             maybe_write_archives(record)
+            write_gateway_event(
+                namespace,
+                "proposal_accepted",
+                requester=requester,
+                target=target,
+                importance=importance,
+                turn_id=turn_id,
+            )
             maybe_update_focus_memory(record)
             write_json(
                 self,

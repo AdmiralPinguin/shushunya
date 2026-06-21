@@ -1126,7 +1126,7 @@ def archive_search(config: AgentConfig, kind: str, query: str) -> dict[str, Any]
         payload = archive_request(
             config,
             "GET",
-            f"/archive/memory/focus?namespace={quote(config.memory_namespace)}&id=active",
+            f"/archive/memory/focus?namespace={quote(config.memory_namespace)}&id=active&requester=shushunya-agent",
             timeout=30,
         )
         payload.update(warning)
@@ -1156,7 +1156,7 @@ def archive_memory_catalog(config: AgentConfig) -> dict[str, Any]:
     payload = archive_request(
         config,
         "GET",
-        f"/archive/memory/catalog?namespace={quote(config.memory_namespace)}",
+        f"/archive/memory/catalog?namespace={quote(config.memory_namespace)}&requester=shushunya-agent",
         timeout=30,
     )
     payload["ok"] = True
@@ -1174,7 +1174,7 @@ def archive_memory_search(config: AgentConfig, query: str, limit: int | None = N
     payload = archive_request(
         config,
         "GET",
-        f"/archive/memory/search?namespace={quote(config.memory_namespace)}&q={quote(query)}&limit={safe_limit}",
+        f"/archive/memory/search?namespace={quote(config.memory_namespace)}&q={quote(query)}&limit={safe_limit}&requester=shushunya-agent",
         timeout=30,
     )
     payload["ok"] = bool(payload.get("ok", True))
@@ -1188,13 +1188,13 @@ def archive_memory_read(config: AgentConfig, kind: str, item_id: str | None = No
         payload = archive_request(
             config,
             "GET",
-            f"/archive/memory/focus?namespace={quote(config.memory_namespace)}&id={quote(target_id)}",
+            f"/archive/memory/focus?namespace={quote(config.memory_namespace)}&id={quote(target_id)}&requester=shushunya-agent",
             timeout=30,
         )
         payload["ok"] = True
         return payload
     if kind == "wiki":
-        params = {"namespace": config.memory_namespace}
+        params = {"namespace": config.memory_namespace, "requester": "shushunya-agent"}
         if item_id:
             params["id"] = str(item_id)
         if title:
