@@ -1746,14 +1746,14 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         try:
             action = parse_action(raw)
         except Exception as exc:
-            emit(event_sink, {"type": "warning", "step": step, "message": f"модель вернула невалидный JSON, пробую repair: {exc}"})
+            emit(event_sink, {"type": "warning", "code": "json_parse_error", "step": step, "message": f"модель вернула невалидный JSON, пробую repair: {exc}"})
             write_task_journal(config, "json_parse_error", {"step": step, "error": str(exc), "raw": truncate(raw, 4000)})
             try:
                 action = repair_action_json(config, raw, exc)
-                emit(event_sink, {"type": "warning", "step": step, "message": "JSON восстановлен repair-проходом"})
+                emit(event_sink, {"type": "warning", "code": "json_repaired", "step": step, "message": "JSON восстановлен repair-проходом"})
                 write_task_journal(config, "json_repaired", {"step": step, "action": action})
             except Exception as repair_exc:
-                emit(event_sink, {"type": "warning", "step": step, "message": f"repair не помог: {repair_exc}"})
+                emit(event_sink, {"type": "warning", "code": "json_repair_failed", "step": step, "message": f"repair не помог: {repair_exc}"})
                 write_task_journal(config, "json_repair_failed", {"step": step, "error": str(repair_exc)})
                 messages.append({"role": "assistant", "content": raw})
                 messages.append(
@@ -1767,7 +1767,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         action_type = str(action.get("action", "")).strip().lower()
         validation = validate_action(action)
         if not validation.get("ok"):
-            emit(event_sink, {"type": "warning", "step": step, "message": "supervisor отклонил действие: " + validation.get("error", "validation error")})
+            emit(event_sink, {"type": "warning", "code": "validation_error", "step": step, "message": "supervisor отклонил действие: " + validation.get("error", "validation error")})
             messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
             messages.append(
                 {
@@ -1862,6 +1862,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             result = {"ok": False, "error": str(exc), "exception": exc.__class__.__name__}
 
         action_duration_sec = round(time.time() - action_started, 3)
+        event_extra: dict[str, Any] = {}
+        if isinstance(result, dict):
+            if action_type == "web_search":
+                event_extra["source"] = result.get("source") or result.get("provider")
+            if "timed out" in str(result.get("error", "")).lower():
+                event_extra["timeout"] = True
         emit(
             event_sink,
             {
@@ -1871,6 +1877,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "ok": bool(result.get("ok", False)) if isinstance(result, dict) else False,
                 "message": result_summary(action_type, result if isinstance(result, dict) else {"error": str(result)}),
                 "duration_sec": action_duration_sec,
+                **event_extra,
             },
         )
         write_task_journal(

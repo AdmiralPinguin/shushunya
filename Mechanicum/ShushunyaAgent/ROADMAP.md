@@ -27,6 +27,8 @@
 - Technical output mode for automation.
 - `/run` serialization in the Agent API with process-local and runtime file locks.
 - `/state` runtime endpoint for UI/ops checks.
+- Process-local quality metrics in `/state` for runs, steps, JSON repair,
+  validation rejects, tool failures, timeouts, cancels, and web search sources.
 - Task journals and compact `resume_task_id` continuation context.
 - Cooperative cancellation through `POST /cancel`.
 - Bounded run queue with `SHUSHUNYA_AGENT_MAX_QUEUE`.

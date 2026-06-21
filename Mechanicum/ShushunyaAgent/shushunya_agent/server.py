@@ -42,6 +42,20 @@ RUN_STATE: dict[str, Any] = {
     "last_finished_at": 0.0,
     "last_duration_sec": 0.0,
 }
+RUN_METRICS: dict[str, Any] = {
+    "runs_started": 0,
+    "runs_completed": 0,
+    "runs_failed": 0,
+    "runs_cancelled": 0,
+    "json_parse_errors": 0,
+    "json_repairs": 0,
+    "json_repair_failures": 0,
+    "validation_rejects": 0,
+    "tool_failures": 0,
+    "timeouts": 0,
+    "web_search_sources": {},
+    "total_steps": 0,
+}
 REVISION_CACHE = ""
 
 
@@ -140,6 +154,10 @@ def runtime_state() -> dict[str, Any]:
     with STATE_LOCK:
         payload = dict(RUN_STATE)
         payload["cancelled_task_count"] = len(CANCELLED_TASK_IDS)
+        metrics = json.loads(json.dumps(RUN_METRICS))
+        finished_runs = int(metrics.get("runs_completed", 0)) + int(metrics.get("runs_failed", 0))
+        metrics["average_steps_per_finished_run"] = round(int(metrics.get("total_steps", 0)) / finished_runs, 3) if finished_runs else 0.0
+        payload["metrics"] = metrics
     now = time.time()
     if payload.get("busy") and payload.get("current_task_started_at"):
         payload["current_task_duration_sec"] = round(now - float(payload["current_task_started_at"]), 3)
@@ -152,6 +170,46 @@ def runtime_state() -> dict[str, Any]:
     payload["started_at"] = SERVICE_STARTED_AT
     payload["uptime_sec"] = round(now - SERVICE_STARTED_AT, 3)
     return payload
+
+
+def record_run_started() -> None:
+    with STATE_LOCK:
+        RUN_METRICS["runs_started"] = int(RUN_METRICS.get("runs_started", 0)) + 1
+
+
+def record_run_finished(code: int) -> None:
+    with STATE_LOCK:
+        if code == 0:
+            RUN_METRICS["runs_completed"] = int(RUN_METRICS.get("runs_completed", 0)) + 1
+        else:
+            RUN_METRICS["runs_failed"] = int(RUN_METRICS.get("runs_failed", 0)) + 1
+        if code == 2:
+            RUN_METRICS["runs_cancelled"] = int(RUN_METRICS.get("runs_cancelled", 0)) + 1
+
+
+def collect_agent_event(event: dict[str, Any]) -> None:
+    event_type = str(event.get("type") or "")
+    code = str(event.get("code") or "")
+    with STATE_LOCK:
+        if event_type == "step":
+            RUN_METRICS["total_steps"] = int(RUN_METRICS.get("total_steps", 0)) + 1
+        if code == "json_parse_error":
+            RUN_METRICS["json_parse_errors"] = int(RUN_METRICS.get("json_parse_errors", 0)) + 1
+        elif code == "json_repaired":
+            RUN_METRICS["json_repairs"] = int(RUN_METRICS.get("json_repairs", 0)) + 1
+        elif code == "json_repair_failed":
+            RUN_METRICS["json_repair_failures"] = int(RUN_METRICS.get("json_repair_failures", 0)) + 1
+        elif code == "validation_error":
+            RUN_METRICS["validation_rejects"] = int(RUN_METRICS.get("validation_rejects", 0)) + 1
+        if event_type == "tool_result":
+            if event.get("ok") is False:
+                RUN_METRICS["tool_failures"] = int(RUN_METRICS.get("tool_failures", 0)) + 1
+            if event.get("timeout") is True:
+                RUN_METRICS["timeouts"] = int(RUN_METRICS.get("timeouts", 0)) + 1
+            if event.get("action") == "web_search" and event.get("source"):
+                sources = RUN_METRICS.setdefault("web_search_sources", {})
+                source = str(event.get("source"))
+                sources[source] = int(sources.get(source, 0)) + 1
 
 
 def is_task_cancelled(task_id: str) -> bool:
@@ -366,6 +424,7 @@ class AgentHandler(BaseHTTPRequestHandler):
 
             stdout = io.StringIO()
             stderr = io.StringIO()
+            code = 1
             queue_error = try_enqueue_run()
             if queue_error is not None:
                 queue_error["state"] = runtime_state()
@@ -377,12 +436,13 @@ class AgentHandler(BaseHTTPRequestHandler):
                     RUN_STATE["busy"] = True
                     RUN_STATE["current_task_id"] = config.task_id
                     RUN_STATE["current_task_started_at"] = time.time()
+                record_run_started()
                 RUN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
                 with RUN_LOCK_FILE.open("w", encoding="utf-8") as lock_fh:
                     fcntl.flock(lock_fh, fcntl.LOCK_EX)
                     try:
                         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                            code = run_agent(task, config)
+                            code = run_agent(task, config, event_sink=collect_agent_event)
                     finally:
                         fcntl.flock(lock_fh, fcntl.LOCK_UN)
                         with STATE_LOCK:
@@ -396,6 +456,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                             RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
                             RUN_STATE["current_task_id"] = ""
                             RUN_STATE["current_task_started_at"] = 0.0
+                        record_run_finished(code)
                         clear_task_cancelled(config.task_id)
 
             text = stdout.getvalue().strip()
@@ -453,6 +514,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                     RUN_STATE["busy"] = True
                     RUN_STATE["current_task_id"] = config.task_id
                     RUN_STATE["current_task_started_at"] = time.time()
+                record_run_started()
                 RUN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
                 with RUN_LOCK_FILE.open("w", encoding="utf-8") as lock_fh:
                     fcntl.flock(lock_fh, fcntl.LOCK_EX)
@@ -464,7 +526,11 @@ class AgentHandler(BaseHTTPRequestHandler):
                         def run_worker() -> None:
                             try:
                                 with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                                    code_box["code"] = run_agent(task, config, event_sink=events.put)
+                                    def stream_event_sink(event: dict[str, Any]) -> None:
+                                        collect_agent_event(event)
+                                        events.put(event)
+
+                                    code_box["code"] = run_agent(task, config, event_sink=stream_event_sink)
                             except Exception as exc:
                                 code_box["code"] = 1
                                 events.put({"type": "error", "ok": False, "message": str(exc)})
@@ -517,6 +583,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                             RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
                             RUN_STATE["current_task_id"] = ""
                             RUN_STATE["current_task_started_at"] = 0.0
+                        record_run_finished(code)
                         clear_task_cancelled(config.task_id)
 
             if code != 0:

@@ -342,6 +342,40 @@ def main() -> int:
     if state.get("uptime_sec", -1) < 0 or state.get("started_at", 0) <= 0:
         raise AssertionError(f"runtime state missing uptime: {state}")
     print("[ok] runtime state payload")
+    old_metrics = json.loads(json.dumps(server.RUN_METRICS))
+    try:
+        server.record_run_started()
+        server.collect_agent_event({"type": "step"})
+        server.collect_agent_event({"type": "warning", "code": "json_parse_error"})
+        server.collect_agent_event({"type": "warning", "code": "json_repaired"})
+        server.collect_agent_event({"type": "warning", "code": "validation_error"})
+        server.collect_agent_event({"type": "tool_result", "action": "web_search", "ok": True, "source": "searxng"})
+        server.collect_agent_event({"type": "tool_result", "action": "python", "ok": False, "timeout": True})
+        server.record_run_finished(2)
+        metrics = server.runtime_state().get("metrics") or {}
+        if metrics.get("runs_started") != old_metrics.get("runs_started", 0) + 1:
+            raise AssertionError(f"run start metric failed: {metrics}")
+        if metrics.get("runs_failed") != old_metrics.get("runs_failed", 0) + 1:
+            raise AssertionError(f"run failure metric failed: {metrics}")
+        if metrics.get("runs_cancelled") != old_metrics.get("runs_cancelled", 0) + 1:
+            raise AssertionError(f"cancel metric failed: {metrics}")
+        if metrics.get("json_parse_errors") != old_metrics.get("json_parse_errors", 0) + 1:
+            raise AssertionError(f"json parse metric failed: {metrics}")
+        if metrics.get("json_repairs") != old_metrics.get("json_repairs", 0) + 1:
+            raise AssertionError(f"json repair metric failed: {metrics}")
+        if metrics.get("validation_rejects") != old_metrics.get("validation_rejects", 0) + 1:
+            raise AssertionError(f"validation metric failed: {metrics}")
+        if metrics.get("tool_failures") != old_metrics.get("tool_failures", 0) + 1:
+            raise AssertionError(f"tool failure metric failed: {metrics}")
+        if metrics.get("timeouts") != old_metrics.get("timeouts", 0) + 1:
+            raise AssertionError(f"timeout metric failed: {metrics}")
+        if (metrics.get("web_search_sources") or {}).get("searxng") != (old_metrics.get("web_search_sources") or {}).get("searxng", 0) + 1:
+            raise AssertionError(f"web source metric failed: {metrics}")
+    finally:
+        with server.STATE_LOCK:
+            server.RUN_METRICS.clear()
+            server.RUN_METRICS.update(old_metrics)
+    print("[ok] runtime metrics payload")
     if server.STREAM_HEARTBEAT_SEC < 5.0:
         raise AssertionError(f"stream heartbeat interval is unsafe: {server.STREAM_HEARTBEAT_SEC}")
     print("[ok] stream heartbeat interval")

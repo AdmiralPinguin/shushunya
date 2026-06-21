@@ -78,6 +78,9 @@ Last verified: 2026-06-21 22:46 KST.
 - Resume context is compacted before entering the model prompt.
 - `GET /state` reports runner busy/queue/current/last task state.
 - `GET /state` and `/health` include Agent API uptime.
+- `GET /state` includes process-local quality counters for runs, steps, JSON
+  repair, validation rejects, tool failures, timeouts, cancels, and web search
+  sources.
 - `wait_for_slot=false` can fail fast with `409 agent busy` instead of waiting
   behind another active or queued run.
 - Waiting runs are bounded by `SHUSHUNYA_AGENT_MAX_QUEUE`; overflow returns

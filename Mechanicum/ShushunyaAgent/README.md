@@ -104,7 +104,9 @@ curl -sS http://127.0.0.1:8095/state
 
 `/state` reports whether the serialized runner is busy, queued request count,
 current task id, last completed task id, git revision, API uptime, and the
-request size limit.
+request size limit. It also includes process-local quality counters such as run
+completion/failure/cancel counts, total and average steps, JSON repair counts,
+schema validation rejects, tool failures, timeout count, and web search sources.
 `/health` is intentionally minimal by default and reports only the agent service
 status, git revision, plus Archive status. Use `/health?detail=1` for the full
 Archive health payload only when `SHUSHUNYA_AGENT_API_KEY` is configured and the
