@@ -5,7 +5,10 @@
 - Model loop through `ArchiveOfHeresy`.
 - No persistent runner-owned memory.
 - Explicit Archive memory tools: `archive_status`, `archive_search`,
-  `archive_memory_events`.
+  `archive_memory_catalog`, `archive_memory_search`, `archive_memory_read`,
+  `archive_memory_propose`, and filtered `archive_memory_events`.
+- Archive memory tools use the controlled Memory Gateway and fail soft on
+  Archive HTTP errors.
 - Automatic Archive memory for agent runs in the `agent` namespace.
 - Isolated sandbox execution through `bubblewrap`.
 - Default sandbox network isolation.

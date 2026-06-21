@@ -1,6 +1,6 @@
 # ShushunyaAgent Status
 
-Last verified: 2026-06-21 17:24 KST.
+Last verified: 2026-06-21 18:08 KST.
 
 ## Running Services
 
@@ -27,7 +27,11 @@ Last verified: 2026-06-21 17:24 KST.
 - Default search providers are `searxng,marginalia,wikipedia,brave`.
 - Brave is an optional fallback only and is skipped unless `brave` is present in
   `SHUSHUNYA_AGENT_SEARCH_PROVIDERS`.
-- `archive_memory_events` is available as an agent diagnostic tool.
+- Archive Memory Gateway tools are available: `archive_memory_catalog`,
+  `archive_memory_search`, `archive_memory_read`, `archive_memory_propose`, and
+  filtered `archive_memory_events`.
+- Archive memory tools are fail-soft: HTTP 400/404 responses become tool results
+  with `ok=false`.
 
 ## Local SearXNG
 

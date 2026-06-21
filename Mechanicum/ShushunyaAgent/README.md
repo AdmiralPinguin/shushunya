@@ -145,7 +145,12 @@ For an interactive prompt:
   ArchiveOfHeresy memory handling in the isolated `agent` memory namespace.
   Tool results are included in the following model step, so Magos and the
   Librarian can account for the whole agent loop. The agent can also request
-  memory explicitly with the `archive_search` action.
+  memory explicitly with the `archive_memory_catalog`, `archive_memory_search`,
+  `archive_memory_read`, `archive_memory_events`, and legacy `archive_search`
+  actions.
+- Agent memory reads go through the ArchiveOfHeresy Memory Gateway instead of
+  direct file access. The agent can request changes only with
+  `archive_memory_propose`; the Librarian decides what to apply.
 - Structured file writes enforce the configured `500G` soft limit. Shell and
   Python tools still require hard filesystem quota for kernel-level enforcement.
 - `read_file` reads bounded slices with `max_bytes` and `offset`; it no longer

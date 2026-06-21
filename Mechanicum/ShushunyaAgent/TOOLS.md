@@ -86,6 +86,7 @@ Inspect recent memory maintenance events for the current agent namespace:
 
 ```json
 {"action":"archive_memory_events","limit":20}
+{"action":"archive_memory_events","component":"memory_gateway","event_action":"search","limit":20}
 ```
 
 Search or inspect memory explicitly:
@@ -94,10 +95,28 @@ Search or inspect memory explicitly:
 {"action":"archive_search","kind":"focus","query":"active"}
 {"action":"archive_search","kind":"vector","query":"search terms"}
 {"action":"archive_search","kind":"graph","query":"search terms"}
+{"action":"archive_memory_catalog"}
+{"action":"archive_memory_search","query":"search terms","limit":5}
+{"action":"archive_memory_read","kind":"focus","id":"active","max_chars":12000}
+{"action":"archive_memory_read","kind":"wiki","title":"page title","max_chars":12000}
 ```
 
 The runner has no long-term memory. It can ask `ArchiveOfHeresy` for memory
-through these explicit actions. Normal agent runs also pass every model step
-through `ArchiveOfHeresy` with `memory_namespace=agent`, so the agent has a
-separate focus bookshelf with the same 10-file limit as the default chat focus
-bookshelf, plus namespace-scoped wiki/vector/graph memory.
+through these explicit actions. Prefer the `archive_memory_*` gateway actions
+over direct layer-specific search when possible: they go through the controlled
+ArchiveOfHeresy Memory Gateway, audit read operations, and return fail-soft tool
+results on HTTP 400/404 instead of crashing the agent loop.
+
+To request a memory change, submit a proposal:
+
+```json
+{"action":"archive_memory_propose","target":"focus","importance":3,"proposal":"fact to preserve","evidence":"why this is known"}
+```
+
+The proposal is archived and reviewed by the Librarian. The agent never writes
+memory files directly.
+
+Normal agent runs also pass every model step through `ArchiveOfHeresy` with
+`memory_namespace=agent`, so the agent has a separate focus bookshelf with the
+same 10-file limit as the default chat focus bookshelf, plus namespace-scoped
+wiki/vector/graph memory.
