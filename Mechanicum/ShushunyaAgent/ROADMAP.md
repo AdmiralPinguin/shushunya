@@ -15,6 +15,7 @@
 - Default sandbox network isolation.
 - Structured file tools.
 - Structured Python tool.
+- Sandbox subprocess timeout kills the spawned process group.
 - Optional shell fallback with supervisor denylist.
 - SearXNG-first web search and guarded public `web_fetch`.
 - Stream heartbeat events for long model/tool calls.

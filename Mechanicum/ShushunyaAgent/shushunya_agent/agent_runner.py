@@ -940,31 +940,37 @@ def run_sandbox_argv(
     output_limit = int(max_output_chars or config.max_tool_output_chars)
     argv = sandbox_launcher_argv(config, inner_argv)
     started = time.time()
+    process = subprocess.Popen(
+        argv,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
     try:
-        completed = subprocess.run(
-            argv,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, 9)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = process.communicate()
         return {
             "ok": False,
             "error": "command timed out",
             "timeout_sec": timeout,
-            "stdout": truncate(exc.stdout or "", output_limit),
-            "stderr": truncate(exc.stderr or "", output_limit),
+            "killed_process_group": True,
+            "stdout": truncate(stdout or "", output_limit),
+            "stderr": truncate(stderr or "", output_limit),
         }
     return {
-        "ok": completed.returncode == 0,
-        "returncode": completed.returncode,
+        "ok": process.returncode == 0,
+        "returncode": process.returncode,
         "sandbox_mode": config.sandbox_mode,
         "argv": inner_argv,
         "duration_sec": round(time.time() - started, 3),
-        "stdout": truncate(completed.stdout, output_limit),
-        "stderr": truncate(completed.stderr, output_limit),
+        "stdout": truncate(stdout, output_limit),
+        "stderr": truncate(stderr, output_limit),
     }
 
 

@@ -39,6 +39,8 @@ Last verified: 2026-06-21 22:46 KST.
 - `read_file` reports binary-slice metadata with `is_binary` and `encoding`.
 - `replace_in_file` works.
 - Python tool works inside sandbox.
+- Sandbox subprocess tool timeouts kill the spawned process group and report
+  `killed_process_group=true`.
 - `shell_enabled=false` blocks shell execution.
 - HTTP shell is locked by default: payload `shell_enabled=true` is ignored unless
   API key auth or an explicit env override allows it.

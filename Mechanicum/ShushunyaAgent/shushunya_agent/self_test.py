@@ -745,6 +745,10 @@ def main() -> int:
     if python_result.get("stdout", "").strip() != "15":
         raise AssertionError(f"unexpected python output: {python_result}")
     print("[ok] python output")
+    timeout_result = python_tool(config, {"action": "python", "code": "import time; time.sleep(5)", "timeout": 1})
+    if timeout_result.get("ok") is not False or timeout_result.get("error") != "command timed out" or timeout_result.get("killed_process_group") is not True:
+        raise AssertionError(f"python timeout did not kill process group: {timeout_result}")
+    print("[ok] python timeout process group kill")
 
     network_result = python_tool(
         config,

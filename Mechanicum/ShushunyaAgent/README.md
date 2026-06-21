@@ -243,6 +243,8 @@ matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
   context budgets and then retries with Archive memory injection disabled.
 - Tool exceptions are converted into `ok=false` tool results, so the agent can
   recover or explain the failure instead of crashing the whole run.
+- Sandbox subprocess tool timeouts kill the whole spawned process group and
+  return `killed_process_group=true`.
 - Long-term memory stays in `ArchiveOfHeresy`; this runner stores no persistent
   memory of its own.
 - Task journals are operational traces, not long-term memory. They are used for
