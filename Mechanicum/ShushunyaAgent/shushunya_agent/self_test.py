@@ -169,6 +169,29 @@ def main() -> int:
         raise AssertionError("HTTP shell should be disabled without API key or explicit env override")
     print("[ok] HTTP shell default locked")
 
+    class FakeHeaders:
+        def __init__(self, authorization: str = "") -> None:
+            self.authorization = authorization
+
+        def get(self, key: str, default: str = "") -> str:
+            return self.authorization if key == "Authorization" else default
+
+    class FakeHandler:
+        def __init__(self, authorization: str = "") -> None:
+            self.headers = FakeHeaders(authorization)
+
+    old_api_key = server.API_KEY
+    try:
+        server.API_KEY = ""
+        if server.health_detail_allowed(FakeHandler()):
+            raise AssertionError("health detail should require configured API key")
+        server.API_KEY = "secret"
+        if not server.health_detail_allowed(FakeHandler("Bearer secret")):
+            raise AssertionError("health detail should allow valid bearer key")
+    finally:
+        server.API_KEY = old_api_key
+    print("[ok] health detail requires API key")
+
     compact_resume = server.compact_resume_events(
         [{"type": "tool_result", "result": {"content": "r" * 10000}, "index": index} for index in range(30)],
         max_chars=5000,

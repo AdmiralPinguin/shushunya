@@ -18,8 +18,8 @@ Last verified: 2026-06-21 18:08 KST.
   Agent API, and self-test.
 - `scripts/start-agent-tunnel.sh` fails fast if the configured `cloudflared`
   executable is missing.
-- Agent API `/health` is minimal by default; full Archive details require
-  `/health?detail=1`.
+- Agent API `/health` is minimal by default; full Archive details through
+  `/health?detail=1` require a configured API key and bearer auth.
 - Archive health reports `default` and `agent` memory namespaces.
 - Agent namespace memory smoke run completed and wrote focus/vector/event data.
 - Sandbox hides `/media` and `/root`.

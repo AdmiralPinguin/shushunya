@@ -97,6 +97,10 @@ def authorized(handler: BaseHTTPRequestHandler) -> bool:
     return handler.headers.get("Authorization", "").strip() == f"Bearer {API_KEY}"
 
 
+def health_detail_allowed(handler: BaseHTTPRequestHandler) -> bool:
+    return bool(API_KEY) and authorized(handler)
+
+
 def bool_field(payload: dict[str, Any], key: str, default: bool = False) -> bool:
     value = payload.get(key, default)
     if isinstance(value, bool):
@@ -257,7 +261,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             try:
                 archive = archive_request(config, "GET", "/health", timeout=5)
                 detail = (parse_qs(parsed_path.query).get("detail") or ["0"])[0] in {"1", "true", "yes"}
-                if detail and not authorized(self):
+                if detail and not health_detail_allowed(self):
                     write_json(self, 401, {"error": "unauthorized"})
                     return
                 payload = {
