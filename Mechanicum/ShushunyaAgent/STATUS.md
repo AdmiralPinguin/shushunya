@@ -59,6 +59,8 @@ Last verified: 2026-06-21 18:08 KST.
   `cancelled=true`.
 - `/run-stream` emits `heartbeat` events during long in-flight model/tool calls
   so mobile and tunnel clients can keep the connection observable.
+- `web_fetch` detects binary responses and returns metadata without decoded
+  binary text.
 - Invalid JSON request bodies return `400`; oversized request bodies return
   `413` before the agent loop starts.
 - Transient model HTTP errors `429`, `502`, `503`, and `504` are retried before

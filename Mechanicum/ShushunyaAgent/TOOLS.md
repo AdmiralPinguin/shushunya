@@ -66,6 +66,7 @@ Web tools run through the supervisor, not through sandbox shell. They allow only
 public `http` and `https` URLs and reject localhost, private, loopback,
 link-local, multicast, reserved, and unspecified IP targets. `web_fetch` returns
 status, final URL, content type, title, extracted text, and truncation status.
+Binary responses return `is_binary=true` and byte metadata without decoded text.
 `web_search` uses configured providers in order. The default is
 SearXNG (`SHUSHUNYA_AGENT_SEARXNG_URL`), Marginalia, Wikipedia, then Brave
 Search API (`SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY`) as an optional fallback.

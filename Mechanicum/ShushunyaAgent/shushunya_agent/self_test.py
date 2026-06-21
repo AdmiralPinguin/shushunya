@@ -88,6 +88,11 @@ def main() -> int:
         raise AssertionError("web_fetch allowed localhost")
     except ValueError:
         print("[ok] web_fetch blocks localhost")
+    if not agent_runner.is_textual_content("application/json", b'{"ok":true}'):
+        raise AssertionError("JSON content was not detected as textual")
+    if agent_runner.is_textual_content("image/png", b"\x89PNG\r\n\x1a\n\x00\x00"):
+        raise AssertionError("binary content was detected as textual")
+    print("[ok] web_fetch binary detection")
 
     old_provider_env = agent_runner.SEARCH_PROVIDERS
     old_brave_key = agent_runner.BRAVE_SEARCH_API_KEY

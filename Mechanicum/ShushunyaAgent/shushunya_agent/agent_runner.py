@@ -515,6 +515,20 @@ def read_limited_response(response: Any, max_bytes: int) -> tuple[bytes, bool]:
     return data[:max_bytes], len(data) > max_bytes
 
 
+def is_textual_content(content_type: str, data: bytes) -> bool:
+    lowered = content_type.lower()
+    textual_markers = ("text/", "json", "xml", "html", "javascript", "x-www-form-urlencoded")
+    if any(marker in lowered for marker in textual_markers):
+        return True
+    if b"\x00" in data[:4096]:
+        return False
+    sample = data[:4096]
+    if not sample:
+        return True
+    control = sum(1 for byte in sample if byte < 32 and byte not in {9, 10, 13})
+    return control / max(1, len(sample)) < 0.05
+
+
 def validate_public_url(raw_url: str) -> str:
     parsed = urlparse(str(raw_url).strip())
     if parsed.scheme not in {"http", "https"}:
@@ -784,6 +798,18 @@ def web_fetch(config: AgentConfig, url: str, max_bytes: int | None = None) -> di
         validate_public_url(final_url)
         data, truncated = read_limited_response(response, max_bytes)
         content_type = response.headers.get("Content-Type", "")
+        if not is_textual_content(content_type, data):
+            return {
+                "ok": True,
+                "url": final_url,
+                "status": getattr(response, "status", 200),
+                "content_type": content_type,
+                "truncated": truncated,
+                "bytes_read": len(data),
+                "is_binary": True,
+                "text": "",
+                "note": "binary response was not decoded into model context",
+            }
         charset = response.headers.get_content_charset() or "utf-8"
         text = data.decode(charset, errors="replace")
         title = ""
@@ -798,6 +824,8 @@ def web_fetch(config: AgentConfig, url: str, max_bytes: int | None = None) -> di
             "content_type": content_type,
             "title": title,
             "truncated": truncated,
+            "bytes_read": len(data),
+            "is_binary": False,
             "text": truncate(text.strip(), config.max_tool_output_chars),
         }
 

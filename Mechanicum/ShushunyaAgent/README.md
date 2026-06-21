@@ -263,6 +263,8 @@ matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
   localhost, private, loopback, link-local, multicast, reserved, or unspecified
   addresses. The local SearXNG localhost exception applies only inside the
   configured `web_search_searxng` provider.
+- `web_fetch` keeps binary responses out of model context and returns
+  `is_binary=true` with byte metadata instead of decoded garbage.
 
 Disable automatic memory injection only for debugging:
 
