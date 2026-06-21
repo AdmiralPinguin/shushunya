@@ -27,6 +27,8 @@
 - `/state` runtime endpoint for UI/ops checks.
 - Task journals and compact `resume_task_id` continuation context.
 - Cooperative cancellation through `POST /cancel`.
+- Bounded run queue with `SHUSHUNYA_AGENT_MAX_QUEUE`.
+- Privileged task journal and resume access behind API-key bearer auth.
 - Self-test covering Archive, sandbox paths, file tools, Python, and network isolation.
 - Android agent mode calls `/run-stream`, uses the `agent` memory namespace, and
   includes state and cancel controls.
@@ -39,6 +41,7 @@
 - Add AppArmor enforcement for the sandbox launcher.
 - Add an approval gate for risky tools before enabling broader shell access.
 - Add a service wrapper for long-running agent sessions.
-- If binding Agent API outside localhost, require `SHUSHUNYA_AGENT_API_KEY`.
+- Add mobile support for bearer auth, then require `SHUSHUNYA_AGENT_API_KEY`
+  before exposing broader public agent controls.
 - Keep monitoring stale Archive focus files as namespaces accumulate.
-- Add richer queue controls for long-running phone-driven tasks.
+- Add richer visible queue controls for long-running phone-driven tasks.
