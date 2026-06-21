@@ -206,7 +206,8 @@
         "query": "string",
         "case_sensitive": "boolean",
         "max_matches": "integer",
-        "max_bytes_per_file": "integer"
+        "max_bytes_per_file": "integer",
+        "returns": "matches plus scanned_files, truncated_files, truncated"
       }
     }
   },

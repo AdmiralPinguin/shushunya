@@ -44,6 +44,7 @@ Last verified: 2026-06-21 18:08 KST.
 - Stream `tool_result` and `final` events include `duration_sec`.
 - `list_files` and `find_files` support `limit`/`offset` pagination for large
   directories.
+- `search_text` reports scanned and per-file-truncated file counts.
 - Agent runs have a total runtime limit through `max_runtime_sec` /
   `SHUSHUNYA_AGENT_MAX_RUNTIME_SEC`.
 - `GET /task-journal?task_id=...` can inspect recent journal events, and

@@ -43,6 +43,8 @@ when more content remains, plus `is_binary` and `encoding` metadata for the
 returned slice.
 For large directories, `list_files` and `find_files` accept `limit` and `offset`
 and return `total_count` plus `next_offset` for pagination.
+`search_text` returns `scanned_files` and `truncated_files` so callers can judge
+whether `max_bytes_per_file` was enough.
 `file_info` can compute a bounded SHA-256 digest with `sha256=true`; this is
 useful for identity/change checks without reading the file content into the
 model context.

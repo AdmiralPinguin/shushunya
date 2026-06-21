@@ -495,6 +495,12 @@ def main() -> int:
         raise AssertionError(f"find_files pagination failed: {paged_find}")
     print("[ok] file pagination")
 
+    search_result = file_tool(config, {"action": "search_text", "path": "/work/self-test", "query": "hello-updated", "max_matches": 5})
+    assert_ok("search_text metadata", search_result)
+    if search_result.get("scanned_files", 0) < 1 or "truncated_files" not in search_result:
+        raise AssertionError(f"search_text metadata missing: {search_result}")
+    print("[ok] search_text scan counters")
+
     python_result = python_tool(config, {"action": "python", "code": "print(sum(range(1, 6)))", "timeout": 30})
     assert_ok("python", python_result)
     if python_result.get("stdout", "").strip() != "15":

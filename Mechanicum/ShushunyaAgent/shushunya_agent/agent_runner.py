@@ -1219,12 +1219,18 @@ try:
                     break
         needle = query if case_sensitive else query.lower()
         matches = []
+        scanned_files = 0
+        truncated_files = 0
         for file_path in files:
             try:
+                size = file_path.stat().st_size
                 with file_path.open("rb") as fh:
                     data = fh.read(max_bytes_per_file)
             except OSError:
                 continue
+            scanned_files += 1
+            if size > len(data):
+                truncated_files += 1
             text = data.decode("utf-8", errors="ignore")
             haystack = text if case_sensitive else text.lower()
             if needle not in haystack:
@@ -1234,9 +1240,9 @@ try:
                 if needle in checked:
                     matches.append({"path": str(file_path), "line": line_no, "text": line[:500]})
                     if len(matches) >= max_matches:
-                        respond({"ok": True, "path": str(path), "query": query, "matches": matches, "truncated": True})
+                        respond({"ok": True, "path": str(path), "query": query, "matches": matches, "scanned_files": scanned_files, "truncated_files": truncated_files, "truncated": True})
                         raise SystemExit(0)
-        respond({"ok": True, "path": str(path), "query": query, "matches": matches, "truncated": False})
+        respond({"ok": True, "path": str(path), "query": query, "matches": matches, "scanned_files": scanned_files, "truncated_files": truncated_files, "truncated": False})
 
     else:
         respond({"ok": False, "error": f"unsupported file tool action: {action}"})
