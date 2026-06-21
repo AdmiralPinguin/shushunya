@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 from archivist_agent import Librarian
 from archivist_agent.agent import FocusBookshelf, WikiBookshelf
 from archivist_agent.graph_memory import GRAPH_TOP_K, GraphMemory
-from archivist_agent.magos_agent import Magos
+from archivist_agent.magos_agent import MAGOS_CONTEXT_LAYERS, Magos
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
 
 
@@ -482,6 +482,7 @@ def memory_gateway_manifest():
             "read_unknown_namespace": "rejected unless create=1 is passed intentionally",
             "write_unknown_namespace": "allowed only through chat/proposal paths that let the librarian create memory",
         },
+        "magos_context_layers": sorted(MAGOS_CONTEXT_LAYERS),
         "read_endpoints": {
             "catalog": "GET /archive/memory/catalog?namespace=agent&requester=name",
             "search": "GET /archive/memory/search?namespace=agent&q=query&limit=5&layers=focus,wiki,vector,graph&include_content=0&requester=name",
@@ -1013,6 +1014,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "jsonl_root": str(JSONL_ROOT),
                     "memory_events_root": str(MEMORY_EVENTS_ROOT),
                     "sqlite_path": str(SQLITE_PATH),
+                    "magos_context_layers": sorted(MAGOS_CONTEXT_LAYERS),
                     "focus_root": str(FOCUS_ROOT),
                     "focus_namespaces": {
                         namespace: str(focus_root_for_namespace(namespace))

@@ -155,6 +155,8 @@ Direct vector and graph injection is disabled by default with
 Magos lower-layer context injection is also opt-in. Set
 `ARCHIVE_MAGOS_CONTEXT_LAYERS=wiki,vector,graph` or a narrower comma list when
 pre-answer lower-layer context should be eligible for the model prompt.
+The current Magos lower-layer list is exposed as `magos_context_layers` in
+`/health` and `/archive/memory/gateway`.
 
 ## Diagnostics
 

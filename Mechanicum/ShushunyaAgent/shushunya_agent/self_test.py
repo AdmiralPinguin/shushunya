@@ -120,6 +120,8 @@ def main() -> int:
     assert_ok("archive memory gateway manifest tool", manifest)
     if manifest.get("service") != "ArchiveOfHeresy Memory Gateway" or manifest.get("version") != 1:
         raise AssertionError(f"unexpected memory gateway manifest: {manifest}")
+    if "magos_context_layers" not in manifest:
+        raise AssertionError(f"memory gateway manifest missing magos_context_layers: {manifest}")
     print("[ok] archive memory gateway manifest")
     catalog = archive_memory_catalog(config)
     assert_ok("archive memory catalog tool", catalog)
