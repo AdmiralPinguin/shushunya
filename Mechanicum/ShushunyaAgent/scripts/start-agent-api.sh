@@ -22,6 +22,7 @@ if [[ ! -x "$PYTHON" ]]; then
 fi
 
 export SHUSHUNYA_AGENT_SEARXNG_URL="${SHUSHUNYA_AGENT_SEARXNG_URL:-http://127.0.0.1:8888}"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 setsid "$PYTHON" -m shushunya_agent.server >"$LOG_FILE" 2>&1 </dev/null &
 echo "$!" > "$PID_FILE"
 

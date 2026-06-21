@@ -146,3 +146,19 @@ Read a journal through:
 ```text
 GET /task-journal?task_id=stable-task-id&limit=80
 ```
+
+Resume context is compacted before it is appended to the next prompt. A large
+journal remains inspectable through `/task-journal`, but it is not replayed into
+the model wholesale.
+
+## Runtime State
+
+The HTTP API exposes process-local runner state:
+
+```text
+GET /state
+```
+
+The response includes `busy`, `queued`, `current_task_id`, `last_task_id`,
+`last_exit_code`, `completed`, and `max_request_bytes`. This endpoint is meant
+for UI/ops checks and does not start a model request.

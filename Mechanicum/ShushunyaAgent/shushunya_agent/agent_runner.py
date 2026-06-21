@@ -331,6 +331,19 @@ def read_task_journal(task_id: str | None = None, limit: int = 80) -> dict[str, 
         return {"ok": False, "error": str(exc), "task_id": task_id or ""}
 
 
+def compact_resume_events(events: list[Any], max_chars: int = 20000) -> list[Any]:
+    selected: list[Any] = []
+    total = 2
+    for event in reversed(events):
+        compacted = compact_json_value(event, string_limit=1200, list_limit=20)
+        text = json.dumps(compacted, ensure_ascii=False, separators=(",", ":"))
+        if selected and total + len(text) + 1 > max_chars:
+            break
+        selected.append(compacted)
+        total += len(text) + 1
+    return list(reversed(selected))
+
+
 def archive_request(config: AgentConfig, method: str, path: str, payload: dict[str, Any] | None = None, timeout: int = 180) -> dict[str, Any]:
     data = None
     headers = {"Content-Type": "application/json"}
@@ -1533,6 +1546,7 @@ def emit(event_sink: AgentEventSink | None, payload: dict[str, Any]) -> None:
 def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None = None) -> int:
     if not config.task_id:
         config.task_id = safe_task_id()
+    run_started = time.time()
     system_prompt = SYSTEM_PROMPT
     if config.technical_output:
         system_prompt += (
@@ -1603,10 +1617,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
 
         if action_type == "final":
             message = str(action.get("message", "")).strip()
-            emit(event_sink, {"type": "final", "step": step, "ok": True, "message": message})
-            write_task_journal(config, "final", {"step": step, "ok": True, "message": message})
+            duration_sec = round(time.time() - run_started, 3)
+            emit(event_sink, {"type": "final", "step": step, "ok": True, "message": message, "duration_sec": duration_sec})
+            write_task_journal(config, "final", {"step": step, "ok": True, "message": message, "duration_sec": duration_sec})
             if config.json_output:
-                print(json.dumps({"ok": True, "task_id": config.task_id, "message": message, "steps": trace}, ensure_ascii=False, indent=2))
+                print(json.dumps({"ok": True, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
             else:
                 print(message)
             return 0
@@ -1624,6 +1639,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         write_task_journal(config, "action", {"step": step, "action": action})
         fingerprint = action_fingerprint(action)
         action_counts[fingerprint] = action_counts.get(fingerprint, 0) + 1
+        action_started = time.time()
         if action_counts[fingerprint] >= 3:
             result = {
                 "ok": False,
@@ -1680,6 +1696,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         else:
             result = {"ok": False, "error": f"unsupported action: {action_type}"}
 
+        action_duration_sec = round(time.time() - action_started, 3)
         emit(
             event_sink,
             {
@@ -1688,10 +1705,20 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "action": action_type,
                 "ok": bool(result.get("ok", False)) if isinstance(result, dict) else False,
                 "message": result_summary(action_type, result if isinstance(result, dict) else {"error": str(result)}),
+                "duration_sec": action_duration_sec,
             },
         )
-        write_task_journal(config, "tool_result", {"step": step, "action": action_type, "result": result_for_model(action_type, result, config)})
-        trace.append({"step": step, "action": action, "result": result})
+        write_task_journal(
+            config,
+            "tool_result",
+            {
+                "step": step,
+                "action": action_type,
+                "duration_sec": action_duration_sec,
+                "result": result_for_model(action_type, result, config),
+            },
+        )
+        trace.append({"step": step, "action": action, "duration_sec": action_duration_sec, "result": result})
 
         messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
         messages.append(
@@ -1702,10 +1729,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         )
 
     message = "Агент остановлен: достигнут лимит шагов без final."
-    emit(event_sink, {"type": "final", "ok": False, "message": message})
-    write_task_journal(config, "final", {"ok": False, "message": message})
+    duration_sec = round(time.time() - run_started, 3)
+    emit(event_sink, {"type": "final", "ok": False, "message": message, "duration_sec": duration_sec})
+    write_task_journal(config, "final", {"ok": False, "message": message, "duration_sec": duration_sec})
     if config.json_output:
-        print(json.dumps({"ok": False, "task_id": config.task_id, "message": message, "steps": trace}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": False, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
     else:
         print(message, file=sys.stderr)
     return 2
@@ -1719,6 +1747,7 @@ def read_task_from_stdin() -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Shushunya as a sandboxed tool-using agent.")
     parser.add_argument("--max-steps", type=int, default=None, help="Override the agent step limit.")
+    parser.add_argument("--max-tokens", type=int, default=None, help="Override max model reply tokens.")
     parser.add_argument("--inject-memory", action="store_true", help="Enable automatic ArchiveOfHeresy memory injection.")
     parser.add_argument("--no-inject-memory", action="store_true", help="Disable automatic ArchiveOfHeresy memory injection.")
     parser.add_argument("--archive-internal-steps", action="store_true", help="Archive internal agent steps for debugging.")
@@ -1743,6 +1772,8 @@ def main(argv: list[str] | None = None) -> int:
     config = AgentConfig()
     if args.max_steps is not None:
         config.max_steps = args.max_steps
+    if args.max_tokens is not None:
+        config.max_model_tokens = max(128, min(args.max_tokens, 4096))
     if args.inject_memory:
         config.inject_memory = True
     if args.no_inject_memory:
@@ -1765,7 +1796,7 @@ def main(argv: list[str] | None = None) -> int:
         config.task_id = safe_task_id(args.task_id)
     if args.resume_task_id:
         journal = read_task_journal(args.resume_task_id, limit=80)
-        compact_events = journal.get("events", [])[-40:] if journal.get("ok") else []
+        compact_events = compact_resume_events(journal.get("events", [])[-80:]) if journal.get("ok") else []
         task += (
             "\n\nResume context from previous agent task journal "
             + str(journal.get("task_id") or args.resume_task_id)

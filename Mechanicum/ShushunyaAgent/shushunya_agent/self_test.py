@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import sys
 from unittest import mock
 
 from . import agent_runner
+from . import server
 from .agent_runner import (
     AgentConfig,
     archive_memory_gateway,
@@ -22,6 +26,7 @@ from .agent_runner import (
     read_task_journal,
     repair_action_json,
     result_for_model,
+    run_agent,
     sandbox_status,
     safe_task_id,
     validate_configured_searxng_url,
@@ -110,6 +115,25 @@ def main() -> int:
         raise AssertionError("safe_task_id did not normalize spaces and slashes")
     print("[ok] task id normalization")
 
+    server_config = server.config_from_payload({"max_tokens": "1024"})
+    if not server_config.task_id:
+        raise AssertionError("server did not assign a task_id")
+    print("[ok] server assigns task id")
+
+    compact_resume = server.compact_resume_events(
+        [{"type": "tool_result", "result": {"content": "r" * 10000}, "index": index} for index in range(30)],
+        max_chars=5000,
+    )
+    compact_resume_text = str(compact_resume)
+    if not compact_resume or len(compact_resume_text) > 7000:
+        raise AssertionError("resume events were not compacted")
+    print("[ok] resume context compacted")
+
+    state = server.runtime_state()
+    if "busy" not in state or state.get("max_request_bytes", 0) <= 0:
+        raise AssertionError(f"runtime state missing expected fields: {state}")
+    print("[ok] runtime state payload")
+
     journal_config = AgentConfig(task_id=safe_task_id("self test journal"))
     write_task_journal(journal_config, "self_test", {"large": "z" * 20000})
     journal = read_task_journal(journal_config.task_id, limit=5)
@@ -123,6 +147,26 @@ def main() -> int:
     if repaired_action != {"action": "final", "message": "repaired"}:
         raise AssertionError(f"unexpected repaired action: {repaired_action}")
     print("[ok] JSON repair helper")
+
+    final_events: list[dict] = []
+    final_stdout = io.StringIO()
+    final_config = AgentConfig(
+        task_id=safe_task_id("self-test-final-run"),
+        json_output=True,
+        max_steps=1,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat", return_value='{"action":"final","message":"ok"}'), \
+            contextlib.redirect_stdout(final_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        final_code = run_agent("return final", final_config, event_sink=final_events.append)
+    final_payload = json.loads(final_stdout.getvalue())
+    if final_code != 0 or "duration_sec" not in final_payload:
+        raise AssertionError(f"final run did not include duration: code={final_code}, payload={final_payload}")
+    if not any(event.get("type") == "final" and "duration_sec" in event for event in final_events):
+        raise AssertionError(f"final event did not include duration: {final_events}")
+    print("[ok] final event duration")
 
     health = archive_request(config, "GET", "/health", timeout=10)
     if health.get("status") != "ok":

@@ -16,12 +16,18 @@
 - Structured file tools.
 - Structured Python tool.
 - Optional shell fallback with supervisor denylist.
+- SearXNG-first web search and guarded public `web_fetch`.
 - Runtime required-field validation.
 - Repeated identical action guard.
 - JSON output mode for integration.
+- Streaming progress events with task id and duration metadata.
 - Technical output mode for automation.
 - `/run` serialization in the Agent API with process-local and runtime file locks.
+- `/state` runtime endpoint for UI/ops checks.
+- Task journals and compact `resume_task_id` continuation context.
 - Self-test covering Archive, sandbox paths, file tools, Python, and network isolation.
+- Android agent mode calls `/run-stream`, uses the `agent` memory namespace, and
+  includes a state check button.
 
 ## Next
 
@@ -30,8 +36,7 @@
   such as `xfs_quota`.
 - Add AppArmor enforcement for the sandbox launcher.
 - Add an approval gate for risky tools before enabling broader shell access.
-- Add a browser or HTTP-fetch tool as an explicitly networked, separately gated mode.
 - Add a service wrapper for long-running agent sessions.
-- Add a UI or Telegram command path that calls `run-agent.sh --json --technical`.
 - If binding Agent API outside localhost, require `SHUSHUNYA_AGENT_API_KEY`.
 - Keep monitoring stale Archive focus files as namespaces accumulate.
+- Add richer queue/cancel controls for long-running phone-driven tasks.

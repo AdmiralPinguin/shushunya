@@ -602,6 +602,14 @@ public class MainActivity extends Activity {
         quickRow.addView(focusButton, focusLp);
         focusButton.setOnClickListener(v -> runAgentTask("Через archive_search kind=focus query=active кратко скажи текущий фокус."));
 
+        Button stateButton = new Button(this);
+        stateButton.setText("STATE");
+        styleAgentQuickButton(stateButton);
+        LinearLayout.LayoutParams stateLp = new LinearLayout.LayoutParams(0, dp(42), 1);
+        stateLp.leftMargin = dp(8);
+        quickRow.addView(stateButton, stateLp);
+        stateButton.setOnClickListener(v -> refreshAgentState());
+
         agentComposer = new LinearLayout(this);
         agentComposer.setOrientation(LinearLayout.HORIZONTAL);
         agentComposer.setGravity(Gravity.BOTTOM);
@@ -986,6 +994,30 @@ public class MainActivity extends Activity {
         runAgentTask(text);
     }
 
+    private void refreshAgentState() {
+        if (agentStatus != null) {
+            agentStatus.setText("Проверяю состояние агента...");
+        }
+        new Thread(() -> {
+            try {
+                String state = requestAgentState();
+                main.post(() -> {
+                    if (agentStatus != null) {
+                        agentStatus.setText("Состояние агента получено.");
+                    }
+                    addAgentMessage(false, state, true);
+                });
+            } catch (Exception exc) {
+                main.post(() -> {
+                    if (agentStatus != null) {
+                        agentStatus.setText("Ошибка state: " + exc.getMessage());
+                    }
+                    addAgentMessage(false, "! Ошибка state: " + exc.getMessage(), true);
+                });
+            }
+        }).start();
+    }
+
     private void appendAgentLog(String line) {
         if (agentLiveBubble == null || line == null || line.trim().isEmpty()) {
             return;
@@ -1029,7 +1061,9 @@ public class MainActivity extends Activity {
         }
         if ("tool_result".equals(type)) {
             String marker = event.optBoolean("ok", false) ? "✓" : "!";
-            appendAgentLog(marker + " " + event.optString("action", "tool") + ": " + event.optString("message", "готово"));
+            double duration = event.optDouble("duration_sec", -1.0);
+            String suffix = duration >= 0.0 ? " (" + duration + "s)" : "";
+            appendAgentLog(marker + " " + event.optString("action", "tool") + ": " + event.optString("message", "готово") + suffix);
             return;
         }
         if ("warning".equals(type)) {
@@ -1038,8 +1072,9 @@ public class MainActivity extends Activity {
         }
         if ("final".equals(type)) {
             String message = event.optString("message", "").trim();
+            double duration = event.optDouble("duration_sec", -1.0);
             appendAgentLog("");
-            appendAgentLog("Результат:");
+            appendAgentLog(duration >= 0.0 ? "Результат (" + duration + "s):" : "Результат:");
             appendAgentLog(message.isEmpty() ? "Агент вернул пустой ответ." : message);
             return;
         }
@@ -1146,6 +1181,42 @@ public class MainActivity extends Activity {
             throw new IllegalStateException(message.isEmpty() ? response : message);
         }
         return message.isEmpty() ? "Агент вернул пустой ответ." : message;
+    }
+
+    private String requestAgentState() throws Exception {
+        URL url = new URL(DEFAULT_AGENT_URL + "/state");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(12000);
+        conn.setReadTimeout(30000);
+        conn.setRequestProperty("Accept", "application/json");
+
+        int code = conn.getResponseCode();
+        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
+        String response = readAll(stream);
+        if (code < 200 || code >= 300) {
+            throw new IllegalStateException("HTTP " + code + ": " + response);
+        }
+        JSONObject json = new JSONObject(response);
+        JSONObject state = json.optJSONObject("state");
+        if (state == null) {
+            throw new IllegalStateException("empty state payload");
+        }
+        StringBuilder out = new StringBuilder();
+        out.append("State: ").append(state.optBoolean("busy", false) ? "busy" : "idle");
+        out.append("\nОчередь: ").append(state.optInt("queued", 0));
+        String currentTask = state.optString("current_task_id", "").trim();
+        if (!currentTask.isEmpty()) {
+            out.append("\nТекущая задача: ").append(currentTask);
+            out.append("\nДлительность: ").append(state.optDouble("current_task_duration_sec", 0.0)).append("s");
+        }
+        String lastTask = state.optString("last_task_id", "").trim();
+        if (!lastTask.isEmpty()) {
+            out.append("\nПоследняя задача: ").append(lastTask);
+            out.append("\nExit code: ").append(state.optString("last_exit_code", ""));
+        }
+        out.append("\nCompleted: ").append(state.optInt("completed", 0));
+        return out.toString();
     }
 
     private void toggleWhisperRecording(String language, EditText output, String titleText, Button button) {

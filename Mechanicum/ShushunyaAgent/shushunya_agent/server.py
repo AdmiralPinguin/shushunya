@@ -7,19 +7,39 @@ import io
 import json
 import os
 import threading
+import time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from .agent_runner import AgentConfig, archive_request, read_task_journal, run_agent, safe_task_id
+from .agent_runner import AgentConfig, archive_request, compact_resume_events, read_task_journal, run_agent, safe_task_id
 
 
 HOST = os.environ.get("SHUSHUNYA_AGENT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("SHUSHUNYA_AGENT_PORT", "8095"))
 API_KEY = os.environ.get("SHUSHUNYA_AGENT_API_KEY", "").strip()
 ROOT = Path(__file__).resolve().parents[1]
+MAX_REQUEST_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_REQUEST_BYTES", "1048576"))
 RUN_LOCK = threading.Lock()
 RUN_LOCK_FILE = ROOT / "runtime" / "agent-run.lock"
+STATE_LOCK = threading.Lock()
+RUN_STATE: dict[str, Any] = {
+    "busy": False,
+    "current_task_id": "",
+    "current_task_started_at": 0.0,
+    "queued": 0,
+    "completed": 0,
+    "last_task_id": "",
+    "last_exit_code": None,
+    "last_finished_at": 0.0,
+}
+
+
+class RequestError(Exception):
+    def __init__(self, status: int, payload: dict[str, Any]) -> None:
+        super().__init__(payload.get("error", "request error"))
+        self.status = status
+        self.payload = payload
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -45,10 +65,22 @@ def write_ndjson(handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> No
 
 
 def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    length = int(handler.headers.get("Content-Length", "0"))
+    try:
+        length = int(handler.headers.get("Content-Length", "0"))
+    except ValueError as exc:
+        raise RequestError(400, {"ok": False, "error": "invalid Content-Length"}) from exc
     if length <= 0:
         return {}
-    return json.loads(handler.rfile.read(length).decode("utf-8"))
+    if length > MAX_REQUEST_BYTES:
+        raise RequestError(
+            413,
+            {"ok": False, "error": "request body too large", "max_bytes": MAX_REQUEST_BYTES},
+        )
+    raw = handler.rfile.read(length)
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RequestError(400, {"ok": False, "error": "invalid JSON body", "detail": str(exc)}) from exc
 
 
 def authorized(handler: BaseHTTPRequestHandler) -> bool:
@@ -74,6 +106,18 @@ def int_field(payload: dict[str, Any], key: str, default: int, minimum: int, max
     return max(minimum, min(value, maximum))
 
 
+def runtime_state() -> dict[str, Any]:
+    with STATE_LOCK:
+        payload = dict(RUN_STATE)
+    now = time.time()
+    if payload.get("busy") and payload.get("current_task_started_at"):
+        payload["current_task_duration_sec"] = round(now - float(payload["current_task_started_at"]), 3)
+    if payload.get("last_finished_at"):
+        payload["last_finished_ago_sec"] = round(now - float(payload["last_finished_at"]), 3)
+    payload["max_request_bytes"] = MAX_REQUEST_BYTES
+    return payload
+
+
 def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
     task_id = str(payload.get("task_id") or payload.get("resume_task_id") or "").strip()
     return AgentConfig(
@@ -91,7 +135,7 @@ def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
         task_memory=bool_field(payload, "task_memory", env_bool("SHUSHUNYA_AGENT_TASK_MEMORY", True)),
         archive_user=str(payload.get("archive_user") or os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_USER", "shushunya-agent")),
         memory_namespace=str(payload.get("memory_namespace") or os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent")),
-        task_id=safe_task_id(task_id) if task_id else "",
+        task_id=safe_task_id(task_id),
         shell_enabled=bool_field(payload, "shell_enabled", True),
     )
 
@@ -103,7 +147,7 @@ def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]
     journal = read_task_journal(resume_task_id, limit=80)
     if not journal.get("ok"):
         return task + "\n\nResume note: requested previous task journal was not found."
-    compact_events = journal.get("events", [])[-40:]
+    compact_events = compact_resume_events(journal.get("events", [])[-80:])
     return (
         task
         + "\n\nResume context from previous agent task journal "
@@ -131,6 +175,12 @@ class AgentHandler(BaseHTTPRequestHandler):
         if self.path == "/tools":
             schema_path = ROOT / "tool_schema.json"
             write_json(self, 200, json.loads(schema_path.read_text(encoding="utf-8")))
+            return
+        if self.path == "/state":
+            if not authorized(self):
+                write_json(self, 401, {"error": "unauthorized"})
+                return
+            write_json(self, 200, {"ok": True, "service": "ShushunyaAgent", "state": runtime_state()})
             return
         if self.path.startswith("/task-journal"):
             from urllib.parse import parse_qs, urlparse
@@ -172,7 +222,14 @@ class AgentHandler(BaseHTTPRequestHandler):
 
             stdout = io.StringIO()
             stderr = io.StringIO()
+            with STATE_LOCK:
+                RUN_STATE["queued"] += 1
             with RUN_LOCK:
+                with STATE_LOCK:
+                    RUN_STATE["queued"] = max(0, int(RUN_STATE["queued"]) - 1)
+                    RUN_STATE["busy"] = True
+                    RUN_STATE["current_task_id"] = config.task_id
+                    RUN_STATE["current_task_started_at"] = time.time()
                 RUN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
                 with RUN_LOCK_FILE.open("w", encoding="utf-8") as lock_fh:
                     fcntl.flock(lock_fh, fcntl.LOCK_EX)
@@ -181,6 +238,14 @@ class AgentHandler(BaseHTTPRequestHandler):
                             code = run_agent(task, config)
                     finally:
                         fcntl.flock(lock_fh, fcntl.LOCK_UN)
+                        with STATE_LOCK:
+                            RUN_STATE["busy"] = False
+                            RUN_STATE["completed"] = int(RUN_STATE["completed"]) + 1
+                            RUN_STATE["last_task_id"] = config.task_id
+                            RUN_STATE["last_exit_code"] = code
+                            RUN_STATE["last_finished_at"] = time.time()
+                            RUN_STATE["current_task_id"] = ""
+                            RUN_STATE["current_task_started_at"] = 0.0
 
             text = stdout.getvalue().strip()
             try:
@@ -193,6 +258,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             if bool_field(payload, "include_stderr", False) or code != 0:
                 result["stderr"] = stderr.getvalue()
             write_json(self, 200 if code == 0 else 500, result)
+        except RequestError as exc:
+            write_json(self, exc.status, exc.payload)
         except Exception as exc:
             write_json(self, 500, {"ok": False, "error": str(exc)})
 
@@ -216,7 +283,14 @@ class AgentHandler(BaseHTTPRequestHandler):
             stdout = io.StringIO()
             stderr = io.StringIO()
             code = 1
+            with STATE_LOCK:
+                RUN_STATE["queued"] += 1
             with RUN_LOCK:
+                with STATE_LOCK:
+                    RUN_STATE["queued"] = max(0, int(RUN_STATE["queued"]) - 1)
+                    RUN_STATE["busy"] = True
+                    RUN_STATE["current_task_id"] = config.task_id
+                    RUN_STATE["current_task_started_at"] = time.time()
                 RUN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
                 with RUN_LOCK_FILE.open("w", encoding="utf-8") as lock_fh:
                     fcntl.flock(lock_fh, fcntl.LOCK_EX)
@@ -226,6 +300,14 @@ class AgentHandler(BaseHTTPRequestHandler):
                             code = run_agent(task, config, event_sink=lambda event: write_ndjson(self, event))
                     finally:
                         fcntl.flock(lock_fh, fcntl.LOCK_UN)
+                        with STATE_LOCK:
+                            RUN_STATE["busy"] = False
+                            RUN_STATE["completed"] = int(RUN_STATE["completed"]) + 1
+                            RUN_STATE["last_task_id"] = config.task_id
+                            RUN_STATE["last_exit_code"] = code
+                            RUN_STATE["last_finished_at"] = time.time()
+                            RUN_STATE["current_task_id"] = ""
+                            RUN_STATE["current_task_started_at"] = 0.0
 
             if code != 0:
                 text = stdout.getvalue().strip()
@@ -238,9 +320,12 @@ class AgentHandler(BaseHTTPRequestHandler):
                 write_ndjson(self, {"type": "done", "ok": False, "exit_code": code, "result": result})
             else:
                 write_ndjson(self, {"type": "done", "ok": True, "exit_code": code})
+        except RequestError as exc:
+            write_json(self, exc.status, exc.payload)
         except Exception as exc:
             try:
                 write_ndjson(self, {"type": "error", "ok": False, "message": str(exc)})
+                write_ndjson(self, {"type": "done", "ok": False, "exit_code": 1})
             except Exception:
                 pass
 

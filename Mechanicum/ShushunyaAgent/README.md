@@ -69,6 +69,8 @@ curl -sS http://127.0.0.1:8095/run \
 
 Model replies default to `1024` tokens. Override per HTTP request with
 `"max_tokens": 2048` when a longer action JSON or final answer is needed.
+HTTP request bodies are capped by `SHUSHUNYA_AGENT_MAX_REQUEST_BYTES`, default
+`1048576`, so broken clients fail with `413` before entering the agent loop.
 
 Streaming HTTP API for Codex-style progress:
 
@@ -80,7 +82,17 @@ curl -N -sS http://127.0.0.1:8095/run-stream \
 
 `/run-stream` returns one NDJSON object per event: `start`, `task`, `step`,
 `action`, `tool_result`, `warning`, `final`, and `done`. The `task` event
-includes the stable `task_id` and `memory_namespace`.
+includes the stable `task_id` and `memory_namespace`. `tool_result` and
+`final` events include `duration_sec` for operational visibility.
+
+Runtime state:
+
+```bash
+curl -sS http://127.0.0.1:8095/state
+```
+
+`/state` reports whether the serialized runner is busy, queued request count,
+current task id, last completed task id, and the request size limit.
 
 Every run writes a compact JSONL journal under `runtime/task-journals/`.
 Pass a stable task id when a caller wants resumable task history:
@@ -104,6 +116,9 @@ curl -N -sS http://127.0.0.1:8095/run-stream \
   -H 'Content-Type: application/json' \
   -d '{"task":"продолжи предыдущую задачу","resume_task_id":"agent-memory-check","technical":true}'
 ```
+
+Resume context is compacted before it is appended to the prompt, so a long task
+journal cannot be replayed into the model wholesale.
 
 Optional API key:
 
@@ -157,6 +172,8 @@ For an interactive prompt:
 ./scripts/run-agent.sh
 ```
 
+CLI runs also accept `--max-tokens`, matching the HTTP `max_tokens` field.
+
 ## Safety Boundaries
 
 - Shell commands run only through the sandbox profile on the `ARCHIVE` disk.
@@ -169,6 +186,9 @@ For an interactive prompt:
   memory of its own.
 - Task journals are operational traces, not long-term memory. They are used for
   resume/debugging and can be inspected with `GET /task-journal`.
+- `GET /state` exposes process-local runner state for UI/ops checks without
+  starting a model request.
+- Bad JSON request bodies return `400`; oversized bodies return `413`.
 - Internal agent steps are archived by default and receive automatic
   ArchiveOfHeresy memory handling in the isolated `agent` memory namespace.
   Tool results are included in the following model step, so Magos and the

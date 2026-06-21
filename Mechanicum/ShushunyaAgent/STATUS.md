@@ -34,8 +34,13 @@ Last verified: 2026-06-21 18:08 KST.
   with `ok=false`.
 - Agent runs emit `task` stream events and write compact JSONL task journals in
   `runtime/task-journals/`.
+- Stream `tool_result` and `final` events include `duration_sec`.
 - `GET /task-journal?task_id=...` can inspect recent journal events, and
   `resume_task_id` can feed recent journal context into a follow-up run.
+- Resume context is compacted before entering the model prompt.
+- `GET /state` reports runner busy/queue/current/last task state.
+- Invalid JSON request bodies return `400`; oversized request bodies return
+  `413` before the agent loop starts.
 - Malformed model JSON gets a minimal repair pass with memory disabled before
   the runner spends another normal step.
 
