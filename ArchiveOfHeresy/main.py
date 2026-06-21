@@ -554,6 +554,30 @@ def write_memory_event(record, event):
             archive.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def recent_memory_events(limit=50, memory_namespace=None):
+    limit = max(1, min(int(limit or 50), 500))
+    events = []
+    paths = sorted(MEMORY_EVENTS_ROOT.glob("*/*/*.jsonl"), reverse=True)
+    for path in paths:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if memory_namespace and event.get("memory_namespace") != memory_namespace:
+                continue
+            events.append(event)
+            if len(events) >= limit:
+                return events
+    return events
+
+
 def update_focus_memory(record):
     namespace = record.get("memory_namespace") or "default"
     librarian = focus_components(namespace)["librarian"]
@@ -658,6 +682,28 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             graph_memory = graph_memory_for_namespace(namespace)
             matches = graph_memory.search(query) if graph_memory and query else {"nodes": [], "edges": []}
             write_json(self, 200, {"query": query, "memory_namespace": namespace, "matches": matches})
+            return
+
+        if self.path.startswith("/archive/memory/events"):
+            namespace = None
+            limit = 50
+            if "?" in self.path:
+                params = parse_qs(urlsplit(self.path).query)
+                raw_namespace = (params.get("namespace") or [""])[0]
+                namespace = safe_memory_namespace(raw_namespace) if raw_namespace else None
+                try:
+                    limit = int((params.get("limit") or ["50"])[0])
+                except (TypeError, ValueError):
+                    limit = 50
+            write_json(
+                self,
+                200,
+                {
+                    "memory_namespace": namespace,
+                    "limit": max(1, min(limit, 500)),
+                    "events": recent_memory_events(limit=limit, memory_namespace=namespace),
+                },
+            )
             return
 
         if self.path == "/v1/models":
