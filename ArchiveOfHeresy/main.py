@@ -735,6 +735,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             payload["messages"] = list(payload.get("messages", []))
             memory_messages = sanitize_messages_for_memory(payload["messages"])
             magos_message = None
+            magos_result = None
             magos = focus_components(memory_namespace)["magos"]
             if focus_enabled and magos is not None:
                 try:
@@ -745,9 +746,11 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                         turn_id=turn_id,
                         memory_namespace=memory_namespace,
                     )
+                    magos_result = magos.last_result
                 except Exception as exc:
                     print(f"Magos hard fail-soft: {exc}", flush=True)
                     magos_message = None
+                    magos_result = {"error": str(exc)}
             prepared_payload = dict(payload)
             prepared_payload["messages"] = prepare_messages(
                 payload["messages"],
@@ -781,6 +784,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "vector_enabled": vector_enabled,
                 "graph_enabled": graph_enabled,
                 "magos_enabled": bool(magos_message),
+                "magos_result": magos_result,
                 "model": payload.get("model"),
                 "request": sanitized_payload,
                 "prepared_messages": archive_prepared_messages,
