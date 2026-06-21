@@ -377,14 +377,23 @@ def memory_search(memory_namespace, query, limit=5):
     vector_matches = VECTOR_MEMORY.search(query, limit=safe_limit, memory_namespace=namespace) if VECTOR_MEMORY and query else []
     graph_memory = graph_memory_for_namespace(namespace)
     graph_matches = graph_memory.search(query, limit=safe_limit) if graph_memory and query else {"nodes": [], "edges": []}
+    focus_matches = focus_search(namespace, query, safe_limit)
+    wiki_matches = wiki_search(namespace, query, safe_limit)
     return {
         "ok": True,
         "memory_namespace": namespace,
         "query": query,
         "limit": safe_limit,
         "warning": "Gateway search is reference memory only. Treat current task/tool results as fresher than memory.",
-        "focus": focus_search(namespace, query, safe_limit),
-        "wiki": wiki_search(namespace, query, safe_limit),
+        "counts": {
+            "focus": len(focus_matches),
+            "wiki": len(wiki_matches),
+            "vector": len(vector_matches),
+            "graph_nodes": len(graph_matches.get("nodes", [])),
+            "graph_edges": len(graph_matches.get("edges", [])),
+        },
+        "focus": focus_matches,
+        "wiki": wiki_matches,
         "vector": vector_matches,
         "graph": graph_matches,
     }
