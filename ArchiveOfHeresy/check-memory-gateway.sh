@@ -26,6 +26,11 @@ curl -fsS "$BASE_URL/health"
 echo
 echo
 
+echo "Memory Gateway manifest:"
+curl -fsS "${AUTH_ARGS[@]}" "$BASE_URL/archive/memory/gateway"
+echo
+echo
+
 echo "Memory Gateway catalog namespace=$NAMESPACE:"
 curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" --data-urlencode "requester=$REQUESTER" "$BASE_URL/archive/memory/catalog"
 echo
@@ -61,6 +66,15 @@ echo
 
 echo "Memory Gateway events namespace=$NAMESPACE:"
 curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" --data-urlencode "limit=5" "$BASE_URL/archive/memory/events"
+echo
+
+echo "Memory Gateway filtered search events namespace=$NAMESPACE:"
+curl -fsS -G "${AUTH_ARGS[@]}" \
+  --data-urlencode "namespace=$NAMESPACE" \
+  --data-urlencode "component=memory_gateway" \
+  --data-urlencode "event_action=search" \
+  --data-urlencode "limit=3" \
+  "$BASE_URL/archive/memory/events"
 echo
 
 if [ "${ARCHIVE_GATEWAY_PROPOSE:-0}" = "1" ]; then
