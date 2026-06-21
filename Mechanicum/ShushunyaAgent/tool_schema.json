@@ -286,6 +286,13 @@
     "offline_mode_skips": ["ArchiveOfHeresy health", "Archive memory gateway integration"],
     "offline_mode_checks": ["API /state", "sandbox", "file tools", "web URL guards", "queue guards", "model JSON handling"]
   },
+  "ops_policy": {
+    "api_watchdog_script": "scripts/watch-agent-api.sh",
+    "api_watchdog_probe": "GET /state",
+    "api_watchdog_interval_env": "SHUSHUNYA_AGENT_WATCH_INTERVAL_SEC",
+    "api_watchdog_max_failures_env": "SHUSHUNYA_AGENT_WATCH_MAX_FAILURES",
+    "api_watchdog_restart_readiness": "/state"
+  },
   "web_policy": {
     "tools": ["web_search", "web_fetch"],
     "search_provider_chain": ["searxng", "marginalia_public", "wikipedia_opensearch", "brave_api"],

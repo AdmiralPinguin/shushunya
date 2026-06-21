@@ -32,6 +32,8 @@
 - `/run-stream` returns queue overflow as HTTP `429` before opening NDJSON.
 - Offline self-test and check scripts can validate local agent hardening without
   touching ArchiveOfHeresy.
+- Lightweight Agent API watchdog monitors `/state` and can restart without
+  touching ArchiveOfHeresy.
 - Privileged task journal and resume access behind API-key bearer auth.
 - Self-test covering Archive, sandbox paths, file tools, Python, and network isolation.
 - Android agent mode calls `/run-stream`, uses the `agent` memory namespace, and
@@ -44,7 +46,7 @@
   such as `xfs_quota`.
 - Add AppArmor enforcement for the sandbox launcher.
 - Add an approval gate for risky tools before enabling broader shell access.
-- Add a service wrapper for long-running agent sessions.
+- Add a durable service manager wrapper for boot-time startup and log rotation.
 - Add mobile support for bearer auth, then require `SHUSHUNYA_AGENT_API_KEY`
   before exposing broader public agent controls.
 - Keep monitoring stale Archive focus files as namespaces accumulate.

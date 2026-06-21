@@ -346,6 +346,16 @@ the readiness probe, set:
 SHUSHUNYA_AGENT_START_CHECK_PATH=/state ./scripts/start-agent-api.sh
 ```
 
+Run a lightweight API watchdog that does not touch ArchiveOfHeresy:
+
+```bash
+./scripts/watch-agent-api.sh
+```
+
+The watchdog checks `/state` every `SHUSHUNYA_AGENT_WATCH_INTERVAL_SEC`
+seconds, default `15`. After `SHUSHUNYA_AGENT_WATCH_MAX_FAILURES` failed checks,
+default `2`, it restarts the API and uses `/state` as the readiness probe.
+
 Stop the model host and archive gateway:
 
 ```bash
