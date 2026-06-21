@@ -7,7 +7,10 @@ from unittest import mock
 from . import agent_runner
 from .agent_runner import (
     AgentConfig,
+    archive_memory_catalog,
     archive_memory_events,
+    archive_memory_propose,
+    archive_memory_read,
     archive_request,
     archive_status,
     compact_messages_for_model,
@@ -107,6 +110,27 @@ def main() -> int:
     if memory_events.get("memory_namespace") != config.memory_namespace:
         raise AssertionError(f"unexpected memory namespace in events response: {memory_events}")
     print("[ok] archive memory events namespace")
+    catalog = archive_memory_catalog(config)
+    assert_ok("archive memory catalog tool", catalog)
+    if catalog.get("memory_namespace") != config.memory_namespace:
+        raise AssertionError(f"unexpected memory namespace in catalog response: {catalog}")
+    print("[ok] archive memory catalog namespace")
+    focus_read = archive_memory_read(config, "focus", "active")
+    assert_ok("archive memory focus read tool", focus_read)
+    if focus_read.get("memory_namespace") != config.memory_namespace:
+        raise AssertionError(f"unexpected memory namespace in focus read response: {focus_read}")
+    print("[ok] archive memory focus read namespace")
+    with mock.patch.object(
+        agent_runner,
+        "archive_request",
+        return_value={"ok": True, "turn_id": "mock-turn", "memory_namespace": config.memory_namespace},
+    ) as mocked_archive:
+        proposal = archive_memory_propose(config, {"proposal": "self-test proposal", "target": "focus", "importance": 2})
+    assert_ok("archive memory proposal tool", proposal)
+    called_payload = mocked_archive.call_args.args[3]
+    if called_payload.get("namespace") != config.memory_namespace or called_payload.get("proposal") != "self-test proposal":
+        raise AssertionError(f"unexpected proposal payload: {called_payload}")
+    print("[ok] archive memory proposal payload")
 
     status = sandbox_status(config)
     assert_ok("sandbox status", status)
