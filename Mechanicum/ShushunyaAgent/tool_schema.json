@@ -27,7 +27,8 @@
         "action": "archive_memory_events",
         "limit": "integer",
         "component": ["librarian", "memory_gateway"],
-        "event_action": "string"
+        "event_action": "string",
+        "requester": "string"
       }
     },
     "archive_memory_gateway": {

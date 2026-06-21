@@ -120,6 +120,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 {"action":"archive_memory_events","limit":20}
 {"action":"archive_memory_events","component":"librarian","limit":20}
 {"action":"archive_memory_events","component":"memory_gateway","event_action":"search","limit":20}
+{"action":"archive_memory_events","component":"memory_gateway","requester":"shushunya-agent","limit":20}
 
 8. Читать память через Memory Gateway без доступа к файлам:
 {"action":"archive_memory_gateway"}
@@ -1274,6 +1275,7 @@ def archive_memory_events(
     limit: int | None = None,
     component: str | None = None,
     event_action: str | None = None,
+    requester: str | None = None,
 ) -> dict[str, Any]:
     try:
         safe_limit = max(1, min(int(limit or 20), 100))
@@ -1287,6 +1289,8 @@ def archive_memory_events(
         params["component"] = str(component)
     if event_action:
         params["event_action"] = str(event_action)
+    if requester:
+        params["requester"] = str(requester)
     payload = archive_tool_request(
         config,
         "GET",
@@ -1497,7 +1501,13 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         elif action_type == "archive_status":
             result = archive_status(config)
         elif action_type == "archive_memory_events":
-            result = archive_memory_events(config, action.get("limit"), action.get("component"), action.get("event_action"))
+            result = archive_memory_events(
+                config,
+                action.get("limit"),
+                action.get("component"),
+                action.get("event_action"),
+                action.get("requester"),
+            )
         elif action_type == "archive_memory_gateway":
             result = archive_memory_gateway(config)
         elif action_type == "archive_memory_catalog":

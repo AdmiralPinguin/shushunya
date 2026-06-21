@@ -84,6 +84,7 @@ curl -fsS -G "${AUTH_ARGS[@]}" \
   --data-urlencode "namespace=$NAMESPACE" \
   --data-urlencode "component=memory_gateway" \
   --data-urlencode "event_action=search" \
+  --data-urlencode "requester=$REQUESTER" \
   --data-urlencode "limit=3" \
   "$BASE_URL/archive/memory/events"
 echo

@@ -112,9 +112,9 @@ def main() -> int:
     if memory_events.get("memory_namespace") != config.memory_namespace:
         raise AssertionError(f"unexpected memory namespace in events response: {memory_events}")
     print("[ok] archive memory events namespace")
-    gateway_events = archive_memory_events(config, limit=5, component="memory_gateway")
+    gateway_events = archive_memory_events(config, limit=5, component="memory_gateway", requester="shushunya-agent")
     assert_ok("archive memory events component filter", gateway_events)
-    if gateway_events.get("component") != "memory_gateway":
+    if gateway_events.get("component") != "memory_gateway" or gateway_events.get("requester") != "shushunya-agent":
         raise AssertionError(f"unexpected component filter in events response: {gateway_events}")
     manifest = archive_memory_gateway(config)
     assert_ok("archive memory gateway manifest tool", manifest)

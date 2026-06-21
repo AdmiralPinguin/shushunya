@@ -437,7 +437,7 @@ def memory_gateway_manifest():
             "search": "GET /archive/memory/search?namespace=agent&q=query&limit=5&requester=name",
             "focus": "GET /archive/memory/focus?namespace=agent&id=active&max_chars=12000&requester=name",
             "wiki": "GET /archive/memory/wiki?namespace=agent&id=page-id&max_chars=12000&requester=name",
-            "events": "GET /archive/memory/events?namespace=agent&limit=20&component=memory_gateway&event_action=search",
+            "events": "GET /archive/memory/events?namespace=agent&limit=20&component=memory_gateway&event_action=search&requester=shushunya-agent",
         },
         "write_endpoints": {
             "proposal": "POST /archive/memory/propose-change",
@@ -872,10 +872,11 @@ def write_gateway_event(memory_namespace, action, requester=None, **details):
     )
 
 
-def recent_memory_events(limit=50, memory_namespace=None, component=None, event_action=None):
+def recent_memory_events(limit=50, memory_namespace=None, component=None, event_action=None, requester=None):
     limit = max(1, min(int(limit or 50), 500))
     component = str(component or "").strip()
     event_action = str(event_action or "").strip()
+    requester = str(requester or "").strip()
     events = []
     paths = sorted(MEMORY_EVENTS_ROOT.glob("*/*/*.jsonl"), reverse=True)
     for path in paths:
@@ -896,6 +897,8 @@ def recent_memory_events(limit=50, memory_namespace=None, component=None, event_
             if component and body.get("component") != component:
                 continue
             if event_action and body.get("action") != event_action:
+                continue
+            if requester and body.get("requester") != requester:
                 continue
             events.append(event)
             if len(events) >= limit:
@@ -1015,12 +1018,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             limit = 50
             component = ""
             event_action = ""
+            requester = ""
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 raw_namespace = (params.get("namespace") or [""])[0]
                 namespace = safe_memory_namespace(raw_namespace) if raw_namespace else None
                 component = (params.get("component") or [""])[0]
                 event_action = (params.get("event_action") or [""])[0]
+                requester = (params.get("requester") or [""])[0]
                 try:
                     limit = int((params.get("limit") or ["50"])[0])
                 except (TypeError, ValueError):
@@ -1033,11 +1038,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "limit": max(1, min(limit, 500)),
                     "component": component or None,
                     "event_action": event_action or None,
+                    "requester": requester or None,
                     "events": recent_memory_events(
                         limit=limit,
                         memory_namespace=namespace,
                         component=component,
                         event_action=event_action,
+                        requester=requester,
                     ),
                 },
             )
