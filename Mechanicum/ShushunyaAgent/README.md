@@ -59,6 +59,9 @@ curl -sS http://127.0.0.1:8095/run \
   -d '{"task":"создай /work/hello.txt с текстом hello","technical":true}'
 ```
 
+Model replies default to `1024` tokens. Override per HTTP request with
+`"max_tokens": 2048` when a longer action JSON or final answer is needed.
+
 Streaming HTTP API for Codex-style progress:
 
 ```bash
@@ -90,7 +93,8 @@ Set `"include_steps": false` when a caller only needs the final message and exit
 code.
 
 Set `"shell_enabled": false` for mobile or public clients; the agent can still
-use structured file/search tools, Python, sandbox status, and archive tools.
+use structured file/search tools, Python, sandbox status, archive tools, and
+supervised public web tools.
 
 For an interactive prompt:
 
@@ -111,8 +115,13 @@ For an interactive prompt:
   `archive_search` action.
 - Structured file writes enforce the configured `500G` soft limit. Shell and
   Python tools still require hard filesystem quota for kernel-level enforcement.
+- `read_file` reads bounded slices with `max_bytes` and `offset`; it no longer
+  loads the whole file before truncating.
 - Arbitrary shell can be disabled with `SHUSHUNYA_AGENT_SHELL_ENABLED=0` or
   `"shell_enabled": false` in the HTTP API payload.
+- Web browsing is exposed as `web_search` and `web_fetch`. The supervisor blocks
+  localhost, private, loopback, link-local, multicast, reserved, and unspecified
+  IP targets, including redirects.
 
 Enable automatic memory injection for experiments:
 

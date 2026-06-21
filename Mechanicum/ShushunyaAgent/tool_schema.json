@@ -46,6 +46,22 @@
         "timeout": "integer"
       }
     },
+    "web_search": {
+      "required": ["action", "query"],
+      "properties": {
+        "action": "web_search",
+        "query": "string",
+        "limit": "integer"
+      }
+    },
+    "web_fetch": {
+      "required": ["action", "url"],
+      "properties": {
+        "action": "web_fetch",
+        "url": "public_http_url",
+        "max_bytes": "integer"
+      }
+    },
     "list_files": {
       "required": ["action", "path"],
       "properties": {
@@ -59,7 +75,8 @@
       "properties": {
         "action": "read_file",
         "path": "sandbox_path",
-        "max_bytes": "integer"
+        "max_bytes": "integer",
+        "offset": "integer"
       }
     },
     "write_file": {
@@ -149,6 +166,14 @@
     "shell_can_be_disabled": true,
     "http_payload_field": "shell_enabled",
     "http_debug_stderr_field": "include_stderr",
-    "http_steps_field": "include_steps"
+    "http_steps_field": "include_steps",
+    "http_max_tokens_field": "max_tokens",
+    "default_max_model_tokens": 1024
+  },
+  "web_policy": {
+    "tools": ["web_search", "web_fetch"],
+    "allowed_schemes": ["http", "https"],
+    "blocked_targets": ["localhost", "private_ip", "loopback", "link_local", "multicast", "reserved", "unspecified"],
+    "default_max_bytes": 200000
   }
 }

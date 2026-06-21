@@ -23,7 +23,7 @@ Paths must be inside sandbox writable roots. Relative paths resolve under
 
 ```json
 {"action":"list_files","path":"/work","max_depth":2}
-{"action":"read_file","path":"/work/file.txt","max_bytes":20000}
+{"action":"read_file","path":"/work/file.txt","max_bytes":20000,"offset":0}
 {"action":"write_file","path":"/work/file.txt","content":"text"}
 {"action":"append_file","path":"/work/file.txt","content":"text"}
 {"action":"replace_in_file","path":"/work/file.txt","old":"old text","new":"new text","count":1}
@@ -37,6 +37,9 @@ Paths must be inside sandbox writable roots. Relative paths resolve under
 `remove_file` refuses directories unless `recursive` is exactly `true`.
 `find_files` and `search_text` are structured alternatives to shell search for
 mobile callers that disable shell execution.
+For large files, call `file_info` or `search_text` first, then use `read_file`
+with explicit `max_bytes` and `offset` slices. `read_file` reports `next_offset`
+when more content remains.
 
 ## Python
 
@@ -45,6 +48,18 @@ mobile callers that disable shell execution.
 ```
 
 Runs `/usr/bin/python3 -c` inside the sandbox.
+
+## Web
+
+```json
+{"action":"web_search","query":"current query","limit":5}
+{"action":"web_fetch","url":"https://example.com/page","max_bytes":200000}
+```
+
+Web tools run through the supervisor, not through sandbox shell. They allow only
+public `http` and `https` URLs and reject localhost, private, loopback,
+link-local, multicast, reserved, and unspecified IP targets. `web_fetch` returns
+status, final URL, content type, title, extracted text, and truncation status.
 
 ## Shell
 
