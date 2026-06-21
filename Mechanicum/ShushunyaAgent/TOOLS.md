@@ -95,6 +95,7 @@ Search or inspect memory explicitly:
 {"action":"archive_search","kind":"focus","query":"active"}
 {"action":"archive_search","kind":"vector","query":"search terms"}
 {"action":"archive_search","kind":"graph","query":"search terms"}
+{"action":"archive_memory_gateway"}
 {"action":"archive_memory_catalog"}
 {"action":"archive_memory_search","query":"search terms","limit":5}
 {"action":"archive_memory_read","kind":"focus","id":"active","max_chars":12000}

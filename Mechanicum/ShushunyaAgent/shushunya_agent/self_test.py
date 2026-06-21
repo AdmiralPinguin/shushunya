@@ -7,6 +7,7 @@ from unittest import mock
 from . import agent_runner
 from .agent_runner import (
     AgentConfig,
+    archive_memory_gateway,
     archive_memory_catalog,
     archive_memory_events,
     archive_memory_propose,
@@ -115,6 +116,11 @@ def main() -> int:
     assert_ok("archive memory events component filter", gateway_events)
     if gateway_events.get("component") != "memory_gateway":
         raise AssertionError(f"unexpected component filter in events response: {gateway_events}")
+    manifest = archive_memory_gateway(config)
+    assert_ok("archive memory gateway manifest tool", manifest)
+    if manifest.get("service") != "ArchiveOfHeresy Memory Gateway":
+        raise AssertionError(f"unexpected memory gateway manifest: {manifest}")
+    print("[ok] archive memory gateway manifest")
     catalog = archive_memory_catalog(config)
     assert_ok("archive memory catalog tool", catalog)
     if catalog.get("memory_namespace") != config.memory_namespace:

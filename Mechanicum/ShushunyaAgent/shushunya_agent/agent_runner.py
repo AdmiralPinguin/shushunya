@@ -122,6 +122,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 {"action":"archive_memory_events","component":"memory_gateway","event_action":"search","limit":20}
 
 8. Читать память через Memory Gateway без доступа к файлам:
+{"action":"archive_memory_gateway"}
 {"action":"archive_memory_catalog"}
 {"action":"archive_memory_search","query":"что искать","limit":5}
 {"action":"archive_memory_read","kind":"focus","id":"active","max_chars":12000}
@@ -233,7 +234,7 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
         payload["compacted_for_model"] = len(matches) > 80
         if len(matches) > 80:
             payload["omitted_matches"] = len(matches) - 80
-    elif action_type in {"archive_search", "archive_memory_catalog", "archive_memory_search", "archive_memory_read", "archive_memory_propose"}:
+    elif action_type in {"archive_search", "archive_memory_gateway", "archive_memory_catalog", "archive_memory_search", "archive_memory_read", "archive_memory_propose"}:
         payload = compact_json_value(payload, string_limit=3000, list_limit=12)
     return compact_json_value(payload, string_limit=config.max_tool_output_chars, list_limit=100)
 
@@ -1188,6 +1189,12 @@ def archive_memory_catalog(config: AgentConfig) -> dict[str, Any]:
     return payload
 
 
+def archive_memory_gateway(config: AgentConfig) -> dict[str, Any]:
+    payload = archive_tool_request(config, "GET", "/archive/memory/gateway", timeout=30)
+    payload["ok"] = bool(payload.get("ok", True))
+    return payload
+
+
 def archive_memory_search(config: AgentConfig, query: str, limit: int | None = None) -> dict[str, Any]:
     query = str(query or "").strip()
     if not query:
@@ -1306,6 +1313,8 @@ def action_summary(action: dict[str, Any]) -> str:
         return "python code"
     if action_type == "archive_search":
         return f"{action.get('kind', '')}: {truncate(str(action.get('query', '')), 120)}"
+    if action_type == "archive_memory_gateway":
+        return "memory gateway manifest"
     if action_type == "archive_memory_read":
         return f"{action.get('kind', '')}: {action.get('id') or action.get('title') or 'active'}"
     if action_type == "archive_memory_search":
@@ -1356,6 +1365,8 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
         return str(result.get("status") or result.get("ok"))
     if action_type == "archive_search":
         return "archive context received"
+    if action_type == "archive_memory_gateway":
+        return str(result.get("service") or result.get("error") or "memory gateway")
     if action_type == "archive_memory_catalog":
         focus = result.get("focus", {}) if isinstance(result.get("focus"), dict) else {}
         wiki = result.get("wiki", {}) if isinstance(result.get("wiki"), dict) else {}
@@ -1487,6 +1498,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             result = archive_status(config)
         elif action_type == "archive_memory_events":
             result = archive_memory_events(config, action.get("limit"), action.get("component"), action.get("event_action"))
+        elif action_type == "archive_memory_gateway":
+            result = archive_memory_gateway(config)
         elif action_type == "archive_memory_catalog":
             result = archive_memory_catalog(config)
         elif action_type == "archive_memory_search":
