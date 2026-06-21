@@ -88,6 +88,22 @@ curl -fsS -G "${AUTH_ARGS[@]}" \
   --data-urlencode "limit=3" \
   "$BASE_URL/archive/memory/events"
 echo
+echo
+
+echo "Memory Gateway unknown namespace guard:"
+guard_file="$(mktemp)"
+guard_status="$(
+  curl -sS -o "$guard_file" -w "%{http_code}" -G "${AUTH_ARGS[@]}" \
+    --data-urlencode "namespace=__gateway_unknown_probe__" \
+    "$BASE_URL/archive/memory/catalog"
+)"
+cat "$guard_file"
+rm -f "$guard_file"
+echo
+if [ "$guard_status" != "404" ]; then
+  echo "Expected unknown namespace guard to return 404, got $guard_status" >&2
+  exit 1
+fi
 
 if [ "${ARCHIVE_GATEWAY_PROPOSE:-0}" = "1" ]; then
   echo
