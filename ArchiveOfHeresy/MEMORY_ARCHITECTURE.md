@@ -96,7 +96,7 @@ GET /archive/memory/catalog?namespace=agent&requester=name
 GET /archive/memory/search?namespace=agent&q=query&limit=5&requester=name
 GET /archive/memory/focus?namespace=agent&id=active&requester=name
 GET /archive/memory/wiki?namespace=agent&id=page-id&requester=name
-GET /archive/memory/events?namespace=agent&limit=20&component=librarian
+GET /archive/memory/events?namespace=agent&limit=20&component=memory_gateway&requester=shushunya-agent
 ```
 
 Write endpoint:
@@ -113,7 +113,8 @@ to the requester.
 
 Read-only gateway operations are audited as `memory_gateway` events. This makes
 agent memory browsing visible without turning every read into a full archive
-turn. Event reads can be filtered by `component` and `event_action`.
+turn. Event reads can be filtered by `component`, `event_action`, and
+`requester`.
 
 Unknown namespaces are rejected on read endpoints unless `create=1` is passed
 explicitly. Chat/proposal writes can still create namespace memory through the
@@ -158,5 +159,5 @@ Use:
 The memory event API is:
 
 ```text
-GET /archive/memory/events?namespace=agent&limit=20&component=librarian
+GET /archive/memory/events?namespace=agent&limit=20&component=memory_gateway&requester=shushunya-agent
 ```
