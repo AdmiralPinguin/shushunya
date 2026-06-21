@@ -72,6 +72,8 @@ Last verified: 2026-06-21 18:08 KST.
   the agent step fails.
 - Malformed model JSON gets a minimal repair pass with memory disabled before
   the runner spends another normal step.
+- Context-size model `400` responses are retried with compacted messages and
+  then with Archive memory injection disabled.
 - Tool exceptions become fail-soft `ok=false` tool results instead of crashing
   the whole agent run.
 

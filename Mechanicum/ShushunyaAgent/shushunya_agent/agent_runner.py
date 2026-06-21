@@ -425,35 +425,39 @@ def chat(
     last_error = ""
     memory_enabled = config.inject_memory if inject_memory is None else inject_memory
     should_archive = config.archive_internal_steps if archive_enabled is None else archive_enabled
-    for budget in budgets:
-        compacted_messages = compact_messages_for_model(messages, config, budget)
-        payload = {
-            "model": config.model,
-            "messages": compacted_messages,
-            "temperature": 0.1,
-            "max_tokens": config.max_model_tokens,
-            "archive_enabled": should_archive,
-            "focus_enabled": memory_enabled,
-            "vector_enabled": memory_enabled,
-            "graph_enabled": memory_enabled,
-            "user": config.archive_user,
-            "memory_namespace": config.memory_namespace,
-        }
-        attempts = max(1, min(config.llm_retries, 5))
-        for attempt in range(1, attempts + 1):
-            try:
-                response = archive_request(config, "POST", "/v1/chat/completions", payload, timeout=240)
-                return response["choices"][0]["message"]["content"]
-            except HTTPError as exc:
-                body = exc.read().decode("utf-8", errors="replace")
-                last_error = f"HTTP {exc.code}: {truncate(body, 1000)}"
-                lowered = body.lower()
-                if exc.code == 400 and any(token in lowered for token in ("context", "token", "exceeds", "too large")):
-                    break
-                if exc.code in {429, 502, 503, 504} and attempt < attempts:
-                    time.sleep(min(8, 2 ** (attempt - 1)))
-                    continue
-                raise RuntimeError(last_error) from exc
+    memory_profiles = [memory_enabled]
+    if memory_enabled:
+        memory_profiles.append(False)
+    for profile_memory_enabled in memory_profiles:
+        for budget in budgets:
+            compacted_messages = compact_messages_for_model(messages, config, budget)
+            payload = {
+                "model": config.model,
+                "messages": compacted_messages,
+                "temperature": 0.1,
+                "max_tokens": config.max_model_tokens,
+                "archive_enabled": should_archive,
+                "focus_enabled": profile_memory_enabled,
+                "vector_enabled": profile_memory_enabled,
+                "graph_enabled": profile_memory_enabled,
+                "user": config.archive_user,
+                "memory_namespace": config.memory_namespace,
+            }
+            attempts = max(1, min(config.llm_retries, 5))
+            for attempt in range(1, attempts + 1):
+                try:
+                    response = archive_request(config, "POST", "/v1/chat/completions", payload, timeout=240)
+                    return response["choices"][0]["message"]["content"]
+                except HTTPError as exc:
+                    body = exc.read().decode("utf-8", errors="replace")
+                    last_error = f"HTTP {exc.code}: {truncate(body, 1000)}"
+                    lowered = body.lower()
+                    if exc.code == 400 and any(token in lowered for token in ("context", "token", "exceeds", "too large")):
+                        break
+                    if exc.code in {429, 502, 503, 504} and attempt < attempts:
+                        time.sleep(min(8, 2 ** (attempt - 1)))
+                        continue
+                    raise RuntimeError(last_error) from exc
     raise RuntimeError(f"model request failed after context compaction retries: {last_error}")
 
 

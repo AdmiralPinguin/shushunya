@@ -299,6 +299,24 @@ def main() -> int:
         raise AssertionError(f"model retry did not recover: reply={retry_reply}, calls={mocked_archive.call_count}")
     print("[ok] model 429 retry")
 
+    def context_side_effect(config_arg, method, path, payload=None, timeout=180):
+        if payload and payload.get("focus_enabled"):
+            raise HTTPError(
+                url="http://archive/v1/chat/completions",
+                code=400,
+                msg="Bad Request",
+                hdrs={},
+                fp=io.BytesIO(b'{"error":"context too large"}'),
+            )
+        return {"choices": [{"message": {"content": '{"action":"final","message":"memory off ok"}'}}]}
+
+    context_config = AgentConfig(llm_retries=1, inject_memory=True, archive_internal_steps=False)
+    with mock.patch.object(agent_runner, "archive_request", side_effect=context_side_effect) as mocked_archive:
+        context_reply = chat(context_config, [{"role": "user", "content": "context"}], inject_memory=True, archive_enabled=False)
+    if context_reply != '{"action":"final","message":"memory off ok"}' or mocked_archive.call_count != 4:
+        raise AssertionError(f"context retry did not disable memory after compacted attempts: reply={context_reply}, calls={mocked_archive.call_count}")
+    print("[ok] model context retry disables memory")
+
     final_events: list[dict] = []
     final_stdout = io.StringIO()
     final_config = AgentConfig(
