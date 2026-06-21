@@ -9,9 +9,11 @@ from .agent_runner import (
     AgentConfig,
     archive_request,
     archive_status,
+    compact_messages_for_model,
     configured_search_providers,
     file_tool,
     python_tool,
+    result_for_model,
     sandbox_status,
     validate_configured_searxng_url,
     validate_public_url,
@@ -76,6 +78,23 @@ def main() -> int:
     finally:
         agent_runner.SEARCH_PROVIDERS = old_provider_env
         agent_runner.BRAVE_SEARCH_API_KEY = old_brave_key
+
+    large_result = {"ok": True, "content": "x" * 50000, "size": 50000}
+    compacted_result = result_for_model("read_file", large_result, config)
+    if len(compacted_result.get("content", "")) > 7000:
+        raise AssertionError("read_file result was not compacted for model context")
+    print("[ok] read_file result compacted for model context")
+
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "task"},
+        *({"role": "user", "content": "Tool result:\n" + ("y" * 6000)} for _ in range(8)),
+    ]
+    compacted_messages = compact_messages_for_model(messages, config, budget=9000)
+    total_context_chars = sum(len(message.get("content", "")) for message in compacted_messages)
+    if total_context_chars > 9000 or len(compacted_messages) >= len(messages):
+        raise AssertionError(f"context messages were not compacted: chars={total_context_chars}, count={len(compacted_messages)}")
+    print("[ok] model context compacted")
 
     health = archive_request(config, "GET", "/health", timeout=10)
     if health.get("status") != "ok":

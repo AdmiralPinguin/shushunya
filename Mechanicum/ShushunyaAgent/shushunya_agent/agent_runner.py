@@ -32,6 +32,7 @@ SANDBOX_RUNNER = os.environ.get(
 )
 MAX_STEPS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_STEPS", "12"))
 MAX_MODEL_TOKENS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "1024"))
+MAX_CONTEXT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_CONTEXT_CHARS", "14000"))
 SHELL_TIMEOUT = int(os.environ.get("SHUSHUNYA_AGENT_SHELL_TIMEOUT", "60"))
 MAX_TOOL_OUTPUT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_TOOL_OUTPUT_CHARS", "12000"))
 MAX_WEB_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_WEB_BYTES", "200000"))
@@ -140,6 +141,7 @@ class AgentConfig:
     sandbox_group: str = SANDBOX_GROUP
     sandbox_runner: str = SANDBOX_RUNNER
     max_steps: int = MAX_STEPS
+    max_context_chars: int = MAX_CONTEXT_CHARS
     shell_timeout: int = SHELL_TIMEOUT
     max_tool_output_chars: int = MAX_TOOL_OUTPUT_CHARS
     sandbox_storage_limit_bytes: int = SANDBOX_STORAGE_LIMIT_BYTES
@@ -156,6 +158,83 @@ def truncate(text: str, limit: int) -> str:
     return text[: limit // 2] + "\n...[truncated]...\n" + text[-limit // 2 :]
 
 
+def compact_json_value(value: Any, string_limit: int = 4000, list_limit: int = 40, depth: int = 0) -> Any:
+    if depth > 6:
+        return truncate(str(value), string_limit)
+    if isinstance(value, str):
+        return truncate(value, string_limit)
+    if isinstance(value, list):
+        compacted = [compact_json_value(item, string_limit, list_limit, depth + 1) for item in value[:list_limit]]
+        if len(value) > list_limit:
+            compacted.append({"truncated_items": len(value) - list_limit})
+        return compacted
+    if isinstance(value, dict):
+        return {str(key): compact_json_value(item, string_limit, list_limit, depth + 1) for key, item in value.items()}
+    return value
+
+
+def result_for_model(action_type: str, result: dict[str, Any], config: AgentConfig) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {"ok": False, "error": truncate(str(result), 2000)}
+    payload = dict(result)
+    if action_type == "read_file" and isinstance(payload.get("content"), str):
+        payload["content"] = truncate(payload["content"], 6000)
+        payload["content_note"] = "content compacted for model context; use read_file offset/next_offset for more"
+    elif action_type == "web_fetch" and isinstance(payload.get("text"), str):
+        payload["text"] = truncate(payload["text"], 8000)
+    elif action_type in {"shell", "python"}:
+        if isinstance(payload.get("stdout"), str):
+            payload["stdout"] = truncate(payload["stdout"], 6000)
+        if isinstance(payload.get("stderr"), str):
+            payload["stderr"] = truncate(payload["stderr"], 4000)
+    elif action_type in {"list_files", "find_files"} and isinstance(payload.get("items"), list):
+        items = payload["items"]
+        payload["items"] = items[:80]
+        payload["compacted_for_model"] = len(items) > 80
+        if len(items) > 80:
+            payload["omitted_items"] = len(items) - 80
+    elif action_type == "search_text" and isinstance(payload.get("matches"), list):
+        matches = payload["matches"]
+        payload["matches"] = matches[:80]
+        payload["compacted_for_model"] = len(matches) > 80
+        if len(matches) > 80:
+            payload["omitted_matches"] = len(matches) - 80
+    elif action_type == "archive_search":
+        payload = compact_json_value(payload, string_limit=3000, list_limit=12)
+    return compact_json_value(payload, string_limit=config.max_tool_output_chars, list_limit=100)
+
+
+def compact_messages_for_model(messages: list[dict[str, str]], config: AgentConfig, budget: int | None = None) -> list[dict[str, str]]:
+    budget = max(6000, int(budget or config.max_context_chars))
+    current = sum(len(message.get("content", "")) for message in messages)
+    if current <= budget:
+        return messages
+
+    system = messages[0] if messages else {"role": "system", "content": SYSTEM_PROMPT}
+    user = messages[1] if len(messages) > 1 else {"role": "user", "content": ""}
+    remaining_budget = max(4000, budget - len(system.get("content", "")) - len(user.get("content", "")))
+    tail: list[dict[str, str]] = []
+    used = 0
+    for message in reversed(messages[2:]):
+        content_len = len(message.get("content", ""))
+        if tail and used + content_len > remaining_budget:
+            break
+        tail.append(message)
+        used += content_len
+    tail.reverse()
+    omitted = max(0, len(messages) - 2 - len(tail))
+    if omitted:
+        summary = {
+            "role": "user",
+            "content": (
+                f"Context compaction: omitted {omitted} older assistant/tool messages to stay under model context. "
+                "Use current visible tool results only; repeat a tool call with narrower parameters if missing detail is needed."
+            ),
+        }
+        return [system, user, summary, *tail]
+    return [system, user, *tail]
+
+
 def archive_request(config: AgentConfig, method: str, path: str, payload: dict[str, Any] | None = None, timeout: int = 180) -> dict[str, Any]:
     data = None
     headers = {"Content-Type": "application/json"}
@@ -170,18 +249,31 @@ def archive_request(config: AgentConfig, method: str, path: str, payload: dict[s
 
 
 def chat(config: AgentConfig, messages: list[dict[str, str]]) -> str:
-    payload = {
-        "model": config.model,
-        "messages": messages,
-        "temperature": 0.1,
-        "max_tokens": config.max_model_tokens,
-        "archive_enabled": config.archive_internal_steps,
-        "focus_enabled": config.inject_memory,
-        "vector_enabled": config.inject_memory,
-        "graph_enabled": config.inject_memory,
-    }
-    response = archive_request(config, "POST", "/v1/chat/completions", payload, timeout=240)
-    return response["choices"][0]["message"]["content"]
+    budgets = [config.max_context_chars, 10000, 7000]
+    last_error = ""
+    for budget in budgets:
+        compacted_messages = compact_messages_for_model(messages, config, budget)
+        payload = {
+            "model": config.model,
+            "messages": compacted_messages,
+            "temperature": 0.1,
+            "max_tokens": config.max_model_tokens,
+            "archive_enabled": config.archive_internal_steps,
+            "focus_enabled": config.inject_memory,
+            "vector_enabled": config.inject_memory,
+            "graph_enabled": config.inject_memory,
+        }
+        try:
+            response = archive_request(config, "POST", "/v1/chat/completions", payload, timeout=240)
+            return response["choices"][0]["message"]["content"]
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            last_error = f"HTTP {exc.code}: {truncate(body, 1000)}"
+            lowered = body.lower()
+            if exc.code == 400 and any(token in lowered for token in ("context", "token", "exceeds", "too large")):
+                continue
+            raise RuntimeError(last_error) from exc
+    raise RuntimeError(f"model request failed after context compaction retries: {last_error}")
 
 
 def parse_action(raw: str) -> dict[str, Any]:
@@ -411,7 +503,7 @@ def web_search_searxng(query: str, limit: int) -> dict[str, Any]:
         return {"ok": False, "provider": "searxng", "error": "SEARXNG_URL is not configured"}
     url = SEARXNG_URL + "/search?" + urlencode({"q": query, "format": "json", "language": "auto"})
     validate_configured_searxng_url(url)
-    request = Request(url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "application/json"})
+    request = Request(url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "application/json", "X-Real-IP": "127.0.0.1"})
     with build_opener(SearxngRedirectHandler).open(request, timeout=25) as response:
         validate_configured_searxng_url(response.geturl())
         data, truncated = read_limited_response(response, 600000)
@@ -1187,7 +1279,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         messages.append(
             {
                 "role": "user",
-                "content": "Tool result:\n" + json.dumps(result, ensure_ascii=False, indent=2),
+                "content": "Tool result:\n" + json.dumps(result_for_model(action_type, result, config), ensure_ascii=False, indent=2),
             }
         )
 

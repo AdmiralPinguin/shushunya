@@ -1,5 +1,6 @@
 bootstrap/
 config/settings.yml
+config/limiter.toml
 python-userbase/
 runtime/
 searxng-src/

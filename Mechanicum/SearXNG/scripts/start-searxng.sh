@@ -34,7 +34,7 @@ echo "$!" > "$PID_FILE"
 
 BASE_URL="http://$HOST:$PORT"
 for _ in {1..80}; do
-  if curl -fsS "$BASE_URL/search?q=OpenAI&format=json" >/dev/null 2>&1; then
+  if curl -fsS -H "X-Real-IP: 127.0.0.1" "$BASE_URL/search?q=OpenAI&format=json" >/dev/null 2>&1; then
     echo "SearXNG started: PID $(cat "$PID_FILE"), $BASE_URL"
     exit 0
   fi
