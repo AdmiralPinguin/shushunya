@@ -217,6 +217,26 @@ def main() -> int:
         raise AssertionError(f"runtime limit did not stop before model: code={limit_code}, payload={limit_payload}")
     print("[ok] runtime limit")
 
+    tool_error_events: list[dict] = []
+    tool_error_stdout = io.StringIO()
+    tool_error_config = AgentConfig(
+        task_id=safe_task_id("self-test-tool-error"),
+        json_output=True,
+        max_steps=2,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+        '{"action":"web_fetch","url":"http://127.0.0.1:8095/health"}',
+        '{"action":"final","message":"handled"}',
+    ]), contextlib.redirect_stdout(tool_error_stdout), contextlib.redirect_stderr(io.StringIO()):
+        tool_error_code = run_agent("handle bad tool", tool_error_config, event_sink=tool_error_events.append)
+    tool_error_payload = json.loads(tool_error_stdout.getvalue())
+    failed_tool_events = [event for event in tool_error_events if event.get("type") == "tool_result" and event.get("ok") is False]
+    if tool_error_code != 0 or tool_error_payload.get("message") != "handled" or not failed_tool_events:
+        raise AssertionError(f"tool exception was not fail-soft: code={tool_error_code}, payload={tool_error_payload}, events={tool_error_events}")
+    print("[ok] tool exception fail-soft")
+
     health = archive_request(config, "GET", "/health", timeout=10)
     if health.get("status") != "ok":
         raise AssertionError(f"Archive health failed: {health}")

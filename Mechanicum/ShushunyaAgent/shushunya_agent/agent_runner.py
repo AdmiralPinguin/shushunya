@@ -1685,61 +1685,64 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         fingerprint = action_fingerprint(action)
         action_counts[fingerprint] = action_counts.get(fingerprint, 0) + 1
         action_started = time.time()
-        if action_counts[fingerprint] >= 3:
-            result = {
-                "ok": False,
-                "error": "repeated identical action rejected by supervisor",
-                "repeated_action": action,
-                "instruction": "Choose a different action based on previous tool results, or return final if enough work is done.",
-            }
-        elif action_type == "shell":
-            result = run_shell(config, str(action.get("cmd", "")), action.get("timeout"))
-        elif action_type in FILE_ACTIONS:
-            result = file_tool(config, action)
-        elif action_type == "python":
-            result = python_tool(config, action)
-        elif action_type == "web_search":
-            result = web_search(config, str(action.get("query", "")), action.get("limit"))
-        elif action_type == "web_fetch":
-            result = web_fetch(config, str(action.get("url", "")), action.get("max_bytes"))
-        elif action_type == "sandbox_status":
-            result = sandbox_status(config)
-        elif action_type == "archive_search":
-            result = archive_search(config, str(action.get("kind", "")), str(action.get("query", "")))
-        elif action_type == "archive_status":
-            result = archive_status(config)
-        elif action_type == "archive_memory_events":
-            result = archive_memory_events(
-                config,
-                action.get("limit"),
-                action.get("component"),
-                action.get("event_action"),
-                action.get("requester"),
-            )
-        elif action_type == "archive_memory_gateway":
-            result = archive_memory_gateway(config)
-        elif action_type == "archive_memory_catalog":
-            result = archive_memory_catalog(config)
-        elif action_type == "archive_memory_search":
-            result = archive_memory_search(
-                config,
-                str(action.get("query", "")),
-                action.get("limit"),
-                action.get("include_content"),
-                action.get("layers"),
-            )
-        elif action_type == "archive_memory_read":
-            result = archive_memory_read(
-                config,
-                str(action.get("kind", "")),
-                action.get("id"),
-                action.get("title"),
-                action.get("max_chars"),
-            )
-        elif action_type == "archive_memory_propose":
-            result = archive_memory_propose(config, action)
-        else:
-            result = {"ok": False, "error": f"unsupported action: {action_type}"}
+        try:
+            if action_counts[fingerprint] >= 3:
+                result = {
+                    "ok": False,
+                    "error": "repeated identical action rejected by supervisor",
+                    "repeated_action": action,
+                    "instruction": "Choose a different action based on previous tool results, or return final if enough work is done.",
+                }
+            elif action_type == "shell":
+                result = run_shell(config, str(action.get("cmd", "")), action.get("timeout"))
+            elif action_type in FILE_ACTIONS:
+                result = file_tool(config, action)
+            elif action_type == "python":
+                result = python_tool(config, action)
+            elif action_type == "web_search":
+                result = web_search(config, str(action.get("query", "")), action.get("limit"))
+            elif action_type == "web_fetch":
+                result = web_fetch(config, str(action.get("url", "")), action.get("max_bytes"))
+            elif action_type == "sandbox_status":
+                result = sandbox_status(config)
+            elif action_type == "archive_search":
+                result = archive_search(config, str(action.get("kind", "")), str(action.get("query", "")))
+            elif action_type == "archive_status":
+                result = archive_status(config)
+            elif action_type == "archive_memory_events":
+                result = archive_memory_events(
+                    config,
+                    action.get("limit"),
+                    action.get("component"),
+                    action.get("event_action"),
+                    action.get("requester"),
+                )
+            elif action_type == "archive_memory_gateway":
+                result = archive_memory_gateway(config)
+            elif action_type == "archive_memory_catalog":
+                result = archive_memory_catalog(config)
+            elif action_type == "archive_memory_search":
+                result = archive_memory_search(
+                    config,
+                    str(action.get("query", "")),
+                    action.get("limit"),
+                    action.get("include_content"),
+                    action.get("layers"),
+                )
+            elif action_type == "archive_memory_read":
+                result = archive_memory_read(
+                    config,
+                    str(action.get("kind", "")),
+                    action.get("id"),
+                    action.get("title"),
+                    action.get("max_chars"),
+                )
+            elif action_type == "archive_memory_propose":
+                result = archive_memory_propose(config, action)
+            else:
+                result = {"ok": False, "error": f"unsupported action: {action_type}"}
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc), "exception": exc.__class__.__name__}
 
         action_duration_sec = round(time.time() - action_started, 3)
         emit(

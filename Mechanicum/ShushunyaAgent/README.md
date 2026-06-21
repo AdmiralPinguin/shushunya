@@ -192,6 +192,8 @@ matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
 - The runner rejects non-JSON model replies and asks the model to repair them.
 - If a model step returns malformed JSON, the runner first attempts a minimal
   JSON repair pass with memory disabled before spending another normal step.
+- Tool exceptions are converted into `ok=false` tool results, so the agent can
+  recover or explain the failure instead of crashing the whole run.
 - Long-term memory stays in `ArchiveOfHeresy`; this runner stores no persistent
   memory of its own.
 - Task journals are operational traces, not long-term memory. They are used for
