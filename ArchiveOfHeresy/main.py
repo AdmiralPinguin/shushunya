@@ -22,6 +22,7 @@ from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_use
 ROOT = Path(__file__).resolve().parent
 HOST = os.environ.get("ARCHIVE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("ARCHIVE_PORT", "8090"))
+ARCHIVE_BASE_URL = os.environ.get("ARCHIVE_BASE_URL", f"http://127.0.0.1:{PORT}").rstrip("/")
 ARCHIVE_API_KEY = os.environ.get("ARCHIVE_API_KEY", "").strip()
 LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
@@ -365,6 +366,7 @@ def memory_catalog(memory_namespace):
         "gateway": {
             "read_endpoints": [
                 "/archive/memory/catalog",
+                "/archive/memory/gateway",
                 "/archive/memory/focus",
                 "/archive/memory/wiki",
                 "/archive/memory/search",
@@ -380,6 +382,46 @@ def memory_catalog(memory_namespace):
         "vector": vector_stats(namespace),
         "graph": graph_stats(namespace),
         "recent_events": recent_memory_events(limit=5, memory_namespace=namespace),
+    }
+
+
+def memory_gateway_manifest():
+    return {
+        "service": "ArchiveOfHeresy Memory Gateway",
+        "base_url": ARCHIVE_BASE_URL,
+        "auth": "Authorization: Bearer $ARCHIVE_API_KEY when ARCHIVE_API_KEY is configured",
+        "known_namespaces": known_memory_namespaces(),
+        "namespace_policy": {
+            "default": "normal Telegram/chat memory",
+            "agent": "ShushunyaAgent memory",
+            "read_unknown_namespace": "rejected unless create=1 is passed intentionally",
+            "write_unknown_namespace": "allowed only through chat/proposal paths that let the librarian create memory",
+        },
+        "read_endpoints": {
+            "catalog": "GET /archive/memory/catalog?namespace=agent&requester=name",
+            "search": "GET /archive/memory/search?namespace=agent&q=query&limit=5&requester=name",
+            "focus": "GET /archive/memory/focus?namespace=agent&id=active&requester=name",
+            "wiki": "GET /archive/memory/wiki?namespace=agent&id=page-id&requester=name",
+            "events": "GET /archive/memory/events?namespace=agent&limit=20",
+        },
+        "write_endpoints": {
+            "proposal": "POST /archive/memory/propose-change",
+            "proposal_policy": "Requester submits a proposal. ArchiveOfHeresy archives it and the librarian decides what to update.",
+        },
+        "agent_actions": [
+            "archive_memory_catalog",
+            "archive_memory_search",
+            "archive_memory_read",
+            "archive_memory_propose",
+            "archive_memory_events",
+        ],
+        "rules": [
+            "Do not read memory files directly from agents.",
+            "Read memory through gateway endpoints.",
+            "Do not write memory files directly from agents.",
+            "Submit changes through /archive/memory/propose-change and let the librarian apply them.",
+            "Treat gateway search results as reference memory; current tool results and current user request are fresher.",
+        ],
     }
 
 
@@ -946,6 +988,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "events": recent_memory_events(limit=limit, memory_namespace=namespace),
                 },
             )
+            return
+
+        if self.path.startswith("/archive/memory/gateway"):
+            write_json(self, 200, memory_gateway_manifest())
             return
 
         if self.path.startswith("/archive/memory/catalog"):
