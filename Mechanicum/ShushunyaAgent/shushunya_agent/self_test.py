@@ -177,6 +177,10 @@ def main() -> int:
     if not compact_resume or len(compact_resume_text) > 7000:
         raise AssertionError("resume events were not compacted")
     print("[ok] resume context compacted")
+    public_journal = server.public_task_journal_payload({"ok": True, "path": "/private/runtime/task.jsonl", "events": []})
+    if "path" in public_journal:
+        raise AssertionError(f"public journal payload leaked path: {public_journal}")
+    print("[ok] public journal path redaction")
 
     state = server.runtime_state()
     if "busy" not in state or state.get("max_request_bytes", 0) <= 0:

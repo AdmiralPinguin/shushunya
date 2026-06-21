@@ -238,6 +238,12 @@ def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]
     )
 
 
+def public_task_journal_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    public_payload = dict(payload)
+    public_payload.pop("path", None)
+    return public_payload
+
+
 class AgentHandler(BaseHTTPRequestHandler):
     server_version = "ShushunyaAgent/0.1"
 
@@ -285,7 +291,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             task_id = (params.get("task_id") or [""])[0].strip() or None
             limit = int_field({"limit": (params.get("limit") or [80])[0]}, "limit", 80, 1, 500)
             payload = read_task_journal(task_id, limit=limit)
-            write_json(self, 200 if payload.get("ok") else 404, payload)
+            write_json(self, 200 if payload.get("ok") else 404, public_task_journal_payload(payload))
             return
         write_json(self, 404, {"error": "not found"})
 
