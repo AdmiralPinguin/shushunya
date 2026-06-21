@@ -201,6 +201,45 @@ def main() -> int:
             server.RUN_STATE["queued"] = old_queued
     print("[ok] HTTP queue full guard")
 
+    class FakeStreamHeaders:
+        def __init__(self, body: bytes) -> None:
+            self.body = body
+
+        def get(self, key: str, default: str = "") -> str:
+            if key == "Content-Length":
+                return str(len(self.body))
+            return default
+
+    class FakeStreamHandler:
+        def __init__(self, body: bytes) -> None:
+            self.headers = FakeStreamHeaders(body)
+            self.rfile = io.BytesIO(body)
+            self.wfile = io.BytesIO()
+            self.statuses: list[int] = []
+
+        def send_response(self, status: int) -> None:
+            self.statuses.append(status)
+
+        def send_header(self, key: str, value: str) -> None:
+            pass
+
+        def end_headers(self) -> None:
+            pass
+
+    stream_body = b'{"task":"queue full self-test","wait_for_slot":true}'
+    stream_handler = FakeStreamHandler(stream_body)
+    with server.STATE_LOCK:
+        old_queued = server.RUN_STATE["queued"]
+        server.RUN_STATE["queued"] = server.MAX_QUEUE
+    try:
+        server.AgentHandler.run_stream(stream_handler)  # type: ignore[arg-type]
+    finally:
+        with server.STATE_LOCK:
+            server.RUN_STATE["queued"] = old_queued
+    if stream_handler.statuses[:1] != [429]:
+        raise AssertionError(f"run_stream should reject full queue before opening stream: {stream_handler.statuses}")
+    print("[ok] run_stream queue full returns HTTP 429")
+
     class FakeHeaders:
         def __init__(self, authorization: str = "") -> None:
             self.authorization = authorization

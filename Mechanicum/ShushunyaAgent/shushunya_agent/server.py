@@ -429,6 +429,11 @@ class AgentHandler(BaseHTTPRequestHandler):
             if busy is not None:
                 write_json(self, 409, busy)
                 return
+            queue_error = try_enqueue_run()
+            if queue_error is not None:
+                queue_error["state"] = runtime_state()
+                write_json(self, 429, queue_error)
+                return
 
             config = attach_cancel_check(config_from_payload(payload))
             task = apply_resume_context(task, config, payload)
@@ -442,11 +447,6 @@ class AgentHandler(BaseHTTPRequestHandler):
             stdout = io.StringIO()
             stderr = io.StringIO()
             code = 1
-            queue_error = try_enqueue_run()
-            if queue_error is not None:
-                queue_error["state"] = runtime_state()
-                write_json(self, 429, queue_error)
-                return
             with RUN_LOCK:
                 with STATE_LOCK:
                     RUN_STATE["queued"] = max(0, int(RUN_STATE["queued"]) - 1)
