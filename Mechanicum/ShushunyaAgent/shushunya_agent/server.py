@@ -429,14 +429,14 @@ class AgentHandler(BaseHTTPRequestHandler):
             if busy is not None:
                 write_json(self, 409, busy)
                 return
+
+            config = attach_cancel_check(config_from_payload(payload))
+            task = apply_resume_context(task, config, payload)
             queue_error = try_enqueue_run()
             if queue_error is not None:
                 queue_error["state"] = runtime_state()
                 write_json(self, 429, queue_error)
                 return
-
-            config = attach_cancel_check(config_from_payload(payload))
-            task = apply_resume_context(task, config, payload)
 
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
