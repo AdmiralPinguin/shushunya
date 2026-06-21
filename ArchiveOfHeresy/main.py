@@ -405,7 +405,7 @@ def memory_gateway_manifest():
             "search": "GET /archive/memory/search?namespace=agent&q=query&limit=5&requester=name",
             "focus": "GET /archive/memory/focus?namespace=agent&id=active&requester=name",
             "wiki": "GET /archive/memory/wiki?namespace=agent&id=page-id&requester=name",
-            "events": "GET /archive/memory/events?namespace=agent&limit=20&component=librarian&event_action=search",
+            "events": "GET /archive/memory/events?namespace=agent&limit=20&component=memory_gateway&event_action=search",
         },
         "write_endpoints": {
             "proposal": "POST /archive/memory/propose-change",
