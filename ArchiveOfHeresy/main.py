@@ -192,6 +192,27 @@ def known_memory_namespaces():
     return sorted(namespaces)
 
 
+def memory_namespace_exists(namespace):
+    return safe_memory_namespace(namespace) in set(known_memory_namespaces())
+
+
+def allow_gateway_namespace(handler, namespace, create=False):
+    namespace = safe_memory_namespace(namespace)
+    if create or memory_namespace_exists(namespace):
+        return True
+    write_json(
+        handler,
+        404,
+        {
+            "error": "Memory namespace not found",
+            "memory_namespace": namespace,
+            "known_namespaces": known_memory_namespaces(),
+            "hint": "Use create=1 only when intentionally opening a new read namespace, or submit a proposal/chat turn to create memory through the librarian.",
+        },
+    )
+    return False
+
+
 def wiki_bookshelf_for_namespace(namespace):
     return WikiBookshelf(wiki_root_for_namespace(namespace))
 
@@ -930,10 +951,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/archive/memory/catalog"):
             namespace = "default"
             requester = "unknown"
+            create_namespace = False
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
                 requester = (params.get("requester") or ["unknown"])[0]
+                create_namespace = internal_flag((params.get("create") or [False])[0], default=False)
+            if not allow_gateway_namespace(self, namespace, create=create_namespace):
+                return
             payload = memory_catalog(namespace)
             write_gateway_event(
                 namespace,
@@ -950,15 +975,19 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             query = ""
             limit = 5
             requester = "unknown"
+            create_namespace = False
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
                 query = (params.get("q") or [""])[0]
                 requester = (params.get("requester") or ["unknown"])[0]
+                create_namespace = internal_flag((params.get("create") or [False])[0], default=False)
                 try:
                     limit = int((params.get("limit") or ["5"])[0])
                 except (TypeError, ValueError):
                     limit = 5
+            if not allow_gateway_namespace(self, namespace, create=create_namespace):
+                return
             if not query.strip():
                 write_json(self, 400, {"error": "Missing required query parameter: q", "memory_namespace": namespace})
                 return
@@ -981,12 +1010,16 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             focus_id = ""
             active = False
             requester = "unknown"
+            create_namespace = False
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
                 focus_id = (params.get("id") or [""])[0]
                 active = focus_id in ("", "active")
                 requester = (params.get("requester") or ["unknown"])[0]
+                create_namespace = internal_flag((params.get("create") or [False])[0], default=False)
+            if not allow_gateway_namespace(self, namespace, create=create_namespace):
+                return
             bookshelf = focus_components(namespace)["bookshelf"]
             index = bookshelf.load_index()
             focus = find_focus(index, focus_id=focus_id, active=active)
@@ -1017,12 +1050,16 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             page_id = ""
             title = ""
             requester = "unknown"
+            create_namespace = False
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
                 page_id = (params.get("id") or [""])[0]
                 title = (params.get("title") or [""])[0]
                 requester = (params.get("requester") or ["unknown"])[0]
+                create_namespace = internal_flag((params.get("create") or [False])[0], default=False)
+            if not allow_gateway_namespace(self, namespace, create=create_namespace):
+                return
             bookshelf = wiki_bookshelf_for_namespace(namespace)
             index = bookshelf.load_index()
             page = bookshelf.find_page(index, page_id=page_id or None, title=title or None)

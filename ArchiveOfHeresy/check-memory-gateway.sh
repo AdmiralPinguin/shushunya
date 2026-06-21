@@ -6,6 +6,7 @@ PORT="${ARCHIVE_PORT:-8090}"
 BASE_URL="${ARCHIVE_BASE_URL:-http://127.0.0.1:$PORT}"
 NAMESPACE="${1:-agent}"
 QUERY="${2:-memory gateway}"
+REQUESTER="${ARCHIVE_GATEWAY_REQUESTER:-check-memory-gateway}"
 ENV_FILE="$ROOT/.env"
 
 if [ -f "$ENV_FILE" ]; then
@@ -26,17 +27,17 @@ echo
 echo
 
 echo "Memory Gateway catalog namespace=$NAMESPACE:"
-curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" "$BASE_URL/archive/memory/catalog"
+curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" --data-urlencode "requester=$REQUESTER" "$BASE_URL/archive/memory/catalog"
 echo
 echo
 
 echo "Memory Gateway search namespace=$NAMESPACE query=$QUERY:"
-curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" --data-urlencode "q=$QUERY" "$BASE_URL/archive/memory/search"
+curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" --data-urlencode "requester=$REQUESTER" --data-urlencode "q=$QUERY" "$BASE_URL/archive/memory/search"
 echo
 echo
 
 echo "Memory Gateway active focus namespace=$NAMESPACE:"
-curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" --data-urlencode "id=active" "$BASE_URL/archive/memory/focus"
+curl -fsS -G "${AUTH_ARGS[@]}" --data-urlencode "namespace=$NAMESPACE" --data-urlencode "requester=$REQUESTER" --data-urlencode "id=active" "$BASE_URL/archive/memory/focus"
 echo
 echo
 
@@ -45,6 +46,7 @@ probe_file="$(mktemp)"
 status="$(
   curl -sS -o "$probe_file" -w "%{http_code}" -G "${AUTH_ARGS[@]}" \
     --data-urlencode "namespace=$NAMESPACE" \
+    --data-urlencode "requester=$REQUESTER" \
     --data-urlencode "title=__archive_gateway_probe_missing__" \
     "$BASE_URL/archive/memory/wiki"
 )"
