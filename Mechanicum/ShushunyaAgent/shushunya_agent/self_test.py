@@ -179,6 +179,17 @@ def main() -> int:
     finally:
         server.MAX_TASK_CHARS = old_max_task_chars
     print("[ok] HTTP task size validation")
+    with server.STATE_LOCK:
+        old_queued = server.RUN_STATE["queued"]
+        server.RUN_STATE["queued"] = server.MAX_QUEUE
+    try:
+        queue_error = server.try_enqueue_run()
+        if not queue_error or queue_error.get("error") != "agent queue full":
+            raise AssertionError(f"queue full guard failed: {queue_error}")
+    finally:
+        with server.STATE_LOCK:
+            server.RUN_STATE["queued"] = old_queued
+    print("[ok] HTTP queue full guard")
 
     class FakeHeaders:
         def __init__(self, authorization: str = "") -> None:
@@ -225,6 +236,8 @@ def main() -> int:
         raise AssertionError(f"runtime state missing expected fields: {state}")
     if state.get("max_task_chars", 0) <= 0:
         raise AssertionError(f"runtime state missing max_task_chars: {state}")
+    if state.get("max_queue", 0) <= 0:
+        raise AssertionError(f"runtime state missing max_queue: {state}")
     if not state.get("revision"):
         raise AssertionError(f"runtime state missing revision: {state}")
     if state.get("uptime_sec", -1) < 0 or state.get("started_at", 0) <= 0:

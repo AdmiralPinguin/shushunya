@@ -172,6 +172,8 @@ curl -sS http://127.0.0.1:8095/run \
 so concurrent callers do not mutate the same sandbox at the same time.
 Set `"wait_for_slot": false` on `/run` or `/run-stream` when a caller wants an
 immediate `409 agent busy` response instead of waiting for the serialized runner.
+Waiting callers are bounded by `SHUSHUNYA_AGENT_MAX_QUEUE`, default `3`; once
+full, new runs fail with `429 agent queue full`.
 HTTP requests cannot enable the shell tool unless `SHUSHUNYA_AGENT_API_KEY` is
 configured or `SHUSHUNYA_AGENT_HTTP_ALLOW_SHELL_WITHOUT_API_KEY=1` is set.
 The phone client sends `shell_enabled=false`.

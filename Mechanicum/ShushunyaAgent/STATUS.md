@@ -65,6 +65,8 @@ Last verified: 2026-06-21 21:19 KST.
 - `GET /state` and `/health` include Agent API uptime.
 - `wait_for_slot=false` can fail fast with `409 agent busy` instead of waiting
   behind another active or queued run.
+- Waiting runs are bounded by `SHUSHUNYA_AGENT_MAX_QUEUE`; overflow returns
+  `429 agent queue full`.
 - `POST /cancel` requests cooperative cancellation for the current task or a
   supplied `task_id`; the runner stops between agent steps and reports
   `cancelled=true`.

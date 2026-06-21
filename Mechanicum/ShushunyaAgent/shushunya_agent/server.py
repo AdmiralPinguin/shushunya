@@ -24,6 +24,7 @@ API_KEY = os.environ.get("SHUSHUNYA_AGENT_API_KEY", "").strip()
 ROOT = Path(__file__).resolve().parents[1]
 MAX_REQUEST_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_REQUEST_BYTES", "1048576"))
 MAX_TASK_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_TASK_CHARS", "50000"))
+MAX_QUEUE = max(1, int(os.environ.get("SHUSHUNYA_AGENT_MAX_QUEUE", "3")))
 STREAM_HEARTBEAT_SEC = max(5.0, float(os.environ.get("SHUSHUNYA_AGENT_STREAM_HEARTBEAT_SEC", "15")))
 SERVICE_STARTED_AT = time.time()
 RUN_LOCK = threading.Lock()
@@ -143,6 +144,7 @@ def runtime_state() -> dict[str, Any]:
         payload["last_finished_ago_sec"] = round(now - float(payload["last_finished_at"]), 3)
     payload["max_request_bytes"] = MAX_REQUEST_BYTES
     payload["max_task_chars"] = MAX_TASK_CHARS
+    payload["max_queue"] = MAX_QUEUE
     payload["revision"] = service_revision()
     payload["started_at"] = SERVICE_STARTED_AT
     payload["uptime_sec"] = round(now - SERVICE_STARTED_AT, 3)
@@ -200,6 +202,14 @@ def reject_if_busy(payload: dict[str, Any]) -> dict[str, Any] | None:
     if not runner_is_busy() and not RUN_LOCK.locked():
         return None
     return {"ok": False, "error": "agent busy", "state": runtime_state()}
+
+
+def try_enqueue_run() -> dict[str, Any] | None:
+    with STATE_LOCK:
+        if int(RUN_STATE.get("queued", 0)) >= MAX_QUEUE:
+            return {"ok": False, "error": "agent queue full"}
+        RUN_STATE["queued"] = int(RUN_STATE.get("queued", 0)) + 1
+    return None
 
 
 def validate_task_text(task: str) -> dict[str, Any] | None:
@@ -353,8 +363,11 @@ class AgentHandler(BaseHTTPRequestHandler):
 
             stdout = io.StringIO()
             stderr = io.StringIO()
-            with STATE_LOCK:
-                RUN_STATE["queued"] += 1
+            queue_error = try_enqueue_run()
+            if queue_error is not None:
+                queue_error["state"] = runtime_state()
+                write_json(self, 429, queue_error)
+                return
             with RUN_LOCK:
                 with STATE_LOCK:
                     RUN_STATE["queued"] = max(0, int(RUN_STATE["queued"]) - 1)
@@ -426,8 +439,11 @@ class AgentHandler(BaseHTTPRequestHandler):
             stdout = io.StringIO()
             stderr = io.StringIO()
             code = 1
-            with STATE_LOCK:
-                RUN_STATE["queued"] += 1
+            queue_error = try_enqueue_run()
+            if queue_error is not None:
+                queue_error["state"] = runtime_state()
+                write_json(self, 429, queue_error)
+                return
             with RUN_LOCK:
                 with STATE_LOCK:
                     RUN_STATE["queued"] = max(0, int(RUN_STATE["queued"]) - 1)
