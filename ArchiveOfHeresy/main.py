@@ -452,6 +452,14 @@ def memory_gateway_manifest():
         "write_endpoints": {
             "proposal": "POST /archive/memory/propose-change",
             "proposal_policy": "Requester submits a proposal. ArchiveOfHeresy archives it and the librarian decides what to update.",
+            "proposal_schema": {
+                "namespace": "memory namespace, default",
+                "requester": "agent or tool name",
+                "target": sorted(GATEWAY_TARGETS),
+                "importance": "integer 1..5",
+                "proposal": "required string",
+                "evidence": "optional string",
+            },
         },
         "agent_actions": [
             "archive_memory_gateway",
