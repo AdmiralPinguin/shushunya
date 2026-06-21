@@ -7,6 +7,7 @@ from unittest import mock
 from . import agent_runner
 from .agent_runner import (
     AgentConfig,
+    archive_memory_events,
     archive_request,
     archive_status,
     compact_messages_for_model,
@@ -101,6 +102,11 @@ def main() -> int:
         raise AssertionError(f"Archive health failed: {health}")
     print("[ok] archive health")
     assert_ok("archive status tool", archive_status(config))
+    memory_events = archive_memory_events(config, limit=1)
+    assert_ok("archive memory events tool", memory_events)
+    if memory_events.get("memory_namespace") != config.memory_namespace:
+        raise AssertionError(f"unexpected memory namespace in events response: {memory_events}")
+    print("[ok] archive memory events namespace")
 
     status = sandbox_status(config)
     assert_ok("sandbox status", status)
