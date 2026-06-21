@@ -161,6 +161,13 @@ def graph_root_for_namespace(namespace):
     return GRAPH_ROOT / "namespaces" / namespace
 
 
+def wiki_root_for_namespace(namespace):
+    namespace = safe_memory_namespace(namespace)
+    if namespace == "default":
+        return WIKI_ROOT
+    return WIKI_ROOT / "namespaces" / namespace
+
+
 def graph_memory_for_namespace(namespace):
     namespace = safe_memory_namespace(namespace)
     cached = GRAPH_COMPONENTS.get(namespace)
@@ -186,12 +193,19 @@ def focus_components(namespace):
     librarian = Librarian(
         root,
         proxy_json,
-        wiki_root=WIKI_ROOT,
+        wiki_root=wiki_root_for_namespace(namespace),
         sqlite_path=SQLITE_PATH,
         vector_memory=VECTOR_MEMORY,
         graph_memory=graph_memory_for_namespace(namespace),
+        memory_namespace=namespace,
     )
-    magos = Magos(root, WIKI_ROOT, proxy_json, vector_memory=VECTOR_MEMORY, graph_memory=graph_memory_for_namespace(namespace))
+    magos = Magos(
+        root,
+        wiki_root_for_namespace(namespace),
+        proxy_json,
+        vector_memory=VECTOR_MEMORY,
+        graph_memory=graph_memory_for_namespace(namespace),
+    )
     cached = {"bookshelf": bookshelf, "librarian": librarian, "magos": magos, "root": root}
     FOCUS_COMPONENTS[namespace] = cached
     return cached
@@ -564,6 +578,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                         for namespace, components in sorted(FOCUS_COMPONENTS.items())
                     },
                     "wiki_root": str(WIKI_ROOT),
+                    "wiki_namespaces": {
+                        namespace: str(wiki_root_for_namespace(namespace))
+                        for namespace in sorted(FOCUS_COMPONENTS.keys())
+                    },
                     "vector_root": str(VECTOR_ROOT),
                     "graph_root": str(GRAPH_ROOT),
                     "graph_namespaces": {

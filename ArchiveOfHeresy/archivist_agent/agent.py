@@ -302,10 +302,24 @@ class FocusBookshelf:
 
 
 class Librarian:
-    def __init__(self, focus_root, proxy_json, wiki_root=None, sqlite_path=None, vector_memory=None, graph_memory=None):
+    def __init__(
+        self,
+        focus_root,
+        proxy_json,
+        wiki_root=None,
+        sqlite_path=None,
+        vector_memory=None,
+        graph_memory=None,
+        memory_namespace="default",
+    ):
         self.bookshelf = FocusBookshelf(focus_root)
         self.proxy_json = proxy_json
-        self.wiki_memory = WikiMemory(wiki_root, proxy_json, sqlite_path) if wiki_root and sqlite_path else None
+        self.memory_namespace = str(memory_namespace or "default")
+        self.wiki_memory = (
+            WikiMemory(wiki_root, proxy_json, sqlite_path, memory_namespace=self.memory_namespace)
+            if wiki_root and sqlite_path
+            else None
+        )
         self.vector_memory = vector_memory
         self.graph_memory = graph_memory
 
@@ -599,10 +613,11 @@ class WikiBookshelf:
 
 
 class WikiMemory:
-    def __init__(self, root, proxy_json, sqlite_path):
+    def __init__(self, root, proxy_json, sqlite_path, memory_namespace="default"):
         self.bookshelf = WikiBookshelf(root)
         self.proxy_json = proxy_json
         self.sqlite_path = Path(sqlite_path)
+        self.memory_namespace = str(memory_namespace or "default")
 
     def process_turn(self, record):
         if record.get("status") != "ok":
@@ -652,6 +667,11 @@ class WikiMemory:
             WHERE status = 'ok'
         """
         params = []
+        with sqlite3.connect(self.sqlite_path) as db:
+            turn_columns = {row[1] for row in db.execute("PRAGMA table_info(turns)")}
+        if "memory_namespace" in turn_columns:
+            sql += " AND memory_namespace = ?"
+            params.append(self.memory_namespace)
         if last_sync_at:
             sql += " AND created_at > ?"
             params.append(last_sync_at)
