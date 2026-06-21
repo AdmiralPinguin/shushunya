@@ -163,30 +163,33 @@ class GraphMemory:
 
     def process_turn(self, record):
         if record.get("status") != "ok":
-            return
+            return {"status": "skipped", "reason": "turn_not_ok"}
         if record.get("conversation_id") == "archive-librarian":
-            return
+            return {"status": "skipped", "reason": "archive_librarian"}
         user_text = latest_user_message(record.get("request", {}).get("messages", []))
         assistant_text = str((record.get("assistant_message") or {}).get("content") or "").strip()
         message_count = int(bool(user_text)) + int(bool(assistant_text))
         if not message_count:
-            return
+            return {"status": "skipped", "reason": "empty_exchange"}
 
         pending = int(self.state_value("pending_messages", "0") or 0) + message_count
         if pending < GRAPH_INTERVAL_MESSAGES:
             self.set_state_value("pending_messages", pending)
-            return
+            return {"status": "pending", "pending_messages": pending}
 
         recent_turns = self.recent_turns(self.state_value("last_sync_at"))
+        applied = {"nodes": 0, "edges": 0}
         if recent_turns:
             decision = self.agent_cycle(record, recent_turns)
             if not decision.get("nodes"):
                 decision = self.fallback_decision(recent_turns)
             self.apply_decision(decision, record)
+            applied = {"nodes": len(decision.get("nodes", [])), "edges": len(decision.get("edges", []))}
 
         self.set_state_value("pending_messages", 0)
         self.set_state_value("last_sync_at", record.get("created_at"))
         self.set_state_value("last_sync_turn_id", record.get("turn_id"))
+        return {"status": "synced", "recent_turns": len(recent_turns), **applied}
 
     def backfill_from_archive(self, model=None):
         if not GRAPH_BACKFILL_ON_START or not self.archive_sqlite_path.exists() or self.node_count() > 0:

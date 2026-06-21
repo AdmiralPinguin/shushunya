@@ -325,17 +325,18 @@ class Librarian:
 
     def process_turn(self, record):
         if record.get("status") != "ok":
-            return
+            return {"status": "skipped", "reason": "turn_not_ok"}
         if record.get("conversation_id") == "archive-librarian":
-            return
+            return {"status": "skipped", "reason": "archive_librarian"}
 
         user_text = latest_user_message(record.get("request", {}).get("messages", []))
         assistant_text = str((record.get("assistant_message") or {}).get("content") or "").strip()
         if not user_text or not assistant_text:
-            return
+            return {"status": "skipped", "reason": "empty_exchange"}
 
+        vector_chunks = 0
         if self.vector_memory is not None:
-            self.vector_memory.index_turn(record)
+            vector_chunks = self.vector_memory.index_turn(record)
 
         index = self.bookshelf.load_index()
         active = self.bookshelf.active_focus(index)
@@ -351,10 +352,25 @@ class Librarian:
         index["active_id"] = focus["id"]
         self.bookshelf.enforce_limit(index)
         self.bookshelf.save_index(index)
+        wiki_result = None
         if self.wiki_memory is not None:
-            self.wiki_memory.process_turn(record)
+            wiki_result = self.wiki_memory.process_turn(record)
+        graph_result = None
         if self.graph_memory is not None:
-            self.graph_memory.process_turn(record)
+            graph_result = self.graph_memory.process_turn(record)
+        return {
+            "status": "ok",
+            "memory_namespace": self.memory_namespace,
+            "vector_chunks": vector_chunks,
+            "focus": {
+                "action": decision["action"],
+                "id": focus.get("id"),
+                "title": focus.get("title"),
+                "importance": focus.get("importance"),
+            },
+            "wiki": wiki_result,
+            "graph": graph_result,
+        }
 
     def agent_cycle(self, record, index, active, user_text, assistant_text):
         messages = [
@@ -621,21 +637,21 @@ class WikiMemory:
 
     def process_turn(self, record):
         if record.get("status") != "ok":
-            return
+            return {"status": "skipped", "reason": "turn_not_ok"}
         if record.get("conversation_id") == "archive-librarian":
-            return
+            return {"status": "skipped", "reason": "archive_librarian"}
 
         user_text = latest_user_message(record.get("request", {}).get("messages", []))
         assistant_text = str((record.get("assistant_message") or {}).get("content") or "").strip()
         message_count = int(bool(user_text)) + int(bool(assistant_text))
         if not message_count:
-            return
+            return {"status": "skipped", "reason": "empty_exchange"}
 
         state = self.bookshelf.load_state()
         state["pending_messages"] = int(state.get("pending_messages") or 0) + message_count
         if state["pending_messages"] < WIKI_INTERVAL_MESSAGES:
             self.bookshelf.save_state(state)
-            return
+            return {"status": "pending", "pending_messages": state["pending_messages"]}
 
         index = self.bookshelf.load_index()
         recent_turns = self.recent_turns(state.get("last_sync_at"))
@@ -644,18 +660,21 @@ class WikiMemory:
             state["last_sync_at"] = record.get("created_at")
             state["last_sync_turn_id"] = record.get("turn_id")
             self.bookshelf.save_state(state)
-            return
+            return {"status": "skipped", "reason": "no_recent_turns"}
 
         decision = self.agent_cycle(record, index, recent_turns)
+        updated_pages = []
         for update in decision.get("page_updates", []):
             if str(update.get("operation") or "upsert").lower() == "upsert":
-                self.bookshelf.upsert_page(index, update, record)
+                page = self.bookshelf.upsert_page(index, update, record)
+                updated_pages.append({"id": page.get("id"), "title": page.get("title")})
 
         self.bookshelf.save_index(index)
         state["pending_messages"] = 0
         state["last_sync_at"] = record.get("created_at")
         state["last_sync_turn_id"] = record.get("turn_id")
         self.bookshelf.save_state(state)
+        return {"status": "synced", "updated_pages": updated_pages, "recent_turns": len(recent_turns)}
 
     def recent_turns(self, last_sync_at):
         if not self.sqlite_path.exists():

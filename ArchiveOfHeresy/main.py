@@ -24,6 +24,7 @@ PORT = int(os.environ.get("ARCHIVE_PORT", "8090"))
 ARCHIVE_API_KEY = os.environ.get("ARCHIVE_API_KEY", "").strip()
 LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
+MEMORY_EVENTS_ROOT = Path(os.environ.get("ARCHIVE_MEMORY_EVENTS_ROOT", ROOT / "archive" / "memory_events"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
 FOCUS_ROOT = Path(os.environ.get("ARCHIVE_FOCUS_ROOT", ROOT / "focus"))
 WIKI_ROOT = Path(os.environ.get("ARCHIVE_WIKI_ROOT", ROOT / "wiki"))
@@ -376,8 +377,14 @@ def daily_jsonl_path(created_at):
     return JSONL_ROOT / f"{dt.year:04d}" / f"{dt.month:02d}" / f"{dt.date().isoformat()}.jsonl"
 
 
+def daily_memory_events_path(created_at):
+    dt = datetime.fromisoformat(created_at)
+    return MEMORY_EVENTS_ROOT / f"{dt.year:04d}" / f"{dt.month:02d}" / f"{dt.date().isoformat()}.jsonl"
+
+
 def init_storage():
     JSONL_ROOT.mkdir(parents=True, exist_ok=True)
+    MEMORY_EVENTS_ROOT.mkdir(parents=True, exist_ok=True)
     SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(SQLITE_PATH) as db:
         db.execute("PRAGMA journal_mode=WAL")
@@ -531,14 +538,32 @@ def write_archives(record):
                 )
 
 
+def write_memory_event(record, event):
+    payload = {
+        "created_at": now_iso(),
+        "turn_created_at": record.get("created_at"),
+        "turn_id": record.get("turn_id"),
+        "conversation_id": record.get("conversation_id"),
+        "memory_namespace": record.get("memory_namespace") or "default",
+        "event": event,
+    }
+    with ARCHIVE_LOCK:
+        path = daily_memory_events_path(record["created_at"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as archive:
+            archive.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+
+
 def update_focus_memory(record):
     namespace = record.get("memory_namespace") or "default"
     librarian = focus_components(namespace)["librarian"]
     if librarian is None:
         return
     try:
-        librarian.process_turn(record)
+        event = librarian.process_turn(record)
+        write_memory_event(record, {"component": "librarian", "result": event})
     except Exception as exc:
+        write_memory_event(record, {"component": "librarian", "status": "error", "error": str(exc)})
         print(f"Librarian error namespace={namespace}: {exc}", flush=True)
 
 
@@ -571,6 +596,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "service": "ArchiveOfHeresy",
                     "llm_base_url": LLM_BASE_URL,
                     "jsonl_root": str(JSONL_ROOT),
+                    "memory_events_root": str(MEMORY_EVENTS_ROOT),
                     "sqlite_path": str(SQLITE_PATH),
                     "focus_root": str(FOCUS_ROOT),
                     "focus_namespaces": {
@@ -900,6 +926,7 @@ def main():
     print(f"ArchiveOfHeresy main started: http://{HOST}:{PORT}", flush=True)
     print(f"Upstream LLM: {LLM_BASE_URL}", flush=True)
     print(f"JSONL archive: {JSONL_ROOT}", flush=True)
+    print(f"Memory events: {MEMORY_EVENTS_ROOT}", flush=True)
     print(f"SQLite archive: {SQLITE_PATH}", flush=True)
     print(f"Focus files: {FOCUS_ROOT}", flush=True)
     print(f"Wiki memory: {WIKI_ROOT}", flush=True)

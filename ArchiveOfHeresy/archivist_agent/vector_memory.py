@@ -127,13 +127,13 @@ class VectorMemory:
 
     def index_turn(self, record):
         if record.get("status") != "ok":
-            return
+            return 0
         turn_id = record.get("turn_id")
         conversation_id = record.get("conversation_id") or "unknown"
         memory_namespace = record.get("memory_namespace") or "default"
         created_at = record.get("created_at")
         if not turn_id or not created_at:
-            return
+            return 0
 
         entries = []
         request_messages = record.get("request", {}).get("messages", [])
@@ -166,7 +166,7 @@ class VectorMemory:
                 )
 
         if not rows:
-            return
+            return 0
 
         with sqlite3.connect(self.db_path) as db:
             db.executemany(
@@ -178,6 +178,7 @@ class VectorMemory:
                 """,
                 rows,
             )
+        return len(rows)
 
     def backfill_from_archive(self, archive_sqlite_path):
         archive_sqlite_path = Path(archive_sqlite_path)
