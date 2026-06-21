@@ -54,6 +54,8 @@ Last verified: 2026-06-21 18:08 KST.
 - `POST /cancel` requests cooperative cancellation for the current task or a
   supplied `task_id`; the runner stops between agent steps and reports
   `cancelled=true`.
+- `/run-stream` emits `heartbeat` events during long in-flight model/tool calls
+  so mobile and tunnel clients can keep the connection observable.
 - Invalid JSON request bodies return `400`; oversized request bodies return
   `413` before the agent loop starts.
 - Transient model HTTP errors `429`, `502`, `503`, and `504` are retried before

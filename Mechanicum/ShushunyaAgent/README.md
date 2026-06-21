@@ -87,9 +87,12 @@ curl -N -sS http://127.0.0.1:8095/run-stream \
 ```
 
 `/run-stream` returns one NDJSON object per event: `start`, `task`, `step`,
-`action`, `tool_result`, `warning`, `final`, and `done`. The `task` event
-includes the stable `task_id` and `memory_namespace`. `tool_result` and
-`final` events include `duration_sec` for operational visibility.
+`action`, `tool_result`, `warning`, `heartbeat`, `final`, and `done`. The
+`task` event includes the stable `task_id` and `memory_namespace`.
+`tool_result` and `final` events include `duration_sec` for operational
+visibility. During long in-flight model or tool calls, `/run-stream` emits
+`heartbeat` every `SHUSHUNYA_AGENT_STREAM_HEARTBEAT_SEC` seconds, default `15`,
+so mobile/tunnel clients can see that the stream is still alive.
 
 Runtime state:
 
@@ -223,6 +226,7 @@ matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
   starting a model request.
 - `POST /cancel` requests cooperative cancellation for the current task or a
   supplied `task_id`.
+- `/run-stream` emits `heartbeat` events during long in-flight model/tool calls.
 - Bad JSON request bodies return `400`; oversized bodies return `413`.
 - Internal agent steps are archived by default and receive automatic
   ArchiveOfHeresy memory handling in the isolated `agent` memory namespace.

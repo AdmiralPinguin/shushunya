@@ -6,6 +6,7 @@ import fcntl
 import io
 import json
 import os
+import queue
 import subprocess
 import threading
 import time
@@ -22,6 +23,7 @@ PORT = int(os.environ.get("SHUSHUNYA_AGENT_PORT", "8095"))
 API_KEY = os.environ.get("SHUSHUNYA_AGENT_API_KEY", "").strip()
 ROOT = Path(__file__).resolve().parents[1]
 MAX_REQUEST_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_REQUEST_BYTES", "1048576"))
+STREAM_HEARTBEAT_SEC = max(5.0, float(os.environ.get("SHUSHUNYA_AGENT_STREAM_HEARTBEAT_SEC", "15")))
 RUN_LOCK = threading.Lock()
 RUN_LOCK_FILE = ROOT / "runtime" / "agent-run.lock"
 STATE_LOCK = threading.Lock()
@@ -398,8 +400,52 @@ class AgentHandler(BaseHTTPRequestHandler):
                     fcntl.flock(lock_fh, fcntl.LOCK_EX)
                     try:
                         write_ndjson(self, {"type": "start", "message": "агент получил слот выполнения"})
-                        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                            code = run_agent(task, config, event_sink=lambda event: write_ndjson(self, event))
+                        events: queue.Queue[dict[str, Any]] = queue.Queue()
+                        code_box = {"code": 1}
+
+                        def run_worker() -> None:
+                            try:
+                                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                                    code_box["code"] = run_agent(task, config, event_sink=events.put)
+                            except Exception as exc:
+                                code_box["code"] = 1
+                                events.put({"type": "error", "ok": False, "message": str(exc)})
+                            finally:
+                                events.put({"type": "_runner_done"})
+
+                        worker = threading.Thread(target=run_worker, name=f"agent-run-{config.task_id}", daemon=True)
+                        worker.start()
+                        client_connected = True
+                        while True:
+                            try:
+                                event = events.get(timeout=STREAM_HEARTBEAT_SEC)
+                            except queue.Empty:
+                                state = runtime_state()
+                                if client_connected:
+                                    try:
+                                        write_ndjson(
+                                            self,
+                                            {
+                                                "type": "heartbeat",
+                                                "task_id": config.task_id,
+                                                "busy": state.get("busy", False),
+                                                "current_task_duration_sec": state.get("current_task_duration_sec", 0.0),
+                                            },
+                                        )
+                                    except OSError:
+                                        client_connected = False
+                                        mark_task_cancelled(config.task_id)
+                                continue
+                            if event.get("type") == "_runner_done":
+                                break
+                            if client_connected:
+                                try:
+                                    write_ndjson(self, event)
+                                except OSError:
+                                    client_connected = False
+                                    mark_task_cancelled(config.task_id)
+                        worker.join(timeout=1)
+                        code = int(code_box["code"])
                     finally:
                         fcntl.flock(lock_fh, fcntl.LOCK_UN)
                         with STATE_LOCK:

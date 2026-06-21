@@ -171,6 +171,10 @@ start a model request.
 HTTP callers can set `wait_for_slot=false` on `/run` or `/run-stream` to fail
 fast with `409 agent busy` instead of waiting behind another active run.
 
+`/run-stream` emits a `heartbeat` event during long in-flight model or tool
+calls. The default interval is 15 seconds and can be changed with
+`SHUSHUNYA_AGENT_STREAM_HEARTBEAT_SEC`.
+
 Long runs can be cancelled cooperatively:
 
 ```text

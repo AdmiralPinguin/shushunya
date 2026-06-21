@@ -157,6 +157,9 @@ def main() -> int:
     if not state.get("revision"):
         raise AssertionError(f"runtime state missing revision: {state}")
     print("[ok] runtime state payload")
+    if server.STREAM_HEARTBEAT_SEC < 5.0:
+        raise AssertionError(f"stream heartbeat interval is unsafe: {server.STREAM_HEARTBEAT_SEC}")
+    print("[ok] stream heartbeat interval")
 
     cancelled_task_id = server.mark_task_cancelled("self test cancel registry")
     if not server.is_task_cancelled(cancelled_task_id):

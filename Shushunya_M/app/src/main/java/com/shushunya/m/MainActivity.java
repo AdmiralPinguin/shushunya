@@ -1129,6 +1129,13 @@ public class MainActivity extends Activity {
             appendAgentLog("! " + event.optString("message", "предупреждение"));
             return;
         }
+        if ("heartbeat".equals(type)) {
+            double duration = event.optDouble("current_task_duration_sec", -1.0);
+            if (duration >= 0.0) {
+                agentStatus.setText("Агент думает... " + duration + "s");
+            }
+            return;
+        }
         if ("final".equals(type)) {
             String message = event.optString("message", "").trim();
             double duration = event.optDouble("duration_sec", -1.0);
