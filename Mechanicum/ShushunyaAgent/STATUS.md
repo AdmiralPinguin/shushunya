@@ -18,6 +18,8 @@ Last verified: 2026-06-21 21:19 KST.
   Agent API, and self-test.
 - `scripts/start-agent-tunnel.sh` fails fast if the configured `cloudflared`
   executable is missing.
+- `scripts/start-agent-api.sh` verifies `/health` when a PID file already points
+  at a running process.
 - Agent API `/health` is minimal by default; full Archive details through
   `/health?detail=1` require a configured API key and bearer auth.
 - Archive health reports `default` and `agent` memory namespaces.
