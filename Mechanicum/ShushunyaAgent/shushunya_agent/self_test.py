@@ -133,6 +133,11 @@ def main() -> int:
     counts = memory_search.get("counts")
     if not isinstance(counts, dict) or "focus" not in counts or "vector" not in counts:
         raise AssertionError(f"archive memory search missing counts: {memory_search}")
+    if memory_search.get("include_content") is not False:
+        raise AssertionError(f"archive memory search should be compact by default: {memory_search}")
+    for match in memory_search.get("vector", []) or []:
+        if "content" in match:
+            raise AssertionError(f"compact archive memory search leaked raw vector content: {memory_search}")
     print("[ok] archive memory search namespace")
     focus_read = archive_memory_read(config, "focus", "active", max_chars=1000)
     assert_ok("archive memory focus read tool", focus_read)

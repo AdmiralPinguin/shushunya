@@ -125,7 +125,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 8. Читать память через Memory Gateway без доступа к файлам:
 {"action":"archive_memory_gateway"}
 {"action":"archive_memory_catalog"}
-{"action":"archive_memory_search","query":"что искать","limit":5}
+{"action":"archive_memory_search","query":"что искать","limit":5,"include_content":false}
 {"action":"archive_memory_read","kind":"focus","id":"active","max_chars":12000}
 {"action":"archive_memory_read","kind":"wiki","id":"wiki-page-id","max_chars":12000}
 
@@ -362,6 +362,19 @@ def parse_action(raw: str) -> dict[str, Any]:
     if not isinstance(action, dict):
         raise ValueError("model returned non-object JSON")
     return action
+
+
+def parse_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off", ""}:
+        return False
+    return default
 
 
 def read_limited_response(response: Any, max_bytes: int) -> tuple[bytes, bool]:
@@ -1196,7 +1209,12 @@ def archive_memory_gateway(config: AgentConfig) -> dict[str, Any]:
     return payload
 
 
-def archive_memory_search(config: AgentConfig, query: str, limit: int | None = None) -> dict[str, Any]:
+def archive_memory_search(
+    config: AgentConfig,
+    query: str,
+    limit: int | None = None,
+    include_content: bool | None = None,
+) -> dict[str, Any]:
     query = str(query or "").strip()
     if not query:
         return {"ok": False, "error": "query must not be empty"}
@@ -1204,10 +1222,14 @@ def archive_memory_search(config: AgentConfig, query: str, limit: int | None = N
         safe_limit = max(1, min(int(limit or 5), 20))
     except (TypeError, ValueError):
         safe_limit = 5
+    raw_content = "1" if parse_bool(include_content, default=False) else "0"
     payload = archive_tool_request(
         config,
         "GET",
-        f"/archive/memory/search?namespace={quote(config.memory_namespace)}&q={quote(query)}&limit={safe_limit}&requester=shushunya-agent",
+        (
+            f"/archive/memory/search?namespace={quote(config.memory_namespace)}"
+            f"&q={quote(query)}&limit={safe_limit}&include_content={raw_content}&requester=shushunya-agent"
+        ),
         timeout=30,
     )
     payload["ok"] = bool(payload.get("ok", True))
@@ -1519,7 +1541,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         elif action_type == "archive_memory_catalog":
             result = archive_memory_catalog(config)
         elif action_type == "archive_memory_search":
-            result = archive_memory_search(config, str(action.get("query", "")), action.get("limit"))
+            result = archive_memory_search(
+                config,
+                str(action.get("query", "")),
+                action.get("limit"),
+                action.get("include_content"),
+            )
         elif action_type == "archive_memory_read":
             result = archive_memory_read(
                 config,

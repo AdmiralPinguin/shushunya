@@ -151,6 +151,8 @@ For an interactive prompt:
 - Agent memory reads go through the ArchiveOfHeresy Memory Gateway instead of
   direct file access. The agent can request changes only with
   `archive_memory_propose`; the Librarian decides what to apply.
+- Gateway search is compact by default and only returns raw vector chunk content
+  when the agent explicitly sets `include_content`.
 - Structured file writes enforce the configured `500G` soft limit. Shell and
   Python tools still require hard filesystem quota for kernel-level enforcement.
 - `read_file` reads bounded slices with `max_bytes` and `offset`; it no longer

@@ -56,7 +56,8 @@
       "properties": {
         "action": "archive_memory_search",
         "query": "string",
-        "limit": "integer"
+        "limit": "integer",
+        "include_content": "boolean"
       }
     },
     "archive_memory_read": {

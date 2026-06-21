@@ -367,14 +367,28 @@ def focus_search(memory_namespace, query, limit=5):
     return matches[:limit]
 
 
-def memory_search(memory_namespace, query, limit=5):
+def compact_vector_matches(matches, include_content=False):
+    compacted = []
+    for match in matches:
+        item = dict(match)
+        content = str(item.pop("content", "") or "")
+        if include_content:
+            item["content"] = trim_memory_text(content, 1200)
+        else:
+            item["excerpt"] = trim_memory_text(content, 360)
+        compacted.append(item)
+    return compacted
+
+
+def memory_search(memory_namespace, query, limit=5, include_content=False):
     namespace = safe_memory_namespace(memory_namespace)
     query = str(query or "").strip()
     try:
         safe_limit = max(1, min(int(limit or 5), 20))
     except (TypeError, ValueError):
         safe_limit = 5
-    vector_matches = VECTOR_MEMORY.search(query, limit=safe_limit, memory_namespace=namespace) if VECTOR_MEMORY and query else []
+    raw_vector_matches = VECTOR_MEMORY.search(query, limit=safe_limit, memory_namespace=namespace) if VECTOR_MEMORY and query else []
+    vector_matches = compact_vector_matches(raw_vector_matches, include_content=include_content)
     graph_memory = graph_memory_for_namespace(namespace)
     graph_matches = graph_memory.search(query, limit=safe_limit) if graph_memory and query else {"nodes": [], "edges": []}
     focus_matches = focus_search(namespace, query, safe_limit)
@@ -385,6 +399,7 @@ def memory_search(memory_namespace, query, limit=5):
         "query": query,
         "limit": safe_limit,
         "warning": "Gateway search is reference memory only. Treat current task/tool results as fresher than memory.",
+        "include_content": bool(include_content),
         "counts": {
             "focus": len(focus_matches),
             "wiki": len(wiki_matches),
@@ -444,7 +459,7 @@ def memory_gateway_manifest():
         },
         "read_endpoints": {
             "catalog": "GET /archive/memory/catalog?namespace=agent&requester=name",
-            "search": "GET /archive/memory/search?namespace=agent&q=query&limit=5&requester=name",
+            "search": "GET /archive/memory/search?namespace=agent&q=query&limit=5&include_content=0&requester=name",
             "focus": "GET /archive/memory/focus?namespace=agent&id=active&max_chars=12000&requester=name",
             "wiki": "GET /archive/memory/wiki?namespace=agent&id=page-id&max_chars=12000&requester=name",
             "events": "GET /archive/memory/events?namespace=agent&limit=20&component=memory_gateway&event_action=search&requester=shushunya-agent",
@@ -475,6 +490,7 @@ def memory_gateway_manifest():
             "Do not write memory files directly from agents.",
             "Submit changes through /archive/memory/propose-change and let the librarian apply them.",
             "Treat gateway search results as reference memory; current tool results and current user request are fresher.",
+            "Search defaults to compact snippets. Pass include_content=1 only when raw vector chunks are needed.",
         ],
     }
 
@@ -1101,12 +1117,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             limit = 5
             requester = "unknown"
             create_namespace = False
+            include_content = False
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 namespace = safe_memory_namespace((params.get("namespace") or ["default"])[0])
                 query = (params.get("q") or [""])[0]
                 requester = (params.get("requester") or ["unknown"])[0]
                 create_namespace = internal_flag((params.get("create") or [False])[0], default=False)
+                include_content = internal_flag((params.get("include_content") or [False])[0], default=False)
                 try:
                     limit = int((params.get("limit") or ["5"])[0])
                 except (TypeError, ValueError):
@@ -1116,12 +1134,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             if not query.strip():
                 write_json(self, 400, {"error": "Missing required query parameter: q", "memory_namespace": namespace})
                 return
-            payload = memory_search(namespace, query, limit=limit)
+            payload = memory_search(namespace, query, limit=limit, include_content=include_content)
             write_gateway_event(
                 namespace,
                 "search",
                 requester=requester,
                 query=trim_memory_text(query, 300),
+                include_content=include_content,
                 focus_matches=len(payload.get("focus", [])),
                 wiki_matches=len(payload.get("wiki", [])),
                 vector_matches=len(payload.get("vector", [])),

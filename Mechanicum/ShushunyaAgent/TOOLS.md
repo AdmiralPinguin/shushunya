@@ -98,7 +98,7 @@ Search or inspect memory explicitly:
 {"action":"archive_search","kind":"graph","query":"search terms"}
 {"action":"archive_memory_gateway"}
 {"action":"archive_memory_catalog"}
-{"action":"archive_memory_search","query":"search terms","limit":5}
+{"action":"archive_memory_search","query":"search terms","limit":5,"include_content":false}
 {"action":"archive_memory_read","kind":"focus","id":"active","max_chars":12000}
 {"action":"archive_memory_read","kind":"wiki","title":"page title","max_chars":12000}
 ```
@@ -108,6 +108,9 @@ through these explicit actions. Prefer the `archive_memory_*` gateway actions
 over direct layer-specific search when possible: they go through the controlled
 ArchiveOfHeresy Memory Gateway, audit read operations, and return fail-soft tool
 results on HTTP 400/404 instead of crashing the agent loop.
+Gateway search returns compact snippets by default. Set `include_content` to
+`true` only when the compact result is relevant and raw vector chunk text is
+needed.
 
 To request a memory change, submit a proposal:
 
