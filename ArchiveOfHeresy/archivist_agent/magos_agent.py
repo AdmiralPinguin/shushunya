@@ -15,6 +15,12 @@ MAGOS_MIN_WIKI_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_WIKI_SCORE", "0.3
 MAGOS_MIN_VECTOR_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_VECTOR_SCORE", "0.32"))
 MAGOS_MIN_GRAPH_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_GRAPH_SCORE", "0.12"))
 MAGOS_ENABLED = os.environ.get("ARCHIVE_MAGOS_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+MAGOS_CONTEXT_LAYERS = {
+    layer.strip().lower()
+    for layer in os.environ.get("ARCHIVE_MAGOS_CONTEXT_LAYERS", "").split(",")
+    if layer.strip()
+}
+MAGOS_CONTEXT_LAYERS &= {"wiki", "vector", "graph"}
 MAGOS_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_MAGOS_SYSTEM_PROMPT",
     "Ты Магос ArchiveOfHeresy: изолированный агент извлечения памяти перед ответом модели. "
@@ -68,9 +74,13 @@ class Magos:
 
             index = self.focus.load_index()
             focus_candidates = self.focus_candidates(index)
-            wiki_context = self.wiki_context(query)
-            vector_context = self.vector_context(query, memory_namespace=memory_namespace)
-            graph_context = self.graph_context(query)
+            wiki_context = self.wiki_context(query) if "wiki" in MAGOS_CONTEXT_LAYERS else ""
+            vector_context = (
+                self.vector_context(query, memory_namespace=memory_namespace)
+                if "vector" in MAGOS_CONTEXT_LAYERS
+                else ""
+            )
+            graph_context = self.graph_context(query) if "graph" in MAGOS_CONTEXT_LAYERS else ""
             context_sources = [
                 name
                 for name, value in (
@@ -90,6 +100,7 @@ class Magos:
                     "wiki_context": wiki_context,
                     "vector_context": vector_context,
                     "graph_context": graph_context,
+                    "enabled_context_layers": sorted(MAGOS_CONTEXT_LAYERS),
                     "schema": {
                         "focus_action": "use_existing|new_empty|keep_active",
                         "focus_id": "required for use_existing",
@@ -112,6 +123,7 @@ class Magos:
                 "reason": decision.get("reason"),
                 "memory_context_chars": len(decision.get("memory_context") or ""),
                 "context_sources": context_sources,
+                "enabled_context_layers": sorted(MAGOS_CONTEXT_LAYERS),
             }
             print(
                 "Magos decision: "

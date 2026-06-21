@@ -248,6 +248,7 @@ Stop it:
 - `ARCHIVE_MAGOS_ENABLED` - default `1`
 - `ARCHIVE_MAGOS_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
 - `ARCHIVE_MAGOS_CONTEXT_CHARS` - default `6000`
+- `ARCHIVE_MAGOS_CONTEXT_LAYERS` - default empty; comma list of `wiki`, `vector`, `graph` allowed for Magos pre-answer context injection
 - `ARCHIVE_MAGOS_MIN_WIKI_SCORE` - default `0.35`
 - `ARCHIVE_MAGOS_MIN_VECTOR_SCORE` - default `0.32`
 - `ARCHIVE_MAGOS_MIN_GRAPH_SCORE` - default `0.12`

@@ -72,7 +72,7 @@ within the namespace.
 Magos runs before the main model request. It:
 
 - chooses an existing focus or opens a new empty focus;
-- gathers compact context from focus, wiki, vector, and graph;
+- gathers compact lower-layer context only from `ARCHIVE_MAGOS_CONTEXT_LAYERS`;
 - fails soft, so the main model request can continue without it.
 
 The Librarian runs after successful model answers. It:
@@ -152,7 +152,9 @@ The model receives:
 
 Direct vector and graph injection is disabled by default with
 `ARCHIVE_VECTOR_INJECTION_ENABLED=0` and `ARCHIVE_GRAPH_INJECTION_ENABLED=0`.
-Lower layers are used through Magos unless those flags are deliberately enabled.
+Magos lower-layer context injection is also opt-in. Set
+`ARCHIVE_MAGOS_CONTEXT_LAYERS=wiki,vector,graph` or a narrower comma list when
+pre-answer lower-layer context should be eligible for the model prompt.
 
 ## Diagnostics
 
