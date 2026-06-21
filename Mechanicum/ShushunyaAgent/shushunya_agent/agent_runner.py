@@ -39,6 +39,7 @@ MAX_CONTEXT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_CONTEXT_CHARS", "140
 SHELL_TIMEOUT = int(os.environ.get("SHUSHUNYA_AGENT_SHELL_TIMEOUT", "60"))
 MAX_TOOL_OUTPUT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_TOOL_OUTPUT_CHARS", "12000"))
 MAX_WEB_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_WEB_BYTES", "200000"))
+LLM_RETRIES = int(os.environ.get("SHUSHUNYA_AGENT_LLM_RETRIES", "3"))
 BRAVE_SEARCH_API_KEY = os.environ.get("SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY", "").strip()
 SEARXNG_URL = os.environ.get("SHUSHUNYA_AGENT_SEARXNG_URL", "").strip().rstrip("/")
 SEARCH_PROVIDERS = os.environ.get("SHUSHUNYA_AGENT_SEARCH_PROVIDERS", "searxng,marginalia,wikipedia,brave")
@@ -173,6 +174,7 @@ class AgentConfig:
     archive_api_key: str = ARCHIVE_API_KEY
     model: str = MODEL
     max_model_tokens: int = MAX_MODEL_TOKENS
+    llm_retries: int = LLM_RETRIES
     sandbox_shell: str = SANDBOX_SHELL
     sandbox_mode: str = SANDBOX_MODE
     sandbox_group: str = SANDBOX_GROUP
@@ -405,16 +407,21 @@ def chat(
             "user": config.archive_user,
             "memory_namespace": config.memory_namespace,
         }
-        try:
-            response = archive_request(config, "POST", "/v1/chat/completions", payload, timeout=240)
-            return response["choices"][0]["message"]["content"]
-        except HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            last_error = f"HTTP {exc.code}: {truncate(body, 1000)}"
-            lowered = body.lower()
-            if exc.code == 400 and any(token in lowered for token in ("context", "token", "exceeds", "too large")):
-                continue
-            raise RuntimeError(last_error) from exc
+        attempts = max(1, min(config.llm_retries, 5))
+        for attempt in range(1, attempts + 1):
+            try:
+                response = archive_request(config, "POST", "/v1/chat/completions", payload, timeout=240)
+                return response["choices"][0]["message"]["content"]
+            except HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                last_error = f"HTTP {exc.code}: {truncate(body, 1000)}"
+                lowered = body.lower()
+                if exc.code == 400 and any(token in lowered for token in ("context", "token", "exceeds", "too large")):
+                    break
+                if exc.code in {429, 502, 503, 504} and attempt < attempts:
+                    time.sleep(min(8, 2 ** (attempt - 1)))
+                    continue
+                raise RuntimeError(last_error) from exc
     raise RuntimeError(f"model request failed after context compaction retries: {last_error}")
 
 
@@ -1748,6 +1755,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Shushunya as a sandboxed tool-using agent.")
     parser.add_argument("--max-steps", type=int, default=None, help="Override the agent step limit.")
     parser.add_argument("--max-tokens", type=int, default=None, help="Override max model reply tokens.")
+    parser.add_argument("--llm-retries", type=int, default=None, help="Retry count for transient model HTTP errors.")
     parser.add_argument("--inject-memory", action="store_true", help="Enable automatic ArchiveOfHeresy memory injection.")
     parser.add_argument("--no-inject-memory", action="store_true", help="Disable automatic ArchiveOfHeresy memory injection.")
     parser.add_argument("--archive-internal-steps", action="store_true", help="Archive internal agent steps for debugging.")
@@ -1774,6 +1782,8 @@ def main(argv: list[str] | None = None) -> int:
         config.max_steps = args.max_steps
     if args.max_tokens is not None:
         config.max_model_tokens = max(128, min(args.max_tokens, 4096))
+    if args.llm_retries is not None:
+        config.llm_retries = max(1, min(args.llm_retries, 5))
     if args.inject_memory:
         config.inject_memory = True
     if args.no_inject_memory:

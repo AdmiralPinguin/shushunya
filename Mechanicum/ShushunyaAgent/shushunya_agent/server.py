@@ -123,6 +123,7 @@ def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
     return AgentConfig(
         max_steps=int_field(payload, "max_steps", int(os.environ.get("SHUSHUNYA_AGENT_MAX_STEPS", "12")), 1, 50),
         max_model_tokens=int_field(payload, "max_tokens", int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "1024")), 128, 4096),
+        llm_retries=int_field(payload, "llm_retries", int(os.environ.get("SHUSHUNYA_AGENT_LLM_RETRIES", "3")), 1, 5),
         json_output=True,
         technical_output=bool_field(payload, "technical", True),
         inject_memory=bool_field(payload, "inject_memory", env_bool("SHUSHUNYA_AGENT_INJECT_MEMORY", True)),

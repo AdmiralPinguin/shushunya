@@ -6,6 +6,7 @@ import io
 import json
 import sys
 from unittest import mock
+from urllib.error import HTTPError
 
 from . import agent_runner
 from . import server
@@ -19,6 +20,7 @@ from .agent_runner import (
     archive_memory_search,
     archive_request,
     archive_status,
+    chat,
     compact_messages_for_model,
     configured_search_providers,
     file_tool,
@@ -147,6 +149,23 @@ def main() -> int:
     if repaired_action != {"action": "final", "message": "repaired"}:
         raise AssertionError(f"unexpected repaired action: {repaired_action}")
     print("[ok] JSON repair helper")
+
+    transient_error = HTTPError(
+        url="http://archive/v1/chat/completions",
+        code=429,
+        msg="Too Many Requests",
+        hdrs={},
+        fp=io.BytesIO(b'{"error":"busy"}'),
+    )
+    retry_config = AgentConfig(llm_retries=2, inject_memory=False, archive_internal_steps=False)
+    with mock.patch.object(agent_runner, "archive_request", side_effect=[
+        transient_error,
+        {"choices": [{"message": {"content": '{"action":"final","message":"retry ok"}'}}]},
+    ]) as mocked_archive, mock.patch.object(agent_runner.time, "sleep"):
+        retry_reply = chat(retry_config, [{"role": "user", "content": "retry"}], inject_memory=False, archive_enabled=False)
+    if retry_reply != '{"action":"final","message":"retry ok"}' or mocked_archive.call_count != 2:
+        raise AssertionError(f"model retry did not recover: reply={retry_reply}, calls={mocked_archive.call_count}")
+    print("[ok] model 429 retry")
 
     final_events: list[dict] = []
     final_stdout = io.StringIO()

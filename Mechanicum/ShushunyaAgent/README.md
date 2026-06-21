@@ -71,6 +71,8 @@ Model replies default to `1024` tokens. Override per HTTP request with
 `"max_tokens": 2048` when a longer action JSON or final answer is needed.
 HTTP request bodies are capped by `SHUSHUNYA_AGENT_MAX_REQUEST_BYTES`, default
 `1048576`, so broken clients fail with `413` before entering the agent loop.
+Transient model HTTP errors `429`, `502`, `503`, and `504` are retried up to
+`SHUSHUNYA_AGENT_LLM_RETRIES`, default `3`.
 
 Streaming HTTP API for Codex-style progress:
 
@@ -172,7 +174,8 @@ For an interactive prompt:
 ./scripts/run-agent.sh
 ```
 
-CLI runs also accept `--max-tokens`, matching the HTTP `max_tokens` field.
+CLI runs also accept `--max-tokens` and `--llm-retries`, matching the HTTP
+`max_tokens` and `llm_retries` fields.
 
 ## Safety Boundaries
 
