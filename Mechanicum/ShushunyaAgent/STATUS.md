@@ -8,6 +8,7 @@ Last verified: 2026-06-21 18:08 KST.
 - ArchiveOfHeresy: `http://127.0.0.1:8090`
 - ShushunyaAgent API: `http://127.0.0.1:8095`
 - SearXNG: `http://127.0.0.1:8888`
+- Agent tunnel can be stopped with `scripts/stop-agent-tunnel.sh`.
 
 ## Verified
 

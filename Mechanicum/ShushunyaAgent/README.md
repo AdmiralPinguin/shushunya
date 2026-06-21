@@ -62,6 +62,8 @@ HTTP API:
 
 ```bash
 ./scripts/start-agent-api.sh
+./scripts/start-agent-tunnel.sh
+./scripts/stop-agent-tunnel.sh
 curl -sS http://127.0.0.1:8095/run \
   -H 'Content-Type: application/json' \
   -d '{"task":"создай /work/hello.txt с текстом hello","technical":true}'

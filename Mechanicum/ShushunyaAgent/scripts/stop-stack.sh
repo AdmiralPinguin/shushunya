@@ -4,6 +4,7 @@ set -euo pipefail
 PROJECT_ROOT="/media/shushunya/SHUSHUNYA/shushunya"
 
 cd "$PROJECT_ROOT/Mechanicum/ShushunyaAgent"
+./scripts/stop-agent-tunnel.sh
 ./scripts/stop-agent-api.sh
 
 cd "$PROJECT_ROOT/Mechanicum/SearXNG"
