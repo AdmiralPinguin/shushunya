@@ -101,6 +101,10 @@ def health_detail_allowed(handler: BaseHTTPRequestHandler) -> bool:
     return bool(API_KEY) and authorized(handler)
 
 
+def privileged_api_allowed(handler: BaseHTTPRequestHandler) -> bool:
+    return bool(API_KEY) and authorized(handler)
+
+
 def bool_field(payload: dict[str, Any], key: str, default: bool = False) -> bool:
     value = payload.get(key, default)
     if isinstance(value, bool):
@@ -288,7 +292,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             write_json(self, 200, {"ok": True, "service": "ShushunyaAgent", "state": runtime_state()})
             return
         if parsed_path.path == "/task-journal":
-            if not authorized(self):
+            if not privileged_api_allowed(self):
                 write_json(self, 401, {"error": "unauthorized"})
                 return
             params = parse_qs(parsed_path.query)
@@ -321,6 +325,9 @@ class AgentHandler(BaseHTTPRequestHandler):
             task = str(payload.get("task", "")).strip()
             if not task:
                 write_json(self, 400, {"error": "missing task"})
+                return
+            if str(payload.get("resume_task_id") or "").strip() and not privileged_api_allowed(self):
+                write_json(self, 401, {"error": "resume_task_id requires API key"})
                 return
             busy = reject_if_busy(payload)
             if busy is not None:
@@ -383,6 +390,9 @@ class AgentHandler(BaseHTTPRequestHandler):
             task = str(payload.get("task", "")).strip()
             if not task:
                 write_json(self, 400, {"error": "missing task"})
+                return
+            if str(payload.get("resume_task_id") or "").strip() and not privileged_api_allowed(self):
+                write_json(self, 401, {"error": "resume_task_id requires API key"})
                 return
             busy = reject_if_busy(payload)
             if busy is not None:

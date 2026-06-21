@@ -136,6 +136,9 @@ Inspect the journal:
 curl -sS 'http://127.0.0.1:8095/task-journal?task_id=agent-memory-check&limit=80'
 ```
 
+`/task-journal` and `resume_task_id` require `SHUSHUNYA_AGENT_API_KEY` plus a
+matching bearer token, because journal entries may contain task details.
+
 Continue with recent journal context:
 
 ```bash
