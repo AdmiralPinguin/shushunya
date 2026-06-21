@@ -39,7 +39,8 @@ Paths must be inside sandbox writable roots. Relative paths resolve under
 mobile callers that disable shell execution.
 For large files, call `file_info` or `search_text` first, then use `read_file`
 with explicit `max_bytes` and `offset` slices. `read_file` reports `next_offset`
-when more content remains.
+when more content remains, plus `is_binary` and `encoding` metadata for the
+returned slice.
 `file_info` can compute a bounded SHA-256 digest with `sha256=true`; this is
 useful for identity/change checks without reading the file content into the
 model context.

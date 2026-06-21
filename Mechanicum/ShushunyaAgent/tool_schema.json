@@ -128,7 +128,8 @@
         "action": "read_file",
         "path": "sandbox_path",
         "max_bytes": "integer",
-        "offset": "integer"
+        "offset": "integer",
+        "returns": "content plus size, offset, next_offset, truncated, is_binary, encoding"
       }
     },
     "write_file": {

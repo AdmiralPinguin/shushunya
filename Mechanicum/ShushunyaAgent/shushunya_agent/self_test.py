@@ -355,6 +355,17 @@ def main() -> int:
         raise AssertionError(f"unexpected file_info hash metadata: {info_result}")
     print("[ok] file hash metadata")
 
+    binary_write = python_tool(
+        config,
+        {"action": "python", "code": "open('/work/self-test/blob.bin','wb').write(b'abc\\x00def')", "timeout": 30},
+    )
+    assert_ok("binary fixture", binary_write)
+    binary_read = file_tool(config, {"action": "read_file", "path": "/work/self-test/blob.bin"})
+    assert_ok("binary read_file", binary_read)
+    if binary_read.get("is_binary") is not True or binary_read.get("encoding") != "utf-8-replace":
+        raise AssertionError(f"read_file did not mark binary content: {binary_read}")
+    print("[ok] binary file detection")
+
     list_result = file_tool(config, {"action": "list_files", "path": "/work/self-test", "max_depth": 1})
     assert_ok("list_files", list_result)
     if not any(item.get("path") == "/work/self-test/hello.txt" for item in list_result.get("items", [])):

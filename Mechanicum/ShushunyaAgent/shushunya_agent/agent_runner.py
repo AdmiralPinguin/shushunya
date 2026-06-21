@@ -1013,6 +1013,7 @@ try:
                 data = fh.read(max_bytes + 1)
             truncated = len(data) > max_bytes
             data = data[:max_bytes]
+            is_binary = b"\x00" in data
             respond({
                 "ok": True,
                 "path": str(path),
@@ -1021,6 +1022,8 @@ try:
                 "bytes_read": len(data),
                 "next_offset": offset + len(data) if truncated else None,
                 "truncated": truncated,
+                "is_binary": is_binary,
+                "encoding": "utf-8-replace",
                 "content": data.decode("utf-8", errors="replace"),
             })
 

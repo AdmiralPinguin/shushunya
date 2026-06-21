@@ -21,6 +21,7 @@ Last verified: 2026-06-21 18:08 KST.
 - Sandbox network is blocked by default.
 - Structured file tools work.
 - `file_info` can return bounded SHA-256 metadata for file identity checks.
+- `read_file` reports binary-slice metadata with `is_binary` and `encoding`.
 - `replace_in_file` works.
 - Python tool works inside sandbox.
 - `shell_enabled=false` blocks shell execution.
