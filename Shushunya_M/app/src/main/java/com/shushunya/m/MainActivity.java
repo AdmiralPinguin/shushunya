@@ -1097,6 +1097,7 @@ public class MainActivity extends Activity {
         payload.put("task_memory", true);
         payload.put("include_stderr", false);
         payload.put("shell_enabled", false);
+        payload.put("wait_for_slot", false);
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
         URL url = new URL(DEFAULT_AGENT_URL + "/run-stream");
@@ -1114,7 +1115,11 @@ public class MainActivity extends Activity {
         int code = conn.getResponseCode();
         InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
         if (code < 200 || code >= 300) {
-            throw new IllegalStateException("HTTP " + code + ": " + readAll(stream));
+            String response = readAll(stream);
+            if (code == 409) {
+                throw new IllegalStateException("агент занят, нажми STATE и повтори позже");
+            }
+            throw new IllegalStateException("HTTP " + code + ": " + response);
         }
 
         String finalMessage = "";
@@ -1155,6 +1160,7 @@ public class MainActivity extends Activity {
         payload.put("include_steps", false);
         payload.put("include_stderr", false);
         payload.put("shell_enabled", false);
+        payload.put("wait_for_slot", false);
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
         URL url = new URL(DEFAULT_AGENT_URL + "/run");
@@ -1173,6 +1179,9 @@ public class MainActivity extends Activity {
         InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
         String response = readAll(stream);
         if (code < 200 || code >= 300) {
+            if (code == 409) {
+                throw new IllegalStateException("агент занят, нажми STATE и повтори позже");
+            }
             throw new IllegalStateException("HTTP " + code + ": " + response);
         }
         JSONObject json = new JSONObject(response);
