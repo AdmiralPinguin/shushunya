@@ -1,6 +1,6 @@
 # ShushunyaAgent Status
 
-Last verified: 2026-06-21 21:36 KST.
+Last verified: 2026-06-21 22:46 KST.
 
 ## Running Services
 
@@ -62,6 +62,9 @@ Last verified: 2026-06-21 21:36 KST.
   directories.
 - `search_text` reports scanned and per-file-truncated file counts.
 - `replace_in_file` has a bounded file-size guard for small text edits.
+- Runtime action schema validation rejects unsupported actions, unknown fields,
+  bad field types, enum mismatches, unsafe absolute sandbox paths, and
+  out-of-range numeric limits before dispatch.
 - Agent runs have a total runtime limit through `max_runtime_sec` /
   `SHUSHUNYA_AGENT_MAX_RUNTIME_SEC`.
 - `GET /task-journal?task_id=...` can inspect recent journal events, and

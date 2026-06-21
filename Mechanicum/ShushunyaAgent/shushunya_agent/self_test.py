@@ -86,6 +86,22 @@ def main() -> int:
         except ValueError:
             pass
     print("[ok] model action JSON must be an object")
+    valid_action = agent_runner.validate_action({"action": "web_search", "query": "OpenAI", "limit": 1, "reason": "smoke"})
+    if not valid_action.get("ok"):
+        raise AssertionError(f"valid action schema was rejected: {valid_action}")
+    invalid_actions = [
+        ({"action": "does_not_exist"}, "unsupported action"),
+        ({"action": "web_search", "query": "OpenAI", "limit": "1"}, "invalid action schema"),
+        ({"action": "web_search", "query": "OpenAI", "extra": True}, "invalid action schema"),
+        ({"action": "archive_memory_read", "kind": "vector"}, "invalid action schema"),
+        ({"action": "archive_memory_search", "query": "x", "layers": ["focus", "bad"]}, "invalid action schema"),
+        ({"action": "read_file", "path": "/media/host.txt"}, "invalid action schema"),
+    ]
+    for invalid_action, expected_error in invalid_actions:
+        result = agent_runner.validate_action(invalid_action)
+        if result.get("ok") is not False or result.get("error") != expected_error:
+            raise AssertionError(f"invalid action schema was not rejected: action={invalid_action}, result={result}")
+    print("[ok] runtime action schema validation")
 
     if configured_search_providers()[0] != "searxng":
         raise AssertionError(f"search providers must start with searxng: {configured_search_providers()}")

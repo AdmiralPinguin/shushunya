@@ -231,6 +231,10 @@ matching the HTTP `max_tokens`, `max_runtime_sec`, and `llm_retries` fields.
 - The sandbox hides host `/media`, `/home`, `/root`, and the project disk.
 - Network is disabled inside the sandbox by default.
 - The runner rejects non-JSON model replies and asks the model to repair them.
+- Every model action is validated against a runtime schema before dispatch:
+  unsupported actions, unknown fields, bad types, enum mismatches, unsafe
+  absolute sandbox paths, and out-of-range limits are rejected back to the model
+  as supervisor validation errors.
 - If a model step returns malformed JSON, the runner first attempts a minimal
   JSON repair pass with memory disabled before spending another normal step.
 - If Archive returns a context-size `400`, the runner retries with smaller model

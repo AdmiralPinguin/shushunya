@@ -19,6 +19,8 @@
 - SearXNG-first web search and guarded public `web_fetch`.
 - Stream heartbeat events for long model/tool calls.
 - Runtime required-field validation.
+- Runtime action schema validation for action allowlist, field types, enums,
+  sandbox path shape, and bounded numeric fields.
 - Repeated identical action guard.
 - JSON output mode for integration.
 - Streaming progress events with task id and duration metadata.

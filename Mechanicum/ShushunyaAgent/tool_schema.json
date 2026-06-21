@@ -1,6 +1,12 @@
 {
   "version": 1,
   "response_contract": "exactly_one_json_object_per_step",
+  "runtime_schema_validation": {
+    "enabled": true,
+    "unknown_actions": "rejected before dispatch",
+    "unknown_fields": "rejected except global reason field",
+    "checks": ["required fields", "field types", "enum values", "sandbox path roots", "numeric limits", "string length limits"]
+  },
   "actions": {
     "final": {
       "required": ["action", "message"],

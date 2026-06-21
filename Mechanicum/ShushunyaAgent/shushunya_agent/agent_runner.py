@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
+
+from .validation import validate_action as validate_action_schema
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 
@@ -1308,13 +1310,7 @@ REQUIRED_FIELDS = {
 
 
 def validate_action(action: dict[str, Any]) -> dict[str, Any]:
-    action_type = str(action.get("action", "")).strip().lower()
-    if not action_type:
-        return {"ok": False, "error": "missing action"}
-    missing = sorted(field for field in REQUIRED_FIELDS.get(action_type, set()) if field not in action)
-    if missing:
-        return {"ok": False, "error": "missing required fields", "action": action_type, "missing": missing}
-    return {"ok": True}
+    return validate_action_schema(action)
 
 
 def file_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any]:
