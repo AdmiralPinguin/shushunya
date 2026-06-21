@@ -27,6 +27,7 @@ from .agent_runner import (
     compact_messages_for_model,
     configured_search_providers,
     file_tool,
+    parse_action,
     python_tool,
     read_task_journal,
     prune_task_journals,
@@ -72,6 +73,15 @@ def main() -> int:
     if '"limit":100' not in agent_runner.SYSTEM_PROMPT or "is_binary=true" not in agent_runner.SYSTEM_PROMPT:
         raise AssertionError("system prompt missing file pagination or binary web_fetch guidance")
     print("[ok] system prompt tool guidance")
+    if parse_action('{"action":"final","message":"ok"}').get("action") != "final":
+        raise AssertionError("parse_action failed to parse a valid JSON object")
+    for invalid_action_json in ('["final"]', '"final"'):
+        try:
+            parse_action(invalid_action_json)
+            raise AssertionError(f"parse_action accepted non-object JSON: {invalid_action_json}")
+        except ValueError:
+            pass
+    print("[ok] model action JSON must be an object")
 
     if configured_search_providers()[0] != "searxng":
         raise AssertionError(f"search providers must start with searxng: {configured_search_providers()}")
