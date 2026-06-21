@@ -164,8 +164,9 @@ GET /state
 ```
 
 The response includes `busy`, `queued`, `current_task_id`, `last_task_id`,
-`last_exit_code`, `completed`, `revision`, and `max_request_bytes`. This
-endpoint is meant for UI/ops checks and does not start a model request.
+`last_exit_code`, `last_duration_sec`, `completed`, `revision`, and
+`max_request_bytes`. This endpoint is meant for UI/ops checks and does not
+start a model request.
 
 HTTP callers can set `wait_for_slot=false` on `/run` or `/run-stream` to fail
 fast with `409 agent busy` instead of waiting behind another active run.

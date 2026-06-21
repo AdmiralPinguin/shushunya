@@ -1227,6 +1227,7 @@ public class MainActivity extends Activity {
         if (!lastTask.isEmpty()) {
             out.append("\nПоследняя задача: ").append(lastTask);
             out.append("\nExit code: ").append(state.optString("last_exit_code", ""));
+            out.append("\nLast duration: ").append(state.optDouble("last_duration_sec", 0.0)).append("s");
         }
         out.append("\nCompleted: ").append(state.optInt("completed", 0));
         return out.toString();

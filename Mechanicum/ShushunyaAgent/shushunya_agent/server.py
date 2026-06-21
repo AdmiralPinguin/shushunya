@@ -34,6 +34,7 @@ RUN_STATE: dict[str, Any] = {
     "last_task_id": "",
     "last_exit_code": None,
     "last_finished_at": 0.0,
+    "last_duration_sec": 0.0,
 }
 REVISION_CACHE = ""
 
@@ -304,11 +305,14 @@ class AgentHandler(BaseHTTPRequestHandler):
                     finally:
                         fcntl.flock(lock_fh, fcntl.LOCK_UN)
                         with STATE_LOCK:
+                            started_at = float(RUN_STATE["current_task_started_at"] or 0.0)
+                            finished_at = time.time()
                             RUN_STATE["busy"] = False
                             RUN_STATE["completed"] = int(RUN_STATE["completed"]) + 1
                             RUN_STATE["last_task_id"] = config.task_id
                             RUN_STATE["last_exit_code"] = code
-                            RUN_STATE["last_finished_at"] = time.time()
+                            RUN_STATE["last_finished_at"] = finished_at
+                            RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
                             RUN_STATE["current_task_id"] = ""
                             RUN_STATE["current_task_started_at"] = 0.0
 
@@ -370,11 +374,14 @@ class AgentHandler(BaseHTTPRequestHandler):
                     finally:
                         fcntl.flock(lock_fh, fcntl.LOCK_UN)
                         with STATE_LOCK:
+                            started_at = float(RUN_STATE["current_task_started_at"] or 0.0)
+                            finished_at = time.time()
                             RUN_STATE["busy"] = False
                             RUN_STATE["completed"] = int(RUN_STATE["completed"]) + 1
                             RUN_STATE["last_task_id"] = config.task_id
                             RUN_STATE["last_exit_code"] = code
-                            RUN_STATE["last_finished_at"] = time.time()
+                            RUN_STATE["last_finished_at"] = finished_at
+                            RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
                             RUN_STATE["current_task_id"] = ""
                             RUN_STATE["current_task_started_at"] = 0.0
 
