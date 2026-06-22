@@ -39,6 +39,9 @@ def main() -> None:
     caps = client.get("/forge/capabilities")
     assert caps.status_code == 200, caps.text
     assert "engines" in caps.json()
+    assert "implemented_job_types" in caps.json()
+    assert caps.json()["engines"]["sdxl"]["implemented"]["img2img"] is True
+    assert caps.json()["engines"]["flux"]["implemented"]["img2img"] is False
     runtime = client.get("/forge/runtime")
     assert runtime.status_code == 200, runtime.text
     assert runtime.json()["cpu_only"] is True

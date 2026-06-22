@@ -14,6 +14,9 @@ ENGINE_MODELS = {
         "job_types": ["txt2img"],
         "supports_negative_prompt": True,
         "supports_lora": False,
+        "supports_img2img": False,
+        "supports_inpaint": False,
+        "supports_control": False,
         "guidance_default": 4.5,
         "steps_default": 28,
     },
@@ -23,6 +26,9 @@ ENGINE_MODELS = {
         "job_types": ["txt2img", "img2img", "inpaint"],
         "supports_negative_prompt": True,
         "supports_lora": True,
+        "supports_img2img": True,
+        "supports_inpaint": True,
+        "supports_control": False,
         "guidance_default": 7.0,
         "steps_default": 30,
     },
@@ -32,6 +38,9 @@ ENGINE_MODELS = {
         "job_types": ["txt2img"],
         "supports_negative_prompt": False,
         "supports_lora": False,
+        "supports_img2img": False,
+        "supports_inpaint": False,
+        "supports_control": False,
         "guidance_default": 0.0,
         "steps_default": 4,
     },
@@ -50,6 +59,9 @@ ASPECT_PRESETS = {
     "landscape": {"width": 1216, "height": 832},
     "wide": {"width": 1344, "height": 768},
 }
+SERVICE_JOB_TYPES = ["upscale", "prompt-enhance", "metadata-read", "asset-download"]
+UNSUPPORTED_JOB_TYPES = ["outpaint", "variation"]
+FUTURE_FEATURES = ["ControlNet", "IP-Adapter", "reference_image"]
 
 
 def _dir_size(path: Path) -> int:
@@ -156,13 +168,16 @@ def capabilities() -> dict[str, Any]:
             "available": model["available"],
             "models": [model["name"]],
             "job_types": meta["job_types"],
-            "capability_gated_stubs": [
-                "outpaint",
-                "variation",
-                "ControlNet",
-                "IP-Adapter",
-                "reference_image",
-            ],
+            "implemented": {
+                "txt2img": "txt2img" in meta["job_types"],
+                "img2img": bool(meta.get("supports_img2img")),
+                "inpaint": bool(meta.get("supports_inpaint")),
+                "lora": bool(meta.get("supports_lora")),
+                "negative_prompt": bool(meta.get("supports_negative_prompt")),
+                "control": bool(meta.get("supports_control")),
+            },
+            "unsupported_job_types": UNSUPPORTED_JOB_TYPES,
+            "future_features": FUTURE_FEATURES,
         }
     return {
         "service": "DemonsForge",
@@ -180,7 +195,13 @@ def capabilities() -> dict[str, Any]:
             "max_steps": config.MAX_STEPS,
             "max_batch": config.MAX_BATCH,
         },
-        "service_job_types": ["upscale", "prompt-enhance", "metadata-read", "asset-download"],
+        "implemented_job_types": sorted(
+            set(SERVICE_JOB_TYPES)
+            | {job_type for meta in ENGINE_MODELS.values() for job_type in meta["job_types"]}
+        ),
+        "service_job_types": SERVICE_JOB_TYPES,
+        "unsupported_job_types": UNSUPPORTED_JOB_TYPES,
+        "future_features": FUTURE_FEATURES,
     }
 
 
