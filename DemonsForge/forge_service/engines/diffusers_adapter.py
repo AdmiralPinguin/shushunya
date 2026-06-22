@@ -24,6 +24,7 @@ class DiffusersEngine(BaseEngine):
         self._inpaint_pipe: Any = None
         self.loaded_model: str | None = None
         self.last_used = 0.0
+        self._loaded_loras: dict[int, set[str]] = {}
 
     def _model_dir(self, spec: JobSpec) -> Path:
         model_name = spec.model or self.meta["default_model"]
@@ -70,6 +71,7 @@ class DiffusersEngine(BaseEngine):
         self._img2img_pipe = None
         self._inpaint_pipe = None
         self.loaded_model = None
+        self._loaded_loras.clear()
         gc.collect()
         try:
             import torch
@@ -98,6 +100,7 @@ class DiffusersEngine(BaseEngine):
                 "img2img": self._img2img_pipe is not None,
                 "inpaint": self._inpaint_pipe is not None,
             },
+            "loaded_loras": sorted({name for names in self._loaded_loras.values() for name in names}),
             "idle_seconds": round(time.monotonic() - self.last_used, 1) if loaded else None,
         }
 
@@ -166,12 +169,15 @@ class DiffusersEngine(BaseEngine):
             raise EngineError(f"{self.name} adapter does not support LoRA loading yet")
         adapter_names = []
         adapter_weights = []
+        loaded_for_pipe = self._loaded_loras.setdefault(id(pipe), set())
         for item in spec.loras:
             local = find_lora(item.name)
             if not local:
                 raise EngineError(f"LoRA is not available locally: {item.name}")
             adapter_name = f"lora_{item.name}".replace(" ", "_")
-            pipe.load_lora_weights(local["path"], adapter_name=adapter_name)
+            if adapter_name not in loaded_for_pipe:
+                pipe.load_lora_weights(local["path"], adapter_name=adapter_name)
+                loaded_for_pipe.add(adapter_name)
             adapter_names.append(adapter_name)
             adapter_weights.append(item.weight)
         if hasattr(pipe, "set_adapters"):

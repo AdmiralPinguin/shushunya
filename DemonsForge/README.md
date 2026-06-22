@@ -176,6 +176,8 @@ adjacent `.json` sidecars into a metadata artifact.
 `img2img` and `inpaint` have real diffusers adapter hooks and require local
 source images, with `inpaint` also requiring `mask_image`. SQLite uses
 `PRAGMA user_version` for schema versioning.
+SDXL LoRA adapters are loaded once per active pipeline and then re-weighted via
+`set_adapters`, avoiding repeated adapter loads for reused pipelines.
 
 ## ArchiveOfHeresy memory
 
