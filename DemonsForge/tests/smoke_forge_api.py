@@ -179,6 +179,13 @@ def main() -> None:
     )
     assert planned_control.status_code == 200, planned_control.text
     assert planned_control.json()["asset_request"]["asset_type"] == "control_asset"
+    planned_flux = client.post(
+        "/forge/plan",
+        json={"request": "flux test image 512x512 steps 1"},
+    )
+    assert planned_flux.status_code == 200, planned_flux.text
+    if planned_flux.json()["engine"] == "flux":
+        assert "runtime_warning" in planned_flux.json()["safety"]
     dry_run = client.post(
         "/forge/jobs?dry_run=true",
         json={

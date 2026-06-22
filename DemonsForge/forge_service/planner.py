@@ -173,6 +173,12 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
     additions = [value for key, value in QUALITY_HINTS.items() if key in text.lower()]
     if additions:
         prompt = f"{prompt}, {', '.join(additions)}"
+    safety: dict[str, object] = {"memory_context": _memory_context(text)}
+    if engine in {"flux", "stable_diffusion"}:
+        safety["runtime_warning"] = (
+            f"{engine} is available but heavy in CPU-only mode; use low steps for smoke runs "
+            "or choose sdxl for quicker iteration."
+        )
 
     spec = JobSpec(
         type=job_type,
@@ -190,7 +196,7 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
         seed=_seed(text),
         batch_size=1,
         loras=_local_loras(text),
-        safety={"memory_context": _memory_context(text)},
+        safety=safety,
         asset_request=_asset_request_if_needed(text),
     )
     if job_type == JobType.upscale:
