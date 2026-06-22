@@ -112,6 +112,17 @@ def _seed(text: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _upscale_factor(text: str) -> int:
+    match = re.search(r"(?:upscale|апскейл|увелич(?:ь|ить)?)\s*(?:x|в)?\s*([234])\s*(?:x|раза?)?", text, re.I)
+    if match:
+        return int(match.group(1))
+    if any(token in text.lower() for token in ["upscale", "апскейл", "увелич"]):
+        match = re.search(r"(?:x|в)\s*([234])\s*(?:x|раза?)?", text, re.I)
+        if match:
+            return int(match.group(1))
+    return 2
+
+
 def _negative(text: str, supports_negative: bool) -> str | None:
     if not supports_negative:
         return None
@@ -194,6 +205,7 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
         sampler="default",
         scheduler="native",
         seed=_seed(text),
+        upscale_factor=_upscale_factor(text),
         batch_size=1,
         loras=_local_loras(text),
         safety=safety,

@@ -188,6 +188,13 @@ def main() -> None:
     )
     assert planned_control.status_code == 200, planned_control.text
     assert planned_control.json()["asset_request"]["asset_type"] == "control_asset"
+    planned_upscale = client.post(
+        "/forge/plan",
+        json={"request": "Увеличь картинку в 4 раза"},
+    )
+    assert planned_upscale.status_code == 200, planned_upscale.text
+    assert planned_upscale.json()["type"] == "upscale"
+    assert planned_upscale.json()["upscale_factor"] == 4
     planned_flux = client.post(
         "/forge/plan",
         json={"request": "flux test image 512x512 steps 1"},
