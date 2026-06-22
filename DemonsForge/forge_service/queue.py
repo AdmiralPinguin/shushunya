@@ -523,6 +523,12 @@ class ForgeQueue:
         return digest.hexdigest()
 
     def _metadata(self, job_id: str, spec: JobSpec, path: Path, index: int) -> dict[str, object]:
+        engine_name = spec.engine
+        if engine_name is None and spec.type in {JobType.txt2img, JobType.img2img, JobType.inpaint}:
+            engine_name = "sdxl"
+        model_name = spec.model
+        if model_name is None and engine_name in ENGINE_MODELS:
+            model_name = str(ENGINE_MODELS[engine_name]["default_model"])
         return {
             "job_id": job_id,
             "artifact_index": index,
@@ -530,8 +536,8 @@ class ForgeQueue:
             "created_at": utc_now(),
             "prompt": spec.prompt,
             "negative_prompt": spec.negative_prompt,
-            "engine": spec.engine,
-            "model": spec.model,
+            "engine": engine_name,
+            "model": model_name,
             "loras": [item.model_dump() for item in spec.loras],
             "embeddings": spec.embeddings,
             "seed": spec.seed,
