@@ -128,6 +128,8 @@ SDXL diffusion jobs (`txt2img`, `img2img`, `inpaint`) are validated at
 `512x512` minimum because smaller sizes can fail inside the pipeline.
 `img2img` and `inpaint` also require `steps * strength >= 1`, since very low
 strength with one step can produce zero denoising timesteps.
+Real CPU-only SDXL smoke checks have passed for `img2img` and `inpaint` at
+`512x512`, `steps=1`, `strength=1.0`.
 
 Architecture:
 
