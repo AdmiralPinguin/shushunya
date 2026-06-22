@@ -19,6 +19,7 @@ curl_json() {
 
 curl_json GET /health | "$PYTHON_BIN" -m json.tool >/dev/null
 curl_json GET /forge/capabilities | "$PYTHON_BIN" -m json.tool >/dev/null
+curl_json GET /forge/engines | "$PYTHON_BIN" -m json.tool >/dev/null
 curl_json GET /forge/models | "$PYTHON_BIN" -m json.tool >/dev/null
 curl_json GET /forge/loras | "$PYTHON_BIN" -m json.tool >/dev/null
 curl_json GET /forge/embeddings | "$PYTHON_BIN" -m json.tool >/dev/null
