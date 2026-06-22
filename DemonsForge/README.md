@@ -165,6 +165,14 @@ SDXL diffusion jobs (`txt2img`, `img2img`, `inpaint`) are validated at
 strength with one step can produce zero denoising timesteps.
 Real CPU-only SDXL smoke checks have passed for `img2img` and `inpaint` at
 `512x512`, `steps=1`, `strength=1.0`.
+On the Threadripper 3970X / 128GB DDR4 runtime, full CPU-only Forge checks also
+passed with real generation:
+
+- SDXL `txt2img` `512x512`, `steps=6`: about 25 seconds.
+- SDXL `img2img` `512x512`, `steps=4`: about 15 seconds.
+- SDXL `inpaint` `512x512`, `steps=4`: about 15 seconds.
+- FLUX Schnell `txt2img` `512x512`, `steps=1`: about 80 seconds.
+- SD3.5 Large `txt2img` `512x512`, `steps=1`: about 60 seconds.
 
 Architecture:
 

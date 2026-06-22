@@ -664,9 +664,9 @@ def resource_estimate(spec: JobSpec) -> dict[str, object]:
     pixel_count = spec.width * spec.height * spec.batch_size
     megapixels = pixel_count / 1_000_000
     model_ram_gb = {
-        "flux": 55,
-        "stable_diffusion": 68,
-        "sdxl": 46,
+        "flux": 60,
+        "stable_diffusion": 44,
+        "sdxl": 30,
     }.get(spec.engine or "sdxl", 24)
     if spec.type.value in {"upscale", "metadata-read", "prompt-enhance", "asset-download"}:
         model_ram_gb = 0.5
