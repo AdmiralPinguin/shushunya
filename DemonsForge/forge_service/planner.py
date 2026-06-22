@@ -16,19 +16,24 @@ QUALITY_HINTS = {
 }
 
 
-def _choose_engine(text: str, preferred: str | None) -> str:
+def _choose_engine(text: str, preferred: str | None, job_type: JobType) -> str:
     caps = capabilities()
-    if preferred and preferred in caps["engines"]:
+    if preferred and preferred in caps["engines"] and job_type.value in caps["engines"][preferred]["job_types"]:
         return preferred
+    if job_type in {JobType.img2img, JobType.inpaint, JobType.outpaint, JobType.variation}:
+        return "sdxl"
     lowered = text.lower()
     if "flux" in lowered and caps["engines"]["flux"]["available"]:
         return "flux"
+    if any(token in lowered for token in ["sd3.5", "sd 3.5", "stable diffusion", "стейбл", "сд 3.5"]):
+        if caps["engines"]["stable_diffusion"]["available"]:
+            return "stable_diffusion"
     if "sdxl" in lowered and caps["engines"]["sdxl"]["available"]:
         return "sdxl"
-    for engine in ["sdxl", "flux", "stable_diffusion"]:
+    for engine in caps.get("engine_policy", {}).get("txt2img_default_order", ["stable_diffusion", "flux", "sdxl"]):
         if caps["engines"][engine]["available"]:
             return engine
-    return "sdxl"
+    return "stable_diffusion"
 
 
 def _aspect(text: str) -> tuple[int, int, str | None]:
@@ -208,9 +213,7 @@ def _memory_context(text: str, enabled: bool = True) -> dict[str, object]:
 def plan_txt2img(request: PlanRequest) -> JobSpec:
     text = request.request.strip()
     job_type = _job_type(text)
-    engine = _choose_engine(text, request.preferred_engine)
-    if job_type in {JobType.img2img, JobType.inpaint}:
-        engine = "sdxl"
+    engine = _choose_engine(text, request.preferred_engine, job_type)
     caps = capabilities()
     engine_caps = caps["engines"][engine]
     model = engine_caps["default_model"]

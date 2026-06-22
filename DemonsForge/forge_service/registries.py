@@ -14,6 +14,8 @@ ENGINE_MODELS = {
     "stable_diffusion": {
         "default_model": "stable-diffusion-3.5-large",
         "pipeline": "StableDiffusion3Pipeline",
+        "role": "concept_txt2img",
+        "primary_for": ["first_image", "text_to_image_concept"],
         "job_types": ["txt2img"],
         "supports_negative_prompt": True,
         "supports_lora": False,
@@ -26,6 +28,8 @@ ENGINE_MODELS = {
     "sdxl": {
         "default_model": "stable-diffusion-xl-base-1.0",
         "pipeline": "StableDiffusionXLPipeline",
+        "role": "image_edit_refine_workhorse",
+        "primary_for": ["img2img", "inpaint", "outpaint", "variation", "refine", "lora_workflows"],
         "job_types": ["txt2img", "img2img", "inpaint"],
         "supports_negative_prompt": True,
         "supports_lora": True,
@@ -38,6 +42,8 @@ ENGINE_MODELS = {
     "flux": {
         "default_model": "FLUX.1-schnell",
         "pipeline": "FluxPipeline",
+        "role": "concept_txt2img",
+        "primary_for": ["first_image", "text_to_image_concept"],
         "job_types": ["txt2img"],
         "supports_negative_prompt": False,
         "supports_lora": False,
@@ -222,6 +228,15 @@ def capabilities() -> dict[str, Any]:
         "service_job_types": SERVICE_JOB_TYPES,
         "unsupported_job_types": UNSUPPORTED_JOB_TYPES,
         "future_features": FUTURE_FEATURES,
+        "engine_policy": {
+            "txt2img_default_order": ["stable_diffusion", "flux", "sdxl"],
+            "image_operation_engine": "sdxl",
+            "notes": [
+                "Use SD3.5/Flux for first text-to-image concepts by default.",
+                "Use SDXL for operations on existing images: img2img, inpaint, outpaint, variation, refine, LoRA/control workflows.",
+                "Respect explicit engine requests when the requested engine supports the job type.",
+            ],
+        },
     }
 
 

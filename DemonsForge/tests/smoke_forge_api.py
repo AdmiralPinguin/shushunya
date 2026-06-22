@@ -52,6 +52,9 @@ def main() -> None:
     assert caps.json()["limits"]["max_asset_download_bytes"] > 0
     assert caps.json()["engines"]["sdxl"]["implemented"]["img2img"] is True
     assert caps.json()["engines"]["flux"]["implemented"]["img2img"] is False
+    assert caps.json()["engines"]["sdxl"]["role"] == "image_edit_refine_workhorse"
+    assert caps.json()["engines"]["stable_diffusion"]["role"] == "concept_txt2img"
+    assert caps.json()["engine_policy"]["txt2img_default_order"][0] == "stable_diffusion"
     runtime = client.get("/forge/runtime")
     assert runtime.status_code == 200, runtime.text
     assert runtime.json()["cpu_only"] is True
@@ -180,6 +183,7 @@ def main() -> None:
     assert plan.status_code == 200, plan.text
     spec = plan.json()
     assert spec["type"] == "txt2img"
+    assert spec["engine"] == "stable_diffusion"
     assert spec["prompt"]
     assert "memory_context" in spec["safety"]
     plan_without_memory = client.post(
@@ -200,6 +204,7 @@ def main() -> None:
     )
     assert planned_custom.status_code == 200, planned_custom.text
     planned_spec = planned_custom.json()
+    assert planned_spec["engine"] == "sdxl"
     assert planned_spec["width"] == 512
     assert planned_spec["height"] == 768
     assert planned_spec["steps"] == 7
@@ -263,6 +268,12 @@ def main() -> None:
     assert planned_flux.status_code == 200, planned_flux.text
     if planned_flux.json()["engine"] == "flux":
         assert "runtime_warning" in planned_flux.json()["safety"]
+    planned_sd35 = client.post(
+        "/forge/plan",
+        json={"request": "sd 3.5 512x512 steps 1 concept portrait"},
+    )
+    assert planned_sd35.status_code == 200, planned_sd35.text
+    assert planned_sd35.json()["engine"] == "stable_diffusion"
     planned_flux_guidance = client.post(
         "/forge/plan",
         json={"request": "flux 512x512 steps 1 guidance 5 portrait"},

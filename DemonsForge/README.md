@@ -118,6 +118,16 @@ curl -s http://127.0.0.1:8110/forge/plan \
 Set `"use_memory":false` in plan requests for fast/offline planning without
 ArchiveOfHeresy memory search.
 
+Engine policy:
+
+- `stable_diffusion` / SD3.5 and `flux` are concept engines for first
+  text-to-image generation.
+- `sdxl` is the workhorse for operations on existing images: `img2img`,
+  `inpaint`, future `outpaint`, variation/refinement, LoRA and control workflows.
+- The planner defaults plain `txt2img` requests to SD3.5 when available, then
+  Flux, then SDXL. Explicit engine requests are respected when that engine
+  supports the requested job type.
+
 Example txt2img job:
 
 ```bash
@@ -294,8 +304,8 @@ curl -s http://127.0.0.1:8110/forge/memory/propose \
   -d '{
     "target":"auto",
     "importance":3,
-    "proposal":"SDXL is the preferred default engine for CPU-only txt2img smoke jobs.",
-    "evidence":"Forge runtime is CPU-only; SDXL low-step smoke succeeded; GPU is reserved for the main LLM."
+    "proposal":"SD3.5/Flux are preferred concept engines for first text-to-image jobs, while SDXL is the preferred workhorse for image editing and refinement jobs.",
+    "evidence":"Forge runtime is CPU-only on Threadripper 3970X / 128GB RAM; SD3.5, Flux, and SDXL full CPU tests succeeded, and SDXL supports img2img/inpaint workflows."
   }'
 ```
 
