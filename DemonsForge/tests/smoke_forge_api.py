@@ -201,6 +201,8 @@ def main() -> None:
     missing_lora_spec = planned_missing_lora.json()
     assert missing_lora_spec["asset_request"]["asset_type"] == "lora"
     assert missing_lora_spec["asset_request"]["requires_user_approval"] is True
+    unresolved_asset_job = client.post("/forge/jobs?dry_run=true", json=missing_lora_spec)
+    assert unresolved_asset_job.status_code == 400, unresolved_asset_job.text
     planned_control = client.post(
         "/forge/plan",
         json={"request": "Сделай pose controlnet depth для персонажа"},

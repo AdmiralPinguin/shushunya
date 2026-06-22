@@ -54,6 +54,8 @@ class ForgeQueue:
 
     def validate(self, spec: JobSpec) -> dict[str, object]:
         estimate = resource_estimate(spec)
+        if spec.asset_request is not None and spec.asset_request.requires_user_approval:
+            raise RuntimeError("job has unresolved asset_request and requires user approval")
         if spec.type == JobType.txt2img:
             engine_name = spec.engine or "sdxl"
             self._validate_engine_options(spec, engine_name)
