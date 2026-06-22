@@ -10,6 +10,7 @@ ARCHIVE_MEMORY_READ_KINDS = {"focus", "wiki"}
 ARCHIVE_MEMORY_TARGETS = {"auto", "focus", "wiki", "vector", "graph"}
 ARCHIVE_MEMORY_LAYERS = {"focus", "wiki", "vector", "graph"}
 ARCHIVE_MEMORY_EVENT_COMPONENTS = {"librarian", "memory_gateway"}
+RANOBEHUB_CHAPTER_MODES = {"write", "append"}
 GLOBAL_OPTIONAL_FIELDS = {"reason"}
 
 
@@ -141,6 +142,7 @@ ACTION_SCHEMAS: dict[str, dict[str, Any]] = {
     "python": {"required": {"code"}, "fields": {"action", "code", "timeout"}},
     "web_search": {"required": {"query"}, "fields": {"action", "query", "limit"}},
     "web_fetch": {"required": {"url"}, "fields": {"action", "url", "max_bytes"}},
+    "ranobehub_chapter": {"required": {"url", "path"}, "fields": {"action", "url", "path", "mode", "include_title"}},
     "list_files": {"required": {"path"}, "fields": {"action", "path", "max_depth", "limit", "offset"}},
     "read_file": {"required": {"path"}, "fields": {"action", "path", "max_bytes", "offset"}},
     "write_file": {"required": {"path", "content"}, "fields": {"action", "path", "content"}},
@@ -220,6 +222,11 @@ def validate_action(action: Mapping[str, Any]) -> dict[str, Any]:
     elif action_type == "web_fetch":
         _validate_string(action_dict, "url", errors, min_len=1, max_len=4096)
         _validate_int(action_dict, "max_bytes", errors, minimum=1024, maximum=1000000)
+    elif action_type == "ranobehub_chapter":
+        _validate_string(action_dict, "url", errors, min_len=1, max_len=4096)
+        _validate_path(action_dict, errors)
+        _validate_enum(action_dict, "mode", RANOBEHUB_CHAPTER_MODES, errors)
+        _validate_bool(action_dict, "include_title", errors)
     elif action_type in {"list_files", "read_file", "write_file", "append_file", "replace_in_file", "mkdir", "remove_file", "file_info", "find_files", "search_text"}:
         _validate_path(action_dict, errors)
         if action_type in {"write_file", "append_file"}:

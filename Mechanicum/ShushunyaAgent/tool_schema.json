@@ -122,6 +122,17 @@
         "returns": "text/title/encoding for textual responses; is_binary and bytes_read without decoded text for binary responses"
       }
     },
+    "ranobehub_chapter": {
+      "required": ["action", "url", "path"],
+      "properties": {
+        "action": "ranobehub_chapter",
+        "url": "ranobehub.org chapter URL",
+        "path": "sandbox_path",
+        "mode": ["write", "append"],
+        "include_title": "boolean",
+        "returns": "writes cleaned chapter text to path and returns metadata only"
+      }
+    },
     "list_files": {
       "required": ["action", "path"],
       "properties": {

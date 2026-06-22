@@ -37,6 +37,7 @@ from .agent_runner import (
     repair_action_json,
     result_for_model,
     run_agent,
+    RanobehubChapterParser,
     sandbox_status,
     safe_task_id,
     validate_configured_searxng_url,
@@ -94,6 +95,16 @@ def main() -> int:
     valid_action = agent_runner.validate_action({"action": "web_search", "query": "OpenAI", "limit": 1, "reason": "smoke"})
     if not valid_action.get("ok"):
         raise AssertionError(f"valid action schema was rejected: {valid_action}")
+    valid_ranobehub_action = agent_runner.validate_action(
+        {
+            "action": "ranobehub_chapter",
+            "url": "https://ranobehub.org/ranobe/966/10/9",
+            "path": "/work/slime/ch09.txt",
+            "mode": "write",
+        }
+    )
+    if not valid_ranobehub_action.get("ok"):
+        raise AssertionError(f"valid ranobehub_chapter action was rejected: {valid_ranobehub_action}")
     invalid_actions = [
         ({"action": "does_not_exist"}, "unsupported action"),
         ({"action": "web_search", "query": "OpenAI", "limit": "1"}, "invalid action schema"),
@@ -107,6 +118,29 @@ def main() -> int:
         if result.get("ok") is not False or result.get("error") != expected_error:
             raise AssertionError(f"invalid action schema was not rejected: action={invalid_action}, result={result}")
     print("[ok] runtime action schema validation")
+
+    chapter_parser = RanobehubChapterParser()
+    chapter_parser.feed(
+        """
+        <html><head><link rel="canonical" href="https://ranobehub.org/ranobe/1/2/3"></head><body>
+        <a data-previous-chapter-link href="https://ranobehub.org/prev">prev</a>
+        <a data-next-chapter-link href="https://ranobehub.org/next">next</a>
+        <div data-container="123">
+          <h1>Глава 1: тест</h1>
+          <script>bad()</script>
+          <p>Первый абзац.</p>
+          <p>Второй <b>абзац</b>.</p>
+        </div>
+        <p>Внешний мусор.</p>
+        </body></html>
+        """
+    )
+    parsed_chapter = chapter_parser.payload()
+    if parsed_chapter.get("title") != "Глава 1: тест" or parsed_chapter.get("paragraphs") != ["Первый абзац.", "Второй абзац."]:
+        raise AssertionError(f"ranobehub parser failed: {parsed_chapter}")
+    if parsed_chapter.get("next_url") != "https://ranobehub.org/next":
+        raise AssertionError(f"ranobehub parser missed next URL: {parsed_chapter}")
+    print("[ok] ranobehub chapter parser")
 
     if configured_search_providers()[0] != "searxng":
         raise AssertionError(f"search providers must start with searxng: {configured_search_providers()}")
