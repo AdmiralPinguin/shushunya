@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 
 from . import config
+from . import __version__
 
 
 ENGINE_MODELS = {
@@ -199,7 +200,7 @@ def capabilities() -> dict[str, Any]:
         }
     return {
         "service": "DemonsForge",
-        "version": "0.1.0",
+        "version": __version__,
         "engines": engines,
         "models": models,
         "loras": discover_loras(),

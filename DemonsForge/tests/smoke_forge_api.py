@@ -45,6 +45,7 @@ def main() -> None:
     assert thin.artifact_file_url("abc").endswith("/forge/artifacts/abc/file")
     caps = client.get("/forge/capabilities")
     assert caps.status_code == 200, caps.text
+    assert caps.json()["version"] == health.json()["version"]
     assert "engines" in caps.json()
     assert "implemented_job_types" in caps.json()
     assert "modified_at" in caps.json()["models"][0]
