@@ -65,6 +65,11 @@ def main() -> None:
     )
     assert memory_proposal.status_code == 200, memory_proposal.text
     assert isinstance(memory_proposal.json(), dict)
+    empty_memory_proposal = client.post(
+        "/forge/memory/propose",
+        json={"proposal": "   "},
+    )
+    assert empty_memory_proposal.status_code == 422, empty_memory_proposal.text
     schema = client.get("/forge/schema/job")
     assert schema.status_code == 200, schema.text
     downloads = client.get("/forge/assets/downloads")

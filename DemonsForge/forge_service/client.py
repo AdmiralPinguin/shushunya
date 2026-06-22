@@ -41,6 +41,56 @@ class DemonsForgeClient:
     def asset_downloads(self, limit: int = 100) -> list[dict[str, Any]]:
         return self._request("GET", f"/forge/assets/downloads?limit={limit}")
 
+    def memory_status(self) -> dict[str, Any]:
+        return self._request("GET", "/forge/memory/status")
+
+    def memory_gateway(self) -> dict[str, Any]:
+        return self._request("GET", "/forge/memory/gateway")
+
+    def memory_catalog(self, create: bool = False) -> dict[str, Any]:
+        return self._request("GET", "/forge/memory/catalog", params={"create": create})
+
+    def memory_search(
+        self,
+        query: str,
+        layers: str = "focus,wiki,vector,graph",
+        limit: int = 5,
+        include_content: bool = False,
+        create: bool = False,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/forge/memory/search",
+            params={
+                "q": query,
+                "layers": layers,
+                "limit": limit,
+                "include_content": include_content,
+                "create": create,
+            },
+        )
+
+    def memory_events(self, limit: int = 20) -> dict[str, Any]:
+        return self._request("GET", f"/forge/memory/events?limit={limit}")
+
+    def memory_propose(
+        self,
+        proposal: str,
+        evidence: str = "",
+        target: str = "auto",
+        importance: int = 3,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/forge/memory/propose",
+            json={
+                "proposal": proposal,
+                "evidence": evidence,
+                "target": target,
+                "importance": importance,
+            },
+        )
+
     def plan(self, request: str, preferred_engine: str | None = None) -> dict[str, Any]:
         return self._request(
             "POST",

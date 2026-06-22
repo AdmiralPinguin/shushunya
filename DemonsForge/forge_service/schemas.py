@@ -145,6 +145,19 @@ class MemoryProposal(BaseModel):
     target: Literal["auto", "focus", "wiki", "vector", "graph"] = "auto"
     importance: int = Field(default=3, ge=1, le=5)
 
+    @field_validator("proposal")
+    @classmethod
+    def validate_proposal(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("proposal must not be empty")
+        return text
+
+    @field_validator("evidence")
+    @classmethod
+    def validate_evidence(cls, value: str | None) -> str | None:
+        return value.strip() if value else value
+
 
 class ArtifactRecord(BaseModel):
     id: str
