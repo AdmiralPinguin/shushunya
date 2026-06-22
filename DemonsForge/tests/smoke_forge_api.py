@@ -36,6 +36,8 @@ def main() -> None:
     client = TestClient(app)
     health = client.get("/health")
     assert health.status_code == 200, health.text
+    assert "db_schema_version" in health.json()
+    assert "git_commit" in health.json()
     thin = DemonsForgeClient(base_url="http://testserver")
     assert thin is not None
     caps = client.get("/forge/capabilities")

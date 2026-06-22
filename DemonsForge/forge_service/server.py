@@ -29,9 +29,11 @@ def health() -> dict[str, object]:
         "service": "DemonsForge",
         "version": __version__,
         "database": str(config.DB_PATH),
+        "db_schema_version": store.schema_version(),
         "artifacts": str(config.ARTIFACTS_DIR),
         "device_policy": "cpu-only",
         "cpu_threads": config.CPU_THREADS,
+        "git_commit": config.BUILD_COMMIT or None,
         "memory": ArchiveMemoryClient.from_config().status(),
     }
 
