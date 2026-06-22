@@ -182,10 +182,18 @@ def target_task_id(base_url: str, api_key: str, explicit_task_id: str) -> str:
     if explicit:
         return explicit
     status, payload = request_json(base_url, "GET", "/state", api_key)
+    if status == 200:
+        state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
+        task_id = normalize_task_id(str(state.get("current_task_id") or state.get("last_task_id") or ""))
+        if task_id:
+            return task_id
+    status, payload = request_json(base_url, "GET", "/tasks?limit=1", api_key)
     if status != 200:
         return ""
-    state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
-    return normalize_task_id(str(state.get("current_task_id") or state.get("last_task_id") or ""))
+    tasks = payload.get("tasks") if isinstance(payload.get("tasks"), list) else []
+    if not tasks or not isinstance(tasks[0], dict):
+        return ""
+    return normalize_task_id(str(tasks[0].get("task_id") or ""))
 
 
 def task_snapshot(base_url: str, api_key: str, task_id: str) -> tuple[int, dict[str, Any]]:
