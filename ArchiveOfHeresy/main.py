@@ -753,6 +753,9 @@ def memory_gateway_manifest():
         "namespace_policy": {
             "default": "normal Telegram/chat memory",
             "agent": "ShushunyaAgent memory",
+            "telegram": "Telegram bot memory",
+            "mobile": "mobile client memory",
+            "demonsforge": "DemonsForge forge memory; runtime SQLite stays outside long-term memory",
             "read_unknown_namespace": "rejected unless create=1 is passed intentionally",
             "write_unknown_namespace": "allowed only through chat/proposal paths that let the librarian create memory",
         },

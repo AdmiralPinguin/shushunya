@@ -139,6 +139,13 @@ class PlanRequest(BaseModel):
     preferred_engine: str | None = None
 
 
+class MemoryProposal(BaseModel):
+    proposal: str = Field(min_length=1)
+    evidence: str | None = None
+    target: Literal["auto", "focus", "wiki", "vector", "graph"] = "auto"
+    importance: int = Field(default=3, ge=1, le=5)
+
+
 class ArtifactRecord(BaseModel):
     id: str
     job_id: str

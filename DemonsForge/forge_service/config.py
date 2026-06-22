@@ -19,6 +19,15 @@ CPU_THREADS = os.cpu_count() or 32
 MODEL_IDLE_SECONDS = int(os.environ.get("FORGE_MODEL_IDLE_SECONDS", "1800"))
 EMBEDDED_WORKER = os.environ.get("FORGE_EMBEDDED_WORKER", "1") not in {"0", "false", "False"}
 
+MEMORY_ENABLED = os.environ.get("FORGE_MEMORY_ENABLED", "1") not in {"0", "false", "False", "no", "off"}
+MEMORY_NAMESPACE = os.environ.get("FORGE_MEMORY_NAMESPACE", "demonsforge").strip() or "demonsforge"
+MEMORY_REQUESTER = os.environ.get("FORGE_MEMORY_REQUESTER", "demonsforge").strip() or "demonsforge"
+ARCHIVE_BASE_URL = os.environ.get("FORGE_ARCHIVE_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
+ARCHIVE_API_KEY = os.environ.get("FORGE_ARCHIVE_API_KEY", os.environ.get("ARCHIVE_API_KEY", "")).strip()
+MEMORY_TIMEOUT_SECONDS = float(os.environ.get("FORGE_MEMORY_TIMEOUT_SECONDS", "5"))
+MEMORY_PROPOSAL_MAX_CHARS = int(os.environ.get("FORGE_MEMORY_PROPOSAL_MAX_CHARS", "4000"))
+MEMORY_EVIDENCE_MAX_CHARS = int(os.environ.get("FORGE_MEMORY_EVIDENCE_MAX_CHARS", "3000"))
+
 MAX_WIDTH = 1536
 MAX_HEIGHT = 1536
 MAX_STEPS = 60

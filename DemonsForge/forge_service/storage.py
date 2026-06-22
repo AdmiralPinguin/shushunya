@@ -175,10 +175,13 @@ class ForgeStore:
             return
         logs = [*record.logs, f"{utc_now()} {message}"]
         self.update_job(job_id, logs=logs)
+        self.append_event_log(job_id, record.status.value, message)
+
+    def append_event_log(self, job_id: str, status: str, message: str) -> None:
         event = {
             "ts": utc_now(),
             "job_id": job_id,
-            "status": record.status.value,
+            "status": status,
             "message": message,
         }
         with self._lock:

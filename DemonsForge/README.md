@@ -78,6 +78,12 @@ Core endpoints:
 - `GET /forge/artifacts/{artifact_id}`
 - `GET /forge/artifacts/{artifact_id}/thumbnail`
 - `GET /forge/gallery`
+- `GET /forge/memory/status`
+- `GET /forge/memory/gateway`
+- `GET /forge/memory/catalog`
+- `GET /forge/memory/search`
+- `GET /forge/memory/events`
+- `POST /forge/memory/propose`
 
 Example plan request:
 
@@ -161,6 +167,75 @@ adjacent `.json` sidecars into a metadata artifact.
 `img2img` and `inpaint` have real diffusers adapter hooks and require local
 source images, with `inpaint` also requiring `mask_image`. SQLite uses
 `PRAGMA user_version` for schema versioning.
+
+## ArchiveOfHeresy memory
+
+DemonsForge uses ArchiveOfHeresy as its long-term memory. Its own SQLite
+database remains only a runtime/job/gallery store for jobs, artifacts,
+downloads and logs. Forge code and agents must not read or write ArchiveOfHeresy
+memory files directly.
+
+Default memory config:
+
+```bash
+FORGE_MEMORY_ENABLED=1
+FORGE_MEMORY_NAMESPACE=demonsforge
+FORGE_MEMORY_REQUESTER=demonsforge
+FORGE_ARCHIVE_BASE_URL=http://127.0.0.1:8090
+FORGE_ARCHIVE_API_KEY=...
+```
+
+The Forge API exposes thin proxy endpoints over the ArchiveOfHeresy Memory
+Gateway:
+
+```text
+GET  /forge/memory/status
+GET  /forge/memory/gateway
+GET  /forge/memory/catalog?create=true
+GET  /forge/memory/search?q=sdxl&layers=focus,wiki,vector,graph&limit=5
+GET  /forge/memory/events?limit=20
+POST /forge/memory/propose
+```
+
+`POST /forge/memory/propose` forwards a proposal to
+`/archive/memory/propose-change` with namespace `demonsforge` and requester
+`demonsforge`. The archive stores the proposal and the librarian decides how to
+integrate it into focus/wiki/vector/graph memory.
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8110/forge/memory/propose \
+  -H 'content-type: application/json' \
+  -d '{
+    "target":"auto",
+    "importance":3,
+    "proposal":"SDXL is the preferred default engine for CPU-only txt2img smoke jobs.",
+    "evidence":"Forge runtime is CPU-only; SDXL low-step smoke succeeded; GPU is reserved for the main LLM."
+  }'
+```
+
+Remember durable forge facts only:
+
+- hardware/runtime policy, especially that DemonsForge is CPU-only and should
+  not reserve GPU memory;
+- selected default engines, models, schedulers and samplers;
+- stable user style preferences;
+- approved or rejected assets;
+- locally available models, LoRAs, embeddings, control assets and adapters;
+- repeated failures with useful workarounds;
+- Forge API architecture decisions.
+
+Do not write ordinary runtime noise into memory:
+
+- progress events;
+- every job status change;
+- one-off seed/job ids unless they explain a durable decision;
+- noisy prompt variants;
+- large gallery metadata blobs.
+
+Asset download success/rejection is proposed automatically because it changes
+the durable local asset set. Other memory writes should be explicit proposals.
 
 Smoke test without heavy image generation:
 

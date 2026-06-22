@@ -12,6 +12,7 @@ import psutil
 from PIL import Image
 
 from . import config
+from .archive_memory import ArchiveMemoryClient, asset_memory_proposal
 from .downloader import DownloadError, download_asset, target_dir_for, validate_download_spec
 from .engines.diffusers_adapter import DiffusersEngine
 from .registries import ENGINE_MODELS, write_json
@@ -25,6 +26,7 @@ class ForgeQueue:
         self._queue: queue.Queue[str] = queue.Queue()
         self._cancel = set[str]()
         self._engines: dict[str, DiffusersEngine] = {}
+        self.memory = ArchiveMemoryClient.from_config()
         self._embedded_worker = start_worker
         self._worker = None
         if start_worker:
@@ -139,6 +141,7 @@ class ForgeQueue:
             "cpu_threads": config.CPU_THREADS,
             "model_idle_seconds": config.MODEL_IDLE_SECONDS,
             "db_schema_version": self.store.schema_version(),
+            "memory": self.memory.status(),
             "ram": {
                 "total_gb": round(mem.total / 1024**3, 2),
                 "available_gb": round(mem.available / 1024**3, 2),
@@ -290,9 +293,11 @@ class ForgeQueue:
             result = download_asset(spec.asset_download)
         except DownloadError as exc:
             self.store.update_asset_download(job_id, status="rejected", error=str(exc))
+            self._remember_asset_status(spec, "rejected", error=str(exc))
             raise
         except Exception as exc:
             self.store.update_asset_download(job_id, status="failed", error=str(exc))
+            self._remember_asset_status(spec, "failed", error=str(exc))
             raise
         self.store.update_asset_download(
             job_id,
@@ -320,6 +325,35 @@ class ForgeQueue:
                 metadata=metadata,
             )
         )
+        self._remember_asset_status(spec, "downloaded", result=result)
+
+    def _remember_asset_status(
+        self,
+        spec: JobSpec,
+        status: str,
+        result: dict[str, object] | None = None,
+        error: str | None = None,
+    ) -> None:
+        if spec.asset_download is None or not self.memory.enabled:
+            return
+        asset = spec.asset_download.model_dump()
+        proposal, evidence, importance = asset_memory_proposal(status, asset, result, error)
+
+        def propose() -> None:
+            response = self.memory.propose(
+                proposal=proposal,
+                evidence=evidence,
+                target="auto",
+                importance=importance,
+            )
+            if response.get("ok") is False:
+                self.store.append_event_log(
+                    "system",
+                    "memory",
+                    f"archive memory proposal failed: {response.get('error')}",
+                )
+
+        threading.Thread(target=propose, name="forge-memory-proposal", daemon=True).start()
 
     def _execute_prompt_enhance(self, job_id: str, spec: JobSpec) -> None:
         if not spec.prompt or not spec.prompt.strip():

@@ -8,10 +8,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import __version__, config
+from .archive_memory import ArchiveMemoryClient
 from .planner import plan_txt2img
 from .queue import ForgeQueue
 from .registries import capabilities, discover_loras, discover_models
-from .schemas import JobSpec, PlanRequest
+from .schemas import JobSpec, MemoryProposal, PlanRequest
 from .storage import ForgeStore
 
 config.force_cpu_runtime()
@@ -31,6 +32,7 @@ def health() -> dict[str, object]:
         "artifacts": str(config.ARTIFACTS_DIR),
         "device_policy": "cpu-only",
         "cpu_threads": config.CPU_THREADS,
+        "memory": ArchiveMemoryClient.from_config().status(),
     }
 
 
@@ -42,6 +44,63 @@ def get_capabilities() -> dict[str, object]:
 @app.get("/forge/runtime")
 def get_runtime() -> dict[str, object]:
     return forge_queue.runtime_state()
+
+
+@app.get("/forge/memory/status")
+def memory_status() -> dict[str, object]:
+    return ArchiveMemoryClient.from_config().status()
+
+
+@app.get("/forge/memory/gateway")
+def memory_gateway() -> dict[str, object]:
+    return ArchiveMemoryClient.from_config().gateway()
+
+
+@app.get("/forge/memory/catalog")
+def memory_catalog(create: bool = False) -> dict[str, object]:
+    return ArchiveMemoryClient.from_config().catalog(create=create)
+
+
+@app.get("/forge/memory/search")
+def memory_search(
+    q: str,
+    limit: int = 5,
+    layers: str = "focus,wiki,vector,graph",
+    include_content: bool = False,
+    create: bool = False,
+) -> dict[str, object]:
+    return ArchiveMemoryClient.from_config().search(
+        query=q,
+        limit=limit,
+        layers=layers,
+        include_content=include_content,
+        create=create,
+    )
+
+
+@app.get("/forge/memory/events")
+def memory_events(
+    limit: int = 20,
+    component: str | None = None,
+    event_action: str | None = None,
+    create: bool = False,
+) -> dict[str, object]:
+    return ArchiveMemoryClient.from_config().events(
+        limit=limit,
+        component=component,
+        event_action=event_action,
+        create=create,
+    )
+
+
+@app.post("/forge/memory/propose")
+def memory_propose(request: MemoryProposal) -> dict[str, object]:
+    return ArchiveMemoryClient.from_config().propose(
+        proposal=request.proposal,
+        evidence=request.evidence or "",
+        target=request.target,
+        importance=request.importance,
+    )
 
 
 @app.get("/forge/schema/job")

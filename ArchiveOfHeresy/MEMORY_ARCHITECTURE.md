@@ -132,6 +132,16 @@ Unknown namespaces are rejected on read endpoints unless `create=1` is passed
 explicitly. Chat/proposal writes can still create namespace memory through the
 normal librarian path.
 
+Recommended namespaces:
+
+- `default`: ordinary chat memory.
+- `telegram`: Telegram bot memory.
+- `agent`: ShushunyaAgent memory.
+- `mobile`: mobile client memory.
+- `demonsforge`: DemonsForge long-term forge memory. DemonsForge SQLite remains
+  a runtime/job/gallery store; durable forge facts should enter ArchiveOfHeresy
+  through `/archive/memory/propose-change` only.
+
 ShushunyaAgent tools over this gateway:
 
 ```text

@@ -42,6 +42,29 @@ def main() -> None:
     assert runtime.status_code == 200, runtime.text
     assert runtime.json()["cpu_only"] is True
     assert runtime.json()["embedded_worker"] is True
+    assert runtime.json()["memory"]["namespace"] == "demonsforge"
+    memory_status = client.get("/forge/memory/status")
+    assert memory_status.status_code == 200, memory_status.text
+    assert memory_status.json()["write_policy"] == "proposal-only"
+    memory_catalog = client.get("/forge/memory/catalog?create=true")
+    assert memory_catalog.status_code == 200, memory_catalog.text
+    assert isinstance(memory_catalog.json(), dict)
+    memory_search = client.get("/forge/memory/search?q=sdxl&layers=focus,wiki,vector,graph&limit=2")
+    assert memory_search.status_code == 200, memory_search.text
+    assert isinstance(memory_search.json(), dict)
+    memory_events = client.get("/forge/memory/events?limit=2")
+    assert memory_events.status_code == 200, memory_events.text
+    assert isinstance(memory_events.json(), dict)
+    memory_proposal = client.post(
+        "/forge/memory/propose",
+        json={
+            "proposal": "DemonsForge smoke memory proposal endpoint exists.",
+            "evidence": "Smoke test checked endpoint shape.",
+            "importance": 1,
+        },
+    )
+    assert memory_proposal.status_code == 200, memory_proposal.text
+    assert isinstance(memory_proposal.json(), dict)
     schema = client.get("/forge/schema/job")
     assert schema.status_code == 200, schema.text
     downloads = client.get("/forge/assets/downloads")
