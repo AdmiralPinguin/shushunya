@@ -40,6 +40,7 @@ def main() -> None:
     assert "git_commit" in health.json()
     thin = DemonsForgeClient(base_url="http://testserver")
     assert thin is not None
+    assert thin.artifact_file_url("abc").endswith("/forge/artifacts/abc/file")
     caps = client.get("/forge/capabilities")
     assert caps.status_code == 200, caps.text
     assert "engines" in caps.json()

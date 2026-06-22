@@ -193,5 +193,11 @@ class DemonsForgeClient:
     def artifact(self, artifact_id: str) -> dict[str, Any]:
         return self._request("GET", f"/forge/artifacts/{artifact_id}")
 
+    def artifact_file_url(self, artifact_id: str) -> str:
+        return f"{self.base_url}/forge/artifacts/{artifact_id}/file"
+
+    def artifact_thumbnail_url(self, artifact_id: str) -> str:
+        return f"{self.base_url}/forge/artifacts/{artifact_id}/thumbnail"
+
     def artifact_metadata(self, artifact_id: str) -> dict[str, Any]:
         return self._request("GET", f"/forge/artifacts/{artifact_id}/metadata")
