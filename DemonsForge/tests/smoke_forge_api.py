@@ -132,6 +132,9 @@ def main() -> None:
     assert duplicate_memory_proposal.json()["duplicate"] is True
     schema = client.get("/forge/schema/job")
     assert schema.status_code == 200, schema.text
+    embeddings = client.get("/forge/embeddings")
+    assert embeddings.status_code == 200, embeddings.text
+    assert isinstance(embeddings.json(), list)
     samplers = client.get("/forge/samplers")
     assert samplers.status_code == 200, samplers.text
     assert "default" in samplers.json()

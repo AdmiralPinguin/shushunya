@@ -51,6 +51,9 @@ class DemonsForgeClient:
     def loras(self) -> list[dict[str, Any]]:
         return self._request("GET", "/forge/loras")
 
+    def embeddings(self) -> list[dict[str, Any]]:
+        return self._request("GET", "/forge/embeddings")
+
     def samplers(self) -> list[str]:
         return self._request("GET", "/forge/samplers")
 

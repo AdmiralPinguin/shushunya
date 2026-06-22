@@ -69,6 +69,7 @@ Core endpoints:
 - `GET /forge/schema/job`
 - `GET /forge/models`
 - `GET /forge/loras`
+- `GET /forge/embeddings`
 - `GET /forge/samplers`
 - `GET /forge/schedulers`
 - `GET /forge/aspect-presets`

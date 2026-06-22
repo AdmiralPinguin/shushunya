@@ -11,7 +11,15 @@ from . import __version__, config
 from .archive_memory import ArchiveMemoryClient
 from .planner import plan_txt2img
 from .queue import ForgeQueue
-from .registries import ASPECT_PRESETS, SAMPLERS, SCHEDULERS, capabilities, discover_loras, discover_models
+from .registries import (
+    ASPECT_PRESETS,
+    SAMPLERS,
+    SCHEDULERS,
+    capabilities,
+    discover_embeddings,
+    discover_loras,
+    discover_models,
+)
 from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest
 from .storage import ForgeStore
 
@@ -181,6 +189,11 @@ def get_models() -> list[dict[str, object]]:
 @app.get("/forge/loras")
 def get_loras() -> list[dict[str, object]]:
     return discover_loras()
+
+
+@app.get("/forge/embeddings")
+def get_embeddings() -> list[dict[str, object]]:
+    return discover_embeddings()
 
 
 @app.get("/forge/samplers")
