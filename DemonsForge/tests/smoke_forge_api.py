@@ -172,6 +172,13 @@ def main() -> None:
     )
     assert planned_batch.status_code == 200, planned_batch.text
     assert planned_batch.json()["batch_size"] == 3
+    planned_cfg = client.post(
+        "/forge/plan",
+        json={"request": "SDXL 512x512 cfg 5.5 cinematic portrait"},
+    )
+    assert planned_cfg.status_code == 200, planned_cfg.text
+    assert planned_cfg.json()["cfg"] == 5.5
+    assert planned_cfg.json()["guidance"] == 5.5
     planned_img2img = client.post(
         "/forge/plan",
         json={"request": "Сделай вариацию по картинке в кинематографичном стиле"},

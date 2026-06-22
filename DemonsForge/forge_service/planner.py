@@ -119,6 +119,16 @@ def _seed(text: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _guidance(text: str, default: float) -> tuple[float | None, float | None]:
+    match = re.search(r"(guidance|cfg)\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", text, re.I)
+    if not match:
+        return default, None
+    value = max(0.0, min(float(match.group(2)), 30.0))
+    if match.group(1).lower() == "cfg":
+        return value, value
+    return value, None
+
+
 def _upscale_factor(text: str) -> int:
     match = re.search(r"(?:upscale|апскейл|увелич(?:ь|ить)?)\s*(?:x|в)?\s*([234])\s*(?:x|раза?)?", text, re.I)
     if match:
@@ -197,6 +207,7 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
             f"{engine} is available but heavy in CPU-only mode; use low steps for smoke runs "
             "or choose sdxl for quicker iteration."
         )
+    guidance, cfg = _guidance(text, engine_caps["guidance_default"])
 
     spec = JobSpec(
         type=job_type,
@@ -208,7 +219,8 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
         height=height,
         aspect_preset=preset,
         steps=_steps(text, engine_caps["steps_default"]),
-        guidance=engine_caps["guidance_default"],
+        cfg=cfg,
+        guidance=guidance,
         sampler="default",
         scheduler="native",
         seed=_seed(text),
