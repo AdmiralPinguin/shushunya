@@ -207,6 +207,9 @@ POST /forge/memory/propose
 `/archive/memory/propose-change` with namespace `demonsforge` and requester
 `demonsforge`. The archive stores the proposal and the librarian decides how to
 integrate it into focus/wiki/vector/graph memory.
+Forge keeps a local proposal hash in its runtime SQLite store to avoid sending
+the same durable proposal twice, including uncertain timeout cases where
+ArchiveOfHeresy may already have accepted the write.
 
 Example:
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import threading
 from pathlib import Path
@@ -69,6 +70,19 @@ class ForgeStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     error TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_proposals (
+                    hash TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    importance INTEGER NOT NULL,
+                    proposal TEXT NOT NULL,
+                    evidence TEXT NOT NULL,
+                    response_json TEXT NOT NULL
                 )
                 """
             )
@@ -328,3 +342,56 @@ class ForgeStore:
             )
             for row in rows
         ]
+
+    def memory_proposal_hash(self, proposal: str, evidence: str, target: str) -> str:
+        payload = json.dumps(
+            {
+                "proposal": proposal.strip(),
+                "evidence": evidence.strip(),
+                "target": target.strip().lower(),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def get_memory_proposal(self, proposal_hash: str) -> dict[str, object] | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM memory_proposals WHERE hash = ?", (proposal_hash,)).fetchone()
+        if row is None:
+            return None
+        return {
+            "hash": row["hash"],
+            "created_at": row["created_at"],
+            "target": row["target"],
+            "importance": row["importance"],
+            "proposal": row["proposal"],
+            "evidence": row["evidence"],
+            "response": json.loads(row["response_json"]),
+        }
+
+    def record_memory_proposal(
+        self,
+        proposal_hash: str,
+        proposal: str,
+        evidence: str,
+        target: str,
+        importance: int,
+        response: dict[str, object],
+    ) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO memory_proposals
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    proposal_hash,
+                    utc_now(),
+                    target,
+                    importance,
+                    proposal,
+                    evidence,
+                    json.dumps(response, ensure_ascii=False),
+                ),
+            )

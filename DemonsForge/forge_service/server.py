@@ -100,12 +100,36 @@ def memory_events(
 
 @app.post("/forge/memory/propose")
 def memory_propose(request: MemoryProposal) -> dict[str, object]:
-    return ArchiveMemoryClient.from_config().propose(
+    proposal_hash = store.memory_proposal_hash(
+        request.proposal,
+        request.evidence or "",
+        request.target,
+    )
+    existing = store.get_memory_proposal(proposal_hash)
+    if existing is not None:
+        return {
+            "ok": True,
+            "duplicate": True,
+            "proposal_hash": proposal_hash,
+            "existing": existing,
+        }
+    response = ArchiveMemoryClient.from_config().propose(
         proposal=request.proposal,
         evidence=request.evidence or "",
         target=request.target,
         importance=request.importance,
     )
+    should_record = response.get("ok") is not False or "timed out" in str(response.get("error", "")).lower()
+    if should_record:
+        store.record_memory_proposal(
+            proposal_hash,
+            request.proposal,
+            request.evidence or "",
+            request.target,
+            request.importance,
+            response,
+        )
+    return {**response, "proposal_hash": proposal_hash}
 
 
 @app.get("/forge/schema/job")
