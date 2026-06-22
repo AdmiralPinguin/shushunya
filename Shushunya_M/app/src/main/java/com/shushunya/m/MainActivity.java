@@ -12,7 +12,6 @@ import android.content.ClipboardManager;
 import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
@@ -71,16 +70,12 @@ import java.util.ArrayList;
 
 public class MainActivity extends Activity {
     private static final String PREFS = "shushunya_m";
-    private static final String CHAT_HISTORY_KEY = "chat_history";
     private static final String NOTIFICATION_CHANNEL_ID = "shushunya_answers";
     private static final int CHAT_HISTORY_LIMIT = 120;
     private static final String SERVER_CHAT_SESSION_ID = "redmagic9-shushunya-m";
     private static final int REQUEST_NOTIFICATIONS = 42;
     private static final String DEFAULT_BASE_URL = "https://chat.shushunya.com";
-    private static final String DEFAULT_AGENT_URL = "https://technologies-numerous-passport-aspect.trycloudflare.com";
     private static final String MODEL = "gemma-4-12b-it-UD-Q5_K_XL.gguf";
-    private static final String DEFAULT_TRANSLATOR_URL = "https://translator.shushunya.com";
-    private static final String DEFAULT_STT_URL = "https://stt.shushunya.com";
     private static final int AUDIO_SAMPLE_RATE = 16000;
     private static final int REQUEST_RECORD_AUDIO = 41;
     private static final int REQUEST_PICK_IMAGE = 43;
@@ -922,7 +917,7 @@ public class MainActivity extends Activity {
         payload.put("text", text);
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(DEFAULT_TRANSLATOR_URL + "/translate");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/translate");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -930,6 +925,7 @@ public class MainActivity extends Activity {
         conn.setDoOutput(true);
         conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         conn.setRequestProperty("Accept", "application/json");
+        applyMobileAuth(conn);
         try (OutputStream out = conn.getOutputStream()) {
             out.write(body);
         }
@@ -1175,7 +1171,7 @@ public class MainActivity extends Activity {
         payload.put("wait_for_slot", false);
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(DEFAULT_AGENT_URL + "/run-stream");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/run-stream");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1183,6 +1179,7 @@ public class MainActivity extends Activity {
         conn.setDoOutput(true);
         conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         conn.setRequestProperty("Accept", "application/x-ndjson");
+        applyMobileAuth(conn);
         try (OutputStream out = conn.getOutputStream()) {
             out.write(body);
         }
@@ -1233,7 +1230,7 @@ public class MainActivity extends Activity {
         JSONObject payload = new JSONObject();
         payload.put("task_id", taskId);
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(DEFAULT_AGENT_URL + "/cancel");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/cancel");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1241,6 +1238,7 @@ public class MainActivity extends Activity {
         conn.setDoOutput(true);
         conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         conn.setRequestProperty("Accept", "application/json");
+        applyMobileAuth(conn);
         try (OutputStream out = conn.getOutputStream()) {
             out.write(body);
         }
@@ -1272,7 +1270,7 @@ public class MainActivity extends Activity {
         payload.put("wait_for_slot", false);
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(DEFAULT_AGENT_URL + "/run");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/run");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1280,6 +1278,7 @@ public class MainActivity extends Activity {
         conn.setDoOutput(true);
         conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         conn.setRequestProperty("Accept", "application/json");
+        applyMobileAuth(conn);
         try (OutputStream out = conn.getOutputStream()) {
             out.write(body);
         }
@@ -1302,12 +1301,13 @@ public class MainActivity extends Activity {
     }
 
     private String requestAgentState() throws Exception {
-        URL url = new URL(DEFAULT_AGENT_URL + "/state");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/state");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(12000);
         conn.setReadTimeout(30000);
         conn.setRequestProperty("Accept", "application/json");
+        applyMobileAuth(conn);
 
         int code = conn.getResponseCode();
         InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
@@ -1401,7 +1401,7 @@ public class MainActivity extends Activity {
     }
 
     private String requestRemoteSttLive(String language, String titleText) throws Exception {
-        URL url = new URL(DEFAULT_STT_URL + "/stt-live");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/stt-live");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1412,6 +1412,7 @@ public class MainActivity extends Activity {
         conn.setRequestProperty("Accept", "application/json");
         conn.setRequestProperty("X-Language", language);
         conn.setRequestProperty("X-Sample-Rate", String.valueOf(AUDIO_SAMPLE_RATE));
+        applyMobileAuth(conn);
 
         int minBuffer = AudioRecord.getMinBufferSize(
                 AUDIO_SAMPLE_RATE,
@@ -1473,7 +1474,7 @@ public class MainActivity extends Activity {
         }
 
         byte[] body = pcm.toByteArray();
-        URL url = new URL(DEFAULT_STT_URL + "/stt-pcm");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/stt-pcm");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1483,6 +1484,7 @@ public class MainActivity extends Activity {
         conn.setRequestProperty("Accept", "application/json");
         conn.setRequestProperty("X-Language", language);
         conn.setRequestProperty("X-Sample-Rate", String.valueOf(AUDIO_SAMPLE_RATE));
+        applyMobileAuth(conn);
         try (OutputStream out = conn.getOutputStream()) {
             out.write(body);
         }
@@ -1593,7 +1595,7 @@ public class MainActivity extends Activity {
         boolean translator = TAB_TRANSLATOR.equals(tab);
         boolean agent = TAB_AGENT.equals(tab);
         title.setText(chat ? "Шушуня" : agent ? "Агент" : "Переводчик");
-        endpoint.setText(agent ? DEFAULT_AGENT_URL : baseUrl);
+        endpoint.setText(baseUrl);
         endpoint.setVisibility((chat || agent) ? View.VISIBLE : View.INVISIBLE);
         chatView.setVisibility(chat ? View.VISIBLE : View.GONE);
         translatorView.setVisibility(translator ? View.VISIBLE : View.GONE);

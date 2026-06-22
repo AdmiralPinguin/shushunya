@@ -27,6 +27,9 @@ ARCHIVE_BASE_URL = os.environ.get("ARCHIVE_BASE_URL", f"http://127.0.0.1:{PORT}"
 ARCHIVE_API_KEY = os.environ.get("ARCHIVE_API_KEY", "").strip()
 ARCHIVE_MOBILE_API_KEY = os.environ.get("ARCHIVE_MOBILE_API_KEY", "").strip()
 LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
+TRANSLATOR_BASE_URL = os.environ.get("ARCHIVE_TRANSLATOR_BASE_URL", "http://127.0.0.1:8091").rstrip("/")
+STT_BASE_URL = os.environ.get("ARCHIVE_STT_BASE_URL", "http://127.0.0.1:8093").rstrip("/")
+AGENT_BASE_URL = os.environ.get("ARCHIVE_AGENT_BASE_URL", "http://127.0.0.1:8095").rstrip("/")
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
 MEMORY_EVENTS_ROOT = Path(os.environ.get("ARCHIVE_MEMORY_EVENTS_ROOT", ROOT / "archive" / "memory_events"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
@@ -163,6 +166,66 @@ def open_upstream(method, path, payload=None, timeout=180):
 
     request = Request(f"{LLM_BASE_URL}{path}", data=data, headers=headers, method=method)
     return urlopen(request, timeout=timeout)
+
+
+def proxy_json_url(method, url, payload=None, timeout=180):
+    data = None
+    headers = {}
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = Request(url, data=data, headers=headers, method=method)
+    with urlopen(request, timeout=timeout) as response:
+        body = response.read().decode("utf-8")
+        return response.status, json.loads(body) if body else {}
+
+
+def open_json_stream_url(method, url, payload=None, timeout=300, accept="application/x-ndjson"):
+    data = None
+    headers = {"Accept": accept}
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = Request(url, data=data, headers=headers, method=method)
+    return urlopen(request, timeout=timeout)
+
+
+def proxy_binary_url(method, url, body, headers=None, timeout=240):
+    request = Request(url, data=body, headers=headers or {}, method=method)
+    with urlopen(request, timeout=timeout) as response:
+        raw = response.read()
+        content_type = response.headers.get("Content-Type", "")
+        if "json" in content_type:
+            return response.status, json.loads(raw.decode("utf-8")) if raw else {}
+        return response.status, {"body": raw.decode("utf-8", errors="replace")}
+
+
+def read_chunked_body(handler):
+    body = bytearray()
+    while True:
+        line = handler.rfile.readline()
+        if not line:
+            break
+        size_text = line.split(b";", 1)[0].strip()
+        if not size_text:
+            continue
+        size = int(size_text, 16)
+        if size == 0:
+            handler.rfile.readline()
+            break
+        body.extend(handler.rfile.read(size))
+        handler.rfile.read(2)
+    return bytes(body)
+
+
+def read_raw_body(handler):
+    transfer_encoding = str(handler.headers.get("Transfer-Encoding") or "").lower()
+    if "chunked" in transfer_encoding:
+        return read_chunked_body(handler)
+    length = int(handler.headers.get("Content-Length", "0"))
+    if length <= 0:
+        return b""
+    return handler.rfile.read(length)
 
 
 def now_iso():
@@ -1316,6 +1379,18 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if self.path == "/archive/mobile/agent/state":
+            if not require_auth(self, allow_mobile=True):
+                return
+            try:
+                status, response = proxy_json_url("GET", f"{AGENT_BASE_URL}/state", timeout=30)
+                write_json(self, status, response)
+            except HTTPError as exc:
+                self.write_proxy_error(exc)
+            except Exception as exc:
+                write_json(self, 502, {"error": f"agent unavailable: {exc}"})
+            return
+
         if not require_auth(self):
             return
 
@@ -1583,6 +1658,36 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             self.mobile_chat_completion()
             return
 
+        if self.path == "/archive/mobile/translate":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_proxy_json(f"{TRANSLATOR_BASE_URL}/translate", timeout=180)
+            return
+
+        if self.path in ("/archive/mobile/stt-live", "/archive/mobile/stt-pcm"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_proxy_stt("/stt-live" if self.path.endswith("stt-live") else "/stt-pcm")
+            return
+
+        if self.path == "/archive/mobile/agent/run":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_proxy_json(f"{AGENT_BASE_URL}/run", timeout=240)
+            return
+
+        if self.path == "/archive/mobile/agent/cancel":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_proxy_json(f"{AGENT_BASE_URL}/cancel", timeout=30)
+            return
+
+        if self.path == "/archive/mobile/agent/run-stream":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_proxy_agent_stream()
+            return
+
         if self.path == "/v1/chat/completions":
             if not require_auth(self):
                 return
@@ -1597,6 +1702,70 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             return
 
         write_json(self, 404, {"error": "Not found"})
+
+    def write_proxy_error(self, exc):
+        try:
+            error_payload = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            error_payload = {"error": str(exc)}
+        write_json(self, exc.code, error_payload)
+
+    def mobile_proxy_json(self, url, timeout=180):
+        try:
+            payload = read_json(self)
+            status, response = proxy_json_url("POST", url, payload=payload, timeout=timeout)
+            write_json(self, status, response)
+        except json.JSONDecodeError as exc:
+            write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
+        except HTTPError as exc:
+            self.write_proxy_error(exc)
+        except Exception as exc:
+            write_json(self, 502, {"error": f"mobile backend unavailable: {exc}"})
+
+    def mobile_proxy_stt(self, upstream_path):
+        try:
+            body = read_raw_body(self)
+            headers = {
+                "Content-Type": self.headers.get("Content-Type", "application/octet-stream"),
+                "Accept": "application/json",
+                "X-Language": self.headers.get("X-Language", ""),
+                "X-Sample-Rate": self.headers.get("X-Sample-Rate", "16000"),
+            }
+            status, response = proxy_binary_url(
+                "POST",
+                f"{STT_BASE_URL}{upstream_path}",
+                body,
+                headers=headers,
+                timeout=240,
+            )
+            write_json(self, status, response)
+        except HTTPError as exc:
+            self.write_proxy_error(exc)
+        except Exception as exc:
+            write_json(self, 502, {"error": f"stt backend unavailable: {exc}"})
+
+    def mobile_proxy_agent_stream(self):
+        try:
+            payload = read_json(self)
+        except json.JSONDecodeError as exc:
+            write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
+            return
+        try:
+            with open_json_stream_url("POST", f"{AGENT_BASE_URL}/run-stream", payload=payload, timeout=300) as upstream:
+                self.send_response(upstream.status)
+                self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                for raw_line in upstream:
+                    self.wfile.write(raw_line)
+                    self.wfile.flush()
+        except HTTPError as exc:
+            self.write_proxy_error(exc)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception as exc:
+            write_json(self, 502, {"error": f"agent stream unavailable: {exc}"})
 
     def memory_propose_change(self):
         with CHAT_QUEUE_LOCK:

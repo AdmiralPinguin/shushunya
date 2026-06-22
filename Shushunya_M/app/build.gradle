@@ -14,8 +14,8 @@ android {
         applicationId = "com.shushunya.m"
         minSdk = 34
         targetSdk = 35
-        versionCode = 33
-        versionName = "2.2.10"
+        versionCode = 34
+        versionName = "2.4.0"
         buildConfigField("String", "MOBILE_API_KEY", "\"${project.findProperty("SHUSHUNYA_MOBILE_API_KEY") ?: ""}\"")
     }
 }

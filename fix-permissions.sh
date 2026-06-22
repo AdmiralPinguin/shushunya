@@ -16,6 +16,8 @@ find "$ROOT" -type f \( \
   -path '*/android-tools/android-sdk/cmdline-tools/latest/bin/*' -o \
   -path '*/android-tools/android-sdk/platform-tools/*' -o \
   -path '*/android-tools/android-sdk/build-tools/*/*' -o \
+  -path '*/android-tools/whisper.cpp/build/bin/*' -o \
+  -path '*/.gradle-home/caches/*/transformed/aapt2-*-linux/aapt2' -o \
   -path '*/llama.cpp/*' \
 \) -exec chmod 755 {} +
 

@@ -14,6 +14,11 @@ ROOT = Path(__file__).resolve().parent
 HOST = os.environ.get("STT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("STT_PORT", "8093"))
 WHISPER_CLI = Path(os.environ.get("WHISPER_CLI", "/media/shushunya/SHUSHUNYA/shushunya/android-tools/whisper.cpp/build/bin/whisper-cli"))
+WHISPER_BUILD_ROOT = WHISPER_CLI.resolve().parents[1]
+WHISPER_LIBRARY_PATHS = [
+    WHISPER_BUILD_ROOT / "src",
+    WHISPER_BUILD_ROOT / "ggml" / "src",
+]
 MODEL = Path(os.environ.get("STT_MODEL", ROOT / "stt-models" / "ggml-large-v3-turbo-q5_0.bin"))
 LANGUAGE_MODELS = {
     "ko": Path(os.environ.get("STT_MODEL_KO", ROOT / "stt-models" / "ggml-large-v3-q5_0.bin")),
@@ -102,6 +107,16 @@ def whisper_prompt(language):
     return ""
 
 
+def whisper_env():
+    env = os.environ.copy()
+    paths = [str(path) for path in WHISPER_LIBRARY_PATHS if path.exists()]
+    existing = env.get("LD_LIBRARY_PATH", "")
+    if existing:
+        paths.append(existing)
+    env["LD_LIBRARY_PATH"] = ":".join(paths)
+    return env
+
+
 def transcribe(language, samples, sample_rate):
     with tempfile.TemporaryDirectory(prefix="shushunya-stt-") as tmp:
         wav_path = Path(tmp) / "audio.wav"
@@ -128,7 +143,15 @@ def transcribe(language, samples, sample_rate):
         if prompt:
             cmd.extend(["--prompt", prompt])
         print(f"[stt] language={language} model={model_path.name} samples={len(samples)} sample_rate={sample_rate}", flush=True)
-        result = subprocess.run(cmd, cwd=str(ROOT), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=240)
+        result = subprocess.run(
+            cmd,
+            cwd=str(ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=240,
+            env=whisper_env(),
+        )
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout or f"whisper-cli failed: {result.returncode}")[-2000:])
         text_path = Path(str(out_prefix) + ".txt")
@@ -163,7 +186,15 @@ def transcribe_pcm(language, pcm, sample_rate):
         if prompt:
             cmd.extend(["--prompt", prompt])
         print(f"[stt] language={language} model={model_path.name} pcm_bytes={len(pcm)} sample_rate={sample_rate}", flush=True)
-        result = subprocess.run(cmd, cwd=str(ROOT), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=240)
+        result = subprocess.run(
+            cmd,
+            cwd=str(ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=240,
+            env=whisper_env(),
+        )
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout or f"whisper-cli failed: {result.returncode}")[-2000:])
         text_path = Path(str(out_prefix) + ".txt")
@@ -193,6 +224,7 @@ class Handler(BaseHTTPRequestHandler):
                     "threads": THREADS,
                     "whisper_cli": str(WHISPER_CLI),
                     "whisper_cli_exists": WHISPER_CLI.exists(),
+                    "library_paths": [str(path) for path in WHISPER_LIBRARY_PATHS],
                 },
             )
             return
