@@ -400,6 +400,10 @@ def main() -> None:
     upscale_status = wait_for_terminal(client, upscale.json()["id"])
     assert upscale_status["status"] == "succeeded", upscale_status
     assert upscale_status["artifacts"], upscale_status
+    upscale_artifact = store.get_artifact(upscale_status["artifacts"][0])
+    assert upscale_artifact is not None
+    assert len(upscale_artifact.metadata["image_sha256"]) == 64
+    assert upscale_artifact.metadata["image_size_bytes"] > 0
     artifact_file = client.get(f"/forge/artifacts/{upscale_status['artifacts'][0]}/file")
     assert artifact_file.status_code == 200, artifact_file.text
     queued = client.post(

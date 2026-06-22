@@ -609,7 +609,11 @@ class ForgeQueue:
         thumbnail_path = artifact_dir / f"{artifact_id}.thumb.png"
         self._write_thumbnail(image_path, thumbnail_path)
         metadata = self._metadata(job_id, spec, image_path, index)
+        metadata["image_sha256"] = self._sha256_file(image_path)
+        metadata["image_size_bytes"] = image_path.stat().st_size
         metadata["thumbnail_path"] = str(thumbnail_path)
+        metadata["thumbnail_sha256"] = self._sha256_file(thumbnail_path)
+        metadata["thumbnail_size_bytes"] = thumbnail_path.stat().st_size
         write_json(metadata_path, metadata)
         self.store.add_artifact(
             ArtifactRecord(
