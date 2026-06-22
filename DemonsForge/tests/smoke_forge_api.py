@@ -208,6 +208,9 @@ def main() -> None:
     assert events.status_code == 200, events.text
     gallery = client.get("/forge/gallery")
     assert gallery.status_code == 200, gallery.text
+    gallery_filtered = client.get("/forge/gallery?kind=image&job_type=upscale&limit=5")
+    assert gallery_filtered.status_code == 200, gallery_filtered.text
+    assert isinstance(gallery_filtered.json(), list)
     print("smoke ok")
 
 

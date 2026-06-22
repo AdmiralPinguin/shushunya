@@ -122,8 +122,24 @@ class DemonsForgeClient:
     def cancel(self, job_id: str) -> dict[str, Any]:
         return self._request("POST", f"/forge/jobs/{job_id}/cancel")
 
-    def gallery(self, limit: int = 100) -> list[dict[str, Any]]:
-        return self._request("GET", f"/forge/gallery?limit={limit}")
+    def gallery(
+        self,
+        limit: int = 100,
+        query: str | None = None,
+        engine: str | None = None,
+        model: str | None = None,
+        job_type: str | None = None,
+        kind: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params = {
+            "limit": limit,
+            "q": query,
+            "engine": engine,
+            "model": model,
+            "job_type": job_type,
+            "kind": kind,
+        }
+        return self._request("GET", "/forge/gallery", params={k: v for k, v in params.items() if v is not None})
 
     def artifact(self, artifact_id: str) -> dict[str, Any]:
         return self._request("GET", f"/forge/artifacts/{artifact_id}")

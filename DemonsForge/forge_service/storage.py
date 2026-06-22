@@ -236,13 +236,21 @@ class ForgeStore:
             metadata=json.loads(row["metadata_json"]),
         )
 
-    def list_gallery(self, limit: int = 100) -> list[ArtifactRecord]:
+    def list_gallery(
+        self,
+        limit: int = 100,
+        query: str | None = None,
+        engine: str | None = None,
+        model: str | None = None,
+        job_type: str | None = None,
+        kind: str | None = None,
+    ) -> list[ArtifactRecord]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM artifacts ORDER BY created_at DESC LIMIT ?",
-                (limit,),
+                (max(limit * 5, limit),),
             ).fetchall()
-        return [
+        records = [
             ArtifactRecord(
                 id=row["id"],
                 job_id=row["job_id"],
@@ -254,6 +262,28 @@ class ForgeStore:
             )
             for row in rows
         ]
+        query_lower = (query or "").strip().lower()
+
+        def matches(record: ArtifactRecord) -> bool:
+            metadata = record.metadata
+            if kind and record.kind != kind:
+                return False
+            if engine and metadata.get("engine") != engine:
+                return False
+            if model and metadata.get("model") != model:
+                return False
+            if job_type and metadata.get("raw_spec", {}).get("type") != job_type:
+                return False
+            if query_lower:
+                haystack = " ".join(
+                    str(metadata.get(key) or "")
+                    for key in ["prompt", "negative_prompt", "engine", "model", "path"]
+                ).lower()
+                if query_lower not in haystack:
+                    return False
+            return True
+
+        return [record for record in records if matches(record)][:limit]
 
     def create_asset_download(self, record: AssetDownloadRecord) -> None:
         with self._lock, self._connect() as conn:

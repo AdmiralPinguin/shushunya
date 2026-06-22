@@ -246,9 +246,23 @@ def get_artifact_thumbnail(artifact_id: str):
 
 
 @app.get("/forge/gallery")
-def get_gallery(limit: int = 100) -> list[dict[str, object]]:
+def get_gallery(
+    limit: int = 100,
+    q: str | None = None,
+    engine: str | None = None,
+    model: str | None = None,
+    job_type: str | None = None,
+    kind: str | None = None,
+) -> list[dict[str, object]]:
     records = []
-    for item in store.list_gallery(limit=max(1, min(limit, 500))):
+    for item in store.list_gallery(
+        limit=max(1, min(limit, 500)),
+        query=q,
+        engine=engine,
+        model=model,
+        job_type=job_type,
+        kind=kind,
+    ):
         data = item.model_dump()
         data["artifact_url"] = f"/forge/artifacts/{item.id}?file=true"
         if item.metadata.get("thumbnail_path"):

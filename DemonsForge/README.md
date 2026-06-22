@@ -161,6 +161,8 @@ Generated outputs are stored under `artifacts/{job_id}/` with PNG files and JSON
 metadata containing prompt, negative prompt, engine, model, LoRA list, seed,
 dimensions, sampler, steps, guidance/CFG, source images, creation time and job
 id.
+Gallery supports filters: `q`, `engine`, `model`, `job_type`, `kind`, and
+`limit`.
 
 `prompt-enhance` and `metadata-read` are implemented as lightweight CPU-only job
 types. `prompt-enhance` produces a deterministic enhanced prompt metadata
