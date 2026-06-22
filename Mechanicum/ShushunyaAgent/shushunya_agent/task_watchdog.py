@@ -35,6 +35,7 @@ PUBLIC_CONTINUE_TASK = (
     "Если предыдущий прогон остановился на цикле повторяющихся действий, выбери новое продуктивное действие или final вместо тех же проверок. "
     "Не повторяй уже выполненные действия и не начинай задачу заново."
 )
+USEFUL_CONTEXT_TYPES = {"start", "action", "tool_result", "final", "error", "warning"}
 
 
 def normalize_task_id(raw: str | None) -> str:
@@ -206,6 +207,79 @@ def task_snapshot(base_url: str, api_key: str, task_id: str) -> tuple[int, dict[
     return request_json(base_url, "GET", f"/task?{query}", api_key)
 
 
+def compact_value(value: Any, *, string_limit: int = 600, list_limit: int = 8) -> Any:
+    if isinstance(value, str):
+        return value if len(value) <= string_limit else value[:string_limit] + "\n...[truncated]..."
+    if isinstance(value, list):
+        return [compact_value(item, string_limit=string_limit, list_limit=list_limit) for item in value[:list_limit]]
+    if isinstance(value, dict):
+        return {str(key): compact_value(item, string_limit=string_limit, list_limit=list_limit) for key, item in value.items()}
+    return value
+
+
+def compact_watchdog_event(event: dict[str, Any]) -> dict[str, Any]:
+    event_type = str(event.get("type") or "")
+    if event_type == "start":
+        return {
+            "type": "start",
+            "task": compact_value(event.get("task"), string_limit=1200),
+        }
+    if event_type == "action":
+        return {
+            "type": "action",
+            "step": event.get("step"),
+            "action": compact_value(event.get("action"), string_limit=400, list_limit=6),
+        }
+    if event_type == "tool_result":
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        brief_result: dict[str, Any] = {}
+        for key in (
+            "ok",
+            "error",
+            "url",
+            "status",
+            "title",
+            "path",
+            "chars",
+            "bytes_written",
+            "skipped_no_text",
+            "skipped_not_found",
+            "previous_url",
+            "next_url",
+            "canonical_url",
+            "instruction",
+            "json_summary",
+            "api_candidates",
+        ):
+            if key in result:
+                brief_result[key] = result[key]
+        return {
+            "type": "tool_result",
+            "step": event.get("step"),
+            "action": event.get("action"),
+            "result": compact_value(brief_result, string_limit=350, list_limit=6),
+        }
+    return compact_value(event, string_limit=500, list_limit=6)
+
+
+def public_resume_context(task: dict[str, Any]) -> str:
+    events = task.get("events") if isinstance(task.get("events"), list) else []
+    useful = [event for event in events if isinstance(event, dict) and str(event.get("type") or "") in USEFUL_CONTEXT_TYPES]
+    selected = useful[:1] + useful[-24:]
+    context = {
+        "source": "public_task_snapshot",
+        "rule": (
+            "This snapshot is authoritative. Continue from these journal facts and current files only. "
+            "Do not use Archive/focus memory as the active task state."
+        ),
+        "task_id": task.get("task_id"),
+        "running": task.get("running"),
+        "final": compact_value(task.get("final"), string_limit=700, list_limit=6),
+        "events": [compact_watchdog_event(event) for event in selected],
+    }
+    return json.dumps(context, ensure_ascii=False, indent=2)
+
+
 def start_resume(base_url: str, api_key: str, task_id: str, max_auto_cycles: int) -> tuple[int, dict[str, Any], str]:
     payload = {
         "task": DEFAULT_CONTINUE_TASK,
@@ -221,14 +295,22 @@ def start_resume(base_url: str, api_key: str, task_id: str, max_auto_cycles: int
     if status != 401:
         return status, result, "resume_task_id"
 
+    snapshot_status, snapshot = task_snapshot(base_url, api_key, task_id)
+    snapshot_text = public_resume_context(snapshot) if snapshot_status == 200 else json.dumps(
+        {"source": "public_task_snapshot", "error": "snapshot unavailable", "status": snapshot_status, "response": snapshot},
+        ensure_ascii=False,
+        indent=2,
+    )
     public_payload = {
-        "task": PUBLIC_CONTINUE_TASK,
+        "task": PUBLIC_CONTINUE_TASK + "\n\nAuthoritative task snapshot:\n" + snapshot_text,
         "task_id": f"mobile-watchdog-{int(time.time())}",
         "technical": True,
         "shell_enabled": False,
         "wait_for_slot": False,
         "auto_continue": True,
         "auto_continue_max_cycles": max_auto_cycles,
+        "task_memory": False,
+        "archive_task": False,
     }
     status, result = request_json(base_url, "POST", "/start", api_key, public_payload)
     return status, result, "public_start"

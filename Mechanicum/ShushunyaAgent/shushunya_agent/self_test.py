@@ -173,6 +173,32 @@ def main() -> int:
     should_continue, reason = task_watchdog.should_resume(success_task, {"attempts": {}, "last_resume_at": {}, "last_final": {}}, now=1000.0, max_attempts=2, cooldown_sec=60)
     if should_continue or reason != "success":
         raise AssertionError(f"task watchdog should not resume success: {should_continue}, {reason}")
+    public_context = task_watchdog.public_resume_context(
+        {
+            "task_id": "watchdog-public",
+            "running": False,
+            "final": {"ok": False, "continuable": True, "message": "limit"},
+            "events": [
+                {"type": "start", "task": "Сделай длинную задачу"},
+                {
+                    "type": "tool_result",
+                    "step": 7,
+                    "action": "ranobehub_chapter",
+                    "result": {
+                        "ok": True,
+                        "url": "https://ranobehub.org/ranobe/966/140/3",
+                        "path": "/work/novel_data/vol140_ch3.txt",
+                        "next_url": "",
+                        "preview": "x" * 2000,
+                    },
+                },
+            ],
+        }
+    )
+    if "public_task_snapshot" not in public_context or "vol140_ch3.txt" not in public_context:
+        raise AssertionError(f"watchdog public context missed task facts: {public_context}")
+    if "Do not use Archive/focus memory" not in public_context:
+        raise AssertionError(f"watchdog public context missed Archive warning: {public_context}")
     print("[ok] task watchdog resume guards")
     if parse_action('{"action":"final","message":"ok"}').get("action") != "final":
         raise AssertionError("parse_action failed to parse a valid JSON object")
