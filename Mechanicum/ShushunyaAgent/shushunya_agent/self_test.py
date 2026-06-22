@@ -15,6 +15,7 @@ from urllib.error import HTTPError
 from . import agent_runner
 from . import server
 from . import task_journal
+from . import task_watchdog
 from . import web_tools
 from .agent_runner import (
     AgentConfig,
@@ -116,6 +117,35 @@ def main() -> int:
     if previous_summary.get("task_id") != "journal-real-unfinished":
         raise AssertionError(f"latest task summary did not skip meta tasks: {previous_summary}")
     print("[ok] previous task journal summary skips meta tasks")
+    watchdog_state = {"attempts": {}, "last_resume_at": {}, "last_final": {}}
+    continuable_task = {
+        "ok": True,
+        "task_id": "watchdog-continuable",
+        "running": False,
+        "final": {
+            "ok": False,
+            "continuable": True,
+            "resume_task_id": "watchdog-continuable",
+            "message": "Агент достиг лимита шагов без final.",
+        },
+    }
+    should_continue, reason = task_watchdog.should_resume(continuable_task, watchdog_state, now=1000.0, max_attempts=2, cooldown_sec=60)
+    if not should_continue or reason != "continuable":
+        raise AssertionError(f"task watchdog missed continuable task: {should_continue}, {reason}")
+    if task_watchdog.normalize_task_id("") != "":
+        raise AssertionError("task watchdog must not generate task ids while normalizing empty input")
+    task_watchdog.remember_resume_attempt("watchdog-continuable", watchdog_state, 1000.0, continuable_task["final"])
+    should_continue, reason = task_watchdog.should_resume(continuable_task, watchdog_state, now=1020.0, max_attempts=2, cooldown_sec=60)
+    if should_continue or reason != "cooldown":
+        raise AssertionError(f"task watchdog cooldown failed: {should_continue}, {reason}")
+    should_continue, reason = task_watchdog.should_resume(continuable_task, watchdog_state, now=1100.0, max_attempts=1, cooldown_sec=60)
+    if should_continue or reason != "max_attempts":
+        raise AssertionError(f"task watchdog max-attempt guard failed: {should_continue}, {reason}")
+    success_task = {"task_id": "watchdog-success", "running": False, "final": {"ok": True, "message": "done"}}
+    should_continue, reason = task_watchdog.should_resume(success_task, {"attempts": {}, "last_resume_at": {}, "last_final": {}}, now=1000.0, max_attempts=2, cooldown_sec=60)
+    if should_continue or reason != "success":
+        raise AssertionError(f"task watchdog should not resume success: {should_continue}, {reason}")
+    print("[ok] task watchdog resume guards")
     if parse_action('{"action":"final","message":"ok"}').get("action") != "final":
         raise AssertionError("parse_action failed to parse a valid JSON object")
     for invalid_action_json in ('["final"]', '"final"'):

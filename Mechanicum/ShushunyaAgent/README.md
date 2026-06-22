@@ -373,12 +373,32 @@ Run a lightweight API watchdog that does not touch ArchiveOfHeresy:
 The watchdog checks `/state` every `SHUSHUNYA_AGENT_WATCH_INTERVAL_SEC`
 seconds, default `15`. After `SHUSHUNYA_AGENT_WATCH_MAX_FAILURES` failed checks,
 default `2`, it restarts the API and uses `/state` as the readiness probe.
+It can also supervise the latest/current task and ask the API to continue
+continuable failures through the same HTTP surface used by clients:
+
+```bash
+SHUSHUNYA_AGENT_WATCH_TASK_SUPERVISOR=1 \
+SHUSHUNYA_AGENT_TASK_WATCH_INTERVAL_SEC=900 \
+./scripts/watch-agent-api.sh
+```
+
+Task supervision is generic: it only reacts to task journal state such as
+`running`, `success`, `cancelled`, `continuable`, runtime/step limits, or a
+missing final event. It does not contain site-specific recovery logic. Resume
+attempts are rate-limited by `SHUSHUNYA_AGENT_TASK_WATCH_COOLDOWN_SEC`, default
+`300`, and capped by `SHUSHUNYA_AGENT_TASK_WATCH_MAX_ATTEMPTS`, default `8`.
+Set `SHUSHUNYA_AGENT_WATCH_TASK_ID` to pin supervision to one task; otherwise it
+uses the current task, then the last task from `/state`.
 Run it in the background with:
 
 ```bash
 ./scripts/start-agent-watchdog.sh
 ./scripts/stop-agent-watchdog.sh
 ```
+
+`scripts/start-agent-watchdog.sh` sources `runtime/agent-watchdog.env` when the
+file exists, so long-running local configuration can be kept out of tracked
+source files.
 
 Stop the model host and archive gateway:
 

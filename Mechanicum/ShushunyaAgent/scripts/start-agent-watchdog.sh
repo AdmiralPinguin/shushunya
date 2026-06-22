@@ -14,6 +14,13 @@ fi
 mkdir -p "$RUNTIME_DIR"
 cd "$ROOT"
 
+if [[ -f "$RUNTIME_DIR/agent-watchdog.env" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$RUNTIME_DIR/agent-watchdog.env"
+  set +a
+fi
+
 setsid "$ROOT/scripts/watch-agent-api.sh" >"$LOG_FILE" 2>&1 </dev/null &
 echo "$!" > "$PID_FILE"
 

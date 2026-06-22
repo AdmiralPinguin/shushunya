@@ -333,7 +333,14 @@
     "api_watchdog_probe": "GET /state",
     "api_watchdog_interval_env": "SHUSHUNYA_AGENT_WATCH_INTERVAL_SEC",
     "api_watchdog_max_failures_env": "SHUSHUNYA_AGENT_WATCH_MAX_FAILURES",
-    "api_watchdog_restart_readiness": "/state"
+    "api_watchdog_restart_readiness": "/state",
+    "task_watchdog_module": "shushunya_agent.task_watchdog",
+    "task_watchdog_enable_env": "SHUSHUNYA_AGENT_WATCH_TASK_SUPERVISOR",
+    "task_watchdog_interval_env": "SHUSHUNYA_AGENT_TASK_WATCH_INTERVAL_SEC",
+    "task_watchdog_interval_default_sec": 900,
+    "task_watchdog_cooldown_env": "SHUSHUNYA_AGENT_TASK_WATCH_COOLDOWN_SEC",
+    "task_watchdog_max_attempts_env": "SHUSHUNYA_AGENT_TASK_WATCH_MAX_ATTEMPTS",
+    "task_watchdog_target_env": "SHUSHUNYA_AGENT_WATCH_TASK_ID"
   },
   "web_policy": {
     "tools": ["web_search", "web_fetch"],
