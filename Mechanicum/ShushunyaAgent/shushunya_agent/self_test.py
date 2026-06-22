@@ -359,6 +359,29 @@ def main() -> int:
     if len(compacted_result.get("content", "")) > 7000:
         raise AssertionError("read_file result was not compacted for model context")
     print("[ok] read_file result compacted for model context")
+    large_json_result = {
+        "ok": True,
+        "content_type": "application/json",
+        "text": json.dumps(
+            {
+                "volumes": [
+                    {
+                        "num": index,
+                        "name": f"Volume {index}",
+                        "chapters": [{"url": f"https://example.com/{index}/{chapter}", "title": f"Chapter {chapter}"} for chapter in range(1, 30)],
+                    }
+                    for index in range(1, 25)
+                ]
+            }
+        ),
+    }
+    compacted_json = result_for_model("web_fetch", large_json_result, config)
+    if "text" in compacted_json or compacted_json.get("json_summary", {}).get("volumes", {}).get("count") != 24:
+        raise AssertionError(f"web_fetch JSON result was not summarized: {compacted_json}")
+    first_volume = compacted_json["json_summary"]["volumes"]["items"][0]
+    if first_volume.get("chapters", {}).get("count") != 29 or "first" not in first_volume.get("chapters", {}):
+        raise AssertionError(f"web_fetch JSON nested list summary failed: {compacted_json}")
+    print("[ok] web_fetch JSON result summarized for model context")
 
     messages = [
         {"role": "system", "content": "system"},

@@ -264,7 +264,17 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
         payload["content"] = truncate(payload["content"], 6000)
         payload["content_note"] = "content compacted for model context; use read_file offset/next_offset for more"
     elif action_type == "web_fetch" and isinstance(payload.get("text"), str):
-        payload["text"] = truncate(payload["text"], 8000)
+        text = str(payload.get("text") or "")
+        content_type = str(payload.get("content_type") or "").lower()
+        if "json" in content_type or text.lstrip().startswith(("{", "[")):
+            try:
+                payload["json_summary"] = summarize_json_for_model(json.loads(text))
+                payload["text_note"] = "JSON response compacted for model context; use smaller max_bytes or a follow-up targeted fetch/tool if exact raw JSON is needed"
+                payload.pop("text", None)
+            except json.JSONDecodeError:
+                payload["text"] = truncate(text, 4000)
+        else:
+            payload["text"] = truncate(text, 5000)
     elif action_type in {"shell", "python"}:
         if isinstance(payload.get("stdout"), str):
             payload["stdout"] = truncate(payload["stdout"], 6000)
@@ -285,6 +295,34 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
     elif action_type in {"archive_search", "archive_memory_gateway", "archive_memory_catalog", "archive_memory_search", "archive_memory_read", "archive_memory_propose"}:
         payload = compact_json_value(payload, string_limit=3000, list_limit=12)
     return compact_json_value(payload, string_limit=config.max_tool_output_chars, list_limit=100)
+
+
+def summarize_json_for_model(value: Any, depth: int = 0) -> Any:
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= 40:
+                result["_omitted_keys"] = len(value) - 40
+                break
+            result[str(key)] = summarize_json_for_model(item, depth + 1)
+        return result
+    if isinstance(value, list):
+        count = len(value)
+        if count == 0:
+            return {"count": 0, "items": []}
+        if all(isinstance(item, dict) for item in value):
+            if depth <= 1:
+                return {"count": count, "items": [summarize_json_for_model(item, depth + 1) for item in value[:80]], "truncated": count > 80}
+            return {
+                "count": count,
+                "first": summarize_json_for_model(value[0], depth + 1),
+                "last": summarize_json_for_model(value[-1], depth + 1),
+            }
+        sample = [summarize_json_for_model(item, depth + 1) for item in value[:20]]
+        return {"count": count, "sample": sample, "truncated": count > 20}
+    if isinstance(value, str):
+        return truncate(value, 300)
+    return value
 
 
 def compact_messages_for_model(messages: list[dict[str, str]], config: AgentConfig, budget: int | None = None) -> list[dict[str, str]]:
