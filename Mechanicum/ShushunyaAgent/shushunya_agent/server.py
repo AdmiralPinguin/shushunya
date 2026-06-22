@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .agent_runner import AgentConfig, archive_request, compact_resume_events, read_task_journal, run_agent, safe_task_id
 from .task_journal import is_contextless_task_reference, latest_completed_task_summary, recent_task_summaries
+from .utils import compact_json_value
 
 
 HOST = os.environ.get("SHUSHUNYA_AGENT_HOST", "127.0.0.1")
@@ -358,10 +359,10 @@ def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]
     )
 
 
-def recent_continuation_evidence(exclude_task_id: str, limit: int = 4) -> list[dict[str, Any]]:
+def recent_continuation_evidence(exclude_task_id: str, limit: int = 2) -> list[dict[str, Any]]:
     summaries = recent_task_summaries(limit=20).get("tasks", [])
-    evidence: list[dict[str, Any]] = []
-    for summary in summaries if isinstance(summaries, list) else []:
+    candidates: list[tuple[int, int, dict[str, Any]]] = []
+    for index, summary in enumerate(summaries if isinstance(summaries, list) else []):
         if not isinstance(summary, dict):
             continue
         task_id = safe_task_id(str(summary.get("task_id") or ""))
@@ -372,18 +373,121 @@ def recent_continuation_evidence(exclude_task_id: str, limit: int = 4) -> list[d
             continue
         journal = read_task_journal(task_id, limit=80)
         events = journal.get("events") if isinstance(journal.get("events"), list) else []
-        evidence.append(
-            {
-                "task_id": task_id,
-                "success": bool(summary.get("success")),
-                "cancelled": bool(summary.get("cancelled")),
-                "final": str(summary.get("final") or "")[:800],
-                "recent_events": compact_resume_events(events[-24:]) if isinstance(events, list) else [],
-            }
-        )
-        if len(evidence) >= limit:
-            break
-    return evidence
+        recent_events = compact_continuation_events(events[-80:]) if isinstance(events, list) else []
+        if not recent_events:
+            continue
+        item = {
+            "task_id": task_id,
+            "success": bool(summary.get("success")),
+            "cancelled": bool(summary.get("cancelled")),
+            "final": str(summary.get("final") or "")[:800],
+            "recent_events": recent_events,
+        }
+        candidates.append((continuation_evidence_score(item), -index, item))
+    candidates.sort(key=lambda candidate: (candidate[0], candidate[1]), reverse=True)
+    return [item for score, _index, item in candidates[:limit] if score > 0]
+
+
+def continuation_evidence_score(item: dict[str, Any]) -> int:
+    encoded = json.dumps(item.get("recent_events", []), ensure_ascii=False).lower()
+    score = 0
+    for marker in ("api_candidates", "json_summary", "next_url", "canonical_url"):
+        if marker in encoded:
+            score += 30
+    score += encoded.count('"ok":true') * 5
+    score -= encoded.count("repeated identical action rejected") * 10
+    if item.get("cancelled"):
+        score -= 10
+    return score
+
+
+def compact_continuation_events(events: list[Any], max_chars: int = 1800) -> list[dict[str, Any]]:
+    candidates: list[tuple[int, int, dict[str, Any], str]] = []
+    useful_types = {"action", "tool_result", "final", "error"}
+    for index, event in enumerate(events):
+        if not isinstance(event, dict) or event.get("type") not in useful_types:
+            continue
+        compacted = compact_json_value(event, string_limit=420, list_limit=8)
+        compacted = brief_large_tool_result(compacted)
+        if isinstance(compacted, dict) and compacted.get("type") == "tool_result":
+            compacted.pop("duration_sec", None)
+        text = json.dumps(compacted, ensure_ascii=False, separators=(",", ":"))
+        score = continuation_event_score(compacted)
+        if score <= 0:
+            continue
+        candidates.append((score, index, compacted, text))
+    candidates.sort(key=lambda candidate: (candidate[0], candidate[1]), reverse=True)
+    selected_with_index: list[tuple[int, dict[str, Any]]] = []
+    total = 2
+    for _score, index, compacted, text in candidates:
+        if selected_with_index and total + len(text) + 1 > max_chars:
+            continue
+        if not selected_with_index and len(text) > max_chars:
+            compacted = brief_large_tool_result(compact_json_value(compacted, string_limit=220, list_limit=4))
+            text = json.dumps(compacted, ensure_ascii=False, separators=(",", ":"))
+            if len(text) > max_chars:
+                compacted = {
+                    "type": compacted.get("type") if isinstance(compacted, dict) else "",
+                    "step": compacted.get("step") if isinstance(compacted, dict) else None,
+                    "action": compacted.get("action") if isinstance(compacted, dict) else None,
+                    "note": "event too large; omitted from continuation evidence",
+                }
+                text = json.dumps(compacted, ensure_ascii=False, separators=(",", ":"))
+        selected_with_index.append((index, compacted))
+        total += len(text) + 1
+    selected_with_index.sort(key=lambda item: item[0])
+    return [event for _index, event in selected_with_index]
+
+
+def brief_large_tool_result(event: Any) -> Any:
+    if not isinstance(event, dict) or event.get("type") != "tool_result":
+        return event
+    result = event.get("result")
+    if not isinstance(result, dict):
+        return event
+    brief_result: dict[str, Any] = {}
+    for key in (
+        "ok",
+        "error",
+        "url",
+        "final_url",
+        "status",
+        "pattern",
+        "api_candidates",
+        "json_summary",
+        "next_url",
+        "previous_url",
+        "canonical_url",
+        "title",
+        "path",
+    ):
+        if key in result:
+            brief_result[key] = result[key]
+    if "api_candidates" in brief_result:
+        brief_result["api_candidates"] = compact_json_value(brief_result["api_candidates"], string_limit=220, list_limit=5)
+    if "json_summary" in brief_result:
+        brief_result["json_summary"] = compact_json_value(brief_result["json_summary"], string_limit=180, list_limit=6)
+    compacted = dict(event)
+    compacted["result"] = brief_result
+    return compact_json_value(compacted, string_limit=300, list_limit=8)
+
+
+def continuation_event_score(event: dict[str, Any]) -> int:
+    encoded = json.dumps(event, ensure_ascii=False).lower()
+    score = 0
+    if "api_candidates" in encoded:
+        score += 100
+    if "json_summary" in encoded:
+        score += 100
+    if "next_url" in encoded or "canonical_url" in encoded:
+        score += 30
+    if '"ok":true' in encoded:
+        score += 10
+    if event.get("type") == "final":
+        score += 3
+    if "repeated identical action rejected" in encoded:
+        score -= 30
+    return score
 
 
 def asks_about_previous_task(task: str) -> bool:

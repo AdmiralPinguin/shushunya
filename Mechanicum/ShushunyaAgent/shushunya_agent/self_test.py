@@ -140,6 +140,9 @@ def main() -> int:
     encoded_evidence = json.dumps(evidence, ensure_ascii=False)
     if "https://example.com/api/contents" not in encoded_evidence:
         raise AssertionError(f"recent continuation evidence missed useful tool result: {evidence}")
+    previous_context = server.apply_previous_task_context("Продолжи последнюю незавершенную задачу агента", AgentConfig(task_id="self-test-current"))
+    if len(previous_context) > 16000:
+        raise AssertionError(f"previous task context is too large: {len(previous_context)}")
     print("[ok] previous task context includes continuation evidence")
     watchdog_state = {"attempts": {}, "last_resume_at": {}, "last_final": {}}
     continuable_task = {
