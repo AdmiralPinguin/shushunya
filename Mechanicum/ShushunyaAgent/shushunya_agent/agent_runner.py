@@ -1228,9 +1228,26 @@ def ranobehub_chapter_tool(config: AgentConfig, action: dict[str, Any]) -> dict[
     parser.feed(html_text)
     parsed = parser.payload()
     paragraphs = [paragraph for paragraph in parsed.get("paragraphs", []) if isinstance(paragraph, str) and paragraph.strip()]
-    if not paragraphs:
-        return {"ok": False, "error": "no chapter paragraphs found", "url": raw_url, "status": status}
     title = str(parsed.get("title") or "").strip()
+    if not paragraphs:
+        return {
+            "ok": True,
+            "url": raw_url,
+            "status": status,
+            "title": title,
+            "path": path,
+            "mode": mode,
+            "paragraphs": 0,
+            "chars": 0,
+            "bytes_written": 0,
+            "encoding": encoding,
+            "truncated": truncated,
+            "skipped_no_text": True,
+            "previous_url": parsed.get("previous_url") or "",
+            "next_url": parsed.get("next_url") or "",
+            "canonical_url": parsed.get("canonical_url") or "",
+            "preview": "chapter page has no text paragraphs; likely illustrations or media-only content",
+        }
     lines: list[str] = []
     if include_title and title:
         lines.extend([title, ""])
