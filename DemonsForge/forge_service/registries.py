@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+from . import config
+
+
+ENGINE_MODELS = {
+    "stable_diffusion": {
+        "default_model": "stable-diffusion-3.5-large",
+        "pipeline": "StableDiffusion3Pipeline",
+        "job_types": ["txt2img"],
+        "supports_negative_prompt": True,
+        "supports_lora": False,
+        "guidance_default": 4.5,
+        "steps_default": 28,
+    },
+    "sdxl": {
+        "default_model": "stable-diffusion-xl-base-1.0",
+        "pipeline": "StableDiffusionXLPipeline",
+        "job_types": ["txt2img"],
+        "supports_negative_prompt": True,
+        "supports_lora": True,
+        "guidance_default": 7.0,
+        "steps_default": 30,
+    },
+    "flux": {
+        "default_model": "FLUX.1-schnell",
+        "pipeline": "FluxPipeline",
+        "job_types": ["txt2img"],
+        "supports_negative_prompt": False,
+        "supports_lora": False,
+        "guidance_default": 0.0,
+        "steps_default": 4,
+    },
+}
+
+SAMPLERS = ["default"]
+SCHEDULERS = [
+    {"name": "native", "available": True, "class": None},
+    {"name": "euler", "available": True, "class": "EulerDiscreteScheduler"},
+    {"name": "ddim", "available": True, "class": "DDIMScheduler"},
+    {"name": "dpm_solver", "available": True, "class": "DPMSolverMultistepScheduler"},
+]
+ASPECT_PRESETS = {
+    "square": {"width": 1024, "height": 1024},
+    "portrait": {"width": 832, "height": 1216},
+    "landscape": {"width": 1216, "height": 832},
+    "wide": {"width": 1344, "height": 768},
+}
+
+
+def _dir_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+
+
+def discover_models() -> list[dict[str, Any]]:
+    models = []
+    for engine, meta in ENGINE_MODELS.items():
+        name = meta["default_model"]
+        path = config.MODELS_DIR / name
+        models.append(
+            {
+                "name": name,
+                "engine": engine,
+                "path": str(path),
+                "available": (path / "model_index.json").exists(),
+                "size_bytes": _dir_size(path),
+                "pipeline": meta["pipeline"],
+            }
+        )
+    return models
+
+
+def discover_loras() -> list[dict[str, Any]]:
+    roots = [config.LORAS_DIR, config.MODELS_DIR]
+    found = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.safetensors"):
+            if "lora" not in path.name.lower() and "lora" not in str(path.parent).lower():
+                continue
+            found.append(
+                {
+                    "name": path.stem,
+                    "path": str(path),
+                    "size_bytes": path.stat().st_size,
+                    "sha256": None,
+                    "license_note": None,
+                    "status": "local",
+                }
+            )
+    return found
+
+
+def find_lora(name: str) -> dict[str, Any] | None:
+    for item in discover_loras():
+        if item["name"].lower() == name.lower():
+            return item
+    return None
+
+
+def discover_embeddings() -> list[dict[str, Any]]:
+    if not config.EMBEDDINGS_DIR.exists():
+        return []
+    return [
+        {"name": p.stem, "path": str(p), "size_bytes": p.stat().st_size}
+        for p in config.EMBEDDINGS_DIR.rglob("*")
+        if p.is_file()
+    ]
+
+
+def capabilities() -> dict[str, Any]:
+    models = discover_models()
+    model_by_engine = {m["engine"]: m for m in models}
+    engines = {}
+    for name, meta in ENGINE_MODELS.items():
+        model = model_by_engine[name]
+        engines[name] = {
+            **meta,
+            "available": model["available"],
+            "models": [model["name"]],
+            "job_types": meta["job_types"],
+            "capability_gated_stubs": [
+                "img2img",
+                "inpaint",
+                "outpaint",
+                "upscale",
+                "variation",
+                "prompt-enhance",
+                "metadata-read",
+                "ControlNet",
+                "IP-Adapter",
+                "reference_image",
+            ],
+        }
+    return {
+        "service": "DemonsForge",
+        "version": "0.1.0",
+        "engines": engines,
+        "models": models,
+        "loras": discover_loras(),
+        "embeddings": discover_embeddings(),
+        "samplers": SAMPLERS,
+        "schedulers": SCHEDULERS,
+        "aspect_presets": ASPECT_PRESETS,
+        "limits": {
+            "max_width": config.MAX_WIDTH,
+            "max_height": config.MAX_HEIGHT,
+            "max_steps": config.MAX_STEPS,
+            "max_batch": config.MAX_BATCH,
+        },
+    }
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

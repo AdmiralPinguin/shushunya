@@ -2,4 +2,10 @@ DemonsForge/
 hf_home/
 models/
 outputs/
+artifacts/
+runtime/
+asset_requests/
+loras/
+embeddings/
+control_assets/
 *.log

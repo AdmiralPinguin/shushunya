@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator
+
+from . import config
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class JobType(str, Enum):
+    txt2img = "txt2img"
+    img2img = "img2img"
+    inpaint = "inpaint"
+    outpaint = "outpaint"
+    upscale = "upscale"
+    variation = "variation"
+    prompt_enhance = "prompt-enhance"
+    metadata_read = "metadata-read"
+    asset_download = "asset-download"
+
+
+class JobStatus(str, Enum):
+    queued = "queued"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+    canceled = "canceled"
+
+
+class LoraRef(BaseModel):
+    name: str
+    weight: float = 1.0
+
+
+class AssetRequest(BaseModel):
+    name: str
+    asset_type: Literal["model", "lora", "embedding", "control_asset", "ip_adapter"]
+    candidate_source: str | None = None
+    license_note: str | None = None
+    risks: list[str] = Field(default_factory=list)
+    requires_user_approval: bool = True
+
+
+class AssetDownloadSpec(BaseModel):
+    name: str
+    asset_type: Literal["model", "lora", "embedding", "control_asset", "ip_adapter"]
+    source_url: str
+    sha256: str | None = None
+    license_note: str | None = None
+    target_dir: str | None = None
+    approved: bool = False
+
+
+class JobSpec(BaseModel):
+    type: JobType = JobType.txt2img
+    engine: str | None = None
+    model: str | None = None
+    prompt: str | None = None
+    negative_prompt: str | None = None
+    width: int = 1024
+    height: int = 1024
+    aspect_preset: str | None = None
+    steps: int = 20
+    cfg: float | None = None
+    guidance: float | None = None
+    sampler: str | None = None
+    scheduler: str | None = None
+    seed: int | None = None
+    batch_size: int = 1
+    loras: list[LoraRef] = Field(default_factory=list)
+    embeddings: list[str] = Field(default_factory=list)
+    source_images: list[str] = Field(default_factory=list)
+    control: dict[str, Any] = Field(default_factory=dict)
+    safety: dict[str, Any] = Field(default_factory=dict)
+    asset_request: AssetRequest | None = None
+    asset_download: AssetDownloadSpec | None = None
+
+    @field_validator("width", "height")
+    @classmethod
+    def validate_dimensions(cls, value: int) -> int:
+        if value < 64 or value % 8 != 0:
+            raise ValueError("dimensions must be >=64 and divisible by 8")
+        if value > config.MAX_WIDTH:
+            raise ValueError(f"dimensions must be <= {config.MAX_WIDTH}")
+        return value
+
+    @field_validator("steps")
+    @classmethod
+    def validate_steps(cls, value: int) -> int:
+        if value < 1 or value > config.MAX_STEPS:
+            raise ValueError(f"steps must be between 1 and {config.MAX_STEPS}")
+        return value
+
+    @field_validator("batch_size")
+    @classmethod
+    def validate_batch(cls, value: int) -> int:
+        if value < 1 or value > config.MAX_BATCH:
+            raise ValueError(f"batch_size must be between 1 and {config.MAX_BATCH}")
+        return value
+
+
+class JobRecord(BaseModel):
+    id: str
+    spec: JobSpec
+    status: JobStatus
+    created_at: str = Field(default_factory=utc_now)
+    updated_at: str = Field(default_factory=utc_now)
+    progress: float = 0.0
+    logs: list[str] = Field(default_factory=list)
+    artifacts: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+class PlanRequest(BaseModel):
+    request: str
+    preferred_engine: str | None = None
+
+
+class ArtifactRecord(BaseModel):
+    id: str
+    job_id: str
+    kind: Literal["image", "metadata", "asset"]
+    path: str
+    metadata_path: str
+    created_at: str = Field(default_factory=utc_now)
+    metadata: dict[str, Any] = Field(default_factory=dict)
