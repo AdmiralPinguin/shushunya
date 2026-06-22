@@ -166,6 +166,12 @@ def main() -> None:
     assert planned_spec["height"] == 768
     assert planned_spec["steps"] == 7
     assert planned_spec["seed"] == 123
+    planned_batch = client.post(
+        "/forge/plan",
+        json={"request": "SDXL 512x512 batch 3 cinematic portraits"},
+    )
+    assert planned_batch.status_code == 200, planned_batch.text
+    assert planned_batch.json()["batch_size"] == 3
     planned_img2img = client.post(
         "/forge/plan",
         json={"request": "Сделай вариацию по картинке в кинематографичном стиле"},

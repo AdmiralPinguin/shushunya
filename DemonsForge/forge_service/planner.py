@@ -107,6 +107,13 @@ def _steps(text: str, default: int) -> int:
     return max(1, min(int(match.group(1)), 60))
 
 
+def _batch_size(text: str) -> int:
+    match = re.search(r"(?:batch|батч)\s*[:=]?\s*([1-4])", text, re.I)
+    if not match:
+        match = re.search(r"([1-4])\s*(?:вариант(?:а|ов)?|images|картин(?:ки|ок)?)", text, re.I)
+    return int(match.group(1)) if match else 1
+
+
 def _seed(text: str) -> int | None:
     match = re.search(r"seed\s*[:=]?\s*(\d+)", text, re.I)
     return int(match.group(1)) if match else None
@@ -206,7 +213,7 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
         scheduler="native",
         seed=_seed(text),
         upscale_factor=_upscale_factor(text),
-        batch_size=1,
+        batch_size=_batch_size(text),
         loras=_local_loras(text),
         safety=safety,
         asset_request=_asset_request_if_needed(text),
