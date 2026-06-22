@@ -26,11 +26,20 @@ class DemonsForgeClient:
     def capabilities(self) -> dict[str, Any]:
         return self._request("GET", "/forge/capabilities")
 
+    def runtime(self) -> dict[str, Any]:
+        return self._request("GET", "/forge/runtime")
+
+    def job_schema(self) -> dict[str, Any]:
+        return self._request("GET", "/forge/schema/job")
+
     def models(self) -> list[dict[str, Any]]:
         return self._request("GET", "/forge/models")
 
     def loras(self) -> list[dict[str, Any]]:
         return self._request("GET", "/forge/loras")
+
+    def asset_downloads(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self._request("GET", f"/forge/assets/downloads?limit={limit}")
 
     def plan(self, request: str, preferred_engine: str | None = None) -> dict[str, Any]:
         return self._request(

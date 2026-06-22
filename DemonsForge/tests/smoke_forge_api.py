@@ -9,6 +9,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from forge_service.server import app
+from forge_service.client import DemonsForgeClient
 
 
 def wait_for_terminal(client: TestClient, job_id: str) -> dict:
@@ -32,6 +33,8 @@ def main() -> None:
     client = TestClient(app)
     health = client.get("/health")
     assert health.status_code == 200, health.text
+    thin = DemonsForgeClient(base_url="http://testserver")
+    assert thin is not None
     caps = client.get("/forge/capabilities")
     assert caps.status_code == 200, caps.text
     assert "engines" in caps.json()
