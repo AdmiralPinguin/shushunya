@@ -380,7 +380,7 @@ def recent_continuation_evidence(exclude_task_id: str, limit: int = 1) -> list[d
             "task_id": task_id,
             "success": bool(summary.get("success")),
             "cancelled": bool(summary.get("cancelled")),
-            "final": str(summary.get("final") or "")[:800],
+            "final": str(summary.get("final") or "")[:300],
             "recent_events": recent_events,
         }
         candidates.append((continuation_evidence_score(item), -index, item))
@@ -401,7 +401,7 @@ def continuation_evidence_score(item: dict[str, Any]) -> int:
     return score
 
 
-def compact_continuation_events(events: list[Any], max_chars: int = 1800) -> list[dict[str, Any]]:
+def compact_continuation_events(events: list[Any], max_chars: int = 1000) -> list[dict[str, Any]]:
     candidates: list[tuple[int, int, dict[str, Any], str]] = []
     useful_types = {"action", "tool_result", "final", "error"}
     for index, event in enumerate(events):
@@ -474,7 +474,7 @@ def brief_large_tool_result(event: Any) -> Any:
                 }
                 if isinstance(candidate, dict)
                 else candidate
-                for candidate in candidates[:3]
+                for candidate in candidates[:1]
             ]
         else:
             brief_result["api_candidates"] = compact_json_value(candidates, string_limit=180, list_limit=3)
@@ -521,16 +521,15 @@ def apply_previous_task_context(task: str, config: AgentConfig) -> str:
     if not asks_about_previous_task(task):
         return task
     summary = latest_completed_task_summary(exclude_task_id=config.task_id)
+    if isinstance(summary.get("actions"), list):
+        summary = dict(summary)
+        summary["actions"] = summary["actions"][-8:]
     config.inject_memory = False
     config.task_memory = False
     context = {
         "source": "authoritative_task_journal",
         "rule": (
-            "Use this task journal summary as the only source for questions about the previous/last agent task. "
-            "Do not use Archive semantic memory for this question, because it may contain meta-conversation noise. "
-            "If the user asks to start, repeat, resume, or continue the previous task, treat summary.task as the target task "
-            "and continue from the task journal summary instead of answering from semantic memory. "
-            "If the user asks about an unfinished/incomplete task, answer from summary.success/cancelled/final/actions, not Archive focus."
+            "Use summary.task as the target previous task. Continue from task journal facts only; ignore Archive semantic memory for previous-task resolution."
         ),
         "summary": summary,
         "recent_continuation_evidence": recent_continuation_evidence(config.task_id),

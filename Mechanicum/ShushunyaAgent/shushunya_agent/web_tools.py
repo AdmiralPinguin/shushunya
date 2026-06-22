@@ -69,7 +69,17 @@ def summarize_json_for_model(value: Any, depth: int = 0) -> Any:
             return {"count": 0, "items": []}
         if all(isinstance(item, dict) for item in value):
             if depth <= 1:
-                return {"count": count, "items": [summarize_json_for_model(item, depth + 1) for item in value[:80]], "truncated": count > 80}
+                head = value[:4]
+                tail = value[-3:] if count > 8 else []
+                payload: dict[str, Any] = {
+                    "count": count,
+                    "items": [summarize_json_for_model(item, depth + 1) for item in head],
+                    "truncated": count > len(head) + len(tail),
+                }
+                if tail:
+                    payload["last_items"] = [summarize_json_for_model(item, depth + 1) for item in tail]
+                    payload["omitted_middle"] = count - len(head) - len(tail)
+                return payload
             return {
                 "count": count,
                 "first": summarize_json_for_model(value[0], depth + 1),
