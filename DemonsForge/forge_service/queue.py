@@ -15,7 +15,7 @@ from . import config
 from .archive_memory import ArchiveMemoryClient, asset_memory_proposal
 from .downloader import DownloadError, download_asset, target_dir_for, validate_download_spec
 from .engines.diffusers_adapter import DiffusersEngine
-from .registries import ENGINE_MODELS, write_json
+from .registries import ENGINE_MODELS, SAMPLERS, SCHEDULERS, find_lora, write_json
 from .schemas import ArtifactRecord, AssetDownloadRecord, JobRecord, JobSpec, JobStatus, JobType, utc_now
 from .storage import ForgeStore
 
@@ -40,8 +40,9 @@ class ForgeQueue:
         self._maintenance.start()
 
     def submit(self, spec: JobSpec) -> JobRecord:
+        self.validate(spec)
         job_id = uuid.uuid4().hex
-        if spec.seed is None and spec.type == JobType.txt2img:
+        if spec.seed is None and spec.type in {JobType.txt2img, JobType.img2img, JobType.inpaint, JobType.variation}:
             spec.seed = random.randint(0, 2**32 - 1)
         record = JobRecord(id=job_id, spec=spec, status=JobStatus.queued)
         self.store.create_job(record)
@@ -53,8 +54,7 @@ class ForgeQueue:
         estimate = resource_estimate(spec)
         if spec.type == JobType.txt2img:
             engine_name = spec.engine or "sdxl"
-            if engine_name not in ENGINE_MODELS:
-                raise RuntimeError(f"unknown engine: {engine_name}")
+            self._validate_engine_options(spec, engine_name)
             if not spec.prompt or not spec.prompt.strip():
                 raise RuntimeError("txt2img requires prompt")
         elif spec.type == JobType.prompt_enhance:
@@ -68,7 +68,9 @@ class ForgeQueue:
                 raise RuntimeError("img2img requires source_images")
             if not spec.prompt or not spec.prompt.strip():
                 raise RuntimeError("img2img requires prompt")
-            if (spec.engine or "sdxl") != "sdxl":
+            engine_name = spec.engine or "sdxl"
+            self._validate_engine_options(spec, engine_name)
+            if engine_name != "sdxl":
                 raise RuntimeError("img2img is currently implemented for sdxl only")
             self._resolve_input_path(spec.source_images[0])
         elif spec.type == JobType.inpaint:
@@ -78,7 +80,9 @@ class ForgeQueue:
                 raise RuntimeError("inpaint requires prompt")
             if not spec.mask_image:
                 raise RuntimeError("inpaint requires mask_image")
-            if (spec.engine or "sdxl") != "sdxl":
+            engine_name = spec.engine or "sdxl"
+            self._validate_engine_options(spec, engine_name)
+            if engine_name != "sdxl":
                 raise RuntimeError("inpaint is currently implemented for sdxl only")
             self._resolve_input_path(spec.source_images[0])
             self._resolve_input_path(spec.mask_image)
@@ -94,6 +98,29 @@ class ForgeQueue:
             raise RuntimeError(f"job type is not supported by any registered backend yet: {spec.type.value}")
         estimate["loaded_engines"] = [engine.runtime_state() for engine in self._engines.values()]
         return {"valid": True, "resource_estimate": estimate}
+
+    def _validate_engine_options(self, spec: JobSpec, engine_name: str) -> None:
+        if engine_name not in ENGINE_MODELS:
+            raise RuntimeError(f"unknown engine: {engine_name}")
+        meta = ENGINE_MODELS[engine_name]
+        if spec.type.value not in meta["job_types"]:
+            raise RuntimeError(f"{engine_name} does not support {spec.type.value}")
+        if spec.sampler and spec.sampler not in SAMPLERS:
+            raise RuntimeError(f"unsupported sampler: {spec.sampler}")
+        scheduler_names = {str(item["name"]) for item in SCHEDULERS if item.get("available")}
+        if spec.scheduler and spec.scheduler not in scheduler_names:
+            raise RuntimeError(f"unsupported scheduler: {spec.scheduler}")
+        if spec.negative_prompt and not meta.get("supports_negative_prompt"):
+            raise RuntimeError(f"{engine_name} does not support negative_prompt")
+        if spec.loras and not meta.get("supports_lora"):
+            raise RuntimeError(f"{engine_name} does not support LoRA")
+        for lora in spec.loras:
+            if not find_lora(lora.name):
+                raise RuntimeError(f"LoRA is not available locally: {lora.name}")
+        if spec.embeddings:
+            raise RuntimeError("textual inversion embeddings are not implemented for active backends yet")
+        if spec.control and not meta.get("supports_control"):
+            raise RuntimeError(f"{engine_name} does not support control assets yet")
 
     def cancel(self, job_id: str) -> JobRecord:
         record = self.store.get_job(job_id)

@@ -196,7 +196,10 @@ def create_job(spec: JobSpec, dry_run: bool = False) -> dict[str, object]:
             return forge_queue.validate(spec)
         except RuntimeError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
-    record = forge_queue.submit(spec)
+    try:
+        record = forge_queue.submit(spec)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     return record.model_dump()
 
 

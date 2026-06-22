@@ -159,6 +159,32 @@ def main() -> None:
     assert dry_run.json()["valid"] is True
     assert "estimated_min_ram_gb" in dry_run.json()["resource_estimate"]
     assert "warnings" in dry_run.json()["resource_estimate"]
+    bad_scheduler = client.post(
+        "/forge/jobs",
+        json={
+            "type": "txt2img",
+            "engine": "sdxl",
+            "prompt": "bad scheduler",
+            "width": 512,
+            "height": 512,
+            "steps": 1,
+            "scheduler": "not-a-scheduler",
+        },
+    )
+    assert bad_scheduler.status_code == 400, bad_scheduler.text
+    missing_lora = client.post(
+        "/forge/jobs",
+        json={
+            "type": "txt2img",
+            "engine": "sdxl",
+            "prompt": "missing lora",
+            "width": 512,
+            "height": 512,
+            "steps": 1,
+            "loras": [{"name": "definitely_missing_lora", "weight": 0.8}],
+        },
+    )
+    assert missing_lora.status_code == 400, missing_lora.text
     img2img_dry_run = client.post(
         "/forge/jobs?dry_run=true",
         json={

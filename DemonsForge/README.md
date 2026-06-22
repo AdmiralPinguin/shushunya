@@ -129,6 +129,9 @@ curl -s 'http://127.0.0.1:8110/forge/jobs?dry_run=true' \
 
 Dry-run responses include a conservative CPU-only resource estimate with pixel
 budget ratio, estimated RAM floor, loaded engine state, and warnings.
+The same validation runs before normal job submission, including scheduler,
+sampler, LoRA availability, embeddings, control hooks, source-image checks, and
+backend capability gates.
 Existing jobs can be cloned or retried without copying records in SQLite
 manually. Clone accepts `overrides` and keeps the original seed by default;
 set `reuse_seed:false` to request a new random seed for supported generative
