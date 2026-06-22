@@ -44,6 +44,7 @@ from .web_tools import (
     MAX_WEB_BYTES,
     SEARCH_PROVIDERS,
     SEARXNG_URL,
+    WEB_ACCEPT_LANGUAGE,
     WEB_USER_AGENT,
     SafeRedirectHandler,
     configured_search_providers,
@@ -1142,7 +1143,14 @@ def web_extract_to_file_tool(config: AgentConfig, action: dict[str, Any]) -> dic
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
-    request = Request(raw_url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "text/html,application/xhtml+xml,text/plain"})
+    request = Request(
+        raw_url,
+        headers={
+            "User-Agent": WEB_USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,text/plain",
+            "Accept-Language": WEB_ACCEPT_LANGUAGE,
+        },
+    )
     try:
         with build_opener(SafeRedirectHandler).open(request, timeout=30) as response:
             data, truncated = read_limited_response(response, 1200000)
@@ -1211,7 +1219,14 @@ def ranobehub_chapter_tool(config: AgentConfig, action: dict[str, Any]) -> dict[
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
-    request = Request(raw_url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "text/html,application/xhtml+xml"})
+    request = Request(
+        raw_url,
+        headers={
+            "User-Agent": WEB_USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": WEB_ACCEPT_LANGUAGE,
+        },
+    )
     try:
         with build_opener(SafeRedirectHandler).open(request, timeout=30) as response:
             data, truncated = read_limited_response(response, 1200000)
@@ -1345,7 +1360,14 @@ def web_links_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
-    request = Request(raw_url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "text/html,application/xhtml+xml,text/plain"})
+    request = Request(
+        raw_url,
+        headers={
+            "User-Agent": WEB_USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,text/plain",
+            "Accept-Language": WEB_ACCEPT_LANGUAGE,
+        },
+    )
     try:
         with build_opener(SafeRedirectHandler).open(request, timeout=30) as response:
             data, truncated = read_limited_response(response, 1200000)

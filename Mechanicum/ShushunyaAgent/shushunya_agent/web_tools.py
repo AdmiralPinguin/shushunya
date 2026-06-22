@@ -23,8 +23,9 @@ SEARXNG_URL = os.environ.get("SHUSHUNYA_AGENT_SEARXNG_URL", "").strip().rstrip("
 SEARCH_PROVIDERS = os.environ.get("SHUSHUNYA_AGENT_SEARCH_PROVIDERS", "searxng,marginalia,wikipedia,brave")
 WEB_USER_AGENT = os.environ.get(
     "SHUSHUNYA_AGENT_WEB_USER_AGENT",
-    "ShushunyaAgent/0.1 (+https://github.com/AdmiralPinguin/shushunya)",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
 )
+WEB_ACCEPT_LANGUAGE = os.environ.get("SHUSHUNYA_AGENT_WEB_ACCEPT_LANGUAGE", "ru,en;q=0.9")
 
 
 def read_limited_response(response: Any, max_bytes: int) -> tuple[bytes, bool]:
@@ -361,7 +362,14 @@ def web_fetch(config: WebConfig, url: str, max_bytes: int | None = None) -> dict
     max_bytes = max(1024, min(int(max_bytes or MAX_WEB_BYTES), 1000000))
     validate_public_url(url)
     opener = build_opener(SafeRedirectHandler)
-    request = Request(url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "text/html,text/plain,application/json;q=0.8,*/*;q=0.2"})
+    request = Request(
+        url,
+        headers={
+            "User-Agent": WEB_USER_AGENT,
+            "Accept": "text/html,text/plain,application/json;q=0.8,*/*;q=0.2",
+            "Accept-Language": WEB_ACCEPT_LANGUAGE,
+        },
+    )
     with opener.open(request, timeout=30) as response:
         final_url = response.geturl()
         validate_public_url(final_url)
