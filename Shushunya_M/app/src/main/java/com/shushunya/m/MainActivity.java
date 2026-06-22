@@ -72,6 +72,7 @@ public class MainActivity extends Activity {
     private static final String PREFS = "shushunya_m";
     private static final String NOTIFICATION_CHANNEL_ID = "shushunya_answers";
     private static final int CHAT_HISTORY_LIMIT = 120;
+    private static final int AGENT_HISTORY_LIMIT = 12;
     private static final String SERVER_CHAT_SESSION_ID = "redmagic9-shushunya-m";
     private static final int REQUEST_NOTIFICATIONS = 42;
     private static final String DEFAULT_BASE_URL = "https://chat.shushunya.com";
@@ -142,6 +143,7 @@ public class MainActivity extends Activity {
     private volatile boolean streamingAnswer;
     private volatile boolean agentCancelRequested;
     private String currentAgentTaskId;
+    private int agentDisplayedEventCount;
     private String pendingSpeechLanguage;
     private EditText pendingSpeechOutput;
     private String pendingSpeechTitle;
@@ -163,8 +165,6 @@ public class MainActivity extends Activity {
     private Bitmap pendingImagePreview;
     private ValueAnimator scrollAnimator;
     private int lastKeyboardHeight;
-    private final Object keepAliveLock = new Object();
-    private int activeKeepAliveJobs;
     private float downX;
     private float downY;
 
@@ -179,6 +179,7 @@ public class MainActivity extends Activity {
         buildUi();
         addMessage(false, "Шушуня здесь. Пиши, брат, пока нити судьбы не спутались окончательно.", false);
         loadServerChatHistory();
+        loadAgentHistoryAndRestore();
     }
 
     @Override
@@ -883,10 +884,11 @@ public class MainActivity extends Activity {
 
         new Thread(() -> {
             try {
-                String result = requestTranslation(
+                String jobId = requestTranslationStart(
                         TRANSLATOR_CODES[translatorSourceIndex],
                         TRANSLATOR_CODES[translatorTargetIndex],
                         text);
+                String result = pollTranslationJobUntilDone(jobId);
                 main.post(() -> {
                     translating = false;
                     translateButton.setEnabled(true);
@@ -909,6 +911,60 @@ public class MainActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    private String requestTranslationStart(String source, String target, String text) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("source", source);
+        payload.put("target", target);
+        payload.put("text", text);
+
+        byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/translate/start");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setConnectTimeout(12000);
+        conn.setReadTimeout(30000);
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        conn.setRequestProperty("Accept", "application/json");
+        applyMobileAuth(conn);
+        try (OutputStream out = conn.getOutputStream()) {
+            out.write(body);
+        }
+
+        int code = conn.getResponseCode();
+        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
+        String response = readAll(stream);
+        if (code < 200 || code >= 300) {
+            throw new IllegalStateException("HTTP " + code + ": " + response);
+        }
+        JSONObject json = new JSONObject(response);
+        if (!json.optBoolean("ok", false)) {
+            throw new IllegalStateException(json.optString("error", response));
+        }
+        return json.optString("job_id", "");
+    }
+
+    private String pollTranslationJobUntilDone(String jobId) throws Exception {
+        if (jobId == null || jobId.trim().isEmpty()) {
+            throw new IllegalStateException("empty translation job id");
+        }
+        while (true) {
+            JSONObject snapshot = requestMobileJobSnapshot(jobId);
+            String status = snapshot.optString("status", "");
+            if ("done".equals(status)) {
+                JSONObject response = snapshot.optJSONObject("response");
+                if (response == null) {
+                    return "";
+                }
+                return response.optString("translation", "").trim();
+            }
+            if ("failed".equals(status)) {
+                throw new IllegalStateException(snapshot.optString("error", "translation job failed"));
+            }
+            Thread.sleep(900);
+        }
     }
 
     private String requestTranslation(String source, String target, String text) throws Exception {
@@ -947,6 +1003,7 @@ public class MainActivity extends Activity {
         }
         String taskId = "mobile-" + System.currentTimeMillis();
         currentAgentTaskId = taskId;
+        agentDisplayedEventCount = 0;
         agentCancelRequested = false;
         agentRunning = true;
         setAgentRunButtonRunning(true);
@@ -954,17 +1011,29 @@ public class MainActivity extends Activity {
         addAgentMessage(true, clean, true);
         agentLiveBubble = addAgentMessage(false, "", true);
         appendAgentLog("Запускаю агента...");
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putString("current_agent_task_id", taskId)
+                .apply();
         progress.setVisibility(View.VISIBLE);
-        startAnswerKeepAlive();
-
         new Thread(() -> {
             PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
             try {
-                String result = requestAgentRunStream(clean, taskId);
+                String acceptedTaskId = requestAgentStart(clean, taskId);
+                currentAgentTaskId = acceptedTaskId;
+                getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .edit()
+                        .putString("current_agent_task_id", acceptedTaskId)
+                        .apply();
+                String result = pollAgentTaskUntilDone(acceptedTaskId);
                 main.post(() -> {
                     agentRunning = false;
                     agentCancelRequested = false;
                     currentAgentTaskId = "";
+                    getSharedPreferences(PREFS, MODE_PRIVATE)
+                            .edit()
+                            .remove("current_agent_task_id")
+                            .apply();
                     setAgentRunButtonRunning(false);
                     progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
                     agentStatus.setText(result.toLowerCase().contains("остановлен") ? "Отменено." : "Готово.");
@@ -976,6 +1045,10 @@ public class MainActivity extends Activity {
                     agentRunning = false;
                     agentCancelRequested = false;
                     currentAgentTaskId = "";
+                    getSharedPreferences(PREFS, MODE_PRIVATE)
+                            .edit()
+                            .remove("current_agent_task_id")
+                            .apply();
                     setAgentRunButtonRunning(false);
                     progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
                     agentStatus.setText("Ошибка агента: " + exc.getMessage());
@@ -986,7 +1059,101 @@ public class MainActivity extends Activity {
                 if (wakeLock != null && wakeLock.isHeld()) {
                     wakeLock.release();
                 }
-                stopAnswerKeepAlive();
+            }
+        }).start();
+    }
+
+    private void loadAgentHistoryAndRestore() {
+        new Thread(() -> {
+            String storedTaskId = getSharedPreferences(PREFS, MODE_PRIVATE).getString("current_agent_task_id", "");
+            try {
+                JSONObject payload = requestAgentTaskList();
+                JSONArray tasks = payload.optJSONArray("tasks");
+                String runningTaskId = "";
+                boolean storedTaskFinished = false;
+                String cleanStoredTaskId = storedTaskId == null ? "" : storedTaskId.trim();
+                if (tasks != null) {
+                    for (int i = 0; i < tasks.length(); i++) {
+                        JSONObject task = tasks.optJSONObject(i);
+                        if (task == null) {
+                            continue;
+                        }
+                        String taskId = task.optString("task_id", "").trim();
+                        boolean running = task.optBoolean("running", false);
+                        if (taskId.equals(cleanStoredTaskId) && !running) {
+                            storedTaskFinished = true;
+                        }
+                        if (running) {
+                            runningTaskId = task.optString("task_id", "").trim();
+                            break;
+                        }
+                    }
+                }
+                String restoreTaskId = !runningTaskId.isEmpty() ? runningTaskId : (storedTaskFinished ? "" : cleanStoredTaskId);
+                boolean shouldClearStoredTaskId = storedTaskFinished && restoreTaskId.isEmpty();
+                main.post(() -> renderAgentTaskHistory(tasks));
+                if (!restoreTaskId.isEmpty()) {
+                    main.post(() -> restoreAgentTask(restoreTaskId));
+                } else if (shouldClearStoredTaskId) {
+                    main.post(() -> getSharedPreferences(PREFS, MODE_PRIVATE)
+                            .edit()
+                            .remove("current_agent_task_id")
+                            .apply());
+                }
+            } catch (Exception exc) {
+                String fallbackTaskId = storedTaskId == null ? "" : storedTaskId.trim();
+                if (!fallbackTaskId.isEmpty()) {
+                    main.post(() -> restoreAgentTask(fallbackTaskId));
+                } else {
+                    main.post(() -> agentStatus.setText("История агента недоступна: " + exc.getMessage()));
+                }
+            }
+        }).start();
+    }
+
+    private void restoreAgentTask(String taskId) {
+        if (taskId == null || taskId.trim().isEmpty()) {
+            return;
+        }
+        currentAgentTaskId = taskId.trim();
+        agentDisplayedEventCount = 0;
+        agentRunning = true;
+        agentCancelRequested = false;
+        setAgentRunButtonRunning(true);
+        if (agentStatus != null) {
+            agentStatus.setText("Восстанавливаю состояние агента...");
+        }
+        if (agentLiveBubble == null) {
+            agentLiveBubble = addAgentMessage(false, "", false);
+        }
+        progress.setVisibility(View.VISIBLE);
+        new Thread(() -> {
+            try {
+                String result = pollAgentTaskUntilDone(currentAgentTaskId);
+                main.post(() -> {
+                    agentRunning = false;
+                    agentCancelRequested = false;
+                    currentAgentTaskId = "";
+                    getSharedPreferences(PREFS, MODE_PRIVATE)
+                            .edit()
+                            .remove("current_agent_task_id")
+                            .apply();
+                    setAgentRunButtonRunning(false);
+                    progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
+                    agentStatus.setText(result.toLowerCase().contains("остановлен") ? "Отменено." : "Готово.");
+                    agentLiveBubble = null;
+                });
+            } catch (Exception exc) {
+                main.post(() -> {
+                    agentRunning = false;
+                    agentCancelRequested = false;
+                    setAgentRunButtonRunning(false);
+                    progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
+                    agentStatus.setText("Ошибка восстановления агента: " + exc.getMessage());
+                    appendAgentLog("! Ошибка восстановления: " + exc.getMessage());
+                    agentLiveBubble = null;
+                });
+            } finally {
             }
         }).start();
     }
@@ -1163,7 +1330,7 @@ public class MainActivity extends Activity {
         payload.put("task", task);
         payload.put("task_id", taskId);
         payload.put("technical", true);
-        payload.put("max_steps", 12);
+        payload.put("max_steps", 200);
         payload.put("memory_namespace", "agent");
         payload.put("archive_task", true);
         payload.put("task_memory", true);
@@ -1227,6 +1394,157 @@ public class MainActivity extends Activity {
         return finalMessage.isEmpty() ? "Агент вернул пустой ответ." : finalMessage;
     }
 
+    private String requestAgentStart(String task, String taskId) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("task", task);
+        payload.put("task_id", taskId);
+        payload.put("technical", true);
+        payload.put("max_steps", 200);
+        payload.put("memory_namespace", "agent");
+        payload.put("archive_task", true);
+        payload.put("task_memory", true);
+        payload.put("include_stderr", false);
+        payload.put("shell_enabled", false);
+        payload.put("wait_for_slot", false);
+
+        byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/start");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setConnectTimeout(12000);
+        conn.setReadTimeout(30000);
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        conn.setRequestProperty("Accept", "application/json");
+        applyMobileAuth(conn);
+        try (OutputStream out = conn.getOutputStream()) {
+            out.write(body);
+        }
+
+        int code = conn.getResponseCode();
+        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
+        String response = readAll(stream);
+        if (code < 200 || code >= 300) {
+            if (code == 409) {
+                throw new IllegalStateException("агент занят, нажми STATE и повтори позже");
+            }
+            throw new IllegalStateException("HTTP " + code + ": " + response);
+        }
+        JSONObject json = new JSONObject(response);
+        if (!json.optBoolean("ok", false)) {
+            throw new IllegalStateException(json.optString("error", response));
+        }
+        return json.optString("task_id", taskId);
+    }
+
+    private JSONObject requestAgentTaskSnapshot(String taskId) throws Exception {
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/task?task_id=" + taskId + "&limit=160");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(12000);
+        conn.setReadTimeout(30000);
+        conn.setRequestProperty("Accept", "application/json");
+        applyMobileAuth(conn);
+
+        int code = conn.getResponseCode();
+        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
+        String response = readAll(stream);
+        if (code < 200 || code >= 300) {
+            throw new IllegalStateException("HTTP " + code + ": " + response);
+        }
+        return new JSONObject(response);
+    }
+
+    private JSONObject requestAgentTaskList() throws Exception {
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/tasks?prefix=mobile&limit=" + AGENT_HISTORY_LIMIT);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(12000);
+        conn.setReadTimeout(30000);
+        conn.setRequestProperty("Accept", "application/json");
+        applyMobileAuth(conn);
+
+        int code = conn.getResponseCode();
+        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
+        String response = readAll(stream);
+        if (code < 200 || code >= 300) {
+            throw new IllegalStateException("HTTP " + code + ": " + response);
+        }
+        return new JSONObject(response);
+    }
+
+    private void renderAgentTaskHistory(JSONArray tasks) {
+        if (tasks == null || tasks.length() == 0 || agentMessageList == null) {
+            return;
+        }
+        agentMessageList.removeAllViews();
+        agentLiveBubble = null;
+        for (int i = tasks.length() - 1; i >= 0; i--) {
+            JSONObject task = tasks.optJSONObject(i);
+            if (task == null) {
+                continue;
+            }
+            String prompt = task.optString("task", "").trim();
+            String taskId = task.optString("task_id", "").trim();
+            boolean running = task.optBoolean("running", false);
+            boolean cancelled = task.optBoolean("cancelled", false);
+            boolean success = task.optBoolean("success", false);
+            String finalText = task.optString("final", "").trim();
+            if (!prompt.isEmpty()) {
+                addAgentMessage(true, prompt, false);
+            }
+            StringBuilder summary = new StringBuilder();
+            if (!taskId.isEmpty()) {
+                summary.append("task_id=").append(taskId).append("\n");
+            }
+            if (running) {
+                summary.append("Задача еще выполняется. Восстанавливаю live-лог...");
+            } else if (cancelled) {
+                summary.append("Остановлено.");
+            } else if (success) {
+                summary.append("Готово.");
+            } else {
+                summary.append("Завершилось без успешного final.");
+            }
+            if (!finalText.isEmpty()) {
+                summary.append("\n\n").append(finalText);
+            }
+            addAgentMessage(false, summary.toString(), false);
+        }
+        maybeScrollAgentToBottom(true);
+    }
+
+    private String pollAgentTaskUntilDone(String taskId) throws Exception {
+        String finalMessage = "";
+        while (true) {
+            JSONObject snapshot = requestAgentTaskSnapshot(taskId);
+            JSONObject finalEvent = snapshot.optJSONObject("final");
+            JSONArray events = snapshot.optJSONArray("events");
+            if (events != null) {
+                int start = Math.max(0, Math.min(agentDisplayedEventCount, events.length()));
+                for (int i = start; i < events.length(); i++) {
+                    JSONObject event = events.optJSONObject(i);
+                    if (event != null) {
+                        main.post(() -> handleAgentEvent(event));
+                    }
+                }
+                agentDisplayedEventCount = events.length();
+            }
+            if (finalEvent != null) {
+                finalMessage = finalEvent.optString("message", "").trim();
+                boolean cancelled = finalEvent.optBoolean("cancelled", false);
+                if (cancelled && finalMessage.isEmpty()) {
+                    return "Агент остановлен: задача отменена.";
+                }
+                return finalMessage.isEmpty() ? "Агент вернул пустой ответ." : finalMessage;
+            }
+            if (!snapshot.optBoolean("running", false)) {
+                return finalMessage.isEmpty() ? "Агент завершился без финального сообщения." : finalMessage;
+            }
+            Thread.sleep(2000);
+        }
+    }
+
     private String requestAgentCancel(String taskId) throws Exception {
         JSONObject payload = new JSONObject();
         payload.put("task_id", taskId);
@@ -1261,7 +1579,7 @@ public class MainActivity extends Activity {
         JSONObject payload = new JSONObject();
         payload.put("task", task);
         payload.put("technical", true);
-        payload.put("max_steps", 12);
+        payload.put("max_steps", 200);
         payload.put("memory_namespace", "agent");
         payload.put("archive_task", true);
         payload.put("task_memory", true);
@@ -1886,13 +2204,16 @@ public class MainActivity extends Activity {
         }
         TextView answerBubble = addMessage(false, "", false);
         setWaiting(true);
-        startAnswerKeepAlive();
-
         new Thread(() -> {
             PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
             try {
                 StreamingBubble liveBubble = new StreamingBubble(answerBubble);
-                streamAnswer(text, imageDataUrl, liveBubble);
+                liveBubble.start();
+                String jobId = requestChatStart(text, imageDataUrl);
+                String finalText = pollChatJobUntilDone(jobId);
+                liveBubble.append(finalText);
+                liveBubble.finish();
+                showAnswerNotification(finalText);
                 main.post(() -> setWaiting(false));
             } catch (Exception e) {
                 main.post(() -> {
@@ -1907,36 +2228,8 @@ public class MainActivity extends Activity {
                 if (wakeLock != null && wakeLock.isHeld()) {
                     wakeLock.release();
                 }
-                stopAnswerKeepAlive();
             }
         }).start();
-    }
-
-    private void startAnswerKeepAlive() {
-        synchronized (keepAliveLock) {
-            activeKeepAliveJobs += 1;
-            if (activeKeepAliveJobs > 1) {
-                return;
-            }
-        }
-        Intent intent = new Intent(this, KeepAliveService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent);
-        } else {
-            startService(intent);
-        }
-    }
-
-    private void stopAnswerKeepAlive() {
-        synchronized (keepAliveLock) {
-            if (activeKeepAliveJobs > 0) {
-                activeKeepAliveJobs -= 1;
-            }
-            if (activeKeepAliveJobs > 0) {
-                return;
-            }
-        }
-        stopService(new Intent(this, KeepAliveService.class));
     }
 
     private void resetAttachImageButton() {
@@ -2006,6 +2299,103 @@ public class MainActivity extends Activity {
         String finalText = liveBubble.targetText();
         saveChatMessage(false, finalText);
         showAnswerNotification(finalText);
+    }
+
+    private String requestChatStart(String text, String imageDataUrl) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("session_id", SERVER_CHAT_SESSION_ID);
+        payload.put("model", MODEL);
+        payload.put("user", SERVER_CHAT_SESSION_ID);
+        payload.put("archive_enabled", true);
+        payload.put("focus_enabled", true);
+        payload.put("max_tokens", 2048);
+        payload.put("temperature", 0.4);
+        payload.put("stream", false);
+        payload.put("system_prompt", SYSTEM_PROMPT);
+        payload.put("text", text);
+        if (imageDataUrl != null && !imageDataUrl.isEmpty()) {
+            payload.put("image_data_url", imageDataUrl);
+        }
+
+        byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/chat/start");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setConnectTimeout(12000);
+        conn.setReadTimeout(30000);
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        conn.setRequestProperty("Accept", "application/json");
+        applyMobileAuth(conn);
+        try (OutputStream out = conn.getOutputStream()) {
+            out.write(body);
+        }
+
+        int code = conn.getResponseCode();
+        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
+        String response = readAll(stream);
+        if (code < 200 || code >= 300) {
+            throw new IllegalStateException("HTTP " + code + ": " + response);
+        }
+        JSONObject json = new JSONObject(response);
+        if (!json.optBoolean("ok", false)) {
+            throw new IllegalStateException(json.optString("error", response));
+        }
+        return json.optString("job_id", "");
+    }
+
+    private JSONObject requestMobileJobSnapshot(String jobId) throws Exception {
+        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/job?job_id=" + jobId);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(12000);
+        conn.setReadTimeout(30000);
+        conn.setRequestProperty("Accept", "application/json");
+        applyMobileAuth(conn);
+
+        int code = conn.getResponseCode();
+        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
+        String response = readAll(stream);
+        if (code < 200 || code >= 300) {
+            throw new IllegalStateException("HTTP " + code + ": " + response);
+        }
+        return new JSONObject(response);
+    }
+
+    private String pollChatJobUntilDone(String jobId) throws Exception {
+        if (jobId == null || jobId.trim().isEmpty()) {
+            throw new IllegalStateException("empty chat job id");
+        }
+        while (true) {
+            JSONObject snapshot = requestMobileJobSnapshot(jobId);
+            String status = snapshot.optString("status", "");
+            if ("done".equals(status)) {
+                JSONObject response = snapshot.optJSONObject("response");
+                if (response == null) {
+                    return "Сервер завершил чат без ответа.";
+                }
+                String message = response.optString("message", "").trim();
+                if (!message.isEmpty()) {
+                    return message;
+                }
+                JSONObject llm = response.optJSONObject("response");
+                if (llm != null) {
+                    JSONArray choices = llm.optJSONArray("choices");
+                    if (choices != null && choices.length() > 0) {
+                        JSONObject choice = choices.optJSONObject(0);
+                        JSONObject msg = choice == null ? null : choice.optJSONObject("message");
+                        if (msg != null) {
+                            message = msg.optString("content", "").trim();
+                        }
+                    }
+                }
+                return message.isEmpty() ? "Сервер вернул пустой ответ." : message;
+            }
+            if ("failed".equals(status)) {
+                throw new IllegalStateException(snapshot.optString("error", "chat job failed"));
+            }
+            Thread.sleep(1200);
+        }
     }
 
     private void applyMobileAuth(HttpURLConnection conn) {

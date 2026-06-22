@@ -223,7 +223,7 @@ def validate_action(action: Mapping[str, Any]) -> dict[str, Any]:
     elif action_type in {"list_files", "read_file", "write_file", "append_file", "replace_in_file", "mkdir", "remove_file", "file_info", "find_files", "search_text"}:
         _validate_path(action_dict, errors)
         if action_type in {"write_file", "append_file"}:
-            _validate_string(action_dict, "content", errors, max_len=1000000)
+            _validate_string(action_dict, "content", errors, max_len=12000)
         if action_type == "replace_in_file":
             _validate_string(action_dict, "old", errors, min_len=1, max_len=200000)
             _validate_string(action_dict, "new", errors, max_len=200000)

@@ -110,6 +110,141 @@ def read_task_journal(task_id: str | None = None, limit: int = 80) -> dict[str, 
         return {"ok": False, "error": str(exc), "task_id": task_id or ""}
 
 
+def summarize_task_events(task_id: str, events: list[Any]) -> dict[str, Any]:
+    start_event = next((event for event in events if isinstance(event, dict) and event.get("type") == "start"), {})
+    final_event = next((event for event in reversed(events) if isinstance(event, dict) and event.get("type") == "final"), {})
+    actions = []
+    for event in events:
+        if not isinstance(event, dict) or event.get("type") != "action":
+            continue
+        action = event.get("action")
+        if isinstance(action, dict):
+            action_name = str(action.get("action") or "")
+            summary = action.get("path") or action.get("query") or action.get("url") or action.get("kind") or ""
+        else:
+            action_name = str(action or "")
+            summary = str(event.get("summary") or "")
+        if action_name:
+            actions.append({"action": action_name, "summary": str(summary)[:240]})
+    return {
+        "ok": bool(final_event),
+        "task_id": task_id,
+        "task": presentable_task_text(str(start_event.get("task") or "")),
+        "final": str(final_event.get("message") or "").strip(),
+        "cancelled": bool(final_event.get("cancelled", False)),
+        "success": bool(final_event.get("ok", False)),
+        "duration_sec": final_event.get("duration_sec"),
+        "actions": actions[-20:],
+    }
+
+
+def presentable_task_text(task: str) -> str:
+    text = str(task or "").strip()
+    for marker in (
+        "\n\nAuthoritative previous agent task context:",
+        "\n\nResume context from previous agent task journal ",
+    ):
+        index = text.find(marker)
+        if index >= 0:
+            text = text[:index].strip()
+    return text
+
+
+def is_meta_or_status_task(task: str) -> bool:
+    text = " ".join(str(task or "").lower().split())
+    if not text:
+        return True
+    previous_markers = ("прошл", "предыдущ", "последн")
+    task_markers = ("задач", "таск", "task")
+    memory_markers = ("помни", "вспом", "что делал", "что была", "что было")
+    if any(marker in text for marker in previous_markers) and any(marker in text for marker in task_markers) and (
+        any(marker in text for marker in memory_markers) or "?" in text
+    ):
+        return True
+    status_phrases = (
+        "живой",
+        "ты жив",
+        "ты тут",
+        "работаешь",
+        "проверь статус",
+        "status",
+        "state",
+        "health",
+    )
+    compact = text.strip(" ?.!")
+    return len(compact) <= 80 and any(phrase in compact for phrase in status_phrases)
+
+
+def latest_completed_task_summary(exclude_task_id: str | None = None) -> dict[str, Any]:
+    exclude = safe_task_id(exclude_task_id) if exclude_task_id else ""
+    try:
+        journals = sorted(
+            (path for path in TASK_JOURNAL_DIR.glob("*.jsonl") if path.is_file()),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for path in journals:
+            task_id = safe_task_id(path.stem)
+            if exclude and task_id == exclude:
+                continue
+            payload = read_task_journal(task_id, limit=500)
+            if not payload.get("ok"):
+                continue
+            events = payload.get("events", [])
+            summary = summarize_task_events(task_id, events if isinstance(events, list) else [])
+            if is_meta_or_status_task(str(summary.get("task") or "")):
+                continue
+            if summary.get("ok"):
+                return summary
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": False, "error": "completed task journal not found"}
+
+
+def recent_task_summaries(limit: int = 20, prefix: str | None = None) -> dict[str, Any]:
+    try:
+        safe_limit = max(1, min(int(limit or 20), 100))
+    except (TypeError, ValueError):
+        safe_limit = 20
+    safe_prefix = safe_task_id(prefix) if prefix else ""
+    try:
+        journals = sorted(
+            (path for path in TASK_JOURNAL_DIR.glob("*.jsonl") if path.is_file()),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        tasks: list[dict[str, Any]] = []
+        for path in journals:
+            task_id = safe_task_id(path.stem)
+            if safe_prefix and not task_id.startswith(safe_prefix):
+                continue
+            payload = read_task_journal(task_id, limit=500)
+            if not payload.get("ok"):
+                continue
+            events = payload.get("events", [])
+            if not isinstance(events, list):
+                events = []
+            summary = summarize_task_events(task_id, events)
+            start_event = next((event for event in events if isinstance(event, dict) and event.get("type") == "start"), {})
+            final_event = next((event for event in reversed(events) if isinstance(event, dict) and event.get("type") == "final"), {})
+            last_event = next((event for event in reversed(events) if isinstance(event, dict)), {})
+            summary.update(
+                {
+                    "created_at": start_event.get("ts") or "",
+                    "updated_at": last_event.get("ts") or "",
+                    "running": False,
+                    "event_count": payload.get("event_count", len(events)),
+                    "last_event_type": last_event.get("type") or "",
+                }
+            )
+            tasks.append(summary)
+            if len(tasks) >= safe_limit:
+                break
+        return {"ok": True, "tasks": tasks, "limit": safe_limit, "prefix": safe_prefix}
+    except OSError as exc:
+        return {"ok": False, "error": str(exc), "tasks": []}
+
+
 def compact_resume_events(events: list[Any], max_chars: int = 20000) -> list[Any]:
     selected: list[Any] = []
     total = 2

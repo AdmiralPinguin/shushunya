@@ -44,6 +44,7 @@ from .agent_runner import (
     web_fetch,
     web_search,
     write_task_journal,
+    looks_like_oversized_inline_file_action,
 )
 
 
@@ -336,6 +337,48 @@ def main() -> int:
     if not compact_resume or len(compact_resume_text) > 7000:
         raise AssertionError("resume events were not compacted")
     print("[ok] resume context compacted")
+
+    auto_continue_calls: list[tuple[str, dict]] = []
+
+    def fake_auto_continue_success(task: str, run_config: AgentConfig, event_sink=None, **kwargs):
+        auto_continue_calls.append((task, kwargs))
+        if event_sink is not None:
+            event_sink({"type": "action", "action": "noop"})
+            event_sink({"type": "tool_result", "ok": True})
+        if len(auto_continue_calls) < 3:
+            return 2, json.dumps({"ok": False, "continuable": True, "message": "limit"}), ""
+        return 0, json.dumps({"ok": True, "message": "done"}), ""
+
+    with mock.patch.object(server, "run_agent_once_locked", side_effect=fake_auto_continue_success):
+        code, _stdout, _stderr, result = server.run_agent_with_auto_continue(
+            "auto continue self-test",
+            AgentConfig(task_id="self-test-auto-continue"),
+            {"auto_continue": True, "auto_continue_max_cycles": 3},
+        )
+    if code != 0 or result.get("ok") is not True or len(auto_continue_calls) != 3:
+        raise AssertionError(f"auto-continue did not reach final success: code={code}, result={result}, calls={len(auto_continue_calls)}")
+    if result.get("auto_continue", {}).get("cycles_used") != 2:
+        raise AssertionError(f"auto-continue cycle metadata is wrong: {result}")
+    print("[ok] auto-continue reaches final success")
+
+    loop_calls: list[tuple[str, dict]] = []
+
+    def fake_auto_continue_loop(task: str, run_config: AgentConfig, event_sink=None, **kwargs):
+        loop_calls.append((task, kwargs))
+        return 2, json.dumps({"ok": False, "continuable": True, "message": "same limit"}), ""
+
+    with mock.patch.object(server, "run_agent_once_locked", side_effect=fake_auto_continue_loop):
+        code, _stdout, _stderr, result = server.run_agent_with_auto_continue(
+            "auto continue loop self-test",
+            AgentConfig(task_id="self-test-auto-loop"),
+            {"auto_continue": True, "auto_continue_max_cycles": 5},
+        )
+    if code != 2 or result.get("auto_continue_exhausted") is not True or len(loop_calls) != 2:
+        raise AssertionError(f"auto-continue loop guard failed: code={code}, result={result}, calls={len(loop_calls)}")
+    if result.get("auto_continue", {}).get("stop_reason") != "repeated_without_progress":
+        raise AssertionError(f"auto-continue loop stop reason is wrong: {result}")
+    print("[ok] auto-continue loop guard")
+
     public_journal = server.public_task_journal_payload({"ok": True, "path": "/private/runtime/task.jsonl", "events": []})
     if "path" in public_journal:
         raise AssertionError(f"public journal payload leaked path: {public_journal}")
@@ -508,6 +551,18 @@ def main() -> int:
     except ValueError:
         pass
     print("[ok] JSON repair helper")
+    broken_inline_write = (
+        '{"action":"write_file","path":"/work/book.txt","content":"'
+        + ("текст главы " * 120)
+    )
+    if not looks_like_oversized_inline_file_action(
+        broken_inline_write,
+        ValueError("Unterminated string starting at: line 1 column 60"),
+    ):
+        raise AssertionError("oversized inline write guard missed truncated write_file JSON")
+    if looks_like_oversized_inline_file_action('{"action":"final","message":"ok"}', ValueError("broken")):
+        raise AssertionError("oversized inline write guard matched a normal final action")
+    print("[ok] oversized inline write guard")
 
     captured_payloads: list[dict] = []
 

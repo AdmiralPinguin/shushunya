@@ -148,7 +148,7 @@
       "properties": {
         "action": "write_file",
         "path": "sandbox_path",
-        "content": "string"
+        "content": "string, max 12000 chars; use append_file chunks or python for larger artifacts"
       }
     },
     "append_file": {
@@ -156,7 +156,7 @@
       "properties": {
         "action": "append_file",
         "path": "sandbox_path",
-        "content": "string"
+        "content": "string, max 12000 chars per chunk"
       }
     },
     "replace_in_file": {

@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .agent_runner import AgentConfig, archive_request, compact_resume_events, read_task_journal, run_agent, safe_task_id
+from .task_journal import latest_completed_task_summary, recent_task_summaries
 
 
 HOST = os.environ.get("SHUSHUNYA_AGENT_HOST", "127.0.0.1")
@@ -42,6 +43,8 @@ RUN_STATE: dict[str, Any] = {
     "last_finished_at": 0.0,
     "last_duration_sec": 0.0,
 }
+RUN_EVENTS: dict[str, list[dict[str, Any]]] = {}
+RUN_EVENT_LIMIT = 300
 RUN_METRICS: dict[str, Any] = {
     "runs_started": 0,
     "runs_completed": 0,
@@ -71,6 +74,13 @@ def env_bool(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() not in {"0", "false", "no", "off", ""}
+
+
+AUTO_CONTINUE_DEFAULT = env_bool("SHUSHUNYA_AGENT_AUTO_CONTINUE", True)
+try:
+    AUTO_CONTINUE_MAX_CYCLES = max(0, min(int(os.environ.get("SHUSHUNYA_AGENT_AUTO_CONTINUE_MAX_CYCLES", "3")), 10))
+except ValueError:
+    AUTO_CONTINUE_MAX_CYCLES = 3
 
 
 def write_json(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -212,6 +222,23 @@ def collect_agent_event(event: dict[str, Any]) -> None:
                 sources[source] = int(sources.get(source, 0)) + 1
 
 
+def remember_run_event(task_id: str, event: dict[str, Any]) -> None:
+    safe_id = safe_task_id(task_id)
+    if not safe_id:
+        return
+    public_event = json.loads(json.dumps(event, ensure_ascii=False))
+    with STATE_LOCK:
+        events = RUN_EVENTS.setdefault(safe_id, [])
+        events.append(public_event)
+        if len(events) > RUN_EVENT_LIMIT:
+            del events[: len(events) - RUN_EVENT_LIMIT]
+
+
+def collect_and_remember_event(task_id: str, event: dict[str, Any]) -> None:
+    collect_agent_event(event)
+    remember_run_event(task_id, event)
+
+
 def is_task_cancelled(task_id: str) -> bool:
     with STATE_LOCK:
         return safe_task_id(task_id) in CANCELLED_TASK_IDS
@@ -287,7 +314,7 @@ def validate_task_text(task: str) -> dict[str, Any] | None:
 def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
     task_id = str(payload.get("task_id") or payload.get("resume_task_id") or "").strip()
     return AgentConfig(
-        max_steps=int_field(payload, "max_steps", int(os.environ.get("SHUSHUNYA_AGENT_MAX_STEPS", "12")), 1, 50),
+        max_steps=int_field(payload, "max_steps", int(os.environ.get("SHUSHUNYA_AGENT_MAX_STEPS", "200")), 1, 200),
         max_runtime_sec=int_field(payload, "max_runtime_sec", int(os.environ.get("SHUSHUNYA_AGENT_MAX_RUNTIME_SEC", "1800")), 30, 7200),
         max_model_tokens=int_field(payload, "max_tokens", int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "1024")), 128, 4096),
         llm_retries=int_field(payload, "llm_retries", int(os.environ.get("SHUSHUNYA_AGENT_LLM_RETRIES", "3")), 1, 5),
@@ -331,10 +358,259 @@ def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]
     )
 
 
+def asks_about_previous_task(task: str) -> bool:
+    lowered = str(task or "").lower()
+    previous_markers = ("прошл", "предыдущ", "последн")
+    task_markers = ("задач", "таск", "task")
+    memory_markers = ("помни", "вспом", "что делал", "что была", "что было")
+    return any(marker in lowered for marker in previous_markers) and any(marker in lowered for marker in task_markers) and (
+        any(marker in lowered for marker in memory_markers) or "?" in lowered
+    )
+
+
+def apply_previous_task_context(task: str, config: AgentConfig) -> str:
+    if not asks_about_previous_task(task):
+        return task
+    summary = latest_completed_task_summary(exclude_task_id=config.task_id)
+    config.inject_memory = False
+    config.task_memory = False
+    context = {
+        "source": "authoritative_task_journal",
+        "rule": (
+            "Use this task journal summary as the only source for questions about the previous/last agent task. "
+            "Do not use Archive semantic memory for this question, because it may contain meta-conversation noise."
+        ),
+        "summary": summary,
+    }
+    return task + "\n\nAuthoritative previous agent task context:\n" + json.dumps(context, ensure_ascii=False, indent=2)
+
+
 def public_task_journal_payload(payload: dict[str, Any]) -> dict[str, Any]:
     public_payload = dict(payload)
     public_payload.pop("path", None)
     return public_payload
+
+
+def task_snapshot(task_id: str, limit: int = 120) -> dict[str, Any]:
+    safe_id = safe_task_id(task_id)
+    if not safe_id:
+        return {"ok": False, "error": "missing task_id"}
+    journal = public_task_journal_payload(read_task_journal(safe_id, limit=limit))
+    events = journal.get("events") if isinstance(journal.get("events"), list) else []
+    with STATE_LOCK:
+        live_events = list(RUN_EVENTS.get(safe_id, []))
+        state = dict(RUN_STATE)
+    if live_events:
+        events = live_events[-limit:]
+    final_event = None
+    for event in reversed(events):
+        if isinstance(event, dict) and event.get("type") == "final":
+            final_event = event
+            break
+    running = bool(state.get("busy") and state.get("current_task_id") == safe_id)
+    return {
+        "ok": bool(journal.get("ok") or live_events),
+        "task_id": safe_id,
+        "running": running,
+        "events": events,
+        "final": final_event,
+        "state": runtime_state(),
+    }
+
+
+def mark_run_started(config: AgentConfig, *, reset_events: bool = True, consume_queue: bool = True) -> None:
+    with STATE_LOCK:
+        if consume_queue:
+            RUN_STATE["queued"] = max(0, int(RUN_STATE["queued"]) - 1)
+        RUN_STATE["busy"] = True
+        RUN_STATE["current_task_id"] = config.task_id
+        RUN_STATE["current_task_started_at"] = time.time()
+        if reset_events:
+            RUN_EVENTS[config.task_id] = []
+    record_run_started()
+
+
+def mark_run_finished(config: AgentConfig, code: int) -> None:
+    with STATE_LOCK:
+        started_at = float(RUN_STATE["current_task_started_at"] or 0.0)
+        finished_at = time.time()
+        RUN_STATE["busy"] = False
+        RUN_STATE["completed"] = int(RUN_STATE["completed"]) + 1
+        RUN_STATE["last_task_id"] = config.task_id
+        RUN_STATE["last_exit_code"] = code
+        RUN_STATE["last_finished_at"] = finished_at
+        RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
+        RUN_STATE["current_task_id"] = ""
+        RUN_STATE["current_task_started_at"] = 0.0
+    record_run_finished(code)
+    clear_task_cancelled(config.task_id)
+
+
+def run_agent_once_locked(
+    task: str,
+    config: AgentConfig,
+    event_sink: AgentEventSink | None = None,
+    *,
+    reset_events: bool = True,
+    consume_queue: bool = True,
+) -> tuple[int, str, str]:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    code = 1
+    mark_run_started(config, reset_events=reset_events, consume_queue=consume_queue)
+    RUN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with RUN_LOCK_FILE.open("w", encoding="utf-8") as lock_fh:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX)
+        try:
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = run_agent(task, config, event_sink=event_sink)
+        finally:
+            fcntl.flock(lock_fh, fcntl.LOCK_UN)
+            mark_run_finished(config, code)
+    return code, stdout.getvalue(), stderr.getvalue()
+
+
+def run_agent_serialized(task: str, config: AgentConfig, event_sink: AgentEventSink | None = None) -> tuple[int, str, str]:
+    with RUN_LOCK:
+        return run_agent_once_locked(task, config, event_sink=event_sink)
+
+
+def result_from_stdout(code: int, stdout_text: str, stderr_text: str, payload: dict[str, Any]) -> dict[str, Any]:
+    text = stdout_text.strip()
+    try:
+        result = json.loads(text) if text else {"ok": False, "message": "empty agent output"}
+    except json.JSONDecodeError:
+        result = {"ok": False, "message": "agent returned non-json output", "raw": text}
+    if not bool_field(payload, "include_steps", True):
+        result.pop("steps", None)
+    result["exit_code"] = code
+    if bool_field(payload, "include_stderr", False) or code != 0:
+        result["stderr"] = stderr_text
+    return result
+
+
+def auto_continue_enabled(payload: dict[str, Any]) -> bool:
+    return bool_field(payload, "auto_continue", AUTO_CONTINUE_DEFAULT)
+
+
+def auto_continue_cycle_limit(payload: dict[str, Any]) -> int:
+    return int_field(payload, "auto_continue_max_cycles", AUTO_CONTINUE_MAX_CYCLES, 0, 10)
+
+
+def continuation_task(base_task: str, task_id: str, cycle: int) -> str:
+    return (
+        "Продолжи выполнение той же задачи по task journal. "
+        "Не повторяй уже выполненные действия. Сначала оцени, что уже сделано, затем продолжай с ближайшего незавершенного шага. "
+        "Если задача уже завершена или дальше продолжать нельзя, верни final и коротко объясни состояние. "
+        "Не начинай задачу заново.\n\n"
+        f"Continuation cycle: {cycle}\n"
+        f"Resume task id: {task_id}\n\n"
+        "Original task:\n"
+        + base_task
+    )
+
+
+def meaningful_progress_count(events: list[dict[str, Any]]) -> int:
+    count = 0
+    for event in events:
+        event_type = str(event.get("type") or "")
+        if event_type == "action":
+            count += 1
+        elif event_type == "tool_result" and event.get("ok") is not False:
+            count += 1
+    return count
+
+
+def run_agent_with_auto_continue(
+    task: str,
+    config: AgentConfig,
+    payload: dict[str, Any],
+    event_sink: AgentEventSink | None = None,
+) -> tuple[int, str, str, dict[str, Any]]:
+    enabled = auto_continue_enabled(payload)
+    max_cycles = auto_continue_cycle_limit(payload) if enabled else 0
+    start_time = time.time()
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    messages_seen: dict[str, int] = {}
+    final_result: dict[str, Any] = {"ok": False, "message": "agent did not run"}
+    final_code = 1
+    stop_reason = ""
+    cycles_used = 0
+
+    with RUN_LOCK:
+        for cycle in range(max_cycles + 1):
+            if cycle > 0:
+                cycles_used = cycle
+                notice = {
+                    "type": "warning",
+                    "code": "auto_continue",
+                    "message": f"agent reached a continuable checkpoint; server starts resume cycle {cycle}/{max_cycles}",
+                    "task_id": config.task_id,
+                    "cycle": cycle,
+                    "max_cycles": max_cycles,
+                }
+                if event_sink is not None:
+                    event_sink(notice)
+                cycle_payload = dict(payload)
+                cycle_payload["resume_task_id"] = config.task_id
+                cycle_task = apply_resume_context(continuation_task(task, config.task_id, cycle), config, cycle_payload)
+            else:
+                cycle_task = task
+
+            cycle_events: list[dict[str, Any]] = []
+
+            def cycle_event_sink(event: dict[str, Any]) -> None:
+                cycle_events.append(event)
+                if event_sink is not None:
+                    event_sink(event)
+
+            final_code, stdout_text, stderr_text = run_agent_once_locked(
+                cycle_task,
+                config,
+                event_sink=cycle_event_sink,
+                reset_events=(cycle == 0),
+                consume_queue=(cycle == 0),
+            )
+            stdout_chunks.append(stdout_text)
+            stderr_chunks.append(stderr_text)
+            final_result = result_from_stdout(final_code, stdout_text, stderr_text, payload)
+
+            if not bool(final_result.get("continuable")):
+                stop_reason = "finished"
+                break
+            if not enabled:
+                stop_reason = "disabled"
+                break
+            if cycle >= max_cycles:
+                stop_reason = "cycle_limit"
+                break
+            if time.time() - start_time >= config.max_runtime_sec:
+                stop_reason = "runtime_limit"
+                break
+
+            message = str(final_result.get("message") or "")
+            messages_seen[message] = messages_seen.get(message, 0) + 1
+            progress = meaningful_progress_count(cycle_events)
+            if progress < 2 and messages_seen.get(message, 0) > 1:
+                stop_reason = "repeated_without_progress"
+                break
+
+    if enabled:
+        meta = {
+            "enabled": True,
+            "cycles_used": cycles_used,
+            "max_cycles": max_cycles,
+            "stop_reason": stop_reason or "unknown",
+        }
+        final_result["auto_continue"] = meta
+        if bool(final_result.get("continuable")) and stop_reason in {"cycle_limit", "runtime_limit", "repeated_without_progress"}:
+            final_result["auto_continue_exhausted"] = True
+            final_result["message"] = (
+                str(final_result.get("message") or "agent stopped at a continuable checkpoint")
+                + f" Server auto-continue stopped: {stop_reason}."
+            )
+    return final_code, "".join(stdout_chunks), "".join(stderr_chunks), final_result
 
 
 class AgentHandler(BaseHTTPRequestHandler):
@@ -376,6 +652,44 @@ class AgentHandler(BaseHTTPRequestHandler):
                 return
             write_json(self, 200, {"ok": True, "service": "ShushunyaAgent", "state": runtime_state()})
             return
+        if parsed_path.path == "/task":
+            if not authorized(self):
+                write_json(self, 401, {"error": "unauthorized"})
+                return
+            params = parse_qs(parsed_path.query)
+            task_id = (params.get("task_id") or [""])[0].strip()
+            if not task_id:
+                with STATE_LOCK:
+                    task_id = str(RUN_STATE.get("current_task_id") or RUN_STATE.get("last_task_id") or "").strip()
+            limit = int_field({"limit": (params.get("limit") or [120])[0]}, "limit", 120, 1, 300)
+            payload = task_snapshot(task_id, limit=limit)
+            write_json(self, 200 if payload.get("ok") else 404, payload)
+            return
+        if parsed_path.path == "/tasks":
+            if not authorized(self):
+                write_json(self, 401, {"error": "unauthorized"})
+                return
+            params = parse_qs(parsed_path.query)
+            limit = int_field({"limit": (params.get("limit") or [20])[0]}, "limit", 20, 1, 100)
+            prefix = (params.get("prefix") or [""])[0].strip()
+            payload = recent_task_summaries(limit=limit, prefix=prefix or None)
+            with STATE_LOCK:
+                current_task_id = str(RUN_STATE.get("current_task_id") or "")
+                busy = bool(RUN_STATE.get("busy"))
+            for item in payload.get("tasks", []):
+                if isinstance(item, dict) and busy and item.get("task_id") == current_task_id:
+                    item["running"] = True
+            write_json(self, 200 if payload.get("ok") else 500, payload)
+            return
+        if parsed_path.path == "/last-task":
+            if not authorized(self):
+                write_json(self, 401, {"error": "unauthorized"})
+                return
+            params = parse_qs(parsed_path.query)
+            exclude = (params.get("exclude_task_id") or [""])[0].strip()
+            payload = latest_completed_task_summary(exclude_task_id=exclude)
+            write_json(self, 200 if payload.get("ok") else 404, payload)
+            return
         if parsed_path.path == "/task-journal":
             if not privileged_api_allowed(self):
                 write_json(self, 401, {"error": "unauthorized"})
@@ -401,6 +715,10 @@ class AgentHandler(BaseHTTPRequestHandler):
             self.cancel_run()
             return
 
+        if self.path == "/start":
+            self.start_run()
+            return
+
         if self.path != "/run":
             write_json(self, 404, {"error": "not found"})
             return
@@ -422,55 +740,73 @@ class AgentHandler(BaseHTTPRequestHandler):
 
             config = attach_cancel_check(config_from_payload(payload))
             task = apply_resume_context(task, config, payload)
+            task = apply_previous_task_context(task, config)
 
-            stdout = io.StringIO()
-            stderr = io.StringIO()
-            code = 1
             queue_error = try_enqueue_run()
             if queue_error is not None:
                 queue_error["state"] = runtime_state()
                 write_json(self, 429, queue_error)
                 return
-            with RUN_LOCK:
-                with STATE_LOCK:
-                    RUN_STATE["queued"] = max(0, int(RUN_STATE["queued"]) - 1)
-                    RUN_STATE["busy"] = True
-                    RUN_STATE["current_task_id"] = config.task_id
-                    RUN_STATE["current_task_started_at"] = time.time()
-                record_run_started()
-                RUN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-                with RUN_LOCK_FILE.open("w", encoding="utf-8") as lock_fh:
-                    fcntl.flock(lock_fh, fcntl.LOCK_EX)
-                    try:
-                        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                            code = run_agent(task, config, event_sink=collect_agent_event)
-                    finally:
-                        fcntl.flock(lock_fh, fcntl.LOCK_UN)
-                        with STATE_LOCK:
-                            started_at = float(RUN_STATE["current_task_started_at"] or 0.0)
-                            finished_at = time.time()
-                            RUN_STATE["busy"] = False
-                            RUN_STATE["completed"] = int(RUN_STATE["completed"]) + 1
-                            RUN_STATE["last_task_id"] = config.task_id
-                            RUN_STATE["last_exit_code"] = code
-                            RUN_STATE["last_finished_at"] = finished_at
-                            RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
-                            RUN_STATE["current_task_id"] = ""
-                            RUN_STATE["current_task_started_at"] = 0.0
-                        record_run_finished(code)
-                        clear_task_cancelled(config.task_id)
-
-            text = stdout.getvalue().strip()
-            try:
-                result = json.loads(text) if text else {"ok": False, "message": "empty agent output"}
-            except json.JSONDecodeError:
-                result = {"ok": False, "message": "agent returned non-json output", "raw": text}
-            if not bool_field(payload, "include_steps", True):
-                result.pop("steps", None)
-            result["exit_code"] = code
-            if bool_field(payload, "include_stderr", False) or code != 0:
-                result["stderr"] = stderr.getvalue()
+            code, _stdout_text, _stderr_text, result = run_agent_with_auto_continue(
+                task,
+                config,
+                payload,
+                event_sink=lambda event, task_id=config.task_id: collect_and_remember_event(task_id, event),
+            )
             write_json(self, 200 if code == 0 else 500, result)
+        except RequestError as exc:
+            write_json(self, exc.status, exc.payload)
+        except Exception as exc:
+            write_json(self, 500, {"ok": False, "error": str(exc)})
+
+    def start_run(self) -> None:
+        try:
+            payload = read_json(self)
+            task = str(payload.get("task", "")).strip()
+            task_error = validate_task_text(task)
+            if task_error is not None:
+                write_json(self, int(task_error["status"]), task_error["payload"])
+                return
+            if str(payload.get("resume_task_id") or "").strip() and not privileged_api_allowed(self):
+                write_json(self, 401, {"error": "resume_task_id requires API key"})
+                return
+            busy = reject_if_busy(payload)
+            if busy is not None:
+                write_json(self, 409, busy)
+                return
+
+            config = attach_cancel_check(config_from_payload(payload))
+            task = apply_resume_context(task, config, payload)
+            task = apply_previous_task_context(task, config)
+            queue_error = try_enqueue_run()
+            if queue_error is not None:
+                queue_error["state"] = runtime_state()
+                write_json(self, 429, queue_error)
+                return
+
+            def background_run() -> None:
+                try:
+                    run_agent_with_auto_continue(
+                        task,
+                        config,
+                        payload,
+                        event_sink=lambda event, task_id=config.task_id: collect_and_remember_event(task_id, event),
+                    )
+                except Exception as exc:
+                    remember_run_event(config.task_id, {"type": "error", "ok": False, "message": str(exc)})
+
+            worker = threading.Thread(target=background_run, name=f"agent-bg-{config.task_id}", daemon=True)
+            worker.start()
+            write_json(
+                self,
+                202,
+                {
+                    "ok": True,
+                    "task_id": config.task_id,
+                    "message": "agent task accepted",
+                    "state": runtime_state(),
+                },
+            )
         except RequestError as exc:
             write_json(self, exc.status, exc.payload)
         except Exception as exc:
@@ -494,6 +830,7 @@ class AgentHandler(BaseHTTPRequestHandler):
 
             config = attach_cancel_check(config_from_payload(payload))
             task = apply_resume_context(task, config, payload)
+            task = apply_previous_task_context(task, config)
             queue_error = try_enqueue_run()
             if queue_error is not None:
                 queue_error["state"] = runtime_state()
@@ -528,7 +865,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                             try:
                                 with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                                     def stream_event_sink(event: dict[str, Any]) -> None:
-                                        collect_agent_event(event)
+                                        collect_and_remember_event(config.task_id, event)
                                         events.put(event)
 
                                     code_box["code"] = run_agent(task, config, event_sink=stream_event_sink)

@@ -2,6 +2,24 @@ plugins {
     id("com.android.application")
 }
 
+def localEnvValue(String path, String key) {
+    def file = rootProject.file(path)
+    if (!file.isFile()) {
+        return ''
+    }
+    def line = file.readLines().collect { it.trim() }.find { it.startsWith("${key}=") }
+    if (!line) {
+        return ''
+    }
+    return line.substring(line.indexOf('=') + 1).trim().replaceAll(/^['"]|['"]$/, '')
+}
+
+def mobileApiKey = (
+        project.findProperty("SHUSHUNYA_MOBILE_API_KEY")
+                ?: System.getenv("SHUSHUNYA_MOBILE_API_KEY")
+                ?: localEnvValue("../ArchiveOfHeresy/.env", "ARCHIVE_MOBILE_API_KEY")
+        ).toString().trim()
+
 android {
     namespace = "com.shushunya.m"
     compileSdk = 35
@@ -16,6 +34,6 @@ android {
         targetSdk = 35
         versionCode = 35
         versionName = "2.4.1"
-        buildConfigField("String", "MOBILE_API_KEY", "\"${project.findProperty("SHUSHUNYA_MOBILE_API_KEY") ?: ""}\"")
+        buildConfigField("String", "MOBILE_API_KEY", "\"$mobileApiKey\"")
     }
 }
