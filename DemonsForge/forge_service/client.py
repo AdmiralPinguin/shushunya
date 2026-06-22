@@ -29,6 +29,10 @@ class DemonsForgeClient:
     def runtime(self) -> dict[str, Any]:
         return self._request("GET", "/forge/runtime")
 
+    def unload_runtime(self, engine: str | None = None) -> dict[str, Any]:
+        suffix = f"?engine={engine}" if engine else ""
+        return self._request("POST", f"/forge/runtime/unload{suffix}")
+
     def job_schema(self) -> dict[str, Any]:
         return self._request("GET", "/forge/schema/job")
 

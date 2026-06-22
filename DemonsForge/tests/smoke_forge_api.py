@@ -53,6 +53,9 @@ def main() -> None:
     assert "ready_for_authenticated_archive" in memory_status.json()
     assert "read_timeout_seconds" in memory_status.json()
     assert "write_timeout_seconds" in memory_status.json()
+    unload = client.post("/forge/runtime/unload")
+    assert unload.status_code == 200, unload.text
+    assert unload.json()["ok"] is True
     memory_policy = client.get("/forge/memory/policy")
     assert memory_policy.status_code == 200, memory_policy.text
     assert "asset approvals/rejections" in memory_policy.json()["durable_topics"]

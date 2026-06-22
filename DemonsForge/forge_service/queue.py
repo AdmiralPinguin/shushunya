@@ -150,6 +150,15 @@ class ForgeQueue:
             },
         }
 
+    def unload_engines(self, engine_name: str | None = None) -> dict[str, object]:
+        unloaded = []
+        for name, engine in list(self._engines.items()):
+            if engine_name and name != engine_name:
+                continue
+            if engine.unload():
+                unloaded.append(name)
+        return {"ok": True, "engine": engine_name, "unloaded": unloaded, "runtime": self.runtime_state()}
+
     def _progress(self, job_id: str, value: float, message: str) -> None:
         if job_id in self._cancel:
             raise RuntimeError("job canceled")

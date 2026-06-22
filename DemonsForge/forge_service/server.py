@@ -46,6 +46,11 @@ def get_runtime() -> dict[str, object]:
     return forge_queue.runtime_state()
 
 
+@app.post("/forge/runtime/unload")
+def unload_runtime(engine: str | None = None) -> dict[str, object]:
+    return forge_queue.unload_engines(engine_name=engine)
+
+
 @app.get("/forge/memory/status")
 def memory_status() -> dict[str, object]:
     return ArchiveMemoryClient.from_config().status()

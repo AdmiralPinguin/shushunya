@@ -65,6 +65,7 @@ Core endpoints:
 - `GET /health`
 - `GET /forge/capabilities`
 - `GET /forge/runtime`
+- `POST /forge/runtime/unload`
 - `GET /forge/schema/job`
 - `GET /forge/models`
 - `GET /forge/loras`
@@ -165,6 +166,8 @@ Runtime logs are appended as JSONL to `runtime/logs/jobs.jsonl`. Loaded
 diffusers pipelines are automatically unloaded after
 `FORGE_MODEL_IDLE_SECONDS` seconds, default `1800`, to return RAM to the rest of
 the system.
+Use `POST /forge/runtime/unload` or `POST /forge/runtime/unload?engine=sdxl` to
+release loaded pipelines immediately.
 
 Generated outputs are stored under `artifacts/{job_id}/` with PNG files and JSON
 metadata containing prompt, negative prompt, engine, model, LoRA list, seed,
