@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 from datetime import datetime, timezone
+from functools import lru_cache
 
 from . import config
 
@@ -65,12 +66,14 @@ UNSUPPORTED_JOB_TYPES = ["outpaint", "variation"]
 FUTURE_FEATURES = ["ControlNet", "IP-Adapter", "reference_image"]
 
 
+@lru_cache(maxsize=256)
 def _dir_size(path: Path) -> int:
     if not path.exists():
         return 0
     return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
 
 
+@lru_cache(maxsize=512)
 def _modified_at(path: Path) -> str | None:
     if not path.exists():
         return None
