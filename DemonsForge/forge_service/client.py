@@ -141,6 +141,9 @@ class DemonsForgeClient:
     def job_manifest(self, job_id: str) -> dict[str, Any]:
         return self._request("GET", f"/forge/jobs/{job_id}/manifest")
 
+    def job_logs(self, job_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/forge/jobs/{job_id}/logs")
+
     def cancel(self, job_id: str) -> dict[str, Any]:
         return self._request("POST", f"/forge/jobs/{job_id}/cancel")
 

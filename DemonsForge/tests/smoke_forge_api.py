@@ -329,6 +329,10 @@ def main() -> None:
     assert manifest.status_code == 200, manifest.text
     assert manifest.json()["job"]["id"] == job_id
     assert manifest.json()["artifact_count"] == len(metadata_status["artifacts"])
+    job_logs = client.get(f"/forge/jobs/{job_id}/logs")
+    assert job_logs.status_code == 200, job_logs.text
+    assert job_logs.json()["job_id"] == job_id
+    assert isinstance(job_logs.json()["logs"], list)
     jobs = client.get("/forge/jobs?limit=5")
     assert jobs.status_code == 200, jobs.text
     events = client.get(f"/forge/jobs/{job_id}/events")
