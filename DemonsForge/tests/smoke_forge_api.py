@@ -48,6 +48,8 @@ def main() -> None:
     assert memory_status.status_code == 200, memory_status.text
     assert memory_status.json()["write_policy"] == "proposal-only"
     assert "ready_for_authenticated_archive" in memory_status.json()
+    assert "read_timeout_seconds" in memory_status.json()
+    assert "write_timeout_seconds" in memory_status.json()
     memory_policy = client.get("/forge/memory/policy")
     assert memory_policy.status_code == 200, memory_policy.text
     assert "asset approvals/rejections" in memory_policy.json()["durable_topics"]

@@ -24,7 +24,8 @@ MEMORY_NAMESPACE = os.environ.get("FORGE_MEMORY_NAMESPACE", "demonsforge").strip
 MEMORY_REQUESTER = os.environ.get("FORGE_MEMORY_REQUESTER", "demonsforge").strip() or "demonsforge"
 ARCHIVE_BASE_URL = os.environ.get("FORGE_ARCHIVE_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
 ARCHIVE_API_KEY = os.environ.get("FORGE_ARCHIVE_API_KEY", os.environ.get("ARCHIVE_API_KEY", "")).strip()
-MEMORY_TIMEOUT_SECONDS = float(os.environ.get("FORGE_MEMORY_TIMEOUT_SECONDS", "30"))
+MEMORY_READ_TIMEOUT_SECONDS = float(os.environ.get("FORGE_MEMORY_READ_TIMEOUT_SECONDS", os.environ.get("FORGE_MEMORY_TIMEOUT_SECONDS", "5")))
+MEMORY_WRITE_TIMEOUT_SECONDS = float(os.environ.get("FORGE_MEMORY_WRITE_TIMEOUT_SECONDS", os.environ.get("FORGE_MEMORY_TIMEOUT_SECONDS", "30")))
 MEMORY_PROPOSAL_MAX_CHARS = int(os.environ.get("FORGE_MEMORY_PROPOSAL_MAX_CHARS", "4000"))
 MEMORY_EVIDENCE_MAX_CHARS = int(os.environ.get("FORGE_MEMORY_EVIDENCE_MAX_CHARS", "3000"))
 

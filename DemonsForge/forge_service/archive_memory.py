@@ -45,7 +45,8 @@ class ArchiveMemoryClient:
     requester: str
     api_key: str = ""
     enabled: bool = True
-    timeout: float = 5.0
+    read_timeout: float = 5.0
+    write_timeout: float = 30.0
 
     @classmethod
     def from_config(cls) -> "ArchiveMemoryClient":
@@ -55,7 +56,8 @@ class ArchiveMemoryClient:
             requester=config.MEMORY_REQUESTER,
             api_key=config.ARCHIVE_API_KEY,
             enabled=config.MEMORY_ENABLED,
-            timeout=config.MEMORY_TIMEOUT_SECONDS,
+            read_timeout=config.MEMORY_READ_TIMEOUT_SECONDS,
+            write_timeout=config.MEMORY_WRITE_TIMEOUT_SECONDS,
         )
 
     def status(self) -> dict[str, object]:
@@ -71,6 +73,8 @@ class ArchiveMemoryClient:
             "base_url": self.base_url,
             "api_key_configured": bool(self.api_key),
             "ready_for_authenticated_archive": self.enabled and bool(self.api_key),
+            "read_timeout_seconds": self.read_timeout,
+            "write_timeout_seconds": self.write_timeout,
             "write_policy": "proposal-only",
             "direct_file_access": False,
             "diagnostics": diagnostics,
@@ -157,7 +161,7 @@ class ArchiveMemoryClient:
             "proposal": _trim(proposal, config.MEMORY_PROPOSAL_MAX_CHARS),
             "evidence": _trim(evidence, config.MEMORY_EVIDENCE_MAX_CHARS),
         }
-        return self._request("POST", "/archive/memory/propose-change", payload=payload)
+        return self._request("POST", "/archive/memory/propose-change", payload=payload, timeout=self.write_timeout)
 
     def _request(
         self,
@@ -165,6 +169,7 @@ class ArchiveMemoryClient:
         path: str,
         params: dict[str, object] | None = None,
         payload: dict[str, object] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         if not self.enabled:
             return {"ok": False, "error": "forge memory is disabled", "memory": self.status()}
@@ -179,7 +184,7 @@ class ArchiveMemoryClient:
             headers["authorization"] = f"Bearer {self.api_key}"
         request = Request(url, data=body, headers=headers, method=method)
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with urlopen(request, timeout=timeout or self.read_timeout) as response:
                 raw = response.read().decode("utf-8")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
