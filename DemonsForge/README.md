@@ -124,6 +124,8 @@ curl -s 'http://127.0.0.1:8110/forge/jobs?dry_run=true' \
 
 Dry-run responses include a conservative CPU-only resource estimate with pixel
 budget ratio, estimated RAM floor, loaded engine state, and warnings.
+SDXL diffusion jobs (`txt2img`, `img2img`, `inpaint`) are validated at
+`512x512` minimum because smaller sizes can fail inside the pipeline.
 
 Architecture:
 

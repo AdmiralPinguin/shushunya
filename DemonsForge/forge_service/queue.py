@@ -165,6 +165,9 @@ class ForgeQueue:
             raise RuntimeError("not enough available RAM for generation queue")
         if spec.width * spec.height * spec.batch_size > 1536 * 1536:
             raise RuntimeError("job exceeds conservative pixel budget")
+        if spec.engine == "sdxl" and spec.type.value in {"txt2img", "img2img", "inpaint"}:
+            if spec.width < 512 or spec.height < 512:
+                raise RuntimeError("sdxl diffusion jobs require width and height >= 512")
 
     def _engine(self, name: str) -> DiffusersEngine:
         if name not in self._engines:
