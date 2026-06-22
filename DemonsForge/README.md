@@ -200,6 +200,7 @@ GET  /forge/memory/gateway
 GET  /forge/memory/catalog?create=true
 GET  /forge/memory/search?q=sdxl&layers=focus,wiki,vector,graph&limit=5
 GET  /forge/memory/events?limit=20
+GET  /forge/memory/proposals?limit=100
 POST /forge/memory/propose
 ```
 

@@ -370,6 +370,25 @@ class ForgeStore:
             "response": json.loads(row["response_json"]),
         }
 
+    def list_memory_proposals(self, limit: int = 100) -> list[dict[str, object]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM memory_proposals ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "hash": row["hash"],
+                "created_at": row["created_at"],
+                "target": row["target"],
+                "importance": row["importance"],
+                "proposal": row["proposal"],
+                "evidence": row["evidence"],
+                "response": json.loads(row["response_json"]),
+            }
+            for row in rows
+        ]
+
     def record_memory_proposal(
         self,
         proposal_hash: str,

@@ -62,6 +62,9 @@ def main() -> None:
     memory_events = client.get("/forge/memory/events?limit=2")
     assert memory_events.status_code == 200, memory_events.text
     assert isinstance(memory_events.json(), dict)
+    memory_proposals = client.get("/forge/memory/proposals?limit=2")
+    assert memory_proposals.status_code == 200, memory_proposals.text
+    assert isinstance(memory_proposals.json(), list)
     empty_memory_proposal = client.post(
         "/forge/memory/propose",
         json={"proposal": "   "},

@@ -98,6 +98,11 @@ def memory_events(
     )
 
 
+@app.get("/forge/memory/proposals")
+def memory_proposals(limit: int = 100) -> list[dict[str, object]]:
+    return store.list_memory_proposals(limit=max(1, min(limit, 500)))
+
+
 @app.post("/forge/memory/propose")
 def memory_propose(request: MemoryProposal) -> dict[str, object]:
     proposal_hash = store.memory_proposal_hash(

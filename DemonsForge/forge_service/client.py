@@ -76,6 +76,9 @@ class DemonsForgeClient:
     def memory_events(self, limit: int = 20) -> dict[str, Any]:
         return self._request("GET", f"/forge/memory/events?limit={limit}")
 
+    def memory_proposals(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self._request("GET", f"/forge/memory/proposals?limit={limit}")
+
     def memory_propose(
         self,
         proposal: str,
