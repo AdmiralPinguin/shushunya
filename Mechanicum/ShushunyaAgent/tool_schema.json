@@ -157,6 +157,20 @@
         "returns": "extracts each matched explicit link into separate files and returns metadata only"
       }
     },
+    "bundle_text_files": {
+      "required": ["action", "path", "output_txt", "output_fb2"],
+      "properties": {
+        "action": "bundle_text_files",
+        "path": "sandbox directory containing text files",
+        "output_txt": "sandbox_path for combined UTF-8 text",
+        "output_fb2": "sandbox_path for generated FB2",
+        "include_glob": "glob for input files, default *.txt",
+        "exclude_glob": "optional comma-separated glob list",
+        "min_chars": "integer minimum file length to include",
+        "dedupe": "boolean dedupe identical file contents",
+        "returns": "writes combined TXT and FB2 and returns metadata"
+      }
+    },
     "ranobehub_chapter": {
       "required": ["action", "url", "path"],
       "properties": {

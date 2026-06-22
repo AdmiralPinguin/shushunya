@@ -187,6 +187,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 
 13. Извлечь много страниц из явного оглавления в отдельные sandbox-файлы:
 {"action":"web_extract_link_list","url":"https://example.com/contents","pattern":"глава|том|chapter|volume","start_url":"https://example.com/ch1","end_url":"https://example.com/ch99","path_template":"/work/ch_{seq}_{vol}_{chapter}.txt","limit":100}
+{"action":"bundle_text_files","path":"/work/chapters","include_glob":"*.txt","exclude_glob":"combined*.txt,_smoke*","output_txt":"/work/book.txt","output_fb2":"/work/book.fb2","min_chars":1000,"dedupe":true}
 
 14. Скачать главу Ranobehub напрямую в sandbox-файл через site adapter:
 {"action":"ranobehub_chapter","url":"https://ranobehub.org/ranobe/966/10/9","path":"/work/slime/vol10_ch09.txt","mode":"write"}
@@ -204,6 +205,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Для сохранения больших HTML-страниц используй web_extract_to_file: он сам скачает, очистит и запишет текст в файл. Не копируй большой текст в write_file content.
 - Когда нужно продолжать по оглавлению, пагинации или списку глав, сначала используй web_links по странице оглавления. Не угадывай следующие URL арифметикой, если tool result дает ссылку на страницу другого тома/раздела.
 - Если нужно извлечь много страниц из явного оглавления, используй web_extract_link_list вместо ручного цикла web_extract_to_file. Он берет только найденные ссылки и не угадывает URL.
+- Для сборки многих текстовых файлов в один TXT/FB2 используй bundle_text_files вместо Python с большим XML/кодом в JSON.
 - Если web_links показывает мало ссылок, но есть scripts/custom_elements, страница может быть SPA. Если web_links вернул api_candidates, сначала пробуй кандидаты с высоким score; иначе изучи custom_elements и scripts, затем fetch публичных JSON endpoint-ов по видимым id/именам компонентов вместо угадывания URL глав.
 - Для страниц глав Ranobehub можно использовать ranobehub_chapter как более точный адаптер, но общий путь для сайтов — web_extract_to_file.
 - Перед чтением неизвестного или большого файла сначала используй file_info/find_files/search_text. Не читай файл целиком; используй read_file с max_bytes и offset небольшими кусками.
@@ -594,6 +596,7 @@ REQUIRED_FIELDS = {
     "web_links": {"url"},
     "web_extract_to_file": {"url", "path"},
     "web_extract_link_list": {"url", "path_template"},
+    "bundle_text_files": {"path", "output_txt", "output_fb2"},
     "ranobehub_chapter": {"url", "path"},
     "web_search": {"query"},
     "archive_search": {"kind", "query"},
@@ -1347,6 +1350,136 @@ def web_extract_link_list_tool(config: AgentConfig, action: dict[str, Any]) -> d
     }
 
 
+BUNDLE_TEXT_FILES_SCRIPT = r'''
+import fnmatch
+import hashlib
+import html
+import json
+import os
+from pathlib import Path
+
+ALLOWED_ROOTS = [Path("/work"), Path("/sandbox-tmp"), Path("/artifacts"), Path("/state"), Path("/logs"), Path("/models"), Path("/tools"), Path("/home/agent")]
+
+def safe_path(raw):
+    path = Path(raw or "/work")
+    if not path.is_absolute():
+        path = Path("/work") / path
+    resolved = path.resolve(strict=False)
+    for root in ALLOWED_ROOTS:
+        try:
+            resolved.relative_to(root)
+            return resolved
+        except ValueError:
+            pass
+    raise ValueError(f"path outside sandbox writable roots: {raw}")
+
+def matches_any(name, patterns):
+    return any(fnmatch.fnmatch(name, pattern) for pattern in patterns if pattern)
+
+payload = json.loads(os.environ["BUNDLE_TEXT_FILES_PAYLOAD"])
+root = safe_path(payload["path"])
+output_txt = safe_path(payload["output_txt"])
+output_fb2 = safe_path(payload["output_fb2"])
+include_glob = payload.get("include_glob") or "*.txt"
+exclude_patterns = [part.strip() for part in str(payload.get("exclude_glob") or "").split(",") if part.strip()]
+min_chars = max(0, int(payload.get("min_chars") or 0))
+dedupe = bool(payload.get("dedupe", True))
+
+if not root.is_dir():
+    raise SystemExit(json.dumps({"ok": False, "error": "path is not a directory", "path": str(root)}, ensure_ascii=False))
+
+output_names = {output_txt.name, output_fb2.name}
+seen = set()
+included = []
+skipped = []
+for path in sorted(root.glob(include_glob)):
+    if not path.is_file():
+        continue
+    rel = path.relative_to(root).as_posix()
+    if path.name in output_names or matches_any(path.name, exclude_patterns) or matches_any(rel, exclude_patterns):
+        skipped.append({"path": str(path), "reason": "excluded"})
+        continue
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        skipped.append({"path": str(path), "reason": "decode_error"})
+        continue
+    stripped = text.strip()
+    if len(stripped) < min_chars:
+        skipped.append({"path": str(path), "reason": "too_short", "chars": len(stripped)})
+        continue
+    digest = hashlib.sha256(stripped.encode("utf-8")).hexdigest()
+    if dedupe and digest in seen:
+        skipped.append({"path": str(path), "reason": "duplicate"})
+        continue
+    seen.add(digest)
+    included.append({"path": str(path), "name": path.name, "text": stripped, "chars": len(stripped), "sha256": digest})
+
+output_txt.parent.mkdir(parents=True, exist_ok=True)
+output_fb2.parent.mkdir(parents=True, exist_ok=True)
+with output_txt.open("w", encoding="utf-8") as fh:
+    for item in included:
+        fh.write(item["text"])
+        fh.write("\n\n")
+
+with output_fb2.open("w", encoding="utf-8") as fh:
+    fh.write('<?xml version="1.0" encoding="utf-8"?>\n')
+    fh.write('<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">\n')
+    fh.write('<description><title-info><book-title>Combined text bundle</book-title></title-info></description>\n<body>\n')
+    for item in included:
+        fh.write("<section>\n")
+        fh.write("<title><p>" + html.escape(item["name"]) + "</p></title>\n")
+        for paragraph in item["text"].split("\n\n"):
+            paragraph = paragraph.strip()
+            if paragraph:
+                fh.write("<p>" + html.escape(paragraph).replace("\n", "<br/>") + "</p>\n")
+        fh.write("</section>\n")
+    fh.write("</body>\n</FictionBook>\n")
+
+result = {
+    "ok": True,
+    "path": str(root),
+    "output_txt": str(output_txt),
+    "output_fb2": str(output_fb2),
+    "included_files": len(included),
+    "skipped_files": len(skipped),
+    "txt_bytes": output_txt.stat().st_size,
+    "fb2_bytes": output_fb2.stat().st_size,
+    "first_files": [{"path": item["path"], "chars": item["chars"]} for item in included[:10]],
+    "last_file": {"path": included[-1]["path"], "chars": included[-1]["chars"]} if included else None,
+    "skipped_sample": skipped[:10],
+}
+print(json.dumps(result, ensure_ascii=False))
+'''
+
+
+def bundle_text_files_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "path": str(action.get("path") or "/work"),
+        "output_txt": str(action.get("output_txt") or "/work/bundle.txt"),
+        "output_fb2": str(action.get("output_fb2") or "/work/bundle.fb2"),
+        "include_glob": str(action.get("include_glob") or "*.txt"),
+        "exclude_glob": str(action.get("exclude_glob") or ""),
+        "min_chars": int(action.get("min_chars") or 0),
+        "dedupe": parse_bool(action.get("dedupe"), default=True),
+    }
+    env_payload = json.dumps(payload, ensure_ascii=False)
+    result = run_sandbox_argv(
+        config,
+        ["/usr/bin/env", f"BUNDLE_TEXT_FILES_PAYLOAD={env_payload}", "python3", "-c", BUNDLE_TEXT_FILES_SCRIPT],
+        timeout=300,
+        max_output_chars=20000,
+    )
+    if not result.get("ok"):
+        return {"ok": False, "error": "bundle_text_files failed", "runner": result}
+    stdout = str(result.get("stdout") or "").strip()
+    try:
+        parsed = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"ok": False, "error": "bundle_text_files returned non-json output", "stdout": truncate(stdout, 2000), "runner": result}
+    return parsed if isinstance(parsed, dict) else {"ok": False, "error": "bundle_text_files returned non-object"}
+
+
 def ranobehub_chapter_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any]:
     raw_url = str(action.get("url") or "").strip()
     path = str(action.get("path") or "").strip()
@@ -1594,6 +1727,8 @@ def action_summary(action: dict[str, Any]) -> str:
         return f"{truncate(str(action.get('url', '')), 120)} -> {action.get('path', '/work')}"
     if action_type == "web_extract_link_list":
         return f"{truncate(str(action.get('url', '')), 100)} -> {action.get('path_template', '/work')}"
+    if action_type == "bundle_text_files":
+        return f"{action.get('path', '/work')} -> {action.get('output_txt', '/work/bundle.txt')}"
     if action_type == "ranobehub_chapter":
         return f"{truncate(str(action.get('url', '')), 120)} -> {action.get('path', '/work')}"
     if action_type in FILE_ACTIONS:
@@ -1676,6 +1811,8 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
         return f"{result.get('title') or 'extracted page'} -> {result.get('path')} ({result.get('chars', 0)} chars)"
     if action_type == "web_extract_link_list":
         return f"{result.get('files_written', 0)}/{result.get('selected_links', 0)} extracted"
+    if action_type == "bundle_text_files":
+        return f"{result.get('included_files', 0)} files -> {result.get('output_txt')}, {result.get('output_fb2')}"
     if action_type == "ranobehub_chapter":
         return f"{result.get('title') or 'chapter'} -> {result.get('path')} ({result.get('chars', 0)} chars)"
     return truncate(str(result.get("error") or result.get("message") or "done"), 180)
@@ -1849,6 +1986,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 result = web_extract_to_file_tool(config, action)
             elif action_type == "web_extract_link_list":
                 result = web_extract_link_list_tool(config, action)
+            elif action_type == "bundle_text_files":
+                result = bundle_text_files_tool(config, action)
             elif action_type == "ranobehub_chapter":
                 result = ranobehub_chapter_tool(config, action)
             elif action_type == "sandbox_status":

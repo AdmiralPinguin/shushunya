@@ -148,6 +148,10 @@ ACTION_SCHEMAS: dict[str, dict[str, Any]] = {
         "required": {"url", "path_template"},
         "fields": {"action", "url", "path_template", "pattern", "start_url", "end_url", "limit", "include_title"},
     },
+    "bundle_text_files": {
+        "required": {"path", "output_txt", "output_fb2"},
+        "fields": {"action", "path", "output_txt", "output_fb2", "include_glob", "exclude_glob", "min_chars", "dedupe"},
+    },
     "ranobehub_chapter": {"required": {"url", "path"}, "fields": {"action", "url", "path", "mode", "include_title"}},
     "list_files": {"required": {"path"}, "fields": {"action", "path", "max_depth", "limit", "offset"}},
     "read_file": {"required": {"path"}, "fields": {"action", "path", "max_bytes", "offset"}},
@@ -257,6 +261,16 @@ def validate_action(action: Mapping[str, Any]) -> dict[str, Any]:
             _validate_string(action_dict, "pattern", errors, max_len=500)
         _validate_int(action_dict, "limit", errors, minimum=1, maximum=200)
         _validate_bool(action_dict, "include_title", errors)
+    elif action_type == "bundle_text_files":
+        _validate_path(action_dict, errors)
+        for field in ("output_txt", "output_fb2"):
+            _validate_string(action_dict, field, errors, min_len=1, max_len=4096)
+            _validate_path({"path": action_dict.get(field)}, errors)
+        for field in ("include_glob", "exclude_glob"):
+            if field in action_dict:
+                _validate_string(action_dict, field, errors, min_len=1, max_len=1000)
+        _validate_int(action_dict, "min_chars", errors, minimum=0, maximum=1000000)
+        _validate_bool(action_dict, "dedupe", errors)
     elif action_type in {"list_files", "read_file", "write_file", "append_file", "replace_in_file", "mkdir", "remove_file", "file_info", "find_files", "search_text"}:
         _validate_path(action_dict, errors)
         if action_type in {"write_file", "append_file"}:

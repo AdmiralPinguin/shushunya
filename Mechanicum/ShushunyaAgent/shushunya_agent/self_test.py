@@ -264,6 +264,20 @@ def main() -> int:
     )
     if not valid_extract_list_action.get("ok"):
         raise AssertionError(f"valid web_extract_link_list action was rejected: {valid_extract_list_action}")
+    valid_bundle_action = agent_runner.validate_action(
+        {
+            "action": "bundle_text_files",
+            "path": "/work/novel_data",
+            "include_glob": "*.txt",
+            "exclude_glob": "bundle*.txt,_smoke*",
+            "output_txt": "/work/novel_data/book.txt",
+            "output_fb2": "/work/novel_data/book.fb2",
+            "min_chars": 100,
+            "dedupe": True,
+        }
+    )
+    if not valid_bundle_action.get("ok"):
+        raise AssertionError(f"valid bundle_text_files action was rejected: {valid_bundle_action}")
     valid_links_action = agent_runner.validate_action(
         {
             "action": "web_links",
@@ -1062,6 +1076,35 @@ def main() -> int:
     if batch_result.get("files_written") != 2 or batch_result.get("selected_links") != 2:
         raise AssertionError(f"web_extract_link_list batch smoke failed: {batch_result}")
     print("[ok] web extract link list")
+
+    with mock.patch.object(
+        agent_runner,
+        "run_sandbox_argv",
+        return_value={
+            "ok": True,
+            "stdout": json.dumps(
+                {
+                    "ok": True,
+                    "output_txt": "/work/book.txt",
+                    "output_fb2": "/work/book.fb2",
+                    "included_files": 2,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ):
+        bundle_result = agent_runner.bundle_text_files_tool(
+            AgentConfig(),
+            {
+                "action": "bundle_text_files",
+                "path": "/work",
+                "output_txt": "/work/book.txt",
+                "output_fb2": "/work/book.fb2",
+            },
+        )
+    if bundle_result.get("included_files") != 2:
+        raise AssertionError(f"bundle_text_files smoke failed: {bundle_result}")
+    print("[ok] bundle text files")
 
     repeat_stdout = io.StringIO()
     repeat_config = AgentConfig(
