@@ -270,6 +270,14 @@ def get_job_manifest(job_id: str) -> dict[str, object]:
     }
 
 
+@app.get("/forge/jobs/{job_id}/spec")
+def get_job_spec(job_id: str) -> dict[str, object]:
+    record = store.get_job(job_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return record.spec.model_dump(mode="json")
+
+
 @app.get("/forge/jobs/{job_id}/logs")
 def get_job_logs(job_id: str) -> dict[str, object]:
     record = store.get_job(job_id)

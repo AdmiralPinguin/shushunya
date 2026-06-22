@@ -84,6 +84,7 @@ Core endpoints:
 - `POST /forge/queue/resume`
 - `GET /forge/jobs/{job_id}`
 - `GET /forge/jobs/{job_id}/manifest`
+- `GET /forge/jobs/{job_id}/spec`
 - `GET /forge/jobs/{job_id}/logs`
 - `GET /forge/jobs/{job_id}/events`
 - `POST /forge/jobs/{job_id}/cancel`

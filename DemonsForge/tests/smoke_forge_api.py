@@ -421,6 +421,9 @@ def main() -> None:
     assert manifest.status_code == 200, manifest.text
     assert manifest.json()["job"]["id"] == job_id
     assert manifest.json()["artifact_count"] == len(metadata_status["artifacts"])
+    job_spec = client.get(f"/forge/jobs/{job_id}/spec")
+    assert job_spec.status_code == 200, job_spec.text
+    assert job_spec.json()["type"] == "metadata-read"
     job_logs = client.get(f"/forge/jobs/{job_id}/logs")
     assert job_logs.status_code == 200, job_logs.text
     assert job_logs.json()["job_id"] == job_id
