@@ -352,6 +352,12 @@ class ForgeQueue:
                     "memory",
                     f"archive memory proposal failed: {response.get('error')}",
                 )
+            else:
+                self.store.append_event_log(
+                    "system",
+                    "memory",
+                    f"archive memory proposal accepted for asset status {status}",
+                )
 
         threading.Thread(target=propose, name="forge-memory-proposal", daemon=True).start()
 
