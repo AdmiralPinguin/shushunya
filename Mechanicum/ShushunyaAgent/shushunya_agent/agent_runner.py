@@ -278,7 +278,7 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
             payload["text"] = truncate(text, 5000)
     elif action_type == "web_links":
         list_limits = {
-            "links": 15,
+            "links": 100,
             "api_candidates": 12,
             "custom_elements": 10,
             "scripts": 5,
@@ -305,14 +305,17 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
         if isinstance(links, list):
             payload["links"] = [
                 {
-                    key: truncate(str(link.get(key, "")), 220)
-                    for key in ("href", "text")
+                    key: truncate(str(link.get(key, "")), 160 if key == "url" else 90)
+                    for key in ("url", "text")
                     if isinstance(link, dict) and link.get(key)
                 }
                 if isinstance(link, dict)
                 else link
                 for link in links
             ]
+            if len(links) >= 40:
+                payload.pop("scripts", None)
+                payload.pop("custom_elements", None)
         custom_elements = payload.get("custom_elements")
         if isinstance(custom_elements, list):
             payload["custom_elements"] = compact_json_value(custom_elements, string_limit=180, list_limit=10)
