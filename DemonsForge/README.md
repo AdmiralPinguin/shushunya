@@ -255,3 +255,9 @@ Smoke test without heavy image generation:
 ```bash
 DemonsForge/bin/python tests/smoke_forge_api.py
 ```
+
+Memory gateway diagnostic:
+
+```bash
+./check-forge-memory.sh "DemonsForge CPU GPU memory"
+```
