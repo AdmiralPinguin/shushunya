@@ -325,10 +325,10 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
             payload["stderr"] = truncate(payload["stderr"], 4000)
     elif action_type in {"list_files", "find_files"} and isinstance(payload.get("items"), list):
         items = payload["items"]
-        payload["items"] = items[:80]
-        payload["compacted_for_model"] = len(items) > 80
-        if len(items) > 80:
-            payload["omitted_items"] = len(items) - 80
+        payload["items"] = items[:25]
+        payload["compacted_for_model"] = len(items) > 25
+        if len(items) > 25:
+            payload["omitted_items"] = len(items) - 25
     elif action_type == "search_text" and isinstance(payload.get("matches"), list):
         matches = payload["matches"]
         payload["matches"] = matches[:80]

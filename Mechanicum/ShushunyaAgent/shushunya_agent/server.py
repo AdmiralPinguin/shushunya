@@ -359,7 +359,7 @@ def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]
     )
 
 
-def recent_continuation_evidence(exclude_task_id: str, limit: int = 2) -> list[dict[str, Any]]:
+def recent_continuation_evidence(exclude_task_id: str, limit: int = 1) -> list[dict[str, Any]]:
     summaries = recent_task_summaries(limit=20).get("tasks", [])
     candidates: list[tuple[int, int, dict[str, Any]]] = []
     for index, summary in enumerate(summaries if isinstance(summaries, list) else []):
@@ -464,7 +464,20 @@ def brief_large_tool_result(event: Any) -> Any:
         if key in result:
             brief_result[key] = result[key]
     if "api_candidates" in brief_result:
-        brief_result["api_candidates"] = compact_json_value(brief_result["api_candidates"], string_limit=220, list_limit=5)
+        candidates = brief_result["api_candidates"]
+        if isinstance(candidates, list):
+            brief_result["api_candidates"] = [
+                {
+                    key: candidate.get(key)
+                    for key in ("url", "path", "score")
+                    if isinstance(candidate, dict) and key in candidate
+                }
+                if isinstance(candidate, dict)
+                else candidate
+                for candidate in candidates[:3]
+            ]
+        else:
+            brief_result["api_candidates"] = compact_json_value(candidates, string_limit=180, list_limit=3)
     if "json_summary" in brief_result:
         brief_result["json_summary"] = compact_json_value(brief_result["json_summary"], string_limit=180, list_limit=6)
     compacted = dict(event)
