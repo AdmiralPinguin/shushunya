@@ -122,6 +122,9 @@ curl -s 'http://127.0.0.1:8110/forge/jobs?dry_run=true' \
   -d '{"type":"txt2img","engine":"sdxl","prompt":"dry run","width":512,"height":512,"steps":1}'
 ```
 
+Dry-run responses include a conservative CPU-only resource estimate with pixel
+budget ratio, estimated RAM floor, loaded engine state, and warnings.
+
 Architecture:
 
 - `forge_service/registries.py`: engine, model, LoRA, sampler, scheduler and

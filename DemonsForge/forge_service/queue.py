@@ -92,6 +92,7 @@ class ForgeQueue:
             validate_download_spec(spec.asset_download)
         else:
             raise RuntimeError(f"job type is not supported by any registered backend yet: {spec.type.value}")
+        estimate["loaded_engines"] = [engine.runtime_state() for engine in self._engines.values()]
         return {"valid": True, "resource_estimate": estimate}
 
     def cancel(self, job_id: str) -> JobRecord:
@@ -505,12 +506,36 @@ class ForgeQueue:
 
 def resource_estimate(spec: JobSpec) -> dict[str, object]:
     pixel_count = spec.width * spec.height * spec.batch_size
+    megapixels = pixel_count / 1_000_000
+    model_ram_gb = {
+        "flux": 55,
+        "stable_diffusion": 68,
+        "sdxl": 46,
+    }.get(spec.engine or "sdxl", 24)
+    if spec.type.value in {"upscale", "metadata-read", "prompt-enhance", "asset-download"}:
+        model_ram_gb = 0.5
+    working_ram_gb = max(1.0, megapixels * max(spec.steps, 1) * 0.08)
+    estimated_min_ram_gb = round(model_ram_gb + working_ram_gb, 2)
+    pixel_budget = 1536 * 1536
+    warnings = []
+    if spec.type.value in {"txt2img", "img2img", "inpaint"}:
+        warnings.append("CPU-only diffusion generation can be slow; use low steps for smoke tests")
+    if pixel_count > pixel_budget:
+        warnings.append("job exceeds conservative pixel budget and will be rejected")
     return {
         "pixel_count": pixel_count,
-        "megapixels": round(pixel_count / 1_000_000, 3),
+        "pixel_budget": pixel_budget,
+        "pixel_budget_ratio": round(pixel_count / pixel_budget, 3),
+        "megapixels": round(megapixels, 3),
         "steps": spec.steps,
         "batch_size": spec.batch_size,
+        "engine": spec.engine,
+        "job_type": spec.type.value,
         "cpu_only": True,
-        "min_free_ram_gb": 4,
+        "estimated_min_ram_gb": estimated_min_ram_gb,
+        "estimated_model_ram_gb": model_ram_gb,
+        "estimated_working_ram_gb": round(working_ram_gb, 2),
+        "min_free_ram_gb": max(4, min(estimated_min_ram_gb, 96)),
         "current_free_ram_gb": round(psutil.virtual_memory().available / 1024**3, 2),
+        "warnings": warnings,
     }

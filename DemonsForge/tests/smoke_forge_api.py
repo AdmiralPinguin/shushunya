@@ -140,6 +140,8 @@ def main() -> None:
     )
     assert dry_run.status_code == 200, dry_run.text
     assert dry_run.json()["valid"] is True
+    assert "estimated_min_ram_gb" in dry_run.json()["resource_estimate"]
+    assert "warnings" in dry_run.json()["resource_estimate"]
     img2img_dry_run = client.post(
         "/forge/jobs?dry_run=true",
         json={
