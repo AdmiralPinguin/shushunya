@@ -178,10 +178,13 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 {"action":"web_search","query":"поисковый запрос","limit":5}
 {"action":"web_fetch","url":"https://example.com/page","max_bytes":200000}
 
-11. Скачать главу Ranobehub напрямую в sandbox-файл без копирования текста через JSON:
+11. Извлечь текст публичной HTML-страницы напрямую в sandbox-файл без копирования текста через JSON:
+{"action":"web_extract_to_file","url":"https://example.com/page","path":"/work/page.txt","mode":"write"}
+
+12. Скачать главу Ranobehub напрямую в sandbox-файл через site adapter:
 {"action":"ranobehub_chapter","url":"https://ranobehub.org/ranobe/966/10/9","path":"/work/slime/vol10_ch09.txt","mode":"write"}
 
-12. Завершить задачу:
+13. Завершить задачу:
 {"action":"final","message":"короткий итог для пользователя"}
 
 Правила:
@@ -191,7 +194,8 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Никогда не помещай большие тексты, HTML, главы книг или длинные исходники прямо в JSON content/code. Держи content/code короче 12000 символов.
 - Для больших артефактов создавай файл маленькими append_file чанками или пиши короткий Python-код, который сам собирает/парсит данные внутри sandbox.
 - Если нужно сохранить текст из web_fetch, не копируй весь текст в JSON. Сохрани URL/метаданные, затем используй более узкие fetch/read/append шаги.
-- Для страниц глав Ranobehub используй ranobehub_chapter: он сам скачает, очистит и запишет текст в файл. Не копируй текст главы в write_file content.
+- Для сохранения больших HTML-страниц используй web_extract_to_file: он сам скачает, очистит и запишет текст в файл. Не копируй большой текст в write_file content.
+- Для страниц глав Ranobehub можно использовать ranobehub_chapter как более точный адаптер, но общий путь для сайтов — web_extract_to_file.
 - Перед чтением неизвестного или большого файла сначала используй file_info/find_files/search_text. Не читай файл целиком; используй read_file с max_bytes и offset небольшими кусками.
 - replace_in_file предназначен для небольших текстовых файлов; если файл большой, сначала используй read_file/search_text и меняй подход.
 - Для больших директорий используй limit/offset в list_files/find_files и продолжай с next_offset, если нужно.
@@ -481,6 +485,7 @@ REQUIRED_FIELDS = {
     "shell": {"cmd"},
     "python": {"code"},
     "web_fetch": {"url"},
+    "web_extract_to_file": {"url", "path"},
     "ranobehub_chapter": {"url", "path"},
     "web_search": {"query"},
     "archive_search": {"kind", "query"},
@@ -730,6 +735,86 @@ class RanobehubChapterParser(HTMLParser):
         }
 
 
+class GenericHtmlTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.skip_depth = 0
+        self.title_depth = 0
+        self.main_depth = 0
+        self.in_text_block = False
+        self.current_tag = ""
+        self.current_parts: list[str] = []
+        self.title_parts: list[str] = []
+        self.main_blocks: list[str] = []
+        self.all_blocks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        attr_map = {name: value or "" for name, value in attrs}
+        if tag in {"script", "style", "noscript", "svg", "canvas", "nav", "footer", "header", "form"}:
+            self.skip_depth += 1
+            return
+        if tag == "title":
+            self.title_depth += 1
+        if tag in {"main", "article"}:
+            self.main_depth += 1
+        elif self.main_depth and tag in {"div", "section"}:
+            self.main_depth += 1
+        classes = attr_map.get("class", "").lower()
+        role = attr_map.get("role", "").lower()
+        if not self.main_depth and tag in {"div", "section"} and any(token in classes for token in ("content", "article", "chapter", "post", "entry", "reader")):
+            self.main_depth += 1
+        if not self.main_depth and role == "main":
+            self.main_depth += 1
+        if tag in {"h1", "h2", "h3", "p", "li", "blockquote", "pre"}:
+            self.in_text_block = True
+            self.current_tag = tag
+            self.current_parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in {"script", "style", "noscript", "svg", "canvas", "nav", "footer", "header", "form"} and self.skip_depth > 0:
+            self.skip_depth -= 1
+            return
+        if tag == "title" and self.title_depth > 0:
+            self.title_depth -= 1
+        if tag == self.current_tag and self.in_text_block:
+            block = clean_ranobehub_text(" ".join(self.current_parts))
+            if block and len(block) > 1:
+                self.all_blocks.append(block)
+                if self.main_depth:
+                    self.main_blocks.append(block)
+            self.in_text_block = False
+            self.current_tag = ""
+            self.current_parts = []
+        if tag in {"main", "article", "div", "section"} and self.main_depth:
+            self.main_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self.skip_depth:
+            return
+        text = html.unescape(data).strip()
+        if not text:
+            return
+        if self.title_depth:
+            self.title_parts.append(text)
+        if self.in_text_block:
+            self.current_parts.append(text)
+
+    def payload(self) -> dict[str, Any]:
+        title = clean_ranobehub_text(" ".join(self.title_parts))
+        blocks = self.main_blocks if len("\n".join(self.main_blocks)) >= 500 else self.all_blocks
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for block in blocks:
+            key = block.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(block)
+        return {"title": title, "blocks": deduped, "used_main_scope": blocks is self.main_blocks}
+
+
 def clean_ranobehub_text(text: str) -> str:
     cleaned = " ".join(str(text or "").split())
     cleaned = re.sub(r"\s+([,.;:!?…»”）\]])", r"\1", cleaned)
@@ -754,6 +839,72 @@ def write_sandbox_text_chunked(config: AgentConfig, path: str, content: str, mod
             }
     final = results[-1] if results else {}
     return {"ok": True, "path": final.get("path", path), "chunks": len(chunks), "size": final.get("size")}
+
+
+def web_extract_to_file_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any]:
+    raw_url = str(action.get("url") or "").strip()
+    path = str(action.get("path") or "").strip()
+    mode = str(action.get("mode") or "write").strip().lower()
+    include_title = parse_bool(action.get("include_title"), default=True)
+    if mode not in {"write", "append"}:
+        return {"ok": False, "error": "mode must be write or append"}
+    try:
+        validate_public_url(raw_url)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    request = Request(raw_url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "text/html,application/xhtml+xml,text/plain"})
+    try:
+        with build_opener(SafeRedirectHandler).open(request, timeout=30) as response:
+            data, truncated = read_limited_response(response, 1200000)
+            content_type = response.headers.get("Content-Type", "")
+            if not is_textual_content(content_type, data):
+                return {"ok": False, "error": "response is not textual", "content_type": content_type}
+            text, encoding = decode_web_text(data, response.headers.get_content_charset())
+            status = getattr(response, "status", 200)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    if "html" in content_type.lower() or "<html" in text[:500].lower():
+        parser = GenericHtmlTextParser()
+        parser.feed(text)
+        parsed = parser.payload()
+        title = str(parsed.get("title") or "").strip()
+        blocks = [block for block in parsed.get("blocks", []) if isinstance(block, str) and block.strip()]
+        if not blocks:
+            return {"ok": False, "error": "no text blocks found", "url": raw_url, "status": status}
+        lines: list[str] = []
+        if include_title and title:
+            lines.extend([title, ""])
+        lines.extend(blocks)
+        content = "\n\n".join(lines).strip() + "\n"
+        used_main_scope = bool(parsed.get("used_main_scope"))
+    else:
+        title = ""
+        content = text.strip() + "\n"
+        used_main_scope = False
+        blocks = [content]
+
+    file_result = write_sandbox_text_chunked(config, path, content, mode)
+    if not file_result.get("ok"):
+        return {"ok": False, "error": "failed to write extracted text", "file_result": file_result}
+    return {
+        "ok": True,
+        "url": raw_url,
+        "status": status,
+        "title": title,
+        "path": file_result.get("path", path),
+        "mode": mode,
+        "blocks": len(blocks),
+        "chars": len(content),
+        "bytes_written": file_result.get("size"),
+        "chunks": file_result.get("chunks"),
+        "encoding": encoding,
+        "content_type": content_type,
+        "truncated": truncated,
+        "used_main_scope": used_main_scope,
+        "preview": truncate(re.sub(r"\s+", " ", content).strip(), 500),
+    }
 
 
 def ranobehub_chapter_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any]:
@@ -879,6 +1030,8 @@ def action_summary(action: dict[str, Any]) -> str:
         return truncate(str(action.get("query", "")), 160)
     if action_type == "web_fetch":
         return truncate(str(action.get("url", "")), 180)
+    if action_type == "web_extract_to_file":
+        return f"{truncate(str(action.get('url', '')), 120)} -> {action.get('path', '/work')}"
     if action_type == "ranobehub_chapter":
         return f"{truncate(str(action.get('url', '')), 120)} -> {action.get('path', '/work')}"
     if action_type in FILE_ACTIONS:
@@ -955,6 +1108,8 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
     if action_type == "web_fetch":
         title = str(result.get("title") or result.get("url") or "page fetched")
         return truncate(title, 180)
+    if action_type == "web_extract_to_file":
+        return f"{result.get('title') or 'extracted page'} -> {result.get('path')} ({result.get('chars', 0)} chars)"
     if action_type == "ranobehub_chapter":
         return f"{result.get('title') or 'chapter'} -> {result.get('path')} ({result.get('chars', 0)} chars)"
     return truncate(str(result.get("error") or result.get("message") or "done"), 180)
@@ -1120,6 +1275,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 result = web_search(config, str(action.get("query", "")), action.get("limit"))
             elif action_type == "web_fetch":
                 result = web_fetch(config, str(action.get("url", "")), action.get("max_bytes"))
+            elif action_type == "web_extract_to_file":
+                result = web_extract_to_file_tool(config, action)
             elif action_type == "ranobehub_chapter":
                 result = ranobehub_chapter_tool(config, action)
             elif action_type == "sandbox_status":

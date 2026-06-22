@@ -37,6 +37,7 @@ from .agent_runner import (
     repair_action_json,
     result_for_model,
     run_agent,
+    GenericHtmlTextParser,
     RanobehubChapterParser,
     sandbox_status,
     safe_task_id,
@@ -105,6 +106,16 @@ def main() -> int:
     )
     if not valid_ranobehub_action.get("ok"):
         raise AssertionError(f"valid ranobehub_chapter action was rejected: {valid_ranobehub_action}")
+    valid_extract_action = agent_runner.validate_action(
+        {
+            "action": "web_extract_to_file",
+            "url": "https://example.com/page",
+            "path": "/work/page.txt",
+            "mode": "append",
+        }
+    )
+    if not valid_extract_action.get("ok"):
+        raise AssertionError(f"valid web_extract_to_file action was rejected: {valid_extract_action}")
     invalid_actions = [
         ({"action": "does_not_exist"}, "unsupported action"),
         ({"action": "web_search", "query": "OpenAI", "limit": "1"}, "invalid action schema"),
@@ -141,6 +152,25 @@ def main() -> int:
     if parsed_chapter.get("next_url") != "https://ranobehub.org/next":
         raise AssertionError(f"ranobehub parser missed next URL: {parsed_chapter}")
     print("[ok] ranobehub chapter parser")
+
+    generic_parser = GenericHtmlTextParser()
+    generic_parser.feed(
+        """
+        <html><head><title>Generic Page</title></head><body>
+        <nav>menu noise</nav>
+        <main><h1>Main title</h1><p>First useful paragraph.</p><p>Second useful paragraph.</p></main>
+        <footer>footer noise</footer>
+        </body></html>
+        """
+    )
+    generic_payload = generic_parser.payload()
+    if generic_payload.get("title") != "Generic Page" or generic_payload.get("blocks") != [
+        "Main title",
+        "First useful paragraph.",
+        "Second useful paragraph.",
+    ]:
+        raise AssertionError(f"generic HTML parser failed: {generic_payload}")
+    print("[ok] generic web extract parser")
 
     if configured_search_providers()[0] != "searxng":
         raise AssertionError(f"search providers must start with searxng: {configured_search_providers()}")

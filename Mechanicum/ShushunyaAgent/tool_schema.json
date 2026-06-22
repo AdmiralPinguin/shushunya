@@ -122,6 +122,17 @@
         "returns": "text/title/encoding for textual responses; is_binary and bytes_read without decoded text for binary responses"
       }
     },
+    "web_extract_to_file": {
+      "required": ["action", "url", "path"],
+      "properties": {
+        "action": "web_extract_to_file",
+        "url": "public_http_url",
+        "path": "sandbox_path",
+        "mode": ["write", "append"],
+        "include_title": "boolean",
+        "returns": "writes extracted page text to path and returns metadata only"
+      }
+    },
     "ranobehub_chapter": {
       "required": ["action", "url", "path"],
       "properties": {
