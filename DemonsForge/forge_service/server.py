@@ -16,6 +16,7 @@ from .registries import (
     SAMPLERS,
     SCHEDULERS,
     capabilities,
+    clear_registry_caches,
     discover_embeddings,
     discover_loras,
     discover_models,
@@ -209,6 +210,12 @@ def get_schedulers() -> list[dict[str, object]]:
 @app.get("/forge/aspect-presets")
 def get_aspect_presets() -> dict[str, dict[str, int]]:
     return ASPECT_PRESETS
+
+
+@app.post("/forge/registries/refresh")
+def refresh_registries() -> dict[str, object]:
+    clear_registry_caches()
+    return {"ok": True, "capabilities": capabilities()}
 
 
 @app.get("/forge/assets/downloads")

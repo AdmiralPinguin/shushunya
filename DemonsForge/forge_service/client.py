@@ -63,6 +63,9 @@ class DemonsForgeClient:
     def aspect_presets(self) -> dict[str, dict[str, int]]:
         return self._request("GET", "/forge/aspect-presets")
 
+    def refresh_registries(self) -> dict[str, Any]:
+        return self._request("POST", "/forge/registries/refresh")
+
     def asset_downloads(self, limit: int = 100) -> list[dict[str, Any]]:
         return self._request("GET", f"/forge/assets/downloads?limit={limit}")
 

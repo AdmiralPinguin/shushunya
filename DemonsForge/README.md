@@ -74,6 +74,7 @@ Core endpoints:
 - `GET /forge/samplers`
 - `GET /forge/schedulers`
 - `GET /forge/aspect-presets`
+- `POST /forge/registries/refresh`
 - `GET /forge/assets/downloads`
 - `POST /forge/plan`
 - `POST /forge/jobs`

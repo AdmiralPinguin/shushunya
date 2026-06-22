@@ -148,6 +148,10 @@ def main() -> None:
     aspect_presets = client.get("/forge/aspect-presets")
     assert aspect_presets.status_code == 200, aspect_presets.text
     assert aspect_presets.json()["square"]["width"] == aspect_presets.json()["square"]["height"]
+    refreshed = client.post("/forge/registries/refresh")
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["ok"] is True
+    assert "capabilities" in refreshed.json()
     downloads = client.get("/forge/assets/downloads")
     assert downloads.status_code == 200, downloads.text
     plan = client.post(
