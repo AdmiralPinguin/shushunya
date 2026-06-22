@@ -155,10 +155,16 @@ def is_meta_or_status_task(task: str) -> bool:
     if not text:
         return True
     previous_markers = ("прошл", "предыдущ", "последн")
+    unfinished_markers = ("незакончен", "не закончен", "невыполн", "не выполн", "недодел", "не додел", "незаверш", "не заверш")
     task_markers = ("задач", "таск", "task")
     memory_markers = ("помни", "вспом", "что делал", "что была", "что было")
+    command_markers = ("начни", "запусти", "продолж", "повтори", "возобнов", "сделай", "заново", "сначала")
     if any(marker in text for marker in previous_markers) and any(marker in text for marker in task_markers) and (
-        any(marker in text for marker in memory_markers) or "?" in text
+        any(marker in text for marker in memory_markers + command_markers) or "?" in text
+    ):
+        return True
+    if any(marker in text for marker in unfinished_markers) and any(marker in text for marker in task_markers) and (
+        any(marker in text for marker in memory_markers + command_markers) or "?" in text
     ):
         return True
     status_phrases = (
@@ -172,6 +178,8 @@ def is_meta_or_status_task(task: str) -> bool:
         "health",
     )
     compact = text.strip(" ?.!")
+    if len(compact) <= 80 and compact in {"еще раз", "ещё раз", "повтори", "повтори еще раз", "повтори ещё раз"}:
+        return True
     return len(compact) <= 80 and any(phrase in compact for phrase in status_phrases)
 
 

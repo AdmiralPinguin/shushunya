@@ -88,9 +88,34 @@ def main() -> int:
         raise AssertionError("previous-task command detector missed restart wording")
     if not server.asks_about_previous_task("Помнишь прошлую задачу?"):
         raise AssertionError("previous-task command detector missed memory question")
+    if not server.asks_about_previous_task("Помнишь не законченную задачу?"):
+        raise AssertionError("previous-task command detector missed unfinished-task question")
     if server.asks_about_previous_task("Начни новую задачу"):
         raise AssertionError("previous-task command detector matched unrelated task")
     print("[ok] previous task command detector")
+    if not task_journal.is_meta_or_status_task("Помнишь не законченную задачу?"):
+        raise AssertionError("unfinished-task question must be filtered from task history")
+    if not task_journal.is_meta_or_status_task("Еще раз"):
+        raise AssertionError("short repeat command must be filtered from task history")
+
+    class JournalConfig:
+        def __init__(self, task_id: str) -> None:
+            self.task_id = task_id
+
+    write_task_journal(JournalConfig("journal-real-unfinished"), "start", {"task": "Продолжи работу"})
+    write_task_journal(
+        JournalConfig("journal-real-unfinished"),
+        "final",
+        {"ok": False, "message": "Агент остановлен: достигнут лимит времени 1800s."},
+    )
+    write_task_journal(JournalConfig("journal-repeat-meta"), "start", {"task": "Еще раз"})
+    write_task_journal(JournalConfig("journal-repeat-meta"), "final", {"ok": True, "message": "smoke ok"})
+    write_task_journal(JournalConfig("journal-question-meta"), "start", {"task": "Помнишь не законченную задачу?"})
+    write_task_journal(JournalConfig("journal-question-meta"), "final", {"ok": True, "message": "wrong memory answer"})
+    previous_summary = task_journal.latest_completed_task_summary()
+    if previous_summary.get("task_id") != "journal-real-unfinished":
+        raise AssertionError(f"latest task summary did not skip meta tasks: {previous_summary}")
+    print("[ok] previous task journal summary skips meta tasks")
     if parse_action('{"action":"final","message":"ok"}').get("action") != "final":
         raise AssertionError("parse_action failed to parse a valid JSON object")
     for invalid_action_json in ('["final"]', '"final"'):
