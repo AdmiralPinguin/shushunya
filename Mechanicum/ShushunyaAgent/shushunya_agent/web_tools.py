@@ -54,6 +54,34 @@ def decode_web_text(data: bytes, charset: str | None) -> tuple[str, str]:
         return data.decode("utf-8", errors="replace"), "utf-8"
 
 
+def summarize_json_for_model(value: Any, depth: int = 0) -> Any:
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= 40:
+                result["_omitted_keys"] = len(value) - 40
+                break
+            result[str(key)] = summarize_json_for_model(item, depth + 1)
+        return result
+    if isinstance(value, list):
+        count = len(value)
+        if count == 0:
+            return {"count": 0, "items": []}
+        if all(isinstance(item, dict) for item in value):
+            if depth <= 1:
+                return {"count": count, "items": [summarize_json_for_model(item, depth + 1) for item in value[:80]], "truncated": count > 80}
+            return {
+                "count": count,
+                "first": summarize_json_for_model(value[0], depth + 1),
+                "last": summarize_json_for_model(value[-1], depth + 1),
+            }
+        sample = [summarize_json_for_model(item, depth + 1) for item in value[:20]]
+        return {"count": count, "sample": sample, "truncated": count > 20}
+    if isinstance(value, str):
+        return truncate(value, 300)
+    return value
+
+
 def validate_public_url(raw_url: str) -> str:
     parsed = urlparse(str(raw_url).strip())
     if parsed.scheme not in {"http", "https"}:
@@ -343,6 +371,23 @@ def web_fetch(config: WebConfig, url: str, max_bytes: int | None = None) -> dict
             }
         text, charset = decode_web_text(data, response.headers.get_content_charset())
         title = ""
+        if "json" in content_type.lower() or text.lstrip().startswith(("{", "[")):
+            try:
+                return {
+                    "ok": True,
+                    "url": final_url,
+                    "status": getattr(response, "status", 200),
+                    "content_type": content_type,
+                    "encoding": charset,
+                    "title": title,
+                    "truncated": truncated,
+                    "bytes_read": len(data),
+                    "is_binary": False,
+                    "json_summary": summarize_json_for_model(json.loads(text)),
+                    "text_note": "JSON response compacted for model context; use a targeted API/file action if exact raw JSON is needed",
+                }
+            except json.JSONDecodeError:
+                pass
         if "html" in content_type.lower() or "<html" in text[:500].lower():
             parser = WebTextExtractor()
             parser.feed(text)

@@ -402,6 +402,36 @@ def main() -> int:
     if first_volume.get("chapters", {}).get("count") != 29 or "first" not in first_volume.get("chapters", {}):
         raise AssertionError(f"web_fetch JSON nested list summary failed: {compacted_json}")
     print("[ok] web_fetch JSON result summarized for model context")
+    class FakeHeaders(dict):
+        def get_content_charset(self):
+            return "utf-8"
+
+    class FakeResponse:
+        status = 200
+        headers = FakeHeaders({"Content-Type": "application/json"})
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def geturl(self):
+            return "https://example.com/data.json"
+
+        def read(self, size):
+            payload = json.dumps({"volumes": [{"num": index, "chapters": [{"num": chapter} for chapter in range(30)]} for index in range(40)]}).encode()
+            return payload[:size]
+
+    class FakeOpener:
+        def open(self, request, timeout=30):
+            return FakeResponse()
+
+    with mock.patch.object(web_tools, "validate_public_url", lambda url: url), mock.patch.object(web_tools, "build_opener", lambda *_args, **_kwargs: FakeOpener()):
+        fetched_json = web_tools.web_fetch(AgentConfig(max_tool_output_chars=100), "https://example.com/data.json", 200000)
+    if "text" in fetched_json or fetched_json.get("json_summary", {}).get("volumes", {}).get("count") != 40:
+        raise AssertionError(f"web_fetch did not summarize full JSON before truncating text: {fetched_json}")
+    print("[ok] web_fetch summarizes full JSON responses")
 
     large_links_result = {
         "ok": True,
