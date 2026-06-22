@@ -129,7 +129,7 @@
         "url": "public_http_url",
         "pattern": "optional regex or plain text filter applied to link text/url/class/title",
         "limit": "integer",
-        "returns": "normalized public links plus script sources and custom elements for SPA/API discovery"
+        "returns": "normalized public links plus script sources, custom elements, and likely API candidates for SPA/API discovery"
       }
     },
     "web_extract_to_file": {

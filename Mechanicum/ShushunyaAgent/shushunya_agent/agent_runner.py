@@ -199,7 +199,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Если нужно сохранить текст из web_fetch, не копируй весь текст в JSON. Сохрани URL/метаданные, затем используй более узкие fetch/read/append шаги.
 - Для сохранения больших HTML-страниц используй web_extract_to_file: он сам скачает, очистит и запишет текст в файл. Не копируй большой текст в write_file content.
 - Когда нужно продолжать по оглавлению, пагинации или списку глав, сначала используй web_links по странице оглавления. Не угадывай следующие URL арифметикой, если tool result дает ссылку на страницу другого тома/раздела.
-- Если web_links показывает мало ссылок, но есть scripts/custom_elements, страница может быть SPA. Изучи custom_elements и scripts, затем fetch публичных JSON endpoint-ов по видимым id/именам компонентов вместо угадывания URL глав.
+- Если web_links показывает мало ссылок, но есть scripts/custom_elements, страница может быть SPA. Если web_links вернул api_candidates, сначала пробуй кандидаты с высоким score; иначе изучи custom_elements и scripts, затем fetch публичных JSON endpoint-ов по видимым id/именам компонентов вместо угадывания URL глав.
 - Для страниц глав Ranobehub можно использовать ranobehub_chapter как более точный адаптер, но общий путь для сайтов — web_extract_to_file.
 - Перед чтением неизвестного или большого файла сначала используй file_info/find_files/search_text. Не читай файл целиком; используй read_file с max_bytes и offset небольшими кусками.
 - replace_in_file предназначен для небольших текстовых файлов; если файл большой, сначала используй read_file/search_text и меняй подход.
@@ -940,6 +940,77 @@ class WebLinksParser(HTMLParser):
         }
 
 
+def component_id_values(custom_elements: list[dict[str, Any]]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for component in custom_elements:
+        attrs = component.get("attrs") if isinstance(component.get("attrs"), dict) else {}
+        for key, value in attrs.items():
+            clean_key = str(key).lstrip(":").replace("-", "_")
+            clean_value = str(value).strip().strip("\"'")
+            if not clean_value or len(clean_value) > 80:
+                continue
+            if clean_value.isdigit():
+                values.setdefault(clean_key, clean_value)
+    for alias in ("ranobe", "ranobe_id", "ranobeId"):
+        if alias in values:
+            values.setdefault("id", values[alias])
+            values.setdefault("ranobe", values[alias])
+            values.setdefault("ranobeId", values[alias])
+            values.setdefault("ranobe_id", values[alias])
+    return values
+
+
+def fill_api_placeholders(path: str, values: dict[str, str]) -> str | None:
+    def replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        normalized = key.replace("-", "_")
+        return values.get(key) or values.get(normalized) or ""
+
+    filled = re.sub(r"\{([A-Za-z0-9_-]+)\}", replace, path)
+    if "{" in filled or "}" in filled or "//" in filled.replace("://", "§§"):
+        return None
+    return filled
+
+
+def scan_script_api_candidates(base_url: str, scripts: list[str], custom_elements: list[dict[str, Any]], max_scripts: int = 5) -> list[dict[str, Any]]:
+    base_host = urlparse(base_url).netloc
+    values = component_id_values(custom_elements)
+    candidates: dict[str, dict[str, Any]] = {}
+    for script_url in scripts[:max_scripts]:
+        parsed = urlparse(script_url)
+        if parsed.scheme not in {"http", "https"} or parsed.netloc != base_host:
+            continue
+        try:
+            validate_public_url(script_url)
+            request = Request(script_url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "application/javascript,text/javascript,*/*"})
+            with build_opener(SafeRedirectHandler).open(request, timeout=20) as response:
+                data, _truncated = read_limited_response(response, 2500000)
+                content_type = response.headers.get("Content-Type", "")
+                if not is_textual_content(content_type, data):
+                    continue
+                text, _encoding = decode_web_text(data, response.headers.get_content_charset())
+        except Exception:
+            continue
+        for match in re.finditer(r"(?<![A-Za-z0-9_/-])/?api/[A-Za-z0-9_./{}?=&:%-]+", text):
+            raw_path = match.group(0)
+            if len(raw_path) > 220:
+                continue
+            filled = fill_api_placeholders(raw_path if raw_path.startswith("/") else "/" + raw_path, values)
+            if not filled:
+                continue
+            absolute = urljoin(base_url, filled)
+            score = 0
+            lowered = filled.lower()
+            if any(token in lowered for token in ("control", "admin", "editor", "user", "subscription", "like", "transactions", "firewall", "broadcasting/auth")):
+                continue
+            if "contents" in lowered:
+                score += 40
+            if "ranobe" in lowered or "book" in lowered or "chapter" in lowered:
+                score += 15
+            candidates[absolute] = {"url": absolute, "path": filled, "source_script": script_url, "score": score}
+    return sorted(candidates.values(), key=lambda item: (-int(item.get("score", 0)), str(item.get("path", ""))))[:80]
+
+
 def clean_ranobehub_text(text: str) -> str:
     cleaned = " ".join(str(text or "").split())
     cleaned = re.sub(r"\s+([,.;:!?…»”）\]])", r"\1", cleaned)
@@ -1153,6 +1224,7 @@ def web_links_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any
     parser = WebLinksParser(final_url or raw_url)
     parser.feed(text)
     payload = parser.payload(pattern=pattern, limit=limit)
+    api_candidates = scan_script_api_candidates(final_url or raw_url, payload.get("scripts", []), payload.get("custom_elements", []))
     return {
         "ok": True,
         "url": raw_url,
@@ -1163,6 +1235,7 @@ def web_links_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any
         "bytes_read": len(data),
         "source_truncated": truncated,
         "pattern": pattern,
+        "api_candidates": api_candidates,
         **payload,
     }
 

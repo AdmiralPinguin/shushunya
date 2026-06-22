@@ -275,6 +275,16 @@ def main() -> int:
         raise AssertionError(f"web links parser missed scripts: {links_payload}")
     if not any(item.get("tag") == "ranobe-contents" and item.get("attrs", {}).get(":ranobe-id") == "966" for item in links_payload.get("custom_elements", [])):
         raise AssertionError(f"web links parser missed custom elements: {links_payload}")
+    candidates = agent_runner.scan_script_api_candidates(
+        "https://example.com/book",
+        [],
+        [{"tag": "ranobe-contents", "attrs": {":ranobe-id": "966"}}],
+    )
+    if candidates:
+        raise AssertionError(f"web links script scanner should not invent candidates without scripts: {candidates}")
+    filled = agent_runner.fill_api_placeholders("/api/ranobe/{ranobe}/contents", {":ranobe-id": "966", "ranobe": "966"})
+    if filled != "/api/ranobe/966/contents":
+        raise AssertionError(f"web links placeholder fill failed: {filled}")
     print("[ok] web links parser")
 
     if configured_search_providers()[0] != "searxng":
