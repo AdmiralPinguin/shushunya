@@ -298,6 +298,19 @@ def main() -> None:
         },
     )
     assert missing_model.status_code == 400, missing_model.text
+    flux_guidance = client.post(
+        "/forge/jobs?dry_run=true",
+        json={
+            "type": "txt2img",
+            "engine": "flux",
+            "prompt": "flux guidance",
+            "width": 512,
+            "height": 512,
+            "steps": 1,
+            "guidance": 5.0,
+        },
+    )
+    assert flux_guidance.status_code == 400, flux_guidance.text
     img2img_dry_run = client.post(
         "/forge/jobs?dry_run=true",
         json={

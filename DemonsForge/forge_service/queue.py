@@ -127,6 +127,9 @@ class ForgeQueue:
             raise RuntimeError(f"unsupported scheduler: {spec.scheduler}")
         if spec.negative_prompt and not meta.get("supports_negative_prompt"):
             raise RuntimeError(f"{engine_name} does not support negative_prompt")
+        if engine_name == "flux":
+            if spec.guidance not in {None, 0, 0.0} or spec.cfg not in {None, 0, 0.0}:
+                raise RuntimeError("flux adapter currently runs with guidance/cfg fixed at 0.0")
         if spec.loras and not meta.get("supports_lora"):
             raise RuntimeError(f"{engine_name} does not support LoRA")
         for lora in spec.loras:
