@@ -50,6 +50,7 @@ available logical CPU cores for CPU math thread pools by default.
 ```bash
 ./start-forge-api.sh
 # http://localhost:8110
+./check-forge-api.sh
 ```
 
 By default the API starts an embedded worker thread. To isolate generation from
