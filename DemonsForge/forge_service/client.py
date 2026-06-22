@@ -48,6 +48,15 @@ class DemonsForgeClient:
     def loras(self) -> list[dict[str, Any]]:
         return self._request("GET", "/forge/loras")
 
+    def samplers(self) -> list[str]:
+        return self._request("GET", "/forge/samplers")
+
+    def schedulers(self) -> list[dict[str, Any]]:
+        return self._request("GET", "/forge/schedulers")
+
+    def aspect_presets(self) -> dict[str, dict[str, int]]:
+        return self._request("GET", "/forge/aspect-presets")
+
     def asset_downloads(self, limit: int = 100) -> list[dict[str, Any]]:
         return self._request("GET", f"/forge/assets/downloads?limit={limit}")
 

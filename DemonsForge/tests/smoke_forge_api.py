@@ -127,6 +127,15 @@ def main() -> None:
     assert duplicate_memory_proposal.json()["duplicate"] is True
     schema = client.get("/forge/schema/job")
     assert schema.status_code == 200, schema.text
+    samplers = client.get("/forge/samplers")
+    assert samplers.status_code == 200, samplers.text
+    assert "default" in samplers.json()
+    schedulers = client.get("/forge/schedulers")
+    assert schedulers.status_code == 200, schedulers.text
+    assert any(item["name"] == "native" for item in schedulers.json())
+    aspect_presets = client.get("/forge/aspect-presets")
+    assert aspect_presets.status_code == 200, aspect_presets.text
+    assert aspect_presets.json()["square"]["width"] == aspect_presets.json()["square"]["height"]
     downloads = client.get("/forge/assets/downloads")
     assert downloads.status_code == 200, downloads.text
     plan = client.post(
