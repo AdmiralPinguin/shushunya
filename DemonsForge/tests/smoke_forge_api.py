@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from forge_service.server import app
 from forge_service.client import DemonsForgeClient
+from forge_service.queue import ForgeQueue
+from forge_service.schemas import JobSpec
 from forge_service.server import store
 
 
@@ -62,6 +64,16 @@ def main() -> None:
     resumed = client.post("/forge/queue/resume")
     assert resumed.status_code == 200, resumed.text
     assert resumed.json()["paused"] is False
+    external_worker = ForgeQueue(store, start_worker=False)
+    external_worker.pause()
+    paused_job = external_worker.submit(
+        JobSpec(type="prompt-enhance", prompt="external worker pause check")
+    )
+    assert external_worker.run_pending_once() is False
+    assert store.get_job(paused_job.id).status.value == "queued"
+    external_worker.resume()
+    assert external_worker.run_pending_once() is True
+    assert store.get_job(paused_job.id).status.value == "succeeded"
     memory_policy = client.get("/forge/memory/policy")
     assert memory_policy.status_code == 200, memory_policy.text
     assert "asset approvals/rejections" in memory_policy.json()["durable_topics"]

@@ -144,6 +144,8 @@ class ForgeQueue:
                 self._queue.task_done()
 
     def run_pending_once(self) -> bool:
+        if self.store.get_runtime_flag("queue_paused", default=False):
+            return False
         queued = self.store.list_jobs(status=JobStatus.queued.value, limit=1)
         if not queued:
             return False
