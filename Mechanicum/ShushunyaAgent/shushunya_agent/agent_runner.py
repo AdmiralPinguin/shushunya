@@ -336,7 +336,7 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
         if len(matches) > 80:
             payload["omitted_matches"] = len(matches) - 80
     elif action_type in {"archive_search", "archive_memory_gateway", "archive_memory_catalog", "archive_memory_search", "archive_memory_read", "archive_memory_propose"}:
-        payload = compact_json_value(payload, string_limit=3000, list_limit=12)
+        payload = compact_json_value(payload, string_limit=1000, list_limit=5)
     if action_type == "web_links":
         return compact_json_value(payload, string_limit=300, list_limit=20)
     return compact_json_value(payload, string_limit=config.max_tool_output_chars, list_limit=100)
@@ -1221,6 +1221,22 @@ def ranobehub_chapter_tool(config: AgentConfig, action: dict[str, Any]) -> dict[
             charset = response.headers.get_content_charset()
             html_text, encoding = decode_web_text(data, charset)
             status = getattr(response, "status", 200)
+    except HTTPError as exc:
+        if exc.code == 404:
+            return {
+                "ok": True,
+                "url": raw_url,
+                "status": 404,
+                "title": "",
+                "path": path,
+                "mode": mode,
+                "paragraphs": 0,
+                "chars": 0,
+                "bytes_written": 0,
+                "skipped_not_found": True,
+                "instruction": "URL returned 404. Do not retry this URL; continue using the last known next_url or the contents/API map.",
+            }
+        return {"ok": False, "error": str(exc), "url": raw_url, "status": exc.code}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
