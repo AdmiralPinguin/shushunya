@@ -244,6 +244,16 @@ def main() -> None:
     assert planned_flux.status_code == 200, planned_flux.text
     if planned_flux.json()["engine"] == "flux":
         assert "runtime_warning" in planned_flux.json()["safety"]
+    planned_flux_guidance = client.post(
+        "/forge/plan",
+        json={"request": "flux 512x512 steps 1 guidance 5 portrait"},
+    )
+    assert planned_flux_guidance.status_code == 200, planned_flux_guidance.text
+    if planned_flux_guidance.json()["engine"] == "flux":
+        assert planned_flux_guidance.json()["guidance"] == 0.0
+        assert "guidance_warning" in planned_flux_guidance.json()["safety"]
+        flux_plan_dry_run = client.post("/forge/jobs?dry_run=true", json=planned_flux_guidance.json())
+        assert flux_plan_dry_run.status_code == 200, flux_plan_dry_run.text
     dry_run = client.post(
         "/forge/jobs?dry_run=true",
         json={

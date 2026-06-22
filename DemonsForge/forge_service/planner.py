@@ -222,6 +222,10 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
             "or choose sdxl for quicker iteration."
         )
     guidance, cfg = _guidance(text, engine_caps["guidance_default"])
+    if engine == "flux" and ((guidance or 0) != 0 or (cfg or 0) != 0):
+        guidance = 0.0
+        cfg = None
+        safety["guidance_warning"] = "Flux adapter currently runs with guidance/cfg fixed at 0.0."
 
     spec = JobSpec(
         type=job_type,
