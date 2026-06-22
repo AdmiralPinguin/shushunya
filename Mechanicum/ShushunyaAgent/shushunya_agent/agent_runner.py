@@ -616,6 +616,52 @@ REQUIRED_FIELDS = {
 }
 
 
+SANDBOX_ARTIFACT_PATH_RE = re.compile(
+    r"(?<![\w/])(/(?:work|artifacts|sandbox-tmp|state|logs|models|tools|home/agent)/[^\s\"'`<>]+)"
+)
+
+
+def extract_sandbox_paths_from_text(text: str) -> list[str]:
+    paths: list[str] = []
+    seen: set[str] = set()
+    for match in SANDBOX_ARTIFACT_PATH_RE.finditer(text or ""):
+        path = match.group(1).rstrip(".,;:!?)]}»”")
+        if path and path not in seen:
+            seen.add(path)
+            paths.append(path)
+    return paths[:20]
+
+
+def validate_final_artifacts(config: AgentConfig, message: str) -> dict[str, Any]:
+    paths = extract_sandbox_paths_from_text(message)
+    if not paths:
+        return {"ok": True, "paths": []}
+    checked: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    for path in paths:
+        result = file_tool(config, {"action": "file_info", "path": path})
+        record = {
+            "path": path,
+            "ok": bool(result.get("ok")),
+            "exists": bool(result.get("exists")),
+            "type": result.get("type"),
+            "size": result.get("size"),
+            "error": result.get("error"),
+        }
+        checked.append(record)
+        if not result.get("ok"):
+            failures.append({**record, "reason": "file_info_failed"})
+            continue
+        if not result.get("exists"):
+            failures.append({**record, "reason": "missing"})
+            continue
+        if result.get("type") == "file" and int(result.get("size") or 0) <= 0:
+            failures.append({**record, "reason": "empty_file"})
+    if failures:
+        return {"ok": False, "paths": paths, "checked": checked, "failures": failures[:10]}
+    return {"ok": True, "paths": paths, "checked": checked}
+
+
 def validate_action(action: dict[str, Any]) -> dict[str, Any]:
     return validate_action_schema(action)
 
@@ -1939,9 +1985,30 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
 
         if action_type == "final":
             message = str(action.get("message", "")).strip()
+            artifact_validation = validate_final_artifacts(config, message)
+            if not artifact_validation.get("ok"):
+                warning_message = (
+                    "Supervisor rejected final because mentioned sandbox artifacts are missing or empty: "
+                    + json.dumps(artifact_validation, ensure_ascii=False)
+                )
+                emit(event_sink, {"type": "warning", "code": "final_artifact_validation_failed", "step": step, "message": warning_message})
+                messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            warning_message
+                            + "\nVerify or create the required files, then return final only after file_info confirms them."
+                        ),
+                    }
+                )
+                continue
             duration_sec = round(time.time() - run_started, 3)
-            emit(event_sink, {"type": "final", "step": step, "ok": True, "message": message, "duration_sec": duration_sec})
-            write_task_journal(config, "final", {"step": step, "ok": True, "message": message, "duration_sec": duration_sec})
+            final_payload = {"step": step, "ok": True, "message": message, "duration_sec": duration_sec}
+            if artifact_validation.get("paths"):
+                final_payload["artifact_validation"] = artifact_validation
+            emit(event_sink, {"type": "final", **final_payload})
+            write_task_journal(config, "final", final_payload)
             if config.json_output:
                 print(json.dumps({"ok": True, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
             else:

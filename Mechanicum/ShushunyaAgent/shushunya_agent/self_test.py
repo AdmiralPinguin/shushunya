@@ -50,6 +50,8 @@ from .agent_runner import (
     web_search,
     write_task_journal,
     looks_like_oversized_inline_file_action,
+    extract_sandbox_paths_from_text,
+    validate_final_artifacts,
 )
 
 
@@ -1000,6 +1002,40 @@ def main() -> int:
     if not any(event.get("type") == "final" and "duration_sec" in event for event in final_events):
         raise AssertionError(f"final event did not include duration: {final_events}")
     print("[ok] final event duration")
+
+    extracted_paths = extract_sandbox_paths_from_text(
+        "Готово: /work/book.txt, /artifacts/out.fb2 и https://example.com/work/nope"
+    )
+    if extracted_paths != ["/work/book.txt", "/artifacts/out.fb2"]:
+        raise AssertionError(f"final artifact path extraction failed: {extracted_paths}")
+    with mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/missing.txt", "exists": False}):
+        artifact_check = validate_final_artifacts(config, "Создан /work/missing.txt")
+    if artifact_check.get("ok") or artifact_check.get("failures", [{}])[0].get("reason") != "missing":
+        raise AssertionError(f"missing final artifact was not rejected: {artifact_check}")
+    rejected_final_events: list[dict] = []
+    rejected_final_stdout = io.StringIO()
+    rejected_final_config = AgentConfig(
+        task_id=safe_task_id("self-test-final-artifact-validation"),
+        json_output=True,
+        max_steps=2,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    final_replies = [
+        '{"action":"final","message":"Создан /work/missing.txt"}',
+        '{"action":"final","message":"Файл не был создан; задача не выполнена."}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=final_replies), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/missing.txt", "exists": False}), \
+            contextlib.redirect_stdout(rejected_final_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        rejected_final_code = run_agent("return missing artifact final", rejected_final_config, event_sink=rejected_final_events.append)
+    rejected_final_payload = json.loads(rejected_final_stdout.getvalue())
+    if rejected_final_code != 0 or rejected_final_payload.get("message") != "Файл не был создан; задача не выполнена.":
+        raise AssertionError(f"artifact validation did not recover to corrected final: {rejected_final_payload}")
+    if not any(event.get("code") == "final_artifact_validation_failed" for event in rejected_final_events):
+        raise AssertionError(f"missing artifact warning was not emitted: {rejected_final_events}")
+    print("[ok] final artifact validation")
 
     limit_stdout = io.StringIO()
     limit_config = AgentConfig(
