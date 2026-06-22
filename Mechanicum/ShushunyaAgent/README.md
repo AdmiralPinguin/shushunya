@@ -6,6 +6,11 @@ The runner has no long-term memory. It talks to `ArchiveOfHeresy` for model
 responses and memory context, then executes allowed actions through the isolated
 sandbox on the `ARCHIVE` disk.
 
+`scripts/start-agent-api.sh` loads `ArchiveOfHeresy/.env` and exports
+`SHUSHUNYA_AGENT_ARCHIVE_API_KEY` from `ARCHIVE_API_KEY` when the dedicated
+agent variable is not already set. This is required because the Agent API calls
+back into `ArchiveOfHeresy` for every model step and memory operation.
+
 Default flow:
 
 ```text

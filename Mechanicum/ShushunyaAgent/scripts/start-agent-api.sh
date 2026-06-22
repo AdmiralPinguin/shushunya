@@ -2,12 +2,23 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$(cd "$ROOT/../.." && pwd)"
 RUNTIME_DIR="$ROOT/runtime"
 PID_FILE="$RUNTIME_DIR/agent-api.pid"
 LOG_FILE="$RUNTIME_DIR/agent-api.log"
 PYTHON="$ROOT/ShushunyaAgent/bin/python"
 BASE_URL="http://${SHUSHUNYA_AGENT_HOST:-127.0.0.1}:${SHUSHUNYA_AGENT_PORT:-8095}"
 HEALTH_PATH="${SHUSHUNYA_AGENT_START_CHECK_PATH:-/health}"
+
+ARCHIVE_ENV="$PROJECT_ROOT/ArchiveOfHeresy/.env"
+if [[ -f "$ARCHIVE_ENV" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ARCHIVE_ENV"
+  set +a
+fi
+export SHUSHUNYA_AGENT_ARCHIVE_API_KEY="${SHUSHUNYA_AGENT_ARCHIVE_API_KEY:-${ARCHIVE_API_KEY:-}}"
+
 AUTH_ARGS=()
 if [[ -n "${SHUSHUNYA_AGENT_API_KEY:-}" ]]; then
   AUTH_ARGS=(-H "Authorization: Bearer $SHUSHUNYA_AGENT_API_KEY")
