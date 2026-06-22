@@ -148,6 +148,9 @@ def main() -> None:
     store.delete_memory_proposal(duplicate_hash)
     schema = client.get("/forge/schema/job")
     assert schema.status_code == 200, schema.text
+    engines = client.get("/forge/engines")
+    assert engines.status_code == 200, engines.text
+    assert "sdxl" in engines.json()
     embeddings = client.get("/forge/embeddings")
     assert embeddings.status_code == 200, embeddings.text
     assert isinstance(embeddings.json(), list)

@@ -48,6 +48,9 @@ class DemonsForgeClient:
     def models(self) -> list[dict[str, Any]]:
         return self._request("GET", "/forge/models")
 
+    def engines(self) -> dict[str, Any]:
+        return self._request("GET", "/forge/engines")
+
     def loras(self) -> list[dict[str, Any]]:
         return self._request("GET", "/forge/loras")
 

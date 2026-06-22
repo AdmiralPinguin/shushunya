@@ -188,6 +188,11 @@ def get_models() -> list[dict[str, object]]:
     return discover_models()
 
 
+@app.get("/forge/engines")
+def get_engines() -> dict[str, object]:
+    return capabilities()["engines"]
+
+
 @app.get("/forge/loras")
 def get_loras() -> list[dict[str, object]]:
     return discover_loras()
