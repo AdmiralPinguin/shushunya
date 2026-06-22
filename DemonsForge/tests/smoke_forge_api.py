@@ -244,6 +244,16 @@ def main() -> None:
         },
     )
     assert img2img_dry_run.status_code == 200, img2img_dry_run.text
+    upscale_dry_run = client.post(
+        "/forge/jobs?dry_run=true",
+        json={
+            "type": "upscale",
+            "source_images": [str(input_image.relative_to(root))],
+            "upscale_factor": 2,
+        },
+    )
+    assert upscale_dry_run.status_code == 200, upscale_dry_run.text
+    assert upscale_dry_run.json()["resource_estimate"]["upscale"]["output_dimensions"]["width"] == 32
     rejected_download = client.post(
         "/forge/jobs?dry_run=true",
         json={

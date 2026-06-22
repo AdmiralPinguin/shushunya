@@ -93,7 +93,8 @@ class ForgeQueue:
         elif spec.type == JobType.upscale:
             if not spec.source_images:
                 raise RuntimeError("upscale requires source_images")
-            self._resolve_input_path(spec.source_images[0])
+            source_path = self._resolve_input_path(spec.source_images[0])
+            estimate["upscale"] = self._upscale_estimate(source_path, spec.upscale_factor)
         elif spec.type == JobType.asset_download:
             if spec.asset_download is None:
                 raise RuntimeError("asset-download requires asset_download payload")
@@ -280,6 +281,22 @@ class ForgeQueue:
             raise RuntimeError(f"input path does not exist: {resolved}")
         return resolved
 
+    def _upscale_estimate(self, source_image: Path, upscale_factor: int) -> dict[str, object]:
+        with Image.open(source_image) as image:
+            source_width, source_height = image.size
+        output_width = source_width * upscale_factor
+        output_height = source_height * upscale_factor
+        output_pixels = output_width * output_height
+        pixel_budget = config.MAX_WIDTH * config.MAX_HEIGHT
+        if output_pixels > pixel_budget:
+            raise RuntimeError("upscale output exceeds conservative pixel budget")
+        return {
+            "source_dimensions": {"width": source_width, "height": source_height},
+            "output_dimensions": {"width": output_width, "height": output_height},
+            "output_pixel_count": output_pixels,
+            "pixel_budget": pixel_budget,
+        }
+
     def _execute_txt2img(self, job_id: str, spec: JobSpec) -> None:
         if not spec.prompt or not spec.prompt.strip():
             raise RuntimeError("txt2img requires prompt")
@@ -336,6 +353,7 @@ class ForgeQueue:
         if not spec.source_images:
             raise RuntimeError("upscale requires source_images")
         source_image = self._resolve_input_path(spec.source_images[0])
+        self._upscale_estimate(source_image, spec.upscale_factor)
         with Image.open(source_image) as image:
             image = image.convert("RGB")
             new_size = (image.width * spec.upscale_factor, image.height * spec.upscale_factor)
