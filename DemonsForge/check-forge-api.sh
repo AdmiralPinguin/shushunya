@@ -25,6 +25,7 @@ curl_json GET /forge/embeddings | "$PYTHON_BIN" -m json.tool >/dev/null
 curl_json GET /forge/schedulers | "$PYTHON_BIN" -m json.tool >/dev/null
 curl_json GET /forge/queue | "$PYTHON_BIN" -m json.tool >/dev/null
 curl_json GET /forge/schema/job | "$PYTHON_BIN" -m json.tool >/dev/null
+curl_json GET /forge/memory/status | "$PYTHON_BIN" -m json.tool >/dev/null
 curl_json POST /forge/plan '{"request":"SDXL 512x512 steps 1 smoke portrait"}' | "$PYTHON_BIN" -m json.tool >/dev/null
 
 echo "forge api smoke ok: $BASE_URL"
