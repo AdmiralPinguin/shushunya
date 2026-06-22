@@ -187,6 +187,12 @@ def main() -> None:
     )
     assert plan_without_memory.status_code == 200, plan_without_memory.text
     assert plan_without_memory.json()["safety"]["memory_context"]["reason"] == "disabled by request"
+    smoke_plan = client.post(
+        "/forge/plan",
+        json={"request": "SDXL 512x512 smoke portrait", "use_memory": False},
+    )
+    assert smoke_plan.status_code == 200, smoke_plan.text
+    assert smoke_plan.json()["steps"] == 1
     planned_custom = client.post(
         "/forge/plan",
         json={"request": "SDXL 512x768 steps 7 seed 123 cinematic portrait"},

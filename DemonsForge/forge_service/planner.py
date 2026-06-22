@@ -103,6 +103,8 @@ def _local_loras(text: str) -> list[LoraRef]:
 def _steps(text: str, default: int) -> int:
     match = re.search(r"(?:steps|шаг(?:ов|и|а)?)\s*[:=]?\s*(\d{1,3})", text, re.I)
     if not match:
+        if any(token in text.lower() for token in ["smoke", "быстро", "тест", "test"]):
+            return 1
         return min(default, 20)
     return max(1, min(int(match.group(1)), 60))
 
