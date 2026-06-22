@@ -156,6 +156,20 @@ def main() -> None:
     assert planned_img2img.json()["type"] == "img2img"
     assert planned_img2img.json()["engine"] == "sdxl"
     assert "source_images" in planned_img2img.json()["safety"]["planner_note"]
+    planned_missing_lora = client.post(
+        "/forge/plan",
+        json={"request": "Нарисуй портрет lora: definitely_missing_lora"},
+    )
+    assert planned_missing_lora.status_code == 200, planned_missing_lora.text
+    missing_lora_spec = planned_missing_lora.json()
+    assert missing_lora_spec["asset_request"]["asset_type"] == "lora"
+    assert missing_lora_spec["asset_request"]["requires_user_approval"] is True
+    planned_control = client.post(
+        "/forge/plan",
+        json={"request": "Сделай pose controlnet depth для персонажа"},
+    )
+    assert planned_control.status_code == 200, planned_control.text
+    assert planned_control.json()["asset_request"]["asset_type"] == "control_asset"
     dry_run = client.post(
         "/forge/jobs?dry_run=true",
         json={

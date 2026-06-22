@@ -50,20 +50,39 @@ def _aspect(text: str) -> tuple[int, int, str | None]:
 
 def _asset_request_if_needed(text: str) -> AssetRequest | None:
     lowered = text.lower()
+    if "controlnet" in lowered or "контрол" in lowered:
+        return AssetRequest(
+            name="ControlNet asset requested by prompt",
+            asset_type="control_asset",
+            candidate_source="user-provided local file or approved model page",
+            license_note="Unknown until the user confirms the exact asset.",
+            risks=["control models can have incompatible licenses", "unverified weights can be unsafe"],
+            requires_user_approval=True,
+        )
+    if "ip-adapter" in lowered or "ip adapter" in lowered or "айпи адаптер" in lowered:
+        return AssetRequest(
+            name="IP-Adapter asset requested by prompt",
+            asset_type="ip_adapter",
+            candidate_source="user-provided local file or approved model page",
+            license_note="Unknown until the user confirms the exact asset.",
+            risks=["adapter license may restrict usage", "unverified weights can be unsafe"],
+            requires_user_approval=True,
+        )
     match = re.search(r"(lora|лора|модель)\s*[:=]?\s*([A-Za-zА-Яа-я0-9_. -]{3,64})", text, re.I)
     if not match:
         match = re.search(r"персонаж\s+([A-Za-zА-Яа-я0-9_. -]{3,48})", text, re.I)
     if not match:
         return None
     name = match.group(match.lastindex or 1).strip(" .,:;")
-    existing = capabilities()["loras"]
-    if any(item["name"].lower() == name.lower() for item in existing):
-        return None
+    caps = capabilities()
     asset_type = "lora" if "lora" in lowered or "лора" in lowered else "model"
+    local_items = caps["loras"] if asset_type == "lora" else caps["models"]
+    if any(item["name"].lower() == name.lower() for item in local_items):
+        return None
     return AssetRequest(
         name=name,
         asset_type=asset_type,
-        candidate_source="huggingface.co or civitai.com",
+        candidate_source="user-provided approved URL, huggingface.co, or civitai.com",
         license_note="Unknown until the user confirms the exact asset page.",
         risks=["license may restrict commercial or character usage", "unverified weights can be unsafe"],
         requires_user_approval=True,
