@@ -32,6 +32,8 @@ def main() -> None:
     test_inputs.mkdir(parents=True, exist_ok=True)
     input_image = test_inputs / "upscale_source.png"
     Image.new("RGB", (16, 16), (128, 32, 16)).save(input_image)
+    existing_asset = test_inputs / "existing_asset.safetensors"
+    existing_asset.write_bytes(b"already here")
 
     client = TestClient(app)
     health = client.get("/health")
@@ -315,6 +317,20 @@ def main() -> None:
         },
     )
     assert rejected_bad_hash.status_code == 400, rejected_bad_hash.text
+    rejected_existing_asset = client.post(
+        "/forge/jobs?dry_run=true",
+        json={
+            "type": "asset-download",
+            "asset_download": {
+                "name": "existing_asset",
+                "asset_type": "lora",
+                "source_url": "https://huggingface.co/example/repo/resolve/main/existing_asset.safetensors",
+                "target_dir": str(test_inputs.relative_to(root)),
+                "approved": True,
+            },
+        },
+    )
+    assert rejected_existing_asset.status_code == 400, rejected_existing_asset.text
     prompt_enhance = client.post(
         "/forge/jobs",
         json={

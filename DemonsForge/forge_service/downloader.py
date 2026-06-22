@@ -50,6 +50,10 @@ def validate_download_spec(spec: AssetDownloadSpec) -> None:
         raise DownloadError("asset name contains unsupported characters")
     if spec.sha256 and not re.fullmatch(r"[A-Fa-f0-9]{64}", spec.sha256):
         raise DownloadError("sha256 must be a 64-character hexadecimal digest")
+    suffix = Path(parsed.path).suffix or ".bin"
+    target = target_dir_for(spec) / f"{spec.name}{suffix}"
+    if target.exists():
+        raise DownloadError(f"target asset already exists: {target}")
 
 
 def download_asset(spec: AssetDownloadSpec) -> dict[str, object]:
