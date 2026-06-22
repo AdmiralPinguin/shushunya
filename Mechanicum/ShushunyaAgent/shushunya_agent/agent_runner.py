@@ -13,7 +13,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode, urlparse
+from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import Request, build_opener, urlopen
 
 from .task_journal import (
@@ -178,13 +178,16 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 {"action":"web_search","query":"поисковый запрос","limit":5}
 {"action":"web_fetch","url":"https://example.com/page","max_bytes":200000}
 
-11. Извлечь текст публичной HTML-страницы напрямую в sandbox-файл без копирования текста через JSON:
+11. Извлечь ссылки публичной HTML-страницы:
+{"action":"web_links","url":"https://example.com/page","pattern":"глава|том|chapter|volume","limit":100}
+
+12. Извлечь текст публичной HTML-страницы напрямую в sandbox-файл без копирования текста через JSON:
 {"action":"web_extract_to_file","url":"https://example.com/page","path":"/work/page.txt","mode":"write"}
 
-12. Скачать главу Ranobehub напрямую в sandbox-файл через site adapter:
+13. Скачать главу Ranobehub напрямую в sandbox-файл через site adapter:
 {"action":"ranobehub_chapter","url":"https://ranobehub.org/ranobe/966/10/9","path":"/work/slime/vol10_ch09.txt","mode":"write"}
 
-13. Завершить задачу:
+14. Завершить задачу:
 {"action":"final","message":"короткий итог для пользователя"}
 
 Правила:
@@ -195,6 +198,8 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Для больших артефактов создавай файл маленькими append_file чанками или пиши короткий Python-код, который сам собирает/парсит данные внутри sandbox.
 - Если нужно сохранить текст из web_fetch, не копируй весь текст в JSON. Сохрани URL/метаданные, затем используй более узкие fetch/read/append шаги.
 - Для сохранения больших HTML-страниц используй web_extract_to_file: он сам скачает, очистит и запишет текст в файл. Не копируй большой текст в write_file content.
+- Когда нужно продолжать по оглавлению, пагинации или списку глав, сначала используй web_links по странице оглавления. Не угадывай следующие URL арифметикой, если tool result дает ссылку на страницу другого тома/раздела.
+- Если web_links показывает мало ссылок, но есть scripts/custom_elements, страница может быть SPA. Изучи custom_elements и scripts, затем fetch публичных JSON endpoint-ов по видимым id/именам компонентов вместо угадывания URL глав.
 - Для страниц глав Ranobehub можно использовать ranobehub_chapter как более точный адаптер, но общий путь для сайтов — web_extract_to_file.
 - Перед чтением неизвестного или большого файла сначала используй file_info/find_files/search_text. Не читай файл целиком; используй read_file с max_bytes и offset небольшими кусками.
 - replace_in_file предназначен для небольших текстовых файлов; если файл большой, сначала используй read_file/search_text и меняй подход.
@@ -485,6 +490,7 @@ REQUIRED_FIELDS = {
     "shell": {"cmd"},
     "python": {"code"},
     "web_fetch": {"url"},
+    "web_links": {"url"},
     "web_extract_to_file": {"url", "path"},
     "ranobehub_chapter": {"url", "path"},
     "web_search": {"query"},
@@ -815,6 +821,125 @@ class GenericHtmlTextParser(HTMLParser):
         return {"title": title, "blocks": deduped, "used_main_scope": blocks is self.main_blocks}
 
 
+class WebLinksParser(HTMLParser):
+    def __init__(self, base_url: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.skip_depth = 0
+        self.title_depth = 0
+        self.in_link = False
+        self.current_href = ""
+        self.current_attrs: dict[str, str] = {}
+        self.current_parts: list[str] = []
+        self.title_parts: list[str] = []
+        self.links: list[dict[str, Any]] = []
+        self.scripts: list[str] = []
+        self.custom_elements: list[dict[str, Any]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        attr_map = {name: value or "" for name, value in attrs}
+        if tag == "script" and attr_map.get("src"):
+            self.scripts.append(urljoin(self.base_url, attr_map.get("src", "")))
+        if tag in {"script", "style", "noscript", "svg", "canvas"}:
+            self.skip_depth += 1
+            return
+        if tag == "title":
+            self.title_depth += 1
+        if "-" in tag and len(self.custom_elements) < 80:
+            component_attrs = {
+                name: value
+                for name, value in attr_map.items()
+                if name.startswith(":") or name.startswith("data-") or name in {"id", "class", "name"}
+            }
+            self.custom_elements.append({"tag": tag, "attrs": component_attrs})
+        if tag == "a" and not self.skip_depth:
+            self.in_link = True
+            self.current_href = attr_map.get("href", "")
+            self.current_attrs = attr_map
+            self.current_parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in {"script", "style", "noscript", "svg", "canvas"} and self.skip_depth > 0:
+            self.skip_depth -= 1
+            return
+        if tag == "title" and self.title_depth > 0:
+            self.title_depth -= 1
+        if tag == "a" and self.in_link:
+            href = self.current_href.strip()
+            text = clean_ranobehub_text(" ".join(self.current_parts))
+            if href and not href.startswith(("#", "javascript:", "mailto:", "tel:")):
+                absolute = urljoin(self.base_url, href)
+                parsed = urlparse(absolute)
+                if parsed.scheme in {"http", "https"} and parsed.netloc:
+                    self.links.append(
+                        {
+                            "text": text or href,
+                            "url": absolute,
+                            "href": href,
+                            "class": self.current_attrs.get("class", ""),
+                            "rel": self.current_attrs.get("rel", ""),
+                            "title": self.current_attrs.get("title", ""),
+                            "data_previous": "data-previous-chapter-link" in self.current_attrs,
+                            "data_next": "data-next-chapter-link" in self.current_attrs,
+                        }
+                    )
+            self.in_link = False
+            self.current_href = ""
+            self.current_attrs = {}
+            self.current_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self.skip_depth:
+            return
+        text = html.unescape(data).strip()
+        if not text:
+            return
+        if self.title_depth:
+            self.title_parts.append(text)
+        if self.in_link:
+            self.current_parts.append(text)
+
+    def payload(self, pattern: str = "", limit: int = 100) -> dict[str, Any]:
+        title = clean_ranobehub_text(" ".join(self.title_parts))
+        links = self.links
+        if pattern:
+            try:
+                regex = re.compile(pattern, re.IGNORECASE)
+                links = [link for link in links if regex.search(" ".join(str(link.get(key, "")) for key in ("text", "url", "class", "title")))]
+            except re.error:
+                needle = pattern.lower()
+                links = [link for link in links if needle in " ".join(str(link.get(key, "")).lower() for key in ("text", "url", "class", "title"))]
+        deduped: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for link in links:
+            key = (str(link.get("url") or ""), str(link.get("text") or ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(link)
+        safe_limit = max(1, min(int(limit or 100), 500))
+        unique_scripts = list(dict.fromkeys(self.scripts))[:80]
+        unique_components: list[dict[str, Any]] = []
+        seen_components: set[str] = set()
+        for component in self.custom_elements:
+            key = json.dumps(component, ensure_ascii=False, sort_keys=True)
+            if key in seen_components:
+                continue
+            seen_components.add(key)
+            unique_components.append(component)
+        return {
+            "title": title,
+            "links": deduped[:safe_limit],
+            "total_links": len(deduped),
+            "limit": safe_limit,
+            "truncated": len(deduped) > safe_limit,
+            "scripts": unique_scripts,
+            "custom_elements": unique_components[:80],
+        }
+
+
 def clean_ranobehub_text(text: str) -> str:
     cleaned = " ".join(str(text or "").split())
     cleaned = re.sub(r"\s+([,.;:!?…»”）\]])", r"\1", cleaned)
@@ -1000,6 +1125,48 @@ def archive_memory_events(
     return payload
 
 
+def web_links_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any]:
+    raw_url = str(action.get("url") or "").strip()
+    pattern = str(action.get("pattern") or "").strip()
+    try:
+        limit = max(1, min(int(action.get("limit") or 100), 500))
+    except (TypeError, ValueError):
+        limit = 100
+    try:
+        validate_public_url(raw_url)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    request = Request(raw_url, headers={"User-Agent": WEB_USER_AGENT, "Accept": "text/html,application/xhtml+xml,text/plain"})
+    try:
+        with build_opener(SafeRedirectHandler).open(request, timeout=30) as response:
+            data, truncated = read_limited_response(response, 1200000)
+            content_type = response.headers.get("Content-Type", "")
+            if not is_textual_content(content_type, data):
+                return {"ok": False, "error": "response is not textual", "content_type": content_type}
+            text, encoding = decode_web_text(data, response.headers.get_content_charset())
+            status = getattr(response, "status", 200)
+            final_url = response.geturl()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    parser = WebLinksParser(final_url or raw_url)
+    parser.feed(text)
+    payload = parser.payload(pattern=pattern, limit=limit)
+    return {
+        "ok": True,
+        "url": raw_url,
+        "final_url": final_url,
+        "status": status,
+        "content_type": content_type,
+        "encoding": encoding,
+        "bytes_read": len(data),
+        "source_truncated": truncated,
+        "pattern": pattern,
+        **payload,
+    }
+
+
 def action_fingerprint(action: dict[str, Any]) -> str:
     normalized = {key: value for key, value in action.items() if key not in {"reason"}}
     return json.dumps(normalized, ensure_ascii=False, sort_keys=True)
@@ -1030,6 +1197,10 @@ def action_summary(action: dict[str, Any]) -> str:
         return truncate(str(action.get("query", "")), 160)
     if action_type == "web_fetch":
         return truncate(str(action.get("url", "")), 180)
+    if action_type == "web_links":
+        pattern = str(action.get("pattern") or "").strip()
+        suffix = f" pattern={truncate(pattern, 80)}" if pattern else ""
+        return truncate(str(action.get("url", "")), 160) + suffix
     if action_type == "web_extract_to_file":
         return f"{truncate(str(action.get('url', '')), 120)} -> {action.get('path', '/work')}"
     if action_type == "ranobehub_chapter":
@@ -1108,6 +1279,8 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
     if action_type == "web_fetch":
         title = str(result.get("title") or result.get("url") or "page fetched")
         return truncate(title, 180)
+    if action_type == "web_links":
+        return f"{len(result.get('links', []) or [])}/{result.get('total_links', 0)} link(s)"
     if action_type == "web_extract_to_file":
         return f"{result.get('title') or 'extracted page'} -> {result.get('path')} ({result.get('chars', 0)} chars)"
     if action_type == "ranobehub_chapter":
@@ -1275,6 +1448,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 result = web_search(config, str(action.get("query", "")), action.get("limit"))
             elif action_type == "web_fetch":
                 result = web_fetch(config, str(action.get("url", "")), action.get("max_bytes"))
+            elif action_type == "web_links":
+                result = web_links_tool(config, action)
             elif action_type == "web_extract_to_file":
                 result = web_extract_to_file_tool(config, action)
             elif action_type == "ranobehub_chapter":

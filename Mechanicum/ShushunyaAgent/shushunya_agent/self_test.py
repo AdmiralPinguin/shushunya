@@ -40,6 +40,7 @@ from .agent_runner import (
     run_agent,
     GenericHtmlTextParser,
     RanobehubChapterParser,
+    WebLinksParser,
     sandbox_status,
     safe_task_id,
     validate_configured_searxng_url,
@@ -184,6 +185,16 @@ def main() -> int:
     )
     if not valid_extract_action.get("ok"):
         raise AssertionError(f"valid web_extract_to_file action was rejected: {valid_extract_action}")
+    valid_links_action = agent_runner.validate_action(
+        {
+            "action": "web_links",
+            "url": "https://example.com/page",
+            "pattern": "chapter|volume",
+            "limit": 100,
+        }
+    )
+    if not valid_links_action.get("ok"):
+        raise AssertionError(f"valid web_links action was rejected: {valid_links_action}")
     invalid_actions = [
         ({"action": "does_not_exist"}, "unsupported action"),
         ({"action": "web_search", "query": "OpenAI", "limit": "1"}, "invalid action schema"),
@@ -239,6 +250,32 @@ def main() -> int:
     ]:
         raise AssertionError(f"generic HTML parser failed: {generic_payload}")
     print("[ok] generic web extract parser")
+
+    links_parser = WebLinksParser("https://example.com/book/index.html")
+    links_parser.feed(
+        """
+        <html><head><title>Book</title></head><body>
+        <script src="/assets/app.js"></script>
+        <ranobe-contents :ranobe-id="966" data-kind="toc"></ranobe-contents>
+        <a href="/book/1">Volume 1</a>
+        <a href="chapter-2.html" data-next-chapter-link>Chapter 2</a>
+        <a href="mailto:test@example.com">mail</a>
+        </body></html>
+        """
+    )
+    links_payload = links_parser.payload(pattern="volume|chapter", limit=10)
+    if links_payload.get("title") != "Book" or [link.get("url") for link in links_payload.get("links", [])] != [
+        "https://example.com/book/1",
+        "https://example.com/book/chapter-2.html",
+    ]:
+        raise AssertionError(f"web links parser failed: {links_payload}")
+    if not links_payload["links"][1].get("data_next"):
+        raise AssertionError(f"web links parser missed data-next flag: {links_payload}")
+    if links_payload.get("scripts") != ["https://example.com/assets/app.js"]:
+        raise AssertionError(f"web links parser missed scripts: {links_payload}")
+    if not any(item.get("tag") == "ranobe-contents" and item.get("attrs", {}).get(":ranobe-id") == "966" for item in links_payload.get("custom_elements", [])):
+        raise AssertionError(f"web links parser missed custom elements: {links_payload}")
+    print("[ok] web links parser")
 
     if configured_search_providers()[0] != "searxng":
         raise AssertionError(f"search providers must start with searxng: {configured_search_providers()}")

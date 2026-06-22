@@ -142,6 +142,7 @@ ACTION_SCHEMAS: dict[str, dict[str, Any]] = {
     "python": {"required": {"code"}, "fields": {"action", "code", "timeout"}},
     "web_search": {"required": {"query"}, "fields": {"action", "query", "limit"}},
     "web_fetch": {"required": {"url"}, "fields": {"action", "url", "max_bytes"}},
+    "web_links": {"required": {"url"}, "fields": {"action", "url", "pattern", "limit"}},
     "web_extract_to_file": {"required": {"url", "path"}, "fields": {"action", "url", "path", "mode", "include_title"}},
     "ranobehub_chapter": {"required": {"url", "path"}, "fields": {"action", "url", "path", "mode", "include_title"}},
     "list_files": {"required": {"path"}, "fields": {"action", "path", "max_depth", "limit", "offset"}},
@@ -223,6 +224,11 @@ def validate_action(action: Mapping[str, Any]) -> dict[str, Any]:
     elif action_type == "web_fetch":
         _validate_string(action_dict, "url", errors, min_len=1, max_len=4096)
         _validate_int(action_dict, "max_bytes", errors, minimum=1024, maximum=1000000)
+    elif action_type == "web_links":
+        _validate_string(action_dict, "url", errors, min_len=1, max_len=4096)
+        _validate_int(action_dict, "limit", errors, minimum=1, maximum=500)
+        if "pattern" in action_dict:
+            _validate_string(action_dict, "pattern", errors, max_len=500)
     elif action_type in {"web_extract_to_file", "ranobehub_chapter"}:
         _validate_string(action_dict, "url", errors, min_len=1, max_len=4096)
         _validate_path(action_dict, errors)

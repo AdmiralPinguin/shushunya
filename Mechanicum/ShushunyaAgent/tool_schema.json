@@ -122,6 +122,16 @@
         "returns": "text/title/encoding for textual responses; is_binary and bytes_read without decoded text for binary responses"
       }
     },
+    "web_links": {
+      "required": ["action", "url"],
+      "properties": {
+        "action": "web_links",
+        "url": "public_http_url",
+        "pattern": "optional regex or plain text filter applied to link text/url/class/title",
+        "limit": "integer",
+        "returns": "normalized public links plus script sources and custom elements for SPA/API discovery"
+      }
+    },
     "web_extract_to_file": {
       "required": ["action", "url", "path"],
       "properties": {
