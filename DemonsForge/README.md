@@ -183,6 +183,7 @@ FORGE_MEMORY_NAMESPACE=demonsforge
 FORGE_MEMORY_REQUESTER=demonsforge
 FORGE_ARCHIVE_BASE_URL=http://127.0.0.1:8090
 FORGE_ARCHIVE_API_KEY=...
+FORGE_MEMORY_TIMEOUT_SECONDS=30
 ```
 
 `start-forge-api.sh` and `start-forge-worker.sh` source
