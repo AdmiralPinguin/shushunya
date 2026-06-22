@@ -285,6 +285,9 @@ def main() -> None:
     assert metadata_entry["size_bytes"] > 0
     assert len(metadata_entry["sha256"]) == 64
     assert "mime_type" in metadata_entry
+    metadata_response = client.get(f"/forge/artifacts/{metadata_status['artifacts'][0]}/metadata")
+    assert metadata_response.status_code == 200, metadata_response.text
+    assert metadata_response.json()["type"] == "metadata-read"
     jobs = client.get("/forge/jobs?limit=5")
     assert jobs.status_code == 200, jobs.text
     events = client.get(f"/forge/jobs/{job_id}/events")

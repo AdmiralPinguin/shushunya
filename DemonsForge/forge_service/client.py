@@ -171,3 +171,6 @@ class DemonsForgeClient:
 
     def artifact(self, artifact_id: str) -> dict[str, Any]:
         return self._request("GET", f"/forge/artifacts/{artifact_id}")
+
+    def artifact_metadata(self, artifact_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/forge/artifacts/{artifact_id}/metadata")

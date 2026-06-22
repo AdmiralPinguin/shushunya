@@ -291,6 +291,17 @@ def get_artifact_thumbnail(artifact_id: str):
     return FileResponse(Path(str(thumbnail_path)))
 
 
+@app.get("/forge/artifacts/{artifact_id}/metadata")
+def get_artifact_metadata(artifact_id: str) -> dict[str, object]:
+    artifact = store.get_artifact(artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    metadata_path = Path(artifact.metadata_path)
+    if not metadata_path.exists():
+        raise HTTPException(status_code=404, detail="artifact metadata file missing")
+    return artifact.metadata
+
+
 @app.get("/forge/gallery")
 def get_gallery(
     limit: int = 100,
