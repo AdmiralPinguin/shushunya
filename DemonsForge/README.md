@@ -185,6 +185,10 @@ FORGE_ARCHIVE_BASE_URL=http://127.0.0.1:8090
 FORGE_ARCHIVE_API_KEY=...
 ```
 
+`start-forge-api.sh` and `start-forge-worker.sh` source
+`../ArchiveOfHeresy/.env` first and then optional local `DemonsForge/.env`, so
+Forge can reuse `ARCHIVE_API_KEY` without copying the secret into this module.
+
 The Forge API exposes thin proxy endpoints over the ArchiveOfHeresy Memory
 Gateway:
 
