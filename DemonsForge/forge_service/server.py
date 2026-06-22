@@ -17,7 +17,7 @@ from .storage import ForgeStore
 config.force_cpu_runtime()
 config.ensure_dirs()
 store = ForgeStore()
-forge_queue = ForgeQueue(store)
+forge_queue = ForgeQueue(store, start_worker=config.EMBEDDED_WORKER)
 app = FastAPI(title="DemonsForge Forge API", version=__version__)
 
 

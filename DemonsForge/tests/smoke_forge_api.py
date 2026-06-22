@@ -38,6 +38,7 @@ def main() -> None:
     runtime = client.get("/forge/runtime")
     assert runtime.status_code == 200, runtime.text
     assert runtime.json()["cpu_only"] is True
+    assert runtime.json()["embedded_worker"] is True
     schema = client.get("/forge/schema/job")
     assert schema.status_code == 200, schema.text
     downloads = client.get("/forge/assets/downloads")

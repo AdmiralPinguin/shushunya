@@ -17,6 +17,7 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8110
 CPU_THREADS = os.cpu_count() or 32
 MODEL_IDLE_SECONDS = int(os.environ.get("FORGE_MODEL_IDLE_SECONDS", "1800"))
+EMBEDDED_WORKER = os.environ.get("FORGE_EMBEDDED_WORKER", "1") not in {"0", "false", "False"}
 
 MAX_WIDTH = 1536
 MAX_HEIGHT = 1536

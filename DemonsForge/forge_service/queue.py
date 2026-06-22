@@ -20,13 +20,16 @@ from .storage import ForgeStore
 
 
 class ForgeQueue:
-    def __init__(self, store: ForgeStore):
+    def __init__(self, store: ForgeStore, start_worker: bool = True):
         self.store = store
         self._queue: queue.Queue[str] = queue.Queue()
         self._cancel = set[str]()
         self._engines: dict[str, DiffusersEngine] = {}
-        self._worker = threading.Thread(target=self._run, name="forge-worker", daemon=True)
-        self._worker.start()
+        self._embedded_worker = start_worker
+        self._worker = None
+        if start_worker:
+            self._worker = threading.Thread(target=self._run, name="forge-worker", daemon=True)
+            self._worker.start()
         self._maintenance = threading.Thread(
             target=self._maintain,
             name="forge-maintenance",
@@ -40,7 +43,8 @@ class ForgeQueue:
             spec.seed = random.randint(0, 2**32 - 1)
         record = JobRecord(id=job_id, spec=spec, status=JobStatus.queued)
         self.store.create_job(record)
-        self._queue.put(job_id)
+        if self._embedded_worker:
+            self._queue.put(job_id)
         return record
 
     def validate(self, spec: JobSpec) -> dict[str, object]:
@@ -107,6 +111,16 @@ class ForgeQueue:
             finally:
                 self._queue.task_done()
 
+    def run_pending_once(self) -> bool:
+        queued = self.store.list_jobs(status=JobStatus.queued.value, limit=1)
+        if not queued:
+            return False
+        job_id = queued[0].id
+        if job_id in self._cancel:
+            return True
+        self._execute(job_id)
+        return True
+
     def _maintain(self) -> None:
         while True:
             time.sleep(60)
@@ -118,6 +132,7 @@ class ForgeQueue:
         mem = psutil.virtual_memory()
         return {
             "queue_depth": self._queue.qsize(),
+            "embedded_worker": self._embedded_worker,
             "canceled_jobs": len(self._cancel),
             "loaded_engines": [engine.runtime_state() for engine in self._engines.values()],
             "cpu_only": True,

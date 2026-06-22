@@ -52,6 +52,14 @@ available logical CPU cores for CPU math thread pools by default.
 # http://localhost:8110
 ```
 
+By default the API starts an embedded worker thread. To isolate generation from
+the HTTP process:
+
+```bash
+FORGE_EMBEDDED_WORKER=0 ./start-forge-api.sh
+./start-forge-worker.sh
+```
+
 Core endpoints:
 
 - `GET /health`
@@ -114,7 +122,9 @@ Architecture:
   capability discovery. Known engines are registered explicitly; additional
   local model folders with `model_index.json` are surfaced as discovered models.
 - `forge_service/queue.py`: single-worker VRAM/RAM-aware job queue with
-  progress logs, cancellation state, runtime status and idle model unload.
+  progress logs, cancellation state, runtime status and idle model unload. It
+  can run embedded in the API process or as a separate worker process polling
+  SQLite.
 - `forge_service/storage.py`: SQLite job and gallery store at
   `runtime/forge.sqlite3`.
 - `forge_service/engines/`: backend adapters. The current vertical slice uses a
