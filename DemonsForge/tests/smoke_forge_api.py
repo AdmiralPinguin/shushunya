@@ -328,6 +328,8 @@ def main() -> None:
     upscale_status = wait_for_terminal(client, upscale.json()["id"])
     assert upscale_status["status"] == "succeeded", upscale_status
     assert upscale_status["artifacts"], upscale_status
+    artifact_file = client.get(f"/forge/artifacts/{upscale_status['artifacts'][0]}/file")
+    assert artifact_file.status_code == 200, artifact_file.text
     queued = client.post(
         "/forge/jobs",
         json={

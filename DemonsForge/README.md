@@ -89,6 +89,7 @@ Core endpoints:
 - `POST /forge/jobs/{job_id}/clone`
 - `POST /forge/jobs/{job_id}/retry`
 - `GET /forge/artifacts/{artifact_id}`
+- `GET /forge/artifacts/{artifact_id}/file`
 - `GET /forge/artifacts/{artifact_id}/metadata`
 - `GET /forge/artifacts/{artifact_id}/thumbnail`
 - `GET /forge/gallery`
