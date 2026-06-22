@@ -60,8 +60,10 @@ def _dir_size(path: Path) -> int:
 
 def discover_models() -> list[dict[str, Any]]:
     models = []
+    known_names = set()
     for engine, meta in ENGINE_MODELS.items():
         name = meta["default_model"]
+        known_names.add(name)
         path = config.MODELS_DIR / name
         models.append(
             {
@@ -73,6 +75,34 @@ def discover_models() -> list[dict[str, Any]]:
                 "pipeline": meta["pipeline"],
             }
         )
+    if config.MODELS_DIR.exists():
+        for path in sorted(config.MODELS_DIR.iterdir()):
+            if not path.is_dir() or path.name in known_names:
+                continue
+            model_index = path / "model_index.json"
+            if not model_index.exists():
+                continue
+            try:
+                payload = json.loads(model_index.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                payload = {}
+            pipeline = payload.get("_class_name")
+            inferred_engine = {
+                "StableDiffusionXLPipeline": "sdxl",
+                "StableDiffusion3Pipeline": "stable_diffusion",
+                "FluxPipeline": "flux",
+            }.get(str(pipeline), "unknown")
+            models.append(
+                {
+                    "name": path.name,
+                    "engine": inferred_engine,
+                    "path": str(path),
+                    "available": True,
+                    "size_bytes": _dir_size(path),
+                    "pipeline": pipeline,
+                    "registered": False,
+                }
+            )
     return models
 
 

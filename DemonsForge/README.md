@@ -111,7 +111,8 @@ curl -s 'http://127.0.0.1:8110/forge/jobs?dry_run=true' \
 Architecture:
 
 - `forge_service/registries.py`: engine, model, LoRA, sampler, scheduler and
-  capability discovery.
+  capability discovery. Known engines are registered explicitly; additional
+  local model folders with `model_index.json` are surfaced as discovered models.
 - `forge_service/queue.py`: single-worker VRAM/RAM-aware job queue with
   progress logs, cancellation state, runtime status and idle model unload.
 - `forge_service/storage.py`: SQLite job and gallery store at
