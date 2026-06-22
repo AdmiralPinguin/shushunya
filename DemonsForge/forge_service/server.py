@@ -350,6 +350,9 @@ def clone_job(job_id: str, request: JobCloneRequest | None = None, dry_run: bool
     if not request.reuse_seed:
         payload["seed"] = None
     payload.update(request.overrides)
+    safety = dict(payload.get("safety") or {})
+    safety.setdefault("cloned_from", job_id)
+    payload["safety"] = safety
     try:
         spec = JobSpec(**payload)
         if dry_run:

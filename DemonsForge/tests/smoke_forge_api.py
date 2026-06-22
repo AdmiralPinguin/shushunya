@@ -428,6 +428,7 @@ def main() -> None:
     )
     assert cloned.status_code == 200, cloned.text
     assert cloned.json()["cloned_from"] == prompt_enhance.json()["id"]
+    assert cloned.json()["spec"]["safety"]["cloned_from"] == prompt_enhance.json()["id"]
     cloned_status = wait_for_terminal(client, cloned.json()["id"])
     assert cloned_status["status"] == "succeeded", cloned_status
     retry = client.post(f"/forge/jobs/{prompt_enhance.json()['id']}/retry?dry_run=true")
