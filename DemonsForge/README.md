@@ -118,6 +118,8 @@ Architecture:
   `runtime/forge.sqlite3`.
 - `forge_service/engines/`: backend adapters. The current vertical slice uses a
   lazy diffusers adapter for `txt2img`; unsupported operations fail explicitly.
+  Diffusers step callbacks are used when available for live progress and
+  cooperative cancellation between inference steps.
 - `forge_service/planner.py`: Russian natural-language planner that returns a
   valid structured job spec. Missing model/LoRA/control assets become
   `asset_request` objects requiring user approval.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import gc
+import inspect
 import time
 from pathlib import Path
 from typing import Any
@@ -153,6 +154,17 @@ class DiffusersEngine(BaseEngine):
             kwargs["guidance_scale"] = spec.guidance if spec.guidance is not None else spec.cfg
             if kwargs["guidance_scale"] is None:
                 kwargs["guidance_scale"] = self.meta["guidance_default"]
+
+        signature = inspect.signature(pipe.__call__)
+        if "callback_on_step_end" in signature.parameters:
+            total_steps = max(spec.steps, 1)
+
+            def on_step_end(_pipeline: Any, step: int, _timestep: Any, callback_kwargs: dict[str, Any]):
+                progress_value = 0.15 + (0.7 * min(step + 1, total_steps) / total_steps)
+                progress(progress_value, f"generation step {step + 1}/{total_steps}")
+                return callback_kwargs
+
+            kwargs["callback_on_step_end"] = on_step_end
 
         progress(0.15, "generating image")
         result = pipe(**kwargs)
