@@ -1475,6 +1475,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         {"role": "user", "content": task},
     ]
     action_counts: dict[str, int] = {}
+    repeated_rejection_count = 0
     trace: list[dict[str, Any]] = []
     write_task_journal(
         config,
@@ -1699,6 +1700,61 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "content": "Tool result:\n" + json.dumps(result_for_model(action_type, result, config), ensure_ascii=False, indent=2),
             }
         )
+        if isinstance(result, dict) and str(result.get("error") or "") == "repeated identical action rejected by supervisor":
+            repeated_rejection_count += 1
+            if repeated_rejection_count >= 6:
+                duration_sec = round(time.time() - run_started, 3)
+                message = (
+                    "Агент остановлен супервизором: обнаружен цикл повторяющихся действий без прогресса. "
+                    f"Задачу можно продолжить с resume_task_id={config.task_id}; следующий запуск должен выбрать новое продуктивное действие, "
+                    "а не повторять уже отклоненные проверки."
+                )
+                emit(
+                    event_sink,
+                    {
+                        "type": "final",
+                        "step": step,
+                        "ok": False,
+                        "continuable": True,
+                        "resume_task_id": config.task_id,
+                        "message": message,
+                        "duration_sec": duration_sec,
+                    },
+                )
+                write_task_journal(
+                    config,
+                    "final",
+                    {
+                        "step": step,
+                        "ok": False,
+                        "continuable": True,
+                        "resume_task_id": config.task_id,
+                        "message": message,
+                        "duration_sec": duration_sec,
+                        "stop_reason": "repeated_action_stall",
+                    },
+                )
+                if config.json_output:
+                    print(
+                        json.dumps(
+                            {
+                                "ok": False,
+                                "continuable": True,
+                                "resume_task_id": config.task_id,
+                                "task_id": config.task_id,
+                                "message": message,
+                                "duration_sec": duration_sec,
+                                "steps": trace,
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                    )
+                else:
+                    print(message, file=sys.stderr)
+                return 2
+        elif isinstance(result, dict) and result.get("ok") is True:
+            repeated_rejection_count = 0
 
     message = (
         f"Агент достиг лимита шагов ({config.max_steps}) без final. "
