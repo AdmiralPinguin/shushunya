@@ -383,6 +383,33 @@ def main() -> int:
         raise AssertionError(f"web_fetch JSON nested list summary failed: {compacted_json}")
     print("[ok] web_fetch JSON result summarized for model context")
 
+    large_links_result = {
+        "ok": True,
+        "links": [{"href": f"https://example.com/chapter/{index}", "text": "chapter " + ("x" * 200)} for index in range(80)],
+        "api_candidates": [
+            {
+                "url": f"https://example.com/api/{index}",
+                "score": 100 - index,
+                "source_script": "https://example.com/assets/app." + ("y" * 500) + ".js",
+            }
+            for index in range(30)
+        ],
+        "custom_elements": [{"tag": f"x-reader-{index}", "attrs": {"data": "z" * 200}} for index in range(60)],
+        "scripts": ["https://example.com/assets/" + ("s" * 300) + f"{index}.js" for index in range(20)],
+    }
+    compacted_links = result_for_model("web_links", large_links_result, config)
+    if (
+        len(compacted_links.get("links", [])) > 25
+        or len(compacted_links.get("api_candidates", [])) > 12
+        or len(compacted_links.get("scripts", [])) > 8
+        or not compacted_links.get("compacted_for_model")
+    ):
+        raise AssertionError(f"web_links result was not compacted: {compacted_links}")
+    encoded_links = json.dumps(compacted_links, ensure_ascii=False)
+    if len(encoded_links) > 12000:
+        raise AssertionError(f"web_links compacted result is still too large: {len(encoded_links)}")
+    print("[ok] web_links result compacted for model context")
+
     messages = [
         {"role": "system", "content": "system"},
         {"role": "user", "content": "task"},

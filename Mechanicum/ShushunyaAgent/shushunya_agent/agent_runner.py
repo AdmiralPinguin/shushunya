@@ -74,7 +74,7 @@ SANDBOX_RUNNER = os.environ.get(
 MAX_STEPS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_STEPS", "200"))
 MAX_RUNTIME_SEC = int(os.environ.get("SHUSHUNYA_AGENT_MAX_RUNTIME_SEC", "1800"))
 MAX_MODEL_TOKENS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "1024"))
-MAX_CONTEXT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_CONTEXT_CHARS", "14000"))
+MAX_CONTEXT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_CONTEXT_CHARS", "8000"))
 SHELL_TIMEOUT = int(os.environ.get("SHUSHUNYA_AGENT_SHELL_TIMEOUT", "60"))
 MAX_TOOL_OUTPUT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_TOOL_OUTPUT_CHARS", "12000"))
 LLM_RETRIES = int(os.environ.get("SHUSHUNYA_AGENT_LLM_RETRIES", "3"))
@@ -275,6 +275,49 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
                 payload["text"] = truncate(text, 4000)
         else:
             payload["text"] = truncate(text, 5000)
+    elif action_type == "web_links":
+        list_limits = {
+            "links": 15,
+            "api_candidates": 12,
+            "custom_elements": 10,
+            "scripts": 5,
+        }
+        omitted: dict[str, int] = {}
+        for key, limit in list_limits.items():
+            value = payload.get(key)
+            if isinstance(value, list) and len(value) > limit:
+                payload[key] = value[:limit]
+                omitted[key] = len(value) - limit
+        candidates = payload.get("api_candidates")
+        if isinstance(candidates, list):
+            compacted_candidates: list[Any] = []
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    compacted_candidates.append(candidate)
+                    continue
+                compacted = dict(candidate)
+                if isinstance(compacted.get("source_script"), str):
+                    compacted["source_script"] = truncate(compacted["source_script"], 120)
+                compacted_candidates.append(compacted)
+            payload["api_candidates"] = compacted_candidates
+        links = payload.get("links")
+        if isinstance(links, list):
+            payload["links"] = [
+                {
+                    key: truncate(str(link.get(key, "")), 220)
+                    for key in ("href", "text")
+                    if isinstance(link, dict) and link.get(key)
+                }
+                if isinstance(link, dict)
+                else link
+                for link in links
+            ]
+        custom_elements = payload.get("custom_elements")
+        if isinstance(custom_elements, list):
+            payload["custom_elements"] = compact_json_value(custom_elements, string_limit=180, list_limit=10)
+        if omitted:
+            payload["compacted_for_model"] = True
+            payload["omitted"] = omitted
     elif action_type in {"shell", "python"}:
         if isinstance(payload.get("stdout"), str):
             payload["stdout"] = truncate(payload["stdout"], 6000)
@@ -294,6 +337,8 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
             payload["omitted_matches"] = len(matches) - 80
     elif action_type in {"archive_search", "archive_memory_gateway", "archive_memory_catalog", "archive_memory_search", "archive_memory_read", "archive_memory_propose"}:
         payload = compact_json_value(payload, string_limit=3000, list_limit=12)
+    if action_type == "web_links":
+        return compact_json_value(payload, string_limit=300, list_limit=20)
     return compact_json_value(payload, string_limit=config.max_tool_output_chars, list_limit=100)
 
 
@@ -326,14 +371,14 @@ def summarize_json_for_model(value: Any, depth: int = 0) -> Any:
 
 
 def compact_messages_for_model(messages: list[dict[str, str]], config: AgentConfig, budget: int | None = None) -> list[dict[str, str]]:
-    budget = max(6000, int(budget or config.max_context_chars))
+    budget = max(4500, int(budget or config.max_context_chars))
     current = sum(len(message.get("content", "")) for message in messages)
     if current <= budget:
         return messages
 
     system = messages[0] if messages else {"role": "system", "content": SYSTEM_PROMPT}
     user = messages[1] if len(messages) > 1 else {"role": "user", "content": ""}
-    remaining_budget = max(4000, budget - len(system.get("content", "")) - len(user.get("content", "")))
+    remaining_budget = max(2000, budget - len(system.get("content", "")) - len(user.get("content", "")))
     tail: list[dict[str, str]] = []
     used = 0
     for message in reversed(messages[2:]):
@@ -399,7 +444,7 @@ def chat(
     inject_memory: bool | None = None,
     archive_enabled: bool | None = None,
 ) -> str:
-    budgets = [config.max_context_chars, 10000, 7000]
+    budgets = [config.max_context_chars, 7000, 5500]
     last_error = ""
     memory_enabled = config.inject_memory if inject_memory is None else inject_memory
     should_archive = config.archive_internal_steps if archive_enabled is None else archive_enabled
