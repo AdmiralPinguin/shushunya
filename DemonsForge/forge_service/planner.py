@@ -174,7 +174,9 @@ def _job_type(text: str) -> JobType:
     return JobType.txt2img
 
 
-def _memory_context(text: str) -> dict[str, object]:
+def _memory_context(text: str, enabled: bool = True) -> dict[str, object]:
+    if not enabled:
+        return {"enabled": False, "used": False, "reason": "disabled by request"}
     client = ArchiveMemoryClient.from_config()
     status = client.status()
     if not status.get("enabled"):
@@ -215,7 +217,7 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
     additions = [value for key, value in QUALITY_HINTS.items() if key in text.lower()]
     if additions:
         prompt = f"{prompt}, {', '.join(additions)}"
-    safety: dict[str, object] = {"memory_context": _memory_context(text)}
+    safety: dict[str, object] = {"memory_context": _memory_context(text, enabled=request.use_memory)}
     if engine in {"flux", "stable_diffusion"}:
         safety["runtime_warning"] = (
             f"{engine} is available but heavy in CPU-only mode; use low steps for smoke runs "

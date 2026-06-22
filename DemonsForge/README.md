@@ -115,6 +115,9 @@ curl -s http://127.0.0.1:8110/forge/plan \
   -d '{"request":"Нарисуй кинематографичный портрет демона в кузнице, вертикально"}'
 ```
 
+Set `"use_memory":false` in plan requests for fast/offline planning without
+ArchiveOfHeresy memory search.
+
 Example txt2img job:
 
 ```bash

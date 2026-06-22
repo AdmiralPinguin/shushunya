@@ -181,6 +181,12 @@ def main() -> None:
     assert spec["type"] == "txt2img"
     assert spec["prompt"]
     assert "memory_context" in spec["safety"]
+    plan_without_memory = client.post(
+        "/forge/plan",
+        json={"request": "SDXL 512x512 fast plan", "use_memory": False},
+    )
+    assert plan_without_memory.status_code == 200, plan_without_memory.text
+    assert plan_without_memory.json()["safety"]["memory_context"]["reason"] == "disabled by request"
     planned_custom = client.post(
         "/forge/plan",
         json={"request": "SDXL 512x768 steps 7 seed 123 cinematic portrait"},

@@ -133,11 +133,16 @@ class DemonsForgeClient:
             },
         )
 
-    def plan(self, request: str, preferred_engine: str | None = None) -> dict[str, Any]:
+    def plan(
+        self,
+        request: str,
+        preferred_engine: str | None = None,
+        use_memory: bool = True,
+    ) -> dict[str, Any]:
         return self._request(
             "POST",
             "/forge/plan",
-            json={"request": request, "preferred_engine": preferred_engine},
+            json={"request": request, "preferred_engine": preferred_engine, "use_memory": use_memory},
         )
 
     def create_job(self, spec: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
