@@ -892,7 +892,8 @@ class AgentHandler(BaseHTTPRequestHandler):
 
             config = attach_cancel_check(config_from_payload(payload))
             task = apply_resume_context(task, config, payload)
-            task = apply_previous_task_context(task, config)
+            if not bool_field(payload, "skip_previous_task_context", False):
+                task = apply_previous_task_context(task, config)
 
             queue_error = try_enqueue_run()
             if queue_error is not None:
@@ -929,7 +930,8 @@ class AgentHandler(BaseHTTPRequestHandler):
 
             config = attach_cancel_check(config_from_payload(payload))
             task = apply_resume_context(task, config, payload)
-            task = apply_previous_task_context(task, config)
+            if not bool_field(payload, "skip_previous_task_context", False):
+                task = apply_previous_task_context(task, config)
             queue_error = try_enqueue_run()
             if queue_error is not None:
                 queue_error["state"] = runtime_state()
@@ -982,7 +984,8 @@ class AgentHandler(BaseHTTPRequestHandler):
 
             config = attach_cancel_check(config_from_payload(payload))
             task = apply_resume_context(task, config, payload)
-            task = apply_previous_task_context(task, config)
+            if not bool_field(payload, "skip_previous_task_context", False):
+                task = apply_previous_task_context(task, config)
             queue_error = try_enqueue_run()
             if queue_error is not None:
                 queue_error["state"] = runtime_state()

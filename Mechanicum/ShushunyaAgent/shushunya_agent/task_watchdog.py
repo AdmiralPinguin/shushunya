@@ -29,8 +29,8 @@ DEFAULT_CONTINUE_TASK = (
     "Не начинай задачу заново."
 )
 PUBLIC_CONTINUE_TASK = (
-    "Продолжи последнюю незавершенную задачу агента. "
-    "Опирайся на authoritative task journal context, не на Archive semantic memory. "
+    "Продолжи задачу, описанную в authoritative task snapshot ниже. "
+    "Опирайся только на этот task snapshot и текущие tool results, не на Archive semantic memory. "
     "Используй уже найденные tool result ссылки, api_candidates и JSON-карты; не угадывай URL арифметикой. "
     "Если предыдущий прогон остановился на цикле повторяющихся действий, выбери новое продуктивное действие или final вместо тех же проверок. "
     "Не повторяй уже выполненные действия и не начинай задачу заново."
@@ -311,6 +311,7 @@ def start_resume(base_url: str, api_key: str, task_id: str, max_auto_cycles: int
         "auto_continue_max_cycles": max_auto_cycles,
         "task_memory": False,
         "archive_task": False,
+        "skip_previous_task_context": True,
     }
     status, result = request_json(base_url, "POST", "/start", api_key, public_payload)
     return status, result, "public_start"

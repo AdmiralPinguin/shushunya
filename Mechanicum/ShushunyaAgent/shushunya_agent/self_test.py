@@ -199,6 +199,25 @@ def main() -> int:
         raise AssertionError(f"watchdog public context missed task facts: {public_context}")
     if "Do not use Archive/focus memory" not in public_context:
         raise AssertionError(f"watchdog public context missed Archive warning: {public_context}")
+    captured_public_payload: dict = {}
+
+    def fake_watchdog_request(base_url: str, method: str, path: str, api_key: str = "", payload: dict | None = None):
+        nonlocal captured_public_payload
+        if method == "POST" and path == "/start" and payload and payload.get("resume_task_id"):
+            return 401, {"ok": False}
+        if method == "GET" and path.startswith("/task?"):
+            return 200, {"task_id": "watchdog-public", "events": [{"type": "start", "task": "x"}]}
+        if method == "POST" and path == "/start":
+            captured_public_payload = dict(payload or {})
+            return 202, {"ok": True}
+        raise AssertionError(f"unexpected watchdog request: {method} {path}")
+
+    with mock.patch.object(task_watchdog, "request_json", side_effect=fake_watchdog_request):
+        status, response, mode = task_watchdog.start_resume("http://agent", "", "watchdog-public", 1)
+    if status != 202 or mode != "public_start" or response.get("ok") is not True:
+        raise AssertionError(f"watchdog public fallback did not start: {status}, {mode}, {response}")
+    if captured_public_payload.get("skip_previous_task_context") is not True:
+        raise AssertionError(f"watchdog public fallback must skip previous task context: {captured_public_payload}")
     print("[ok] task watchdog resume guards")
     if parse_action('{"action":"final","message":"ok"}').get("action") != "final":
         raise AssertionError("parse_action failed to parse a valid JSON object")
