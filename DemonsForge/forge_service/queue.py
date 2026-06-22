@@ -235,6 +235,15 @@ class ForgeQueue:
                 unloaded.append(name)
         return {"ok": True, "engine": engine_name, "unloaded": unloaded, "runtime": self.runtime_state()}
 
+    def _unload_other_engines(self, target_engine: str) -> list[str]:
+        unloaded = []
+        for name, engine in list(self._engines.items()):
+            if name == target_engine:
+                continue
+            if engine.unload():
+                unloaded.append(name)
+        return unloaded
+
     def _progress(self, job_id: str, value: float, message: str) -> None:
         if job_id in self._cancel:
             raise RuntimeError("job canceled")
@@ -244,10 +253,21 @@ class ForgeQueue:
         self.store.update_job(job_id, progress=value)
         self.store.append_log(job_id, message)
 
-    def _resource_check(self, spec: JobSpec) -> None:
+    def _resource_check(self, spec: JobSpec, engine_name: str | None = None) -> None:
+        if spec.type.value in {"txt2img", "img2img", "inpaint"} and engine_name:
+            unloaded = self._unload_other_engines(engine_name)
+            for unloaded_engine in unloaded:
+                self.store.append_log("system", f"unloaded {unloaded_engine} before {engine_name} job")
         mem = psutil.virtual_memory()
-        if mem.available < 4 * 1024**3:
-            raise RuntimeError("not enough available RAM for generation queue")
+        estimate = resource_estimate(spec)
+        min_free_gb = float(estimate["min_free_ram_gb"])
+        if engine_name and engine_name in self._engines and self._engines[engine_name].runtime_state()["loaded"]:
+            min_free_gb = max(4.0, float(estimate["estimated_working_ram_gb"]))
+        if mem.available < min_free_gb * 1024**3:
+            raise RuntimeError(
+                f"not enough available RAM for generation queue: "
+                f"{round(mem.available / 1024**3, 2)}GB available, {min_free_gb}GB required"
+            )
         if spec.width * spec.height * spec.batch_size > 1536 * 1536:
             raise RuntimeError("job exceeds conservative pixel budget")
         if spec.engine == "sdxl" and spec.type.value in {"txt2img", "img2img", "inpaint"}:
@@ -327,7 +347,7 @@ class ForgeQueue:
         engine_name = spec.engine or "sdxl"
         if engine_name not in ENGINE_MODELS:
             raise RuntimeError(f"unknown engine: {engine_name}")
-        self._resource_check(spec)
+        self._resource_check(spec, engine_name)
         images = self._engine(engine_name).generate_txt2img(
             spec,
             lambda value, message: self._progress(job_id, value, message),
@@ -343,7 +363,7 @@ class ForgeQueue:
         engine_name = spec.engine or "sdxl"
         if engine_name != "sdxl":
             raise RuntimeError("img2img is currently implemented for sdxl only")
-        self._resource_check(spec)
+        self._resource_check(spec, engine_name)
         source_image = self._resolve_input_path(spec.source_images[0])
         images = self._engine(engine_name).generate_img2img(
             spec,
@@ -361,7 +381,7 @@ class ForgeQueue:
         engine_name = spec.engine or "sdxl"
         if engine_name != "sdxl":
             raise RuntimeError("inpaint is currently implemented for sdxl only")
-        self._resource_check(spec)
+        self._resource_check(spec, engine_name)
         source_image = self._resolve_input_path(spec.source_images[0])
         mask_image = self._resolve_input_path(spec.mask_image)
         images = self._engine(engine_name).generate_inpaint(
