@@ -6,6 +6,8 @@ import html
 import json
 import os
 import re
+import shlex
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -189,10 +191,13 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 {"action":"web_extract_link_list","url":"https://example.com/contents","pattern":"глава|том|chapter|volume","start_url":"https://example.com/ch1","end_url":"https://example.com/ch99","path_template":"/work/ch_{seq}_{vol}_{chapter}.txt","limit":100}
 {"action":"bundle_text_files","path":"/work/chapters","include_glob":"*.txt","exclude_glob":"combined*.txt,_smoke*","output_txt":"/work/book.txt","output_fb2":"/work/book.fb2","min_chars":1000,"dedupe":true}
 
-14. Скачать главу Ranobehub напрямую в sandbox-файл через site adapter:
+14. Отправить готовый sandbox-файл в Telegram:
+{"action":"telegram_send_document","path":"/work/book.fb2","caption":"короткая подпись"}
+
+15. Скачать главу Ranobehub напрямую в sandbox-файл через site adapter:
 {"action":"ranobehub_chapter","url":"https://ranobehub.org/ranobe/966/10/9","path":"/work/slime/vol10_ch09.txt","mode":"write"}
 
-15. Завершить задачу:
+16. Завершить задачу:
 {"action":"final","message":"короткий итог для пользователя"}
 
 Правила:
@@ -206,6 +211,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Когда нужно продолжать по оглавлению, пагинации или списку глав, сначала используй web_links по странице оглавления. Не угадывай следующие URL арифметикой, если tool result дает ссылку на страницу другого тома/раздела.
 - Если нужно извлечь много страниц из явного оглавления, используй web_extract_link_list вместо ручного цикла web_extract_to_file. Он берет только найденные ссылки и не угадывает URL.
 - Для сборки многих текстовых файлов в один TXT/FB2 используй bundle_text_files вместо Python с большим XML/кодом в JSON.
+- Если пользователь просит отправить готовый файл в Telegram, используй telegram_send_document по sandbox-пути. Не проси оператора отправлять файл вручную.
 - Если web_links показывает мало ссылок, но есть scripts/custom_elements, страница может быть SPA. Если web_links вернул api_candidates, сначала пробуй кандидаты с высоким score; иначе изучи custom_elements и scripts, затем fetch публичных JSON endpoint-ов по видимым id/именам компонентов вместо угадывания URL глав.
 - Для страниц глав Ranobehub можно использовать ranobehub_chapter как более точный адаптер, но общий путь для сайтов — web_extract_to_file.
 - Перед чтением неизвестного или большого файла сначала используй file_info/find_files/search_text. Не читай файл целиком; используй read_file с max_bytes и offset небольшими кусками.
@@ -597,6 +603,7 @@ REQUIRED_FIELDS = {
     "web_extract_to_file": {"url", "path"},
     "web_extract_link_list": {"url", "path_template"},
     "bundle_text_files": {"path", "output_txt", "output_fb2"},
+    "telegram_send_document": {"path"},
     "ranobehub_chapter": {"url", "path"},
     "web_search": {"query"},
     "archive_search": {"kind", "query"},
@@ -613,6 +620,18 @@ REQUIRED_FIELDS = {
     "file_info": {"path"},
     "find_files": {"path", "pattern"},
     "search_text": {"path", "query"},
+}
+
+
+SANDBOX_ROOT_PATH_MAP = {
+    "/work": "work",
+    "/sandbox-tmp": "tmp",
+    "/artifacts": "artifacts",
+    "/state": "state",
+    "/logs": "logs",
+    "/models": "models",
+    "/tools": "tools",
+    "/home/agent": "home",
 }
 
 
@@ -660,6 +679,190 @@ def validate_final_artifacts(config: AgentConfig, message: str) -> dict[str, Any
     if failures:
         return {"ok": False, "paths": paths, "checked": checked, "failures": failures[:10]}
     return {"ok": True, "paths": paths, "checked": checked}
+
+
+def read_dotenv_value(path: Path, key: str) -> str:
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            name, value = stripped.split("=", 1)
+            if name.strip() == key:
+                return value.strip().strip('"').strip("'")
+    except OSError:
+        return ""
+    return ""
+
+
+def telegram_env_value(key: str) -> str:
+    value = os.environ.get(key, "").strip()
+    if value:
+        return value
+    project_root = AGENT_ROOT.parent.parent
+    return read_dotenv_value(project_root / "CoreOfMadness" / "telegram-bot" / ".env", key)
+
+
+def telegram_allowed_chat_ids() -> set[str]:
+    raw = os.environ.get("SHUSHUNYA_AGENT_TELEGRAM_ALLOWED_CHAT_IDS", "").strip()
+    if not raw:
+        raw = os.environ.get("TELEGRAM_ARCHIVE_ALLOWLIST", "7791909246,@Ebuchaya_psina")
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def default_telegram_chat_id() -> str:
+    for key in ("SHUSHUNYA_AGENT_TELEGRAM_CHAT_ID", "TELEGRAM_CHAT_ID"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    for item in telegram_allowed_chat_ids():
+        if item.lstrip("-").isdigit():
+            return item
+    return ""
+
+
+def sandbox_path_to_host_path(raw_path: str) -> Path:
+    path = Path(raw_path or "")
+    if not path.is_absolute():
+        path = Path("/work") / path
+    path_text = path.as_posix()
+    best_root = ""
+    for sandbox_root in SANDBOX_ROOT_PATH_MAP:
+        if path_text == sandbox_root or path_text.startswith(sandbox_root + "/"):
+            if len(sandbox_root) > len(best_root):
+                best_root = sandbox_root
+    if not best_root:
+        raise ValueError(f"path outside sandbox roots: {raw_path}")
+    suffix = path.relative_to(best_root)
+    sandbox_root_dir = Path(os.environ.get("SHUSHUNYA_SANDBOX_ROOT", "/media/shushunya/ARCHIVE/shushunya-agent-sandbox"))
+    host_root = (sandbox_root_dir / SANDBOX_ROOT_PATH_MAP[best_root]).resolve(strict=False)
+    host_path = (host_root / suffix).resolve(strict=False)
+    host_path.relative_to(host_root)
+    return host_path
+
+
+TELEGRAM_SEND_DOCUMENT_SCRIPT = r'''
+import json
+import mimetypes
+import os
+import urllib.request
+
+payload = json.loads(os.environ["SHUSHUNYA_TELEGRAM_SEND_PAYLOAD"])
+token = os.environ["TELEGRAM_BOT_TOKEN"]
+path = payload["host_path"]
+chat_id = payload["chat_id"]
+caption = payload.get("caption") or ""
+filename = payload.get("filename") or os.path.basename(path)
+
+boundary = "----ShushunyaAgentTelegramBoundary"
+parts = []
+
+def add_field(name, value):
+    parts.append(
+        b"--" + boundary.encode("ascii") + b"\r\n"
+        + f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8")
+        + str(value).encode("utf-8") + b"\r\n"
+    )
+
+def add_file(name, file_path, upload_name):
+    content_type = mimetypes.guess_type(upload_name)[0] or "application/octet-stream"
+    with open(file_path, "rb") as fh:
+        data = fh.read()
+    header = (
+        b"--" + boundary.encode("ascii") + b"\r\n"
+        + f'Content-Disposition: form-data; name="{name}"; filename="{upload_name}"\r\n'.encode("utf-8")
+        + f"Content-Type: {content_type}\r\n\r\n".encode("utf-8")
+    )
+    parts.append(header + data + b"\r\n")
+
+add_field("chat_id", chat_id)
+if caption:
+    add_field("caption", caption)
+add_file("document", path, filename)
+body = b"".join(parts) + b"--" + boundary.encode("ascii") + b"--\r\n"
+request = urllib.request.Request(
+    f"https://api.telegram.org/bot{token}/sendDocument",
+    data=body,
+    headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+)
+with urllib.request.urlopen(request, timeout=180) as response:
+    data = json.loads(response.read().decode("utf-8"))
+result = data.get("result") or {}
+document = result.get("document") or {}
+print(json.dumps({
+    "ok": bool(data.get("ok")),
+    "message_id": result.get("message_id"),
+    "chat_id": (result.get("chat") or {}).get("id"),
+    "file_name": document.get("file_name"),
+    "file_size": document.get("file_size"),
+}, ensure_ascii=False))
+'''
+
+
+def telegram_send_document_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any]:
+    path = str(action.get("path") or "").strip()
+    caption = str(action.get("caption") or "").strip()
+    requested_chat_id = str(action.get("chat_id") or "").strip()
+    chat_id = requested_chat_id or default_telegram_chat_id()
+    token = os.environ.get("SHUSHUNYA_AGENT_TELEGRAM_BOT_TOKEN", "").strip() or telegram_env_value("TELEGRAM_BOT_TOKEN")
+    if not token:
+        return {"ok": False, "error": "telegram bot token is not configured"}
+    if not chat_id:
+        return {"ok": False, "error": "telegram chat_id is not configured"}
+    allowed = telegram_allowed_chat_ids()
+    if requested_chat_id and requested_chat_id.lower() not in allowed:
+        return {"ok": False, "error": "telegram chat_id is not allowed", "chat_id": requested_chat_id}
+
+    info = file_tool(config, {"action": "file_info", "path": path})
+    if not info.get("ok") or not info.get("exists") or info.get("type") != "file":
+        return {"ok": False, "error": "telegram document path is not an existing sandbox file", "file_info": info}
+    size = int(info.get("size") or 0)
+    if size <= 0:
+        return {"ok": False, "error": "telegram document is empty", "file_info": info}
+    if size > 50 * 1024 * 1024:
+        return {"ok": False, "error": "telegram document is too large for this tool", "size": size, "max_size": 50 * 1024 * 1024}
+
+    try:
+        host_path = sandbox_path_to_host_path(path)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    payload = {
+        "host_path": str(host_path),
+        "chat_id": chat_id,
+        "caption": caption[:1024],
+        "filename": Path(path).name,
+    }
+    env = os.environ.copy()
+    env["TELEGRAM_BOT_TOKEN"] = token
+    env["SHUSHUNYA_TELEGRAM_SEND_PAYLOAD"] = json.dumps(payload, ensure_ascii=False)
+    command = "/usr/bin/python3 -c " + shlex.quote(TELEGRAM_SEND_DOCUMENT_SCRIPT)
+    started = time.time()
+    try:
+        process = subprocess.Popen(
+            ["sg", config.sandbox_group, "-c", command],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            start_new_session=True,
+        )
+        stdout, stderr = process.communicate(timeout=240)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, 9)
+        except Exception:
+            pass
+        return {"ok": False, "error": "telegram send timed out", "path": path}
+    if process.returncode != 0:
+        return {"ok": False, "error": "telegram send failed", "returncode": process.returncode, "stderr": truncate(stderr, 2000)}
+    try:
+        result = json.loads(stdout.strip())
+    except json.JSONDecodeError:
+        return {"ok": False, "error": "telegram send returned non-json output", "stdout": truncate(stdout, 2000), "stderr": truncate(stderr, 2000)}
+    result["path"] = path
+    result["duration_sec"] = round(time.time() - started, 3)
+    return result
 
 
 def validate_action(action: dict[str, Any]) -> dict[str, Any]:
@@ -1775,6 +1978,8 @@ def action_summary(action: dict[str, Any]) -> str:
         return f"{truncate(str(action.get('url', '')), 100)} -> {action.get('path_template', '/work')}"
     if action_type == "bundle_text_files":
         return f"{action.get('path', '/work')} -> {action.get('output_txt', '/work/bundle.txt')}"
+    if action_type == "telegram_send_document":
+        return str(action.get("path", "/work"))
     if action_type == "ranobehub_chapter":
         return f"{truncate(str(action.get('url', '')), 120)} -> {action.get('path', '/work')}"
     if action_type in FILE_ACTIONS:
@@ -1859,6 +2064,8 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
         return f"{result.get('files_written', 0)}/{result.get('selected_links', 0)} extracted"
     if action_type == "bundle_text_files":
         return f"{result.get('included_files', 0)} files -> {result.get('output_txt')}, {result.get('output_fb2')}"
+    if action_type == "telegram_send_document":
+        return f"telegram message {result.get('message_id')} file={result.get('file_name') or result.get('path')}"
     if action_type == "ranobehub_chapter":
         return f"{result.get('title') or 'chapter'} -> {result.get('path')} ({result.get('chars', 0)} chars)"
     return truncate(str(result.get("error") or result.get("message") or "done"), 180)
@@ -2055,6 +2262,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 result = web_extract_link_list_tool(config, action)
             elif action_type == "bundle_text_files":
                 result = bundle_text_files_tool(config, action)
+            elif action_type == "telegram_send_document":
+                result = telegram_send_document_tool(config, action)
             elif action_type == "ranobehub_chapter":
                 result = ranobehub_chapter_tool(config, action)
             elif action_type == "sandbox_status":

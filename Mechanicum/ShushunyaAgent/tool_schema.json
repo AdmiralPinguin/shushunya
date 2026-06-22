@@ -171,6 +171,16 @@
         "returns": "writes combined TXT and FB2 and returns metadata"
       }
     },
+    "telegram_send_document": {
+      "required": ["action", "path"],
+      "properties": {
+        "action": "telegram_send_document",
+        "path": "sandbox_path to an existing file",
+        "caption": "optional Telegram caption, max 1024 chars",
+        "chat_id": "optional allowed chat id; default is configured server chat",
+        "returns": "sends the sandbox file through the configured Telegram bot and returns message/file metadata"
+      }
+    },
     "ranobehub_chapter": {
       "required": ["action", "url", "path"],
       "properties": {

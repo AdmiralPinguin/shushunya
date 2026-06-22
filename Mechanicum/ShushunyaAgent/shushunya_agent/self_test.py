@@ -280,6 +280,15 @@ def main() -> int:
     )
     if not valid_bundle_action.get("ok"):
         raise AssertionError(f"valid bundle_text_files action was rejected: {valid_bundle_action}")
+    valid_telegram_action = agent_runner.validate_action(
+        {
+            "action": "telegram_send_document",
+            "path": "/work/novel_data/book.fb2",
+            "caption": "ready",
+        }
+    )
+    if not valid_telegram_action.get("ok"):
+        raise AssertionError(f"valid telegram_send_document action was rejected: {valid_telegram_action}")
     valid_links_action = agent_runner.validate_action(
         {
             "action": "web_links",
@@ -1036,6 +1045,36 @@ def main() -> int:
     if not any(event.get("code") == "final_artifact_validation_failed" for event in rejected_final_events):
         raise AssertionError(f"missing artifact warning was not emitted: {rejected_final_events}")
     print("[ok] final artifact validation")
+
+    class FakeTelegramProcess:
+        returncode = 0
+
+        def communicate(self, timeout=None):
+            return (
+                json.dumps(
+                    {
+                        "ok": True,
+                        "message_id": 123,
+                        "chat_id": 7791909246,
+                        "file_name": "book.fb2",
+                        "file_size": 42,
+                    },
+                    ensure_ascii=False,
+                ),
+                "",
+            )
+
+    with mock.patch.dict(os.environ, {"SHUSHUNYA_AGENT_TELEGRAM_BOT_TOKEN": "token", "SHUSHUNYA_AGENT_TELEGRAM_CHAT_ID": "7791909246"}), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/book.fb2", "exists": True, "type": "file", "size": 42}), \
+            mock.patch.object(agent_runner, "sandbox_path_to_host_path", return_value=Path("/sandbox/work/book.fb2")), \
+            mock.patch.object(agent_runner.subprocess, "Popen", return_value=FakeTelegramProcess()):
+        telegram_result = agent_runner.telegram_send_document_tool(
+            config,
+            {"action": "telegram_send_document", "path": "/work/book.fb2", "caption": "ready"},
+        )
+    if telegram_result.get("ok") is not True or telegram_result.get("message_id") != 123:
+        raise AssertionError(f"telegram_send_document mocked tool failed: {telegram_result}")
+    print("[ok] telegram document tool")
 
     limit_stdout = io.StringIO()
     limit_config = AgentConfig(
