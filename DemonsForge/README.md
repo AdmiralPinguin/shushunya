@@ -67,6 +67,7 @@ Core endpoints:
 - `GET /forge/capabilities`
 - `GET /forge/runtime`
 - `POST /forge/runtime/unload`
+- `POST /forge/runtime/checkpoint`
 - `GET /forge/schema/job`
 - `GET /forge/engines`
 - `GET /forge/models`

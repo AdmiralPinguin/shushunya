@@ -67,6 +67,9 @@ def main() -> None:
     unload = client.post("/forge/runtime/unload")
     assert unload.status_code == 200, unload.text
     assert unload.json()["ok"] is True
+    checkpoint = client.post("/forge/runtime/checkpoint")
+    assert checkpoint.status_code == 200, checkpoint.text
+    assert checkpoint.json()["ok"] is True
     paused = client.post("/forge/queue/pause")
     assert paused.status_code == 200, paused.text
     assert paused.json()["paused"] is True

@@ -63,6 +63,11 @@ def unload_runtime(engine: str | None = None) -> dict[str, object]:
     return forge_queue.unload_engines(engine_name=engine)
 
 
+@app.post("/forge/runtime/checkpoint")
+def checkpoint_runtime() -> dict[str, object]:
+    return store.checkpoint()
+
+
 @app.post("/forge/queue/pause")
 def pause_queue() -> dict[str, object]:
     return forge_queue.pause()

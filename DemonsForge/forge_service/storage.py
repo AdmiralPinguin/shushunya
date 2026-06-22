@@ -114,6 +114,16 @@ class ForgeStore:
         with self._lock, self._connect() as conn:
             return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
+    def checkpoint(self) -> dict[str, object]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        return {
+            "ok": True,
+            "busy": int(row[0]) if row else 0,
+            "log_frames": int(row[1]) if row else 0,
+            "checkpointed_frames": int(row[2]) if row else 0,
+        }
+
     def set_runtime_flag(self, key: str, value: bool) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(

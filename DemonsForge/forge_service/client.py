@@ -33,6 +33,9 @@ class DemonsForgeClient:
         suffix = f"?engine={engine}" if engine else ""
         return self._request("POST", f"/forge/runtime/unload{suffix}")
 
+    def checkpoint_runtime(self) -> dict[str, Any]:
+        return self._request("POST", "/forge/runtime/checkpoint")
+
     def pause_queue(self) -> dict[str, Any]:
         return self._request("POST", "/forge/queue/pause")
 
