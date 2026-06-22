@@ -185,7 +185,7 @@ def capabilities() -> dict[str, Any]:
             "max_steps": config.MAX_STEPS,
             "max_batch": config.MAX_BATCH,
         },
-        "service_job_types": ["metadata-read", "asset-download"],
+        "service_job_types": ["prompt-enhance", "metadata-read", "asset-download"],
     }
 
 

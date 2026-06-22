@@ -67,6 +67,14 @@ def main() -> None:
         },
     )
     assert rejected_download.status_code == 400, rejected_download.text
+    prompt_enhance = client.post(
+        "/forge/jobs",
+        json={
+            "type": "prompt-enhance",
+            "prompt": "кинематографичный портрет кузнеца",
+        },
+    )
+    assert prompt_enhance.status_code == 200, prompt_enhance.text
     queued = client.post(
         "/forge/jobs",
         json={

@@ -142,9 +142,10 @@ metadata containing prompt, negative prompt, engine, model, LoRA list, seed,
 dimensions, sampler, steps, guidance/CFG, source images, creation time and job
 id.
 
-`metadata-read` is implemented as a lightweight CPU-only job type. It reads
-image dimensions, embedded PIL metadata and adjacent `.json` sidecars into a
-metadata artifact.
+`prompt-enhance` and `metadata-read` are implemented as lightweight CPU-only job
+types. `prompt-enhance` produces a deterministic enhanced prompt metadata
+artifact; `metadata-read` reads image dimensions, embedded PIL metadata and
+adjacent `.json` sidecars into a metadata artifact.
 
 Smoke test without heavy image generation:
 

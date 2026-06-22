@@ -51,6 +51,9 @@ class ForgeQueue:
                 raise RuntimeError(f"unknown engine: {engine_name}")
             if not spec.prompt or not spec.prompt.strip():
                 raise RuntimeError("txt2img requires prompt")
+        elif spec.type == JobType.prompt_enhance:
+            if not spec.prompt or not spec.prompt.strip():
+                raise RuntimeError("prompt-enhance requires prompt")
         elif spec.type == JobType.metadata_read:
             if not spec.source_images:
                 raise RuntimeError("metadata-read requires source_images")
@@ -136,6 +139,8 @@ class ForgeQueue:
                 self._execute_asset_download(job_id, spec)
             elif spec.type == JobType.txt2img:
                 self._execute_txt2img(job_id, spec)
+            elif spec.type == JobType.prompt_enhance:
+                self._execute_prompt_enhance(job_id, spec)
             elif spec.type == JobType.metadata_read:
                 self._execute_metadata_read(job_id, spec)
             else:
@@ -225,6 +230,45 @@ class ForgeQueue:
                 job_id=job_id,
                 kind="asset",
                 path=result["path"],
+                metadata_path=str(metadata_path),
+                metadata=metadata,
+            )
+        )
+
+    def _execute_prompt_enhance(self, job_id: str, spec: JobSpec) -> None:
+        if not spec.prompt or not spec.prompt.strip():
+            raise RuntimeError("prompt-enhance requires prompt")
+        artifact_id = uuid.uuid4().hex
+        artifact_dir = config.ARTIFACTS_DIR / job_id
+        metadata_path = artifact_dir / f"{artifact_id}.json"
+        prompt = spec.prompt.strip()
+        additions = []
+        lowered = prompt.lower()
+        if "portrait" in lowered or "портрет" in lowered:
+            additions.extend(["detailed face", "balanced composition"])
+        if "cinematic" in lowered or "кинематограф" in lowered:
+            additions.extend(["cinematic lighting", "high dynamic range"])
+        if "anime" in lowered or "аниме" in lowered:
+            additions.extend(["clean linework", "expressive character design"])
+        if not additions:
+            additions.extend(["high detail", "coherent composition", "clean lighting"])
+        enhanced = f"{prompt}, {', '.join(dict.fromkeys(additions))}"
+        metadata = {
+            "job_id": job_id,
+            "type": "prompt-enhance",
+            "created_at": utc_now(),
+            "prompt": prompt,
+            "enhanced_prompt": enhanced,
+            "negative_prompt": spec.negative_prompt or "low quality, blurry, distorted",
+            "raw_spec": json.loads(spec.model_dump_json()),
+        }
+        write_json(metadata_path, metadata)
+        self.store.add_artifact(
+            ArtifactRecord(
+                id=artifact_id,
+                job_id=job_id,
+                kind="metadata",
+                path=str(metadata_path),
                 metadata_path=str(metadata_path),
                 metadata=metadata,
             )
