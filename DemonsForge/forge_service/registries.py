@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timezone
 
 from . import config
 
@@ -70,6 +71,17 @@ def _dir_size(path: Path) -> int:
     return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
 
 
+def _modified_at(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    if path.is_file():
+        mtime = path.stat().st_mtime
+    else:
+        mtimes = [p.stat().st_mtime for p in path.rglob("*") if p.exists()]
+        mtime = max(mtimes, default=path.stat().st_mtime)
+    return datetime.fromtimestamp(mtime, timezone.utc).isoformat()
+
+
 def discover_models() -> list[dict[str, Any]]:
     models = []
     known_names = set()
@@ -84,6 +96,7 @@ def discover_models() -> list[dict[str, Any]]:
                 "path": str(path),
                 "available": (path / "model_index.json").exists(),
                 "size_bytes": _dir_size(path),
+                "modified_at": _modified_at(path),
                 "pipeline": meta["pipeline"],
             }
         )
@@ -111,6 +124,7 @@ def discover_models() -> list[dict[str, Any]]:
                     "path": str(path),
                     "available": True,
                     "size_bytes": _dir_size(path),
+                    "modified_at": _modified_at(path),
                     "pipeline": pipeline,
                     "registered": False,
                 }
@@ -132,6 +146,7 @@ def discover_loras() -> list[dict[str, Any]]:
                     "name": path.stem,
                     "path": str(path),
                     "size_bytes": path.stat().st_size,
+                    "modified_at": _modified_at(path),
                     "sha256": None,
                     "license_note": None,
                     "status": "local",
@@ -151,7 +166,7 @@ def discover_embeddings() -> list[dict[str, Any]]:
     if not config.EMBEDDINGS_DIR.exists():
         return []
     return [
-        {"name": p.stem, "path": str(p), "size_bytes": p.stat().st_size}
+        {"name": p.stem, "path": str(p), "size_bytes": p.stat().st_size, "modified_at": _modified_at(p)}
         for p in config.EMBEDDINGS_DIR.rglob("*")
         if p.is_file()
     ]
