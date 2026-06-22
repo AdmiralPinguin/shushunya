@@ -75,6 +75,7 @@ public class MainActivity extends Activity {
     private static final String SERVER_CHAT_SESSION_ID = "redmagic9-shushunya-m";
     private static final int REQUEST_NOTIFICATIONS = 42;
     private static final String DEFAULT_BASE_URL = "https://chat.shushunya.com";
+    private static final String MOBILE_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/2.4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
     private static final String MODEL = "gemma-4-12b-it-UD-Q5_K_XL.gguf";
     private static final int AUDIO_SAMPLE_RATE = 16000;
     private static final int REQUEST_RECORD_AUDIO = 41;
@@ -2008,6 +2009,7 @@ public class MainActivity extends Activity {
     }
 
     private void applyMobileAuth(HttpURLConnection conn) {
+        conn.setRequestProperty("User-Agent", MOBILE_USER_AGENT);
         String apiKey = BuildConfig.MOBILE_API_KEY == null ? "" : BuildConfig.MOBILE_API_KEY.trim();
         if (!apiKey.isEmpty()) {
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
