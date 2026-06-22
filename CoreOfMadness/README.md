@@ -55,6 +55,13 @@ Default settings:
 - GPU layers: `999` by default, so Vulkan can offload to the GPU when available
 - Reasoning mode: `off` by default, so chat replies return normal `content`
 - KV cache quantization: `CACHE_TYPE_K=q4_0`, `CACHE_TYPE_V=q4_0`
+- Prompt cache is disabled by default: `PROMPT_CACHE=0`,
+  `CACHE_RAM=0`, `CACHE_REUSE=0`, `SLOT_PROMPT_SIMILARITY=0.0`,
+  `CACHE_IDLE_SLOTS=0`. ArchiveOfHeresy is expected to assemble the full
+  request context from memory for each call instead of relying on llama.cpp
+  prompt/KV reuse across requests.
+- Slot actions are enabled with `SLOT_SAVE_PATH=llm-host/runtime/slots` so the
+  archive gateway can explicitly clear the active slot after a request.
 - API base URL: `http://127.0.0.1:8080`
 - Health endpoint: `GET /health`
 - Chat completions endpoint: `POST /v1/chat/completions`

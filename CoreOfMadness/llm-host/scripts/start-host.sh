@@ -15,6 +15,12 @@ CACHE_TYPE_K="${CACHE_TYPE_K:-q4_0}"
 CACHE_TYPE_V="${CACHE_TYPE_V:-q4_0}"
 EMBEDDINGS="${EMBEDDINGS:-1}"
 POOLING="${POOLING:-mean}"
+PROMPT_CACHE="${PROMPT_CACHE:-0}"
+CACHE_REUSE="${CACHE_REUSE:-0}"
+SLOT_PROMPT_SIMILARITY="${SLOT_PROMPT_SIMILARITY:-0.0}"
+CACHE_IDLE_SLOTS="${CACHE_IDLE_SLOTS:-0}"
+CACHE_RAM="${CACHE_RAM:-0}"
+SLOT_SAVE_PATH="${SLOT_SAVE_PATH:-$ROOT/runtime/slots}"
 PID_FILE="$ROOT/runtime/llama-server.pid"
 LOG_FILE="$ROOT/runtime/llama-server.log"
 
@@ -35,6 +41,24 @@ case "${EMBEDDINGS,,}" in
     ;;
 esac
 
+CACHE_ARGS=(--cache-ram "$CACHE_RAM" --cache-reuse "$CACHE_REUSE" --slot-prompt-similarity "$SLOT_PROMPT_SIMILARITY")
+case "${PROMPT_CACHE,,}" in
+  1|true|yes|on)
+    CACHE_ARGS=(--cache-prompt "${CACHE_ARGS[@]}")
+    ;;
+  *)
+    CACHE_ARGS=(--no-cache-prompt "${CACHE_ARGS[@]}")
+    ;;
+esac
+case "${CACHE_IDLE_SLOTS,,}" in
+  1|true|yes|on)
+    CACHE_ARGS+=(--cache-idle-slots)
+    ;;
+  *)
+    CACHE_ARGS+=(--no-cache-idle-slots)
+    ;;
+esac
+
 if [ -f "$PID_FILE" ]; then
   PID="$(cat "$PID_FILE")"
   if kill -0 "$PID" 2>/dev/null; then
@@ -45,6 +69,7 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 mkdir -p "$ROOT/runtime"
+mkdir -p "$SLOT_SAVE_PATH"
 
 export LD_LIBRARY_PATH="$ROOT/llama.cpp:${LD_LIBRARY_PATH:-}"
 
@@ -61,6 +86,8 @@ setsid "$ROOT/llama.cpp/llama-server" \
   --flash-attn auto \
   --cache-type-k "$CACHE_TYPE_K" \
   --cache-type-v "$CACHE_TYPE_V" \
+  "${CACHE_ARGS[@]}" \
+  --slot-save-path "$SLOT_SAVE_PATH" \
   >"$LOG_FILE" 2>&1 </dev/null &
 
 echo "$!" > "$PID_FILE"
