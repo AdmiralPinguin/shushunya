@@ -83,7 +83,8 @@ class DiffusersEngine(BaseEngine):
         return True
 
     def unload_if_idle(self, idle_seconds: int) -> bool:
-        if self._pipe is None:
+        loaded = self._pipe is not None or self._img2img_pipe is not None or self._inpaint_pipe is not None
+        if not loaded:
             return False
         if time.monotonic() - self.last_used < idle_seconds:
             return False
