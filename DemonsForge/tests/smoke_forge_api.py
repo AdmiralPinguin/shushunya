@@ -54,6 +54,7 @@ def main() -> None:
     assert runtime.status_code == 200, runtime.text
     assert runtime.json()["cpu_only"] is True
     assert runtime.json()["embedded_worker"] is True
+    assert runtime.json()["pid"] > 0
     assert runtime.json()["memory"]["namespace"] == "demonsforge"
     memory_status = client.get("/forge/memory/status")
     assert memory_status.status_code == 200, memory_status.text
@@ -73,6 +74,7 @@ def main() -> None:
     queue_state = client.get("/forge/queue")
     assert queue_state.status_code == 200, queue_state.text
     assert "status_counts" in queue_state.json()
+    assert queue_state.json()["pid"] > 0
     external_worker = ForgeQueue(store, start_worker=False)
     external_worker.pause()
     paused_job = external_worker.submit(

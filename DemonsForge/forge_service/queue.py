@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import os
 import queue
 import random
 import threading
@@ -181,6 +182,7 @@ class ForgeQueue:
         mem = psutil.virtual_memory()
         return {
             "queue_depth": self._queue.qsize(),
+            "pid": os.getpid(),
             "paused": self.store.get_runtime_flag("queue_paused", default=False),
             "embedded_worker": self._embedded_worker,
             "canceled_jobs": len(self._cancel),
@@ -200,6 +202,7 @@ class ForgeQueue:
     def queue_state(self) -> dict[str, object]:
         return {
             "queue_depth": self._queue.qsize(),
+            "pid": os.getpid(),
             "paused": self.store.get_runtime_flag("queue_paused", default=False),
             "embedded_worker": self._embedded_worker,
             "canceled_jobs": len(self._cancel),
