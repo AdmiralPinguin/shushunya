@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from forge_service.server import app
 from forge_service.client import DemonsForgeClient
+from forge_service.server import store
 
 
 def wait_for_terminal(client: TestClient, job_id: str) -> dict:
@@ -79,6 +80,25 @@ def main() -> None:
     )
     assert memory_proposal_dry_run.status_code == 200, memory_proposal_dry_run.text
     assert memory_proposal_dry_run.json()["dry_run"] is True
+    duplicate_hash = store.memory_proposal_hash("duplicate check", "smoke", "auto")
+    store.record_memory_proposal(
+        duplicate_hash,
+        "duplicate check",
+        "smoke",
+        "auto",
+        1,
+        {"ok": True, "smoke": True},
+    )
+    duplicate_memory_proposal = client.post(
+        "/forge/memory/propose?dry_run=true",
+        json={
+            "proposal": "duplicate check",
+            "evidence": "smoke",
+            "importance": 1,
+        },
+    )
+    assert duplicate_memory_proposal.status_code == 200, duplicate_memory_proposal.text
+    assert duplicate_memory_proposal.json()["duplicate"] is True
     schema = client.get("/forge/schema/job")
     assert schema.status_code == 200, schema.text
     downloads = client.get("/forge/assets/downloads")
