@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from . import config
 
@@ -86,11 +86,12 @@ class JobSpec(BaseModel):
 
     @field_validator("width", "height")
     @classmethod
-    def validate_dimensions(cls, value: int) -> int:
+    def validate_dimensions(cls, value: int, info: ValidationInfo) -> int:
         if value < 64 or value % 8 != 0:
             raise ValueError("dimensions must be >=64 and divisible by 8")
-        if value > config.MAX_WIDTH:
-            raise ValueError(f"dimensions must be <= {config.MAX_WIDTH}")
+        max_value = config.MAX_HEIGHT if info.field_name == "height" else config.MAX_WIDTH
+        if value > max_value:
+            raise ValueError(f"{info.field_name} must be <= {max_value}")
         return value
 
     @field_validator("steps")
