@@ -212,6 +212,7 @@ def capabilities() -> dict[str, Any]:
             "max_height": config.MAX_HEIGHT,
             "max_steps": config.MAX_STEPS,
             "max_batch": config.MAX_BATCH,
+            "max_asset_download_bytes": config.MAX_ASSET_DOWNLOAD_BYTES,
         },
         "implemented_job_types": sorted(
             set(SERVICE_JOB_TYPES)

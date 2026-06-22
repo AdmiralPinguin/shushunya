@@ -48,6 +48,7 @@ def main() -> None:
     assert "engines" in caps.json()
     assert "implemented_job_types" in caps.json()
     assert "modified_at" in caps.json()["models"][0]
+    assert caps.json()["limits"]["max_asset_download_bytes"] > 0
     assert caps.json()["engines"]["sdxl"]["implemented"]["img2img"] is True
     assert caps.json()["engines"]["flux"]["implemented"]["img2img"] is False
     runtime = client.get("/forge/runtime")
