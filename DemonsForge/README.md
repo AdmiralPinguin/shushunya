@@ -91,10 +91,12 @@ Core endpoints:
 - `GET /forge/artifacts/{artifact_id}/thumbnail`
 - `GET /forge/gallery`
 - `GET /forge/memory/status`
+- `GET /forge/memory/policy`
 - `GET /forge/memory/gateway`
 - `GET /forge/memory/catalog`
 - `GET /forge/memory/search`
 - `GET /forge/memory/events`
+- `GET /forge/memory/proposals`
 - `POST /forge/memory/propose`
 
 Example plan request:
