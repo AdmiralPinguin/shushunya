@@ -85,10 +85,12 @@ class DemonsForgeClient:
         evidence: str = "",
         target: str = "auto",
         importance: int = 3,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
+        suffix = "?dry_run=true" if dry_run else ""
         return self._request(
             "POST",
-            "/forge/memory/propose",
+            f"/forge/memory/propose{suffix}",
             json={
                 "proposal": proposal,
                 "evidence": evidence,

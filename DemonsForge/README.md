@@ -211,6 +211,8 @@ integrate it into focus/wiki/vector/graph memory.
 Forge keeps a local proposal hash in its runtime SQLite store to avoid sending
 the same durable proposal twice, including uncertain timeout cases where
 ArchiveOfHeresy may already have accepted the write.
+Use `POST /forge/memory/propose?dry_run=true` to compute the proposal hash and
+duplicate status without writing to ArchiveOfHeresy.
 
 Example:
 

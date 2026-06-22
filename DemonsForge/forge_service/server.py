@@ -104,13 +104,22 @@ def memory_proposals(limit: int = 100) -> list[dict[str, object]]:
 
 
 @app.post("/forge/memory/propose")
-def memory_propose(request: MemoryProposal) -> dict[str, object]:
+def memory_propose(request: MemoryProposal, dry_run: bool = False) -> dict[str, object]:
     proposal_hash = store.memory_proposal_hash(
         request.proposal,
         request.evidence or "",
         request.target,
     )
     existing = store.get_memory_proposal(proposal_hash)
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "duplicate": existing is not None,
+            "proposal_hash": proposal_hash,
+            "existing": existing,
+            "memory": ArchiveMemoryClient.from_config().status(),
+        }
     if existing is not None:
         return {
             "ok": True,

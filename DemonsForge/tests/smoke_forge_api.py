@@ -70,6 +70,15 @@ def main() -> None:
         json={"proposal": "   "},
     )
     assert empty_memory_proposal.status_code == 422, empty_memory_proposal.text
+    memory_proposal_dry_run = client.post(
+        "/forge/memory/propose?dry_run=true",
+        json={
+            "proposal": "DemonsForge smoke dry-run proposal should not be written.",
+            "evidence": "This validates dry_run only.",
+        },
+    )
+    assert memory_proposal_dry_run.status_code == 200, memory_proposal_dry_run.text
+    assert memory_proposal_dry_run.json()["dry_run"] is True
     schema = client.get("/forge/schema/job")
     assert schema.status_code == 200, schema.text
     downloads = client.get("/forge/assets/downloads")
