@@ -286,23 +286,6 @@ class ForgeStore:
         job_type: str | None = None,
         kind: str | None = None,
     ) -> list[ArtifactRecord]:
-        with self._lock, self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM artifacts ORDER BY created_at DESC LIMIT ?",
-                (max(limit * 5, limit),),
-            ).fetchall()
-        records = [
-            ArtifactRecord(
-                id=row["id"],
-                job_id=row["job_id"],
-                kind=row["kind"],
-                path=row["path"],
-                metadata_path=row["metadata_path"],
-                created_at=row["created_at"],
-                metadata=json.loads(row["metadata_json"]),
-            )
-            for row in rows
-        ]
         query_lower = (query or "").strip().lower()
 
         def matches(record: ArtifactRecord) -> bool:
@@ -324,7 +307,38 @@ class ForgeStore:
                     return False
             return True
 
-        return [record for record in records if matches(record)][:limit]
+        matched: list[ArtifactRecord] = []
+        offset = 0
+        batch_size = max(limit * 5, 100)
+        max_scan = 5000
+        while len(matched) < limit and offset < max_scan:
+            sql = "SELECT * FROM artifacts"
+            params: list[object] = []
+            if kind:
+                sql += " WHERE kind = ?"
+                params.append(kind)
+            sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            params.extend([batch_size, offset])
+            with self._lock, self._connect() as conn:
+                rows = conn.execute(sql, params).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                record = ArtifactRecord(
+                    id=row["id"],
+                    job_id=row["job_id"],
+                    kind=row["kind"],
+                    path=row["path"],
+                    metadata_path=row["metadata_path"],
+                    created_at=row["created_at"],
+                    metadata=json.loads(row["metadata_json"]),
+                )
+                if matches(record):
+                    matched.append(record)
+                    if len(matched) >= limit:
+                        break
+            offset += len(rows)
+        return matched
 
     def create_asset_download(self, record: AssetDownloadRecord) -> None:
         with self._lock, self._connect() as conn:
