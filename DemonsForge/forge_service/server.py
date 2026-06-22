@@ -51,6 +51,11 @@ def memory_status() -> dict[str, object]:
     return ArchiveMemoryClient.from_config().status()
 
 
+@app.get("/forge/memory/policy")
+def memory_policy() -> dict[str, object]:
+    return ArchiveMemoryClient.from_config().policy()
+
+
 @app.get("/forge/memory/gateway")
 def memory_gateway() -> dict[str, object]:
     return ArchiveMemoryClient.from_config().gateway()

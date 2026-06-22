@@ -46,6 +46,10 @@ def main() -> None:
     memory_status = client.get("/forge/memory/status")
     assert memory_status.status_code == 200, memory_status.text
     assert memory_status.json()["write_policy"] == "proposal-only"
+    memory_policy = client.get("/forge/memory/policy")
+    assert memory_policy.status_code == 200, memory_policy.text
+    assert "asset approvals/rejections" in memory_policy.json()["durable_topics"]
+    assert "progress events" in memory_policy.json()["do_not_write"]
     memory_catalog = client.get("/forge/memory/catalog?create=true")
     assert memory_catalog.status_code == 200, memory_catalog.text
     assert isinstance(memory_catalog.json(), dict)

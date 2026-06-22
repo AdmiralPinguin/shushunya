@@ -44,6 +44,9 @@ class DemonsForgeClient:
     def memory_status(self) -> dict[str, Any]:
         return self._request("GET", "/forge/memory/status")
 
+    def memory_policy(self) -> dict[str, Any]:
+        return self._request("GET", "/forge/memory/policy")
+
     def memory_gateway(self) -> dict[str, Any]:
         return self._request("GET", "/forge/memory/gateway")
 

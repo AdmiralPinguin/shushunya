@@ -190,6 +190,7 @@ Gateway:
 
 ```text
 GET  /forge/memory/status
+GET  /forge/memory/policy
 GET  /forge/memory/gateway
 GET  /forge/memory/catalog?create=true
 GET  /forge/memory/search?q=sdxl&layers=focus,wiki,vector,graph&limit=5

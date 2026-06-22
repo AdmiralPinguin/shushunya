@@ -10,6 +10,25 @@ from urllib.request import Request, urlopen
 from . import config
 
 
+DURABLE_MEMORY_TOPICS = [
+    "hardware/runtime policy",
+    "default engines/models/schedulers/samplers",
+    "stable style preferences",
+    "asset approvals/rejections",
+    "local models/LoRA/embeddings/control assets",
+    "repeated failures with useful workarounds",
+    "Forge API architecture decisions",
+]
+
+NOISY_MEMORY_TOPICS = [
+    "progress events",
+    "every job status change",
+    "one-off seed/job_id values",
+    "noisy prompt variants",
+    "large gallery metadata blobs",
+]
+
+
 def _trim(value: str | None, limit: int) -> str:
     if not value:
         return ""
@@ -48,6 +67,17 @@ class ArchiveMemoryClient:
             "api_key_configured": bool(self.api_key),
             "write_policy": "proposal-only",
             "direct_file_access": False,
+        }
+
+    def policy(self) -> dict[str, object]:
+        return {
+            "namespace": self.namespace,
+            "requester": self.requester,
+            "write_endpoint": "/forge/memory/propose",
+            "write_policy": "proposal-only",
+            "durable_topics": DURABLE_MEMORY_TOPICS,
+            "do_not_write": NOISY_MEMORY_TOPICS,
+            "automatic_writes": ["asset download success/rejection"],
         }
 
     def gateway(self) -> dict[str, Any]:
