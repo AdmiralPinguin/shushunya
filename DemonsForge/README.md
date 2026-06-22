@@ -158,6 +158,9 @@ Architecture:
   `seed`, negative prompts and local LoRA references like `lora:name@0.8`.
   It also performs fail-soft read-only memory search through the `demonsforge`
   namespace and stores compact planning hints in `spec.safety.memory_context`.
+  It recognizes `txt2img`, `img2img`, `inpaint`, and `upscale` intent; image
+  editing plans include `planner_note` reminders for required source/mask
+  inputs instead of pretending those assets exist.
 - `forge_service/downloader.py`: controlled asset downloader abstraction. It
   accepts only approved jobs, stores source/license/hash metadata, keeps files
   inside DemonsForge, and rejects unverified hosts.

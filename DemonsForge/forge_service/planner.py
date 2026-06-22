@@ -102,6 +102,17 @@ def _negative(text: str, supports_negative: bool) -> str | None:
     return "low quality, blurry, distorted"
 
 
+def _job_type(text: str) -> JobType:
+    lowered = text.lower()
+    if any(token in lowered for token in ["inpaint", "инпейнт", "замаж", "маск", "mask"]):
+        return JobType.inpaint
+    if any(token in lowered for token in ["img2img", "image to image", "по картинке", "из картинки", "вариацию"]):
+        return JobType.img2img
+    if any(token in lowered for token in ["upscale", "апскейл", "увелич", "увеличь"]):
+        return JobType.upscale
+    return JobType.txt2img
+
+
 def _memory_context(text: str) -> dict[str, object]:
     client = ArchiveMemoryClient.from_config()
     status = client.status()
@@ -131,7 +142,10 @@ def _memory_context(text: str) -> dict[str, object]:
 
 def plan_txt2img(request: PlanRequest) -> JobSpec:
     text = request.request.strip()
+    job_type = _job_type(text)
     engine = _choose_engine(text, request.preferred_engine)
+    if job_type in {JobType.img2img, JobType.inpaint}:
+        engine = "sdxl"
     caps = capabilities()
     engine_caps = caps["engines"][engine]
     model = engine_caps["default_model"]
@@ -142,7 +156,7 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
         prompt = f"{prompt}, {', '.join(additions)}"
 
     spec = JobSpec(
-        type=JobType.txt2img,
+        type=job_type,
         engine=engine,
         model=model,
         prompt=prompt,
@@ -160,4 +174,14 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
         safety={"memory_context": _memory_context(text)},
         asset_request=_asset_request_if_needed(text),
     )
+    if job_type == JobType.upscale:
+        spec.engine = None
+        spec.model = None
+        spec.prompt = None
+        spec.negative_prompt = None
+        spec.safety["planner_note"] = "upscale requires source_images before execution"
+    elif job_type == JobType.img2img:
+        spec.safety["planner_note"] = "img2img requires source_images before execution"
+    elif job_type == JobType.inpaint:
+        spec.safety["planner_note"] = "inpaint requires source_images and mask_image before execution"
     return spec
