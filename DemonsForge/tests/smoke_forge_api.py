@@ -472,6 +472,9 @@ def main() -> None:
     assert isinstance(job_logs.json()["logs"], list)
     jobs = client.get("/forge/jobs?limit=5")
     assert jobs.status_code == 200, jobs.text
+    metadata_jobs = client.get("/forge/jobs?job_type=metadata-read&limit=5")
+    assert metadata_jobs.status_code == 200, metadata_jobs.text
+    assert all(item["spec"]["type"] == "metadata-read" for item in metadata_jobs.json())
     events = client.get(f"/forge/jobs/{job_id}/events")
     assert events.status_code == 200, events.text
     gallery = client.get("/forge/gallery")

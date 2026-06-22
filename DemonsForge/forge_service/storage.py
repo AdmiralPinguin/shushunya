@@ -168,17 +168,23 @@ class ForgeStore:
             error=row["error"],
         )
 
-    def list_jobs(self, status: str | None = None, limit: int = 100) -> list[JobRecord]:
+    def list_jobs(
+        self,
+        status: str | None = None,
+        limit: int = 100,
+        engine: str | None = None,
+        job_type: str | None = None,
+    ) -> list[JobRecord]:
         query = "SELECT * FROM jobs"
         params: list[object] = []
         if status:
             query += " WHERE status = ?"
             params.append(status)
         query += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
+        params.append(max(limit * 5, limit) if engine or job_type else limit)
         with self._lock, self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
-        return [
+        records = [
             JobRecord(
                 id=row["id"],
                 spec=json.loads(row["spec_json"]),
@@ -192,6 +198,11 @@ class ForgeStore:
             )
             for row in rows
         ]
+        if engine:
+            records = [record for record in records if record.spec.engine == engine]
+        if job_type:
+            records = [record for record in records if record.spec.type.value == job_type]
+        return records[:limit]
 
     def job_status_counts(self) -> dict[str, int]:
         with self._lock, self._connect() as conn:

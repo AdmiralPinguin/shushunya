@@ -225,10 +225,20 @@ def list_asset_downloads(limit: int = 100) -> list[dict[str, object]]:
 
 
 @app.get("/forge/jobs")
-def list_jobs(status: str | None = None, limit: int = 100) -> list[dict[str, object]]:
+def list_jobs(
+    status: str | None = None,
+    limit: int = 100,
+    engine: str | None = None,
+    job_type: str | None = None,
+) -> list[dict[str, object]]:
     return [
         item.model_dump()
-        for item in store.list_jobs(status=status, limit=max(1, min(limit, 500)))
+        for item in store.list_jobs(
+            status=status,
+            limit=max(1, min(limit, 500)),
+            engine=engine,
+            job_type=job_type,
+        )
     ]
 
 

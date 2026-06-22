@@ -138,11 +138,15 @@ class DemonsForgeClient:
         suffix = "?dry_run=true" if dry_run else ""
         return self._request("POST", f"/forge/jobs{suffix}", json=spec)
 
-    def jobs(self, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-        query = f"?limit={limit}"
-        if status:
-            query += f"&status={status}"
-        return self._request("GET", f"/forge/jobs{query}")
+    def jobs(
+        self,
+        status: str | None = None,
+        limit: int = 100,
+        engine: str | None = None,
+        job_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params = {"limit": limit, "status": status, "engine": engine, "job_type": job_type}
+        return self._request("GET", "/forge/jobs", params={k: v for k, v in params.items() if v is not None})
 
     def job(self, job_id: str) -> dict[str, Any]:
         return self._request("GET", f"/forge/jobs/{job_id}")

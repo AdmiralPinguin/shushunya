@@ -144,6 +144,7 @@ curl -s 'http://127.0.0.1:8110/forge/jobs?dry_run=true' \
 
 Dry-run responses include a conservative CPU-only resource estimate with pixel
 budget ratio, estimated RAM floor, loaded engine state, and warnings.
+Job listing supports `status`, `engine`, `job_type`, and `limit` query filters.
 The same validation runs before normal job submission, including scheduler,
 sampler, LoRA availability, embeddings, control hooks, source-image checks, and
 backend capability gates.
