@@ -998,6 +998,30 @@ def main() -> int:
         raise AssertionError(f"non-JSON model output did not force retry: {tool_error_events}")
     print("[ok] tool exception fail-soft")
 
+    repeat_stdout = io.StringIO()
+    repeat_config = AgentConfig(
+        task_id=safe_task_id("self-test-cumulative-repeat"),
+        json_output=True,
+        max_steps=30,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    repeat_actions: list[str] = []
+    for index in range(18):
+        repeat_actions.append('{"action":"list_files","path":"/work","max_depth":1,"limit":1,"offset":0}')
+        repeat_actions.append(f'{{"action":"web_search","query":"different filler {index}","limit":1}}')
+    with mock.patch.object(agent_runner, "chat", side_effect=repeat_actions), \
+            mock.patch.object(agent_runner, "web_search", return_value={"ok": True, "results": []}), \
+            contextlib.redirect_stdout(repeat_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        repeat_code = run_agent("stop cumulative repeats", repeat_config)
+    repeat_payload = json.loads(repeat_stdout.getvalue())
+    if repeat_code != 2 or repeat_payload.get("continuable") is not True:
+        raise AssertionError(f"cumulative repeat guard did not stop as continuable: code={repeat_code}, payload={repeat_payload}")
+    if "цикл повторяющихся действий" not in repeat_payload.get("message", ""):
+        raise AssertionError(f"cumulative repeat guard returned wrong message: {repeat_payload}")
+    print("[ok] cumulative repeated action guard")
+
     if offline:
         print("[skip] archive integration")
     else:

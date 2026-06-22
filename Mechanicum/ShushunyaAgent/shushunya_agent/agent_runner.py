@@ -1534,6 +1534,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     ]
     action_counts: dict[str, int] = {}
     repeated_rejection_count = 0
+    repeated_rejection_total = 0
     trace: list[dict[str, Any]] = []
     write_task_journal(
         config,
@@ -1760,7 +1761,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         )
         if isinstance(result, dict) and str(result.get("error") or "") == "repeated identical action rejected by supervisor":
             repeated_rejection_count += 1
-            if repeated_rejection_count >= 6:
+            repeated_rejection_total += 1
+            if repeated_rejection_count >= 6 or repeated_rejection_total >= 8:
                 duration_sec = round(time.time() - run_started, 3)
                 message = (
                     "Агент остановлен супервизором: обнаружен цикл повторяющихся действий без прогресса. "
@@ -1790,6 +1792,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "message": message,
                         "duration_sec": duration_sec,
                         "stop_reason": "repeated_action_stall",
+                        "repeated_rejection_count": repeated_rejection_count,
+                        "repeated_rejection_total": repeated_rejection_total,
                     },
                 )
                 if config.json_output:
