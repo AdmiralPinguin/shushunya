@@ -832,11 +832,14 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         elapsed_sec = time.time() - run_started
         if elapsed_sec > config.max_runtime_sec:
             duration_sec = round(elapsed_sec, 3)
-            message = f"Агент остановлен: достигнут лимит времени {config.max_runtime_sec}s."
-            emit(event_sink, {"type": "final", "ok": False, "message": message, "duration_sec": duration_sec})
-            write_task_journal(config, "final", {"ok": False, "message": message, "duration_sec": duration_sec})
+            message = (
+                f"Агент достиг лимита времени ({config.max_runtime_sec}s). "
+                f"Задачу можно продолжить с resume_task_id={config.task_id}; последние действия сохранены в task journal."
+            )
+            emit(event_sink, {"type": "final", "ok": False, "continuable": True, "resume_task_id": config.task_id, "message": message, "duration_sec": duration_sec})
+            write_task_journal(config, "final", {"ok": False, "continuable": True, "resume_task_id": config.task_id, "message": message, "duration_sec": duration_sec})
             if config.json_output:
-                print(json.dumps({"ok": False, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
+                print(json.dumps({"ok": False, "continuable": True, "resume_task_id": config.task_id, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
             else:
                 print(message, file=sys.stderr)
             return 2

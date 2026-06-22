@@ -649,6 +649,8 @@ def main() -> int:
     limit_payload = json.loads(limit_stdout.getvalue())
     if limit_code != 2 or limit_payload.get("ok") is not False or mocked_chat.called:
         raise AssertionError(f"runtime limit did not stop before model: code={limit_code}, payload={limit_payload}")
+    if limit_payload.get("continuable") is not True or limit_payload.get("resume_task_id") != limit_config.task_id:
+        raise AssertionError(f"runtime limit should be continuable: {limit_payload}")
     print("[ok] runtime limit")
 
     tool_error_events: list[dict] = []
