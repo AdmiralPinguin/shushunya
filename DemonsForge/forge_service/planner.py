@@ -250,8 +250,11 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
         spec.prompt = None
         spec.negative_prompt = None
         spec.safety["planner_note"] = "upscale requires source_images before execution"
+        spec.safety["required_inputs"] = ["source_images"]
     elif job_type == JobType.img2img:
         spec.safety["planner_note"] = "img2img requires source_images before execution"
+        spec.safety["required_inputs"] = ["source_images"]
     elif job_type == JobType.inpaint:
         spec.safety["planner_note"] = "inpaint requires source_images and mask_image before execution"
+        spec.safety["required_inputs"] = ["source_images", "mask_image"]
     return spec

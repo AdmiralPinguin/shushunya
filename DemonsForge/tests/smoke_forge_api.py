@@ -200,6 +200,7 @@ def main() -> None:
     assert planned_img2img.json()["type"] == "img2img"
     assert planned_img2img.json()["engine"] == "sdxl"
     assert "source_images" in planned_img2img.json()["safety"]["planner_note"]
+    assert planned_img2img.json()["safety"]["required_inputs"] == ["source_images"]
     planned_missing_lora = client.post(
         "/forge/plan",
         json={"request": "Нарисуй портрет lora: definitely_missing_lora"},
@@ -223,6 +224,7 @@ def main() -> None:
     assert planned_upscale.status_code == 200, planned_upscale.text
     assert planned_upscale.json()["type"] == "upscale"
     assert planned_upscale.json()["upscale_factor"] == 4
+    assert planned_upscale.json()["safety"]["required_inputs"] == ["source_images"]
     planned_flux = client.post(
         "/forge/plan",
         json={"request": "flux test image 512x512 steps 1"},
