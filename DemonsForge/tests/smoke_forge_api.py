@@ -31,6 +31,16 @@ def main() -> None:
     spec = plan.json()
     assert spec["type"] == "txt2img"
     assert spec["prompt"]
+    planned_custom = client.post(
+        "/forge/plan",
+        json={"request": "SDXL 512x768 steps 7 seed 123 cinematic portrait"},
+    )
+    assert planned_custom.status_code == 200, planned_custom.text
+    planned_spec = planned_custom.json()
+    assert planned_spec["width"] == 512
+    assert planned_spec["height"] == 768
+    assert planned_spec["steps"] == 7
+    assert planned_spec["seed"] == 123
     dry_run = client.post(
         "/forge/jobs?dry_run=true",
         json={

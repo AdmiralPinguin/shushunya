@@ -121,6 +121,8 @@ Architecture:
 - `forge_service/planner.py`: Russian natural-language planner that returns a
   valid structured job spec. Missing model/LoRA/control assets become
   `asset_request` objects requiring user approval.
+  It recognizes engine hints, explicit dimensions like `512x768`, `steps`,
+  `seed`, negative prompts and local LoRA references like `lora:name@0.8`.
 - `forge_service/downloader.py`: controlled asset downloader abstraction. It
   accepts only approved jobs, stores source/license/hash metadata, keeps files
   inside DemonsForge, and rejects unverified hosts.
