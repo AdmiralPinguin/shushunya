@@ -406,6 +406,9 @@ def main() -> None:
     assert upscale_artifact.metadata["image_size_bytes"] > 0
     artifact_file = client.get(f"/forge/artifacts/{upscale_status['artifacts'][0]}/file")
     assert artifact_file.status_code == 200, artifact_file.text
+    artifact_verify = client.get(f"/forge/artifacts/{upscale_status['artifacts'][0]}/verify")
+    assert artifact_verify.status_code == 200, artifact_verify.text
+    assert artifact_verify.json()["ok"] is True
     queued = client.post(
         "/forge/jobs",
         json={

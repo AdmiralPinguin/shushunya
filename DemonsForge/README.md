@@ -93,6 +93,7 @@ Core endpoints:
 - `GET /forge/artifacts/{artifact_id}`
 - `GET /forge/artifacts/{artifact_id}/file`
 - `GET /forge/artifacts/{artifact_id}/metadata`
+- `GET /forge/artifacts/{artifact_id}/verify`
 - `GET /forge/artifacts/{artifact_id}/thumbnail`
 - `GET /forge/gallery`
 - `GET /forge/memory/status`

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 
 import asyncio
 
@@ -391,6 +392,29 @@ def get_artifact_metadata(artifact_id: str) -> dict[str, object]:
     if not metadata_path.exists():
         raise HTTPException(status_code=404, detail="artifact metadata file missing")
     return artifact.metadata
+
+
+@app.get("/forge/artifacts/{artifact_id}/verify")
+def verify_artifact(artifact_id: str) -> dict[str, object]:
+    artifact = store.get_artifact(artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    path = Path(artifact.path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="artifact file missing")
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    expected = artifact.metadata.get("image_sha256") or artifact.metadata.get("sha256")
+    return {
+        "artifact_id": artifact_id,
+        "path": str(path),
+        "sha256": actual,
+        "expected_sha256": expected,
+        "ok": expected is None or str(expected).lower() == actual,
+    }
 
 
 @app.get("/forge/gallery")
