@@ -112,6 +112,9 @@ class ForgeQueue:
         meta = ENGINE_MODELS[engine_name]
         if spec.type.value not in meta["job_types"]:
             raise RuntimeError(f"{engine_name} does not support {spec.type.value}")
+        model_name = spec.model or str(meta["default_model"])
+        if not (config.MODELS_DIR / model_name / "model_index.json").exists():
+            raise RuntimeError(f"model is not available locally: {model_name}")
         if spec.sampler and spec.sampler not in SAMPLERS:
             raise RuntimeError(f"unsupported sampler: {spec.sampler}")
         scheduler_names = {str(item["name"]) for item in SCHEDULERS if item.get("available")}

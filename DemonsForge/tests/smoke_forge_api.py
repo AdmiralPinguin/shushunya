@@ -266,6 +266,19 @@ def main() -> None:
         },
     )
     assert missing_lora.status_code == 400, missing_lora.text
+    missing_model = client.post(
+        "/forge/jobs?dry_run=true",
+        json={
+            "type": "txt2img",
+            "engine": "sdxl",
+            "model": "definitely_missing_model",
+            "prompt": "missing model",
+            "width": 512,
+            "height": 512,
+            "steps": 1,
+        },
+    )
+    assert missing_model.status_code == 400, missing_model.text
     img2img_dry_run = client.post(
         "/forge/jobs?dry_run=true",
         json={
