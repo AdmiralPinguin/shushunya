@@ -185,10 +185,13 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 12. Извлечь текст публичной HTML-страницы напрямую в sandbox-файл без копирования текста через JSON:
 {"action":"web_extract_to_file","url":"https://example.com/page","path":"/work/page.txt","mode":"write"}
 
-13. Скачать главу Ranobehub напрямую в sandbox-файл через site adapter:
+13. Извлечь много страниц из явного оглавления в отдельные sandbox-файлы:
+{"action":"web_extract_link_list","url":"https://example.com/contents","pattern":"глава|том|chapter|volume","start_url":"https://example.com/ch1","end_url":"https://example.com/ch99","path_template":"/work/ch_{seq}_{vol}_{chapter}.txt","limit":100}
+
+14. Скачать главу Ranobehub напрямую в sandbox-файл через site adapter:
 {"action":"ranobehub_chapter","url":"https://ranobehub.org/ranobe/966/10/9","path":"/work/slime/vol10_ch09.txt","mode":"write"}
 
-14. Завершить задачу:
+15. Завершить задачу:
 {"action":"final","message":"короткий итог для пользователя"}
 
 Правила:
@@ -200,6 +203,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Если нужно сохранить текст из web_fetch, не копируй весь текст в JSON. Сохрани URL/метаданные, затем используй более узкие fetch/read/append шаги.
 - Для сохранения больших HTML-страниц используй web_extract_to_file: он сам скачает, очистит и запишет текст в файл. Не копируй большой текст в write_file content.
 - Когда нужно продолжать по оглавлению, пагинации или списку глав, сначала используй web_links по странице оглавления. Не угадывай следующие URL арифметикой, если tool result дает ссылку на страницу другого тома/раздела.
+- Если нужно извлечь много страниц из явного оглавления, используй web_extract_link_list вместо ручного цикла web_extract_to_file. Он берет только найденные ссылки и не угадывает URL.
 - Если web_links показывает мало ссылок, но есть scripts/custom_elements, страница может быть SPA. Если web_links вернул api_candidates, сначала пробуй кандидаты с высоким score; иначе изучи custom_elements и scripts, затем fetch публичных JSON endpoint-ов по видимым id/именам компонентов вместо угадывания URL глав.
 - Для страниц глав Ranobehub можно использовать ranobehub_chapter как более точный адаптер, но общий путь для сайтов — web_extract_to_file.
 - Перед чтением неизвестного или большого файла сначала используй file_info/find_files/search_text. Не читай файл целиком; используй read_file с max_bytes и offset небольшими кусками.
@@ -589,6 +593,7 @@ REQUIRED_FIELDS = {
     "web_fetch": {"url"},
     "web_links": {"url"},
     "web_extract_to_file": {"url", "path"},
+    "web_extract_link_list": {"url", "path_template"},
     "ranobehub_chapter": {"url", "path"},
     "web_search": {"query"},
     "archive_search": {"kind", "query"},
@@ -1229,6 +1234,119 @@ def web_extract_to_file_tool(config: AgentConfig, action: dict[str, Any]) -> dic
     }
 
 
+class SafeFormatDict(dict[str, str]):
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def _safe_filename_piece(value: str, default: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "")).strip("._-")
+    return cleaned[:80] or default
+
+
+def _normalize_public_url_for_range(raw_url: str) -> str:
+    parsed = urlparse(str(raw_url or "").strip())
+    return parsed._replace(fragment="", query="", params="", path=(parsed.path.rstrip("/") or parsed.path)).geturl()
+
+
+def web_extract_link_list_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any]:
+    raw_url = str(action.get("url") or "").strip()
+    pattern = str(action.get("pattern") or "").strip()
+    path_template = str(action.get("path_template") or "").strip()
+    start_url = _normalize_public_url_for_range(str(action.get("start_url") or "").strip())
+    end_url = _normalize_public_url_for_range(str(action.get("end_url") or "").strip())
+    include_title = parse_bool(action.get("include_title"), default=True)
+    try:
+        limit = max(1, min(int(action.get("limit") or 100), 200))
+    except (TypeError, ValueError):
+        limit = 100
+
+    links_result = web_links_tool(config, {"action": "web_links", "url": raw_url, "pattern": pattern, "limit": limit})
+    if not links_result.get("ok"):
+        return {"ok": False, "error": "failed to read link list", "link_result": links_result}
+    raw_links = links_result.get("links") if isinstance(links_result.get("links"), list) else []
+    links = [link for link in raw_links if isinstance(link, dict) and str(link.get("url") or "").strip()]
+    if not links:
+        return {"ok": False, "error": "no explicit links matched", "link_result": result_for_model("web_links", links_result, config)}
+
+    start_index = 0
+    end_index = len(links) - 1
+    normalized_urls = [_normalize_public_url_for_range(str(link.get("url") or "")) for link in links]
+    if start_url:
+        try:
+            start_index = normalized_urls.index(start_url)
+        except ValueError:
+            return {"ok": False, "error": "start_url not found in matched links", "start_url": start_url, "links": normalized_urls[:20]}
+    if end_url:
+        try:
+            end_index = normalized_urls.index(end_url)
+        except ValueError:
+            return {"ok": False, "error": "end_url not found in matched links", "end_url": end_url, "links": normalized_urls[-20:]}
+    if end_index < start_index:
+        return {"ok": False, "error": "end_url appears before start_url", "start_url": start_url, "end_url": end_url}
+
+    selected = links[start_index : end_index + 1]
+    files: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    for offset, link in enumerate(selected, start=1):
+        link_url = str(link.get("url") or "").strip()
+        parsed = urlparse(link_url)
+        path_match = re.search(r"/vol([^/]+)/([^/]+)$", parsed.path)
+        vol = _safe_filename_piece(path_match.group(1) if path_match else "", "x")
+        chapter = _safe_filename_piece((path_match.group(2) if path_match else str(offset)).replace(".", "_"), str(offset))
+        slug = _safe_filename_piece(parsed.path.rstrip("/").rsplit("/", 1)[-1], str(offset))
+        path = path_template.format_map(
+            SafeFormatDict(
+                {
+                    "index": str(offset),
+                    "seq": f"{offset:03d}",
+                    "slug": slug,
+                    "vol": vol,
+                    "chapter": chapter,
+                }
+            )
+        )
+        extract_result = web_extract_to_file_tool(
+            config,
+            {
+                "action": "web_extract_to_file",
+                "url": link_url,
+                "path": path,
+                "mode": "write",
+                "include_title": include_title,
+            },
+        )
+        record = {
+            "index": offset,
+            "url": link_url,
+            "text": truncate(str(link.get("text") or ""), 160),
+            "path": extract_result.get("path", path),
+            "chars": extract_result.get("chars", 0),
+            "ok": bool(extract_result.get("ok")),
+        }
+        if extract_result.get("ok"):
+            files.append(record)
+        else:
+            record["error"] = truncate(str(extract_result.get("error") or "extract failed"), 240)
+            failures.append(record)
+
+    return {
+        "ok": bool(files),
+        "url": raw_url,
+        "pattern": pattern,
+        "matched_links": len(links),
+        "selected_links": len(selected),
+        "start_url": selected[0].get("url") if selected else "",
+        "end_url": selected[-1].get("url") if selected else "",
+        "files_written": len(files),
+        "failures": len(failures),
+        "files": files[:20],
+        "last_file": files[-1] if files else None,
+        "failure_details": failures[:10],
+        "instruction": "Continue from last_file/failed URL only if files_written is less than selected_links; do not guess URLs outside matched links.",
+    }
+
+
 def ranobehub_chapter_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any]:
     raw_url = str(action.get("url") or "").strip()
     path = str(action.get("path") or "").strip()
@@ -1474,6 +1592,8 @@ def action_summary(action: dict[str, Any]) -> str:
         return truncate(str(action.get("url", "")), 160) + suffix
     if action_type == "web_extract_to_file":
         return f"{truncate(str(action.get('url', '')), 120)} -> {action.get('path', '/work')}"
+    if action_type == "web_extract_link_list":
+        return f"{truncate(str(action.get('url', '')), 100)} -> {action.get('path_template', '/work')}"
     if action_type == "ranobehub_chapter":
         return f"{truncate(str(action.get('url', '')), 120)} -> {action.get('path', '/work')}"
     if action_type in FILE_ACTIONS:
@@ -1554,6 +1674,8 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
         return f"{len(result.get('links', []) or [])}/{result.get('total_links', 0)} link(s)"
     if action_type == "web_extract_to_file":
         return f"{result.get('title') or 'extracted page'} -> {result.get('path')} ({result.get('chars', 0)} chars)"
+    if action_type == "web_extract_link_list":
+        return f"{result.get('files_written', 0)}/{result.get('selected_links', 0)} extracted"
     if action_type == "ranobehub_chapter":
         return f"{result.get('title') or 'chapter'} -> {result.get('path')} ({result.get('chars', 0)} chars)"
     return truncate(str(result.get("error") or result.get("message") or "done"), 180)
@@ -1725,6 +1847,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 result = web_links_tool(config, action)
             elif action_type == "web_extract_to_file":
                 result = web_extract_to_file_tool(config, action)
+            elif action_type == "web_extract_link_list":
+                result = web_extract_link_list_tool(config, action)
             elif action_type == "ranobehub_chapter":
                 result = ranobehub_chapter_tool(config, action)
             elif action_type == "sandbox_status":

@@ -144,6 +144,10 @@ ACTION_SCHEMAS: dict[str, dict[str, Any]] = {
     "web_fetch": {"required": {"url"}, "fields": {"action", "url", "max_bytes"}},
     "web_links": {"required": {"url"}, "fields": {"action", "url", "pattern", "limit"}},
     "web_extract_to_file": {"required": {"url", "path"}, "fields": {"action", "url", "path", "mode", "include_title"}},
+    "web_extract_link_list": {
+        "required": {"url", "path_template"},
+        "fields": {"action", "url", "path_template", "pattern", "start_url", "end_url", "limit", "include_title"},
+    },
     "ranobehub_chapter": {"required": {"url", "path"}, "fields": {"action", "url", "path", "mode", "include_title"}},
     "list_files": {"required": {"path"}, "fields": {"action", "path", "max_depth", "limit", "offset"}},
     "read_file": {"required": {"path"}, "fields": {"action", "path", "max_bytes", "offset"}},
@@ -233,6 +237,25 @@ def validate_action(action: Mapping[str, Any]) -> dict[str, Any]:
         _validate_string(action_dict, "url", errors, min_len=1, max_len=4096)
         _validate_path(action_dict, errors)
         _validate_enum(action_dict, "mode", RANOBEHUB_CHAPTER_MODES, errors)
+        _validate_bool(action_dict, "include_title", errors)
+    elif action_type == "web_extract_link_list":
+        _validate_string(action_dict, "url", errors, min_len=1, max_len=4096)
+        _validate_string(action_dict, "path_template", errors, min_len=1, max_len=4096)
+        template_path = str(action_dict.get("path_template") or "")
+        template_probe = (
+            template_path.replace("{index}", "1")
+            .replace("{seq}", "001")
+            .replace("{slug}", "slug")
+            .replace("{vol}", "1")
+            .replace("{chapter}", "1")
+        )
+        _validate_path({"path": template_probe}, errors)
+        for field in ("start_url", "end_url"):
+            if field in action_dict:
+                _validate_string(action_dict, field, errors, min_len=1, max_len=4096)
+        if "pattern" in action_dict:
+            _validate_string(action_dict, "pattern", errors, max_len=500)
+        _validate_int(action_dict, "limit", errors, minimum=1, maximum=200)
         _validate_bool(action_dict, "include_title", errors)
     elif action_type in {"list_files", "read_file", "write_file", "append_file", "replace_in_file", "mkdir", "remove_file", "file_info", "find_files", "search_text"}:
         _validate_path(action_dict, errors)

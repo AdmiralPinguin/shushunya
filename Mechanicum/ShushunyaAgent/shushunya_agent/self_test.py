@@ -251,6 +251,19 @@ def main() -> int:
     )
     if not valid_extract_action.get("ok"):
         raise AssertionError(f"valid web_extract_to_file action was rejected: {valid_extract_action}")
+    valid_extract_list_action = agent_runner.validate_action(
+        {
+            "action": "web_extract_link_list",
+            "url": "https://example.com/contents",
+            "pattern": "chapter",
+            "start_url": "https://example.com/ch1",
+            "end_url": "https://example.com/ch2",
+            "path_template": "/work/ch_{seq}_{vol}_{chapter}.txt",
+            "limit": 10,
+        }
+    )
+    if not valid_extract_list_action.get("ok"):
+        raise AssertionError(f"valid web_extract_link_list action was rejected: {valid_extract_list_action}")
     valid_links_action = agent_runner.validate_action(
         {
             "action": "web_links",
@@ -1016,6 +1029,39 @@ def main() -> int:
     if not any(event.get("code") == "json_repair_failed" for event in tool_error_events):
         raise AssertionError(f"non-JSON model output did not force retry: {tool_error_events}")
     print("[ok] tool exception fail-soft")
+
+    with mock.patch.object(
+        agent_runner,
+        "web_links_tool",
+        return_value={
+            "ok": True,
+            "links": [
+                {"url": "https://example.com/vol14/1.5", "text": "14 - 1.5"},
+                {"url": "https://example.com/vol14/2", "text": "14 - 2"},
+            ],
+        },
+    ), mock.patch.object(
+        agent_runner,
+        "web_extract_to_file_tool",
+        side_effect=[
+            {"ok": True, "path": "/work/batch_001_14_1_5.txt", "chars": 1000},
+            {"ok": True, "path": "/work/batch_002_14_2.txt", "chars": 2000},
+        ],
+    ):
+        batch_result = agent_runner.web_extract_link_list_tool(
+            AgentConfig(),
+            {
+                "action": "web_extract_link_list",
+                "url": "https://example.com/contents",
+                "start_url": "https://example.com/vol14/1.5",
+                "end_url": "https://example.com/vol14/2",
+                "path_template": "/work/batch_{seq}_{vol}_{chapter}.txt",
+                "limit": 10,
+            },
+        )
+    if batch_result.get("files_written") != 2 or batch_result.get("selected_links") != 2:
+        raise AssertionError(f"web_extract_link_list batch smoke failed: {batch_result}")
+    print("[ok] web extract link list")
 
     repeat_stdout = io.StringIO()
     repeat_config = AgentConfig(

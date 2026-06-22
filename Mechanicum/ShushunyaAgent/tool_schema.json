@@ -143,6 +143,20 @@
         "returns": "writes extracted page text to path and returns metadata only"
       }
     },
+    "web_extract_link_list": {
+      "required": ["action", "url", "path_template"],
+      "properties": {
+        "action": "web_extract_link_list",
+        "url": "public_http_url containing table-of-contents links",
+        "path_template": "sandbox_path template, supports {index}, {seq}, {slug}, {vol}, {chapter}",
+        "pattern": "optional regex/plain text filter for links",
+        "start_url": "optional public_http_url; skip links before this URL",
+        "end_url": "optional public_http_url; stop after this URL",
+        "limit": "integer max links to inspect",
+        "include_title": "boolean",
+        "returns": "extracts each matched explicit link into separate files and returns metadata only"
+      }
+    },
     "ranobehub_chapter": {
       "required": ["action", "url", "path"],
       "properties": {
