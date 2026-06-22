@@ -325,6 +325,10 @@ def main() -> None:
     metadata_response = client.get(f"/forge/artifacts/{metadata_status['artifacts'][0]}/metadata")
     assert metadata_response.status_code == 200, metadata_response.text
     assert metadata_response.json()["type"] == "metadata-read"
+    manifest = client.get(f"/forge/jobs/{job_id}/manifest")
+    assert manifest.status_code == 200, manifest.text
+    assert manifest.json()["job"]["id"] == job_id
+    assert manifest.json()["artifact_count"] == len(metadata_status["artifacts"])
     jobs = client.get("/forge/jobs?limit=5")
     assert jobs.status_code == 200, jobs.text
     events = client.get(f"/forge/jobs/{job_id}/events")

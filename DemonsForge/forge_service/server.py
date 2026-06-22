@@ -226,6 +226,23 @@ def get_job(job_id: str) -> dict[str, object]:
     return record.model_dump()
 
 
+@app.get("/forge/jobs/{job_id}/manifest")
+def get_job_manifest(job_id: str) -> dict[str, object]:
+    record = store.get_job(job_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    artifacts = []
+    for artifact_id in record.artifacts:
+        artifact = store.get_artifact(artifact_id)
+        if artifact is not None:
+            artifacts.append(artifact.model_dump())
+    return {
+        "job": record.model_dump(),
+        "artifacts": artifacts,
+        "artifact_count": len(artifacts),
+    }
+
+
 @app.get("/forge/jobs/{job_id}/events")
 async def job_events(job_id: str):
     if store.get_job(job_id) is None:
