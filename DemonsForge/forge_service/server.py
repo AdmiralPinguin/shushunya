@@ -44,6 +44,11 @@ def get_runtime() -> dict[str, object]:
     return forge_queue.runtime_state()
 
 
+@app.get("/forge/schema/job")
+def get_job_schema() -> dict[str, object]:
+    return JobSpec.model_json_schema()
+
+
 @app.get("/forge/models")
 def get_models() -> list[dict[str, object]]:
     return discover_models()

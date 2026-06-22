@@ -19,6 +19,8 @@ def main() -> None:
     runtime = client.get("/forge/runtime")
     assert runtime.status_code == 200, runtime.text
     assert runtime.json()["cpu_only"] is True
+    schema = client.get("/forge/schema/job")
+    assert schema.status_code == 200, schema.text
     downloads = client.get("/forge/assets/downloads")
     assert downloads.status_code == 200, downloads.text
     plan = client.post(
@@ -59,7 +61,7 @@ def main() -> None:
         "/forge/jobs",
         json={
             "type": "metadata-read",
-            "prompt": "smoke unsupported stub",
+            "source_images": ["README.md"],
         },
     )
     assert queued.status_code == 200, queued.text

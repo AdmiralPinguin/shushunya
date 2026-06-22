@@ -57,6 +57,7 @@ Core endpoints:
 - `GET /health`
 - `GET /forge/capabilities`
 - `GET /forge/runtime`
+- `GET /forge/schema/job`
 - `GET /forge/models`
 - `GET /forge/loras`
 - `GET /forge/assets/downloads`
@@ -135,6 +136,10 @@ Generated outputs are stored under `artifacts/{job_id}/` with PNG files and JSON
 metadata containing prompt, negative prompt, engine, model, LoRA list, seed,
 dimensions, sampler, steps, guidance/CFG, source images, creation time and job
 id.
+
+`metadata-read` is implemented as a lightweight CPU-only job type. It reads
+image dimensions, embedded PIL metadata and adjacent `.json` sidecars into a
+metadata artifact.
 
 Smoke test without heavy image generation:
 

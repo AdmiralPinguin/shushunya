@@ -51,6 +51,9 @@ class ForgeQueue:
                 raise RuntimeError(f"unknown engine: {engine_name}")
             if not spec.prompt or not spec.prompt.strip():
                 raise RuntimeError("txt2img requires prompt")
+        elif spec.type == JobType.metadata_read:
+            if not spec.source_images:
+                raise RuntimeError("metadata-read requires source_images")
         elif spec.type == JobType.asset_download:
             if spec.asset_download is None:
                 raise RuntimeError("asset-download requires asset_download payload")
@@ -133,6 +136,8 @@ class ForgeQueue:
                 self._execute_asset_download(job_id, spec)
             elif spec.type == JobType.txt2img:
                 self._execute_txt2img(job_id, spec)
+            elif spec.type == JobType.metadata_read:
+                self._execute_metadata_read(job_id, spec)
             else:
                 raise RuntimeError(f"job type is not supported by any registered backend yet: {spec.type.value}")
             self.store.update_job(job_id, status=JobStatus.succeeded, progress=1.0)
@@ -220,6 +225,53 @@ class ForgeQueue:
                 job_id=job_id,
                 kind="asset",
                 path=result["path"],
+                metadata_path=str(metadata_path),
+                metadata=metadata,
+            )
+        )
+
+    def _execute_metadata_read(self, job_id: str, spec: JobSpec) -> None:
+        if not spec.source_images:
+            raise RuntimeError("metadata-read requires source_images")
+        artifact_id = uuid.uuid4().hex
+        artifact_dir = config.ARTIFACTS_DIR / job_id
+        metadata_path = artifact_dir / f"{artifact_id}.json"
+        entries = []
+        for source in spec.source_images:
+            source_path = Path(source)
+            if not source_path.is_absolute():
+                source_path = config.ROOT / source_path
+            entry: dict[str, object] = {"source": str(source_path), "exists": source_path.exists()}
+            if source_path.exists() and source_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                with Image.open(source_path) as image:
+                    entry["image"] = {
+                        "format": image.format,
+                        "mode": image.mode,
+                        "width": image.width,
+                        "height": image.height,
+                        "info": {k: str(v) for k, v in image.info.items()},
+                    }
+            sidecar = source_path.with_suffix(".json")
+            if sidecar.exists():
+                try:
+                    entry["sidecar_json"] = json.loads(sidecar.read_text(encoding="utf-8"))
+                except json.JSONDecodeError as exc:
+                    entry["sidecar_error"] = str(exc)
+            entries.append(entry)
+        metadata = {
+            "job_id": job_id,
+            "type": "metadata-read",
+            "created_at": utc_now(),
+            "entries": entries,
+            "raw_spec": json.loads(spec.model_dump_json()),
+        }
+        write_json(metadata_path, metadata)
+        self.store.add_artifact(
+            ArtifactRecord(
+                id=artifact_id,
+                job_id=job_id,
+                kind="metadata",
+                path=str(metadata_path),
                 metadata_path=str(metadata_path),
                 metadata=metadata,
             )
