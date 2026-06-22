@@ -33,6 +33,12 @@ class DemonsForgeClient:
         suffix = f"?engine={engine}" if engine else ""
         return self._request("POST", f"/forge/runtime/unload{suffix}")
 
+    def pause_queue(self) -> dict[str, Any]:
+        return self._request("POST", "/forge/queue/pause")
+
+    def resume_queue(self) -> dict[str, Any]:
+        return self._request("POST", "/forge/queue/resume")
+
     def job_schema(self) -> dict[str, Any]:
         return self._request("GET", "/forge/schema/job")
 

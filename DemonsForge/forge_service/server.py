@@ -51,6 +51,16 @@ def unload_runtime(engine: str | None = None) -> dict[str, object]:
     return forge_queue.unload_engines(engine_name=engine)
 
 
+@app.post("/forge/queue/pause")
+def pause_queue() -> dict[str, object]:
+    return forge_queue.pause()
+
+
+@app.post("/forge/queue/resume")
+def resume_queue() -> dict[str, object]:
+    return forge_queue.resume()
+
+
 @app.get("/forge/memory/status")
 def memory_status() -> dict[str, object]:
     return ArchiveMemoryClient.from_config().status()

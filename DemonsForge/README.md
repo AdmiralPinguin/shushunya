@@ -73,6 +73,8 @@ Core endpoints:
 - `POST /forge/plan`
 - `POST /forge/jobs`
 - `GET /forge/jobs`
+- `POST /forge/queue/pause`
+- `POST /forge/queue/resume`
 - `GET /forge/jobs/{job_id}`
 - `GET /forge/jobs/{job_id}/events`
 - `POST /forge/jobs/{job_id}/cancel`

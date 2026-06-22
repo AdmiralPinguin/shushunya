@@ -56,6 +56,12 @@ def main() -> None:
     unload = client.post("/forge/runtime/unload")
     assert unload.status_code == 200, unload.text
     assert unload.json()["ok"] is True
+    paused = client.post("/forge/queue/pause")
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["paused"] is True
+    resumed = client.post("/forge/queue/resume")
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["paused"] is False
     memory_policy = client.get("/forge/memory/policy")
     assert memory_policy.status_code == 200, memory_policy.text
     assert "asset approvals/rejections" in memory_policy.json()["durable_topics"]
