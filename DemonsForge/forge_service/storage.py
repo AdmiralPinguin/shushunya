@@ -11,7 +11,7 @@ from .config import DB_PATH, LOGS_DIR, ensure_dirs
 from .schemas import ArtifactRecord, AssetDownloadRecord, JobRecord, JobStatus, utc_now
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class ForgeStore:
@@ -94,6 +94,15 @@ class ForgeStore:
                     updated_at TEXT NOT NULL
                 )
                 """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_job_created ON artifacts(job_id, created_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_kind_created ON artifacts(kind, created_at DESC)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_asset_downloads_status_created ON asset_downloads(status, created_at DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memory_proposals_created ON memory_proposals(created_at DESC)"
             )
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             if version < SCHEMA_VERSION:
