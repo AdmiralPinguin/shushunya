@@ -143,6 +143,7 @@ def main() -> None:
     )
     assert duplicate_memory_proposal.status_code == 200, duplicate_memory_proposal.text
     assert duplicate_memory_proposal.json()["duplicate"] is True
+    store.delete_memory_proposal(duplicate_hash)
     schema = client.get("/forge/schema/job")
     assert schema.status_code == 200, schema.text
     embeddings = client.get("/forge/embeddings")

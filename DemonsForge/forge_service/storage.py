@@ -457,6 +457,10 @@ class ForgeStore:
             "response": json.loads(row["response_json"]),
         }
 
+    def delete_memory_proposal(self, proposal_hash: str) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute("DELETE FROM memory_proposals WHERE hash = ?", (proposal_hash,))
+
     def list_memory_proposals(self, limit: int = 100) -> list[dict[str, object]]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
