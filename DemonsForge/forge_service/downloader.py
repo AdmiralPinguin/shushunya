@@ -48,24 +48,39 @@ def validate_download_spec(spec: AssetDownloadSpec) -> None:
         raise DownloadError(f"unverified URL is not allowed: {spec.source_url}")
     if not re.match(r"^[A-Za-z0-9._ -]+$", spec.name):
         raise DownloadError("asset name contains unsupported characters")
+    if spec.sha256 and not re.fullmatch(r"[A-Fa-f0-9]{64}", spec.sha256):
+        raise DownloadError("sha256 must be a 64-character hexadecimal digest")
 
 
-def download_asset(spec: AssetDownloadSpec) -> dict[str, str]:
+def download_asset(spec: AssetDownloadSpec) -> dict[str, object]:
     validate_download_spec(spec)
     target_dir = target_dir_for(spec)
     target_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(urlparse(spec.source_url).path).suffix or ".bin"
     target = target_dir / f"{spec.name}{suffix}"
+    partial = target.with_suffix(f"{target.suffix}.part")
 
     digest = hashlib.sha256()
-    with requests.get(spec.source_url, stream=True, timeout=30) as response:
-        response.raise_for_status()
-        with target.open("wb") as handle:
-            for chunk in response.iter_content(chunk_size=1024 * 1024):
-                if not chunk:
-                    continue
-                digest.update(chunk)
-                handle.write(chunk)
+    total_bytes = 0
+    try:
+        with requests.get(spec.source_url, stream=True, timeout=30) as response:
+            response.raise_for_status()
+            content_length = response.headers.get("content-length")
+            if content_length and int(content_length) > config.MAX_ASSET_DOWNLOAD_BYTES:
+                raise DownloadError("asset exceeds configured maximum download size")
+            with partial.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if not chunk:
+                        continue
+                    total_bytes += len(chunk)
+                    if total_bytes > config.MAX_ASSET_DOWNLOAD_BYTES:
+                        raise DownloadError("asset exceeds configured maximum download size")
+                    digest.update(chunk)
+                    handle.write(chunk)
+        partial.replace(target)
+    except Exception:
+        partial.unlink(missing_ok=True)
+        raise
     sha256 = digest.hexdigest()
     if spec.sha256 and spec.sha256.lower() != sha256:
         target.unlink(missing_ok=True)
@@ -74,6 +89,7 @@ def download_asset(spec: AssetDownloadSpec) -> dict[str, str]:
     return {
         "path": str(target),
         "sha256": sha256,
+        "size_bytes": total_bytes,
         "status": "downloaded",
         "license_note": spec.license_note or "",
     }

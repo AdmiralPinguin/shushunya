@@ -33,6 +33,7 @@ MAX_WIDTH = 1536
 MAX_HEIGHT = 1536
 MAX_STEPS = 60
 MAX_BATCH = 4
+MAX_ASSET_DOWNLOAD_BYTES = int(os.environ.get("FORGE_MAX_ASSET_DOWNLOAD_BYTES", str(80 * 1024**3)))
 
 
 def ensure_dirs() -> None:

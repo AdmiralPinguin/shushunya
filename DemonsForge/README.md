@@ -178,7 +178,8 @@ Architecture:
   inputs instead of pretending those assets exist.
 - `forge_service/downloader.py`: controlled asset downloader abstraction. It
   accepts only approved jobs, stores source/license/hash metadata, keeps files
-  inside DemonsForge, and rejects unverified hosts.
+  inside DemonsForge, rejects unverified hosts, validates SHA-256 format, writes
+  through `.part` files, and enforces `FORGE_MAX_ASSET_DOWNLOAD_BYTES`.
 - `forge_service/client.py`: thin client intended for later ShushunyaAgent tool
   integration.
 

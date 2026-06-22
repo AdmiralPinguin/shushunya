@@ -247,6 +247,20 @@ def main() -> None:
         },
     )
     assert rejected_download.status_code == 400, rejected_download.text
+    rejected_bad_hash = client.post(
+        "/forge/jobs?dry_run=true",
+        json={
+            "type": "asset-download",
+            "asset_download": {
+                "name": "bad-hash",
+                "asset_type": "lora",
+                "source_url": "https://huggingface.co/example/repo/resolve/main/file.safetensors",
+                "approved": True,
+                "sha256": "not-a-sha",
+            },
+        },
+    )
+    assert rejected_bad_hash.status_code == 400, rejected_bad_hash.text
     prompt_enhance = client.post(
         "/forge/jobs",
         json={
