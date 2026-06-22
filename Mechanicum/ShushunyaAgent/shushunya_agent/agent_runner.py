@@ -1159,6 +1159,7 @@ def web_extract_to_file_tool(config: AgentConfig, action: dict[str, Any]) -> dic
                 return {"ok": False, "error": "response is not textual", "content_type": content_type}
             text, encoding = decode_web_text(data, response.headers.get_content_charset())
             status = getattr(response, "status", 200)
+            final_url = response.geturl()
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -1182,12 +1183,33 @@ def web_extract_to_file_tool(config: AgentConfig, action: dict[str, Any]) -> dic
         used_main_scope = False
         blocks = [content]
 
+    requested_path = urlparse(raw_url).path
+    chapter_match = re.search(r"/vol(\d+)/([^/]+)$", requested_path)
+    if chapter_match and len(content) < 2000:
+        expected_marker = f"{chapter_match.group(1)} - {chapter_match.group(2).replace('_', '.')}"
+        compact_content = re.sub(r"\s+", " ", f"{title} {content}").lower()
+        if expected_marker.lower() not in compact_content:
+            return {
+                "ok": False,
+                "error": "extracted page looks like a short index/landing page, not the requested chapter",
+                "url": raw_url,
+                "final_url": final_url,
+                "status": status,
+                "title": title,
+                "chars": len(content),
+                "blocks": len(blocks),
+                "expected_marker": expected_marker,
+                "instruction": "Do not save or retry this guessed URL. Use explicit chapter links from web_links/table of contents.",
+                "preview": truncate(re.sub(r"\s+", " ", content).strip(), 500),
+            }
+
     file_result = write_sandbox_text_chunked(config, path, content, mode)
     if not file_result.get("ok"):
         return {"ok": False, "error": "failed to write extracted text", "file_result": file_result}
     return {
         "ok": True,
         "url": raw_url,
+        "final_url": final_url,
         "status": status,
         "title": title,
         "path": file_result.get("path", path),
