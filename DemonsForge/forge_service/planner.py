@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from .archive_memory import ArchiveMemoryClient
-from .registries import ASPECT_PRESETS, capabilities
+from .registries import ASPECT_PRESETS, SCHEDULERS, capabilities
 from .schemas import AssetRequest, JobSpec, JobType, LoraRef, PlanRequest
 
 
@@ -129,6 +129,20 @@ def _guidance(text: str, default: float) -> tuple[float | None, float | None]:
     return value, None
 
 
+def _scheduler(text: str) -> str:
+    names = {str(item["name"]) for item in SCHEDULERS if item.get("available")}
+    match = re.search(r"(?:scheduler|планировщик)\s*[:=]?\s*([A-Za-z0-9_ -]+)", text, re.I)
+    if match:
+        candidate = match.group(1).strip().lower().replace(" ", "_").replace("-", "_")
+        if candidate in names:
+            return candidate
+    lowered = text.lower()
+    for name in names:
+        if name != "native" and name in lowered:
+            return name
+    return "native"
+
+
 def _upscale_factor(text: str) -> int:
     match = re.search(r"(?:upscale|апскейл|увелич(?:ь|ить)?)\s*(?:x|в)?\s*([234])\s*(?:x|раза?)?", text, re.I)
     if match:
@@ -222,7 +236,7 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
         cfg=cfg,
         guidance=guidance,
         sampler="default",
-        scheduler="native",
+        scheduler=_scheduler(text),
         seed=_seed(text),
         upscale_factor=_upscale_factor(text),
         batch_size=_batch_size(text),

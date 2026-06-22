@@ -179,6 +179,12 @@ def main() -> None:
     assert planned_cfg.status_code == 200, planned_cfg.text
     assert planned_cfg.json()["cfg"] == 5.5
     assert planned_cfg.json()["guidance"] == 5.5
+    planned_scheduler = client.post(
+        "/forge/plan",
+        json={"request": "SDXL 512x512 scheduler euler portrait"},
+    )
+    assert planned_scheduler.status_code == 200, planned_scheduler.text
+    assert planned_scheduler.json()["scheduler"] == "euler"
     planned_img2img = client.post(
         "/forge/plan",
         json={"request": "Сделай вариацию по картинке в кинематографичном стиле"},
