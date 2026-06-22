@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .agent_runner import AgentConfig, archive_request, compact_resume_events, read_task_journal, run_agent, safe_task_id
-from .task_journal import latest_completed_task_summary, recent_task_summaries
+from .task_journal import is_contextless_task_reference, latest_completed_task_summary, recent_task_summaries
 
 
 HOST = os.environ.get("SHUSHUNYA_AGENT_HOST", "127.0.0.1")
@@ -360,6 +360,8 @@ def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]
 
 def asks_about_previous_task(task: str) -> bool:
     lowered = str(task or "").lower()
+    if is_contextless_task_reference(lowered):
+        return True
     previous_markers = ("прошл", "предыдущ", "последн")
     unfinished_markers = ("незакончен", "не закончен", "невыполн", "не выполн", "недодел", "не додел", "незаверш", "не заверш")
     task_markers = ("задач", "таск", "task")

@@ -91,6 +91,8 @@ def main() -> int:
         raise AssertionError("previous-task command detector missed memory question")
     if not server.asks_about_previous_task("Помнишь не законченную задачу?"):
         raise AssertionError("previous-task command detector missed unfinished-task question")
+    if not server.asks_about_previous_task("Тогда займись продолжением и закончи уже пожалуйста эту задачу"):
+        raise AssertionError("previous-task command detector missed contextless continuation wording")
     if server.asks_about_previous_task("Начни новую задачу"):
         raise AssertionError("previous-task command detector matched unrelated task")
     print("[ok] previous task command detector")
@@ -98,12 +100,14 @@ def main() -> int:
         raise AssertionError("unfinished-task question must be filtered from task history")
     if not task_journal.is_meta_or_status_task("Еще раз"):
         raise AssertionError("short repeat command must be filtered from task history")
+    if not task_journal.is_meta_or_status_task("Тогда займись продолжением и закончи уже пожалуйста эту задачу"):
+        raise AssertionError("contextless continuation command must be filtered from task history")
 
     class JournalConfig:
         def __init__(self, task_id: str) -> None:
             self.task_id = task_id
 
-    write_task_journal(JournalConfig("journal-real-unfinished"), "start", {"task": "Продолжи работу"})
+    write_task_journal(JournalConfig("journal-real-unfinished"), "start", {"task": "Собери все главы проекта в один файл"})
     write_task_journal(
         JournalConfig("journal-real-unfinished"),
         "final",
@@ -113,6 +117,8 @@ def main() -> int:
     write_task_journal(JournalConfig("journal-repeat-meta"), "final", {"ok": True, "message": "smoke ok"})
     write_task_journal(JournalConfig("journal-question-meta"), "start", {"task": "Помнишь не законченную задачу?"})
     write_task_journal(JournalConfig("journal-question-meta"), "final", {"ok": True, "message": "wrong memory answer"})
+    write_task_journal(JournalConfig("journal-contextless-meta"), "start", {"task": "Тогда займись продолжением и закончи уже пожалуйста эту задачу"})
+    write_task_journal(JournalConfig("journal-contextless-meta"), "final", {"ok": True, "message": "one-step partial answer"})
     previous_summary = task_journal.latest_completed_task_summary()
     if previous_summary.get("task_id") != "journal-real-unfinished":
         raise AssertionError(f"latest task summary did not skip meta tasks: {previous_summary}")

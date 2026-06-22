@@ -154,6 +154,8 @@ def is_meta_or_status_task(task: str) -> bool:
     text = " ".join(str(task or "").lower().split())
     if not text:
         return True
+    if is_contextless_task_reference(text):
+        return True
     previous_markers = ("прошл", "предыдущ", "последн")
     unfinished_markers = ("незакончен", "не закончен", "невыполн", "не выполн", "недодел", "не додел", "незаверш", "не заверш")
     task_markers = ("задач", "таск", "task")
@@ -181,6 +183,34 @@ def is_meta_or_status_task(task: str) -> bool:
     if len(compact) <= 80 and compact in {"еще раз", "ещё раз", "повтори", "повтори еще раз", "повтори ещё раз"}:
         return True
     return len(compact) <= 80 and any(phrase in compact for phrase in status_phrases)
+
+
+def is_contextless_task_reference(task: str) -> bool:
+    compact = " ".join(str(task or "").lower().split()).strip(" ?.!")
+    if not compact or len(compact) > 140:
+        return False
+    exact_phrases = {
+        "продолжи",
+        "продолжи работу",
+        "продолжай",
+        "продолжай работу",
+        "закончи",
+        "закончи задачу",
+        "доделай",
+        "доделай задачу",
+        "доделай работу",
+        "начни сначала",
+        "начни заново",
+        "начни сначала ее",
+        "начни сначала её",
+        "начни заново ее",
+        "начни заново её",
+    }
+    if compact in exact_phrases:
+        return True
+    reference_markers = ("эту задач", "этой задач", "ее", "её", "продолжением")
+    action_markers = ("продолж", "закончи", "додел", "займись", "возобнов", "начни")
+    return any(marker in compact for marker in reference_markers) and any(marker in compact for marker in action_markers)
 
 
 def latest_completed_task_summary(exclude_task_id: str | None = None) -> dict[str, Any]:
