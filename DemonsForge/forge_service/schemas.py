@@ -130,3 +130,17 @@ class ArtifactRecord(BaseModel):
     metadata_path: str
     created_at: str = Field(default_factory=utc_now)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AssetDownloadRecord(BaseModel):
+    id: str
+    name: str
+    asset_type: str
+    source_url: str
+    sha256: str | None = None
+    license_note: str | None = None
+    target_dir: str
+    status: Literal["queued", "running", "downloaded", "failed", "rejected"] = "queued"
+    created_at: str = Field(default_factory=utc_now)
+    updated_at: str = Field(default_factory=utc_now)
+    error: str | None = None

@@ -54,6 +54,11 @@ def get_loras() -> list[dict[str, object]]:
     return discover_loras()
 
 
+@app.get("/forge/assets/downloads")
+def list_asset_downloads(limit: int = 100) -> list[dict[str, object]]:
+    return [item.model_dump() for item in store.list_asset_downloads(limit=max(1, min(limit, 500)))]
+
+
 @app.get("/forge/jobs")
 def list_jobs(status: str | None = None, limit: int = 100) -> list[dict[str, object]]:
     return [
@@ -65,7 +70,10 @@ def list_jobs(status: str | None = None, limit: int = 100) -> list[dict[str, obj
 @app.post("/forge/jobs")
 def create_job(spec: JobSpec, dry_run: bool = False) -> dict[str, object]:
     if dry_run:
-        return forge_queue.validate(spec)
+        try:
+            return forge_queue.validate(spec)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
     record = forge_queue.submit(spec)
     return record.model_dump()
 

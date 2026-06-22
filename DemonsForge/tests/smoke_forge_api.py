@@ -19,6 +19,8 @@ def main() -> None:
     runtime = client.get("/forge/runtime")
     assert runtime.status_code == 200, runtime.text
     assert runtime.json()["cpu_only"] is True
+    downloads = client.get("/forge/assets/downloads")
+    assert downloads.status_code == 200, downloads.text
     plan = client.post(
         "/forge/plan",
         json={"request": "Нарисуй кинематографичный портрет демона в кузнице, вертикально"},
@@ -40,6 +42,19 @@ def main() -> None:
     )
     assert dry_run.status_code == 200, dry_run.text
     assert dry_run.json()["valid"] is True
+    rejected_download = client.post(
+        "/forge/jobs?dry_run=true",
+        json={
+            "type": "asset-download",
+            "asset_download": {
+                "name": "bad",
+                "asset_type": "lora",
+                "source_url": "http://example.com/bad.safetensors",
+                "approved": True,
+            },
+        },
+    )
+    assert rejected_download.status_code == 400, rejected_download.text
     queued = client.post(
         "/forge/jobs",
         json={

@@ -59,6 +59,7 @@ Core endpoints:
 - `GET /forge/runtime`
 - `GET /forge/models`
 - `GET /forge/loras`
+- `GET /forge/assets/downloads`
 - `POST /forge/plan`
 - `POST /forge/jobs`
 - `GET /forge/jobs`

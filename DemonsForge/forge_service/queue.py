@@ -12,10 +12,10 @@ import psutil
 from PIL import Image
 
 from . import config
-from .downloader import DownloadError, download_asset
+from .downloader import DownloadError, download_asset, target_dir_for, validate_download_spec
 from .engines.diffusers_adapter import DiffusersEngine
 from .registries import ENGINE_MODELS, write_json
-from .schemas import ArtifactRecord, JobRecord, JobSpec, JobStatus, JobType, utc_now
+from .schemas import ArtifactRecord, AssetDownloadRecord, JobRecord, JobSpec, JobStatus, JobType, utc_now
 from .storage import ForgeStore
 
 
@@ -51,7 +51,11 @@ class ForgeQueue:
                 raise RuntimeError(f"unknown engine: {engine_name}")
             if not spec.prompt or not spec.prompt.strip():
                 raise RuntimeError("txt2img requires prompt")
-        elif spec.type != JobType.asset_download:
+        elif spec.type == JobType.asset_download:
+            if spec.asset_download is None:
+                raise RuntimeError("asset-download requires asset_download payload")
+            validate_download_spec(spec.asset_download)
+        else:
             raise RuntimeError(f"job type is not supported by any registered backend yet: {spec.type.value}")
         return {"valid": True, "resource_estimate": estimate}
 
@@ -175,10 +179,31 @@ class ForgeQueue:
     def _execute_asset_download(self, job_id: str, spec: JobSpec) -> None:
         if spec.asset_download is None:
             raise RuntimeError("asset-download requires asset_download payload")
+        download_record = AssetDownloadRecord(
+            id=job_id,
+            name=spec.asset_download.name,
+            asset_type=spec.asset_download.asset_type,
+            source_url=spec.asset_download.source_url,
+            sha256=spec.asset_download.sha256,
+            license_note=spec.asset_download.license_note,
+            target_dir=str(target_dir_for(spec.asset_download)),
+            status="running",
+        )
+        self.store.create_asset_download(download_record)
         try:
             result = download_asset(spec.asset_download)
-        except DownloadError:
+        except DownloadError as exc:
+            self.store.update_asset_download(job_id, status="rejected", error=str(exc))
             raise
+        except Exception as exc:
+            self.store.update_asset_download(job_id, status="failed", error=str(exc))
+            raise
+        self.store.update_asset_download(
+            job_id,
+            status="downloaded",
+            sha256=result["sha256"],
+            target_dir=str(Path(result["path"]).parent),
+        )
         artifact_id = uuid.uuid4().hex
         metadata_path = config.ARTIFACTS_DIR / job_id / f"{artifact_id}.json"
         metadata = {
