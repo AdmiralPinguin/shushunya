@@ -84,6 +84,13 @@ def main() -> int:
     if "Текущая user task всегда главнее Archive memory" not in agent_runner.SYSTEM_PROMPT:
         raise AssertionError("system prompt missing current-task-over-memory guidance")
     print("[ok] system prompt tool guidance")
+    if not server.asks_about_previous_task("Начни прошлую задачу заново"):
+        raise AssertionError("previous-task command detector missed restart wording")
+    if not server.asks_about_previous_task("Помнишь прошлую задачу?"):
+        raise AssertionError("previous-task command detector missed memory question")
+    if server.asks_about_previous_task("Начни новую задачу"):
+        raise AssertionError("previous-task command detector matched unrelated task")
+    print("[ok] previous task command detector")
     if parse_action('{"action":"final","message":"ok"}').get("action") != "final":
         raise AssertionError("parse_action failed to parse a valid JSON object")
     for invalid_action_json in ('["final"]', '"final"'):

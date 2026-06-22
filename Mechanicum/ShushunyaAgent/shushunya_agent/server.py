@@ -363,9 +363,9 @@ def asks_about_previous_task(task: str) -> bool:
     previous_markers = ("прошл", "предыдущ", "последн")
     task_markers = ("задач", "таск", "task")
     memory_markers = ("помни", "вспом", "что делал", "что была", "что было")
-    return any(marker in lowered for marker in previous_markers) and any(marker in lowered for marker in task_markers) and (
-        any(marker in lowered for marker in memory_markers) or "?" in lowered
-    )
+    command_markers = ("начни", "запусти", "продолж", "повтори", "возобнов", "сделай", "заново", "сначала")
+    has_previous_task = any(marker in lowered for marker in previous_markers) and any(marker in lowered for marker in task_markers)
+    return has_previous_task and (any(marker in lowered for marker in memory_markers + command_markers) or "?" in lowered)
 
 
 def apply_previous_task_context(task: str, config: AgentConfig) -> str:
@@ -378,7 +378,9 @@ def apply_previous_task_context(task: str, config: AgentConfig) -> str:
         "source": "authoritative_task_journal",
         "rule": (
             "Use this task journal summary as the only source for questions about the previous/last agent task. "
-            "Do not use Archive semantic memory for this question, because it may contain meta-conversation noise."
+            "Do not use Archive semantic memory for this question, because it may contain meta-conversation noise. "
+            "If the user asks to start, repeat, resume, or continue the previous task, treat summary.task as the target task "
+            "and continue from the task journal summary instead of answering from semantic memory."
         ),
         "summary": summary,
     }
