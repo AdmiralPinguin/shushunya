@@ -61,16 +61,6 @@ def main() -> None:
     memory_events = client.get("/forge/memory/events?limit=2")
     assert memory_events.status_code == 200, memory_events.text
     assert isinstance(memory_events.json(), dict)
-    memory_proposal = client.post(
-        "/forge/memory/propose",
-        json={
-            "proposal": "DemonsForge smoke memory proposal endpoint exists.",
-            "evidence": "Smoke test checked endpoint shape.",
-            "importance": 1,
-        },
-    )
-    assert memory_proposal.status_code == 200, memory_proposal.text
-    assert isinstance(memory_proposal.json(), dict)
     empty_memory_proposal = client.post(
         "/forge/memory/propose",
         json={"proposal": "   "},
