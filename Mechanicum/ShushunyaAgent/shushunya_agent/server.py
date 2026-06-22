@@ -358,6 +358,34 @@ def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]
     )
 
 
+def recent_continuation_evidence(exclude_task_id: str, limit: int = 4) -> list[dict[str, Any]]:
+    summaries = recent_task_summaries(limit=20).get("tasks", [])
+    evidence: list[dict[str, Any]] = []
+    for summary in summaries if isinstance(summaries, list) else []:
+        if not isinstance(summary, dict):
+            continue
+        task_id = safe_task_id(str(summary.get("task_id") or ""))
+        if not task_id or task_id == safe_task_id(exclude_task_id):
+            continue
+        task_text = str(summary.get("task") or "")
+        if not asks_about_previous_task(task_text):
+            continue
+        journal = read_task_journal(task_id, limit=80)
+        events = journal.get("events") if isinstance(journal.get("events"), list) else []
+        evidence.append(
+            {
+                "task_id": task_id,
+                "success": bool(summary.get("success")),
+                "cancelled": bool(summary.get("cancelled")),
+                "final": str(summary.get("final") or "")[:800],
+                "recent_events": compact_resume_events(events[-24:]) if isinstance(events, list) else [],
+            }
+        )
+        if len(evidence) >= limit:
+            break
+    return evidence
+
+
 def asks_about_previous_task(task: str) -> bool:
     lowered = str(task or "").lower()
     if is_contextless_task_reference(lowered):
@@ -388,6 +416,7 @@ def apply_previous_task_context(task: str, config: AgentConfig) -> str:
             "If the user asks about an unfinished/incomplete task, answer from summary.success/cancelled/final/actions, not Archive focus."
         ),
         "summary": summary,
+        "recent_continuation_evidence": recent_continuation_evidence(config.task_id),
     }
     return task + "\n\nAuthoritative previous agent task context:\n" + json.dumps(context, ensure_ascii=False, indent=2)
 

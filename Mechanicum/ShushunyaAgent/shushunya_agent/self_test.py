@@ -124,6 +124,23 @@ def main() -> int:
     if previous_summary.get("task_id") != "journal-real-unfinished":
         raise AssertionError(f"latest task summary did not skip meta tasks: {previous_summary}")
     print("[ok] previous task journal summary skips meta tasks")
+    write_task_journal(JournalConfig("journal-continuation-evidence"), "start", {"task": "Продолжи последнюю незавершенную задачу агента"})
+    write_task_journal(
+        JournalConfig("journal-continuation-evidence"),
+        "tool_result",
+        {
+            "action": "web_links",
+            "result": {
+                "ok": True,
+                "api_candidates": [{"url": "https://example.com/api/contents", "score": 55}],
+            },
+        },
+    )
+    evidence = server.recent_continuation_evidence("self-test-current", limit=2)
+    encoded_evidence = json.dumps(evidence, ensure_ascii=False)
+    if "https://example.com/api/contents" not in encoded_evidence:
+        raise AssertionError(f"recent continuation evidence missed useful tool result: {evidence}")
+    print("[ok] previous task context includes continuation evidence")
     watchdog_state = {"attempts": {}, "last_resume_at": {}, "last_final": {}}
     continuable_task = {
         "ok": True,
