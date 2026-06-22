@@ -10,6 +10,9 @@ from .config import DB_PATH, LOGS_DIR, ensure_dirs
 from .schemas import ArtifactRecord, AssetDownloadRecord, JobRecord, JobStatus, utc_now
 
 
+SCHEMA_VERSION = 1
+
+
 class ForgeStore:
     def __init__(self, db_path: Path = DB_PATH):
         ensure_dirs()
@@ -69,6 +72,13 @@ class ForgeStore:
                 )
                 """
             )
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if version < SCHEMA_VERSION:
+                conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def schema_version(self) -> int:
+        with self._lock, self._connect() as conn:
+            return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
     def create_job(self, record: JobRecord) -> None:
         with self._lock, self._connect() as conn:

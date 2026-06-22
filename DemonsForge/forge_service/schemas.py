@@ -72,10 +72,13 @@ class JobSpec(BaseModel):
     sampler: str | None = None
     scheduler: str | None = None
     seed: int | None = None
+    strength: float = 0.75
+    upscale_factor: int = 2
     batch_size: int = 1
     loras: list[LoraRef] = Field(default_factory=list)
     embeddings: list[str] = Field(default_factory=list)
     source_images: list[str] = Field(default_factory=list)
+    mask_image: str | None = None
     control: dict[str, Any] = Field(default_factory=dict)
     safety: dict[str, Any] = Field(default_factory=dict)
     asset_request: AssetRequest | None = None
@@ -102,6 +105,20 @@ class JobSpec(BaseModel):
     def validate_batch(cls, value: int) -> int:
         if value < 1 or value > config.MAX_BATCH:
             raise ValueError(f"batch_size must be between 1 and {config.MAX_BATCH}")
+        return value
+
+    @field_validator("strength")
+    @classmethod
+    def validate_strength(cls, value: float) -> float:
+        if value < 0.0 or value > 1.0:
+            raise ValueError("strength must be between 0.0 and 1.0")
+        return value
+
+    @field_validator("upscale_factor")
+    @classmethod
+    def validate_upscale_factor(cls, value: int) -> int:
+        if value not in {2, 3, 4}:
+            raise ValueError("upscale_factor must be 2, 3, or 4")
         return value
 
 

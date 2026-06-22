@@ -1,15 +1,34 @@
 #!/usr/bin/env python3
 import sys
 from pathlib import Path
+import time
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from forge_service.server import app
 
 
+def wait_for_terminal(client: TestClient, job_id: str) -> dict:
+    for _ in range(50):
+        response = client.get(f"/forge/jobs/{job_id}")
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        if payload["status"] in {"succeeded", "failed", "canceled"}:
+            return payload
+        time.sleep(0.1)
+    raise AssertionError(f"job did not finish: {job_id}")
+
+
 def main() -> None:
+    root = Path(__file__).resolve().parents[1]
+    test_inputs = root / "runtime" / "test_inputs"
+    test_inputs.mkdir(parents=True, exist_ok=True)
+    input_image = test_inputs / "upscale_source.png"
+    Image.new("RGB", (16, 16), (128, 32, 16)).save(input_image)
+
     client = TestClient(app)
     health = client.get("/health")
     assert health.status_code == 200, health.text
@@ -54,6 +73,20 @@ def main() -> None:
     )
     assert dry_run.status_code == 200, dry_run.text
     assert dry_run.json()["valid"] is True
+    img2img_dry_run = client.post(
+        "/forge/jobs?dry_run=true",
+        json={
+            "type": "img2img",
+            "engine": "sdxl",
+            "prompt": "dry run",
+            "source_images": [str(input_image.relative_to(root))],
+            "width": 64,
+            "height": 64,
+            "steps": 1,
+            "strength": 0.2,
+        },
+    )
+    assert img2img_dry_run.status_code == 200, img2img_dry_run.text
     rejected_download = client.post(
         "/forge/jobs?dry_run=true",
         json={
@@ -75,6 +108,22 @@ def main() -> None:
         },
     )
     assert prompt_enhance.status_code == 200, prompt_enhance.text
+    prompt_status = wait_for_terminal(client, prompt_enhance.json()["id"])
+    assert prompt_status["status"] == "succeeded", prompt_status
+    upscale = client.post(
+        "/forge/jobs",
+        json={
+            "type": "upscale",
+            "source_images": [str(input_image.relative_to(root))],
+            "upscale_factor": 2,
+            "width": 64,
+            "height": 64,
+        },
+    )
+    assert upscale.status_code == 200, upscale.text
+    upscale_status = wait_for_terminal(client, upscale.json()["id"])
+    assert upscale_status["status"] == "succeeded", upscale_status
+    assert upscale_status["artifacts"], upscale_status
     queued = client.post(
         "/forge/jobs",
         json={

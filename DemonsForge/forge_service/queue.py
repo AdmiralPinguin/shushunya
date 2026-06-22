@@ -57,6 +57,29 @@ class ForgeQueue:
         elif spec.type == JobType.metadata_read:
             if not spec.source_images:
                 raise RuntimeError("metadata-read requires source_images")
+        elif spec.type == JobType.img2img:
+            if not spec.source_images:
+                raise RuntimeError("img2img requires source_images")
+            if not spec.prompt or not spec.prompt.strip():
+                raise RuntimeError("img2img requires prompt")
+            if (spec.engine or "sdxl") != "sdxl":
+                raise RuntimeError("img2img is currently implemented for sdxl only")
+            self._resolve_input_path(spec.source_images[0])
+        elif spec.type == JobType.inpaint:
+            if not spec.source_images:
+                raise RuntimeError("inpaint requires source_images")
+            if not spec.prompt or not spec.prompt.strip():
+                raise RuntimeError("inpaint requires prompt")
+            if not spec.mask_image:
+                raise RuntimeError("inpaint requires mask_image")
+            if (spec.engine or "sdxl") != "sdxl":
+                raise RuntimeError("inpaint is currently implemented for sdxl only")
+            self._resolve_input_path(spec.source_images[0])
+            self._resolve_input_path(spec.mask_image)
+        elif spec.type == JobType.upscale:
+            if not spec.source_images:
+                raise RuntimeError("upscale requires source_images")
+            self._resolve_input_path(spec.source_images[0])
         elif spec.type == JobType.asset_download:
             if spec.asset_download is None:
                 raise RuntimeError("asset-download requires asset_download payload")
@@ -100,6 +123,7 @@ class ForgeQueue:
             "cpu_only": True,
             "cpu_threads": config.CPU_THREADS,
             "model_idle_seconds": config.MODEL_IDLE_SECONDS,
+            "db_schema_version": self.store.schema_version(),
             "ram": {
                 "total_gb": round(mem.total / 1024**3, 2),
                 "available_gb": round(mem.available / 1024**3, 2),
@@ -139,6 +163,12 @@ class ForgeQueue:
                 self._execute_asset_download(job_id, spec)
             elif spec.type == JobType.txt2img:
                 self._execute_txt2img(job_id, spec)
+            elif spec.type == JobType.img2img:
+                self._execute_img2img(job_id, spec)
+            elif spec.type == JobType.inpaint:
+                self._execute_inpaint(job_id, spec)
+            elif spec.type == JobType.upscale:
+                self._execute_upscale(job_id, spec)
             elif spec.type == JobType.prompt_enhance:
                 self._execute_prompt_enhance(job_id, spec)
             elif spec.type == JobType.metadata_read:
@@ -152,6 +182,18 @@ class ForgeQueue:
             self.store.update_job(job_id, status=status, error=str(exc))
             self.store.append_log(job_id, f"job {status.value}: {exc}")
 
+    def _resolve_input_path(self, value: str) -> Path:
+        path = Path(value)
+        if not path.is_absolute():
+            path = config.ROOT / path
+        resolved = path.resolve()
+        root = config.ROOT.resolve()
+        if resolved != root and root not in resolved.parents:
+            raise RuntimeError("input path must stay inside DemonsForge")
+        if not resolved.exists():
+            raise RuntimeError(f"input path does not exist: {resolved}")
+        return resolved
+
     def _execute_txt2img(self, job_id: str, spec: JobSpec) -> None:
         if not spec.prompt or not spec.prompt.strip():
             raise RuntimeError("txt2img requires prompt")
@@ -164,27 +206,56 @@ class ForgeQueue:
             lambda value, message: self._progress(job_id, value, message),
         )
         for index, image in enumerate(images[: spec.batch_size]):
-            artifact_id = uuid.uuid4().hex
-            artifact_dir = config.ARTIFACTS_DIR / job_id
-            artifact_dir.mkdir(parents=True, exist_ok=True)
-            image_path = artifact_dir / f"{artifact_id}.png"
-            metadata_path = artifact_dir / f"{artifact_id}.json"
-            image.save(image_path)
-            thumbnail_path = artifact_dir / f"{artifact_id}.thumb.png"
-            self._write_thumbnail(image_path, thumbnail_path)
-            metadata = self._metadata(job_id, spec, image_path, index)
-            metadata["thumbnail_path"] = str(thumbnail_path)
-            write_json(metadata_path, metadata)
-            self.store.add_artifact(
-                ArtifactRecord(
-                    id=artifact_id,
-                    job_id=job_id,
-                    kind="image",
-                    path=str(image_path),
-                    metadata_path=str(metadata_path),
-                    metadata=metadata,
-                )
-            )
+            self._save_image_artifact(job_id, spec, image, index)
+
+    def _execute_img2img(self, job_id: str, spec: JobSpec) -> None:
+        if not spec.prompt or not spec.prompt.strip():
+            raise RuntimeError("img2img requires prompt")
+        if not spec.source_images:
+            raise RuntimeError("img2img requires source_images")
+        engine_name = spec.engine or "sdxl"
+        if engine_name != "sdxl":
+            raise RuntimeError("img2img is currently implemented for sdxl only")
+        self._resource_check(spec)
+        source_image = self._resolve_input_path(spec.source_images[0])
+        images = self._engine(engine_name).generate_img2img(
+            spec,
+            source_image,
+            lambda value, message: self._progress(job_id, value, message),
+        )
+        for index, image in enumerate(images[: spec.batch_size]):
+            self._save_image_artifact(job_id, spec, image, index)
+
+    def _execute_inpaint(self, job_id: str, spec: JobSpec) -> None:
+        if not spec.prompt or not spec.prompt.strip():
+            raise RuntimeError("inpaint requires prompt")
+        if not spec.source_images or not spec.mask_image:
+            raise RuntimeError("inpaint requires source_images and mask_image")
+        engine_name = spec.engine or "sdxl"
+        if engine_name != "sdxl":
+            raise RuntimeError("inpaint is currently implemented for sdxl only")
+        self._resource_check(spec)
+        source_image = self._resolve_input_path(spec.source_images[0])
+        mask_image = self._resolve_input_path(spec.mask_image)
+        images = self._engine(engine_name).generate_inpaint(
+            spec,
+            source_image,
+            mask_image,
+            lambda value, message: self._progress(job_id, value, message),
+        )
+        for index, image in enumerate(images[: spec.batch_size]):
+            self._save_image_artifact(job_id, spec, image, index)
+
+    def _execute_upscale(self, job_id: str, spec: JobSpec) -> None:
+        if not spec.source_images:
+            raise RuntimeError("upscale requires source_images")
+        source_image = self._resolve_input_path(spec.source_images[0])
+        with Image.open(source_image) as image:
+            image = image.convert("RGB")
+            new_size = (image.width * spec.upscale_factor, image.height * spec.upscale_factor)
+            resampling = getattr(Image.Resampling, "LANCZOS", Image.LANCZOS)
+            upscaled = image.resize(new_size, resampling)
+        self._save_image_artifact(job_id, spec, upscaled, 0)
 
     def _execute_asset_download(self, job_id: str, spec: JobSpec) -> None:
         if spec.asset_download is None:
@@ -334,6 +405,8 @@ class ForgeQueue:
             "loras": [item.model_dump() for item in spec.loras],
             "embeddings": spec.embeddings,
             "seed": spec.seed,
+            "strength": spec.strength,
+            "upscale_factor": spec.upscale_factor,
             "dimensions": {"width": spec.width, "height": spec.height},
             "sampler": spec.sampler,
             "scheduler": spec.scheduler,
@@ -341,6 +414,7 @@ class ForgeQueue:
             "cfg": spec.cfg,
             "guidance": spec.guidance,
             "source_images": spec.source_images,
+            "mask_image": spec.mask_image,
             "control": spec.control,
             "raw_spec": json.loads(spec.model_dump_json()),
         }
@@ -349,6 +423,29 @@ class ForgeQueue:
         with Image.open(image_path) as image:
             image.thumbnail((256, 256))
             image.save(thumbnail_path)
+
+    def _save_image_artifact(self, job_id: str, spec: JobSpec, image: object, index: int) -> None:
+        artifact_id = uuid.uuid4().hex
+        artifact_dir = config.ARTIFACTS_DIR / job_id
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        image_path = artifact_dir / f"{artifact_id}.png"
+        metadata_path = artifact_dir / f"{artifact_id}.json"
+        image.save(image_path)
+        thumbnail_path = artifact_dir / f"{artifact_id}.thumb.png"
+        self._write_thumbnail(image_path, thumbnail_path)
+        metadata = self._metadata(job_id, spec, image_path, index)
+        metadata["thumbnail_path"] = str(thumbnail_path)
+        write_json(metadata_path, metadata)
+        self.store.add_artifact(
+            ArtifactRecord(
+                id=artifact_id,
+                job_id=job_id,
+                kind="image",
+                path=str(image_path),
+                metadata_path=str(metadata_path),
+                metadata=metadata,
+            )
+        )
 
 
 def resource_estimate(spec: JobSpec) -> dict[str, object]:

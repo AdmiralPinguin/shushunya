@@ -20,7 +20,7 @@ ENGINE_MODELS = {
     "sdxl": {
         "default_model": "stable-diffusion-xl-base-1.0",
         "pipeline": "StableDiffusionXLPipeline",
-        "job_types": ["txt2img"],
+        "job_types": ["txt2img", "img2img", "inpaint"],
         "supports_negative_prompt": True,
         "supports_lora": True,
         "guidance_default": 7.0,
@@ -157,13 +157,8 @@ def capabilities() -> dict[str, Any]:
             "models": [model["name"]],
             "job_types": meta["job_types"],
             "capability_gated_stubs": [
-                "img2img",
-                "inpaint",
                 "outpaint",
-                "upscale",
                 "variation",
-                "prompt-enhance",
-                "metadata-read",
                 "ControlNet",
                 "IP-Adapter",
                 "reference_image",
@@ -185,7 +180,7 @@ def capabilities() -> dict[str, Any]:
             "max_steps": config.MAX_STEPS,
             "max_batch": config.MAX_BATCH,
         },
-        "service_job_types": ["prompt-enhance", "metadata-read", "asset-download"],
+        "service_job_types": ["upscale", "prompt-enhance", "metadata-read", "asset-download"],
     }
 
 

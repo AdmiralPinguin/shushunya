@@ -147,6 +147,11 @@ types. `prompt-enhance` produces a deterministic enhanced prompt metadata
 artifact; `metadata-read` reads image dimensions, embedded PIL metadata and
 adjacent `.json` sidecars into a metadata artifact.
 
+`upscale` is implemented as a lightweight CPU-only PIL/Lanczos job. SDXL
+`img2img` and `inpaint` have real diffusers adapter hooks and require local
+source images, with `inpaint` also requiring `mask_image`. SQLite uses
+`PRAGMA user_version` for schema versioning.
+
 Smoke test without heavy image generation:
 
 ```bash
