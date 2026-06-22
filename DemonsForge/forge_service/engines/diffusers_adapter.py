@@ -238,6 +238,7 @@ class DiffusersEngine(BaseEngine):
     def generate_img2img(self, spec: JobSpec, source_image: Path, progress: ProgressCallback) -> list[object]:
         if spec.type.value != "img2img":
             raise EngineError(f"{self.name} does not support job type {spec.type.value}")
+        progress(0.05, "loading img2img pipeline")
         pipe = self._load_sdxl_img2img_pipeline(spec)
         self._apply_scheduler(pipe, spec.scheduler)
         self._apply_loras(pipe, spec)
@@ -245,6 +246,7 @@ class DiffusersEngine(BaseEngine):
         kwargs = self._image_job_kwargs(spec)
         kwargs["image"] = image
         kwargs["strength"] = spec.strength
+        kwargs.update(self._callback_kwargs(pipe, spec.steps, progress))
         progress(0.15, "generating img2img")
         result = pipe(**kwargs)
         progress(0.9, "image generated")
@@ -260,6 +262,7 @@ class DiffusersEngine(BaseEngine):
     ) -> list[object]:
         if spec.type.value != "inpaint":
             raise EngineError(f"{self.name} does not support job type {spec.type.value}")
+        progress(0.05, "loading inpaint pipeline")
         pipe = self._load_sdxl_inpaint_pipeline(spec)
         self._apply_scheduler(pipe, spec.scheduler)
         self._apply_loras(pipe, spec)
@@ -269,6 +272,7 @@ class DiffusersEngine(BaseEngine):
         kwargs["image"] = image
         kwargs["mask_image"] = mask
         kwargs["strength"] = spec.strength
+        kwargs.update(self._callback_kwargs(pipe, spec.steps, progress))
         progress(0.15, "generating inpaint")
         result = pipe(**kwargs)
         progress(0.9, "image generated")
@@ -291,6 +295,19 @@ class DiffusersEngine(BaseEngine):
             "generator": generator,
         }
         return kwargs
+
+    def _callback_kwargs(self, pipe: Any, steps: int, progress: ProgressCallback) -> dict[str, Any]:
+        signature = inspect.signature(pipe.__call__)
+        if "callback_on_step_end" not in signature.parameters:
+            return {}
+        total_steps = max(steps, 1)
+
+        def on_step_end(_pipeline: Any, step: int, _timestep: Any, callback_kwargs: dict[str, Any]):
+            progress_value = 0.15 + (0.7 * min(step + 1, total_steps) / total_steps)
+            progress(progress_value, f"generation step {step + 1}/{total_steps}")
+            return callback_kwargs
+
+        return {"callback_on_step_end": on_step_end}
 
     def _load_input_image(self, path: Path, width: int, height: int) -> Any:
         from PIL import Image
