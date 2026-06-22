@@ -39,6 +39,11 @@ def get_capabilities() -> dict[str, object]:
     return capabilities()
 
 
+@app.get("/forge/runtime")
+def get_runtime() -> dict[str, object]:
+    return forge_queue.runtime_state()
+
+
 @app.get("/forge/models")
 def get_models() -> list[dict[str, object]]:
     return discover_models()

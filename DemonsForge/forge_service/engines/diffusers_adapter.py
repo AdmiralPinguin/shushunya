@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import gc
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,15 +19,18 @@ class DiffusersEngine(BaseEngine):
         self.name = engine_name
         self.meta = ENGINE_MODELS[engine_name]
         self._pipe: Any = None
+        self.loaded_model: str | None = None
+        self.last_used = 0.0
 
     def _model_dir(self, spec: JobSpec) -> Path:
         model_name = spec.model or self.meta["default_model"]
         return config.MODELS_DIR / model_name
 
     def _load_pipeline(self, spec: JobSpec) -> Any:
-        if self._pipe is not None:
-            return self._pipe
         model_dir = self._model_dir(spec)
+        if self._pipe is not None and self.loaded_model == str(model_dir):
+            self.last_used = time.monotonic()
+            return self._pipe
         if not (model_dir / "model_index.json").exists():
             raise EngineError(f"Model is not available locally: {model_dir}")
 
@@ -47,7 +52,39 @@ class DiffusersEngine(BaseEngine):
             kwargs["use_safetensors"] = True
         self._pipe = pipeline_cls.from_pretrained(model_dir, **kwargs)
         self._pipe.set_progress_bar_config(disable=False)
+        self.loaded_model = str(model_dir)
+        self.last_used = time.monotonic()
         return self._pipe
+
+    def unload(self) -> bool:
+        if self._pipe is None:
+            return False
+        self._pipe = None
+        self.loaded_model = None
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+        return True
+
+    def unload_if_idle(self, idle_seconds: int) -> bool:
+        if self._pipe is None:
+            return False
+        if time.monotonic() - self.last_used < idle_seconds:
+            return False
+        return self.unload()
+
+    def runtime_state(self) -> dict[str, object]:
+        return {
+            "engine": self.name,
+            "loaded": self._pipe is not None,
+            "loaded_model": self.loaded_model,
+            "idle_seconds": round(time.monotonic() - self.last_used, 1) if self._pipe else None,
+        }
 
     def _apply_scheduler(self, pipe: Any, scheduler_name: str | None) -> None:
         if not scheduler_name or scheduler_name == "native":
@@ -120,4 +157,5 @@ class DiffusersEngine(BaseEngine):
         progress(0.15, "generating image")
         result = pipe(**kwargs)
         progress(0.9, "image generated")
+        self.last_used = time.monotonic()
         return list(result.images)

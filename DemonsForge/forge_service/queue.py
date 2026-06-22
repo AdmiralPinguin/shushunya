@@ -4,6 +4,7 @@ import json
 import queue
 import random
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -26,6 +27,12 @@ class ForgeQueue:
         self._engines: dict[str, DiffusersEngine] = {}
         self._worker = threading.Thread(target=self._run, name="forge-worker", daemon=True)
         self._worker.start()
+        self._maintenance = threading.Thread(
+            target=self._maintain,
+            name="forge-maintenance",
+            daemon=True,
+        )
+        self._maintenance.start()
 
     def submit(self, spec: JobSpec) -> JobRecord:
         job_id = uuid.uuid4().hex
@@ -66,6 +73,29 @@ class ForgeQueue:
                 self._execute(job_id)
             finally:
                 self._queue.task_done()
+
+    def _maintain(self) -> None:
+        while True:
+            time.sleep(60)
+            for engine in list(self._engines.values()):
+                if engine.unload_if_idle(config.MODEL_IDLE_SECONDS):
+                    self.store.append_log("system", f"unloaded idle engine {engine.name}")
+
+    def runtime_state(self) -> dict[str, object]:
+        mem = psutil.virtual_memory()
+        return {
+            "queue_depth": self._queue.qsize(),
+            "canceled_jobs": len(self._cancel),
+            "loaded_engines": [engine.runtime_state() for engine in self._engines.values()],
+            "cpu_only": True,
+            "cpu_threads": config.CPU_THREADS,
+            "model_idle_seconds": config.MODEL_IDLE_SECONDS,
+            "ram": {
+                "total_gb": round(mem.total / 1024**3, 2),
+                "available_gb": round(mem.available / 1024**3, 2),
+                "percent": mem.percent,
+            },
+        }
 
     def _progress(self, job_id: str, value: float, message: str) -> None:
         if job_id in self._cancel:

@@ -9,12 +9,14 @@ EMBEDDINGS_DIR = ROOT / "embeddings"
 CONTROL_ASSETS_DIR = ROOT / "control_assets"
 ARTIFACTS_DIR = ROOT / "artifacts"
 RUNTIME_DIR = ROOT / "runtime"
+LOGS_DIR = RUNTIME_DIR / "logs"
 ASSET_REQUESTS_DIR = ROOT / "asset_requests"
 DB_PATH = RUNTIME_DIR / "forge.sqlite3"
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8110
 CPU_THREADS = os.cpu_count() or 32
+MODEL_IDLE_SECONDS = int(os.environ.get("FORGE_MODEL_IDLE_SECONDS", "1800"))
 
 MAX_WIDTH = 1536
 MAX_HEIGHT = 1536
@@ -30,6 +32,7 @@ def ensure_dirs() -> None:
         CONTROL_ASSETS_DIR,
         ARTIFACTS_DIR,
         RUNTIME_DIR,
+        LOGS_DIR,
         ASSET_REQUESTS_DIR,
     ]:
         path.mkdir(parents=True, exist_ok=True)

@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from .config import DB_PATH, ensure_dirs
+from .config import DB_PATH, LOGS_DIR, ensure_dirs
 from .schemas import ArtifactRecord, JobRecord, JobStatus, utc_now
 
 
@@ -165,6 +165,16 @@ class ForgeStore:
             return
         logs = [*record.logs, f"{utc_now()} {message}"]
         self.update_job(job_id, logs=logs)
+        event = {
+            "ts": utc_now(),
+            "job_id": job_id,
+            "status": record.status.value,
+            "message": message,
+        }
+        with self._lock:
+            LOGS_DIR.mkdir(parents=True, exist_ok=True)
+            with (LOGS_DIR / "jobs.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event, ensure_ascii=False) + "\n")
 
     def add_artifact(self, artifact: ArtifactRecord) -> None:
         with self._lock, self._connect() as conn:

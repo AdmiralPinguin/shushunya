@@ -56,6 +56,7 @@ Core endpoints:
 
 - `GET /health`
 - `GET /forge/capabilities`
+- `GET /forge/runtime`
 - `GET /forge/models`
 - `GET /forge/loras`
 - `POST /forge/plan`
@@ -110,7 +111,7 @@ Architecture:
 - `forge_service/registries.py`: engine, model, LoRA, sampler, scheduler and
   capability discovery.
 - `forge_service/queue.py`: single-worker VRAM/RAM-aware job queue with
-  progress logs and cancellation state.
+  progress logs, cancellation state, runtime status and idle model unload.
 - `forge_service/storage.py`: SQLite job and gallery store at
   `runtime/forge.sqlite3`.
 - `forge_service/engines/`: backend adapters. The current vertical slice uses a
@@ -123,6 +124,11 @@ Architecture:
   inside DemonsForge, and rejects unverified hosts.
 - `forge_service/client.py`: thin client intended for later ShushunyaAgent tool
   integration.
+
+Runtime logs are appended as JSONL to `runtime/logs/jobs.jsonl`. Loaded
+diffusers pipelines are automatically unloaded after
+`FORGE_MODEL_IDLE_SECONDS` seconds, default `1800`, to return RAM to the rest of
+the system.
 
 Generated outputs are stored under `artifacts/{job_id}/` with PNG files and JSON
 metadata containing prompt, negative prompt, engine, model, LoRA list, seed,

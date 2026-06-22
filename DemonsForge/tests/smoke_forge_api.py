@@ -16,6 +16,9 @@ def main() -> None:
     caps = client.get("/forge/capabilities")
     assert caps.status_code == 200, caps.text
     assert "engines" in caps.json()
+    runtime = client.get("/forge/runtime")
+    assert runtime.status_code == 200, runtime.text
+    assert runtime.json()["cpu_only"] is True
     plan = client.post(
         "/forge/plan",
         json={"request": "Нарисуй кинематографичный портрет демона в кузнице, вертикально"},
