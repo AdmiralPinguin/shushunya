@@ -198,6 +198,9 @@ Runtime logs are appended as JSONL to `runtime/logs/jobs.jsonl`. Loaded
 diffusers pipelines are automatically unloaded after
 `FORGE_MODEL_IDLE_SECONDS` seconds, default `1800`, to return RAM to the rest of
 the system.
+The runtime SQLite store uses WAL mode and a busy timeout so the HTTP API and
+an external worker can read/write the job database concurrently with fewer
+`database locked` failures.
 Use `POST /forge/runtime/unload` or `POST /forge/runtime/unload?engine=sdxl` to
 release loaded pipelines immediately.
 Queue pause/resume is stored in Forge runtime SQLite, so both embedded and
