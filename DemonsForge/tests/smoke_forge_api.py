@@ -196,6 +196,24 @@ def main() -> None:
     assert prompt_enhance.status_code == 200, prompt_enhance.text
     prompt_status = wait_for_terminal(client, prompt_enhance.json()["id"])
     assert prompt_status["status"] == "succeeded", prompt_status
+    clone_dry_run = client.post(
+        f"/forge/jobs/{prompt_enhance.json()['id']}/clone?dry_run=true",
+        json={"overrides": {"prompt": "dry clone prompt"}, "reuse_seed": True},
+    )
+    assert clone_dry_run.status_code == 200, clone_dry_run.text
+    assert clone_dry_run.json()["cloned_from"] == prompt_enhance.json()["id"]
+    assert clone_dry_run.json()["spec"]["prompt"] == "dry clone prompt"
+    cloned = client.post(
+        f"/forge/jobs/{prompt_enhance.json()['id']}/clone",
+        json={"overrides": {"prompt": "клонированный prompt"}, "reuse_seed": True},
+    )
+    assert cloned.status_code == 200, cloned.text
+    assert cloned.json()["cloned_from"] == prompt_enhance.json()["id"]
+    cloned_status = wait_for_terminal(client, cloned.json()["id"])
+    assert cloned_status["status"] == "succeeded", cloned_status
+    retry = client.post(f"/forge/jobs/{prompt_enhance.json()['id']}/retry?dry_run=true")
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["cloned_from"] == prompt_enhance.json()["id"]
     upscale = client.post(
         "/forge/jobs",
         json={

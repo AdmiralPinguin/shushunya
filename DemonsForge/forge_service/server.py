@@ -12,7 +12,7 @@ from .archive_memory import ArchiveMemoryClient
 from .planner import plan_txt2img
 from .queue import ForgeQueue
 from .registries import capabilities, discover_loras, discover_models
-from .schemas import JobSpec, MemoryProposal, PlanRequest
+from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest
 from .storage import ForgeStore
 
 config.force_cpu_runtime()
@@ -234,6 +234,34 @@ def cancel_job(job_id: str) -> dict[str, object]:
         return forge_queue.cancel(job_id).model_dump()
     except KeyError:
         raise HTTPException(status_code=404, detail="job not found") from None
+
+
+@app.post("/forge/jobs/{job_id}/clone")
+def clone_job(job_id: str, request: JobCloneRequest | None = None, dry_run: bool = False) -> dict[str, object]:
+    original = store.get_job(job_id)
+    if original is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    payload = original.spec.model_dump(mode="json")
+    request = request or JobCloneRequest()
+    if not request.reuse_seed:
+        payload["seed"] = None
+    payload.update(request.overrides)
+    try:
+        spec = JobSpec(**payload)
+        if dry_run:
+            result = forge_queue.validate(spec)
+            return {**result, "cloned_from": job_id, "spec": spec.model_dump(mode="json")}
+        record = forge_queue.submit(spec)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    data = record.model_dump()
+    data["cloned_from"] = job_id
+    return data
+
+
+@app.post("/forge/jobs/{job_id}/retry")
+def retry_job(job_id: str, dry_run: bool = False) -> dict[str, object]:
+    return clone_job(job_id, JobCloneRequest(), dry_run=dry_run)
 
 
 @app.get("/forge/artifacts/{artifact_id}")

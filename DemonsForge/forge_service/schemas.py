@@ -134,6 +134,11 @@ class JobRecord(BaseModel):
     error: str | None = None
 
 
+class JobCloneRequest(BaseModel):
+    overrides: dict[str, Any] = Field(default_factory=dict)
+    reuse_seed: bool = True
+
+
 class PlanRequest(BaseModel):
     request: str
     preferred_engine: str | None = None

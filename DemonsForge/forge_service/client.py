@@ -132,6 +132,24 @@ class DemonsForgeClient:
     def cancel(self, job_id: str) -> dict[str, Any]:
         return self._request("POST", f"/forge/jobs/{job_id}/cancel")
 
+    def clone_job(
+        self,
+        job_id: str,
+        overrides: dict[str, Any] | None = None,
+        reuse_seed: bool = True,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        suffix = "?dry_run=true" if dry_run else ""
+        return self._request(
+            "POST",
+            f"/forge/jobs/{job_id}/clone{suffix}",
+            json={"overrides": overrides or {}, "reuse_seed": reuse_seed},
+        )
+
+    def retry_job(self, job_id: str, dry_run: bool = False) -> dict[str, Any]:
+        suffix = "?dry_run=true" if dry_run else ""
+        return self._request("POST", f"/forge/jobs/{job_id}/retry{suffix}")
+
     def gallery(
         self,
         limit: int = 100,
