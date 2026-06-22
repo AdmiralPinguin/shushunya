@@ -11,7 +11,7 @@ from .config import DB_PATH, LOGS_DIR, ensure_dirs
 from .schemas import ArtifactRecord, AssetDownloadRecord, JobRecord, JobStatus, utc_now
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class ForgeStore:
