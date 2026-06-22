@@ -277,6 +277,14 @@ def main() -> None:
     job_id = queued.json()["id"]
     status = client.get(f"/forge/jobs/{job_id}")
     assert status.status_code == 200, status.text
+    metadata_status = wait_for_terminal(client, job_id)
+    assert metadata_status["status"] == "succeeded", metadata_status
+    metadata_artifact = store.get_artifact(metadata_status["artifacts"][0])
+    assert metadata_artifact is not None
+    metadata_entry = metadata_artifact.metadata["entries"][0]
+    assert metadata_entry["size_bytes"] > 0
+    assert len(metadata_entry["sha256"]) == 64
+    assert "mime_type" in metadata_entry
     jobs = client.get("/forge/jobs?limit=5")
     assert jobs.status_code == 200, jobs.text
     events = client.get(f"/forge/jobs/{job_id}/events")

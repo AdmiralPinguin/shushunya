@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import mimetypes
 import queue
 import random
 import threading
@@ -63,6 +65,8 @@ class ForgeQueue:
         elif spec.type == JobType.metadata_read:
             if not spec.source_images:
                 raise RuntimeError("metadata-read requires source_images")
+            for source in spec.source_images:
+                self._resolve_input_path(source)
         elif spec.type == JobType.img2img:
             if not spec.source_images:
                 raise RuntimeError("img2img requires source_images")
@@ -463,11 +467,15 @@ class ForgeQueue:
         metadata_path = artifact_dir / f"{artifact_id}.json"
         entries = []
         for source in spec.source_images:
-            source_path = Path(source)
-            if not source_path.is_absolute():
-                source_path = config.ROOT / source_path
-            entry: dict[str, object] = {"source": str(source_path), "exists": source_path.exists()}
-            if source_path.exists() and source_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            source_path = self._resolve_input_path(source)
+            entry: dict[str, object] = {
+                "source": str(source_path),
+                "exists": True,
+                "size_bytes": source_path.stat().st_size,
+                "sha256": self._sha256_file(source_path),
+                "mime_type": mimetypes.guess_type(source_path.name)[0],
+            }
+            if source_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
                 with Image.open(source_path) as image:
                     entry["image"] = {
                         "format": image.format,
@@ -479,7 +487,12 @@ class ForgeQueue:
             sidecar = source_path.with_suffix(".json")
             if sidecar.exists():
                 try:
-                    entry["sidecar_json"] = json.loads(sidecar.read_text(encoding="utf-8"))
+                    entry["sidecar_path"] = str(sidecar)
+                    entry["sidecar_size_bytes"] = sidecar.stat().st_size
+                    if sidecar.stat().st_size <= 1_000_000:
+                        entry["sidecar_json"] = json.loads(sidecar.read_text(encoding="utf-8"))
+                    else:
+                        entry["sidecar_skipped"] = "sidecar is larger than 1MB"
                 except json.JSONDecodeError as exc:
                     entry["sidecar_error"] = str(exc)
             entries.append(entry)
@@ -501,6 +514,13 @@ class ForgeQueue:
                 metadata=metadata,
             )
         )
+
+    def _sha256_file(self, path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     def _metadata(self, job_id: str, spec: JobSpec, path: Path, index: int) -> dict[str, object]:
         return {
