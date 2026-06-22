@@ -144,6 +144,8 @@ Architecture:
   `asset_request` objects requiring user approval.
   It recognizes engine hints, explicit dimensions like `512x768`, `steps`,
   `seed`, negative prompts and local LoRA references like `lora:name@0.8`.
+  It also performs fail-soft read-only memory search through the `demonsforge`
+  namespace and stores compact planning hints in `spec.safety.memory_context`.
 - `forge_service/downloader.py`: controlled asset downloader abstraction. It
   accepts only approved jobs, stores source/license/hash metadata, keeps files
   inside DemonsForge, and rejects unverified hosts.

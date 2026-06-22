@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from .archive_memory import ArchiveMemoryClient
 from .registries import ASPECT_PRESETS, capabilities
 from .schemas import AssetRequest, JobSpec, JobType, LoraRef, PlanRequest
 
@@ -101,6 +102,33 @@ def _negative(text: str, supports_negative: bool) -> str | None:
     return "low quality, blurry, distorted"
 
 
+def _memory_context(text: str) -> dict[str, object]:
+    client = ArchiveMemoryClient.from_config()
+    status = client.status()
+    if not status.get("enabled"):
+        return {"enabled": False, "used": False, "reason": "disabled"}
+    result = client.search(text, limit=3, layers="focus,wiki,vector,graph", include_content=False, create=True)
+    if result.get("ok") is False:
+        return {"enabled": True, "used": False, "error": result.get("error"), "status": status}
+    excerpts = []
+    for item in result.get("focus", [])[:1]:
+        if item.get("excerpt"):
+            excerpts.append({"layer": "focus", "title": item.get("title"), "excerpt": item.get("excerpt")})
+    for item in result.get("wiki", [])[:1]:
+        if item.get("excerpt"):
+            excerpts.append({"layer": "wiki", "title": item.get("title"), "excerpt": item.get("excerpt")})
+    for item in result.get("vector", [])[:2]:
+        if item.get("excerpt"):
+            excerpts.append({"layer": "vector", "turn_id": item.get("turn_id"), "excerpt": item.get("excerpt")})
+    return {
+        "enabled": True,
+        "used": bool(excerpts),
+        "namespace": result.get("memory_namespace"),
+        "counts": result.get("counts", {}),
+        "excerpts": excerpts,
+    }
+
+
 def plan_txt2img(request: PlanRequest) -> JobSpec:
     text = request.request.strip()
     engine = _choose_engine(text, request.preferred_engine)
@@ -129,6 +157,7 @@ def plan_txt2img(request: PlanRequest) -> JobSpec:
         seed=_seed(text),
         batch_size=1,
         loras=_local_loras(text),
+        safety={"memory_context": _memory_context(text)},
         asset_request=_asset_request_if_needed(text),
     )
     return spec

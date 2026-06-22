@@ -116,6 +116,7 @@ def main() -> None:
     spec = plan.json()
     assert spec["type"] == "txt2img"
     assert spec["prompt"]
+    assert "memory_context" in spec["safety"]
     planned_custom = client.post(
         "/forge/plan",
         json={"request": "SDXL 512x768 steps 7 seed 123 cinematic portrait"},
