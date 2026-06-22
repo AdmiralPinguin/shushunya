@@ -191,6 +191,11 @@ class ForgeStore:
             for row in rows
         ]
 
+    def job_status_counts(self) -> dict[str, int]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute("SELECT status, COUNT(*) AS count FROM jobs GROUP BY status").fetchall()
+        return {str(row["status"]): int(row["count"]) for row in rows}
+
     def update_job(self, job_id: str, **fields: Any) -> JobRecord:
         record = self.get_job(job_id)
         if record is None:

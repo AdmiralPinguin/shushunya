@@ -186,6 +186,15 @@ class ForgeQueue:
             },
         }
 
+    def queue_state(self) -> dict[str, object]:
+        return {
+            "queue_depth": self._queue.qsize(),
+            "paused": self.store.get_runtime_flag("queue_paused", default=False),
+            "embedded_worker": self._embedded_worker,
+            "canceled_jobs": len(self._cancel),
+            "status_counts": self.store.job_status_counts(),
+        }
+
     def pause(self) -> dict[str, object]:
         self.store.set_runtime_flag("queue_paused", True)
         return {"ok": True, "paused": True, "runtime": self.runtime_state()}

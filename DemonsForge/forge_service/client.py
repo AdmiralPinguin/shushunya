@@ -36,6 +36,9 @@ class DemonsForgeClient:
     def pause_queue(self) -> dict[str, Any]:
         return self._request("POST", "/forge/queue/pause")
 
+    def queue(self) -> dict[str, Any]:
+        return self._request("GET", "/forge/queue")
+
     def resume_queue(self) -> dict[str, Any]:
         return self._request("POST", "/forge/queue/resume")
 

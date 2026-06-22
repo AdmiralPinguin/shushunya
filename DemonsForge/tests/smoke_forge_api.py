@@ -64,6 +64,9 @@ def main() -> None:
     resumed = client.post("/forge/queue/resume")
     assert resumed.status_code == 200, resumed.text
     assert resumed.json()["paused"] is False
+    queue_state = client.get("/forge/queue")
+    assert queue_state.status_code == 200, queue_state.text
+    assert "status_counts" in queue_state.json()
     external_worker = ForgeQueue(store, start_worker=False)
     external_worker.pause()
     paused_job = external_worker.submit(

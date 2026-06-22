@@ -56,6 +56,11 @@ def pause_queue() -> dict[str, object]:
     return forge_queue.pause()
 
 
+@app.get("/forge/queue")
+def get_queue() -> dict[str, object]:
+    return forge_queue.queue_state()
+
+
 @app.post("/forge/queue/resume")
 def resume_queue() -> dict[str, object]:
     return forge_queue.resume()
