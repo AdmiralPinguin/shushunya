@@ -2,22 +2,25 @@
 
 ## Current Memory Activation
 
-The local daemon is intentionally configured for active memory while the archive
-is still small:
+The local daemon is configured for stateless/context-from-archive behavior:
 
 - Magos is enabled with lower layers: `ARCHIVE_MAGOS_CONTEXT_LAYERS=wiki,vector,graph`.
-- Direct vector prompt injection is enabled: `ARCHIVE_VECTOR_INJECTION_ENABLED=1`.
-- Direct graph prompt injection is enabled: `ARCHIVE_GRAPH_INJECTION_ENABLED=1`.
+- Direct vector prompt injection is disabled: `ARCHIVE_VECTOR_INJECTION_ENABLED=0`.
+- Direct graph prompt injection is disabled: `ARCHIVE_GRAPH_INJECTION_ENABLED=0`.
+- Raw mobile chat history injection is disabled: `ARCHIVE_CHAT_CONTEXT_MESSAGES=0`.
 - Vector and graph startup backfill are enabled.
 - Daily memory quality reporting is enabled at 04:00.
 
-This means the model can receive active focus, Magos lower-layer context, direct
-vector context, and direct graph context. If prompt noise becomes visible, first
-reduce `ARCHIVE_MAGOS_CONTEXT_LAYERS`, then disable direct vector/graph injection.
+This means the model receives active focus and Magos lower-layer context, but
+does not receive raw previous mobile messages or direct vector/graph blocks.
+If prompt noise becomes visible, reduce `ARCHIVE_MAGOS_CONTEXT_LAYERS`.
 
 The architecture remains unchanged: Magos runs before the answer, the Librarian
 runs after the answer, and external agents only propose writes through Memory
 Gateway.
+
+Namespaces are split by client mode: `default`, `telegram`, `mobile`, and
+`agent`. Each namespace has separate focus/wiki/vector/graph memory.
 
 `/v1/chat/completions` supports `archive_system_prompt_enabled=false` for agent
 callers that must keep their own system prompt as the top-priority instruction
@@ -67,3 +70,6 @@ the daemon schedules daily at 04:00. Reports are written to
   `MAINTENANCE_LOCK`. This reduces response blocking, but maintenance is still
   synchronous after the response write. Later, move maintenance into a background
   queue with observable pending status.
+- Prompt diagnostics are stored in JSONL turn records as `prompt_diagnostics`.
+  They show raw history count, active focus, Magos, direct vector, and direct
+  graph prompt components for debugging context assembly.

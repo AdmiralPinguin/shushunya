@@ -34,7 +34,7 @@ JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl
 MEMORY_EVENTS_ROOT = Path(os.environ.get("ARCHIVE_MEMORY_EVENTS_ROOT", ROOT / "archive" / "memory_events"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
 CHAT_HISTORY_LIMIT = int(os.environ.get("ARCHIVE_CHAT_HISTORY_LIMIT", "80"))
-CHAT_CONTEXT_MESSAGES = int(os.environ.get("ARCHIVE_CHAT_CONTEXT_MESSAGES", "16"))
+CHAT_CONTEXT_MESSAGES = int(os.environ.get("ARCHIVE_CHAT_CONTEXT_MESSAGES", "0"))
 CHAT_MESSAGE_CHARS = int(os.environ.get("ARCHIVE_CHAT_MESSAGE_CHARS", "5000"))
 REPORTS_ROOT = Path(os.environ.get("ARCHIVE_REPORTS_ROOT", ROOT / "reports"))
 FOCUS_ROOT = Path(os.environ.get("ARCHIVE_FOCUS_ROOT", ROOT / "focus"))
@@ -84,6 +84,7 @@ ARCHIVE_SYSTEM_PROMPT = os.environ.get(
 ARCHIVE_LOCK = threading.Lock()
 CHAT_QUEUE_LOCK = threading.Lock()
 MAINTENANCE_LOCK = threading.Lock()
+MOBILE_JOB_LOCK = threading.Lock()
 LIBRARIAN = None
 MAGOS = None
 FOCUS_BOOKSHELF = None
@@ -169,6 +170,18 @@ def open_upstream(method, path, payload=None, timeout=180):
 
 
 def proxy_json_url(method, url, payload=None, timeout=180):
+    data = None
+    headers = {}
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = Request(url, data=data, headers=headers, method=method)
+    with urlopen(request, timeout=timeout) as response:
+        body = response.read().decode("utf-8")
+        return response.status, json.loads(body) if body else {}
+
+
+def proxy_json_url_raw(method, url, payload=None, timeout=180):
     data = None
     headers = {}
     if payload is not None:
@@ -547,6 +560,154 @@ def memory_search(memory_namespace, query, limit=5, include_content=False, layer
     }
 
 
+def run_mobile_chat_payload(payload):
+    maintenance_record = None
+    with CHAT_QUEUE_LOCK:
+        created_at = now_iso()
+        turn_id = str(uuid.uuid4())
+        payload = dict(payload)
+        payload["stream"] = False
+        session_id = safe_chat_session_id(payload.get("session_id") or payload.get("user") or "default")
+        text = trim_chat_text(payload.get("text") or payload.get("message") or "")
+        image_data_url = str(payload.get("image_data_url") or "").strip()
+        if not text and not image_data_url:
+            raise ValueError("Missing text or image_data_url")
+
+        archive_enabled = internal_flag(payload.get("archive_enabled", True), default=True)
+        focus_enabled = internal_flag(payload.get("focus_enabled", True), default=True)
+        vector_enabled = internal_flag(payload.get("vector_enabled", focus_enabled), default=True)
+        graph_enabled = internal_flag(payload.get("graph_enabled", focus_enabled), default=True)
+        archive_system_prompt_enabled = internal_flag(payload.get("archive_system_prompt_enabled", True), default=True)
+        memory_namespace = safe_memory_namespace(payload.get("memory_namespace") or "mobile")
+        model = payload.get("model") or "gemma-4-12b-it-UD-Q5_K_XL.gguf"
+        system_prompt = payload.get("system_prompt") or ""
+        max_tokens = int(payload.get("max_tokens") or 2048)
+        temperature = float(payload.get("temperature") or 0.4)
+
+        request_messages = messages_for_chat_context(session_id, system_prompt, text, image_data_url=image_data_url)
+        append_chat_message(
+            session_id,
+            "user",
+            text if not image_data_url else f"{text}\n[image attached server-side]",
+            created_at=created_at,
+        )
+        mobile_payload = {
+            "model": model,
+            "user": f"mobile:{session_id}",
+            "archive_enabled": archive_enabled,
+            "focus_enabled": focus_enabled,
+            "vector_enabled": vector_enabled,
+            "graph_enabled": graph_enabled,
+            "archive_system_prompt_enabled": archive_system_prompt_enabled,
+            "memory_namespace": memory_namespace,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": False,
+            "messages": request_messages,
+        }
+        memory_messages = sanitize_messages_for_memory(request_messages)
+        magos_message = None
+        magos_result = None
+        magos = focus_components(memory_namespace)["magos"]
+        if focus_enabled and magos is not None:
+            try:
+                magos_message = magos.prepare_request(
+                    memory_messages,
+                    model=model,
+                    conversation_id=f"mobile:{session_id}",
+                    turn_id=turn_id,
+                    memory_namespace=memory_namespace,
+                )
+                magos_result = magos.last_result
+            except Exception as exc:
+                print(f"Magos hard fail-soft mobile chat job: {exc}", flush=True)
+                magos_result = {"error": str(exc)}
+
+        prepared_payload = dict(mobile_payload)
+        prepared_payload["messages"] = prepare_messages(
+            request_messages,
+            include_focus=focus_enabled,
+            include_vector=vector_enabled,
+            include_graph=graph_enabled,
+            include_system_prompt=archive_system_prompt_enabled,
+            magos_message=magos_message,
+            query_messages=memory_messages,
+            memory_namespace=memory_namespace,
+        )
+        archive_prepared_messages = prepare_messages(
+            memory_messages,
+            include_focus=focus_enabled,
+            include_vector=vector_enabled,
+            include_graph=graph_enabled,
+            include_system_prompt=archive_system_prompt_enabled,
+            magos_message=magos_message,
+            query_messages=memory_messages,
+            memory_namespace=memory_namespace,
+        )
+        diagnostics = prompt_diagnostics(
+            archive_prepared_messages,
+            memory_messages,
+            include_focus=focus_enabled,
+            include_vector=vector_enabled,
+            include_graph=graph_enabled,
+            include_system_prompt=archive_system_prompt_enabled,
+            magos_message=magos_message,
+            memory_namespace=memory_namespace,
+        )
+        record = {
+            "turn_id": turn_id,
+            "created_at": created_at,
+            "source": "mobile-chat-session",
+            "conversation_id": f"mobile:{session_id}",
+            "memory_namespace": memory_namespace,
+            "archive_enabled": archive_enabled,
+            "focus_enabled": focus_enabled,
+            "vector_enabled": vector_enabled,
+            "graph_enabled": graph_enabled,
+            "archive_system_prompt_enabled": archive_system_prompt_enabled,
+            "magos_enabled": bool(magos_message),
+            "magos_result": magos_result,
+            "prompt_diagnostics": diagnostics,
+            "model": model,
+            "request": {
+                "session_id": session_id,
+                "text": text,
+                "has_image": bool(image_data_url),
+                "stream": False,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+            "prepared_messages": archive_prepared_messages,
+            "status": "pending",
+            "http_status": None,
+            "response": None,
+            "assistant_message": None,
+            "error": None,
+        }
+        try:
+            status, response = proxy_json("POST", "/v1/chat/completions", payload=prepared_payload)
+            assistant = assistant_message(response)
+            if assistant:
+                append_chat_message(session_id, "assistant", assistant.get("content") or "")
+            record["status"] = "ok"
+            record["http_status"] = status
+            record["response"] = response
+            record["assistant_message"] = assistant
+            maybe_write_archives(record)
+            maintenance_record = record
+            return {"ok": True, "session_id": session_id, "response": response, "message": (assistant or {}).get("content", "")}
+        except Exception as exc:
+            record["status"] = "error"
+            record["http_status"] = getattr(exc, "code", 500)
+            record["error"] = str(exc)
+            maybe_abandon_magos_focus(record)
+            maybe_write_archives(record)
+            raise
+        finally:
+            if maintenance_record is not None:
+                maybe_update_focus_memory(maintenance_record)
+
+
 def memory_catalog(memory_namespace):
     namespace = safe_memory_namespace(memory_namespace)
     bookshelf = focus_components(namespace)["bookshelf"]
@@ -804,9 +965,12 @@ def safe_chat_session_id(value):
 def chat_history(session_id, limit=CHAT_HISTORY_LIMIT):
     session_id = safe_chat_session_id(session_id)
     try:
-        safe_limit = max(1, min(int(limit or CHAT_HISTORY_LIMIT), 300))
+        parsed_limit = int(limit if limit is not None else CHAT_HISTORY_LIMIT)
     except (TypeError, ValueError):
-        safe_limit = CHAT_HISTORY_LIMIT
+        parsed_limit = CHAT_HISTORY_LIMIT
+    if parsed_limit <= 0:
+        return []
+    safe_limit = max(1, min(parsed_limit, 300))
     with sqlite3.connect(SQLITE_PATH) as db:
         db.row_factory = sqlite3.Row
         rows = db.execute(
@@ -857,14 +1021,93 @@ def append_chat_message(session_id, role, content, asset_id=None, created_at=Non
             )
 
 
+def create_mobile_job(job_type, request_payload):
+    job_id = f"{safe_chat_session_id(job_type)}-{uuid.uuid4().hex[:12]}"
+    created_at = now_iso()
+    with sqlite3.connect(SQLITE_PATH) as db:
+        db.execute(
+            """
+            INSERT INTO mobile_jobs (id, type, status, created_at, updated_at, request_json, response_json, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (job_id, job_type, "queued", created_at, created_at, json.dumps(request_payload, ensure_ascii=False), None, None),
+        )
+    return job_id
+
+
+def update_mobile_job(job_id, status, response=None, error=None):
+    with sqlite3.connect(SQLITE_PATH) as db:
+        db.execute(
+            """
+            UPDATE mobile_jobs
+            SET status = ?, updated_at = ?, response_json = ?, error = ?
+            WHERE id = ?
+            """,
+            (
+                status,
+                now_iso(),
+                json.dumps(response, ensure_ascii=False) if response is not None else None,
+                str(error) if error is not None else None,
+                job_id,
+            ),
+        )
+
+
+def mobile_job_snapshot(job_id):
+    with sqlite3.connect(SQLITE_PATH) as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute(
+            """
+            SELECT id, type, status, created_at, updated_at, request_json, response_json, error
+            FROM mobile_jobs
+            WHERE id = ?
+            """,
+            (safe_chat_session_id(job_id),),
+        ).fetchone()
+    if not row:
+        return {"ok": False, "error": "mobile job not found", "job_id": safe_chat_session_id(job_id)}
+    response = None
+    if row["response_json"]:
+        try:
+            response = json.loads(row["response_json"])
+        except json.JSONDecodeError:
+            response = {"raw": row["response_json"]}
+    return {
+        "ok": row["status"] not in {"failed"},
+        "job_id": row["id"],
+        "type": row["type"],
+        "status": row["status"],
+        "running": row["status"] in {"queued", "running"},
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "response": response,
+        "error": row["error"],
+    }
+
+
+def run_mobile_job(job_id, worker):
+    def _run():
+        update_mobile_job(job_id, "running")
+        try:
+            response = worker()
+            update_mobile_job(job_id, "done", response=response)
+        except Exception as exc:
+            update_mobile_job(job_id, "failed", error=exc)
+
+    thread = threading.Thread(target=_run, name=f"mobile-job-{job_id}", daemon=True)
+    thread.start()
+    return thread
+
+
 def messages_for_chat_context(session_id, system_prompt, user_text, image_data_url=None):
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": str(system_prompt)})
-    for item in chat_history(session_id, limit=CHAT_CONTEXT_MESSAGES):
-        content = trim_chat_text(item.get("content") or "")
-        if content:
-            messages.append({"role": item.get("role") or "user", "content": content})
+    if CHAT_CONTEXT_MESSAGES > 0:
+        for item in chat_history(session_id, limit=CHAT_CONTEXT_MESSAGES):
+            content = trim_chat_text(item.get("content") or "")
+            if content:
+                messages.append({"role": item.get("role") or "user", "content": content})
     user_content = user_text
     if image_data_url:
         user_content = [
@@ -879,6 +1122,62 @@ def messages_for_chat_context(session_id, system_prompt, user_text, image_data_u
         ]
     messages.append({"role": "user", "content": user_content})
     return messages
+
+
+def prompt_diagnostics(
+    prepared_messages,
+    client_messages,
+    include_focus=True,
+    include_vector=True,
+    include_graph=True,
+    include_system_prompt=True,
+    magos_message=None,
+    memory_namespace="default",
+):
+    counters = {
+        "total_messages": len(prepared_messages or []),
+        "client_messages": len(client_messages or []),
+        "client_history_messages": 0,
+        "archive_system_prompt": 0,
+        "focus": 0,
+        "magos": 0,
+        "direct_vector": 0,
+        "direct_graph": 0,
+    }
+    for message in prepared_messages or []:
+        content = message.get("content")
+        if not isinstance(content, str):
+            continue
+        if content.startswith("Ты Шушуня:"):
+            counters["archive_system_prompt"] += 1
+        elif content.startswith("Активный focus-файл ArchiveOfHeresy"):
+            counters["focus"] += 1
+        elif content.startswith("Magos memory context from ArchiveOfHeresy"):
+            counters["magos"] += 1
+        elif content.startswith("Релевантные фрагменты vector memory ArchiveOfHeresy"):
+            counters["direct_vector"] += 1
+        elif content.startswith("Релевантный GraphRAG-контекст ArchiveOfHeresy"):
+            counters["direct_graph"] += 1
+
+    client_count = len(client_messages or [])
+    client_system = 1 if client_messages and client_messages[0].get("role") == "system" else 0
+    counters["client_history_messages"] = max(0, client_count - client_system - 1)
+    return {
+        "memory_namespace": memory_namespace,
+        "chat_context_messages_setting": CHAT_CONTEXT_MESSAGES,
+        "requested": {
+            "focus": bool(include_focus),
+            "vector": bool(include_vector),
+            "graph": bool(include_graph),
+            "archive_system_prompt": bool(include_system_prompt),
+            "magos": bool(magos_message),
+        },
+        "direct_injection_enabled": {
+            "vector": VECTOR_INJECTION_ENABLED,
+            "graph": GRAPH_INJECTION_ENABLED,
+        },
+        "counts": counters,
+    }
 
 
 
@@ -1038,6 +1337,21 @@ def init_storage():
             """
         )
         db.execute("CREATE INDEX IF NOT EXISTS idx_mobile_chat_messages_session_id ON mobile_chat_messages(session_id, id)")
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mobile_jobs (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                request_json TEXT NOT NULL,
+                response_json TEXT,
+                error TEXT
+            )
+            """
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_mobile_jobs_updated ON mobile_jobs(updated_at)")
 
 
 def assistant_message(response):
@@ -1326,6 +1640,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "memory_events_root": str(MEMORY_EVENTS_ROOT),
                     "sqlite_path": str(SQLITE_PATH),
                     "reports_root": str(REPORTS_ROOT),
+                    "chat_context_messages": CHAT_CONTEXT_MESSAGES,
                     "magos_context_layers": sorted(MAGOS_CONTEXT_LAYERS),
                     "direct_injection": {
                         "vector": VECTOR_INJECTION_ENABLED,
@@ -1384,6 +1699,56 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 return
             try:
                 status, response = proxy_json_url("GET", f"{AGENT_BASE_URL}/state", timeout=30)
+                write_json(self, status, response)
+            except HTTPError as exc:
+                self.write_proxy_error(exc)
+            except Exception as exc:
+                write_json(self, 502, {"error": f"agent unavailable: {exc}"})
+            return
+
+        if self.path.startswith("/archive/mobile/job"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            params = parse_qs(urlsplit(self.path).query)
+            job_id = (params.get("job_id") or [""])[0].strip()
+            write_json(self, 200 if job_id else 400, mobile_job_snapshot(job_id) if job_id else {"ok": False, "error": "missing job_id"})
+            return
+
+        if self.path.startswith("/archive/mobile/agent/tasks"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            query = urlsplit(self.path).query
+            suffix = f"?{query}" if query else ""
+            try:
+                status, response = proxy_json_url_raw("GET", f"{AGENT_BASE_URL}/tasks{suffix}", timeout=30)
+                write_json(self, status, response)
+            except HTTPError as exc:
+                self.write_proxy_error(exc)
+            except Exception as exc:
+                write_json(self, 502, {"error": f"agent unavailable: {exc}"})
+            return
+
+        if self.path.startswith("/archive/mobile/agent/task"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            query = urlsplit(self.path).query
+            suffix = f"?{query}" if query else ""
+            try:
+                status, response = proxy_json_url_raw("GET", f"{AGENT_BASE_URL}/task{suffix}", timeout=30)
+                write_json(self, status, response)
+            except HTTPError as exc:
+                self.write_proxy_error(exc)
+            except Exception as exc:
+                write_json(self, 502, {"error": f"agent unavailable: {exc}"})
+            return
+
+        if self.path.startswith("/archive/mobile/agent/last-task"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            query = urlsplit(self.path).query
+            suffix = f"?{query}" if query else ""
+            try:
+                status, response = proxy_json_url_raw("GET", f"{AGENT_BASE_URL}/last-task{suffix}", timeout=30)
                 write_json(self, status, response)
             except HTTPError as exc:
                 self.write_proxy_error(exc)
@@ -1658,10 +2023,22 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             self.mobile_chat_completion()
             return
 
+        if self.path == "/archive/mobile/chat/start":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_chat_start()
+            return
+
         if self.path == "/archive/mobile/translate":
             if not require_auth(self, allow_mobile=True):
                 return
             self.mobile_proxy_json(f"{TRANSLATOR_BASE_URL}/translate", timeout=180)
+            return
+
+        if self.path == "/archive/mobile/translate/start":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_translate_start()
             return
 
         if self.path in ("/archive/mobile/stt-live", "/archive/mobile/stt-pcm"):
@@ -1674,6 +2051,12 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             if not require_auth(self, allow_mobile=True):
                 return
             self.mobile_proxy_json(f"{AGENT_BASE_URL}/run", timeout=240)
+            return
+
+        if self.path == "/archive/mobile/agent/start":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_proxy_json(f"{AGENT_BASE_URL}/start", timeout=30)
             return
 
         if self.path == "/archive/mobile/agent/cancel":
@@ -1766,6 +2149,38 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             return
         except Exception as exc:
             write_json(self, 502, {"error": f"agent stream unavailable: {exc}"})
+
+    def mobile_chat_start(self):
+        try:
+            payload = read_json(self)
+        except json.JSONDecodeError as exc:
+            write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
+            return
+        session_id = safe_chat_session_id(payload.get("session_id") or payload.get("user") or "default")
+        text = trim_chat_text(payload.get("text") or payload.get("message") or "")
+        image_data_url = str(payload.get("image_data_url") or "").strip()
+        if not text and not image_data_url:
+            write_json(self, 400, {"ok": False, "error": "Missing text or image_data_url", "session_id": session_id})
+            return
+        payload["stream"] = False
+        job_id = create_mobile_job("chat", payload)
+        run_mobile_job(job_id, lambda payload=payload: run_mobile_chat_payload(payload))
+        write_json(self, 202, {"ok": True, "job_id": job_id, "type": "chat", "session_id": session_id, "status": "queued"})
+
+    def mobile_translate_start(self):
+        try:
+            payload = read_json(self)
+        except json.JSONDecodeError as exc:
+            write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
+            return
+        job_id = create_mobile_job("translate", payload)
+
+        def worker(payload=payload):
+            status, response = proxy_json_url("POST", f"{TRANSLATOR_BASE_URL}/translate", payload=payload, timeout=180)
+            return {"ok": 200 <= status < 300, "status": status, **response}
+
+        run_mobile_job(job_id, worker)
+        write_json(self, 202, {"ok": True, "job_id": job_id, "type": "translate", "status": "queued"})
 
     def memory_propose_change(self):
         with CHAT_QUEUE_LOCK:
@@ -1915,7 +2330,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             vector_enabled = internal_flag(payload.get("vector_enabled", focus_enabled), default=True)
             graph_enabled = internal_flag(payload.get("graph_enabled", focus_enabled), default=True)
             archive_system_prompt_enabled = internal_flag(payload.get("archive_system_prompt_enabled", True), default=True)
-            memory_namespace = safe_memory_namespace(payload.get("memory_namespace") or "default")
+            memory_namespace = safe_memory_namespace(payload.get("memory_namespace") or "mobile")
             stream = internal_flag(payload.get("stream", True), default=True)
             model = payload.get("model") or "gemma-4-12b-it-UD-Q5_K_XL.gguf"
             system_prompt = payload.get("system_prompt") or ""
@@ -1982,6 +2397,16 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 query_messages=memory_messages,
                 memory_namespace=memory_namespace,
             )
+            diagnostics = prompt_diagnostics(
+                archive_prepared_messages,
+                memory_messages,
+                include_focus=focus_enabled,
+                include_vector=vector_enabled,
+                include_graph=graph_enabled,
+                include_system_prompt=archive_system_prompt_enabled,
+                magos_message=magos_message,
+                memory_namespace=memory_namespace,
+            )
 
             record = {
                 "turn_id": turn_id,
@@ -1996,6 +2421,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "archive_system_prompt_enabled": archive_system_prompt_enabled,
                 "magos_enabled": bool(magos_message),
                 "magos_result": magos_result,
+                "prompt_diagnostics": diagnostics,
                 "model": model,
                 "request": {
                     "session_id": session_id,
@@ -2194,6 +2620,16 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 query_messages=memory_messages,
                 memory_namespace=memory_namespace,
             )
+            diagnostics = prompt_diagnostics(
+                archive_prepared_messages,
+                memory_messages,
+                include_focus=focus_enabled,
+                include_vector=vector_enabled,
+                include_graph=graph_enabled,
+                include_system_prompt=archive_system_prompt_enabled,
+                magos_message=magos_message,
+                memory_namespace=memory_namespace,
+            )
 
             record = {
                 "turn_id": turn_id,
@@ -2208,6 +2644,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "archive_system_prompt_enabled": archive_system_prompt_enabled,
                 "magos_enabled": bool(magos_message),
                 "magos_result": magos_result,
+                "prompt_diagnostics": diagnostics,
                 "model": payload.get("model"),
                 "request": sanitized_payload,
                 "prepared_messages": archive_prepared_messages,

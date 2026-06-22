@@ -101,7 +101,7 @@ When the topic continues, it updates the active focus file. When the topic chang
 ArchiveOfHeresy injects the active focus file into model requests as compact context. Clients should not send long tails of previous chat messages; the active focus file replaces that history pressure.
 The archivist is instructed to keep every important decision, constraint, correction, status, path, command, and next step in that focus, so old chat messages should not be needed for normal continuation.
 
-The active focus is currently global for the allowed ArchiveOfHeresy conversation flow. Non-allowlisted clients should disable focus injection so they do not read or affect this shared memory.
+Focus is scoped by `memory_namespace`. The local client split uses `default`, `telegram`, `mobile`, and `agent`, so separate modes do not overwrite each other's active focus.
 
 ## Wiki Memory
 
@@ -127,7 +127,7 @@ Vector memory is the retrieval layer for old archived turns:
 vector/index.sqlite3
 ```
 
-After a successful archived answer, the librarian indexes the latest user message and assistant answer as chunks. The local starter enables direct vector context injection with `ARCHIVE_VECTOR_INJECTION_ENABLED=1`, so this layer is currently active in model prompts while the memory is still small.
+After a successful archived answer, the librarian indexes the latest user message and assistant answer as chunks. The local starter keeps direct vector context injection disabled with `ARCHIVE_VECTOR_INJECTION_ENABLED=0`; Magos may still consult vector memory and return a compact context packet.
 
 The preferred vector backend is a local OpenAI-compatible `/v1/embeddings`
 endpoint, normally served by the local llama.cpp host with `--embeddings`.
@@ -155,7 +155,7 @@ graph/graph.sqlite3
 
 The graph layer is for relationships that are awkward to represent as raw chunks or isolated wiki pages: project components, agents, memory layers, decisions, dependencies, superseded decisions, ownership, storage, retrieval, and status links.
 
-After every `ARCHIVE_GRAPH_INTERVAL_MESSAGES` archived messages, the librarian reviews recent turns, extracts stable nodes and edges, and merges them into the graph. The local starter enables direct graph context injection with `ARCHIVE_GRAPH_INJECTION_ENABLED=1`, so this layer is currently active in model prompts while the memory is still small.
+After every `ARCHIVE_GRAPH_INTERVAL_MESSAGES` archived messages, the librarian reviews recent turns, extracts stable nodes and edges, and merges them into the graph. The local starter keeps direct graph context injection disabled with `ARCHIVE_GRAPH_INJECTION_ENABLED=0`; Magos may still consult GraphRAG and return compact relevant context.
 
 On startup, if the graph is empty, ArchiveOfHeresy asks the librarian to seed it from the latest archived turns by default.
 
@@ -233,6 +233,7 @@ Stop it:
 - `ARCHIVE_WIKI_ROOT` - default `ArchiveOfHeresy/wiki`
 - `ARCHIVE_VECTOR_ROOT` - default `ArchiveOfHeresy/vector`
 - `ARCHIVE_GRAPH_ROOT` - default `ArchiveOfHeresy/graph`
+- `ARCHIVE_CHAT_CONTEXT_MESSAGES` - default `0`; when `0`, mobile chat does not inject raw previous messages into the next model request
 - `ARCHIVE_FOCUS_CONTEXT_CHARS` - default `6000`
 - `ARCHIVE_VECTOR_CONTEXT_CHARS` - default `5000`
 - `ARCHIVE_GRAPH_CONTEXT_CHARS` - default `5000`
@@ -276,10 +277,11 @@ Stop it:
 - `ARCHIVE_MEMORY_QUALITY_REPORT_HOUR` - default `4`
 - `ARCHIVE_REPORTS_ROOT` - default `ArchiveOfHeresy/reports`
 
-`start-main.sh` currently activates memory aggressively for the local daemon:
+`start-main.sh` currently activates strict stateless memory for the local daemon:
 `ARCHIVE_MAGOS_CONTEXT_LAYERS=wiki,vector,graph`,
-`ARCHIVE_VECTOR_INJECTION_ENABLED=1`, `ARCHIVE_GRAPH_INJECTION_ENABLED=1`,
-`ARCHIVE_MAGOS_ENABLED=1`, `ARCHIVE_VECTOR_BACKFILL_ON_START=1`, and
+`ARCHIVE_VECTOR_INJECTION_ENABLED=0`, `ARCHIVE_GRAPH_INJECTION_ENABLED=0`,
+`ARCHIVE_CHAT_CONTEXT_MESSAGES=0`, `ARCHIVE_MAGOS_ENABLED=1`,
+`ARCHIVE_VECTOR_BACKFILL_ON_START=1`, and
 `ARCHIVE_GRAPH_BACKFILL_ON_START=1`. It also enables the daily memory quality
 report at 04:00 with `ARCHIVE_MEMORY_QUALITY_REPORT_ENABLED=1` and
 `ARCHIVE_MEMORY_QUALITY_REPORT_HOUR=4`, unless `.env` overrides them.

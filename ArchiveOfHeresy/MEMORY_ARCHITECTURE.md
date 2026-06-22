@@ -10,6 +10,10 @@ Memory is scoped with `memory_namespace`.
 
 - `default` is the normal chat namespace.
 - `agent` is the ShushunyaAgent namespace.
+- `telegram` is the Telegram bot namespace.
+- `mobile` is the Android app chat namespace.
+- `voice` and `translator` are reserved for voice and translation flows when
+  those clients start using Archive memory directly.
 
 Focus, wiki, vector retrieval, graph memory, and memory maintenance events are
 namespace-aware. This keeps agent tool loops searchable by the agent without
@@ -157,6 +161,11 @@ Magos lower-layer context injection is also opt-in. Set
 pre-answer lower-layer context should be eligible for the model prompt.
 The current Magos lower-layer list is exposed as `magos_context_layers` in
 `/health` and `/archive/memory/gateway`.
+
+Strict stateless chat mode is enabled by setting `ARCHIVE_CHAT_CONTEXT_MESSAGES=0`.
+In this mode mobile chat stores raw messages for archive/history display but
+does not feed previous raw chat messages into the next model request. Continuity
+must come from active focus and Magos-selected memory.
 
 ## Diagnostics
 

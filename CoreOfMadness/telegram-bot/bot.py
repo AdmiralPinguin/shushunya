@@ -37,6 +37,7 @@ TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.4"))
 STREAM_ENABLED = os.environ.get("STREAM_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
 STREAM_DRAFT_INTERVAL = float(os.environ.get("STREAM_DRAFT_INTERVAL", "1.1"))
 STREAM_FINAL_DRAFT_TIMEOUT = float(os.environ.get("STREAM_FINAL_DRAFT_TIMEOUT", "30"))
+TELEGRAM_MEMORY_NAMESPACE = os.environ.get("TELEGRAM_MEMORY_NAMESPACE", "telegram").strip() or "telegram"
 ARCHIVE_ALLOWLIST = {
     item.strip().lower()
     for item in os.environ.get("TELEGRAM_ARCHIVE_ALLOWLIST", "7791909246,@Ebuchaya_psina").split(",")
@@ -181,6 +182,7 @@ def archive_flags(chat_id, username=None):
     return {
         "archive_enabled": allowed,
         "focus_enabled": allowed,
+        "memory_namespace": TELEGRAM_MEMORY_NAMESPACE,
     }
 
 
