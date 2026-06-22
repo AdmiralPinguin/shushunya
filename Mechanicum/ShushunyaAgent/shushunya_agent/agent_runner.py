@@ -1243,10 +1243,15 @@ def ranobehub_chapter_tool(config: AgentConfig, action: dict[str, Any]) -> dict[
     parser = RanobehubChapterParser()
     parser.feed(html_text)
     parsed = parser.payload()
+    next_url = parsed.get("next_url") or ""
+    no_next_instruction = (
+        "No next_url was found on this chapter page. Do not guess adjacent chapter URLs or restart earlier chapters; "
+        "use the contents/API map to find an explicit next entry, or finalize/verify if the chain is exhausted."
+    )
     paragraphs = [paragraph for paragraph in parsed.get("paragraphs", []) if isinstance(paragraph, str) and paragraph.strip()]
     title = str(parsed.get("title") or "").strip()
     if not paragraphs:
-        return {
+        result = {
             "ok": True,
             "url": raw_url,
             "status": status,
@@ -1260,10 +1265,13 @@ def ranobehub_chapter_tool(config: AgentConfig, action: dict[str, Any]) -> dict[
             "truncated": truncated,
             "skipped_no_text": True,
             "previous_url": parsed.get("previous_url") or "",
-            "next_url": parsed.get("next_url") or "",
+            "next_url": next_url,
             "canonical_url": parsed.get("canonical_url") or "",
             "preview": "chapter page has no text paragraphs; likely illustrations or media-only content",
         }
+        if not next_url:
+            result["instruction"] = no_next_instruction
+        return result
     lines: list[str] = []
     if include_title and title:
         lines.extend([title, ""])
@@ -1272,7 +1280,7 @@ def ranobehub_chapter_tool(config: AgentConfig, action: dict[str, Any]) -> dict[
     file_result = write_sandbox_text_chunked(config, path, content, mode)
     if not file_result.get("ok"):
         return {"ok": False, "error": "failed to write chapter file", "file_result": file_result}
-    return {
+    result = {
         "ok": True,
         "url": raw_url,
         "status": status,
@@ -1285,10 +1293,13 @@ def ranobehub_chapter_tool(config: AgentConfig, action: dict[str, Any]) -> dict[
         "encoding": encoding,
         "truncated": truncated,
         "previous_url": parsed.get("previous_url") or "",
-        "next_url": parsed.get("next_url") or "",
+        "next_url": next_url,
         "canonical_url": parsed.get("canonical_url") or "",
         "preview": truncate(re.sub(r"\s+", " ", content).strip(), 500),
     }
+    if not next_url:
+        result["instruction"] = no_next_instruction
+    return result
 
 
 def archive_memory_events(
@@ -1367,6 +1378,20 @@ def web_links_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any
 
 
 def action_fingerprint(action: dict[str, Any]) -> str:
+    action_type = str(action.get("action", "")).strip().lower()
+    if action_type == "ranobehub_chapter":
+        raw_url = str(action.get("url") or "").strip()
+        parsed = urlparse(raw_url)
+        path = parsed.path.rstrip("/") or parsed.path
+        normalized_url = parsed._replace(
+            scheme=parsed.scheme.lower(),
+            netloc=parsed.netloc.lower(),
+            path=path,
+            params="",
+            query="",
+            fragment="",
+        ).geturl()
+        return json.dumps({"action": action_type, "url": normalized_url}, ensure_ascii=False, sort_keys=True)
     normalized = {key: value for key, value in action.items() if key not in {"reason"}}
     return json.dumps(normalized, ensure_ascii=False, sort_keys=True)
 

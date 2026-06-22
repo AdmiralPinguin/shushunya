@@ -27,6 +27,7 @@ from .agent_runner import (
     archive_memory_search,
     archive_request,
     archive_status,
+    action_fingerprint,
     chat,
     compact_messages_for_model,
     configured_search_providers,
@@ -712,6 +713,22 @@ def main() -> int:
     if server.STREAM_HEARTBEAT_SEC < 5.0:
         raise AssertionError(f"stream heartbeat interval is unsafe: {server.STREAM_HEARTBEAT_SEC}")
     print("[ok] stream heartbeat interval")
+
+    chapter_a = {
+        "action": "ranobehub_chapter",
+        "url": "https://ranobehub.org/ranobe/966/130/5",
+        "path": "/work/novel_data/vol130_ch05.txt",
+        "mode": "write",
+    }
+    chapter_b = {
+        "action": "ranobehub_chapter",
+        "url": "https://ranobehub.org/ranobe/966/130/5?unused=1#top",
+        "path": "/work/novel_data/vol130_ch5.txt",
+        "mode": "append",
+    }
+    if action_fingerprint(chapter_a) != action_fingerprint(chapter_b):
+        raise AssertionError("ranobehub chapter repeat fingerprint should ignore output path/name variants")
+    print("[ok] ranobehub repeat fingerprint")
 
     cancelled_task_id = server.mark_task_cancelled("self test cancel registry")
     if not server.is_task_cancelled(cancelled_task_id):
