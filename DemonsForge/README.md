@@ -126,6 +126,8 @@ Dry-run responses include a conservative CPU-only resource estimate with pixel
 budget ratio, estimated RAM floor, loaded engine state, and warnings.
 SDXL diffusion jobs (`txt2img`, `img2img`, `inpaint`) are validated at
 `512x512` minimum because smaller sizes can fail inside the pipeline.
+`img2img` and `inpaint` also require `steps * strength >= 1`, since very low
+strength with one step can produce zero denoising timesteps.
 
 Architecture:
 

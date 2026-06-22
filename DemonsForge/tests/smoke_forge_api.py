@@ -152,7 +152,7 @@ def main() -> None:
             "width": 512,
             "height": 512,
             "steps": 1,
-            "strength": 0.2,
+            "strength": 1.0,
         },
     )
     assert img2img_dry_run.status_code == 200, img2img_dry_run.text

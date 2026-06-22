@@ -168,6 +168,8 @@ class ForgeQueue:
         if spec.engine == "sdxl" and spec.type.value in {"txt2img", "img2img", "inpaint"}:
             if spec.width < 512 or spec.height < 512:
                 raise RuntimeError("sdxl diffusion jobs require width and height >= 512")
+        if spec.type.value in {"img2img", "inpaint"} and spec.steps * spec.strength < 1:
+            raise RuntimeError("img2img/inpaint require steps * strength >= 1")
 
     def _engine(self, name: str) -> DiffusersEngine:
         if name not in self._engines:
