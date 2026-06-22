@@ -79,6 +79,7 @@ def main() -> None:
     queue_state = client.get("/forge/queue")
     assert queue_state.status_code == 200, queue_state.text
     assert "status_counts" in queue_state.json()
+    assert "queued" in queue_state.json()["status_counts"]
     assert queue_state.json()["pid"] > 0
     external_worker = ForgeQueue(store, start_worker=False)
     external_worker.pause()
