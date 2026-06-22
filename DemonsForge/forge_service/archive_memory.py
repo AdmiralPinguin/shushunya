@@ -59,14 +59,21 @@ class ArchiveMemoryClient:
         )
 
     def status(self) -> dict[str, object]:
+        diagnostics = []
+        if not self.enabled:
+            diagnostics.append("memory proxy disabled by FORGE_MEMORY_ENABLED")
+        if self.enabled and not self.api_key:
+            diagnostics.append("FORGE_ARCHIVE_API_KEY/ARCHIVE_API_KEY is not configured; ArchiveOfHeresy may reject requests when auth is enabled")
         return {
             "enabled": self.enabled,
             "namespace": self.namespace,
             "requester": self.requester,
             "base_url": self.base_url,
             "api_key_configured": bool(self.api_key),
+            "ready_for_authenticated_archive": self.enabled and bool(self.api_key),
             "write_policy": "proposal-only",
             "direct_file_access": False,
+            "diagnostics": diagnostics,
         }
 
     def policy(self) -> dict[str, object]:
