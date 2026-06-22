@@ -170,6 +170,8 @@ diffusers pipelines are automatically unloaded after
 the system.
 Use `POST /forge/runtime/unload` or `POST /forge/runtime/unload?engine=sdxl` to
 release loaded pipelines immediately.
+Queue pause/resume is stored in Forge runtime SQLite, so both embedded and
+separate worker modes observe the same pause flag.
 
 Generated outputs are stored under `artifacts/{job_id}/` with PNG files and JSON
 metadata containing prompt, negative prompt, engine, model, LoRA list, seed,

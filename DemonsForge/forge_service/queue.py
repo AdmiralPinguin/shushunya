@@ -28,7 +28,6 @@ class ForgeQueue:
         self._engines: dict[str, DiffusersEngine] = {}
         self.memory = ArchiveMemoryClient.from_config()
         self._embedded_worker = start_worker
-        self._paused = False
         self._worker = None
         if start_worker:
             self._worker = threading.Thread(target=self._run, name="forge-worker", daemon=True)
@@ -111,7 +110,7 @@ class ForgeQueue:
             try:
                 if job_id in self._cancel:
                     continue
-                while self._paused:
+                while self.store.get_runtime_flag("queue_paused", default=False):
                     time.sleep(0.5)
                 self._execute(job_id)
             finally:
@@ -138,7 +137,7 @@ class ForgeQueue:
         mem = psutil.virtual_memory()
         return {
             "queue_depth": self._queue.qsize(),
-            "paused": self._paused,
+            "paused": self.store.get_runtime_flag("queue_paused", default=False),
             "embedded_worker": self._embedded_worker,
             "canceled_jobs": len(self._cancel),
             "loaded_engines": [engine.runtime_state() for engine in self._engines.values()],
@@ -155,12 +154,12 @@ class ForgeQueue:
         }
 
     def pause(self) -> dict[str, object]:
-        self._paused = True
-        return {"ok": True, "paused": self._paused, "runtime": self.runtime_state()}
+        self.store.set_runtime_flag("queue_paused", True)
+        return {"ok": True, "paused": True, "runtime": self.runtime_state()}
 
     def resume(self) -> dict[str, object]:
-        self._paused = False
-        return {"ok": True, "paused": self._paused, "runtime": self.runtime_state()}
+        self.store.set_runtime_flag("queue_paused", False)
+        return {"ok": True, "paused": False, "runtime": self.runtime_state()}
 
     def unload_engines(self, engine_name: str | None = None) -> dict[str, object]:
         unloaded = []

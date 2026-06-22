@@ -11,7 +11,7 @@ from .config import DB_PATH, LOGS_DIR, ensure_dirs
 from .schemas import ArtifactRecord, AssetDownloadRecord, JobRecord, JobStatus, utc_now
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class ForgeStore:
@@ -86,6 +86,15 @@ class ForgeStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS runtime_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             if version < SCHEMA_VERSION:
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -93,6 +102,24 @@ class ForgeStore:
     def schema_version(self) -> int:
         with self._lock, self._connect() as conn:
             return int(conn.execute("PRAGMA user_version").fetchone()[0])
+
+    def set_runtime_flag(self, key: str, value: bool) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO runtime_state (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                """,
+                (key, "1" if value else "0", utc_now()),
+            )
+
+    def get_runtime_flag(self, key: str, default: bool = False) -> bool:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT value FROM runtime_state WHERE key = ?", (key,)).fetchone()
+        if row is None:
+            return default
+        return str(row["value"]).lower() in {"1", "true", "yes", "on"}
 
     def create_job(self, record: JobRecord) -> None:
         with self._lock, self._connect() as conn:
