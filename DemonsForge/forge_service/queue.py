@@ -18,7 +18,7 @@ from . import config
 from .archive_memory import ArchiveMemoryClient, asset_memory_proposal
 from .downloader import DownloadError, download_asset, target_dir_for, validate_download_spec
 from .engines.diffusers_adapter import DiffusersEngine
-from .registries import ENGINE_MODELS, SAMPLERS, SCHEDULERS, find_lora, write_json
+from .registries import ENGINE_MODELS, SAMPLERS, SCHEDULERS, clear_registry_caches, find_lora, write_json
 from .schemas import ArtifactRecord, AssetDownloadRecord, JobRecord, JobSpec, JobStatus, JobType, utc_now
 from .storage import ForgeStore
 
@@ -433,6 +433,7 @@ class ForgeQueue:
                 metadata=metadata,
             )
         )
+        clear_registry_caches()
         self._remember_asset_status(spec, "downloaded", result=result)
 
     def _remember_asset_status(
