@@ -139,13 +139,17 @@ class ForgeQueue:
         if record.status in {JobStatus.succeeded, JobStatus.failed, JobStatus.canceled}:
             return record
         self._cancel.add(job_id)
-        return self.store.update_job(job_id, status=JobStatus.canceled, progress=record.progress)
+        updated = self.store.update_job(job_id, status=JobStatus.canceled, progress=record.progress)
+        if record.status == JobStatus.queued:
+            self._cancel.discard(job_id)
+        return updated
 
     def _run(self) -> None:
         while True:
             job_id = self._queue.get()
             try:
                 if job_id in self._cancel:
+                    self._cancel.discard(job_id)
                     continue
                 while self.store.get_runtime_flag("queue_paused", default=False):
                     time.sleep(0.5)
@@ -161,6 +165,7 @@ class ForgeQueue:
             return False
         job_id = queued[0].id
         if job_id in self._cancel:
+            self._cancel.discard(job_id)
             return True
         self._execute(job_id)
         return True
@@ -273,6 +278,8 @@ class ForgeQueue:
             status = JobStatus.canceled if str(exc) == "job canceled" else JobStatus.failed
             self.store.update_job(job_id, status=status, error=str(exc))
             self.store.append_log(job_id, f"job {status.value}: {exc}")
+        finally:
+            self._cancel.discard(job_id)
 
     def _resolve_input_path(self, value: str) -> Path:
         path = Path(value)

@@ -83,6 +83,13 @@ def main() -> None:
     external_worker.resume()
     assert external_worker.run_pending_once() is True
     assert store.get_job(paused_job.id).status.value == "succeeded"
+    cancel_worker = ForgeQueue(store, start_worker=False)
+    cancel_job = cancel_worker.submit(JobSpec(type="prompt-enhance", prompt="cancel cleanup check"))
+    cancel_worker.cancel(cancel_job.id)
+    assert cancel_worker.queue_state()["canceled_jobs"] == 0
+    assert store.get_job(cancel_job.id).status.value == "canceled"
+    assert cancel_worker.run_pending_once() is False
+    assert cancel_worker.queue_state()["canceled_jobs"] == 0
     memory_policy = client.get("/forge/memory/policy")
     assert memory_policy.status_code == 200, memory_policy.text
     assert "asset approvals/rejections" in memory_policy.json()["durable_topics"]
