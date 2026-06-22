@@ -176,7 +176,17 @@ class ArchiveMemoryClient:
                 raw = response.read().decode("utf-8")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            return {"ok": False, "status": exc.code, "error": detail or exc.reason}
+            try:
+                archive_error: Any = json.loads(detail) if detail else {}
+            except json.JSONDecodeError:
+                archive_error = detail or exc.reason
+            return {
+                "ok": False,
+                "status": exc.code,
+                "error": "archive memory gateway request failed",
+                "archive_error": archive_error,
+                "memory": self.status(),
+            }
         except (OSError, URLError) as exc:
             return {"ok": False, "error": str(exc), "memory": self.status()}
         try:

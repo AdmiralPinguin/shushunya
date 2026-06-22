@@ -53,6 +53,8 @@ def main() -> None:
     memory_catalog = client.get("/forge/memory/catalog?create=true")
     assert memory_catalog.status_code == 200, memory_catalog.text
     assert isinstance(memory_catalog.json(), dict)
+    if memory_catalog.json().get("ok") is False:
+        assert "memory" in memory_catalog.json()
     memory_search = client.get("/forge/memory/search?q=sdxl&layers=focus,wiki,vector,graph&limit=2")
     assert memory_search.status_code == 200, memory_search.text
     assert isinstance(memory_search.json(), dict)
