@@ -428,12 +428,14 @@ def verify_artifact(artifact_id: str) -> dict[str, object]:
             digest.update(chunk)
     actual = digest.hexdigest()
     expected = artifact.metadata.get("image_sha256") or artifact.metadata.get("sha256")
+    verified = expected is not None
     return {
         "artifact_id": artifact_id,
         "path": str(path),
         "sha256": actual,
         "expected_sha256": expected,
-        "ok": expected is None or str(expected).lower() == actual,
+        "verified_against_metadata": verified,
+        "ok": not verified or str(expected).lower() == actual,
     }
 
 

@@ -455,6 +455,7 @@ def main() -> None:
     artifact_verify = client.get(f"/forge/artifacts/{upscale_status['artifacts'][0]}/verify")
     assert artifact_verify.status_code == 200, artifact_verify.text
     assert artifact_verify.json()["ok"] is True
+    assert artifact_verify.json()["verified_against_metadata"] is True
     queued = client.post(
         "/forge/jobs",
         json={
