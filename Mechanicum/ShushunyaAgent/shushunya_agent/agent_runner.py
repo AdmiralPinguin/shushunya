@@ -564,7 +564,7 @@ def chat(
             for attempt in range(1, attempts + 1):
                 try:
                     response = archive_request(config, "POST", "/v1/chat/completions", payload, timeout=240)
-                    return response["choices"][0]["message"]["content"]
+                    return response_message_text(response)
                 except HTTPError as exc:
                     body = exc.read().decode("utf-8", errors="replace")
                     last_error = f"HTTP {exc.code}: {truncate(body, 1000)}"
@@ -576,6 +576,17 @@ def chat(
                         continue
                     raise RuntimeError(last_error) from exc
     raise RuntimeError(f"model request failed after context compaction retries: {last_error}")
+
+
+def response_message_text(response: dict[str, Any]) -> str:
+    choices = response.get("choices") or []
+    if not choices:
+        return ""
+    message = choices[0].get("message") or {}
+    content = message.get("content")
+    if content is None or str(content).strip() == "":
+        content = message.get("reasoning_content")
+    return str(content or "")
 
 
 def parse_action(raw: str) -> dict[str, Any]:

@@ -54,6 +54,8 @@ Default settings:
 - Parallel slots: `1`
 - GPU layers: `999` by default, so Vulkan can offload to the GPU when available
 - Reasoning mode: `off` by default, so chat replies return normal `content`
+- Chat template kwargs: `{"enable_thinking":false}` by default, to keep Gemma 4
+  agent/controller replies in normal assistant content instead of thinking output
 - KV cache quantization: `CACHE_TYPE_K=q4_0`, `CACHE_TYPE_V=q4_0`
 - Prompt cache is disabled by default: `PROMPT_CACHE=0`,
   `CACHE_RAM=0`, `CACHE_REUSE=0`, `SLOT_PROMPT_SIMILARITY=0.0`,

@@ -157,7 +157,11 @@ def stream_delta(payload):
     message = choice.get("message") or {}
     content = delta.get("content")
     if content is None:
+        content = delta.get("reasoning_content")
+    if content is None:
         content = message.get("content")
+    if content is None:
+        content = message.get("reasoning_content")
     return str(content or "")
 
 

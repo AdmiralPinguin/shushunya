@@ -1357,12 +1357,19 @@ def init_storage():
         db.execute("CREATE INDEX IF NOT EXISTS idx_mobile_jobs_updated ON mobile_jobs(updated_at)")
 
 
+def assistant_content(message):
+    content = message.get("content")
+    if content is None or str(content).strip() == "":
+        content = message.get("reasoning_content")
+    return str(content or "")
+
+
 def assistant_message(response):
     choices = response.get("choices") or []
     if not choices:
         return None
     message = choices[0].get("message") or {}
-    content = str(message.get("content") or "").strip()
+    content = assistant_content(message).strip()
     if not content:
         return None
     return {"role": message.get("role") or "assistant", "content": content}
@@ -1378,7 +1385,9 @@ def stream_delta(payload):
     message = choice.get("message") or {}
     content = delta.get("content")
     if content is None:
-        content = message.get("content")
+        content = delta.get("reasoning_content")
+    if content is None:
+        content = assistant_content(message)
     return str(content or ""), choice.get("finish_reason")
 
 

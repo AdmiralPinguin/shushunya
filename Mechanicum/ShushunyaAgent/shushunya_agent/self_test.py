@@ -1137,6 +1137,15 @@ def main() -> int:
         raise AssertionError(f"agent chat did not disable Archive persona prompt: {captured_payloads}")
     print("[ok] agent chat disables Archive persona prompt")
 
+    def reasoning_content_payload(config_arg, method, path, payload=None, timeout=180):
+        return {"choices": [{"message": {"content": "", "reasoning_content": '{"action":"final","message":"reasoning fallback ok"}'}}]}
+
+    with mock.patch.object(agent_runner, "archive_request", side_effect=reasoning_content_payload):
+        reasoning_reply = chat(config, [{"role": "user", "content": "reasoning fallback"}], inject_memory=False, archive_enabled=False)
+    if reasoning_reply != '{"action":"final","message":"reasoning fallback ok"}':
+        raise AssertionError(f"reasoning_content fallback failed: {reasoning_reply}")
+    print("[ok] agent chat reads reasoning_content fallback")
+
     transient_error = HTTPError(
         url="http://archive/v1/chat/completions",
         code=429,

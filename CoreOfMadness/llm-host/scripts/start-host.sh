@@ -11,6 +11,7 @@ CTX_SIZE="${CTX_SIZE:-32768}"
 GPU_LAYERS="${GPU_LAYERS:-999}"
 PARALLEL="${PARALLEL:-1}"
 REASONING="${REASONING:-off}"
+CHAT_TEMPLATE_KWARGS="${CHAT_TEMPLATE_KWARGS:-{\"enable_thinking\":false}}"
 CACHE_TYPE_K="${CACHE_TYPE_K:-q4_0}"
 CACHE_TYPE_V="${CACHE_TYPE_V:-q4_0}"
 EMBEDDINGS="${EMBEDDINGS:-1}"
@@ -83,6 +84,7 @@ setsid "$ROOT/llama.cpp/llama-server" \
   --n-gpu-layers "$GPU_LAYERS" \
   --parallel "$PARALLEL" \
   --reasoning "$REASONING" \
+  --chat-template-kwargs "$CHAT_TEMPLATE_KWARGS" \
   --flash-attn auto \
   --cache-type-k "$CACHE_TYPE_K" \
   --cache-type-v "$CACHE_TYPE_V" \
