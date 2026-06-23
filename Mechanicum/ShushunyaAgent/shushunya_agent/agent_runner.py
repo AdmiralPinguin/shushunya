@@ -413,12 +413,20 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
             if isinstance(failure, dict) and failure.get("check") == "must_contain" and failure.get("pattern")
         ]
         if missing_literals:
+            path = str(payload.get("path") or "")
+            append_content = "\n\nVerification literal markers:\n" + "\n".join(f"- {pattern}" for pattern in missing_literals) + "\n"
             payload["supervisor_instruction"] = (
                 "must_contain failures are exact literal substring checks. Add each missing pattern verbatim "
                 "to the target file, without translating, paraphrasing, changing case, escaping with backslashes, "
-                "or replacing spaces, then rerun verify_text_file."
+                "or replacing spaces, then rerun verify_text_file. The suggested_append_file_action is safe to copy."
             )
             payload["missing_literal_patterns"] = missing_literals[:20]
+            if path:
+                payload["suggested_append_file_action"] = {
+                    "action": "append_file",
+                    "path": path,
+                    "content": append_content,
+                }
     elif action_type in {"archive_search", "archive_memory_gateway", "archive_memory_catalog", "archive_memory_search", "archive_memory_read", "archive_memory_propose"}:
         payload = compact_json_value(payload, string_limit=1000, list_limit=5)
     if action_type == "web_links":
@@ -944,10 +952,13 @@ except UnicodeDecodeError:
     text = raw.decode("utf-8", errors="replace")
     encoding = "utf-8-replace"
 
+original_required = as_list(payload.get("must_contain"))
+original_ordered = as_list(payload.get("ordered_patterns"))
+original_forbidden = as_list(payload.get("must_not_contain"))
 search_text = text if case_sensitive else text.lower()
-required = as_list(payload.get("must_contain"))
-ordered = as_list(payload.get("ordered_patterns"))
-forbidden = as_list(payload.get("must_not_contain"))
+required = list(original_required)
+ordered = list(original_ordered)
+forbidden = list(original_forbidden)
 if not case_sensitive and not regex:
     required = [item.lower() for item in required]
     ordered = [item.lower() for item in ordered]
@@ -959,9 +970,14 @@ if size < min_bytes:
 if len(text) < min_chars:
     failures.append({"check": "min_chars", "expected": min_chars, "actual": len(text)})
 
-for item in required:
+lower_text = text.lower()
+for index, item in enumerate(required):
     if not contains(search_text, item, regex):
-        failures.append({"check": "must_contain", "pattern": item})
+        failure = {"check": "must_contain", "pattern": item}
+        if case_sensitive and not regex and item.lower() in lower_text:
+            failure["case_mismatch"] = True
+            failure["instruction"] = "Pattern exists only with different capitalization; add the exact lowercase/uppercase pattern verbatim or rerun with case_sensitive=false if case does not matter."
+        failures.append(failure)
 
 cursor = 0
 for item in ordered:
@@ -2439,6 +2455,8 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
             if isinstance(failure, dict):
                 check = str(failure.get("check") or failure.get("reason") or "failure")
                 pattern = failure.get("pattern")
+                if failure.get("case_mismatch"):
+                    check = f"{check}/case_mismatch"
                 if pattern:
                     details.append(f"{check}:{truncate(str(pattern), 60)}")
                 elif "expected" in failure or "actual" in failure:

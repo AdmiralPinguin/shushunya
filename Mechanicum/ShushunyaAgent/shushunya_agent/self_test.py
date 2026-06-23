@@ -1190,6 +1190,19 @@ def main() -> int:
         raise AssertionError(f"verify_text_file model payload missed missing literals: {verify_payload}")
     if "verbatim" not in verify_payload.get("supervisor_instruction", ""):
         raise AssertionError(f"verify_text_file model payload missed verbatim guidance: {verify_payload}")
+    suggested_append = verify_payload.get("suggested_append_file_action")
+    if not isinstance(suggested_append, dict) or "- thin mobile client" not in str(suggested_append.get("content", "")):
+        raise AssertionError(f"verify_text_file payload missed suggested append action: {verify_payload}")
+    case_summary = agent_runner.result_summary(
+        "verify_text_file",
+        {
+            "ok": False,
+            "path": "/work/report.md",
+            "failures": [{"check": "must_contain", "pattern": "thin mobile client", "case_mismatch": True}],
+        },
+    )
+    if "case_mismatch" not in case_summary:
+        raise AssertionError(f"verify_text_file summary missed case mismatch: {case_summary}")
     ordered_summary = agent_runner.result_summary(
         "verify_text_file",
         {"ok": False, "path": "/work/report.md", "failures": [{"check": "ordered_patterns", "pattern": "A"}]},
