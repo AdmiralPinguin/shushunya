@@ -735,6 +735,16 @@ def main() -> int:
         raise AssertionError(f"auto-continue cycle metadata is wrong: {result}")
     print("[ok] auto-continue reaches final success")
 
+    repeated_continuation = server.continuation_task(
+        "base",
+        "self-test-repeated",
+        1,
+        {"message": "Агент остановлен супервизором: обнаружен цикл повторяющихся действий без прогресса."},
+    )
+    if "запрещены inspection-действия" not in repeated_continuation or "write_file" not in repeated_continuation:
+        raise AssertionError(f"repeated continuation task did not force productive mode: {repeated_continuation}")
+    print("[ok] auto-continue repeated action prompt")
+
     loop_calls: list[tuple[str, dict]] = []
 
     def fake_auto_continue_loop(task: str, run_config: AgentConfig, event_sink=None, **kwargs):

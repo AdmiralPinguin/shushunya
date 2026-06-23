@@ -666,7 +666,18 @@ def auto_continue_cycle_limit(payload: dict[str, Any]) -> int:
     return int_field(payload, "auto_continue_max_cycles", AUTO_CONTINUE_MAX_CYCLES, 0, 10)
 
 
-def continuation_task(base_task: str, task_id: str, cycle: int) -> str:
+def continuation_task(base_task: str, task_id: str, cycle: int, previous_result: dict[str, Any] | None = None) -> str:
+    previous_message = str((previous_result or {}).get("message") or "").lower()
+    repeated_mode = any(token in previous_message for token in ("повторяющихся действий", "repeated", "without progress"))
+    repeated_instruction = ""
+    if repeated_mode:
+        repeated_instruction = (
+            "\n\nПредыдущий цикл остановился из-за повторяющихся действий без прогресса. "
+            "До первого продуктивного действия запрещены inspection-действия: list_files, find_files, search_text, "
+            "read_file, file_info, web_search, web_fetch, web_links. "
+            "Следующий шаг должен быть продуктивным: write_file, append_file, replace_in_file, python, "
+            "web_extract_to_file, bundle_text_files, verify_text_file, telegram_send_document или final."
+        )
     return (
         "Продолжи выполнение той же задачи по task journal. "
         "Не повторяй уже выполненные действия. Сначала оцени, что уже сделано, затем продолжай с ближайшего незавершенного шага. "
@@ -675,6 +686,7 @@ def continuation_task(base_task: str, task_id: str, cycle: int) -> str:
         "используй последние action/tool_result/final/error как источник текущего состояния.\n\n"
         f"Continuation cycle: {cycle}\n"
         f"Resume task id: {task_id}"
+        + repeated_instruction
     )
 
 
@@ -722,7 +734,7 @@ def run_agent_with_auto_continue(
                     event_sink(notice)
                 cycle_payload = dict(payload)
                 cycle_payload["resume_task_id"] = config.task_id
-                cycle_task = apply_resume_context(continuation_task(task, config.task_id, cycle), config, cycle_payload)
+                cycle_task = apply_resume_context(continuation_task(task, config.task_id, cycle, final_result), config, cycle_payload)
             else:
                 cycle_task = task
 
