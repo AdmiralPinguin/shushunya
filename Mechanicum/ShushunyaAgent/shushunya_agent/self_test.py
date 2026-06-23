@@ -1298,6 +1298,26 @@ def main() -> int:
     suggested_append = verify_payload.get("suggested_append_file_action")
     if not isinstance(suggested_append, dict) or "- thin mobile client" not in str(suggested_append.get("content", "")):
         raise AssertionError(f"verify_text_file payload missed suggested append action: {verify_payload}")
+    json_verify_payload = result_for_model(
+        "verify_text_file",
+        {
+            "ok": False,
+            "path": "/work/summary.json",
+            "failures": [{"check": "must_contain", "pattern": "section_count"}],
+        },
+        config,
+    )
+    if "suggested_append_file_action" in json_verify_payload:
+        raise AssertionError(f"JSON verify payload should not suggest append_file: {json_verify_payload}")
+    if "Do not use append_file for .json" not in json_verify_payload.get("supervisor_instruction", ""):
+        raise AssertionError(f"JSON verify payload missed rewrite guidance: {json_verify_payload}")
+    python_syntax_payload = result_for_model(
+        "python",
+        {"ok": False, "stdout": "SyntaxError: invalid syntax", "stderr": "", "returncode": 1},
+        config,
+    )
+    if "Do not retry the same code" not in python_syntax_payload.get("supervisor_instruction", ""):
+        raise AssertionError(f"Python SyntaxError payload missed retry guidance: {python_syntax_payload}")
     case_summary = agent_runner.result_summary(
         "verify_text_file",
         {

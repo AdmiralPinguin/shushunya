@@ -401,6 +401,13 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
             payload["stdout"] = truncate(payload["stdout"], 6000)
         if isinstance(payload.get("stderr"), str):
             payload["stderr"] = truncate(payload["stderr"], 4000)
+        if action_type == "python" and payload.get("ok") is False:
+            combined_output = f"{payload.get('stdout') or ''}\n{payload.get('stderr') or ''}".lower()
+            if "syntaxerror" in combined_output:
+                payload["supervisor_instruction"] = (
+                    "Python failed before running because of SyntaxError. Do not retry the same code. "
+                    "Use simpler Python without f-strings/complex escaping, or switch to write_file with explicit content."
+                )
     elif action_type in {"list_files", "find_files"} and isinstance(payload.get("items"), list):
         items = payload["items"]
         payload["items"] = items[:25]
@@ -422,19 +429,26 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
         ]
         if missing_literals:
             path = str(payload.get("path") or "")
-            append_content = "\n\nVerification literal markers:\n" + "\n".join(f"- {pattern}" for pattern in missing_literals) + "\n"
-            payload["supervisor_instruction"] = (
-                "must_contain failures are exact literal substring checks. Add each missing pattern verbatim "
-                "to the target file, without translating, paraphrasing, changing case, escaping with backslashes, "
-                "or replacing spaces, then rerun verify_text_file. The suggested_append_file_action is safe to copy."
-            )
+            if path.strip().lower().endswith(".json"):
+                payload["supervisor_instruction"] = (
+                    "must_contain failures are exact literal substring checks, but this target is JSON. "
+                    "Do not use append_file for .json. Rewrite the complete valid JSON document with write_file "
+                    "or python/json.dump, then rerun verify_text_file."
+                )
+            else:
+                append_content = "\n\nVerification literal markers:\n" + "\n".join(f"- {pattern}" for pattern in missing_literals) + "\n"
+                payload["supervisor_instruction"] = (
+                    "must_contain failures are exact literal substring checks. Add each missing pattern verbatim "
+                    "to the target file, without translating, paraphrasing, changing case, escaping with backslashes, "
+                    "or replacing spaces, then rerun verify_text_file. The suggested_append_file_action is safe to copy."
+                )
+                if path:
+                    payload["suggested_append_file_action"] = {
+                        "action": "append_file",
+                        "path": path,
+                        "content": append_content,
+                    }
             payload["missing_literal_patterns"] = missing_literals[:20]
-            if path:
-                payload["suggested_append_file_action"] = {
-                    "action": "append_file",
-                    "path": path,
-                    "content": append_content,
-                }
     elif action_type in {"archive_search", "archive_memory_gateway", "archive_memory_catalog", "archive_memory_search", "archive_memory_read", "archive_memory_propose"}:
         payload = compact_json_value(payload, string_limit=1000, list_limit=5)
     if action_type == "web_links":
@@ -2488,9 +2502,15 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
         stdout = str(result.get("stdout", "")).strip()
         stderr = str(result.get("stderr", "")).strip()
         if stdout:
-            return truncate(stdout.replace("\n", " "), 180)
+            summary = truncate(stdout.replace("\n", " "), 180)
+            if action_type == "python" and result.get("ok") is False and "syntaxerror" in stdout.lower():
+                summary += " note=do not retry the same Python; use simpler code without f-strings or use write_file"
+            return summary
         if stderr:
-            return truncate(stderr.replace("\n", " "), 180)
+            summary = truncate(stderr.replace("\n", " "), 180)
+            if action_type == "python" and result.get("ok") is False and "syntaxerror" in stderr.lower():
+                summary += " note=do not retry the same Python; use simpler code without f-strings or use write_file"
+            return summary
         return f"returncode {result.get('returncode', 0)}"
     if action_type == "sandbox_status":
         return f"uid={result.get('uid')} cwd={result.get('cwd')}"
