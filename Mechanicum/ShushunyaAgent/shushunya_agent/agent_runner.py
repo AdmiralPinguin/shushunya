@@ -405,6 +405,20 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
         payload["compacted_for_model"] = len(matches) > 80
         if len(matches) > 80:
             payload["omitted_matches"] = len(matches) - 80
+    elif action_type == "verify_text_file":
+        failures = payload.get("failures") if isinstance(payload.get("failures"), list) else []
+        missing_literals = [
+            str(failure.get("pattern"))
+            for failure in failures
+            if isinstance(failure, dict) and failure.get("check") == "must_contain" and failure.get("pattern")
+        ]
+        if missing_literals:
+            payload["supervisor_instruction"] = (
+                "must_contain failures are exact literal substring checks. Add each missing pattern verbatim "
+                "to the target file, without translating, paraphrasing, changing case, escaping with backslashes, "
+                "or replacing spaces, then rerun verify_text_file."
+            )
+            payload["missing_literal_patterns"] = missing_literals[:20]
     elif action_type in {"archive_search", "archive_memory_gateway", "archive_memory_catalog", "archive_memory_search", "archive_memory_read", "archive_memory_propose"}:
         payload = compact_json_value(payload, string_limit=1000, list_limit=5)
     if action_type == "web_links":
@@ -2434,6 +2448,8 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
             else:
                 details.append(truncate(str(failure), 60))
         suffix = f" missing={'; '.join(details)}" if details else ""
+        if any(isinstance(failure, dict) and failure.get("check") == "must_contain" for failure in failures):
+            suffix += " note=must_contain patterns are exact literal substrings; add the missing text verbatim, without translating or paraphrasing"
         if any(isinstance(failure, dict) and failure.get("check") == "ordered_patterns" for failure in failures):
             suffix += " note=ordered_patterns is only required when the user explicitly asked for ordering; otherwise retry verify_text_file without ordered_patterns"
         return f"verified={bool(result.get('ok'))} path={result.get('path')} failures={len(failures)}{suffix}"

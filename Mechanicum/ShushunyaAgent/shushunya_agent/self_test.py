@@ -1175,6 +1175,21 @@ def main() -> int:
     )
     if "must_contain:reconnect" not in verify_summary or "min_chars:expected=3000 actual=2400" not in verify_summary:
         raise AssertionError(f"verify_text_file summary missed failure details: {verify_summary}")
+    if "must_contain patterns are exact literal substrings" not in verify_summary:
+        raise AssertionError(f"verify_text_file summary missed literal must_contain guidance: {verify_summary}")
+    verify_payload = result_for_model(
+        "verify_text_file",
+        {
+            "ok": False,
+            "path": "/work/report.md",
+            "failures": [{"check": "must_contain", "pattern": "thin mobile client"}],
+        },
+        config,
+    )
+    if "thin mobile client" not in verify_payload.get("missing_literal_patterns", []):
+        raise AssertionError(f"verify_text_file model payload missed missing literals: {verify_payload}")
+    if "verbatim" not in verify_payload.get("supervisor_instruction", ""):
+        raise AssertionError(f"verify_text_file model payload missed verbatim guidance: {verify_payload}")
     ordered_summary = agent_runner.result_summary(
         "verify_text_file",
         {"ok": False, "path": "/work/report.md", "failures": [{"check": "ordered_patterns", "pattern": "A"}]},
