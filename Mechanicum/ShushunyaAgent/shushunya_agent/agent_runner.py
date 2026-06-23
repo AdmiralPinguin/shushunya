@@ -190,6 +190,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 13. Извлечь много страниц из явного оглавления в отдельные sandbox-файлы:
 {"action":"web_extract_link_list","url":"https://example.com/contents","pattern":"глава|том|chapter|volume","start_url":"https://example.com/ch1","end_url":"https://example.com/ch99","path_template":"/work/ch_{seq}_{vol}_{chapter}.txt","limit":100}
 {"action":"bundle_text_files","path":"/work/chapters","include_glob":"*.txt","exclude_glob":"combined*.txt,_smoke*","output_txt":"/work/book.txt","output_fb2":"/work/book.fb2","min_chars":1000,"dedupe":true}
+{"action":"verify_text_file","path":"/work/book.fb2","ordered_patterns":["Том 10","Том 11","Том 12"],"must_contain":["Том 23"],"min_bytes":100000}
 
 14. Отправить готовый sandbox-файл в Telegram:
 {"action":"telegram_send_document","path":"/work/book.fb2","caption":"короткая подпись"}
@@ -211,6 +212,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Когда нужно продолжать по оглавлению, пагинации или списку глав, сначала используй web_links по странице оглавления. Не угадывай следующие URL арифметикой, если tool result дает ссылку на страницу другого тома/раздела.
 - Если нужно извлечь много страниц из явного оглавления, используй web_extract_link_list вместо ручного цикла web_extract_to_file. Он берет только найденные ссылки и не угадывает URL.
 - Для сборки многих текстовых файлов в один TXT/FB2 используй bundle_text_files вместо Python с большим XML/кодом в JSON.
+- Перед final с готовым текстовым артефактом (.txt/.fb2/.json/.xml/.md и т.п.) обязательно используй verify_text_file с проверками из user task: ожидаемые разделы, диапазоны, ключевые маркеры, порядок, минимальный размер. Не считай задачу завершенной только потому, что файл существует.
 - Если пользователь просит отправить готовый файл в Telegram, используй telegram_send_document по sandbox-пути. Не проси оператора отправлять файл вручную.
 - Если web_links показывает мало ссылок, но есть scripts/custom_elements, страница может быть SPA. Если web_links вернул api_candidates, сначала пробуй кандидаты с высоким score; иначе изучи custom_elements и scripts, затем fetch публичных JSON endpoint-ов по видимым id/именам компонентов вместо угадывания URL глав.
 - Для страниц глав Ranobehub можно использовать ranobehub_chapter как более точный адаптер, но общий путь для сайтов — web_extract_to_file.
@@ -603,6 +605,7 @@ REQUIRED_FIELDS = {
     "web_extract_to_file": {"url", "path"},
     "web_extract_link_list": {"url", "path_template"},
     "bundle_text_files": {"path", "output_txt", "output_fb2"},
+    "verify_text_file": {"path"},
     "telegram_send_document": {"path"},
     "ranobehub_chapter": {"url", "path"},
     "web_search": {"query"},
@@ -679,6 +682,177 @@ def validate_final_artifacts(config: AgentConfig, message: str) -> dict[str, Any
     if failures:
         return {"ok": False, "paths": paths, "checked": checked, "failures": failures[:10]}
     return {"ok": True, "paths": paths, "checked": checked}
+
+
+TEXT_VERIFICATION_EXTENSIONS = {
+    ".txt",
+    ".md",
+    ".markdown",
+    ".json",
+    ".jsonl",
+    ".csv",
+    ".tsv",
+    ".xml",
+    ".html",
+    ".htm",
+    ".fb2",
+    ".epub.txt",
+}
+
+
+def path_needs_text_verification(path: str) -> bool:
+    lowered = path.lower()
+    return any(lowered.endswith(extension) for extension in TEXT_VERIFICATION_EXTENSIONS)
+
+
+def missing_text_verifications(paths: list[str], verified_paths: set[str]) -> list[str]:
+    return [path for path in paths if path_needs_text_verification(path) and path not in verified_paths]
+
+
+VERIFY_TEXT_FILE_SCRIPT = r'''
+import json
+import os
+import re
+from pathlib import Path
+
+ALLOWED_ROOTS = [Path("/work"), Path("/sandbox-tmp"), Path("/artifacts"), Path("/state"), Path("/logs"), Path("/models"), Path("/tools"), Path("/home/agent")]
+
+def safe_path(raw):
+    path = Path(raw or "/work")
+    if not path.is_absolute():
+        path = Path("/work") / path
+    resolved = path.resolve(strict=False)
+    for root in ALLOWED_ROOTS:
+        try:
+            resolved.relative_to(root)
+            return resolved
+        except ValueError:
+            pass
+    raise ValueError(f"path outside sandbox writable roots: {raw}")
+
+def as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    return [part.strip() for part in str(value).split("\n") if part.strip()]
+
+def contains(haystack, needle, regex):
+    if regex:
+        return re.search(needle, haystack) is not None
+    return needle in haystack
+
+payload = json.loads(os.environ["VERIFY_TEXT_FILE_PAYLOAD"])
+path = safe_path(payload["path"])
+case_sensitive = bool(payload.get("case_sensitive", True))
+regex = bool(payload.get("regex", False))
+max_bytes = int(payload.get("max_bytes") or 50000000)
+max_bytes = max(1024, min(max_bytes, 200000000))
+min_bytes = max(0, int(payload.get("min_bytes") or 0))
+min_chars = max(0, int(payload.get("min_chars") or 0))
+
+if not path.is_file():
+    print(json.dumps({"ok": False, "error": "path is not a file", "path": str(path)}, ensure_ascii=False))
+    raise SystemExit(0)
+
+size = path.stat().st_size
+if size > max_bytes:
+    print(json.dumps({"ok": False, "error": "file exceeds max_bytes for verification", "path": str(path), "size": size, "max_bytes": max_bytes}, ensure_ascii=False))
+    raise SystemExit(0)
+
+raw = path.read_bytes()
+try:
+    text = raw.decode("utf-8")
+    encoding = "utf-8"
+except UnicodeDecodeError:
+    text = raw.decode("utf-8", errors="replace")
+    encoding = "utf-8-replace"
+
+search_text = text if case_sensitive else text.lower()
+required = as_list(payload.get("must_contain"))
+ordered = as_list(payload.get("ordered_patterns"))
+forbidden = as_list(payload.get("must_not_contain"))
+if not case_sensitive and not regex:
+    required = [item.lower() for item in required]
+    ordered = [item.lower() for item in ordered]
+    forbidden = [item.lower() for item in forbidden]
+
+failures = []
+if size < min_bytes:
+    failures.append({"check": "min_bytes", "expected": min_bytes, "actual": size})
+if len(text) < min_chars:
+    failures.append({"check": "min_chars", "expected": min_chars, "actual": len(text)})
+
+for item in required:
+    if not contains(search_text, item, regex):
+        failures.append({"check": "must_contain", "pattern": item})
+
+cursor = 0
+for item in ordered:
+    if regex:
+        match = re.search(item, search_text[cursor:])
+        if not match:
+            failures.append({"check": "ordered_patterns", "pattern": item, "after_offset": cursor})
+            break
+        cursor += match.end()
+    else:
+        index = search_text.find(item, cursor)
+        if index < 0:
+            failures.append({"check": "ordered_patterns", "pattern": item, "after_offset": cursor})
+            break
+        cursor = index + len(item)
+
+for item in forbidden:
+    if contains(search_text, item, regex):
+        failures.append({"check": "must_not_contain", "pattern": item})
+
+print(json.dumps({
+    "ok": not failures,
+    "path": str(path),
+    "size": size,
+    "chars": len(text),
+    "encoding": encoding,
+    "checks": {
+        "min_bytes": min_bytes,
+        "min_chars": min_chars,
+        "must_contain": len(required),
+        "ordered_patterns": len(ordered),
+        "must_not_contain": len(forbidden),
+        "case_sensitive": case_sensitive,
+        "regex": regex,
+    },
+    "failures": failures[:20],
+}, ensure_ascii=False))
+'''
+
+
+def verify_text_file_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "path": str(action.get("path") or ""),
+        "must_contain": action.get("must_contain") or [],
+        "ordered_patterns": action.get("ordered_patterns") or [],
+        "must_not_contain": action.get("must_not_contain") or [],
+        "min_bytes": int(action.get("min_bytes") or 0),
+        "min_chars": int(action.get("min_chars") or 0),
+        "max_bytes": int(action.get("max_bytes") or 50000000),
+        "case_sensitive": parse_bool(action.get("case_sensitive"), default=True),
+        "regex": parse_bool(action.get("regex"), default=False),
+    }
+    env_payload = json.dumps(payload, ensure_ascii=False)
+    result = run_sandbox_argv(
+        config,
+        ["/usr/bin/env", f"VERIFY_TEXT_FILE_PAYLOAD={env_payload}", "python3", "-c", VERIFY_TEXT_FILE_SCRIPT],
+        timeout=120,
+        max_output_chars=12000,
+    )
+    if not result.get("ok"):
+        return {"ok": False, "error": "verify_text_file failed", "runner": result}
+    stdout = str(result.get("stdout") or "").strip()
+    try:
+        parsed = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"ok": False, "error": "verify_text_file returned non-json output", "stdout": truncate(stdout, 2000), "runner": result}
+    return parsed if isinstance(parsed, dict) else {"ok": False, "error": "verify_text_file returned non-object"}
 
 
 def read_dotenv_value(path: Path, key: str) -> str:
@@ -1978,6 +2152,8 @@ def action_summary(action: dict[str, Any]) -> str:
         return f"{truncate(str(action.get('url', '')), 100)} -> {action.get('path_template', '/work')}"
     if action_type == "bundle_text_files":
         return f"{action.get('path', '/work')} -> {action.get('output_txt', '/work/bundle.txt')}"
+    if action_type == "verify_text_file":
+        return str(action.get("path", "/work"))
     if action_type == "telegram_send_document":
         return str(action.get("path", "/work"))
     if action_type == "ranobehub_chapter":
@@ -2064,6 +2240,8 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
         return f"{result.get('files_written', 0)}/{result.get('selected_links', 0)} extracted"
     if action_type == "bundle_text_files":
         return f"{result.get('included_files', 0)} files -> {result.get('output_txt')}, {result.get('output_fb2')}"
+    if action_type == "verify_text_file":
+        return f"verified={bool(result.get('ok'))} path={result.get('path')} failures={len(result.get('failures') or [])}"
     if action_type == "telegram_send_document":
         return f"telegram message {result.get('message_id')} file={result.get('file_name') or result.get('path')}"
     if action_type == "ranobehub_chapter":
@@ -2094,6 +2272,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     action_counts: dict[str, int] = {}
     repeated_rejection_count = 0
     repeated_rejection_total = 0
+    verified_text_paths: set[str] = set()
     trace: list[dict[str, Any]] = []
     write_task_journal(
         config,
@@ -2210,6 +2389,25 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     }
                 )
                 continue
+            missing_verification = missing_text_verifications(list(artifact_validation.get("paths") or []), verified_text_paths)
+            if missing_verification:
+                warning_message = (
+                    "Supervisor rejected final because mentioned text artifacts were not content-verified against the task: "
+                    + json.dumps({"missing_verification": missing_verification}, ensure_ascii=False)
+                )
+                emit(event_sink, {"type": "warning", "code": "final_text_verification_required", "step": step, "message": warning_message})
+                messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            warning_message
+                            + "\nUse verify_text_file on each text artifact with checks derived from the user task "
+                            + "(expected sections/ranges/key markers/order/min size), then return final only if verification passes."
+                        ),
+                    }
+                )
+                continue
             duration_sec = round(time.time() - run_started, 3)
             final_payload = {"step": step, "ok": True, "message": message, "duration_sec": duration_sec}
             if artifact_validation.get("paths"):
@@ -2262,6 +2460,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 result = web_extract_link_list_tool(config, action)
             elif action_type == "bundle_text_files":
                 result = bundle_text_files_tool(config, action)
+            elif action_type == "verify_text_file":
+                result = verify_text_file_tool(config, action)
             elif action_type == "telegram_send_document":
                 result = telegram_send_document_tool(config, action)
             elif action_type == "ranobehub_chapter":
@@ -2308,6 +2508,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             result = {"ok": False, "error": str(exc), "exception": exc.__class__.__name__}
 
         action_duration_sec = round(time.time() - action_started, 3)
+        if action_type == "verify_text_file" and isinstance(result, dict) and result.get("ok") and result.get("path"):
+            verified_text_paths.add(str(result.get("path")))
         event_extra: dict[str, Any] = {}
         if isinstance(result, dict):
             if action_type == "web_search":

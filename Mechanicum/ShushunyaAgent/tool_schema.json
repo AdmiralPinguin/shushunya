@@ -181,6 +181,22 @@
         "returns": "sends the sandbox file through the configured Telegram bot and returns message/file metadata"
       }
     },
+    "verify_text_file": {
+      "required": ["action", "path"],
+      "properties": {
+        "action": "verify_text_file",
+        "path": "sandbox_path to a text-like artifact",
+        "must_contain": "string or string array of required markers/patterns",
+        "ordered_patterns": "string or string array that must appear in this order",
+        "must_not_contain": "string or string array of forbidden markers/patterns",
+        "min_bytes": "integer minimum file size",
+        "min_chars": "integer minimum decoded text length",
+        "max_bytes": "integer maximum bytes to inspect, default 50000000",
+        "case_sensitive": "boolean, default true",
+        "regex": "boolean; when true patterns are regular expressions",
+        "returns": "content verification result for task-completion checks before final"
+      }
+    },
     "ranobehub_chapter": {
       "required": ["action", "url", "path"],
       "properties": {

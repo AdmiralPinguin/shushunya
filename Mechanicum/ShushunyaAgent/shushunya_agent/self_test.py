@@ -280,6 +280,17 @@ def main() -> int:
     )
     if not valid_bundle_action.get("ok"):
         raise AssertionError(f"valid bundle_text_files action was rejected: {valid_bundle_action}")
+    valid_verify_action = agent_runner.validate_action(
+        {
+            "action": "verify_text_file",
+            "path": "/work/novel_data/book.fb2",
+            "ordered_patterns": ["Том 10", "Том 11"],
+            "must_contain": ["Том 23"],
+            "min_bytes": 1000,
+        }
+    )
+    if not valid_verify_action.get("ok"):
+        raise AssertionError(f"valid verify_text_file action was rejected: {valid_verify_action}")
     valid_telegram_action = agent_runner.validate_action(
         {
             "action": "telegram_send_document",
@@ -1075,6 +1086,33 @@ def main() -> int:
     if telegram_result.get("ok") is not True or telegram_result.get("message_id") != 123:
         raise AssertionError(f"telegram_send_document mocked tool failed: {telegram_result}")
     print("[ok] telegram document tool")
+
+    verified_final_events: list[dict] = []
+    verified_final_stdout = io.StringIO()
+    verified_final_config = AgentConfig(
+        task_id=safe_task_id("self-test-final-text-verification"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    verification_replies = [
+        '{"action":"final","message":"Готово: /work/book.fb2"}',
+        '{"action":"verify_text_file","path":"/work/book.fb2","ordered_patterns":["Том 10","Том 23"],"min_bytes":1000}',
+        '{"action":"final","message":"Готово: /work/book.fb2"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=verification_replies), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/book.fb2", "exists": True, "type": "file", "size": 2000}), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", return_value={"ok": True, "path": "/work/book.fb2", "size": 2000, "chars": 1500, "failures": []}), \
+            contextlib.redirect_stdout(verified_final_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        verified_final_code = run_agent("create verified book", verified_final_config, event_sink=verified_final_events.append)
+    verified_final_payload = json.loads(verified_final_stdout.getvalue())
+    if verified_final_code != 0 or verified_final_payload.get("message") != "Готово: /work/book.fb2":
+        raise AssertionError(f"text verification final did not complete: {verified_final_payload}")
+    if not any(event.get("code") == "final_text_verification_required" for event in verified_final_events):
+        raise AssertionError(f"missing text verification warning was not emitted: {verified_final_events}")
+    print("[ok] final text verification required")
 
     limit_stdout = io.StringIO()
     limit_config = AgentConfig(

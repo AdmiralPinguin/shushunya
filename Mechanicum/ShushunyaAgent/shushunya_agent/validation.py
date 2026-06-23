@@ -127,6 +127,27 @@ def _validate_layers(action: dict[str, Any], errors: list[dict[str, Any]]) -> No
         errors.append({"field": "layers", "error": "unsupported layer", "allowed": sorted(ARCHIVE_MEMORY_LAYERS), "actual": bad_layers})
 
 
+def _validate_string_or_string_list(action: dict[str, Any], field: str, errors: list[dict[str, Any]], *, max_items: int = 100, max_item_len: int = 1000) -> None:
+    if field not in action:
+        return
+    value = action.get(field)
+    if isinstance(value, str):
+        if len(value) > max_item_len * max_items:
+            errors.append({"field": field, "error": "string is too long", "max_length": max_item_len * max_items, "actual_length": len(value)})
+        return
+    if not isinstance(value, list):
+        errors.append({"field": field, "error": "expected string or string array", "actual": _field_type(value)})
+        return
+    if len(value) > max_items:
+        errors.append({"field": field, "error": "too many items", "max_items": max_items, "actual": len(value)})
+    for index, item in enumerate(value):
+        if not isinstance(item, str):
+            errors.append({"field": field, "index": index, "error": "expected string", "actual": _field_type(item)})
+            continue
+        if len(item) > max_item_len:
+            errors.append({"field": field, "index": index, "error": "string is too long", "max_length": max_item_len, "actual_length": len(item)})
+
+
 ACTION_SCHEMAS: dict[str, dict[str, Any]] = {
     "final": {"required": {"message"}, "fields": {"action", "message"}},
     "sandbox_status": {"required": set(), "fields": {"action"}},
@@ -151,6 +172,10 @@ ACTION_SCHEMAS: dict[str, dict[str, Any]] = {
     "bundle_text_files": {
         "required": {"path", "output_txt", "output_fb2"},
         "fields": {"action", "path", "output_txt", "output_fb2", "include_glob", "exclude_glob", "min_chars", "dedupe"},
+    },
+    "verify_text_file": {
+        "required": {"path"},
+        "fields": {"action", "path", "must_contain", "ordered_patterns", "must_not_contain", "min_bytes", "min_chars", "max_bytes", "case_sensitive", "regex"},
     },
     "telegram_send_document": {"required": {"path"}, "fields": {"action", "path", "caption", "chat_id"}},
     "ranobehub_chapter": {"required": {"url", "path"}, "fields": {"action", "url", "path", "mode", "include_title"}},
@@ -278,6 +303,15 @@ def validate_action(action: Mapping[str, Any]) -> dict[str, Any]:
             _validate_string(action_dict, "caption", errors, max_len=1024)
         if "chat_id" in action_dict:
             _validate_string(action_dict, "chat_id", errors, min_len=1, max_len=100)
+    elif action_type == "verify_text_file":
+        _validate_path(action_dict, errors)
+        for field in ("must_contain", "ordered_patterns", "must_not_contain"):
+            _validate_string_or_string_list(action_dict, field, errors, max_items=200, max_item_len=2000)
+        _validate_int(action_dict, "min_bytes", errors, minimum=0, maximum=200000000)
+        _validate_int(action_dict, "min_chars", errors, minimum=0, maximum=200000000)
+        _validate_int(action_dict, "max_bytes", errors, minimum=1024, maximum=200000000)
+        _validate_bool(action_dict, "case_sensitive", errors)
+        _validate_bool(action_dict, "regex", errors)
     elif action_type in {"list_files", "read_file", "write_file", "append_file", "replace_in_file", "mkdir", "remove_file", "file_info", "find_files", "search_text"}:
         _validate_path(action_dict, errors)
         if action_type in {"write_file", "append_file"}:
