@@ -3,7 +3,7 @@ set -euo pipefail
 
 PORT="${PORT:-8080}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:$PORT}"
-MODEL="${MODEL:-gemma-4-12b-it-UD-Q5_K_XL}"
+MODEL="${MODEL:-gemma-4-12b-it-Q6_K}"
 
 request_chat() {
   curl -fsS "$BASE_URL/v1/chat/completions" \

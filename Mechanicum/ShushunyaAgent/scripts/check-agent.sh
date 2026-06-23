@@ -3,6 +3,15 @@ set -euo pipefail
 
 PROJECT_ROOT="/media/shushunya/SHUSHUNYA/shushunya"
 AGENT_ROOT="$PROJECT_ROOT/Mechanicum/ShushunyaAgent"
+ARCHIVE_ENV="$PROJECT_ROOT/ArchiveOfHeresy/.env"
+
+if [[ -f "$ARCHIVE_ENV" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ARCHIVE_ENV"
+  set +a
+fi
+export SHUSHUNYA_AGENT_ARCHIVE_API_KEY="${SHUSHUNYA_AGENT_ARCHIVE_API_KEY:-${ARCHIVE_API_KEY:-}}"
 
 echo "LLM host:"
 curl -fsS "http://127.0.0.1:8080/health"

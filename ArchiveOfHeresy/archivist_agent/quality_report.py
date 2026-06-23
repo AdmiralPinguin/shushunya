@@ -123,6 +123,7 @@ def ask_librarian_for_report(proxy_json, payload, model=None):
             {"role": "system", "content": LIBRARIAN_SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps({"task": REPORT_TASK_PROMPT, "payload": payload}, ensure_ascii=False)},
         ],
+        "response_format": {"type": "json_object"},
         "temperature": 0.1,
         "max_tokens": 1800,
     }

@@ -20,7 +20,10 @@ VECTOR_EMBEDDING_FALLBACK = os.environ.get("ARCHIVE_VECTOR_EMBEDDING_FALLBACK", 
     "off",
 )
 VECTOR_EMBEDDING_BASE_URL = os.environ.get("ARCHIVE_EMBEDDING_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
-VECTOR_EMBEDDING_MODEL = os.environ.get("ARCHIVE_EMBEDDING_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
+VECTOR_EMBEDDING_MODEL = os.environ.get(
+    "ARCHIVE_EMBEDDING_MODEL",
+    os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-Q6_K.gguf"),
+)
 VECTOR_CHUNK_CHARS = int(os.environ.get("ARCHIVE_VECTOR_CHUNK_CHARS", "1200"))
 VECTOR_TOP_K = int(os.environ.get("ARCHIVE_VECTOR_TOP_K", "5"))
 VECTOR_MIN_SCORE = float(os.environ.get("ARCHIVE_VECTOR_MIN_SCORE", "0.18"))

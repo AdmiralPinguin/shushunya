@@ -11,7 +11,7 @@ from archivist_agent.graph_memory import GRAPH_TOP_K
 
 MAGOS_MODEL = os.environ.get(
     "ARCHIVE_MAGOS_MODEL",
-    os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
+    os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-Q6_K.gguf"),
 )
 MAGOS_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_MAGOS_CONTEXT_CHARS", "6000"))
 MAGOS_MIN_WIKI_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_WIKI_SCORE", "0.35"))
@@ -261,6 +261,7 @@ class Magos:
                 {"role": "system", "content": MAGOS_SYSTEM_PROMPT},
                 {"role": "user", "content": json.dumps(task, ensure_ascii=False)},
             ],
+            "response_format": {"type": "json_object"},
             "max_tokens": 1400,
             "temperature": 0.1,
         }

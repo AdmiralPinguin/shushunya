@@ -228,7 +228,8 @@ Stop it:
 - `ARCHIVE_LLM_BASE_URL` - default `http://127.0.0.1:8080`
 - `ARCHIVE_LLM_PROVIDER` - `llamacpp` by default; set to `litert` to use the
   LiteRT-LM host on `http://127.0.0.1:9379`
-- `ARCHIVE_DEFAULT_MODEL` - default chat model; for LiteRT use
+- `ARCHIVE_DEFAULT_MODEL` - default chat model, `gemma-4-12b-it-Q6_K.gguf`;
+  for LiteRT use
   `gemma4-12b,gpu,2048` until longer contexts pass GPU smoke tests
 - `ARCHIVE_SYSTEM_PROMPT` - archive-level system prompt prepended to chat requests; default personality is Shushunya, a sarcastic daemon of Tzeentch
 - `ARCHIVE_JSONL_ROOT` - default `ArchiveOfHeresy/archive/jsonl`
@@ -248,21 +249,23 @@ Stop it:
 - `ARCHIVE_VECTOR_EMBEDDING_BACKEND` - default `openai`
 - `ARCHIVE_VECTOR_EMBEDDING_FALLBACK` - default `1`
 - `ARCHIVE_EMBEDDING_BASE_URL` - default `http://127.0.0.1:8080`
-- `ARCHIVE_EMBEDDING_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
+- `ARCHIVE_EMBEDDING_MODEL` - default follows `ARCHIVE_DEFAULT_MODEL`
 - `ARCHIVE_SPARSE_EMBEDDING_VERSION` - default `hashed-token-chargram-v2`
 - `ARCHIVE_VECTOR_CHUNK_CHARS` - default `1200`
 - `ARCHIVE_VECTOR_TOP_K` - default `5`
 - `ARCHIVE_VECTOR_MIN_SCORE` - default `0.18`
-- `ARCHIVE_VECTOR_BACKFILL_ON_START` - default `1`
+- `ARCHIVE_VECTOR_BACKFILL_ON_START` - default `0`; run backfill explicitly so
+  Archive starts serving before long memory maintenance work
 - `ARCHIVE_VECTOR_BACKFILL_MAX_TURNS` - default `200`, set `0` for unlimited
 - `ARCHIVE_GRAPH_INTERVAL_MESSAGES` - default `20`
 - `ARCHIVE_GRAPH_MAX_RECENT_TURNS` - default `12`
 - `ARCHIVE_GRAPH_TOP_K` - default `5`
-- `ARCHIVE_GRAPH_BACKFILL_ON_START` - default `1`
+- `ARCHIVE_GRAPH_BACKFILL_ON_START` - default `0`; run backfill explicitly so
+  Archive starts serving before long memory maintenance work
 - `ARCHIVE_GRAPH_SYSTEM_PROMPT` - isolated GraphRAG system prompt
 - `ARCHIVE_GRAPH_TASK_PROMPT` - isolated GraphRAG extraction prompt
 - `ARCHIVE_MAGOS_ENABLED` - default `1`
-- `ARCHIVE_MAGOS_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
+- `ARCHIVE_MAGOS_MODEL` - default follows `ARCHIVE_DEFAULT_MODEL`
 - `ARCHIVE_MAGOS_CONTEXT_CHARS` - default `6000`
 - `ARCHIVE_MAGOS_CONTEXT_LAYERS` - default empty; comma list of `wiki`, `vector`, `graph` allowed for Magos pre-answer context injection
 - `ARCHIVE_MAGOS_MIN_WIKI_SCORE` - default `0.35`
@@ -272,7 +275,7 @@ Stop it:
 - `ARCHIVE_MAGOS_TASK_PROMPT` - isolated Magos task prompt
 - `ARCHIVE_WIKI_INTERVAL_MESSAGES` - default `20`
 - `ARCHIVE_WIKI_MAX_RECENT_TURNS` - default `12`
-- `ARCHIVE_LIBRARIAN_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
+- `ARCHIVE_LIBRARIAN_MODEL` - default follows `ARCHIVE_DEFAULT_MODEL`
 - `ARCHIVE_LIBRARIAN_MAX_AGENT_STEPS` - default `4`
 - `ARCHIVE_LIBRARIAN_SYSTEM_PROMPT` - isolated librarian system prompt
 - `ARCHIVE_LIBRARIAN_TASK_PROMPT` - isolated librarian task prompt

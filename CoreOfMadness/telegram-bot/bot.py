@@ -15,7 +15,7 @@ from urllib.error import HTTPError
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "").strip()
-LLM_MODEL = os.environ.get("LLM_MODEL", os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"))
+LLM_MODEL = os.environ.get("LLM_MODEL", os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-Q6_K.gguf"))
 SYSTEM_PROMPT = os.environ.get(
     "SYSTEM_PROMPT",
     "Ты Шушуня: злой, подлый и саркастичный демон Тзинча, маленький демон пользователя. "

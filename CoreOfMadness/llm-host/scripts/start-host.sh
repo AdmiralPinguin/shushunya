@@ -3,11 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODELS_DIR="$(cd "$ROOT/.." && pwd)"
-MODEL="${MODEL:-$MODELS_DIR/gemma-4-12b-it-UD-Q5_K_XL.gguf}"
+MODEL="${MODEL:-$MODELS_DIR/gemma-4-12b-it-Q6_K.gguf}"
 MMPROJ="${MMPROJ:-$MODELS_DIR/vision/mmproj-google-gemma-4-12B-it-BF16.gguf}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8080}"
-CTX_SIZE="${CTX_SIZE:-32768}"
+CTX_SIZE="${CTX_SIZE:-16384}"
 GPU_LAYERS="${GPU_LAYERS:-999}"
 PARALLEL="${PARALLEL:-1}"
 REASONING="${REASONING:-off}"

@@ -1166,6 +1166,8 @@ def main() -> int:
         raise AssertionError(f"unexpected payload reply: {payload_reply}")
     if not captured_payloads or captured_payloads[0].get("archive_system_prompt_enabled") is not False:
         raise AssertionError(f"agent chat did not disable Archive persona prompt: {captured_payloads}")
+    if captured_payloads[0].get("response_format") != {"type": "json_object"}:
+        raise AssertionError(f"agent chat did not request JSON response format: {captured_payloads}")
     print("[ok] agent chat disables Archive persona prompt")
 
     def reasoning_content_payload(config_arg, method, path, payload=None, timeout=180):
