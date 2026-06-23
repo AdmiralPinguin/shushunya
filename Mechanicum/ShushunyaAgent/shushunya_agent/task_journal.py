@@ -289,6 +289,14 @@ def compact_resume_events(events: list[Any], max_chars: int = 6000) -> list[Any]
     start_event = next((event for event in events if isinstance(event, dict) and event.get("type") == "start"), None)
     if start_event is not None:
         compacted_start = compact_json_value(start_event, string_limit=1800, list_limit=30)
+        if isinstance(compacted_start, dict):
+            clean_task = presentable_task_text(str(compacted_start.get("task") or ""))
+            compacted_start["task"] = clean_task
+            required = compacted_start.get("required_artifacts")
+            if isinstance(required, list):
+                compacted_start["required_artifacts"] = [
+                    path for path in required if isinstance(path, str) and path in clean_task
+                ]
         text = json.dumps(compacted_start, ensure_ascii=False, separators=(",", ":"))
         if len(text) + 3 <= max_chars:
             selected.append(compacted_start)

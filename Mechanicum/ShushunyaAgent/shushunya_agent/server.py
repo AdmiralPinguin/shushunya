@@ -416,6 +416,8 @@ def verified_text_paths_from_events(events: list[object]) -> list[str]:
 def should_apply_previous_task_context(payload: dict[str, Any]) -> bool:
     if bool_field(payload, "skip_previous_task_context", False):
         return False
+    if str(payload.get("resume_task_id") or "").strip():
+        return False
     has_explicit_new_task_id = bool(str(payload.get("task_id") or "").strip()) and not str(payload.get("resume_task_id") or "").strip()
     return not has_explicit_new_task_id
 
@@ -1056,7 +1058,7 @@ class AgentHandler(BaseHTTPRequestHandler):
 
             config = attach_cancel_check(config_from_payload(payload))
             task = apply_resume_context(task, config, payload)
-            if not bool_field(payload, "skip_previous_task_context", False):
+            if should_apply_previous_task_context(payload):
                 task = apply_previous_task_context(task, config)
             queue_error = try_enqueue_run()
             if queue_error is not None:

@@ -751,6 +751,24 @@ def main() -> int:
     if resume_with_start[0].get("required_artifacts") != ["/work/report.md", "/work/matrix.md"]:
         raise AssertionError(f"resume context lost required artifacts: {resume_with_start[0]}")
     print("[ok] resume context preserves required artifacts")
+    contaminated_resume = server.compact_resume_events(
+        [
+            {
+                "type": "start",
+                "task": (
+                    "Create /work/report.md.\n\nAuthoritative previous agent task context:\n"
+                    "{\"summary\":{\"task\":\"Create /work/old.json\"}}"
+                ),
+                "required_artifacts": ["/work/report.md", "/work/old.json"],
+            }
+        ],
+        max_chars=5000,
+    )
+    if "/work/old.json" in json.dumps(contaminated_resume, ensure_ascii=False):
+        raise AssertionError(f"resume context kept contaminated previous task data: {contaminated_resume}")
+    if contaminated_resume[0].get("required_artifacts") != ["/work/report.md"]:
+        raise AssertionError(f"resume context failed to filter contaminated required artifacts: {contaminated_resume}")
+    print("[ok] resume context strips nested previous task context")
     long_resume_events = [
         {
             "type": "start",
@@ -784,8 +802,8 @@ def main() -> int:
     print("[ok] resume context restores verified text paths")
     if server.should_apply_previous_task_context({"task_id": "new-explicit-task"}):
         raise AssertionError("explicit new task_id should not inherit previous task context")
-    if not server.should_apply_previous_task_context({"resume_task_id": "old-task"}):
-        raise AssertionError("resume_task_id should keep previous/resume context enabled")
+    if server.should_apply_previous_task_context({"resume_task_id": "old-task"}):
+        raise AssertionError("resume_task_id should not inherit separate previous task context")
     if server.should_apply_previous_task_context({"skip_previous_task_context": True}):
         raise AssertionError("skip_previous_task_context should disable previous context")
     print("[ok] explicit task id skips previous task context")
