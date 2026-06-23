@@ -3183,6 +3183,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 return 2
         elif isinstance(result, dict) and result.get("ok") is True:
             repeated_rejection_count = 0
+            if action_type in PRODUCTIVE_ACTIONS:
+                repeated_rejection_total = 0
 
     message = (
         f"Агент достиг лимита шагов ({config.max_steps}) без final. "

@@ -1846,6 +1846,33 @@ def main() -> int:
         raise AssertionError(f"cumulative repeat guard stopped too late: {len(repeat_payload.get('steps', []))} steps")
     print("[ok] cumulative repeated action guard")
 
+    productive_reset_stdout = io.StringIO()
+    productive_reset_config = AgentConfig(
+        task_id=safe_task_id("self-test-repeat-reset-on-progress"),
+        json_output=True,
+        max_steps=8,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    productive_reset_actions = [
+        '{"action":"list_files","path":"/work","max_depth":1,"limit":1,"offset":0}',
+        '{"action":"list_files","path":"/work","max_depth":1,"limit":1,"offset":0}',
+        '{"action":"list_files","path":"/work","max_depth":1,"limit":1,"offset":0}',
+        '{"action":"write_file","path":"/work/report.md","content":"progress"}',
+        '{"action":"list_files","path":"/work","max_depth":1,"limit":1,"offset":0}',
+        '{"action":"list_files","path":"/work","max_depth":1,"limit":1,"offset":0}',
+        '{"action":"final","message":"done"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=productive_reset_actions), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/report.md"}), \
+            contextlib.redirect_stdout(productive_reset_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        productive_reset_code = run_agent("repeat rejection reset on progress", productive_reset_config)
+    productive_reset_payload = json.loads(productive_reset_stdout.getvalue())
+    if productive_reset_code != 0:
+        raise AssertionError(f"productive progress should reset cumulative repeat guard: code={productive_reset_code}, payload={productive_reset_payload}")
+    print("[ok] repeated rejection total resets on productive progress")
+
     if offline:
         print("[skip] archive integration")
     else:
