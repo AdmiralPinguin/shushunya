@@ -2626,6 +2626,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     ]
     action_counts: dict[str, int] = {}
     successful_write_file_paths: dict[str, int] = {}
+    successful_write_file_max_bytes: dict[str, int] = {}
     failed_verification_paths: set[str] = set()
     inspection_actions_since_progress = 0
     repeated_rejection_count = 0
@@ -2937,16 +2938,21 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             elif (
                 action_type == "write_file"
                 and successful_write_file_paths.get(str(action.get("path") or ""), 0) >= max(1, REPEATED_WRITE_FILE_PATH_LIMIT)
+                and len(str(action.get("content") or "").encode("utf-8"))
+                <= successful_write_file_max_bytes.get(str(action.get("path") or ""), 0)
                 and str(action.get("path") or "") not in failed_verification_paths
             ):
                 result = {
                     "ok": False,
                     "error": "repeated write_file path rejected by supervisor",
                     "path": str(action.get("path") or ""),
+                    "previous_max_content_bytes": successful_write_file_max_bytes.get(str(action.get("path") or ""), 0),
+                    "new_content_bytes": len(str(action.get("content") or "").encode("utf-8")),
                     "instruction": (
-                        "This path already had successful write_file calls in this run. If you are building a file in chunks, "
-                        "continue with append_file, verify_text_file/file_info, or use replace_in_file for a targeted correction. "
-                        "Do not overwrite accumulated content with another write_file unless the user explicitly asked to replace it."
+                        "This path already had successful write_file calls in this run and the new content is not larger. "
+                        "If you are building a file in chunks, continue with append_file, verify_text_file/file_info, "
+                        "or use replace_in_file for a targeted correction. If you must rewrite the draft, write the complete "
+                        "improved file with more complete content, then verify it."
                     ),
                 }
             elif action_type == "append_file" and str(action.get("path") or "").strip().lower().endswith(".json"):
@@ -3071,6 +3077,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             path = str(action.get("path") or "")
             if path:
                 successful_write_file_paths[path] = successful_write_file_paths.get(path, 0) + 1
+                content_bytes = len(str(action.get("content") or "").encode("utf-8"))
+                successful_write_file_max_bytes[path] = max(successful_write_file_max_bytes.get(path, 0), content_bytes)
         if isinstance(result, dict) and result.get("ok") is True:
             if action_type in {"write_file", "append_file", "replace_in_file"}:
                 reset_path_dependent_action_counts(action_counts, str(action.get("path") or ""))

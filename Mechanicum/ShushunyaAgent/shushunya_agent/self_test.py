@@ -1130,9 +1130,9 @@ def main() -> int:
         archive_internal_steps=False,
     )
     repeated_write_actions = [
-        '{"action":"write_file","path":"/work/report.md","content":"one"}',
-        '{"action":"write_file","path":"/work/report.md","content":"two"}',
-        '{"action":"write_file","path":"/work/report.md","content":"three"}',
+        '{"action":"write_file","path":"/work/report.md","content":"first draft"}',
+        '{"action":"write_file","path":"/work/report.md","content":"same size?"}',
+        '{"action":"write_file","path":"/work/report.md","content":"short"}',
         '{"action":"final","message":"done"}',
     ]
     with mock.patch.object(agent_runner, "chat", side_effect=repeated_write_actions), \
@@ -1148,6 +1148,34 @@ def main() -> int:
     if repeated_write_code != 0 or not rejected_write:
         raise AssertionError(f"repeated write_file path guard failed: code={repeated_write_code}, payload={repeated_write_payload}")
     print("[ok] repeated write_file path guard")
+
+    growing_rewrite_stdout = io.StringIO()
+    growing_rewrite_config = AgentConfig(
+        task_id=safe_task_id("self-test-growing-write-file"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    growing_rewrite_actions = [
+        '{"action":"write_file","path":"/work/report.md","content":"draft"}',
+        '{"action":"write_file","path":"/work/report.md","content":"draft plus more"}',
+        '{"action":"write_file","path":"/work/report.md","content":"draft plus more and final section"}',
+        '{"action":"final","message":"done"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=growing_rewrite_actions), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/report.md"}), \
+            contextlib.redirect_stdout(growing_rewrite_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        growing_rewrite_code = run_agent("growing write file", growing_rewrite_config)
+    growing_rewrite_payload = json.loads(growing_rewrite_stdout.getvalue())
+    rejected_growing_rewrite = [
+        step for step in growing_rewrite_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "repeated write_file path rejected by supervisor"
+    ]
+    if growing_rewrite_code != 0 or rejected_growing_rewrite:
+        raise AssertionError(f"growing repeated write_file should be allowed: code={growing_rewrite_code}, payload={growing_rewrite_payload}")
+    print("[ok] growing write_file draft rewrite allowed")
 
     json_append_stdout = io.StringIO()
     json_append_config = AgentConfig(
