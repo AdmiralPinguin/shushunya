@@ -7,6 +7,7 @@ import io
 import json
 import os
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -366,7 +367,10 @@ def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]
     journal = read_task_journal(resume_task_id, limit=500)
     if not journal.get("ok"):
         return task + "\n\nResume note: requested previous task journal was not found."
-    compact_events = compact_resume_events(journal.get("events", []))
+    events = journal.get("events", [])
+    if isinstance(events, list):
+        config.initial_verified_text_paths = tuple(verified_text_paths_from_events(events))
+    compact_events = compact_resume_events(events if isinstance(events, list) else [])
     return (
         task
         + "\n\nResume context from previous agent task journal "
@@ -374,6 +378,39 @@ def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]
         + ":\n"
         + json.dumps(compact_events, ensure_ascii=False, indent=2)
     )
+
+
+def verified_text_paths_from_events(events: list[object]) -> list[str]:
+    verified: set[str] = set()
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("type") or "")
+        if event_type == "tool_result" and str(event.get("action") or "") == "verify_text_file":
+            result = event.get("result")
+            path = ""
+            if isinstance(result, dict) and result.get("ok") is True:
+                path = str(result.get("path") or "")
+            if not path and event.get("ok") is True:
+                message = str(event.get("message") or "")
+                match = re.search(r"path=([^ ]+)", message)
+                if match:
+                    path = match.group(1)
+            if path:
+                verified.add(path)
+            continue
+        if event_type != "action":
+            continue
+        action = event.get("action")
+        if not isinstance(action, dict):
+            continue
+        action_type = str(action.get("action") or "")
+        if action_type in {"write_file", "append_file", "replace_in_file"}:
+            verified.discard(str(action.get("path") or ""))
+        elif action_type == "bundle_text_files":
+            verified.discard(str(action.get("output_txt") or ""))
+            verified.discard(str(action.get("output_fb2") or ""))
+    return sorted(path for path in verified if path)
 
 
 def should_apply_previous_task_context(payload: dict[str, Any]) -> bool:

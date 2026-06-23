@@ -323,6 +323,7 @@ class AgentConfig:
     technical_output: bool = False
     shell_enabled: bool = SHELL_ENABLED
     shell_approval_required: bool = SHELL_APPROVAL_REQUIRED
+    initial_verified_text_paths: tuple[str, ...] = ()
 
 
 def result_for_model(action_type: str, result: dict[str, Any], config: AgentConfig) -> dict[str, Any]:
@@ -2631,7 +2632,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     repeated_rejection_total = 0
     consecutive_parse_failures = 0
     total_parse_failures = 0
-    verified_text_paths: set[str] = set()
+    verified_text_paths: set[str] = set(config.initial_verified_text_paths)
     required_artifact_path_list = required_artifact_paths_from_task(task)
     required_artifact_paths = set(required_artifact_path_list)
     trace: list[dict[str, Any]] = []
@@ -2916,6 +2917,21 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "instruction": (
                         "Enough inspection actions have already run without productive progress. Stop reading/searching the same workspace. "
                         "Use the gathered context to write or append the requested artifacts, run verify_text_file/file_info, or return final if done."
+                    ),
+                }
+            elif (
+                action_type in {"write_file", "append_file", "replace_in_file"}
+                and str(action.get("path") or "") in verified_text_paths
+                and str(action.get("path") or "") not in failed_verification_paths
+            ):
+                result = {
+                    "ok": False,
+                    "error": "verified text artifact mutation rejected by supervisor",
+                    "path": str(action.get("path") or ""),
+                    "instruction": (
+                        "This text artifact already passed verify_text_file in this task/resume chain. "
+                        "Do not rewrite it unless a later verify_text_file failure proves it needs correction. "
+                        "Verify remaining artifacts or return final."
                     ),
                 }
             elif (

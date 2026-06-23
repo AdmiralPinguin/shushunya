@@ -766,10 +766,22 @@ def main() -> int:
         return {"ok": True, "task_id": task_id, "events": long_resume_events}
 
     with mock.patch.object(server, "read_task_journal", side_effect=fake_long_journal):
-        long_resume_task = server.apply_resume_context("continue", AgentConfig(task_id="long-resume"), {"resume_task_id": "previous"})
+        long_resume_config = AgentConfig(task_id="long-resume")
+        long_resume_task = server.apply_resume_context("continue", long_resume_config, {"resume_task_id": "previous"})
     if "/work/report.md" not in long_resume_task or "/work/matrix.md" not in long_resume_task:
         raise AssertionError(f"long resume context lost required artifact paths: {long_resume_task[-1000:]}")
     print("[ok] long resume context keeps original required artifacts")
+    verified_events = [
+        {"type": "action", "action": {"action": "verify_text_file", "path": "/work/report.md"}},
+        {"type": "tool_result", "action": "verify_text_file", "result": {"ok": True, "path": "/work/report.md"}},
+        {"type": "action", "action": {"action": "write_file", "path": "/work/report.md"}},
+        {"type": "action", "action": {"action": "verify_text_file", "path": "/work/report.md"}},
+        {"type": "tool_result", "action": "verify_text_file", "result": {"ok": True, "path": "/work/report.md"}},
+        {"type": "tool_result", "action": "verify_text_file", "ok": True, "message": "verified=True path=/work/matrix.md failures=0"},
+    ]
+    if server.verified_text_paths_from_events(verified_events) != ["/work/matrix.md", "/work/report.md"]:
+        raise AssertionError(f"resume verified path extraction failed: {server.verified_text_paths_from_events(verified_events)}")
+    print("[ok] resume context restores verified text paths")
     if server.should_apply_previous_task_context({"task_id": "new-explicit-task"}):
         raise AssertionError("explicit new task_id should not inherit previous task context")
     if not server.should_apply_previous_task_context({"resume_task_id": "old-task"}):
@@ -1161,6 +1173,32 @@ def main() -> int:
     if not json_append_rejections:
         raise AssertionError(f"append_file JSON guard failed: code={json_append_code}, payload={json_append_payload}")
     print("[ok] append_file JSON guard")
+
+    verified_mutation_stdout = io.StringIO()
+    verified_mutation_config = AgentConfig(
+        task_id=safe_task_id("self-test-verified-mutation-guard"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        initial_verified_text_paths=("/work/report.md",),
+    )
+    verified_mutation_actions = [
+        '{"action":"write_file","path":"/work/report.md","content":"rewrite verified"}',
+        '{"action":"final","message":"done"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=verified_mutation_actions), \
+            contextlib.redirect_stdout(verified_mutation_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        verified_mutation_code = run_agent("do not mutate verified", verified_mutation_config)
+    verified_mutation_payload = json.loads(verified_mutation_stdout.getvalue())
+    verified_mutation_rejections = [
+        step for step in verified_mutation_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "verified text artifact mutation rejected by supervisor"
+    ]
+    if not verified_mutation_rejections:
+        raise AssertionError(f"verified mutation guard failed: code={verified_mutation_code}, payload={verified_mutation_payload}")
+    print("[ok] verified artifact mutation guard")
 
     inspection_stall_stdout = io.StringIO()
     inspection_stall_config = AgentConfig(
