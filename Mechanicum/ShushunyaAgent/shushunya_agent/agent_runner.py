@@ -606,6 +606,12 @@ def chat(
                         time.sleep(min(8, 2 ** (attempt - 1)))
                         continue
                     raise RuntimeError(last_error) from exc
+                except (TimeoutError, URLError) as exc:
+                    last_error = f"{exc.__class__.__name__}: {exc}"
+                    if attempt < attempts:
+                        time.sleep(min(8, 2 ** (attempt - 1)))
+                        continue
+                    raise RuntimeError(f"model request timed out or was unavailable: {last_error}") from exc
     raise RuntimeError(f"model request failed after context compaction retries: {last_error}")
 
 
@@ -2562,7 +2568,47 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         write_task_journal(config, "step", {"step": step, "max_steps": config.max_steps})
         step_memory = config.inject_memory or (config.task_memory and step == 1)
         step_archive = config.archive_internal_steps or (config.archive_task and step == 1)
-        raw = chat(config, messages, inject_memory=step_memory, archive_enabled=step_archive)
+        try:
+            raw = chat(config, messages, inject_memory=step_memory, archive_enabled=step_archive)
+        except Exception as exc:
+            duration_sec = round(time.time() - run_started, 3)
+            message = (
+                "Агент остановлен супервизором: модельный запрос не завершился успешно "
+                f"({exc.__class__.__name__}: {truncate(str(exc), 240)}). "
+                f"Задачу можно продолжить с resume_task_id={config.task_id}; последние действия сохранены в task journal."
+            )
+            emit(
+                event_sink,
+                {
+                    "type": "final",
+                    "step": step,
+                    "ok": False,
+                    "continuable": True,
+                    "resume_task_id": config.task_id,
+                    "message": message,
+                    "duration_sec": duration_sec,
+                    "stop_reason": "model_request_failed",
+                },
+            )
+            write_task_journal(
+                config,
+                "final",
+                {
+                    "step": step,
+                    "ok": False,
+                    "continuable": True,
+                    "resume_task_id": config.task_id,
+                    "message": message,
+                    "duration_sec": duration_sec,
+                    "stop_reason": "model_request_failed",
+                    "error": f"{exc.__class__.__name__}: {str(exc)}",
+                },
+            )
+            if config.json_output:
+                print(json.dumps({"ok": False, "continuable": True, "resume_task_id": config.task_id, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
+            else:
+                print(message, file=sys.stderr)
+            return 2
         print(f"[model] {raw}", file=sys.stderr)
 
         try:

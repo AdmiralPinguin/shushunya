@@ -1480,6 +1480,26 @@ def main() -> int:
         raise AssertionError(f"required artifact auto-final warning was not emitted: {auto_final_events}")
     print("[ok] required artifacts auto-final after verification")
 
+    timeout_stdout = io.StringIO()
+    timeout_events: list[dict] = []
+    timeout_config = AgentConfig(
+        task_id=safe_task_id("self-test-model-timeout-continuable"),
+        json_output=True,
+        max_steps=1,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=TimeoutError("model read timed out")), \
+            contextlib.redirect_stdout(timeout_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        timeout_code = run_agent("model timeout should be continuable", timeout_config, event_sink=timeout_events.append)
+    timeout_payload = json.loads(timeout_stdout.getvalue())
+    if timeout_code != 2 or timeout_payload.get("continuable") is not True:
+        raise AssertionError(f"model timeout was not converted to continuable final: code={timeout_code}, payload={timeout_payload}")
+    if not any(event.get("stop_reason") == "model_request_failed" for event in timeout_events):
+        raise AssertionError(f"model timeout final event missing stop reason: {timeout_events}")
+    print("[ok] model timeout becomes continuable final")
+
     limit_stdout = io.StringIO()
     limit_config = AgentConfig(
         task_id=safe_task_id("self-test-runtime-limit"),
