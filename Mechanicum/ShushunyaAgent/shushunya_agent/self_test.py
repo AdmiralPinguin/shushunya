@@ -982,6 +982,12 @@ def main() -> int:
         repaired_action = repair_action_json(config, "```json\n{\"action\":\"final\",\"message\":\"broken\"", ValueError("broken"))
     if repaired_action != {"action": "final", "message": "repaired"}:
         raise AssertionError(f"unexpected repaired action: {repaired_action}")
+    loose_python = (
+        '{"action":"python","code":"print(\\"ok\\")\\ntext = "quoted value"\\nprint(text)","timeout":60}'
+    )
+    loose_action = repair_action_json(config, loose_python, ValueError("Expecting ',' delimiter"))
+    if loose_action.get("action") != "python" or 'text = "quoted value"' not in loose_action.get("code", ""):
+        raise AssertionError(f"loose python action was not salvaged: {loose_action}")
     try:
         repair_action_json(config, "Обычный чатовый ответ без JSON action", ValueError("not json"))
         raise AssertionError("JSON repair should reject non-JSON chat prose")

@@ -664,9 +664,74 @@ def looks_like_oversized_inline_file_action(raw: str, error: Exception | None = 
     return "unterminated string" in error_text and len(text) >= 1000
 
 
+def strip_json_fence(raw: str) -> str:
+    text = str(raw or "").strip()
+    if text.startswith("```"):
+        lines = [line for line in text.splitlines() if not line.strip().startswith("```")]
+        return "\n".join(lines).strip()
+    return text
+
+
+def loose_unescape_json_string(value: str) -> str:
+    return (
+        value.replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace('\\"', '"')
+        .replace("\\/", "/")
+        .replace("\\\\", "\\")
+    )
+
+
+def extract_loose_json_string_field(text: str, field: str, end_fields: tuple[str, ...]) -> str | None:
+    match = re.search(rf'"{re.escape(field)}"\s*:\s*"', text)
+    if not match:
+        return None
+    start = match.end()
+    end_candidates: list[int] = []
+    for end_field in end_fields:
+        marker = f'","{end_field}"'
+        index = text.find(marker, start)
+        if index >= 0:
+            end_candidates.append(index)
+    closing = text.rfind('"}')
+    if closing > start:
+        end_candidates.append(closing)
+    if not end_candidates:
+        return None
+    return loose_unescape_json_string(text[start:min(end_candidates)])
+
+
+def salvage_loose_action_json(raw: str) -> dict[str, Any] | None:
+    text = strip_json_fence(raw)
+    action_match = re.search(r'"action"\s*:\s*"([a-zA-Z_]+)"', text)
+    if not action_match:
+        return None
+    action_type = action_match.group(1).strip().lower()
+    if action_type == "python":
+        code = extract_loose_json_string_field(text, "code", ("timeout", "reason"))
+        if not code:
+            return None
+        action: dict[str, Any] = {"action": "python", "code": code}
+        timeout_match = re.search(r'"timeout"\s*:\s*(\d+)', text)
+        if timeout_match:
+            action["timeout"] = int(timeout_match.group(1))
+        return action
+    if action_type in {"write_file", "append_file"}:
+        path_match = re.search(r'"path"\s*:\s*"([^"]+)"', text)
+        content = extract_loose_json_string_field(text, "content", ("reason",))
+        if not path_match or content is None:
+            return None
+        return {"action": action_type, "path": path_match.group(1), "content": content}
+    return None
+
+
 def repair_action_json(config: AgentConfig, raw: str, error: Exception) -> dict[str, Any]:
     if "{" not in raw:
         raise ValueError("model output contained no JSON object to repair")
+    salvaged = salvage_loose_action_json(raw)
+    if salvaged is not None:
+        return salvaged
     repair_messages = [
         {
             "role": "system",
