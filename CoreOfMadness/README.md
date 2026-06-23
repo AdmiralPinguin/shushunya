@@ -23,6 +23,7 @@ This directory is intended to run a local language model server on Linux over SS
 - `llm-host/runtime/` - local logs and server process files.
 - `llm-host/scripts/` - helper scripts for starting, checking, and stopping the LLM host.
 - `telegram-bot/` - Telegram bot for chatting with the local model through ArchiveOfHeresy.
+- `litert-lm/` - optional LiteRT-LM runtime and model registry for Gemma 4 12B.
 
 ## Target Model
 
@@ -125,6 +126,24 @@ Stop the bot with:
 
 The bot talks to ArchiveOfHeresy through `http://127.0.0.1:8090/v1/chat/completions`.
 ArchiveOfHeresy then talks to the local LLM host through `http://127.0.0.1:8080/v1/chat/completions`.
+
+## LiteRT-LM Backend
+
+LiteRT-LM is installed project-locally under `litert-lm/` and keeps its model
+registry under `litert-lm/home/.litert-lm`.
+
+Start the LiteRT host:
+
+```bash
+cd /media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness
+./litert-lm/scripts/start-litert-host.sh
+```
+
+Switch ArchiveOfHeresy to LiteRT on next restart:
+
+```bash
+ARCHIVE_LLM_PROVIDER=litert ./start-main.sh
+```
 
 ## Permissions
 

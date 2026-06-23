@@ -12,7 +12,10 @@ MAX_FOCUS_FILES = int(os.environ.get("ARCHIVE_FOCUS_MAX_FILES", "10"))
 MAX_AGENT_STEPS = int(os.environ.get("ARCHIVE_LIBRARIAN_MAX_AGENT_STEPS", "4"))
 WIKI_INTERVAL_MESSAGES = int(os.environ.get("ARCHIVE_WIKI_INTERVAL_MESSAGES", "20"))
 WIKI_MAX_RECENT_TURNS = int(os.environ.get("ARCHIVE_WIKI_MAX_RECENT_TURNS", "12"))
-LIBRARIAN_MODEL = os.environ.get("ARCHIVE_LIBRARIAN_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
+LIBRARIAN_MODEL = os.environ.get(
+    "ARCHIVE_LIBRARIAN_MODEL",
+    os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
+)
 LIBRARIAN_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_LIBRARIAN_SYSTEM_PROMPT",
     "Ты изолированный архивариус ArchiveOfHeresy. "

@@ -226,6 +226,10 @@ Stop it:
 - `ARCHIVE_PORT` - default `8090`
 - `ARCHIVE_API_KEY` - optional Bearer API key required for `/v1/*` and `/archive/*` endpoints when set
 - `ARCHIVE_LLM_BASE_URL` - default `http://127.0.0.1:8080`
+- `ARCHIVE_LLM_PROVIDER` - `llamacpp` by default; set to `litert` to use the
+  LiteRT-LM host on `http://127.0.0.1:9379`
+- `ARCHIVE_DEFAULT_MODEL` - default chat model; for LiteRT use
+  `gemma4-12b,gpu,2048` until longer contexts pass GPU smoke tests
 - `ARCHIVE_SYSTEM_PROMPT` - archive-level system prompt prepended to chat requests; default personality is Shushunya, a sarcastic daemon of Tzeentch
 - `ARCHIVE_JSONL_ROOT` - default `ArchiveOfHeresy/archive/jsonl`
 - `ARCHIVE_SQLITE_PATH` - default `ArchiveOfHeresy/archive/sqlite/archive.sqlite3`

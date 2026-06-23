@@ -27,6 +27,7 @@ ARCHIVE_BASE_URL = os.environ.get("ARCHIVE_BASE_URL", f"http://127.0.0.1:{PORT}"
 ARCHIVE_API_KEY = os.environ.get("ARCHIVE_API_KEY", "").strip()
 ARCHIVE_MOBILE_API_KEY = os.environ.get("ARCHIVE_MOBILE_API_KEY", "").strip()
 LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
+DEFAULT_MODEL = os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
 TRANSLATOR_BASE_URL = os.environ.get("ARCHIVE_TRANSLATOR_BASE_URL", "http://127.0.0.1:8091").rstrip("/")
 STT_BASE_URL = os.environ.get("ARCHIVE_STT_BASE_URL", "http://127.0.0.1:8093").rstrip("/")
 AGENT_BASE_URL = os.environ.get("ARCHIVE_AGENT_BASE_URL", "http://127.0.0.1:8095").rstrip("/")
@@ -579,7 +580,7 @@ def run_mobile_chat_payload(payload):
         graph_enabled = internal_flag(payload.get("graph_enabled", focus_enabled), default=True)
         archive_system_prompt_enabled = internal_flag(payload.get("archive_system_prompt_enabled", True), default=True)
         memory_namespace = safe_memory_namespace(payload.get("memory_namespace") or "mobile")
-        model = payload.get("model") or "gemma-4-12b-it-UD-Q5_K_XL.gguf"
+        model = payload.get("model") or DEFAULT_MODEL
         system_prompt = payload.get("system_prompt") or ""
         max_tokens = int(payload.get("max_tokens") or 2048)
         temperature = float(payload.get("temperature") or 0.4)
@@ -2344,7 +2345,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             archive_system_prompt_enabled = internal_flag(payload.get("archive_system_prompt_enabled", True), default=True)
             memory_namespace = safe_memory_namespace(payload.get("memory_namespace") or "mobile")
             stream = internal_flag(payload.get("stream", True), default=True)
-            model = payload.get("model") or "gemma-4-12b-it-UD-Q5_K_XL.gguf"
+            model = payload.get("model") or DEFAULT_MODEL
             system_prompt = payload.get("system_prompt") or ""
             max_tokens = int(payload.get("max_tokens") or 2048)
             temperature = float(payload.get("temperature") or 0.4)
