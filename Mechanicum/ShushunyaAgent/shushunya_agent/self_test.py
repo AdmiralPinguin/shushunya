@@ -989,6 +989,68 @@ def main() -> int:
         raise AssertionError(f"json parse stall returned wrong message: {parse_stall_payload}")
     print("[ok] JSON parse stall guard")
 
+    intermittent_parse_stdout = io.StringIO()
+    intermittent_parse_config = AgentConfig(
+        task_id=safe_task_id("self-test-json-intermittent-stall"),
+        json_output=True,
+        max_steps=20,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    intermittent_actions = [
+        '{"action":"python","code":"unterminated',
+        '{"action":"mkdir","path":"/work/intermittent"}',
+        '{"action":"python","code":"unterminated',
+        '{"action":"mkdir","path":"/work/intermittent2"}',
+        '{"action":"python","code":"unterminated',
+        '{"action":"mkdir","path":"/work/intermittent3"}',
+        '{"action":"python","code":"unterminated',
+        '{"action":"mkdir","path":"/work/intermittent4"}',
+        '{"action":"python","code":"unterminated',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=intermittent_actions), \
+            mock.patch.object(agent_runner, "repair_action_json", side_effect=ValueError("no repair")), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/intermittent"}), \
+            contextlib.redirect_stdout(intermittent_parse_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        intermittent_parse_code = run_agent("intermittent parse stall", intermittent_parse_config)
+    intermittent_parse_payload = json.loads(intermittent_parse_stdout.getvalue())
+    if intermittent_parse_code != 2 or intermittent_parse_payload.get("continuable") is not True:
+        raise AssertionError(
+            f"intermittent json parse stall did not stop as continuable: code={intermittent_parse_code}, payload={intermittent_parse_payload}"
+        )
+    if len(intermittent_parse_payload.get("steps", [])) > 4:
+        raise AssertionError(f"intermittent json parse stall allowed too much filler progress: {intermittent_parse_payload}")
+    print("[ok] intermittent JSON parse stall guard")
+
+    repeated_write_stdout = io.StringIO()
+    repeated_write_config = AgentConfig(
+        task_id=safe_task_id("self-test-repeated-write-file"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    repeated_write_actions = [
+        '{"action":"write_file","path":"/work/report.md","content":"one"}',
+        '{"action":"write_file","path":"/work/report.md","content":"two"}',
+        '{"action":"write_file","path":"/work/report.md","content":"three"}',
+        '{"action":"final","message":"done"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=repeated_write_actions), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/report.md"}), \
+            contextlib.redirect_stdout(repeated_write_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        repeated_write_code = run_agent("repeated write file", repeated_write_config)
+    repeated_write_payload = json.loads(repeated_write_stdout.getvalue())
+    rejected_write = [
+        step for step in repeated_write_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "repeated write_file path rejected by supervisor"
+    ]
+    if repeated_write_code != 0 or not rejected_write:
+        raise AssertionError(f"repeated write_file path guard failed: code={repeated_write_code}, payload={repeated_write_payload}")
+    print("[ok] repeated write_file path guard")
+
     captured_payloads: list[dict] = []
 
     def capture_archive_payload(config_arg, method, path, payload=None, timeout=180):

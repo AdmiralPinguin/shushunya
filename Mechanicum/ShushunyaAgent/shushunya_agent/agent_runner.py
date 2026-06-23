@@ -83,6 +83,8 @@ MAX_TOOL_OUTPUT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_TOOL_OUTPUT_CHAR
 LLM_RETRIES = int(os.environ.get("SHUSHUNYA_AGENT_LLM_RETRIES", "3"))
 REPEATED_REJECTION_CONSECUTIVE_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_REPEATED_REJECTION_CONSECUTIVE_LIMIT", "4"))
 REPEATED_REJECTION_TOTAL_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_REPEATED_REJECTION_TOTAL_LIMIT", "3"))
+JSON_REPAIR_FAILURE_TOTAL_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_JSON_REPAIR_FAILURE_TOTAL_LIMIT", "5"))
+REPEATED_WRITE_FILE_PATH_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_REPEATED_WRITE_FILE_PATH_LIMIT", "2"))
 SANDBOX_STORAGE_LIMIT_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_STORAGE_LIMIT_BYTES", "536870912000"))
 SHELL_ENABLED = os.environ.get("SHUSHUNYA_AGENT_SHELL_ENABLED", "1").strip().lower() not in (
     "0",
@@ -209,6 +211,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Для файлов предпочитай структурированные file tools вместо shell.
 - Никогда не помещай большие тексты, HTML, главы книг или длинные исходники прямо в JSON content/code. Держи content/code короче 12000 символов.
 - Для больших артефактов создавай файл маленькими append_file чанками или пиши короткий Python-код, который сам собирает/парсит данные внутри sandbox.
+- Если строишь большой файл частями, используй write_file только один раз для заголовка/начала, а дальше append_file. Не перезаписывай тот же путь через write_file, если уже начал накапливать содержимое, кроме явного исправления поврежденного файла.
 - Если нужно сохранить текст из web_fetch, не копируй весь текст в JSON. Сохрани URL/метаданные, затем используй более узкие fetch/read/append шаги.
 - Для сохранения больших HTML-страниц используй web_extract_to_file: он сам скачает, очистит и запишет текст в файл. Не копируй большой текст в write_file content.
 - Когда нужно продолжать по оглавлению, пагинации или списку глав, сначала используй web_links по странице оглавления. Не угадывай следующие URL арифметикой, если tool result дает ссылку на страницу другого тома/раздела.
@@ -2273,9 +2276,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         {"role": "user", "content": task},
     ]
     action_counts: dict[str, int] = {}
+    successful_write_file_paths: dict[str, int] = {}
     repeated_rejection_count = 0
     repeated_rejection_total = 0
     consecutive_parse_failures = 0
+    total_parse_failures = 0
     verified_text_paths: set[str] = set()
     trace: list[dict[str, Any]] = []
     write_task_journal(
@@ -2350,12 +2355,13 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 write_task_journal(config, "json_repaired", {"step": step, "action": action})
             except Exception as repair_exc:
                 consecutive_parse_failures += 1
+                total_parse_failures += 1
                 emit(event_sink, {"type": "warning", "code": "json_repair_failed", "step": step, "message": f"repair не помог: {repair_exc}"})
                 write_task_journal(config, "json_repair_failed", {"step": step, "error": str(repair_exc)})
-                if consecutive_parse_failures >= 3:
+                if consecutive_parse_failures >= 3 or total_parse_failures >= max(1, JSON_REPAIR_FAILURE_TOTAL_LIMIT):
                     duration_sec = round(time.time() - run_started, 3)
                     message = (
-                        "Агент остановлен супервизором: модель несколько раз подряд вернула невалидный JSON, "
+                        "Агент остановлен супервизором: модель несколько раз вернула невалидный JSON, "
                         "и repair не смог восстановить действие. Задачу можно продолжить с более коротким действием: "
                         "не генерировать большие файлы/код одним JSON, а использовать короткие append_file/python шаги."
                     )
@@ -2372,6 +2378,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                             "duration_sec": duration_sec,
                             "stop_reason": "json_parse_stall",
                             "consecutive_parse_failures": consecutive_parse_failures,
+                            "total_parse_failures": total_parse_failures,
                         },
                     )
                     if config.json_output:
@@ -2479,6 +2486,17 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "or return final if enough work is done. Do not alternate filler actions just to retry this action."
                     ),
                 }
+            elif action_type == "write_file" and successful_write_file_paths.get(str(action.get("path") or ""), 0) >= max(1, REPEATED_WRITE_FILE_PATH_LIMIT):
+                result = {
+                    "ok": False,
+                    "error": "repeated write_file path rejected by supervisor",
+                    "path": str(action.get("path") or ""),
+                    "instruction": (
+                        "This path already had successful write_file calls in this run. If you are building a file in chunks, "
+                        "continue with append_file, verify_text_file/file_info, or use replace_in_file for a targeted correction. "
+                        "Do not overwrite accumulated content with another write_file unless the user explicitly asked to replace it."
+                    ),
+                }
             elif action_type == "shell":
                 result = run_shell(config, str(action.get("cmd", "")), action.get("timeout"), bool(action.get("approved", False)))
             elif action_type in FILE_ACTIONS:
@@ -2576,6 +2594,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             },
         )
         trace.append({"step": step, "action": action, "duration_sec": action_duration_sec, "result": result})
+        if action_type == "write_file" and isinstance(result, dict) and result.get("ok") is True:
+            path = str(action.get("path") or "")
+            if path:
+                successful_write_file_paths[path] = successful_write_file_paths.get(path, 0) + 1
 
         messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
         messages.append(
