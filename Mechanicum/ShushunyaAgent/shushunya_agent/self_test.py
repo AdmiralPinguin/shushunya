@@ -714,16 +714,18 @@ def main() -> int:
         server.API_KEY = ""
         if server.health_detail_allowed(FakeHandler()):
             raise AssertionError("health detail should require configured API key")
-        if server.privileged_api_allowed(FakeHandler()):
-            raise AssertionError("privileged API should require configured API key")
+        if not server.privileged_api_allowed(FakeHandler()):
+            raise AssertionError("privileged API should follow open local mode when API key is not configured")
         server.API_KEY = "secret"
         if not server.health_detail_allowed(FakeHandler("Bearer secret")):
             raise AssertionError("health detail should allow valid bearer key")
         if not server.privileged_api_allowed(FakeHandler("Bearer secret")):
             raise AssertionError("privileged API should allow valid bearer key")
+        if server.privileged_api_allowed(FakeHandler("Bearer wrong")):
+            raise AssertionError("privileged API should reject invalid bearer key")
     finally:
         server.API_KEY = old_api_key
-    print("[ok] privileged endpoints require API key")
+    print("[ok] privileged endpoints follow auth mode")
 
     compact_resume = server.compact_resume_events(
         [{"type": "tool_result", "result": {"content": "r" * 10000}, "index": index} for index in range(30)],

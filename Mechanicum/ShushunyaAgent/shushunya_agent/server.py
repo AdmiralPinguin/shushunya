@@ -137,7 +137,7 @@ def health_detail_allowed(handler: BaseHTTPRequestHandler) -> bool:
 
 
 def privileged_api_allowed(handler: BaseHTTPRequestHandler) -> bool:
-    return bool(API_KEY) and authorized(handler)
+    return authorized(handler)
 
 
 def bool_field(payload: dict[str, Any], key: str, default: bool = False) -> bool:
