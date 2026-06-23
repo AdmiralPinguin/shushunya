@@ -1051,6 +1051,33 @@ def main() -> int:
         raise AssertionError(f"repeated write_file path guard failed: code={repeated_write_code}, payload={repeated_write_payload}")
     print("[ok] repeated write_file path guard")
 
+    inspection_stall_stdout = io.StringIO()
+    inspection_stall_config = AgentConfig(
+        task_id=safe_task_id("self-test-inspection-stall"),
+        json_output=True,
+        max_steps=12,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    inspection_actions = [
+        json.dumps({"action": "read_file", "path": f"/work/source-{index}.txt", "max_bytes": 1000, "offset": 0})
+        for index in range(9)
+    ]
+    inspection_actions.append('{"action":"final","message":"done"}')
+    with mock.patch.object(agent_runner, "chat", side_effect=inspection_actions), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/source.txt", "content": "x", "size": 1}), \
+            contextlib.redirect_stdout(inspection_stall_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        inspection_stall_code = run_agent("inspection stall", inspection_stall_config)
+    inspection_stall_payload = json.loads(inspection_stall_stdout.getvalue())
+    rejected_inspection = [
+        step for step in inspection_stall_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "inspection stall rejected by supervisor"
+    ]
+    if inspection_stall_code != 0 or not rejected_inspection:
+        raise AssertionError(f"inspection stall guard failed: code={inspection_stall_code}, payload={inspection_stall_payload}")
+    print("[ok] inspection stall guard")
+
     captured_payloads: list[dict] = []
 
     def capture_archive_payload(config_arg, method, path, payload=None, timeout=180):

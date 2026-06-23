@@ -85,6 +85,7 @@ REPEATED_REJECTION_CONSECUTIVE_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_REPEA
 REPEATED_REJECTION_TOTAL_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_REPEATED_REJECTION_TOTAL_LIMIT", "3"))
 JSON_REPAIR_FAILURE_TOTAL_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_JSON_REPAIR_FAILURE_TOTAL_LIMIT", "5"))
 REPEATED_WRITE_FILE_PATH_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_REPEATED_WRITE_FILE_PATH_LIMIT", "2"))
+INSPECTION_STALL_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_INSPECTION_STALL_LIMIT", "8"))
 SANDBOX_STORAGE_LIMIT_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_STORAGE_LIMIT_BYTES", "536870912000"))
 SHELL_ENABLED = os.environ.get("SHUSHUNYA_AGENT_SHELL_ENABLED", "1").strip().lower() not in (
     "0",
@@ -658,6 +659,24 @@ def parse_bool(value: Any, default: bool = False) -> bool:
     if text in {"0", "false", "no", "off", ""}:
         return False
     return default
+
+
+INSPECTION_ACTIONS = {"list_files", "find_files", "search_text", "read_file", "file_info", "web_search", "web_fetch", "web_links"}
+PRODUCTIVE_ACTIONS = {
+    "write_file",
+    "append_file",
+    "replace_in_file",
+    "remove_file",
+    "python",
+    "shell",
+    "web_extract_to_file",
+    "web_extract_link_list",
+    "bundle_text_files",
+    "verify_text_file",
+    "telegram_send_document",
+    "ranobehub_chapter",
+    "archive_memory_propose",
+}
 
 
 REQUIRED_FIELDS = {
@@ -2337,6 +2356,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     ]
     action_counts: dict[str, int] = {}
     successful_write_file_paths: dict[str, int] = {}
+    inspection_actions_since_progress = 0
     repeated_rejection_count = 0
     repeated_rejection_total = 0
     consecutive_parse_failures = 0
@@ -2546,6 +2566,19 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "or return final if enough work is done. Do not alternate filler actions just to retry this action."
                     ),
                 }
+            elif (
+                action_type in INSPECTION_ACTIONS
+                and inspection_actions_since_progress >= max(1, INSPECTION_STALL_LIMIT)
+            ):
+                result = {
+                    "ok": False,
+                    "error": "inspection stall rejected by supervisor",
+                    "inspection_actions_since_progress": inspection_actions_since_progress,
+                    "instruction": (
+                        "Enough inspection actions have already run without productive progress. Stop reading/searching the same workspace. "
+                        "Use the gathered context to write or append the requested artifacts, run verify_text_file/file_info, or return final if done."
+                    ),
+                }
             elif action_type == "write_file" and successful_write_file_paths.get(str(action.get("path") or ""), 0) >= max(1, REPEATED_WRITE_FILE_PATH_LIMIT):
                 result = {
                     "ok": False,
@@ -2658,6 +2691,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             path = str(action.get("path") or "")
             if path:
                 successful_write_file_paths[path] = successful_write_file_paths.get(path, 0) + 1
+        if isinstance(result, dict) and result.get("ok") is True:
+            if action_type in PRODUCTIVE_ACTIONS:
+                inspection_actions_since_progress = 0
+            elif action_type in INSPECTION_ACTIONS:
+                inspection_actions_since_progress += 1
 
         messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
         messages.append(
@@ -2666,7 +2704,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "content": "Tool result:\n" + json.dumps(result_for_model(action_type, result, config), ensure_ascii=False, indent=2),
             }
         )
-        if isinstance(result, dict) and str(result.get("error") or "") == "repeated identical action rejected by supervisor":
+        supervisor_rejection = str(result.get("error") or "") in {
+            "repeated identical action rejected by supervisor",
+            "repeated write_file path rejected by supervisor",
+            "inspection stall rejected by supervisor",
+        } if isinstance(result, dict) else False
+        if supervisor_rejection:
             repeated_rejection_count += 1
             repeated_rejection_total += 1
             if (
