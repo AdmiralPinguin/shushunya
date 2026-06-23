@@ -5,6 +5,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -36,6 +37,8 @@ PUBLIC_CONTINUE_TASK = (
     "Не повторяй уже выполненные действия и не начинай задачу заново."
 )
 USEFUL_CONTEXT_TYPES = {"start", "action", "tool_result", "final", "error", "warning"}
+WATCHDOG_TASK_PREFIX = "mobile-watchdog-"
+TASK_ID_RE = re.compile(r'"(?:task_id|resume_task_id)"\s*:\s*"([^"]+)"')
 
 
 def normalize_task_id(raw: str | None) -> str:
@@ -202,6 +205,53 @@ def target_task_id(base_url: str, api_key: str, explicit_task_id: str) -> str:
     return normalize_task_id(str(tasks[0].get("task_id") or ""))
 
 
+def embedded_task_ids_from_text(value: Any) -> list[str]:
+    text = str(value or "")
+    result: list[str] = []
+    for match in TASK_ID_RE.finditer(text):
+        task_id = normalize_task_id(match.group(1))
+        if task_id and task_id not in result:
+            result.append(task_id)
+    return result
+
+
+def embedded_root_task_id(task: dict[str, Any]) -> str:
+    current = normalize_task_id(str(task.get("task_id") or ""))
+    candidates: list[str] = []
+    candidates.extend(embedded_task_ids_from_text(task.get("task")))
+    events = task.get("events") if isinstance(task.get("events"), list) else []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if str(event.get("type") or "") == "start":
+            candidates.extend(embedded_task_ids_from_text(event.get("task")))
+        final = event if str(event.get("type") or "") == "final" else None
+        if final:
+            candidates.extend(embedded_task_ids_from_text(json.dumps(final, ensure_ascii=False)))
+    final_payload = task.get("final")
+    if isinstance(final_payload, dict):
+        resume_id = normalize_task_id(str(final_payload.get("resume_task_id") or ""))
+        if resume_id:
+            candidates.append(resume_id)
+    for candidate in candidates:
+        if candidate and candidate != current and not candidate.startswith(WATCHDOG_TASK_PREFIX):
+            return candidate
+    return ""
+
+
+def resolve_watchdog_wrapper(base_url: str, api_key: str, task_id: str, task: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    safe_id = normalize_task_id(task_id)
+    if not safe_id.startswith(WATCHDOG_TASK_PREFIX):
+        return safe_id, task
+    root_id = embedded_root_task_id(task)
+    if not root_id:
+        return safe_id, task
+    status, root_task = task_snapshot(base_url, api_key, root_id)
+    if status != 200:
+        return safe_id, task
+    return root_id, root_task
+
+
 def task_snapshot(base_url: str, api_key: str, task_id: str) -> tuple[int, dict[str, Any]]:
     query = urllib.parse.urlencode({"task_id": task_id, "limit": 160})
     return request_json(base_url, "GET", f"/task?{query}", api_key)
@@ -220,6 +270,14 @@ def compact_value(value: Any, *, string_limit: int = 600, list_limit: int = 8) -
 def compact_watchdog_event(event: dict[str, Any]) -> dict[str, Any]:
     event_type = str(event.get("type") or "")
     if event_type == "start":
+        task_text = str(event.get("task") or "")
+        embedded_ids = embedded_task_ids_from_text(task_text)
+        if "Authoritative task snapshot:" in task_text and embedded_ids:
+            root_id = next((task_id for task_id in embedded_ids if not task_id.startswith(WATCHDOG_TASK_PREFIX)), embedded_ids[0])
+            return {
+                "type": "start",
+                "task": f"watchdog continuation for {root_id}",
+            }
         return {
             "type": "start",
             "task": compact_value(event.get("task"), string_limit=1200),
@@ -329,6 +387,10 @@ def run_once(args: argparse.Namespace) -> int:
     if status != 200:
         log("task-watchdog: task snapshot unavailable", task_id=task_id, status=status, response=task)
         return 1
+    resolved_task_id, task = resolve_watchdog_wrapper(base_url, api_key, task_id, task)
+    if resolved_task_id != task_id:
+        log("task-watchdog: unwrapped watchdog task", task_id=task_id, resolved_task_id=resolved_task_id)
+        task_id = resolved_task_id
 
     final = task.get("final") if isinstance(task.get("final"), dict) else None
     state = load_state()

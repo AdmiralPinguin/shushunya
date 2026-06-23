@@ -202,6 +202,22 @@ def main() -> int:
         raise AssertionError(f"watchdog public context missed task facts: {public_context}")
     if "Do not use Archive/focus memory" not in public_context:
         raise AssertionError(f"watchdog public context missed Archive warning: {public_context}")
+    nested_watchdog_text = (
+        task_watchdog.PUBLIC_CONTINUE_TASK
+        + '\n\nAuthoritative task snapshot:\n{"task_id":"mobile-watchdog-old","events":[{"type":"start","task":"x"}],'
+          '"final":{"resume_task_id":"mobile-codex-root-123"}}'
+    )
+    compact_nested_start = task_watchdog.compact_watchdog_event({"type": "start", "task": nested_watchdog_text})
+    if "mobile-codex-root-123" not in compact_nested_start.get("task", "") or "Authoritative task snapshot" in compact_nested_start.get("task", ""):
+        raise AssertionError(f"watchdog nested start was not compacted: {compact_nested_start}")
+    nested_root = task_watchdog.embedded_root_task_id(
+        {
+            "task_id": "mobile-watchdog-new",
+            "events": [{"type": "start", "task": nested_watchdog_text}],
+        }
+    )
+    if nested_root != "mobile-codex-root-123":
+        raise AssertionError(f"watchdog did not resolve nested root task id: {nested_root}")
     captured_public_payload: dict = {}
 
     def fake_watchdog_request(base_url: str, method: str, path: str, api_key: str = "", payload: dict | None = None):
