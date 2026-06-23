@@ -283,11 +283,11 @@ def recent_task_summaries(limit: int = 20, prefix: str | None = None) -> dict[st
         return {"ok": False, "error": str(exc), "tasks": []}
 
 
-def compact_resume_events(events: list[Any], max_chars: int = 20000) -> list[Any]:
+def compact_resume_events(events: list[Any], max_chars: int = 6000) -> list[Any]:
     selected: list[Any] = []
     total = 2
     for event in reversed(events):
-        compacted = compact_json_value(event, string_limit=1200, list_limit=20)
+        compacted = compact_json_value(event, string_limit=500, list_limit=8)
         text = json.dumps(compacted, ensure_ascii=False, separators=(",", ":"))
         if selected and total + len(text) + 1 > max_chars:
             break

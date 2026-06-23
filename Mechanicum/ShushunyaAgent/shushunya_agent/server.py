@@ -671,11 +671,10 @@ def continuation_task(base_task: str, task_id: str, cycle: int) -> str:
         "Продолжи выполнение той же задачи по task journal. "
         "Не повторяй уже выполненные действия. Сначала оцени, что уже сделано, затем продолжай с ближайшего незавершенного шага. "
         "Если задача уже завершена или дальше продолжать нельзя, верни final и коротко объясни состояние. "
-        "Не начинай задачу заново.\n\n"
+        "Не начинай задачу заново. Исходную цель бери из start-событий в resume context; если они скомпактированы, "
+        "используй последние action/tool_result/final/error как источник текущего состояния.\n\n"
         f"Continuation cycle: {cycle}\n"
-        f"Resume task id: {task_id}\n\n"
-        "Original task:\n"
-        + base_task
+        f"Resume task id: {task_id}"
     )
 
 

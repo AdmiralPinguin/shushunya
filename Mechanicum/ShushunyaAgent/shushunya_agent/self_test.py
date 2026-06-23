@@ -1014,7 +1014,13 @@ def main() -> int:
     context_config = AgentConfig(llm_retries=1, inject_memory=True, archive_internal_steps=False)
     with mock.patch.object(agent_runner, "archive_request", side_effect=context_side_effect) as mocked_archive:
         context_reply = chat(context_config, [{"role": "user", "content": "context"}], inject_memory=True, archive_enabled=False)
-    if context_reply != '{"action":"final","message":"memory off ok"}' or mocked_archive.call_count != 4:
+    last_call = mocked_archive.call_args_list[-1]
+    last_payload = last_call.kwargs.get("payload") or (last_call.args[3] if len(last_call.args) > 3 else {})
+    if (
+        context_reply != '{"action":"final","message":"memory off ok"}'
+        or mocked_archive.call_count < 2
+        or last_payload.get("focus_enabled") is not False
+    ):
         raise AssertionError(f"context retry did not disable memory after compacted attempts: reply={context_reply}, calls={mocked_archive.call_count}")
     print("[ok] model context retry disables memory")
 

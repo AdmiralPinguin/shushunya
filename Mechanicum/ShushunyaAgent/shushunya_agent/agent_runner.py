@@ -402,14 +402,14 @@ def summarize_json_for_model(value: Any, depth: int = 0) -> Any:
 
 
 def compact_messages_for_model(messages: list[dict[str, str]], config: AgentConfig, budget: int | None = None) -> list[dict[str, str]]:
-    budget = max(4500, int(budget or config.max_context_chars))
+    budget = max(2500, int(budget or config.max_context_chars))
     current = sum(len(message.get("content", "")) for message in messages)
     if current <= budget:
         return messages
 
     system = messages[0] if messages else {"role": "system", "content": SYSTEM_PROMPT}
     user = messages[1] if len(messages) > 1 else {"role": "user", "content": ""}
-    remaining_budget = max(2000, budget - len(system.get("content", "")) - len(user.get("content", "")))
+    remaining_budget = max(800, budget - len(system.get("content", "")) - len(user.get("content", "")))
     tail: list[dict[str, str]] = []
     used = 0
     for message in reversed(messages[2:]):
@@ -475,7 +475,7 @@ def chat(
     inject_memory: bool | None = None,
     archive_enabled: bool | None = None,
 ) -> str:
-    budgets = [config.max_context_chars, 7000, 5500]
+    budgets = [config.max_context_chars, 7000, 5500, 4000, 3000]
     last_error = ""
     memory_enabled = config.inject_memory if inject_memory is None else inject_memory
     should_archive = config.archive_internal_steps if archive_enabled is None else archive_enabled
