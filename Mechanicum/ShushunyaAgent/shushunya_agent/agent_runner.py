@@ -2103,7 +2103,7 @@ def web_links_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any
 
 def action_fingerprint(action: dict[str, Any]) -> str:
     action_type = str(action.get("action", "")).strip().lower()
-    if action_type == "ranobehub_chapter":
+    if action_type in {"ranobehub_chapter", "web_extract_to_file"}:
         raw_url = str(action.get("url") or "").strip()
         parsed = urlparse(raw_url)
         path = parsed.path.rstrip("/") or parsed.path

@@ -823,6 +823,21 @@ def main() -> int:
     if action_fingerprint(chapter_a) != action_fingerprint(chapter_b):
         raise AssertionError("ranobehub chapter repeat fingerprint should ignore output path/name variants")
     print("[ok] ranobehub repeat fingerprint")
+    extract_a = {
+        "action": "web_extract_to_file",
+        "url": "https://example.com/docs/page?utm_source=test#section",
+        "path": "/work/source_a.txt",
+        "mode": "write",
+    }
+    extract_b = {
+        "action": "web_extract_to_file",
+        "url": "https://example.com/docs/page/",
+        "path": "/work/source_b.txt",
+        "mode": "append",
+    }
+    if action_fingerprint(extract_a) != action_fingerprint(extract_b):
+        raise AssertionError("web_extract_to_file repeat fingerprint should ignore output path/name variants")
+    print("[ok] web extract repeat fingerprint")
 
     cancelled_task_id = server.mark_task_cancelled("self test cancel registry")
     if not server.is_task_cancelled(cancelled_task_id):
