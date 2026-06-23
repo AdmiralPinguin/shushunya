@@ -16,7 +16,12 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .agent_runner import AgentConfig, archive_request, compact_resume_events, read_task_journal, run_agent, safe_task_id
-from .task_journal import is_contextless_task_reference, latest_completed_task_summary, recent_task_summaries
+from .task_journal import (
+    is_contextless_task_reference,
+    latest_completed_task_summary,
+    recent_task_summaries,
+    write_task_journal,
+)
 from .utils import compact_json_value
 
 
@@ -238,6 +243,18 @@ def remember_run_event(task_id: str, event: dict[str, Any]) -> None:
 def collect_and_remember_event(task_id: str, event: dict[str, Any]) -> None:
     collect_agent_event(event)
     remember_run_event(task_id, event)
+
+
+def record_background_crash(config: AgentConfig, exc: Exception) -> None:
+    event = {
+        "type": "error",
+        "ok": False,
+        "code": "background_exception",
+        "exception": exc.__class__.__name__,
+        "message": str(exc),
+    }
+    collect_and_remember_event(config.task_id, event)
+    write_task_journal(config, "error", event)
 
 
 def is_task_cancelled(task_id: str) -> bool:
@@ -947,7 +964,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                         event_sink=lambda event, task_id=config.task_id: collect_and_remember_event(task_id, event),
                     )
                 except Exception as exc:
-                    remember_run_event(config.task_id, {"type": "error", "ok": False, "message": str(exc)})
+                    record_background_crash(config, exc)
 
             worker = threading.Thread(target=background_run, name=f"agent-bg-{config.task_id}", daemon=True)
             worker.start()
