@@ -737,8 +737,57 @@ def extract_sandbox_paths_from_text(text: str) -> list[str]:
     return paths[:20]
 
 
+REQUIRED_ARTIFACT_MARKERS = (
+    "required",
+    "обяз",
+    "создай",
+    "создать",
+    "создан",
+    "готов",
+    "цель",
+    "итог",
+    "artifact",
+    "артефакт",
+    "output",
+)
+
+NON_REQUIRED_ARTIFACT_MARKERS = (
+    "not substitute",
+    "not substitutes",
+    "не замен",
+    "не является замен",
+    "не являются замен",
+    "не substitute",
+)
+
+
+def required_artifact_paths_from_task(task: str) -> list[str]:
+    required: list[str] = []
+    seen: set[str] = set()
+    for sentence in re.split(r"(?<=[.!?\n])\s+", task or ""):
+        lowered = sentence.lower()
+        paths = extract_sandbox_paths_from_text(sentence)
+        if not paths:
+            continue
+        if any(marker in lowered for marker in NON_REQUIRED_ARTIFACT_MARKERS):
+            continue
+        if not any(marker in lowered for marker in REQUIRED_ARTIFACT_MARKERS):
+            continue
+        for path in paths:
+            if Path(path).suffix.lower() not in TEXT_VERIFICATION_EXTENSIONS:
+                continue
+            if path not in seen:
+                seen.add(path)
+                required.append(path)
+    return required[:20]
+
+
 def validate_final_artifacts(config: AgentConfig, message: str) -> dict[str, Any]:
-    paths = extract_sandbox_paths_from_text(message)
+    return validate_artifact_paths(config, extract_sandbox_paths_from_text(message))
+
+
+def validate_artifact_paths(config: AgentConfig, paths: list[str]) -> dict[str, Any]:
+    paths = list(dict.fromkeys(paths))[:20]
     if not paths:
         return {"ok": True, "paths": []}
     checked: list[dict[str, Any]] = []
@@ -2362,6 +2411,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     consecutive_parse_failures = 0
     total_parse_failures = 0
     verified_text_paths: set[str] = set()
+    required_artifact_paths = set(required_artifact_paths_from_task(task))
     trace: list[dict[str, Any]] = []
     write_task_journal(
         config,
@@ -2492,6 +2542,32 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if action_type == "final":
             message = str(action.get("message", "")).strip()
             artifact_validation = validate_final_artifacts(config, message)
+            final_paths = set(artifact_validation.get("paths") or [])
+            missing_required_paths = sorted(required_artifact_paths - final_paths)
+            if missing_required_paths:
+                required_validation = validate_artifact_paths(config, missing_required_paths)
+                warning_message = (
+                    "Supervisor rejected final because the user task required sandbox artifacts that final omitted: "
+                    + json.dumps(
+                        {
+                            "missing_required_paths": missing_required_paths,
+                            "required_validation": required_validation,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                emit(event_sink, {"type": "warning", "code": "final_required_artifacts_omitted", "step": step, "message": warning_message})
+                messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            warning_message
+                            + "\nCreate, verify, and mention every required sandbox artifact from the user task before final."
+                        ),
+                    }
+                )
+                continue
             if not artifact_validation.get("ok"):
                 warning_message = (
                     "Supervisor rejected final because mentioned sandbox artifacts are missing or empty: "

@@ -51,6 +51,7 @@ from .agent_runner import (
     write_task_journal,
     looks_like_oversized_inline_file_action,
     extract_sandbox_paths_from_text,
+    required_artifact_paths_from_task,
     validate_final_artifacts,
 )
 
@@ -1232,6 +1233,44 @@ def main() -> int:
     if not any(event.get("code") == "final_artifact_validation_failed" for event in rejected_final_events):
         raise AssertionError(f"missing artifact warning was not emitted: {rejected_final_events}")
     print("[ok] final artifact validation")
+
+    required_paths = required_artifact_paths_from_task(
+        "Required artifacts: /work/report.md and /work/matrix.md. "
+        "summary.md and /work/analysis.json are not substitutes. Use /work/sources as input."
+    )
+    if required_paths != ["/work/report.md", "/work/matrix.md"]:
+        raise AssertionError(f"required artifact extraction failed: {required_paths}")
+    print("[ok] required artifact path extraction")
+
+    omitted_final_events: list[dict] = []
+    omitted_final_stdout = io.StringIO()
+    omitted_final_config = AgentConfig(
+        task_id=safe_task_id("self-test-final-required-artifacts"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    omitted_replies = [
+        '{"action":"final","message":"Готово: /work/report.md"}',
+        '{"action":"final","message":"Готово: /work/report.md и /work/matrix.md"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=omitted_replies), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "exists": True, "type": "file", "size": 2000}), \
+            mock.patch.object(agent_runner, "missing_text_verifications", return_value=[]), \
+            contextlib.redirect_stdout(omitted_final_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        omitted_final_code = run_agent(
+            "Required artifacts: /work/report.md and /work/matrix.md. summary.md and /work/analysis.json are not substitutes.",
+            omitted_final_config,
+            event_sink=omitted_final_events.append,
+        )
+    omitted_final_payload = json.loads(omitted_final_stdout.getvalue())
+    if omitted_final_code != 0 or "/work/matrix.md" not in omitted_final_payload.get("message", ""):
+        raise AssertionError(f"required final artifacts were not enforced: {omitted_final_payload}")
+    if not any(event.get("code") == "final_required_artifacts_omitted" for event in omitted_final_events):
+        raise AssertionError(f"missing required artifact warning was not emitted: {omitted_final_events}")
+    print("[ok] final required artifact coverage")
 
     class FakeTelegramProcess:
         returncode = 0
