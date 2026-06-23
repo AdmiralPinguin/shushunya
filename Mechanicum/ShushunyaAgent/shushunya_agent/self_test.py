@@ -1177,6 +1177,44 @@ def main() -> int:
         raise AssertionError(f"verify after append should not be blocked by repeat guard: calls={verify_calls}, payload={verify_after_append_payload}")
     print("[ok] verify repeat reset after file mutation")
 
+    rewrite_after_verify_stdout = io.StringIO()
+    rewrite_after_verify_config = AgentConfig(
+        task_id=safe_task_id("self-test-rewrite-after-verify-failure"),
+        json_output=True,
+        max_steps=6,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    rewrite_after_verify_actions = [
+        '{"action":"write_file","path":"/work/checklist.md","content":"draft"}',
+        '{"action":"verify_text_file","path":"/work/checklist.md","must_contain":["done"]}',
+        '{"action":"write_file","path":"/work/checklist.md","content":"draft\\ndone"}',
+        '{"action":"verify_text_file","path":"/work/checklist.md","must_contain":["done"]}',
+        '{"action":"final","message":"Готово: /work/checklist.md"}',
+    ]
+
+    def fake_rewrite_verify(_config, action):
+        if action.get("path") == "/work/checklist.md" and fake_rewrite_verify.calls == 0:
+            fake_rewrite_verify.calls += 1
+            return {"ok": False, "path": "/work/checklist.md", "failures": [{"check": "must_contain", "pattern": "done"}]}
+        return {"ok": True, "path": "/work/checklist.md", "failures": []}
+
+    fake_rewrite_verify.calls = 0
+    with mock.patch.object(agent_runner, "chat", side_effect=rewrite_after_verify_actions), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_rewrite_verify), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/checklist.md"}), \
+            contextlib.redirect_stdout(rewrite_after_verify_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        rewrite_after_verify_code = run_agent("rewrite after failed verification", rewrite_after_verify_config)
+    rewrite_after_verify_payload = json.loads(rewrite_after_verify_stdout.getvalue())
+    rejected_rewrite = [
+        step for step in rewrite_after_verify_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "repeated write_file path rejected by supervisor"
+    ]
+    if rejected_rewrite:
+        raise AssertionError(f"rewrite after failed verification was blocked: code={rewrite_after_verify_code}, payload={rewrite_after_verify_payload}")
+    print("[ok] write_file correction allowed after failed verification")
+
     captured_payloads: list[dict] = []
 
     def capture_archive_payload(config_arg, method, path, payload=None, timeout=180):
