@@ -733,6 +733,29 @@ def main() -> int:
     if not compact_resume or len(compact_resume_text) > 7000:
         raise AssertionError("resume events were not compacted")
     print("[ok] resume context compacted")
+    resume_with_start = server.compact_resume_events(
+        [
+            {
+                "type": "start",
+                "task": "Create /work/report.md and /work/matrix.md.",
+                "required_artifacts": ["/work/report.md", "/work/matrix.md"],
+            },
+            *({"type": "tool_result", "result": {"content": "x" * 2000}, "index": index} for index in range(40)),
+        ],
+        max_chars=5000,
+    )
+    if not resume_with_start or resume_with_start[0].get("type") != "start":
+        raise AssertionError(f"resume context lost start event: {resume_with_start[:2]}")
+    if resume_with_start[0].get("required_artifacts") != ["/work/report.md", "/work/matrix.md"]:
+        raise AssertionError(f"resume context lost required artifacts: {resume_with_start[0]}")
+    print("[ok] resume context preserves required artifacts")
+    if server.should_apply_previous_task_context({"task_id": "new-explicit-task"}):
+        raise AssertionError("explicit new task_id should not inherit previous task context")
+    if not server.should_apply_previous_task_context({"resume_task_id": "old-task"}):
+        raise AssertionError("resume_task_id should keep previous/resume context enabled")
+    if server.should_apply_previous_task_context({"skip_previous_task_context": True}):
+        raise AssertionError("skip_previous_task_context should disable previous context")
+    print("[ok] explicit task id skips previous task context")
 
     auto_continue_calls: list[tuple[str, dict]] = []
 

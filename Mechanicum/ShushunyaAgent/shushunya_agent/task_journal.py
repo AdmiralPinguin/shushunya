@@ -286,11 +286,22 @@ def recent_task_summaries(limit: int = 20, prefix: str | None = None) -> dict[st
 def compact_resume_events(events: list[Any], max_chars: int = 6000) -> list[Any]:
     selected: list[Any] = []
     total = 2
+    start_event = next((event for event in events if isinstance(event, dict) and event.get("type") == "start"), None)
+    if start_event is not None:
+        compacted_start = compact_json_value(start_event, string_limit=1800, list_limit=30)
+        text = json.dumps(compacted_start, ensure_ascii=False, separators=(",", ":"))
+        if len(text) + 3 <= max_chars:
+            selected.append(compacted_start)
+            total += len(text) + 1
     for event in reversed(events):
+        if event is start_event:
+            continue
         compacted = compact_json_value(event, string_limit=500, list_limit=8)
         text = json.dumps(compacted, ensure_ascii=False, separators=(",", ":"))
         if selected and total + len(text) + 1 > max_chars:
             break
         selected.append(compacted)
         total += len(text) + 1
+    if selected and start_event is not None and selected[0].get("type") == "start":
+        return [selected[0], *reversed(selected[1:])]
     return list(reversed(selected))

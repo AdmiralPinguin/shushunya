@@ -2601,6 +2601,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         "start",
         {
             "task": task,
+            "required_artifacts": required_artifact_path_list,
             "memory_namespace": config.memory_namespace,
             "archive_user": config.archive_user,
             "max_steps": config.max_steps,
