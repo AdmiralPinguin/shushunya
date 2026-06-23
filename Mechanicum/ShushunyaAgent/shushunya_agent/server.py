@@ -363,10 +363,10 @@ def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]
     resume_task_id = str(payload.get("resume_task_id") or "").strip()
     if not resume_task_id:
         return task
-    journal = read_task_journal(resume_task_id, limit=80)
+    journal = read_task_journal(resume_task_id, limit=500)
     if not journal.get("ok"):
         return task + "\n\nResume note: requested previous task journal was not found."
-    compact_events = compact_resume_events(journal.get("events", [])[-80:])
+    compact_events = compact_resume_events(journal.get("events", []))
     return (
         task
         + "\n\nResume context from previous agent task journal "

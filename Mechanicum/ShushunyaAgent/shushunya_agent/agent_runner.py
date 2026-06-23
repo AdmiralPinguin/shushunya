@@ -3229,8 +3229,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.task_id:
         config.task_id = safe_task_id(args.task_id)
     if args.resume_task_id:
-        journal = read_task_journal(args.resume_task_id, limit=80)
-        compact_events = compact_resume_events(journal.get("events", [])[-80:]) if journal.get("ok") else []
+        journal = read_task_journal(args.resume_task_id, limit=500)
+        compact_events = compact_resume_events(journal.get("events", [])) if journal.get("ok") else []
         task += (
             "\n\nResume context from previous agent task journal "
             + str(journal.get("task_id") or args.resume_task_id)

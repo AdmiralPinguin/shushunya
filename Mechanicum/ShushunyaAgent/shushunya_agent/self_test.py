@@ -751,6 +751,25 @@ def main() -> int:
     if resume_with_start[0].get("required_artifacts") != ["/work/report.md", "/work/matrix.md"]:
         raise AssertionError(f"resume context lost required artifacts: {resume_with_start[0]}")
     print("[ok] resume context preserves required artifacts")
+    long_resume_events = [
+        {
+            "type": "start",
+            "task": "Create /work/report.md and /work/matrix.md.",
+            "required_artifacts": ["/work/report.md", "/work/matrix.md"],
+        },
+        *({"type": "step", "step": index} for index in range(140)),
+    ]
+
+    def fake_long_journal(task_id, limit=80):
+        if limit < 500:
+            raise AssertionError(f"resume journal limit too small: {limit}")
+        return {"ok": True, "task_id": task_id, "events": long_resume_events}
+
+    with mock.patch.object(server, "read_task_journal", side_effect=fake_long_journal):
+        long_resume_task = server.apply_resume_context("continue", AgentConfig(task_id="long-resume"), {"resume_task_id": "previous"})
+    if "/work/report.md" not in long_resume_task or "/work/matrix.md" not in long_resume_task:
+        raise AssertionError(f"long resume context lost required artifact paths: {long_resume_task[-1000:]}")
+    print("[ok] long resume context keeps original required artifacts")
     if server.should_apply_previous_task_context({"task_id": "new-explicit-task"}):
         raise AssertionError("explicit new task_id should not inherit previous task context")
     if not server.should_apply_previous_task_context({"resume_task_id": "old-task"}):
