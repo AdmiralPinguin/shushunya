@@ -1175,6 +1175,12 @@ def main() -> int:
     )
     if "must_contain:reconnect" not in verify_summary or "min_chars:expected=3000 actual=2400" not in verify_summary:
         raise AssertionError(f"verify_text_file summary missed failure details: {verify_summary}")
+    ordered_summary = agent_runner.result_summary(
+        "verify_text_file",
+        {"ok": False, "path": "/work/report.md", "failures": [{"check": "ordered_patterns", "pattern": "A"}]},
+    )
+    if "retry verify_text_file without ordered_patterns" not in ordered_summary:
+        raise AssertionError(f"ordered pattern summary missed retry hint: {ordered_summary}")
     print("[ok] verify_text_file summary includes failure details")
 
     transient_error = HTTPError(

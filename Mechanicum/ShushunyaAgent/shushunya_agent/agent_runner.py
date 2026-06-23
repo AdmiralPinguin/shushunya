@@ -2418,6 +2418,8 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
             else:
                 details.append(truncate(str(failure), 60))
         suffix = f" missing={'; '.join(details)}" if details else ""
+        if any(isinstance(failure, dict) and failure.get("check") == "ordered_patterns" for failure in failures):
+            suffix += " note=ordered_patterns is only required when the user explicitly asked for ordering; otherwise retry verify_text_file without ordered_patterns"
         return f"verified={bool(result.get('ok'))} path={result.get('path')} failures={len(failures)}{suffix}"
     if action_type == "telegram_send_document":
         return f"telegram message {result.get('message_id')} file={result.get('file_name') or result.get('path')}"
