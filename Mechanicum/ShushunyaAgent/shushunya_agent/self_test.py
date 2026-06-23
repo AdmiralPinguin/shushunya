@@ -1289,6 +1289,33 @@ def main() -> int:
         raise AssertionError(f"verify after append should not be blocked by repeat guard: calls={verify_calls}, payload={verify_after_append_payload}")
     print("[ok] verify repeat reset after file mutation")
 
+    repeated_verify_stdout = io.StringIO()
+    repeated_verify_config = AgentConfig(
+        task_id=safe_task_id("self-test-repeated-verified-text"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    repeated_verify_actions = [
+        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["done"]}',
+        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["done"]}',
+        '{"action":"final","message":"done"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=repeated_verify_actions), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", return_value={"ok": True, "path": "/work/report.md", "failures": []}), \
+            contextlib.redirect_stdout(repeated_verify_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        repeated_verify_code = run_agent("do not verify same text forever", repeated_verify_config)
+    repeated_verify_payload = json.loads(repeated_verify_stdout.getvalue())
+    repeated_verify_rejections = [
+        step for step in repeated_verify_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "repeated verified text verification rejected by supervisor"
+    ]
+    if repeated_verify_code != 0 or not repeated_verify_rejections:
+        raise AssertionError(f"repeated verified text guard failed: code={repeated_verify_code}, payload={repeated_verify_payload}")
+    print("[ok] repeated verified text guard")
+
     rewrite_after_verify_stdout = io.StringIO()
     rewrite_after_verify_config = AgentConfig(
         task_id=safe_task_id("self-test-rewrite-after-verify-failure"),

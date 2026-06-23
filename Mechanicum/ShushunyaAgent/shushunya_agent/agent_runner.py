@@ -2936,6 +2936,20 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     ),
                 }
             elif (
+                action_type == "verify_text_file"
+                and str(action.get("path") or "") in verified_text_paths
+                and str(action.get("path") or "") not in failed_verification_paths
+            ):
+                result = {
+                    "ok": False,
+                    "error": "repeated verified text verification rejected by supervisor",
+                    "path": str(action.get("path") or ""),
+                    "instruction": (
+                        "This text artifact already passed verify_text_file and has not changed since. "
+                        "Do not verify it again. Verify remaining required artifacts or return final."
+                    ),
+                }
+            elif (
                 action_type == "write_file"
                 and successful_write_file_paths.get(str(action.get("path") or ""), 0) >= max(1, REPEATED_WRITE_FILE_PATH_LIMIT)
                 and len(str(action.get("content") or "").encode("utf-8"))
@@ -3120,6 +3134,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         supervisor_rejection = str(result.get("error") or "") in {
             "repeated identical action rejected by supervisor",
             "repeated write_file path rejected by supervisor",
+            "repeated verified text verification rejected by supervisor",
             "inspection stall rejected by supervisor",
         } if isinstance(result, dict) else False
         if supervisor_rejection:
