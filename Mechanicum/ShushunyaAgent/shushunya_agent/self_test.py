@@ -1162,6 +1162,21 @@ def main() -> int:
         raise AssertionError(f"reasoning_content fallback failed: {reasoning_reply}")
     print("[ok] agent chat reads reasoning_content fallback")
 
+    verify_summary = agent_runner.result_summary(
+        "verify_text_file",
+        {
+            "ok": False,
+            "path": "/work/report.md",
+            "failures": [
+                {"check": "must_contain", "pattern": "reconnect"},
+                {"check": "min_chars", "expected": 3000, "actual": 2400},
+            ],
+        },
+    )
+    if "must_contain:reconnect" not in verify_summary or "min_chars:expected=3000 actual=2400" not in verify_summary:
+        raise AssertionError(f"verify_text_file summary missed failure details: {verify_summary}")
+    print("[ok] verify_text_file summary includes failure details")
+
     transient_error = HTTPError(
         url="http://archive/v1/chat/completions",
         code=429,

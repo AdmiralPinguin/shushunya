@@ -2403,7 +2403,22 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
     if action_type == "bundle_text_files":
         return f"{result.get('included_files', 0)} files -> {result.get('output_txt')}, {result.get('output_fb2')}"
     if action_type == "verify_text_file":
-        return f"verified={bool(result.get('ok'))} path={result.get('path')} failures={len(result.get('failures') or [])}"
+        failures = result.get("failures") if isinstance(result.get("failures"), list) else []
+        details: list[str] = []
+        for failure in failures[:5]:
+            if isinstance(failure, dict):
+                check = str(failure.get("check") or failure.get("reason") or "failure")
+                pattern = failure.get("pattern")
+                if pattern:
+                    details.append(f"{check}:{truncate(str(pattern), 60)}")
+                elif "expected" in failure or "actual" in failure:
+                    details.append(f"{check}:expected={failure.get('expected')} actual={failure.get('actual')}")
+                else:
+                    details.append(check)
+            else:
+                details.append(truncate(str(failure), 60))
+        suffix = f" missing={'; '.join(details)}" if details else ""
+        return f"verified={bool(result.get('ok'))} path={result.get('path')} failures={len(failures)}{suffix}"
     if action_type == "telegram_send_document":
         return f"telegram message {result.get('message_id')} file={result.get('file_name') or result.get('path')}"
     if action_type == "ranobehub_chapter":
