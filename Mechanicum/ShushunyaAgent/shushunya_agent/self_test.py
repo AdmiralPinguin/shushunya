@@ -471,7 +471,7 @@ def main() -> int:
 
     large_result = {"ok": True, "content": "x" * 50000, "size": 50000}
     compacted_result = result_for_model("read_file", large_result, config)
-    if len(compacted_result.get("content", "")) > 7000:
+    if len(compacted_result.get("content", "")) > 3000:
         raise AssertionError("read_file result was not compacted for model context")
     print("[ok] read_file result compacted for model context")
     large_json_result = {

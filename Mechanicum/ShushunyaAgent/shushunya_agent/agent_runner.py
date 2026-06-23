@@ -279,7 +279,7 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
         return {"ok": False, "error": truncate(str(result), 2000)}
     payload = dict(result)
     if action_type == "read_file" and isinstance(payload.get("content"), str):
-        payload["content"] = truncate(payload["content"], 6000)
+        payload["content"] = truncate(payload["content"], 2500)
         payload["content_note"] = "content compacted for model context; use read_file offset/next_offset for more"
     elif action_type == "web_fetch" and isinstance(payload.get("text"), str):
         text = str(payload.get("text") or "")
@@ -292,7 +292,7 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
             except json.JSONDecodeError:
                 payload["text"] = truncate(text, 4000)
         else:
-            payload["text"] = truncate(text, 5000)
+            payload["text"] = truncate(text, 2500)
     elif action_type == "web_links":
         list_limits = {
             "links": 100,
