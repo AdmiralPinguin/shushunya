@@ -1612,7 +1612,7 @@ def main() -> int:
     ]
     with mock.patch.object(agent_runner, "chat", side_effect=omitted_replies), \
             mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "exists": True, "type": "file", "size": 2000}), \
-            mock.patch.object(agent_runner, "missing_text_verifications", return_value=[]), \
+            mock.patch.object(agent_runner, "missing_text_verifications", side_effect=[["/work/matrix.md"], []]), \
             contextlib.redirect_stdout(omitted_final_stdout), \
             contextlib.redirect_stderr(io.StringIO()):
         omitted_final_code = run_agent(
@@ -1626,6 +1626,28 @@ def main() -> int:
     if not any(event.get("code") == "final_required_artifacts_omitted" for event in omitted_final_events):
         raise AssertionError(f"missing required artifact warning was not emitted: {omitted_final_events}")
     print("[ok] final required artifact coverage")
+
+    omitted_verified_stdout = io.StringIO()
+    omitted_verified_config = AgentConfig(
+        task_id=safe_task_id("self-test-final-omitted-but-verified-artifacts"),
+        json_output=True,
+        max_steps=1,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat", return_value='{"action":"final","message":"Готово: /work/report.md"}'), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "exists": True, "type": "file", "size": 2000}), \
+            mock.patch.object(agent_runner, "missing_text_verifications", return_value=[]), \
+            contextlib.redirect_stdout(omitted_verified_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        omitted_verified_code = run_agent(
+            "Required artifacts: /work/report.md and /work/matrix.md.",
+            omitted_verified_config,
+        )
+    omitted_verified_payload = json.loads(omitted_verified_stdout.getvalue())
+    if omitted_verified_code != 0 or "/work/matrix.md" not in omitted_verified_payload.get("message", ""):
+        raise AssertionError(f"verified omitted required artifacts should be appended to final: {omitted_verified_payload}")
+    print("[ok] verified omitted required artifacts appended to final")
 
     class FakeTelegramProcess:
         returncode = 0

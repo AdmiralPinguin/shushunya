@@ -2811,28 +2811,41 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             missing_required_paths = sorted(required_artifact_paths - final_paths)
             if missing_required_paths:
                 required_validation = validate_artifact_paths(config, missing_required_paths)
-                warning_message = (
-                    "Supervisor rejected final because the user task required sandbox artifacts that final omitted: "
-                    + json.dumps(
-                        {
-                            "missing_required_paths": missing_required_paths,
-                            "required_validation": required_validation,
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-                emit(event_sink, {"type": "warning", "code": "final_required_artifacts_omitted", "step": step, "message": warning_message})
-                messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            warning_message
-                            + "\nCreate, verify, and mention every required sandbox artifact from the user task before final."
-                        ),
+                missing_required_verification = missing_text_verifications(missing_required_paths, verified_text_paths)
+                if required_validation.get("ok") and not missing_required_verification:
+                    all_required_paths = sorted(required_artifact_paths)
+                    message = (message + "\n\nАртефакты: " + ", ".join(all_required_paths)).strip()
+                    artifact_validation = validate_artifact_paths(config, all_required_paths)
+                    final_paths = set(artifact_validation.get("paths") or [])
+                    missing_required_paths = []
+                else:
+                    warning_payload = {
+                        "missing_required_paths": missing_required_paths,
+                        "missing_verification": missing_required_verification,
+                        "required_validation": required_validation,
                     }
-                )
-                continue
+                    if missing_required_verification:
+                        instruction = (
+                            "\nThe omitted required files already exist or are expected, but these text artifacts still need "
+                            "verify_text_file before final: "
+                            + ", ".join(missing_required_verification)
+                            + ". Verify those exact paths with task-derived checks, then return final."
+                        )
+                    else:
+                        instruction = "\nCreate, verify, and mention every required sandbox artifact from the user task before final."
+                    warning_message = (
+                        "Supervisor rejected final because the user task required sandbox artifacts that final omitted: "
+                        + json.dumps(warning_payload, ensure_ascii=False)
+                    )
+                    emit(event_sink, {"type": "warning", "code": "final_required_artifacts_omitted", "step": step, "message": warning_message})
+                    messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": warning_message + instruction,
+                        }
+                    )
+                    continue
             if not artifact_validation.get("ok"):
                 warning_message = (
                     "Supervisor rejected final because mentioned sandbox artifacts are missing or empty: "
