@@ -83,6 +83,7 @@ setsid "$ROOT/llama.cpp/llama-server" \
   --ctx-size "$CTX_SIZE" \
   --n-gpu-layers "$GPU_LAYERS" \
   --parallel "$PARALLEL" \
+  --jinja \
   --reasoning "$REASONING" \
   --chat-template-kwargs "$CHAT_TEMPLATE_KWARGS" \
   --flash-attn auto \
