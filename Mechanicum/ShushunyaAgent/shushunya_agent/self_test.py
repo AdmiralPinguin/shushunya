@@ -1492,6 +1492,16 @@ def main() -> int:
     )
     if required_paths != ["/work/report.md", "/work/matrix.md"]:
         raise AssertionError(f"required artifact extraction failed: {required_paths}")
+    recovery_required_paths = required_artifact_paths_from_task(
+        "Обязательные артефакты: /work/nightly-error-recovery/report.md и /work/nightly-error-recovery/recovery_log.json. "
+        "Один раз попробуй read_file для /work/nightly-error-recovery/missing-input.md, ожидаемо получишь ошибку, "
+        "после этого не повторяй чтение missing-input.md и создай fallback input сам."
+    )
+    if recovery_required_paths != [
+        "/work/nightly-error-recovery/report.md",
+        "/work/nightly-error-recovery/recovery_log.json",
+    ]:
+        raise AssertionError(f"recovery task required artifact extraction failed: {recovery_required_paths}")
     print("[ok] required artifact path extraction")
 
     omitted_final_events: list[dict] = []

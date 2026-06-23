@@ -893,6 +893,13 @@ NON_REQUIRED_ARTIFACT_MARKERS = (
     "не является замен",
     "не являются замен",
     "не substitute",
+    "read_file",
+    "web_fetch",
+    "попробуй",
+    "ожидаемо",
+    "не повторяй",
+    "missing",
+    "несуществ",
 )
 
 
