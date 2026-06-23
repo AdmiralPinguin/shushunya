@@ -1241,6 +1241,8 @@ def main() -> int:
         raise AssertionError(f"cumulative repeat guard did not stop as continuable: code={repeat_code}, payload={repeat_payload}")
     if "цикл повторяющихся действий" not in repeat_payload.get("message", ""):
         raise AssertionError(f"cumulative repeat guard returned wrong message: {repeat_payload}")
+    if len(repeat_payload.get("steps", [])) > 10:
+        raise AssertionError(f"cumulative repeat guard stopped too late: {len(repeat_payload.get('steps', []))} steps")
     print("[ok] cumulative repeated action guard")
 
     if offline:
