@@ -1106,6 +1106,42 @@ def main() -> int:
         raise AssertionError(f"context retry did not disable memory after compacted attempts: reply={context_reply}, calls={mocked_archive.call_count}")
     print("[ok] model context retry disables memory")
 
+    compact_prompt_calls: list[str] = []
+
+    def compact_prompt_side_effect(config_arg, method, path, payload=None, timeout=180):
+        messages = (payload or {}).get("messages") or []
+        system_content = messages[0].get("content", "") if messages else ""
+        compact_prompt_calls.append(system_content)
+        if "Разрешенные действия:" in system_content:
+            raise HTTPError(
+                url="http://archive/v1/chat/completions",
+                code=400,
+                msg="Bad Request",
+                hdrs={},
+                fp=io.BytesIO(b'{"error":"context too large"}'),
+            )
+        return {"choices": [{"message": {"content": '{"action":"final","message":"compact ok"}'}}]}
+
+    compact_context_config = AgentConfig(llm_retries=1, inject_memory=False, archive_internal_steps=False)
+    with mock.patch.object(agent_runner, "archive_request", side_effect=compact_prompt_side_effect):
+        compact_prompt_reply = chat(
+            compact_context_config,
+            [{"role": "system", "content": agent_runner.SYSTEM_PROMPT}, {"role": "user", "content": "context fallback"}],
+            inject_memory=False,
+            archive_enabled=False,
+        )
+    if compact_prompt_reply != '{"action":"final","message":"compact ok"}' or not any("Доступные действия:" in call for call in compact_prompt_calls):
+        raise AssertionError(f"compact system prompt fallback failed: reply={compact_prompt_reply}, calls={len(compact_prompt_calls)}")
+    print("[ok] compact system prompt fallback")
+
+    rejected_summary = agent_runner.result_summary(
+        "list_files",
+        {"ok": False, "error": "repeated identical action rejected by supervisor", "items": []},
+    )
+    if "repeated identical action rejected" not in rejected_summary:
+        raise AssertionError(f"supervisor rejection summary hid the error: {rejected_summary}")
+    print("[ok] supervisor rejection result summary")
+
     final_events: list[dict] = []
     final_stdout = io.StringIO()
     final_config = AgentConfig(

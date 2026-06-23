@@ -245,6 +245,48 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Если JSON сломался, сам исправь формат в следующем ответе.
 """
 
+COMPACT_SYSTEM_PROMPT = """Ты Шушуня-агент: локальный агент выполнения задач.
+
+Отвечай только одним валидным JSON-объектом без markdown и пояснений.
+Нет собственной долговременной памяти: прошлый контекст только из task journal snapshot и tool results.
+Текущая user task главнее памяти. Не подменяй требуемые файлы другими именами.
+
+Доступные действия:
+{"action":"list_files","path":"/work","max_depth":2,"limit":100,"offset":0}
+{"action":"read_file","path":"/work/file.txt","max_bytes":20000,"offset":0}
+{"action":"write_file","path":"/work/file.txt","content":"text"}
+{"action":"append_file","path":"/work/file.txt","content":"text"}
+{"action":"replace_in_file","path":"/work/file.txt","old":"old","new":"new","count":1,"max_file_bytes":5000000}
+{"action":"mkdir","path":"/work/dir"}
+{"action":"file_info","path":"/work/file.txt","sha256":true}
+{"action":"find_files","path":"/work","pattern":"*.txt","max_depth":4,"limit":100,"offset":0}
+{"action":"search_text","path":"/work","query":"needle","case_sensitive":false,"max_matches":50}
+{"action":"python","code":"print('hello')","timeout":60}
+{"action":"shell","cmd":"pwd","timeout":60,"reason":"why"}
+{"action":"web_search","query":"query","limit":5}
+{"action":"web_fetch","url":"https://example.com","max_bytes":200000}
+{"action":"web_links","url":"https://example.com","pattern":"chapter","limit":100}
+{"action":"web_extract_to_file","url":"https://example.com","path":"/work/page.txt","mode":"write"}
+{"action":"web_extract_link_list","url":"https://example.com/contents","path_template":"/work/ch_{seq}.txt","limit":100}
+{"action":"bundle_text_files","path":"/work/chapters","output_txt":"/work/book.txt","output_fb2":"/work/book.fb2","dedupe":true}
+{"action":"verify_text_file","path":"/work/report.md","must_contain":["marker"],"ordered_patterns":["A","B"],"min_chars":1000}
+{"action":"telegram_send_document","path":"/work/file.fb2","caption":"caption"}
+{"action":"archive_status"}
+{"action":"archive_memory_search","query":"query","limit":5,"layers":"focus,wiki,vector,graph","include_content":false}
+{"action":"archive_memory_read","kind":"focus","id":"active","max_chars":12000}
+{"action":"archive_memory_propose","target":"focus","importance":3,"proposal":"text","evidence":"why"}
+{"action":"sandbox_status"}
+{"action":"final","message":"short result"}
+
+Правила:
+- Работай только в sandbox /work. Не лезь в host paths.
+- Для больших файлов: write_file один раз, дальше append_file маленькими чанками. Не вставляй огромный текст в один JSON.
+- Если tool result ok=true, не повторяй то же действие без новых параметров.
+- Перед final для текстовых артефактов используй verify_text_file с проверками из user task.
+- Если пользователь просит Telegram, отправь файл через telegram_send_document.
+- Если используешь интернет, в final укажи URL-источники.
+"""
+
 
 @dataclass
 class AgentConfig:
@@ -435,6 +477,16 @@ def compact_messages_for_model(messages: list[dict[str, str]], config: AgentConf
     return [system, user, *tail]
 
 
+def replace_system_prompt(messages: list[dict[str, str]], prompt: str) -> list[dict[str, str]]:
+    if not messages:
+        return [{"role": "system", "content": prompt}]
+    replaced = [dict(message) for message in messages]
+    if replaced[0].get("role") == "system":
+        replaced[0]["content"] = prompt
+        return replaced
+    return [{"role": "system", "content": prompt}, *replaced]
+
+
 def archive_request(config: AgentConfig, method: str, path: str, payload: dict[str, Any] | None = None, timeout: int = 180) -> dict[str, Any]:
     data = None
     headers = {"Content-Type": "application/json"}
@@ -482,12 +534,18 @@ def chat(
     last_error = ""
     memory_enabled = config.inject_memory if inject_memory is None else inject_memory
     should_archive = config.archive_internal_steps if archive_enabled is None else archive_enabled
-    memory_profiles = [memory_enabled]
+    message_profiles: list[tuple[list[dict[str, str]], bool]] = [(messages, memory_enabled)]
     if memory_enabled:
-        memory_profiles.append(False)
-    for profile_memory_enabled in memory_profiles:
+        message_profiles.append((messages, False))
+    message_profiles.append((replace_system_prompt(messages, COMPACT_SYSTEM_PROMPT), False))
+    seen_profiles: set[tuple[int, bool]] = set()
+    for profile_messages, profile_memory_enabled in message_profiles:
+        profile_key = (id(profile_messages), profile_memory_enabled)
+        if profile_key in seen_profiles:
+            continue
+        seen_profiles.add(profile_key)
         for budget in budgets:
-            compacted_messages = compact_messages_for_model(messages, config, budget)
+            compacted_messages = compact_messages_for_model(profile_messages, config, budget)
             payload = {
                 "model": config.model,
                 "messages": compacted_messages,
@@ -2174,6 +2232,8 @@ def action_summary(action: dict[str, Any]) -> str:
 def result_summary(action_type: str, result: dict[str, Any]) -> str:
     if not isinstance(result, dict):
         return "tool returned non-object result"
+    if result.get("ok") is False and result.get("error"):
+        return truncate(str(result.get("error")), 180)
     if action_type == "list_files":
         count = len(result.get("items", [])) if isinstance(result.get("items"), list) else 0
         return f"{count} item(s) listed"
