@@ -68,7 +68,7 @@ ARCHIVE_BASE_URL = os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_URL", "http://127.0.0
 ARCHIVE_API_KEY = os.environ.get("SHUSHUNYA_AGENT_ARCHIVE_API_KEY", "").strip()
 MODEL = os.environ.get(
     "SHUSHUNYA_AGENT_MODEL",
-    os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-Q6_K.gguf"),
+    os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
 )
 SANDBOX_SHELL = os.environ.get("SHUSHUNYA_AGENT_SANDBOX_SHELL", "shushunya-agent-shell")
 SANDBOX_MODE = os.environ.get("SHUSHUNYA_AGENT_SANDBOX_MODE", "auto").strip().lower()

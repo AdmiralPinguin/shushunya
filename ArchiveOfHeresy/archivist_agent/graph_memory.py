@@ -314,7 +314,7 @@ class GraphMemory:
                 "model": record.get("model")
                 or os.environ.get(
                     "ARCHIVE_LIBRARIAN_MODEL",
-                    os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-Q6_K.gguf"),
+                    os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
                 ),
                 "user": "archive-librarian",
                 "messages": messages,

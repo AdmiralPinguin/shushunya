@@ -228,8 +228,8 @@ Stop it:
 - `ARCHIVE_LLM_BASE_URL` - default `http://127.0.0.1:8080`
 - `ARCHIVE_LLM_PROVIDER` - `llamacpp` by default; set to `litert` to use the
   LiteRT-LM host on `http://127.0.0.1:9379`
-- `ARCHIVE_DEFAULT_MODEL` - default chat model, `gemma-4-12b-it-Q6_K.gguf`;
-  for LiteRT use
+- `ARCHIVE_DEFAULT_MODEL` - default chat model,
+  `gemma-4-12b-it-UD-Q5_K_XL.gguf`; for LiteRT use
   `gemma4-12b,gpu,2048` until longer contexts pass GPU smoke tests
 - `ARCHIVE_SYSTEM_PROMPT` - archive-level system prompt prepended to chat requests; default personality is Shushunya, a sarcastic daemon of Tzeentch
 - `ARCHIVE_JSONL_ROOT` - default `ArchiveOfHeresy/archive/jsonl`
@@ -250,8 +250,6 @@ Stop it:
 - `ARCHIVE_VECTOR_EMBEDDING_FALLBACK` - default `1`
 - `ARCHIVE_EMBEDDING_BASE_URL` - default `http://127.0.0.1:8080`
 - `ARCHIVE_EMBEDDING_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
-  to keep using the existing vector index while the chat backend is tested on
-  Q6_K; switch explicitly only when rebuilding/backfilling embeddings
 - `ARCHIVE_SPARSE_EMBEDDING_VERSION` - default `hashed-token-chargram-v2`
 - `ARCHIVE_VECTOR_CHUNK_CHARS` - default `1200`
 - `ARCHIVE_VECTOR_TOP_K` - default `5`

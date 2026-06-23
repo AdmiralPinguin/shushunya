@@ -40,7 +40,7 @@ cd /media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness
 Optional environment variables:
 
 - `LLM_BASE_URL` - default `http://127.0.0.1:8090`
-- `LLM_MODEL` - default `gemma-4-12b-it-Q6_K.gguf`
+- `LLM_MODEL` - default `gemma-4-12b-it-UD-Q5_K_XL.gguf`
 - `MAX_TOKENS` - default `2048`
 - `MAX_CONTINUATIONS` - default `3`; continues automatically when the model stops because of the token limit
 - `CONTINUATION_TAIL_CHARS` - default `2500`; characters of the previous answer sent back when asking the model to continue

@@ -14,7 +14,7 @@ WIKI_INTERVAL_MESSAGES = int(os.environ.get("ARCHIVE_WIKI_INTERVAL_MESSAGES", "2
 WIKI_MAX_RECENT_TURNS = int(os.environ.get("ARCHIVE_WIKI_MAX_RECENT_TURNS", "12"))
 LIBRARIAN_MODEL = os.environ.get(
     "ARCHIVE_LIBRARIAN_MODEL",
-    os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-Q6_K.gguf"),
+    os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
 )
 LIBRARIAN_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_LIBRARIAN_SYSTEM_PROMPT",

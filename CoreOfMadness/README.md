@@ -14,12 +14,12 @@ All model-server related files are kept inside:
 
 ## Purpose
 
-This directory is intended to run a local language model server on Linux over SSH. The current target model is Gemma 4 12B Instruct in Q6 GGUF quantization, served through `llama.cpp` / `llama-server`.
+This directory is intended to run a local language model server on Linux over SSH. The current target model is Gemma 4 12B Instruct in Q5 GGUF quantization, served through `llama.cpp` / `llama-server`.
 
 ## Directory Layout
 
-- `gemma-4-12b-it-Q6_K.gguf` - default downloaded GGUF model.
-- `gemma-4-12b-it-UD-Q5_K_XL.gguf` - previous fallback GGUF model.
+- `gemma-4-12b-it-UD-Q5_K_XL.gguf` - default downloaded GGUF model.
+- `gemma-4-12b-it-Q6_K.gguf` - experimental higher-quality GGUF model.
 - `llm-host/llama.cpp/` - local llama.cpp runtime files.
 - `llm-host/runtime/` - local logs and server process files.
 - `llm-host/scripts/` - helper scripts for starting, checking, and stopping the LLM host.
@@ -31,14 +31,16 @@ This directory is intended to run a local language model server on Linux over SS
 - Model family: Google Gemma 4
 - Variant: 12B Instruct
 - Format: GGUF
-- Quantization: `Q6_K`
-- File: `gemma-4-12b-it-Q6_K.gguf`
-- Source: `https://huggingface.co/unsloth/gemma-4-12b-it-GGUF`
-
-Previous fallback model:
-
 - Quantization: `UD-Q5_K_XL`
 - File: `gemma-4-12b-it-UD-Q5_K_XL.gguf`
+- Source: `https://huggingface.co/unsloth/gemma-4-12b-it-GGUF`
+
+Experimental model:
+
+- Quantization: `Q6_K`
+- File: `gemma-4-12b-it-Q6_K.gguf`
+- Note: Q6_K + 16k context passed smoke tests but leaves little free VRAM on
+  the RTX 2060 12GB.
 
 ## Runtime
 
@@ -57,17 +59,16 @@ Default settings:
 
 - Host: `0.0.0.0`
 - Port: `8080`
-- Context size: `16384`
+- Context size: `32768`
 - Parallel slots: `1`
 - GPU layers: `999` by default, so Vulkan can offload to the GPU when available
 - Reasoning mode: `off` by default, so chat replies return normal `content`
 - Chat template kwargs: `{"enable_thinking":false}` by default, to keep Gemma 4
   agent/controller replies in normal assistant content instead of thinking output
 - KV cache quantization: `CACHE_TYPE_K=q4_0`, `CACHE_TYPE_V=q4_0`
-- The Q6_K + 16k profile uses almost all RTX 2060 12GB VRAM. Keep
-  `PARALLEL=1` and q4 KV cache unless a larger GPU is installed. Q8_0 is
-  available upstream but is not a practical default for this GPU at 16k+
-  context.
+- Keep `PARALLEL=1` and q4 KV cache unless a larger GPU is installed. Q6_K is
+  available as an experiment with 16k context; Q8_0 is not a practical default
+  for this GPU at 16k+ context.
 - Prompt cache is disabled by default: `PROMPT_CACHE=0`,
   `CACHE_RAM=0`, `CACHE_REUSE=0`, `SLOT_PROMPT_SIMILARITY=0.0`,
   `CACHE_IDLE_SLOTS=0`. ArchiveOfHeresy is expected to assemble the full
@@ -102,7 +103,7 @@ Stop it with:
 Runtime settings can be overridden through environment variables:
 
 ```bash
-PORT=8081 CTX_SIZE=16384 PARALLEL=1 GPU_LAYERS=999 REASONING=off ./llm-host/scripts/start-host.sh
+PORT=8081 CTX_SIZE=32768 PARALLEL=1 GPU_LAYERS=999 REASONING=off ./llm-host/scripts/start-host.sh
 ```
 
 For a higher-quality but heavier KV cache profile, override the cache types:
