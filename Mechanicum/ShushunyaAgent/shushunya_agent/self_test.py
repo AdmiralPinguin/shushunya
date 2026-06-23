@@ -1118,6 +1118,31 @@ def main() -> int:
         raise AssertionError(f"repeated write_file path guard failed: code={repeated_write_code}, payload={repeated_write_payload}")
     print("[ok] repeated write_file path guard")
 
+    json_append_stdout = io.StringIO()
+    json_append_config = AgentConfig(
+        task_id=safe_task_id("self-test-json-append-guard"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    json_append_actions = [
+        '{"action":"append_file","path":"/work/summary.json","content":"not-json-tail"}',
+        '{"action":"final","message":"done"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=json_append_actions), \
+            contextlib.redirect_stdout(json_append_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        json_append_code = run_agent("do not append json", json_append_config)
+    json_append_payload = json.loads(json_append_stdout.getvalue())
+    json_append_rejections = [
+        step for step in json_append_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "append_file to JSON rejected by supervisor"
+    ]
+    if not json_append_rejections:
+        raise AssertionError(f"append_file JSON guard failed: code={json_append_code}, payload={json_append_payload}")
+    print("[ok] append_file JSON guard")
+
     inspection_stall_stdout = io.StringIO()
     inspection_stall_config = AgentConfig(
         task_id=safe_task_id("self-test-inspection-stall"),
