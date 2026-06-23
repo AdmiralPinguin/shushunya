@@ -855,6 +855,22 @@ def missing_text_verifications(paths: list[str], verified_paths: set[str]) -> li
     return [path for path in paths if path_needs_text_verification(path) and path not in verified_paths]
 
 
+def required_artifacts_auto_final(config: AgentConfig, required_paths: list[str], verified_paths: set[str]) -> dict[str, Any] | None:
+    if not required_paths:
+        return None
+    artifact_validation = validate_artifact_paths(config, required_paths)
+    if not artifact_validation.get("ok"):
+        return None
+    missing_verification = missing_text_verifications(required_paths, verified_paths)
+    if missing_verification:
+        return None
+    return {
+        "ok": True,
+        "message": "Готово: " + ", ".join(required_paths),
+        "artifact_validation": artifact_validation,
+    }
+
+
 VERIFY_TEXT_FILE_SCRIPT = r'''
 import json
 import os
@@ -2456,7 +2472,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     consecutive_parse_failures = 0
     total_parse_failures = 0
     verified_text_paths: set[str] = set()
-    required_artifact_paths = set(required_artifact_paths_from_task(task))
+    required_artifact_path_list = required_artifact_paths_from_task(task)
+    required_artifact_paths = set(required_artifact_path_list)
     trace: list[dict[str, Any]] = []
     write_task_journal(
         config,
@@ -2777,7 +2794,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             result = {"ok": False, "error": str(exc), "exception": exc.__class__.__name__}
 
         action_duration_sec = round(time.time() - action_started, 3)
-        if action_type == "verify_text_file" and isinstance(result, dict) and result.get("ok") and result.get("path"):
+        if action_type in {"write_file", "append_file", "replace_in_file"} and isinstance(result, dict) and result.get("ok") is True:
+            verified_text_paths.discard(str(action.get("path") or ""))
+        elif action_type == "bundle_text_files" and isinstance(result, dict) and result.get("ok") is True:
+            verified_text_paths.discard(str(action.get("output_txt") or ""))
+            verified_text_paths.discard(str(action.get("output_fb2") or ""))
+        elif action_type == "verify_text_file" and isinstance(result, dict) and result.get("ok") and result.get("path"):
             verified_text_paths.add(str(result.get("path")))
         event_extra: dict[str, Any] = {}
         if isinstance(result, dict):
@@ -2822,6 +2844,26 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 inspection_actions_since_progress = 0
             elif action_type in INSPECTION_ACTIONS:
                 inspection_actions_since_progress += 1
+            auto_final = required_artifacts_auto_final(config, required_artifact_path_list, verified_text_paths)
+            if auto_final is not None:
+                duration_sec = round(time.time() - run_started, 3)
+                final_payload = {
+                    "step": step,
+                    "ok": True,
+                    "message": str(auto_final.get("message") or "").strip(),
+                    "duration_sec": duration_sec,
+                    "auto_final": True,
+                }
+                if auto_final.get("artifact_validation"):
+                    final_payload["artifact_validation"] = auto_final["artifact_validation"]
+                emit(event_sink, {"type": "warning", "code": "auto_final_required_artifacts_verified", "step": step, "message": "All required artifacts exist and passed text verification; finalizing without another model step."})
+                emit(event_sink, {"type": "final", **final_payload})
+                write_task_journal(config, "final", final_payload)
+                if config.json_output:
+                    print(json.dumps({"ok": True, "task_id": config.task_id, "message": final_payload["message"], "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
+                else:
+                    print(final_payload["message"])
+                return 0
 
         messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
         messages.append(

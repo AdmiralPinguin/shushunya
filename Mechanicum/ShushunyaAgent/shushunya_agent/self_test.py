@@ -1409,6 +1409,44 @@ def main() -> int:
         raise AssertionError(f"missing text verification warning was not emitted: {verified_final_events}")
     print("[ok] final text verification required")
 
+    auto_final_events: list[dict] = []
+    auto_final_stdout = io.StringIO()
+    auto_final_config = AgentConfig(
+        task_id=safe_task_id("self-test-auto-final-required-artifacts"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    auto_final_replies = [
+        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["Summary"],"min_chars":1000}',
+        '{"action":"verify_text_file","path":"/work/matrix.md","must_contain":["Risk"],"min_chars":1000}',
+        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["Summary"],"min_chars":1000}',
+    ]
+
+    def fake_file_info(_config, action):
+        return {"ok": True, "path": action.get("path"), "exists": True, "type": "file", "size": 2000}
+
+    def fake_verify(_config, action):
+        return {"ok": True, "path": action.get("path"), "size": 2000, "chars": 1500, "failures": []}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=auto_final_replies), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=fake_file_info), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_verify), \
+            contextlib.redirect_stdout(auto_final_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        auto_final_code = run_agent(
+            "Required artifacts: /work/report.md and /work/matrix.md.",
+            auto_final_config,
+            event_sink=auto_final_events.append,
+        )
+    auto_final_payload = json.loads(auto_final_stdout.getvalue())
+    if auto_final_code != 0 or "/work/report.md" not in auto_final_payload.get("message", "") or "/work/matrix.md" not in auto_final_payload.get("message", ""):
+        raise AssertionError(f"required artifact auto-final did not complete: {auto_final_payload}")
+    if not any(event.get("code") == "auto_final_required_artifacts_verified" for event in auto_final_events):
+        raise AssertionError(f"required artifact auto-final warning was not emitted: {auto_final_events}")
+    print("[ok] required artifacts auto-final after verification")
+
     limit_stdout = io.StringIO()
     limit_config = AgentConfig(
         task_id=safe_task_id("self-test-runtime-limit"),
