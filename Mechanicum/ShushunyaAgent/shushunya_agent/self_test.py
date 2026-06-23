@@ -486,10 +486,15 @@ def main() -> int:
         web_tools.SEARCH_PROVIDERS = old_provider_env
         web_tools.BRAVE_SEARCH_API_KEY = old_brave_key
 
-    large_result = {"ok": True, "content": "x" * 50000, "size": 50000}
+    large_result = {"ok": True, "content": "x" * 50000, "size": 50000, "bytes_read": 20000, "offset": 0, "next_offset": 20000, "truncated": True}
     compacted_result = result_for_model("read_file", large_result, config)
     if len(compacted_result.get("content", "")) > 3000:
         raise AssertionError("read_file result was not compacted for model context")
+    if "next_offset" not in compacted_result.get("supervisor_instruction", ""):
+        raise AssertionError(f"read_file result missed next_offset guidance: {compacted_result}")
+    read_summary = agent_runner.result_summary("read_file", large_result)
+    if "read 20000/50000 byte(s) offset=0 next_offset=20000" not in read_summary:
+        raise AssertionError(f"read_file summary used misleading size: {read_summary}")
     print("[ok] read_file result compacted for model context")
     large_json_result = {
         "ok": True,

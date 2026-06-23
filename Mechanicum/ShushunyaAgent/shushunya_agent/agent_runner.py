@@ -329,7 +329,13 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
     payload = dict(result)
     if action_type == "read_file" and isinstance(payload.get("content"), str):
         payload["content"] = truncate(payload["content"], 2500)
-        payload["content_note"] = "content compacted for model context; use read_file offset/next_offset for more"
+        payload["content_note"] = "content compacted for model context"
+        if payload.get("truncated") and payload.get("next_offset") is not None:
+            payload["supervisor_instruction"] = (
+                "This read_file result is truncated. Do not reread the same path with the same offset. "
+                "Use read_file with offset=next_offset for the next chunk, search_text for targeted facts, "
+                "or start writing the artifact from the gathered context."
+            )
     elif action_type == "web_fetch" and isinstance(payload.get("text"), str):
         text = str(payload.get("text") or "")
         content_type = str(payload.get("content_type") or "").lower()
@@ -2386,8 +2392,12 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
         count = len(result.get("matches", [])) if isinstance(result.get("matches"), list) else 0
         return f"{count} text match(es)"
     if action_type == "read_file":
-        size = result.get("size", 0)
-        return f"read {size} byte(s)"
+        size = int(result.get("size") or 0)
+        bytes_read = int(result.get("bytes_read") or 0)
+        offset = int(result.get("offset") or 0)
+        next_offset = result.get("next_offset")
+        suffix = f" next_offset={next_offset}" if next_offset is not None else ""
+        return f"read {bytes_read}/{size} byte(s) offset={offset}{suffix}"
     if action_type in {"write_file", "append_file", "replace_in_file", "mkdir", "remove_file", "file_info"}:
         return str(result.get("path") or result.get("error") or "file tool done")
     if action_type in {"shell", "python"}:
