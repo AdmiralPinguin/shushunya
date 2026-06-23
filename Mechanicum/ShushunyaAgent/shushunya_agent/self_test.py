@@ -969,6 +969,26 @@ def main() -> int:
         raise AssertionError("oversized inline write guard matched a normal final action")
     print("[ok] oversized inline write guard")
 
+    parse_stall_stdout = io.StringIO()
+    parse_stall_config = AgentConfig(
+        task_id=safe_task_id("self-test-json-parse-stall"),
+        json_output=True,
+        max_steps=10,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat", return_value='{"action":"python","code":"unterminated'), \
+            mock.patch.object(agent_runner, "repair_action_json", side_effect=ValueError("no repair")), \
+            contextlib.redirect_stdout(parse_stall_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        parse_stall_code = run_agent("parse stall", parse_stall_config)
+    parse_stall_payload = json.loads(parse_stall_stdout.getvalue())
+    if parse_stall_code != 2 or parse_stall_payload.get("continuable") is not True:
+        raise AssertionError(f"json parse stall did not stop as continuable: code={parse_stall_code}, payload={parse_stall_payload}")
+    if "невалидный JSON" not in parse_stall_payload.get("message", ""):
+        raise AssertionError(f"json parse stall returned wrong message: {parse_stall_payload}")
+    print("[ok] JSON parse stall guard")
+
     captured_payloads: list[dict] = []
 
     def capture_archive_payload(config_arg, method, path, payload=None, timeout=180):

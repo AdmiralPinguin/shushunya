@@ -2275,6 +2275,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     action_counts: dict[str, int] = {}
     repeated_rejection_count = 0
     repeated_rejection_total = 0
+    consecutive_parse_failures = 0
     verified_text_paths: set[str] = set()
     trace: list[dict[str, Any]] = []
     write_task_journal(
@@ -2348,8 +2349,36 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 emit(event_sink, {"type": "warning", "code": "json_repaired", "step": step, "message": "JSON восстановлен repair-проходом"})
                 write_task_journal(config, "json_repaired", {"step": step, "action": action})
             except Exception as repair_exc:
+                consecutive_parse_failures += 1
                 emit(event_sink, {"type": "warning", "code": "json_repair_failed", "step": step, "message": f"repair не помог: {repair_exc}"})
                 write_task_journal(config, "json_repair_failed", {"step": step, "error": str(repair_exc)})
+                if consecutive_parse_failures >= 3:
+                    duration_sec = round(time.time() - run_started, 3)
+                    message = (
+                        "Агент остановлен супервизором: модель несколько раз подряд вернула невалидный JSON, "
+                        "и repair не смог восстановить действие. Задачу можно продолжить с более коротким действием: "
+                        "не генерировать большие файлы/код одним JSON, а использовать короткие append_file/python шаги."
+                    )
+                    emit(event_sink, {"type": "final", "step": step, "ok": False, "continuable": True, "resume_task_id": config.task_id, "message": message, "duration_sec": duration_sec})
+                    write_task_journal(
+                        config,
+                        "final",
+                        {
+                            "step": step,
+                            "ok": False,
+                            "continuable": True,
+                            "resume_task_id": config.task_id,
+                            "message": message,
+                            "duration_sec": duration_sec,
+                            "stop_reason": "json_parse_stall",
+                            "consecutive_parse_failures": consecutive_parse_failures,
+                        },
+                    )
+                    if config.json_output:
+                        print(json.dumps({"ok": False, "continuable": True, "resume_task_id": config.task_id, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
+                    else:
+                        print(message, file=sys.stderr)
+                    return 2
                 messages.append({"role": "assistant", "content": raw})
                 messages.append(
                     {
@@ -2360,6 +2389,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 continue
 
         action_type = str(action.get("action", "")).strip().lower()
+        consecutive_parse_failures = 0
         validation = validate_action(action)
         if not validation.get("ok"):
             emit(event_sink, {"type": "warning", "code": "validation_error", "step": step, "message": "supervisor отклонил действие: " + validation.get("error", "validation error")})
