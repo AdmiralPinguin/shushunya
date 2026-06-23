@@ -1089,6 +1089,40 @@ def main() -> int:
         raise AssertionError(f"inspection stall guard failed: code={inspection_stall_code}, payload={inspection_stall_payload}")
     print("[ok] inspection stall guard")
 
+    verify_after_append_stdout = io.StringIO()
+    verify_after_append_config = AgentConfig(
+        task_id=safe_task_id("self-test-verify-after-append"),
+        json_output=True,
+        max_steps=6,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    verify_after_append_actions = [
+        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["done"],"min_chars":10}',
+        '{"action":"append_file","path":"/work/report.md","content":"more"}',
+        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["done"],"min_chars":10}',
+        '{"action":"append_file","path":"/work/report.md","content":"more"}',
+        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["done"],"min_chars":10}',
+        '{"action":"final","message":"Готово: /work/report.md"}',
+    ]
+    verify_calls = 0
+
+    def fake_verify_after_append(config_arg, action):
+        nonlocal verify_calls
+        verify_calls += 1
+        return {"ok": False, "path": action.get("path"), "failures": ["still short"]}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=verify_after_append_actions), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_verify_after_append), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/report.md"}), \
+            contextlib.redirect_stdout(verify_after_append_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        verify_after_append_code = run_agent("append then verify repeatedly", verify_after_append_config)
+    verify_after_append_payload = json.loads(verify_after_append_stdout.getvalue())
+    if verify_calls != 3:
+        raise AssertionError(f"verify after append should not be blocked by repeat guard: calls={verify_calls}, payload={verify_after_append_payload}")
+    print("[ok] verify repeat reset after file mutation")
+
     captured_payloads: list[dict] = []
 
     def capture_archive_payload(config_arg, method, path, payload=None, timeout=180):

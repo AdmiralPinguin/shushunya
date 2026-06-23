@@ -2249,6 +2249,20 @@ def action_fingerprint(action: dict[str, Any]) -> str:
     return json.dumps(normalized, ensure_ascii=False, sort_keys=True)
 
 
+def reset_path_dependent_action_counts(action_counts: dict[str, int], path: str) -> None:
+    if not path:
+        return
+    for fingerprint in list(action_counts):
+        try:
+            parsed = json.loads(fingerprint)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        if parsed.get("path") == path and parsed.get("action") in {"read_file", "file_info", "verify_text_file", "search_text"}:
+            action_counts.pop(fingerprint, None)
+
+
 AgentEventSink = Callable[[dict[str, Any]], None]
 
 
@@ -2768,6 +2782,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             if path:
                 successful_write_file_paths[path] = successful_write_file_paths.get(path, 0) + 1
         if isinstance(result, dict) and result.get("ok") is True:
+            if action_type in {"write_file", "append_file", "replace_in_file"}:
+                reset_path_dependent_action_counts(action_counts, str(action.get("path") or ""))
+            elif action_type == "bundle_text_files":
+                reset_path_dependent_action_counts(action_counts, str(action.get("output_txt") or ""))
+                reset_path_dependent_action_counts(action_counts, str(action.get("output_fb2") or ""))
             if action_type in PRODUCTIVE_ACTIONS:
                 inspection_actions_since_progress = 0
             elif action_type in INSPECTION_ACTIONS:
