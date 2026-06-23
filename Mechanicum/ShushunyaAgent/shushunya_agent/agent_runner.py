@@ -674,7 +674,12 @@ def strip_json_fence(raw: str) -> str:
 
 def loose_unescape_json_string(value: str) -> str:
     return (
-        value.replace("\\r\\n", "\n")
+        value.replace("\\\\r\\\\n", "\n")
+        .replace("\\\\n", "\n")
+        .replace("\\\\t", "\t")
+        .replace('\\\\"', '"')
+        .replace("\\\\/", "/")
+        .replace("\\r\\n", "\n")
         .replace("\\n", "\n")
         .replace("\\t", "\t")
         .replace('\\"', '"')
