@@ -15,6 +15,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageStat
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from forge_service.reports import prune_reports
+from forge_test_lock import forge_test_lock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -551,6 +552,11 @@ def write_report(report: dict[str, Any], explicit_path: str | None = None) -> Pa
 
 
 def main() -> int:
+    with forge_test_lock():
+        return _main()
+
+
+def _main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--cycles", type=int, default=10)

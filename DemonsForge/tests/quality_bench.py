@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from forge_service.reports import prune_reports
+from forge_test_lock import forge_test_lock
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8110"
 QUALITY_ASSETS = ROOT / "quality_assets"
@@ -283,6 +284,11 @@ def quality_verdict(name: str, evaluation: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
+    with forge_test_lock():
+        return _main()
+
+
+def _main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--run", action="store_true", help="enqueue real generation jobs")

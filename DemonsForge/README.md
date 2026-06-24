@@ -480,8 +480,10 @@ FORGE_WORKER_MAX_JOBS=5 ./start-forge-worker.sh
 DemonsForge/bin/python tests/forge_cycle.py --iterations 1 --quality-run --concept-engines
 ```
 
-The cycle runner executes `forge_self_test.py` and `quality_bench.py`, records a
-cycle report under `runtime/test-reports/`, and applies report retention.
+The cycle runner executes `forge_self_test.py` and `quality_bench.py`, records
+paired JSON/Markdown cycle reports under `runtime/test-reports/`, and applies
+report retention. `forge_self_test.py` also records paired JSON/Markdown
+reports.
 
 Memory gateway diagnostic:
 

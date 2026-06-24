@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from forge_service.reports import prune_reports
+from forge_test_lock import forge_test_lock
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8110"
 REPORTS_DIR = ROOT / "runtime" / "test-reports"
@@ -76,7 +77,43 @@ def live_quality_dry_run(base_url: str) -> dict[str, Any]:
     return {"health": health.json(), "stdout": completed.stdout.strip().splitlines()[-3:]}
 
 
+def write_summary(report: dict[str, Any], path: Path) -> str:
+    lines = [
+        "# Forge Self Test Report",
+        "",
+        f"Run ID: `{report['run_id']}`",
+        "",
+        f"Result: `{'pass' if report.get('ok') else 'fail'}`",
+        f"Duration: `{report.get('duration_sec')}` seconds",
+        "",
+        "## Steps",
+        "",
+        "| Step | Result | Duration | Notes |",
+        "| --- | ---: | ---: | --- |",
+    ]
+    for step in report["steps"]:
+        result_label = "pass" if step.get("ok") else "skip" if step.get("skipped") else "fail"
+        notes = step.get("error") or ""
+        if not notes and isinstance(step.get("result"), dict):
+            details = step["result"]
+            if details.get("stdout"):
+                notes = "; ".join(str(item) for item in details["stdout"][-2:])
+            elif details.get("script"):
+                notes = str(details["script"])
+            elif details.get("files"):
+                notes = f"{details['files']} files"
+        lines.append(f"| `{step['name']}` | {result_label} | `{step.get('duration_sec')}` | {notes} |")
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return str(path)
+
+
 def main() -> int:
+    with forge_test_lock():
+        return _main()
+
+
+def _main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--skip-live", action="store_true")
@@ -109,6 +146,8 @@ def main() -> int:
     if not report_path.is_absolute():
         report_path = ROOT / report_path
     report_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path = report_path.with_suffix(".md")
+    report["summary_path"] = write_summary(report, summary_path)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     prune_reports()
     print(f"report: {report_path}", flush=True)
