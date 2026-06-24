@@ -291,6 +291,8 @@ class ForgeQueue:
         self.store.update_job(job_id, status=JobStatus.running, progress=0.0)
         try:
             spec = record.spec
+            if spec.type in {JobType.txt2img, JobType.img2img, JobType.inpaint}:
+                config.boost_torch_threads()
             if spec.type == JobType.asset_download:
                 self._execute_asset_download(job_id, spec)
             elif spec.type == JobType.txt2img:

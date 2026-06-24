@@ -72,6 +72,9 @@ FORGE_WORKER_MAX_JOBS=4 ./start-forge-worker.sh
 
 Start a fresh worker for the next batch. The API remains available on port
 `8110`.
+Each diffusion job re-boosts torch CPU threads before inference and cools them
+back down after completion. This keeps repeated jobs in a recycled worker from
+falling back to idle-thread throughput.
 
 Core endpoints:
 
