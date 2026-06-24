@@ -1557,6 +1557,13 @@ def main() -> int:
     )
     if "Do not retry the same code" not in python_syntax_payload.get("supervisor_instruction", ""):
         raise AssertionError(f"Python SyntaxError payload missed retry guidance: {python_syntax_payload}")
+    shell_failure_payload = result_for_model(
+        "shell",
+        {"ok": False, "stdout": "", "stderr": "AssertionError", "returncode": 1},
+        config,
+    )
+    if "Do not repeat the identical command" not in shell_failure_payload.get("supervisor_instruction", ""):
+        raise AssertionError(f"shell failure payload missed retry guidance: {shell_failure_payload}")
     case_summary = agent_runner.result_summary(
         "verify_text_file",
         {
