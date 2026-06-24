@@ -25,6 +25,7 @@ from .registries import (
     discover_loras,
     discover_models,
 )
+from .reports import list_reports, report_path
 from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest, utc_now
 from .storage import ForgeStore
 from .thinker import PlannerThinker
@@ -92,6 +93,7 @@ def get_state() -> dict[str, object]:
         "job_status_counts": queue_state["status_counts"],
         "recent_failed_jobs": recent_failed,
         "dependencies": caps.get("dependencies", {}),
+        "recent_reports": list_reports(limit=5),
         "memory": runtime["memory"],
     }
 
@@ -285,6 +287,22 @@ def list_asset_downloads(limit: int = 100) -> list[dict[str, object]]:
 @app.get("/forge/assets/profiles")
 def get_asset_profiles() -> dict[str, object]:
     return asset_profiles()
+
+
+@app.get("/forge/reports")
+def get_reports(limit: int = 100) -> list[dict[str, object]]:
+    return list_reports(limit=limit)
+
+
+@app.get("/forge/reports/{filename}")
+def get_report_file(filename: str):
+    try:
+        path = report_path(filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="report not found") from None
+    return FileResponse(path)
 
 
 @app.get("/forge/jobs")

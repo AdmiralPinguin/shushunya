@@ -99,6 +99,9 @@ def main() -> None:
     assert events.status_code == 200, events.text
     assert events.json()["ok"] is True
     assert isinstance(events.json()["events"], list)
+    reports = client.get("/forge/reports?limit=5")
+    assert reports.status_code == 200, reports.text
+    assert isinstance(reports.json(), list)
     external_worker = ForgeQueue(store, start_worker=False)
     external_worker.pause()
     paused_job = external_worker.submit(
