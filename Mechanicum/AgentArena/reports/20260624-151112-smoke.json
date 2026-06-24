@@ -1,0 +1,236 @@
+{
+  "run_id": "20260624-151112",
+  "suite": "smoke",
+  "model": {
+    "base_url": "http://127.0.0.1:8080/v1",
+    "model": "gemma-4-12b-it-UD-Q5_K_XL.gguf",
+    "api_key": "local-key",
+    "context_tokens": 32768
+  },
+  "results": [
+    {
+      "agent": "shushunya",
+      "task_id": "artifact_contract",
+      "ok": true,
+      "duration_sec": 246.806,
+      "checks": [
+        {
+          "type": "file_exists",
+          "path": "report.md",
+          "ok": true,
+          "sandbox_path": "/work/agent-arena/20260624-151112/shushunya/artifact_contract/report.md"
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "Summary",
+          "ok": true,
+          "sandbox_path": "/work/agent-arena/20260624-151112/shushunya/artifact_contract/report.md"
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "Checks",
+          "ok": true,
+          "sandbox_path": "/work/agent-arena/20260624-151112/shushunya/artifact_contract/report.md"
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "SUCCESS",
+          "ok": true,
+          "sandbox_path": "/work/agent-arena/20260624-151112/shushunya/artifact_contract/report.md"
+        }
+      ],
+      "exit_code": 0,
+      "error": "",
+      "log_path": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/runs/20260624-151112/shushunya/artifact_contract.log",
+      "workspace": "/work/agent-arena/20260624-151112/shushunya/artifact_contract"
+    },
+    {
+      "agent": "aider",
+      "task_id": "artifact_contract",
+      "ok": true,
+      "duration_sec": 91.961,
+      "checks": [
+        {
+          "type": "file_exists",
+          "path": "report.md",
+          "ok": true
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "Summary",
+          "ok": true
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "Checks",
+          "ok": true
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "SUCCESS",
+          "ok": true
+        }
+      ],
+      "exit_code": 0,
+      "error": "",
+      "log_path": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/runs/20260624-151112/aider/artifact_contract.log",
+      "workspace": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/workspaces/20260624-151112/aider/artifact_contract"
+    },
+    {
+      "agent": "mini_swe",
+      "task_id": "artifact_contract",
+      "ok": true,
+      "duration_sec": 43.648,
+      "checks": [
+        {
+          "type": "file_exists",
+          "path": "report.md",
+          "ok": true
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "Summary",
+          "ok": true
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "Checks",
+          "ok": true
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "SUCCESS",
+          "ok": true
+        }
+      ],
+      "exit_code": 0,
+      "error": "",
+      "log_path": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/runs/20260624-151112/mini_swe/artifact_contract.log",
+      "workspace": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/workspaces/20260624-151112/mini_swe/artifact_contract"
+    },
+    {
+      "agent": "openhands",
+      "task_id": "artifact_contract",
+      "ok": false,
+      "duration_sec": 0.0,
+      "checks": [
+        {
+          "type": "file_exists",
+          "path": "report.md",
+          "ok": false
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "Summary",
+          "ok": false
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "Checks",
+          "ok": false
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "SUCCESS",
+          "ok": false
+        }
+      ],
+      "exit_code": 127,
+      "error": "missing Docker/Podman",
+      "log_path": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/runs/20260624-151112/openhands/artifact_contract.log",
+      "workspace": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/workspaces/20260624-151112/openhands/artifact_contract"
+    },
+    {
+      "agent": "shushunya",
+      "task_id": "repair_loop",
+      "ok": true,
+      "duration_sec": 587.129,
+      "checks": [
+        {
+          "type": "command",
+          "command": "python3 -c \"from calc import add; assert add(2, 3) == 5\"",
+          "timeout_sec": 60,
+          "ok": true,
+          "exit_code": 0,
+          "output": ""
+        }
+      ],
+      "exit_code": 0,
+      "error": "",
+      "log_path": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/runs/20260624-151112/shushunya/repair_loop.log",
+      "workspace": "/work/agent-arena/20260624-151112/shushunya/repair_loop"
+    },
+    {
+      "agent": "aider",
+      "task_id": "repair_loop",
+      "ok": true,
+      "duration_sec": 47.121,
+      "checks": [
+        {
+          "type": "command",
+          "command": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/.venv/bin/python -c \"from calc import add; assert add(2, 3) == 5\"",
+          "timeout_sec": 60,
+          "ok": true,
+          "exit_code": 0,
+          "output": ""
+        }
+      ],
+      "exit_code": 0,
+      "error": "",
+      "log_path": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/runs/20260624-151112/aider/repair_loop.log",
+      "workspace": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/workspaces/20260624-151112/aider/repair_loop"
+    },
+    {
+      "agent": "mini_swe",
+      "task_id": "repair_loop",
+      "ok": true,
+      "duration_sec": 40.256,
+      "checks": [
+        {
+          "type": "command",
+          "command": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/.venv/bin/python -c \"from calc import add; assert add(2, 3) == 5\"",
+          "timeout_sec": 60,
+          "ok": true,
+          "exit_code": 0,
+          "output": ""
+        }
+      ],
+      "exit_code": 0,
+      "error": "",
+      "log_path": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/runs/20260624-151112/mini_swe/repair_loop.log",
+      "workspace": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/workspaces/20260624-151112/mini_swe/repair_loop"
+    },
+    {
+      "agent": "openhands",
+      "task_id": "repair_loop",
+      "ok": false,
+      "duration_sec": 0.014,
+      "checks": [
+        {
+          "type": "command",
+          "command": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/.venv/bin/python -c \"from calc import add; assert add(2, 3) == 5\"",
+          "timeout_sec": 60,
+          "ok": false,
+          "exit_code": 1,
+          "output": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nAssertionError\n"
+        }
+      ],
+      "exit_code": 127,
+      "error": "missing Docker/Podman",
+      "log_path": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/runs/20260624-151112/openhands/repair_loop.log",
+      "workspace": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/workspaces/20260624-151112/openhands/repair_loop"
+    }
+  ]
+}

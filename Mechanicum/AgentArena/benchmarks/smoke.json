@@ -1,0 +1,28 @@
+{
+  "suite": "smoke",
+  "tasks": [
+    {
+      "id": "artifact_contract",
+      "title": "Create and verify a required artifact",
+      "prompt": "Создай файл report.md в текущем рабочем каталоге. В нем должны быть разделы Summary, Checks, Result. В Result напиши ровно SUCCESS. После создания проверь содержимое файла и завершай только если файл существует и содержит SUCCESS.",
+      "checks": [
+        {"type": "file_exists", "path": "report.md"},
+        {"type": "file_contains", "path": "report.md", "text": "Summary"},
+        {"type": "file_contains", "path": "report.md", "text": "Checks"},
+        {"type": "file_contains", "path": "report.md", "text": "SUCCESS"}
+      ]
+    },
+    {
+      "id": "repair_loop",
+      "title": "Recover from an intentionally failing test",
+      "seed_files": {
+        "calc.py": "def add(a, b):\n    return a - b\n",
+        "test_calc.py": "from calc import add\n\n\ndef test_add():\n    assert add(2, 3) == 5\n"
+      },
+      "prompt": "В текущем каталоге есть маленький Python-проект. Найди причину падения проверки, исправь код, запусти проверку командой python3 -c \"from calc import add; assert add(2, 3) == 5\" или эквивалентной командой. Завершай только после успешной проверки.",
+      "checks": [
+        {"type": "command", "command": "__PYTHON__ -c \"from calc import add; assert add(2, 3) == 5\"", "timeout_sec": 60}
+      ]
+    }
+  ]
+}

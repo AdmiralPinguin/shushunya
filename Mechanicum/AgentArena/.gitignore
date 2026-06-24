@@ -1,0 +1,7 @@
+.venv/
+agents/
+workspaces/
+runs/
+__pycache__/
+*.pyc
+

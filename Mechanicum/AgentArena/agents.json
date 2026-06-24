@@ -1,0 +1,35 @@
+{
+  "model": {
+    "base_url": "http://127.0.0.1:8080/v1",
+    "model": "gemma-4-12b-it-UD-Q5_K_XL.gguf",
+    "api_key": "local-key",
+    "context_tokens": 32768
+  },
+  "agents": {
+    "shushunya": {
+      "type": "shushunya",
+      "enabled": true,
+      "base_url": "http://127.0.0.1:8095",
+      "timeout_sec": 1800
+    },
+    "aider": {
+      "type": "aider",
+      "enabled": true,
+      "venv": ".venv",
+      "timeout_sec": 1800
+    },
+    "mini_swe": {
+      "type": "mini_swe",
+      "enabled": true,
+      "venv": ".venv",
+      "timeout_sec": 1800
+    },
+    "openhands": {
+      "type": "openhands",
+      "enabled": true,
+      "repo": "agents/openhands",
+      "timeout_sec": 1800
+    }
+  }
+}
+
