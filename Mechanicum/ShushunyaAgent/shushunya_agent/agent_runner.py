@@ -844,6 +844,7 @@ def task_with_execution_profile(task: str, config: AgentConfig) -> str:
         + "- Use a tight reproduce-edit-verify loop: identify the working directory, inspect only relevant files, reproduce the failure, edit the minimal files, run the requested or nearest equivalent verification, then final.\n"
         + "- Before the first code edit, inspect existing tests/source files or reproduce the failure. If a tests directory exists or the task mentions tests/pytest, read or run those tests before changing behavior.\n"
         + "- If the user gives an explicit working directory, stay in it. Shell cwd is not persistent, so prefix every shell command with cd <workspace> && ... .\n"
+        + "- For Python one-liners/checks, use the python action with cwd=<workspace>; do not escape python -c through shell unless you are running a real script file.\n"
         + "- Do not scan unrelated /work trees after relevant project files are known.\n"
         + f"- {shell_rule}\n"
         + "- For code changes, prefer small targeted replace/write actions over rewriting unrelated files.\n"
@@ -1019,6 +1020,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "repeated verified text verification rejected by supervisor",
     "inspection stall rejected by supervisor",
     "swe edit before diagnostic rejected by supervisor",
+    "swe shell inline python rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
 }
@@ -3287,6 +3289,20 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "This text artifact already passed verify_text_file in this task/resume chain. "
                         "Do not rewrite it unless a later verify_text_file failure proves it needs correction. "
                         "Verify remaining artifacts or return final."
+                    ),
+                }
+            elif (
+                action_type == "shell"
+                and swe_task
+                and explicit_workspace
+                and looks_like_inline_python_shell(str(action.get("cmd", "")))
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe shell inline python rejected by supervisor",
+                    "instruction": (
+                        "This is a SWE/code task with an explicit workspace. Do not run Python one-liners through shell quoting. "
+                        f"Use action=python with cwd={explicit_workspace!r}, or write a temporary .py script and run that script with shell."
                     ),
                 }
             elif (

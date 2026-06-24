@@ -2152,6 +2152,37 @@ def main() -> int:
         )
     print("[ok] shell inline python syntax loop guard")
 
+    swe_shell_python_stdout = io.StringIO()
+    swe_shell_python_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-shell-python-reject"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -c \\"print(1)\\"","timeout":60}',
+            '{"action":"final","message":"done"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={"ok": True, "stdout": "1\n"}) as mocked_swe_shell, \
+            contextlib.redirect_stdout(swe_shell_python_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        swe_shell_python_code = run_agent(
+            "Исправь Python-проект.\n\nРабочий каталог для этой задачи: /work/project",
+            swe_shell_python_config,
+        )
+    swe_shell_python_payload = json.loads(swe_shell_python_stdout.getvalue())
+    swe_shell_rejections = [
+        step for step in swe_shell_python_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "swe shell inline python rejected by supervisor"
+    ]
+    if swe_shell_python_code != 0 or not swe_shell_rejections or mocked_swe_shell.called:
+        raise AssertionError(
+            "SWE shell inline python guard failed: "
+            f"code={swe_shell_python_code}, shell_called={mocked_swe_shell.called}, payload={swe_shell_python_payload}"
+        )
+    print("[ok] SWE shell inline python rejected")
+
     stale_replace_stdout = io.StringIO()
     stale_replace_config = AgentConfig(
         task_id=safe_task_id("self-test-stale-replace-loop"),
