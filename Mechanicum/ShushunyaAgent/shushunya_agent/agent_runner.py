@@ -428,6 +428,11 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
                     " Pytest is unavailable in this environment; do not retry pytest. "
                     "Use a focused python action with cwd set to the project root, or shell with cd <project> && PYTHONPATH=$(pwd) python3 -c '...'."
                 )
+            if "syntaxerror" in combined_output and "python" in str(payload.get("argv") or "").lower() and "-c" in str(payload.get("argv") or ""):
+                payload["supervisor_instruction"] += (
+                    " Inline python passed through shell quoting failed with SyntaxError. "
+                    "Prefer the python action with cwd set to the project root, or write a temporary script file and run it."
+                )
         if action_type == "python" and payload.get("ok") is False:
             combined_output = f"{payload.get('stdout') or ''}\n{payload.get('stderr') or ''}".lower()
             if "syntaxerror" in combined_output:
@@ -1009,6 +1014,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "repeated verified text verification rejected by supervisor",
     "inspection stall rejected by supervisor",
     "swe edit before diagnostic rejected by supervisor",
+    "shell python inline syntax loop rejected by supervisor",
 }
 
 
@@ -1172,6 +1178,11 @@ def resume_context_has_swe_diagnostic(task: str) -> bool:
     if "resume context" not in lowered and "authoritative resume context" not in lowered:
         return False
     return any(re.search(r'"action"\s*:\s*"' + re.escape(action) + r'"', lowered) for action in SWE_DIAGNOSTIC_ACTIONS)
+
+
+def looks_like_inline_python_shell(cmd: str) -> bool:
+    lowered = f" {cmd.lower()} "
+    return (" python " in lowered or " python3 " in lowered or "/python3 " in lowered) and " -c " in lowered
 
 
 def validate_final_artifacts(config: AgentConfig, message: str) -> dict[str, Any]:
@@ -2907,6 +2918,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     failed_verification_paths: set[str] = set()
     swe_diagnostic_seen = resume_context_has_swe_diagnostic(original_task)
     inspection_actions_since_progress = 0
+    shell_inline_python_syntax_failures = 0
     repeated_rejection_count = 0
     repeated_rejection_total = 0
     consecutive_parse_failures = 0
@@ -3271,6 +3283,20 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     ),
                 }
             elif (
+                action_type == "shell"
+                and shell_inline_python_syntax_failures >= 2
+                and looks_like_inline_python_shell(str(action.get("cmd", "")))
+            ):
+                result = {
+                    "ok": False,
+                    "error": "shell python inline syntax loop rejected by supervisor",
+                    "instruction": (
+                        "Inline python through shell has already failed with SyntaxError multiple times. "
+                        "Do not keep escaping python3 -c in shell. Use the python action with cwd set to the project root, "
+                        "or write a temporary script file and run that script."
+                    ),
+                }
+            elif (
                 action_type == "verify_text_file"
                 and str(action.get("path") or "") in verified_text_paths
                 and str(action.get("path") or "") not in failed_verification_paths
@@ -3387,6 +3413,14 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         )
         if swe_task and action_type in SWE_DIAGNOSTIC_ACTIONS and not supervisor_rejection:
             swe_diagnostic_seen = True
+        if (
+            action_type == "shell"
+            and isinstance(result, dict)
+            and result.get("ok") is False
+            and looks_like_inline_python_shell(str(action.get("cmd", "")))
+            and "syntaxerror" in f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}".lower()
+        ):
+            shell_inline_python_syntax_failures += 1
         if action_type in {"write_file", "append_file", "replace_in_file"} and isinstance(result, dict) and result.get("ok") is True:
             path = str(action.get("path") or "")
             verified_text_paths.discard(path)
@@ -3445,6 +3479,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if isinstance(result, dict) and result.get("ok") is True:
             if action_type in STATE_MUTATING_ACTIONS:
                 action_counts.clear()
+                shell_inline_python_syntax_failures = 0
             if action_type in {"write_file", "append_file", "replace_in_file"}:
                 reset_path_dependent_action_counts(action_counts, str(action.get("path") or ""))
             elif action_type == "bundle_text_files":

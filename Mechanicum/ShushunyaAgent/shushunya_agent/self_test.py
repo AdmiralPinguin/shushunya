@@ -2119,6 +2119,39 @@ def main() -> int:
         raise AssertionError(f"productive progress should reset cumulative repeat guard: code={productive_reset_code}, payload={productive_reset_payload}")
     print("[ok] repeated rejection total resets on productive progress")
 
+    shell_python_syntax_stdout = io.StringIO()
+    shell_python_syntax_config = AgentConfig(
+        task_id=safe_task_id("self-test-shell-python-syntax-loop"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    shell_python_syntax_actions = [
+        '{"action":"shell","cmd":"python3 -c \\"print((\\"","timeout":60}',
+        '{"action":"shell","cmd":"python3 -c \\"print(((\\"","timeout":60}',
+        '{"action":"shell","cmd":"python3 -c \\"print((((\\"","timeout":60}',
+        '{"action":"final","message":"done"}',
+    ]
+    syntax_error_result = {"ok": False, "returncode": 1, "stdout": "", "stderr": "SyntaxError: '(' was never closed"}
+    with mock.patch.object(agent_runner, "chat", side_effect=shell_python_syntax_actions), \
+            mock.patch.object(agent_runner, "run_shell", return_value=syntax_error_result) as mocked_syntax_shell, \
+            contextlib.redirect_stdout(shell_python_syntax_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        shell_python_syntax_code = run_agent("debug python quoting", shell_python_syntax_config)
+    shell_python_syntax_payload = json.loads(shell_python_syntax_stdout.getvalue())
+    syntax_rejections = [
+        step for step in shell_python_syntax_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "shell python inline syntax loop rejected by supervisor"
+    ]
+    if shell_python_syntax_code != 0 or not syntax_rejections or mocked_syntax_shell.call_count != 2:
+        raise AssertionError(
+            "shell inline python syntax loop guard failed: "
+            f"code={shell_python_syntax_code}, shell_calls={mocked_syntax_shell.call_count}, payload={shell_python_syntax_payload}"
+        )
+    print("[ok] shell inline python syntax loop guard")
+
     swe_diagnostic_stdout = io.StringIO()
     swe_diagnostic_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-diagnostic-before-edit"),
