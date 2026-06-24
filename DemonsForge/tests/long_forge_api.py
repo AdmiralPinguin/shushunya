@@ -139,6 +139,20 @@ def mean_abs_difference(left: str, right: str) -> float:
         return sum(stat.mean) / len(stat.mean)
 
 
+def masked_mean_abs_difference(left: str, right: str, mask: str) -> dict[str, float]:
+    with Image.open(left) as left_image, Image.open(right) as right_image, Image.open(mask) as mask_image:
+        left_rgb = left_image.convert("RGB")
+        right_rgb = right_image.convert("RGB").resize(left_rgb.size)
+        mask_l = mask_image.convert("L").resize(left_rgb.size)
+        diff = ImageChops.difference(left_rgb, right_rgb)
+        masked = ImageStat.Stat(diff, mask_l)
+        unmasked = ImageStat.Stat(diff, ImageChops.invert(mask_l))
+        return {
+            "masked": round(sum(masked.mean) / len(masked.mean), 3),
+            "unmasked": round(sum(unmasked.mean) / len(unmasked.mean), 3),
+        }
+
+
 def artifact_metadata(base_url: str, artifact_id: str) -> dict[str, Any]:
     return request_json("GET", f"{base_url}/forge/artifacts/{artifact_id}/metadata")
 
@@ -150,6 +164,37 @@ def assert_image_changed(base_url: str, artifact_id: str, source: str, min_mean_
     if diff < min_mean_diff:
         raise AssertionError(f"{label}: output changed too little, mean abs diff={diff:.3f}")
     print(f"{label}: mean abs diff={diff:.3f}", flush=True)
+
+
+def image_stats(path: str) -> dict[str, Any]:
+    with Image.open(path) as image:
+        rgb = image.convert("RGB")
+        stat = ImageStat.Stat(rgb)
+        return {
+            "width": rgb.width,
+            "height": rgb.height,
+            "mean": [round(value, 3) for value in stat.mean],
+            "stddev": [round(value, 3) for value in stat.stddev],
+        }
+
+
+def make_contact_sheet(items: list[tuple[str, str]], output_path: Path) -> str:
+    thumbs = []
+    for label, path in items:
+        image = Image.open(path).convert("RGB")
+        image.thumbnail((256, 256))
+        canvas = Image.new("RGB", (256, 296), "white")
+        canvas.paste(image, ((256 - image.width) // 2, 28))
+        draw = ImageDraw.Draw(canvas)
+        draw.text((8, 6), label[:36], fill=(0, 0, 0))
+        draw.text((8, 276), Path(path).parent.name[:28], fill=(40, 40, 40))
+        thumbs.append(canvas)
+    sheet = Image.new("RGB", (256 * len(thumbs), 296), "white")
+    for index, thumb in enumerate(thumbs):
+        sheet.paste(thumb, (256 * index, 0))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(output_path)
+    return str(output_path)
 
 
 def run_downloader_safety(base_url: str, report: dict[str, Any]) -> None:
@@ -188,14 +233,22 @@ def prepare_generation_inputs() -> tuple[str, str]:
     inputs.mkdir(parents=True, exist_ok=True)
     source = inputs / "source.png"
     mask = inputs / "mask.png"
-    image = Image.new("RGB", (512, 512), (36, 32, 30))
+    image = Image.new("RGB", (512, 512), (38, 34, 32))
     draw = ImageDraw.Draw(image)
-    draw.rectangle((120, 80, 390, 460), fill=(92, 48, 38))
-    draw.ellipse((190, 120, 320, 250), fill=(145, 76, 55))
+    draw.rectangle((42, 44, 470, 470), outline=(58, 48, 42), width=10)
+    draw.rectangle((126, 190, 386, 448), fill=(86, 46, 38), outline=(118, 70, 52), width=6)
+    draw.ellipse((188, 78, 324, 214), fill=(150, 82, 58), outline=(184, 112, 80), width=5)
+    draw.polygon([(256, 214), (202, 318), (310, 318)], fill=(54, 42, 38), outline=(160, 90, 60))
+    draw.line((120, 356, 392, 356), fill=(178, 96, 54), width=10)
+    draw.line((84, 410, 428, 410), fill=(190, 116, 58), width=6)
+    draw.rectangle((54, 86, 150, 130), fill=(70, 55, 44))
+    draw.rectangle((362, 86, 458, 130), fill=(70, 55, 44))
     image.save(source)
     mask_image = Image.new("L", (512, 512), 0)
     mask_draw = ImageDraw.Draw(mask_image)
     mask_draw.rectangle((0, 0, 512, 170), fill=255)
+    mask_draw.ellipse((176, 66, 336, 226), fill=0)
+    mask_draw.rectangle((150, 160, 362, 448), fill=0)
     mask_image.save(mask)
     return str(source), str(mask)
 
@@ -277,6 +330,8 @@ def run_generation_smoke(base_url: str, report: dict[str, Any]) -> None:
                     raise AssertionError(f"img2img metadata lost source_images: {metadata}")
             if spec["type"] == "inpaint":
                 assert_image_changed(base_url, artifact_id, source, 1.0, "inpaint")
+                region_diff = masked_mean_abs_difference(source, metadata["path"], mask)
+                print(f"inpaint region diff: {region_diff}", flush=True)
                 if metadata.get("mask_image") != mask:
                     raise AssertionError(f"inpaint metadata lost mask_image: {metadata}")
             if spec.get("loras"):
@@ -310,6 +365,112 @@ def run_generation_smoke(base_url: str, report: dict[str, Any]) -> None:
             print("LoRA metadata ok; runtime load check skipped for external worker mode", flush=True)
 
 
+def run_quality_generation(base_url: str, report: dict[str, Any]) -> None:
+    source, mask = prepare_generation_inputs()
+    jobs = [
+        (
+            "sdxl_quality_txt2img",
+            {
+                "type": "txt2img",
+                "engine": "sdxl",
+                "model": "stable-diffusion-xl-base-1.0",
+                "prompt": (
+                    "quality evaluation, cinematic demonic blacksmith in a fiery forge, "
+                    "clear silhouette, warm rim light, coherent composition"
+                ),
+                "negative_prompt": "low quality, blurry, broken anatomy, abstract noise",
+                "width": 512,
+                "height": 512,
+                "steps": 10,
+                "guidance": 7.0,
+                "seed": 51001,
+                "safety": {"quality_preset": "quality_eval"},
+            },
+        ),
+        (
+            "sdxl_quality_img2img",
+            {
+                "type": "img2img",
+                "engine": "sdxl",
+                "model": "stable-diffusion-xl-base-1.0",
+                "prompt": "turn the simple source into a cinematic demonic blacksmith portrait, keep central figure",
+                "negative_prompt": "low quality, blurry, abstract noise",
+                "source_images": [source],
+                "width": 512,
+                "height": 512,
+                "steps": 8,
+                "strength": 0.78,
+                "guidance": 7.0,
+                "seed": 51002,
+                "safety": {"quality_preset": "quality_eval_edit"},
+            },
+        ),
+        (
+            "sdxl_quality_inpaint",
+            {
+                "type": "inpaint",
+                "engine": "sdxl",
+                "model": "stable-diffusion-xl-base-1.0",
+                "prompt": "replace masked top background with fiery forge sparks and orange furnace light",
+                "negative_prompt": "low quality, blurry, abstract noise",
+                "source_images": [source],
+                "mask_image": mask,
+                "width": 512,
+                "height": 512,
+                "steps": 8,
+                "strength": 0.72,
+                "guidance": 7.0,
+                "seed": 51003,
+                "safety": {"quality_preset": "quality_eval_inpaint"},
+            },
+        ),
+    ]
+    sheet_items: list[tuple[str, str]] = [("source", source)]
+    quality_jobs = []
+    for label, spec in jobs:
+        started = time.monotonic()
+        record = request_json("POST", f"{base_url}/forge/jobs", json=spec)
+        finished = wait_job(base_url, record["id"], timeout_seconds=1800)
+        if finished["status"] != "succeeded":
+            raise AssertionError(f"quality generation job failed: {finished}")
+        artifact_id = finished["artifacts"][0]
+        metadata = artifact_metadata(base_url, artifact_id)
+        verified = request_json("GET", f"{base_url}/forge/artifacts/{artifact_id}/verify")
+        if not verified.get("ok"):
+            raise AssertionError(f"quality artifact verify failed: {verified}")
+        path = metadata["path"]
+        sheet_items.append((label, path))
+        diff_from_source = None
+        region_diff = None
+        if spec["type"] in {"img2img", "inpaint"}:
+            diff_from_source = mean_abs_difference(source, path)
+        if spec["type"] == "inpaint":
+            region_diff = masked_mean_abs_difference(source, path, mask)
+        quality_jobs.append(
+            {
+                "label": label,
+                "job_id": finished["id"],
+                "artifact_id": artifact_id,
+                "path": path,
+                "duration_sec": round(time.monotonic() - started, 3),
+                "prompt": spec["prompt"],
+                "steps": spec["steps"],
+                "guidance": spec["guidance"],
+                "strength": spec.get("strength"),
+                "diff_from_source": None if diff_from_source is None else round(diff_from_source, 3),
+                "region_diff": region_diff,
+                "image_stats": image_stats(path),
+            }
+        )
+        print(f"{label} ok: {finished['id']} artifact={artifact_id}", flush=True)
+    sheet_path = make_contact_sheet(sheet_items, REPORTS_DIR / f"{report['run_id']}-quality-sheet.png")
+    report["quality_generation"] = {
+        "jobs": quality_jobs,
+        "contact_sheet": sheet_path,
+        "note": "This is still a CPU-bounded quality probe, not a final artistic benchmark.",
+    }
+
+
 def write_report(report: dict[str, Any], explicit_path: str | None = None) -> Path:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     path = Path(explicit_path) if explicit_path else REPORTS_DIR / f"{report['run_id']}.json"
@@ -325,6 +486,7 @@ def main() -> int:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--cycles", type=int, default=10)
     parser.add_argument("--generate", action="store_true")
+    parser.add_argument("--quality-generate", action="store_true")
     parser.add_argument("--report-json", default="")
     args = parser.parse_args()
 
@@ -336,6 +498,7 @@ def main() -> int:
         "base_url": args.base_url,
         "cycles": max(1, args.cycles),
         "generate": bool(args.generate),
+        "quality_generate": bool(args.quality_generate),
         "ok": False,
     }
     health = request_json("GET", f"{args.base_url}/health")
@@ -348,6 +511,8 @@ def main() -> int:
     run_downloader_safety(args.base_url.rstrip("/"), report)
     if args.generate:
         run_generation_smoke(args.base_url.rstrip("/"), report)
+    if args.quality_generate:
+        run_quality_generation(args.base_url.rstrip("/"), report)
     report["finished_at"] = utc_now()
     report["duration_sec"] = round(time.monotonic() - started, 3)
     report["ok"] = True

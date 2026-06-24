@@ -238,6 +238,14 @@ def main() -> None:
     )
     assert smoke_plan.status_code == 200, smoke_plan.text
     assert smoke_plan.json()["steps"] == 1
+    assert smoke_plan.json()["safety"]["quality_preset"] == "smoke"
+    quality_plan = client.post(
+        "/forge/plan",
+        json={"request": "SDXL 512x512 качественно cinematic portrait", "use_memory": False},
+    )
+    assert quality_plan.status_code == 200, quality_plan.text
+    assert quality_plan.json()["safety"]["quality_preset"] == "quality"
+    assert quality_plan.json()["steps"] > smoke_plan.json()["steps"]
     planned_custom = client.post(
         "/forge/plan",
         json={"request": "SDXL 512x768 steps 7 seed 123 cinematic portrait"},
@@ -277,6 +285,17 @@ def main() -> None:
     assert planned_img2img.json()["engine"] == "sdxl"
     assert "source_images" in planned_img2img.json()["safety"]["planner_note"]
     assert planned_img2img.json()["safety"]["required_inputs"] == ["source_images"]
+    planned_soft_edit = client.post(
+        "/forge/plan",
+        json={"request": "Слегка измени по картинке в кинематографичном стиле", "use_memory": False},
+    )
+    planned_strong_edit = client.post(
+        "/forge/plan",
+        json={"request": "Сильно переделай по картинке в кинематографичном стиле", "use_memory": False},
+    )
+    assert planned_soft_edit.status_code == 200, planned_soft_edit.text
+    assert planned_strong_edit.status_code == 200, planned_strong_edit.text
+    assert planned_soft_edit.json()["strength"] < planned_strong_edit.json()["strength"]
     planned_missing_lora = client.post(
         "/forge/plan",
         json={"request": "Нарисуй портрет lora: definitely_missing_lora"},

@@ -400,6 +400,20 @@ Optional real CPU SDXL generation smoke:
 DemonsForge/bin/python tests/long_forge_api.py --cycles 5 --generate
 ```
 
+Optional CPU SDXL quality probe:
+
+```bash
+FORGE_EMBEDDED_WORKER=0 ./start-forge-api.sh
+FORGE_WORKER_MAX_JOBS=3 ./start-forge-worker.sh
+DemonsForge/bin/python tests/long_forge_api.py --cycles 1 --quality-generate
+```
+
+This runs real `txt2img`, `img2img`, and `inpaint` jobs, writes a JSON report
+under `runtime/test-reports/`, and creates a contact sheet next to the report.
+For inpaint, the report includes masked and unmasked mean absolute differences
+so prompt-following can be judged separately from whether the pipeline merely
+produced an image.
+
 Memory gateway diagnostic:
 
 ```bash

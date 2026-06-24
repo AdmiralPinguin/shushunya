@@ -16,6 +16,18 @@ QUALITY_HINTS = {
     "портрет": "portrait, detailed face",
 }
 
+QUALITY_PRESETS = {
+    "smoke": {"steps": 1, "guidance_scale": 0.7},
+    "draft": {"steps": 8, "guidance_scale": 0.85},
+    "quality": {"steps": 24, "guidance_scale": 1.0},
+}
+
+EDIT_PRESETS = {
+    "edit_soft": {"strength": 0.35, "steps": 12},
+    "edit_strong": {"strength": 0.8, "steps": 20},
+    "inpaint_precise": {"strength": 0.65, "steps": 18},
+}
+
 
 def _choose_engine(text: str, preferred: str | None, job_type: JobType) -> str:
     caps = capabilities()
@@ -113,6 +125,42 @@ def _steps(text: str, default: int) -> int:
             return 1
         return min(default, 20)
     return max(1, min(int(match.group(1)), 60))
+
+
+def _quality_preset(text: str, job_type: JobType) -> str:
+    lowered = text.lower()
+    if any(token in lowered for token in ["smoke", "быстро", "тест", "test", "черновик", "draft"]):
+        return "draft" if "черновик" in lowered or "draft" in lowered else "smoke"
+    if any(token in lowered for token in ["quality", "качественно", "финал", "final", "нормально", "подробно"]):
+        return "quality"
+    if job_type in {JobType.img2img, JobType.inpaint}:
+        if any(token in lowered for token in ["чуть", "слегка", "мягко", "soft"]):
+            return "edit_soft"
+        if any(token in lowered for token in ["сильно", "переделай", "редизайн", "strong"]):
+            return "edit_strong"
+        if job_type == JobType.inpaint:
+            return "inpaint_precise"
+    return "draft" if job_type == JobType.txt2img else "edit_strong"
+
+
+def _preset_steps(text: str, default: int, preset: str) -> int:
+    explicit = re.search(r"(?:steps|шаг(?:ов|и|а)?)\s*[:=]?\s*(\d{1,3})", text, re.I)
+    if explicit:
+        return _steps(text, default)
+    if preset in EDIT_PRESETS:
+        return min(int(EDIT_PRESETS[preset]["steps"]), default)
+    preset_meta = QUALITY_PRESETS.get(preset, QUALITY_PRESETS["draft"])
+    scaled = max(1, round(default * float(preset_meta["guidance_scale"])))
+    return min(int(preset_meta["steps"]), scaled, 60)
+
+
+def _preset_strength(text: str, job_type: JobType, preset: str) -> float:
+    match = re.search(r"(?:strength|сила)\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", text, re.I)
+    if match:
+        return max(0.0, min(float(match.group(1)), 1.0))
+    if job_type in {JobType.img2img, JobType.inpaint} and preset in EDIT_PRESETS:
+        return float(EDIT_PRESETS[preset]["strength"])
+    return 0.75
 
 
 def _batch_size(text: str) -> int:
@@ -230,11 +278,15 @@ def build_heuristic_plan(request: PlanRequest) -> JobSpec:
     engine_caps = caps["engines"][engine]
     model = engine_caps["default_model"]
     width, height, preset = _aspect(text)
+    quality_preset = _quality_preset(text, job_type)
     prompt = text
     additions = [value for key, value in QUALITY_HINTS.items() if key in text.lower()]
     if additions:
         prompt = f"{prompt}, {', '.join(additions)}"
-    safety: dict[str, object] = {"memory_context": _memory_context(text, enabled=request.use_memory)}
+    safety: dict[str, object] = {
+        "memory_context": _memory_context(text, enabled=request.use_memory),
+        "quality_preset": quality_preset,
+    }
     if engine in {"flux", "stable_diffusion"}:
         safety["runtime_warning"] = (
             f"{engine} is available but heavy in CPU-only mode; use low steps for smoke runs "
@@ -255,12 +307,13 @@ def build_heuristic_plan(request: PlanRequest) -> JobSpec:
         width=width,
         height=height,
         aspect_preset=preset,
-        steps=_steps(text, engine_caps["steps_default"]),
+        steps=_preset_steps(text, engine_caps["steps_default"], quality_preset),
         cfg=cfg,
         guidance=guidance,
         sampler="default",
         scheduler=_scheduler(text),
         seed=_seed(text),
+        strength=_preset_strength(text, job_type, quality_preset),
         upscale_factor=_upscale_factor(text),
         batch_size=_batch_size(text),
         loras=_local_loras(text),
