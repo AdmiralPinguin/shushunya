@@ -969,6 +969,16 @@ PRODUCTIVE_ACTIONS = {
     "ranobehub_chapter",
     "archive_memory_propose",
 }
+STATE_MUTATING_ACTIONS = {
+    "write_file",
+    "append_file",
+    "replace_in_file",
+    "remove_file",
+    "web_extract_to_file",
+    "web_extract_link_list",
+    "bundle_text_files",
+    "ranobehub_chapter",
+}
 
 
 REQUIRED_FIELDS = {
@@ -3355,6 +3365,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 content_bytes = len(str(action.get("content") or "").encode("utf-8"))
                 successful_write_file_max_bytes[path] = max(successful_write_file_max_bytes.get(path, 0), content_bytes)
         if isinstance(result, dict) and result.get("ok") is True:
+            if action_type in STATE_MUTATING_ACTIONS:
+                action_counts.clear()
             if action_type in {"write_file", "append_file", "replace_in_file"}:
                 reset_path_dependent_action_counts(action_counts, str(action.get("path") or ""))
             elif action_type == "bundle_text_files":

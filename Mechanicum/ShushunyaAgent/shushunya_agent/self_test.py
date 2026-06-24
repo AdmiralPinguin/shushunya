@@ -2099,6 +2099,43 @@ def main() -> int:
         raise AssertionError(f"productive progress should reset cumulative repeat guard: code={productive_reset_code}, payload={productive_reset_payload}")
     print("[ok] repeated rejection total resets on productive progress")
 
+    verify_after_edit_stdout = io.StringIO()
+    verify_after_edit_config = AgentConfig(
+        task_id=safe_task_id("self-test-repeat-verification-after-edit"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    same_test_action = '{"action":"shell","cmd":"cd /work/project && python3 -c \\"from calc import add; assert add(2, 3) == 5\\"","timeout":60}'
+    verify_after_edit_actions = [
+        same_test_action,
+        same_test_action,
+        '{"action":"replace_in_file","path":"/work/project/calc.py","old":"return a - b","new":"return a + b","count":1}',
+        same_test_action,
+        '{"action":"final","message":"done"}',
+    ]
+    shell_results = [
+        {"ok": False, "returncode": 1, "stderr": "AssertionError"},
+        {"ok": False, "returncode": 1, "stderr": "AssertionError"},
+        {"ok": True, "returncode": 0, "stdout": ""},
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=verify_after_edit_actions), \
+            mock.patch.object(agent_runner, "run_shell", side_effect=shell_results), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/calc.py"}), \
+            contextlib.redirect_stdout(verify_after_edit_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        verify_after_edit_code = run_agent("allow same verification after code edit", verify_after_edit_config)
+    verify_after_edit_payload = json.loads(verify_after_edit_stdout.getvalue())
+    rejected_after_edit = [
+        step for step in verify_after_edit_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "repeated identical action rejected by supervisor"
+    ]
+    if verify_after_edit_code != 0 or rejected_after_edit:
+        raise AssertionError(f"same verification after edit should be allowed: code={verify_after_edit_code}, payload={verify_after_edit_payload}")
+    print("[ok] repeated verification allowed after state mutation")
+
     if offline:
         print("[skip] archive integration")
     else:
