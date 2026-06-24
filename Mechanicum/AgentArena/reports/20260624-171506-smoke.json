@@ -1,0 +1,71 @@
+{
+  "run_id": "20260624-171506",
+  "suite": "smoke",
+  "model": {
+    "base_url": "http://127.0.0.1:8080/v1",
+    "model": "gemma-4-12b-it-UD-Q5_K_XL.gguf",
+    "api_key": "local-key",
+    "context_tokens": 32768
+  },
+  "results": [
+    {
+      "agent": "shushunya",
+      "task_id": "artifact_contract",
+      "ok": true,
+      "duration_sec": 219.409,
+      "checks": [
+        {
+          "type": "file_exists",
+          "path": "report.md",
+          "ok": true,
+          "sandbox_path": "/work/agent-arena/20260624-171506/shushunya/artifact_contract/report.md"
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "Summary",
+          "ok": true,
+          "sandbox_path": "/work/agent-arena/20260624-171506/shushunya/artifact_contract/report.md"
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "Checks",
+          "ok": true,
+          "sandbox_path": "/work/agent-arena/20260624-171506/shushunya/artifact_contract/report.md"
+        },
+        {
+          "type": "file_contains",
+          "path": "report.md",
+          "text": "SUCCESS",
+          "ok": true,
+          "sandbox_path": "/work/agent-arena/20260624-171506/shushunya/artifact_contract/report.md"
+        }
+      ],
+      "exit_code": 0,
+      "error": "",
+      "log_path": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/runs/20260624-171506/shushunya/artifact_contract.log",
+      "workspace": "/work/agent-arena/20260624-171506/shushunya/artifact_contract"
+    },
+    {
+      "agent": "shushunya",
+      "task_id": "repair_loop",
+      "ok": true,
+      "duration_sec": 428.159,
+      "checks": [
+        {
+          "type": "command",
+          "command": "python3 -c \"from calc import add; assert add(2, 3) == 5\"",
+          "timeout_sec": 60,
+          "ok": true,
+          "exit_code": 0,
+          "output": ""
+        }
+      ],
+      "exit_code": 0,
+      "error": "",
+      "log_path": "/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/AgentArena/runs/20260624-171506/shushunya/repair_loop.log",
+      "workspace": "/work/agent-arena/20260624-171506/shushunya/repair_loop"
+    }
+  ]
+}
