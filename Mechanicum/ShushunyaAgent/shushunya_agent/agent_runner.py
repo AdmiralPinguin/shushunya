@@ -1031,6 +1031,29 @@ def required_artifacts_auto_final(config: AgentConfig, required_paths: list[str]
     }
 
 
+def required_artifact_verification_hint(
+    config: AgentConfig,
+    required_paths: list[str],
+    verified_paths: set[str],
+) -> tuple[str | None, list[str]]:
+    if not required_paths:
+        return None, []
+    artifact_validation = validate_artifact_paths(config, required_paths)
+    if not artifact_validation.get("ok"):
+        return None, []
+    missing_verification = missing_text_verifications(required_paths, verified_paths)
+    if not missing_verification:
+        return None, []
+    return (
+        "Required artifact progress hint: all required artifacts exist. "
+        "Do not list, read, rewrite, or re-verify artifacts that already passed verify_text_file. "
+        "Next productive actions should be verify_text_file for these unverified required text artifacts only: "
+        + ", ".join(missing_verification)
+        + ". After they pass, return final.",
+        missing_verification,
+    )
+
+
 VERIFY_TEXT_FILE_SCRIPT = r'''
 import json
 import os
@@ -2667,6 +2690,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     verified_text_paths: set[str] = set(config.initial_verified_text_paths)
     required_artifact_path_list = required_artifact_paths_from_task(task)
     required_artifact_paths = set(required_artifact_path_list)
+    last_required_artifact_hint = ""
     trace: list[dict[str, Any]] = []
     write_task_journal(
         config,
@@ -3189,11 +3213,32 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     print(final_payload["message"])
                 return 0
 
+        required_hint, missing_required_verification = required_artifact_verification_hint(
+            config,
+            required_artifact_path_list,
+            verified_text_paths,
+        )
+        if required_hint and required_hint != last_required_artifact_hint:
+            last_required_artifact_hint = required_hint
+            emit(
+                event_sink,
+                {
+                    "type": "warning",
+                    "code": "required_artifact_verification_hint",
+                    "step": step,
+                    "message": required_hint,
+                    "missing_verification": missing_required_verification,
+                },
+            )
+
         messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
+        tool_result_content = "Tool result:\n" + json.dumps(result_for_model(action_type, result, config), ensure_ascii=False, indent=2)
+        if required_hint:
+            tool_result_content += "\n\n" + required_hint
         messages.append(
             {
                 "role": "user",
-                "content": "Tool result:\n" + json.dumps(result_for_model(action_type, result, config), ensure_ascii=False, indent=2),
+                "content": tool_result_content,
             }
         )
         supervisor_rejection = str(result.get("error") or "") in {

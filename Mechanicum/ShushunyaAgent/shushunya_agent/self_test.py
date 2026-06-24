@@ -1809,6 +1809,40 @@ def main() -> int:
         raise AssertionError(f"required artifact auto-final warning was not emitted: {auto_final_events}")
     print("[ok] required artifacts auto-final after verification")
 
+    progress_hint_events: list[dict] = []
+    progress_hint_stdout = io.StringIO()
+    progress_hint_config = AgentConfig(
+        task_id=safe_task_id("self-test-required-artifact-verification-hint"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        initial_verified_text_paths=("/work/plan.md",),
+    )
+    progress_hint_replies = [
+        '{"action":"write_file","path":"/work/final.md","content":"FINAL"}',
+        '{"action":"verify_text_file","path":"/work/final.md","must_contain":["FINAL"]}',
+    ]
+
+    with mock.patch.object(agent_runner, "chat", side_effect=progress_hint_replies), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=fake_file_info), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_verify), \
+            contextlib.redirect_stdout(progress_hint_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        progress_hint_code = run_agent(
+            "Required artifacts: /work/plan.md and /work/final.md.",
+            progress_hint_config,
+            event_sink=progress_hint_events.append,
+        )
+    progress_hint_payload = json.loads(progress_hint_stdout.getvalue())
+    hint_events = [event for event in progress_hint_events if event.get("code") == "required_artifact_verification_hint"]
+    if progress_hint_code != 0 or not hint_events or hint_events[0].get("missing_verification") != ["/work/final.md"]:
+        raise AssertionError(
+            f"required artifact verification hint failed: code={progress_hint_code}, "
+            f"payload={progress_hint_payload}, events={progress_hint_events}"
+        )
+    print("[ok] required artifact verification hint")
+
     timeout_stdout = io.StringIO()
     timeout_events: list[dict] = []
     timeout_config = AgentConfig(
