@@ -2847,6 +2847,19 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     )
                     continue
             if not artifact_validation.get("ok"):
+                failed_paths = [
+                    str(item.get("path"))
+                    for item in artifact_validation.get("failures", [])
+                    if isinstance(item, dict) and item.get("path")
+                ]
+                failed_instruction = (
+                    "\nCreate or fix only these failed required artifact paths next: "
+                    + ", ".join(failed_paths)
+                    + ". Do not inspect unrelated paths, do not use paths from previous tasks, and do not rewrite artifacts "
+                    "that already passed verify_text_file unless a real content verification failure names that same path."
+                    if failed_paths
+                    else "\nCreate or fix the failed required artifact paths next. Do not inspect unrelated paths or use paths from previous tasks."
+                )
                 warning_message = (
                     "Supervisor rejected final because mentioned sandbox artifacts are missing or empty: "
                     + json.dumps(artifact_validation, ensure_ascii=False)
@@ -2858,7 +2871,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "role": "user",
                         "content": (
                             warning_message
-                            + "\nVerify or create the required files, then return final only after file_info confirms them."
+                            + failed_instruction
+                            + "\nAfter each text artifact exists, run verify_text_file only for text artifacts that have not already passed in this task/resume chain."
                         ),
                     }
                 )
@@ -3069,7 +3083,14 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             path = str(result.get("path"))
             verified_text_paths.add(path)
             failed_verification_paths.discard(path)
-        elif action_type == "verify_text_file" and isinstance(result, dict) and result.get("ok") is False and result.get("path"):
+        elif (
+            action_type == "verify_text_file"
+            and isinstance(result, dict)
+            and result.get("ok") is False
+            and result.get("path")
+            and isinstance(result.get("failures"), list)
+            and result.get("failures")
+        ):
             failed_verification_paths.add(str(result.get("path")))
         event_extra: dict[str, Any] = {}
         if isinstance(result, dict):
