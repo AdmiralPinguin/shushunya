@@ -1153,6 +1153,20 @@ def required_artifact_paths_from_task(task: str) -> list[str]:
     return required[:20]
 
 
+def explicit_workspace_from_task(task: str) -> str:
+    for raw_line in (task or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lowered = line.lower()
+        if not any(marker in lowered for marker in ("рабочий каталог", "working directory", "workspace", "workdir")):
+            continue
+        paths = extract_sandbox_paths_from_text(line)
+        if paths:
+            return paths[0]
+    return ""
+
+
 def validate_final_artifacts(config: AgentConfig, message: str) -> dict[str, Any]:
     return validate_artifact_paths(config, extract_sandbox_paths_from_text(message))
 
@@ -2893,6 +2907,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     verified_text_paths: set[str] = set(config.initial_verified_text_paths)
     required_artifact_path_list = required_artifact_paths_from_task(original_task)
     required_artifact_paths = set(required_artifact_path_list)
+    explicit_workspace = explicit_workspace_from_task(original_task)
     last_required_artifact_hint = ""
     trace: list[dict[str, Any]] = []
     write_task_journal(
@@ -3061,6 +3076,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 continue
 
         action_type = str(action.get("action", "")).strip().lower()
+        if action_type == "python" and explicit_workspace and not (action.get("cwd") or action.get("workdir")):
+            action["cwd"] = explicit_workspace
         consecutive_parse_failures = 0
         validation = validate_action(action)
         if not validation.get("ok"):

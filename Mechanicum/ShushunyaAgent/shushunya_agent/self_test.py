@@ -2156,6 +2156,11 @@ def main() -> int:
         )
     print("[ok] SWE edits require initial diagnostic")
 
+    workspace_task = "Запусти проверку Python.\n\nРабочий каталог для этой задачи: /work/project"
+    if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":
+        raise AssertionError("explicit workspace was not extracted from task text")
+    print("[ok] explicit task workspace extracted")
+
     verify_after_edit_stdout = io.StringIO()
     verify_after_edit_config = AgentConfig(
         task_id=safe_task_id("self-test-repeat-verification-after-edit"),

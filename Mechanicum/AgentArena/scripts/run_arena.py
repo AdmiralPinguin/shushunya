@@ -47,6 +47,19 @@ def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def write_report(path: Path, run_id: str, suite: dict[str, Any], model: dict[str, Any], results: list[RunResult], partial: bool) -> None:
+    write_json(
+        path,
+        {
+            "run_id": run_id,
+            "suite": suite["suite"],
+            "partial": partial,
+            "model": model,
+            "results": [item.__dict__ for item in results],
+        },
+    )
+
+
 def prepare_workspace(task: dict[str, Any], agent_name: str, run_id: str) -> Path:
     workspace = WORKSPACES / run_id / agent_name / task["id"]
     if workspace.exists():
@@ -325,15 +338,20 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--suite", default="smoke")
     parser.add_argument("--agents", default="", help="Comma-separated agent names. Defaults to enabled agents.")
+    parser.add_argument("--tasks", default="", help="Comma-separated task ids. Defaults to all tasks in the suite.")
     args = parser.parse_args()
 
     config = load_json(ROOT / "agents.json")
     suite = load_json(ROOT / "benchmarks" / f"{args.suite}.json")
     selected = [item.strip() for item in args.agents.split(",") if item.strip()]
+    selected_tasks = {item.strip() for item in args.tasks.split(",") if item.strip()}
     run_id = time.strftime("%Y%m%d-%H%M%S")
+    report_path = REPORTS / f"{run_id}-{suite['suite']}.json"
     results: list[RunResult] = []
 
     for task in suite["tasks"]:
+        if selected_tasks and task["id"] not in selected_tasks:
+            continue
         for agent_name, agent in config["agents"].items():
             if selected and agent_name not in selected:
                 continue
@@ -343,15 +361,9 @@ def main() -> int:
             result = run_one(agent_name, agent, config["model"], task, run_id)
             print(f"[arena] {agent_name} -> {task['id']} ok={result.ok} exit={result.exit_code}", flush=True)
             results.append(result)
+            write_report(report_path, run_id, suite, config["model"], results, partial=True)
 
-    report = {
-        "run_id": run_id,
-        "suite": suite["suite"],
-        "model": config["model"],
-        "results": [item.__dict__ for item in results],
-    }
-    report_path = REPORTS / f"{run_id}-{suite['suite']}.json"
-    write_json(report_path, report)
+    write_report(report_path, run_id, suite, config["model"], results, partial=False)
     print(f"[arena] report: {report_path}")
     return 0 if all(item.ok for item in results if item.agent != "openhands") else 1
 
