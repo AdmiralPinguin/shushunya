@@ -404,6 +404,7 @@ Smoke test without heavy image generation:
 
 ```bash
 DemonsForge/bin/python tests/smoke_forge_api.py
+DemonsForge/bin/python tests/forge_self_test.py
 ```
 
 Long live-API planner/dry-run matrix:
