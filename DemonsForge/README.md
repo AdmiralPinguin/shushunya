@@ -220,6 +220,8 @@ Architecture:
   local model folders with `model_index.json` are surfaced as discovered models.
   `/forge/capabilities` exposes implemented job types, service-level jobs,
   unsupported job types, future feature hooks, and per-engine feature flags.
+  For thin clients, it also includes stable top-level aliases: `job_types` and
+  `defaults`.
 - `forge_service/queue.py`: single-worker VRAM/RAM-aware job queue with
   progress logs, cancellation state, runtime status and idle model unload. It
   can run embedded in the API process or as a separate worker process polling

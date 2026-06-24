@@ -269,6 +269,19 @@ def capabilities() -> dict[str, Any]:
             "unsupported_job_types": UNSUPPORTED_JOB_TYPES,
             "future_features": FUTURE_FEATURES,
         }
+    implemented_job_types = sorted(
+        set(SERVICE_JOB_TYPES)
+        | {job_type for meta in ENGINE_MODELS.values() for job_type in meta["job_types"]}
+    )
+    engine_policy = {
+        "txt2img_default_order": ["stable_diffusion", "flux", "sdxl"],
+        "image_operation_engine": "sdxl",
+        "notes": [
+            "Use SD3.5/Flux for first text-to-image concepts by default.",
+            "Use SDXL for operations on existing images: img2img, inpaint, outpaint, variation, refine, LoRA/control workflows.",
+            "Respect explicit engine requests when the requested engine supports the job type.",
+        ],
+    }
     return {
         "service": "DemonsForge",
         "version": __version__,
@@ -290,22 +303,20 @@ def capabilities() -> dict[str, Any]:
         "dependencies": {
             "peft": {"available": has_peft, "required_for": ["sdxl_lora"]},
         },
-        "implemented_job_types": sorted(
-            set(SERVICE_JOB_TYPES)
-            | {job_type for meta in ENGINE_MODELS.values() for job_type in meta["job_types"]}
-        ),
+        "job_types": implemented_job_types,
+        "implemented_job_types": implemented_job_types,
         "service_job_types": SERVICE_JOB_TYPES,
         "unsupported_job_types": UNSUPPORTED_JOB_TYPES,
         "future_features": FUTURE_FEATURES,
-        "engine_policy": {
-            "txt2img_default_order": ["stable_diffusion", "flux", "sdxl"],
-            "image_operation_engine": "sdxl",
-            "notes": [
-                "Use SD3.5/Flux for first text-to-image concepts by default.",
-                "Use SDXL for operations on existing images: img2img, inpaint, outpaint, variation, refine, LoRA/control workflows.",
-                "Respect explicit engine requests when the requested engine supports the job type.",
-            ],
+        "defaults": {
+            "engine": engine_policy["txt2img_default_order"][0],
+            "txt2img_engine_order": engine_policy["txt2img_default_order"],
+            "image_operation_engine": engine_policy["image_operation_engine"],
+            "sampler": "default",
+            "scheduler": "native",
+            "aspect_preset": "square",
         },
+        "engine_policy": engine_policy,
     }
 
 
