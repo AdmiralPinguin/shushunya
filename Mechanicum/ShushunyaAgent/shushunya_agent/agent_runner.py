@@ -907,6 +907,37 @@ NON_REQUIRED_ARTIFACT_MARKERS = (
 def required_artifact_paths_from_task(task: str) -> list[str]:
     required: list[str] = []
     seen: set[str] = set()
+
+    in_required_block = False
+    required_block_had_paths = False
+    for raw_line in (task or "").splitlines():
+        line = raw_line.strip()
+        lowered = line.lower()
+        line_has_required_marker = any(marker in lowered for marker in REQUIRED_ARTIFACT_MARKERS)
+        paths = extract_sandbox_paths_from_text(line)
+        if line_has_required_marker:
+            in_required_block = True
+            required_block_had_paths = False
+        elif in_required_block and not line:
+            in_required_block = False
+            required_block_had_paths = False
+            continue
+        elif in_required_block and required_block_had_paths and not paths:
+            in_required_block = False
+            required_block_had_paths = False
+            continue
+        if not in_required_block or not paths:
+            continue
+        if any(marker in lowered for marker in NON_REQUIRED_ARTIFACT_MARKERS):
+            continue
+        for path in paths:
+            if Path(path).suffix.lower() not in TEXT_VERIFICATION_EXTENSIONS:
+                continue
+            if path not in seen:
+                seen.add(path)
+                required.append(path)
+                required_block_had_paths = True
+
     for sentence in re.split(r"(?<=[.!?\n])\s+", task or ""):
         lowered = sentence.lower()
         paths = extract_sandbox_paths_from_text(sentence)

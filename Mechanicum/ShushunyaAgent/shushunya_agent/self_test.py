@@ -1634,6 +1634,22 @@ def main() -> int:
     )
     if required_paths != ["/work/report.md", "/work/matrix.md"]:
         raise AssertionError(f"required artifact extraction failed: {required_paths}")
+    numbered_required_paths = required_artifact_paths_from_task(
+        "Обязательные артефакты:\n"
+        "1. /work/nightly-finalization/plan.md\n"
+        "2. /work/nightly-finalization/result.md\n"
+        "3. /work/nightly-finalization/audit.json\n"
+        "4. /work/nightly-finalization/final.md\n\n"
+        "Требования:\n"
+        "- Не используй /work/nightly-finalization/source.tmp как финальный результат."
+    )
+    if numbered_required_paths != [
+        "/work/nightly-finalization/plan.md",
+        "/work/nightly-finalization/result.md",
+        "/work/nightly-finalization/audit.json",
+        "/work/nightly-finalization/final.md",
+    ]:
+        raise AssertionError(f"numbered required artifact extraction failed: {numbered_required_paths}")
     recovery_required_paths = required_artifact_paths_from_task(
         "Обязательные артефакты: /work/nightly-error-recovery/report.md и /work/nightly-error-recovery/recovery_log.json. "
         "Один раз попробуй read_file для /work/nightly-error-recovery/missing-input.md, ожидаемо получишь ошибку, "
