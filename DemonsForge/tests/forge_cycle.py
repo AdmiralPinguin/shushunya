@@ -39,6 +39,7 @@ def run_command(name: str, command: list[str], timeout_seconds: int) -> dict[str
 
 
 def cycle_once(index: int, args: argparse.Namespace) -> dict[str, Any]:
+    started = time.monotonic()
     steps = [
         run_command(
             "self_test",
@@ -55,6 +56,7 @@ def cycle_once(index: int, args: argparse.Namespace) -> dict[str, Any]:
     return {
         "cycle": index,
         "started_at": utc_now(),
+        "duration_sec": round(time.monotonic() - started, 3),
         "steps": steps,
         "ok": all(step["ok"] for step in steps),
     }
@@ -72,6 +74,7 @@ def main() -> int:
     args = parser.parse_args()
 
     run_id = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S-forge-cycle")
+    started = time.monotonic()
     report: dict[str, Any] = {
         "run_id": run_id,
         "started_at": utc_now(),
@@ -90,6 +93,7 @@ def main() -> int:
         if index < max(1, args.iterations) and args.sleep_seconds > 0:
             time.sleep(args.sleep_seconds)
     report["finished_at"] = utc_now()
+    report["duration_sec"] = round(time.monotonic() - started, 3)
     report["ok"] = all(cycle["ok"] for cycle in report["cycles"])
     report_path = Path(args.report_json) if args.report_json else REPORTS_DIR / f"{run_id}.json"
     if not report_path.is_absolute():

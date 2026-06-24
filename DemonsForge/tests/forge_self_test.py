@@ -85,6 +85,7 @@ def main() -> int:
     args = parser.parse_args()
 
     run_id = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S-forge-self-test")
+    started = time.monotonic()
     report: dict[str, Any] = {
         "run_id": run_id,
         "started_at": utc_now(),
@@ -102,6 +103,7 @@ def main() -> int:
             live_step["skipped"] = True
             report["steps"].append(live_step)
     report["finished_at"] = utc_now()
+    report["duration_sec"] = round(time.monotonic() - started, 3)
     report["ok"] = all(step.get("ok") or step.get("skipped") for step in report["steps"])
     report_path = Path(args.report_json) if args.report_json else REPORTS_DIR / f"{run_id}.json"
     if not report_path.is_absolute():
