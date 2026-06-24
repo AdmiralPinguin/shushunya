@@ -771,6 +771,54 @@ def task_with_execution_plan(task: str, plan: dict[str, Any] | None) -> str:
     )
 
 
+SWE_TASK_MARKERS = (
+    "python-проект",
+    "python project",
+    "код",
+    "code",
+    "тест",
+    "test",
+    "pytest",
+    "исправь",
+    "fix",
+    "bug",
+    "ошибк",
+    "traceback",
+    "stack trace",
+    ".py",
+    ".js",
+    ".ts",
+    ".kt",
+    ".java",
+    "git",
+)
+
+
+def looks_like_swe_task(task: str) -> bool:
+    lowered = task.lower()
+    return any(marker in lowered for marker in SWE_TASK_MARKERS)
+
+
+def task_with_execution_profile(task: str, config: AgentConfig) -> str:
+    if not looks_like_swe_task(task):
+        return task
+    shell_rule = (
+        "Prefer shell for repo inspection and verification commands."
+        if config.shell_enabled
+        else "Shell may be unavailable; if shell is rejected, use file tools and python instead of repeating shell."
+    )
+    return (
+        task
+        + "\n\nExecutor profile: SWE/code task.\n"
+        + "- Use a tight reproduce-edit-verify loop: identify the working directory, inspect only relevant files, reproduce the failure, edit the minimal files, run the requested or nearest equivalent verification, then final.\n"
+        + "- If the user gives an explicit working directory, stay in it. Shell cwd is not persistent, so prefix every shell command with cd <workspace> && ... .\n"
+        + "- Do not scan unrelated /work trees after relevant project files are known.\n"
+        + f"- {shell_rule}\n"
+        + "- For code changes, prefer small targeted replace/write actions over rewriting unrelated files.\n"
+        + "- Do not return final for a code fix until a verification command or equivalent python check has passed, unless the task explicitly says no verification is possible.\n"
+    )
+
+
 def looks_like_oversized_inline_file_action(raw: str, error: Exception | None = None) -> bool:
     text = str(raw or "")
     lowered = text.lower()
@@ -2778,6 +2826,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     original_task = task
     execution_plan, planner_meta = build_execution_plan(original_task, config)
     task = task_with_execution_plan(original_task, execution_plan)
+    task = task_with_execution_profile(task, config)
     system_prompt = SYSTEM_PROMPT
     if config.technical_output:
         system_prompt += (

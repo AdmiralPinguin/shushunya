@@ -158,6 +158,30 @@ def int_field(payload: dict[str, Any], key: str, default: int, minimum: int, max
     return max(minimum, min(value, maximum))
 
 
+def default_max_steps_for_payload(payload: dict[str, Any]) -> int:
+    env_default = int(os.environ.get("SHUSHUNYA_AGENT_MAX_STEPS", "200"))
+    if "max_steps" in payload:
+        return env_default
+    task = str(payload.get("task") or "")
+    lowered = task.lower()
+    complex_markers = (
+        "обязательные артефакты",
+        "required artifacts",
+        "bundle",
+        "web_extract",
+        "telegram",
+        "стресс",
+        "stress",
+        "продолж",
+        "resume",
+    )
+    if len(task) >= 5000:
+        return max(env_default, 1000)
+    if len(task) >= 1500 or any(marker in lowered for marker in complex_markers):
+        return max(env_default, 600)
+    return env_default
+
+
 def http_shell_enabled(payload: dict[str, Any]) -> bool:
     requested = bool_field(payload, "shell_enabled", env_bool("SHUSHUNYA_AGENT_HTTP_SHELL_ENABLED", False))
     if not requested:
@@ -333,7 +357,7 @@ def validate_task_text(task: str) -> dict[str, Any] | None:
 def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
     task_id = str(payload.get("task_id") or payload.get("resume_task_id") or "").strip()
     return AgentConfig(
-        max_steps=int_field(payload, "max_steps", int(os.environ.get("SHUSHUNYA_AGENT_MAX_STEPS", "200")), 1, 200),
+        max_steps=int_field(payload, "max_steps", default_max_steps_for_payload(payload), 1, 2000),
         max_runtime_sec=int_field(payload, "max_runtime_sec", int(os.environ.get("SHUSHUNYA_AGENT_MAX_RUNTIME_SEC", "1800")), 30, 7200),
         max_model_tokens=int_field(payload, "max_tokens", int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "1024")), 128, 4096),
         llm_retries=int_field(payload, "llm_retries", int(os.environ.get("SHUSHUNYA_AGENT_LLM_RETRIES", "3")), 1, 5),

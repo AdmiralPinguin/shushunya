@@ -596,6 +596,15 @@ def main() -> int:
     if not server_config.task_id:
         raise AssertionError("server did not assign a task_id")
     print("[ok] server assigns task id")
+    if server.config_from_payload({"task": "x" * 6000}).max_steps < 1000:
+        raise AssertionError("long HTTP tasks should receive a larger default step budget")
+    if server.config_from_payload({"task": "Required artifacts: /work/a.md"}).max_steps < 600:
+        raise AssertionError("complex artifact tasks should receive a larger default step budget")
+    if server.config_from_payload({"task": "tiny", "max_steps": 1500}).max_steps != 1500:
+        raise AssertionError("explicit HTTP max_steps should allow long supervised runs")
+    if server.config_from_payload({"task": "tiny", "max_steps": 2500}).max_steps != 2000:
+        raise AssertionError("HTTP max_steps should remain capped by the hard safety limit")
+    print("[ok] adaptive HTTP step budget")
     if server.config_from_payload({"shell_enabled": True}).shell_enabled:
         raise AssertionError("HTTP shell should be disabled without API key or explicit env override")
     print("[ok] HTTP shell default locked")
@@ -606,6 +615,17 @@ def main() -> int:
     if not agent_runner.validate_action({"action": "shell", "cmd": "echo ok", "approved": True}).get("ok"):
         raise AssertionError("shell approved field should be valid")
     print("[ok] shell approval gate")
+    if not agent_runner.looks_like_swe_task("Исправь Python-проект и запусти pytest"):
+        raise AssertionError("SWE task detector missed a coding task")
+    swe_profile_task = agent_runner.task_with_execution_profile(
+        "Исправь Python-проект и запусти pytest",
+        AgentConfig(shell_enabled=True),
+    )
+    if "Executor profile: SWE/code task" not in swe_profile_task or "reproduce-edit-verify" not in swe_profile_task:
+        raise AssertionError(f"SWE execution profile was not appended: {swe_profile_task}")
+    if agent_runner.task_with_execution_profile("Создай краткий отчет", AgentConfig()) != "Создай краткий отчет":
+        raise AssertionError("SWE execution profile should not affect unrelated tasks")
+    print("[ok] SWE execution profile")
     if server.validate_task_text("").get("status") != 400:
         raise AssertionError("empty task should fail validation")
     old_max_task_chars = server.MAX_TASK_CHARS
