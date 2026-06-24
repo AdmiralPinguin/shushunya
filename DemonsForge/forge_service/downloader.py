@@ -18,6 +18,14 @@ APPROVED_HOSTS = {
     "raw.githubusercontent.com",
 }
 
+ALLOWED_SUFFIXES_BY_TYPE = {
+    "model": {".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".gguf"},
+    "lora": {".safetensors", ".pt", ".bin"},
+    "embedding": {".safetensors", ".pt", ".bin"},
+    "control_asset": {".safetensors", ".pt", ".pth", ".bin", ".onnx"},
+    "ip_adapter": {".safetensors", ".pt", ".pth", ".bin", ".onnx"},
+}
+
 
 class DownloadError(RuntimeError):
     pass
@@ -50,7 +58,12 @@ def validate_download_spec(spec: AssetDownloadSpec) -> None:
         raise DownloadError("asset name contains unsupported characters")
     if spec.sha256 and not re.fullmatch(r"[A-Fa-f0-9]{64}", spec.sha256):
         raise DownloadError("sha256 must be a 64-character hexadecimal digest")
-    suffix = Path(parsed.path).suffix or ".bin"
+    suffix = (Path(parsed.path).suffix or ".bin").lower()
+    allowed_suffixes = ALLOWED_SUFFIXES_BY_TYPE[spec.asset_type]
+    if suffix not in allowed_suffixes:
+        raise DownloadError(f"asset type {spec.asset_type} does not allow {suffix} downloads")
+    if suffix == ".bin" and not spec.sha256:
+        raise DownloadError("generic .bin asset downloads require sha256")
     target = target_dir_for(spec) / f"{spec.name}{suffix}"
     if target.exists():
         raise DownloadError(f"target asset already exists: {target}")

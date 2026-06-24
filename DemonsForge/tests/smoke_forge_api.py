@@ -495,6 +495,32 @@ def main() -> None:
         },
     )
     assert rejected_bad_hash.status_code == 400, rejected_bad_hash.text
+    rejected_bad_extension = client.post(
+        "/forge/jobs?dry_run=true",
+        json={
+            "type": "asset-download",
+            "asset_download": {
+                "name": "bad-extension",
+                "asset_type": "lora",
+                "source_url": "https://github.com/example/repo/raw/main/not-a-weight.py",
+                "approved": True,
+            },
+        },
+    )
+    assert rejected_bad_extension.status_code == 400, rejected_bad_extension.text
+    rejected_generic_bin_without_hash = client.post(
+        "/forge/jobs?dry_run=true",
+        json={
+            "type": "asset-download",
+            "asset_download": {
+                "name": "generic-bin",
+                "asset_type": "lora",
+                "source_url": "https://civitai.com/api/download/models/12345",
+                "approved": True,
+            },
+        },
+    )
+    assert rejected_generic_bin_without_hash.status_code == 400, rejected_generic_bin_without_hash.text
     rejected_existing_asset = client.post(
         "/forge/jobs?dry_run=true",
         json={
