@@ -628,6 +628,11 @@ def main() -> int:
     print("[ok] SWE execution profile")
     if agent_runner.planner_should_run("Создай /work/report.md с текстом ok", AgentConfig(planner_enabled=True)):
         raise AssertionError("simple create tasks should not spend a planner call")
+    if agent_runner.planner_should_run(
+        "Создай отчет.\n\nОбязательные артефакты:\n- /work/report.md",
+        AgentConfig(planner_enabled=True),
+    ):
+        raise AssertionError("single short required artifact tasks should not spend a planner call")
     if not agent_runner.planner_should_run(
         "Сложный стресс-тест. Обязательные артефакты: /work/report.md и /work/audit.json",
         AgentConfig(planner_enabled=True),

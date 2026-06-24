@@ -719,6 +719,9 @@ def planner_should_run(task: str, config: AgentConfig) -> bool:
     if "Continuation cycle:" in task:
         return False
     lowered = task.lower()
+    required_artifacts = required_artifact_paths_from_task(task)
+    if len(required_artifacts) == 1 and len(task) < 1500 and not any(marker in lowered for marker in ("stress", "стресс", "bundle", "telegram", "web_search")):
+        return False
     complexity_markers = (
         "обязательные артефакты",
         "required artifacts",
