@@ -144,6 +144,7 @@ class PlanRequest(BaseModel):
     request: str
     preferred_engine: str | None = None
     use_memory: bool = True
+    use_thinker: bool = True
 
 
 class MemoryProposal(BaseModel):

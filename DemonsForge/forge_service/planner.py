@@ -5,6 +5,7 @@ import re
 from .archive_memory import ArchiveMemoryClient
 from .registries import ASPECT_PRESETS, SCHEDULERS, capabilities
 from .schemas import AssetRequest, JobSpec, JobType, LoraRef, PlanRequest
+from .thinker import PlannerThinker
 
 
 QUALITY_HINTS = {
@@ -211,6 +212,17 @@ def _memory_context(text: str, enabled: bool = True) -> dict[str, object]:
 
 
 def plan_txt2img(request: PlanRequest) -> JobSpec:
+    spec = build_heuristic_plan(request)
+    if not request.use_thinker:
+        spec.safety["planner_thinker"] = {"enabled": False, "used": False, "reason": "disabled by request"}
+        return spec
+    thinker = PlannerThinker.from_config()
+    improved, thinker_meta = thinker.improve_plan(request, spec)
+    improved.safety["planner_thinker"] = thinker_meta
+    return improved
+
+
+def build_heuristic_plan(request: PlanRequest) -> JobSpec:
     text = request.request.strip()
     job_type = _job_type(text)
     engine = _choose_engine(text, request.preferred_engine, job_type)

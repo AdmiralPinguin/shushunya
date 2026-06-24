@@ -76,6 +76,7 @@ Core endpoints:
 - `GET /forge/samplers`
 - `GET /forge/schedulers`
 - `GET /forge/aspect-presets`
+- `GET /forge/planner/thinker`
 - `POST /forge/registries/refresh`
 - `GET /forge/assets/downloads`
 - `POST /forge/plan`
@@ -117,6 +118,9 @@ curl -s http://127.0.0.1:8110/forge/plan \
 
 Set `"use_memory":false` in plan requests for fast/offline planning without
 ArchiveOfHeresy memory search.
+Set `"use_thinker":false` to force the deterministic heuristic planner. By
+default, `/forge/plan` may use the optional planner thinker when it is enabled
+and configured.
 
 Engine policy:
 
@@ -211,6 +215,11 @@ Architecture:
   It recognizes `txt2img`, `img2img`, `inpaint`, and `upscale` intent; image
   editing plans include `planner_note` reminders for required source/mask
   inputs instead of pretending those assets exist.
+- `forge_service/thinker.py`: optional OpenAI-compatible planner thinker. It is
+  advisory only: the deterministic planner builds the baseline plan first, the
+  thinker can return a compact JSON patch, and Forge filters plus validates that
+  patch back into a `JobSpec`. Invalid thinker output falls back to the baseline
+  plan and is reported in `spec.safety.planner_thinker`.
 - `forge_service/downloader.py`: controlled asset downloader abstraction. It
   accepts only approved jobs, stores source/license/hash metadata, keeps files
   inside DemonsForge, rejects unverified hosts, validates SHA-256 format, writes
@@ -331,10 +340,47 @@ Do not write ordinary runtime noise into memory:
 Asset download success/rejection is proposed automatically because it changes
 the durable local asset set. Other memory writes should be explicit proposals.
 
+## Planner thinker
+
+The default planner is deterministic and works without an LLM. To connect a
+local or remote OpenAI-compatible thinking model for richer Russian request
+interpretation, set:
+
+```bash
+FORGE_PLANNER_THINKER_ENABLED=1
+FORGE_PLANNER_THINKER_BASE_URL=http://127.0.0.1:8000/v1
+FORGE_PLANNER_THINKER_API_KEY=optional-key
+FORGE_PLANNER_THINKER_MODEL=local-thinking-model
+FORGE_PLANNER_THINKER_TIMEOUT_SECONDS=20
+```
+
+Status:
+
+```bash
+curl -s http://127.0.0.1:8110/forge/planner/thinker | python3 -m json.tool
+```
+
+The thinker never executes jobs and never downloads assets. It can only suggest
+allowed `JobSpec` fields. Missing models, LoRA, embeddings, ControlNet,
+IP-Adapter, or reference assets must become an `asset_request` with
+`requires_user_approval=true`.
+
 Smoke test without heavy image generation:
 
 ```bash
 DemonsForge/bin/python tests/smoke_forge_api.py
+```
+
+Long live-API planner/dry-run matrix:
+
+```bash
+DemonsForge/bin/python tests/long_forge_api.py --cycles 20
+```
+
+Optional real CPU SDXL generation smoke:
+
+```bash
+DemonsForge/bin/python tests/long_forge_api.py --cycles 5 --generate
 ```
 
 Memory gateway diagnostic:

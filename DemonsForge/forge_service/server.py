@@ -24,6 +24,7 @@ from .registries import (
 )
 from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest
 from .storage import ForgeStore
+from .thinker import PlannerThinker
 
 config.force_cpu_runtime()
 config.ensure_dirs()
@@ -221,6 +222,11 @@ def get_schedulers() -> list[dict[str, object]]:
 @app.get("/forge/aspect-presets")
 def get_aspect_presets() -> dict[str, dict[str, int]]:
     return ASPECT_PRESETS
+
+
+@app.get("/forge/planner/thinker")
+def get_planner_thinker() -> dict[str, object]:
+    return PlannerThinker.from_config().status()
 
 
 @app.post("/forge/registries/refresh")

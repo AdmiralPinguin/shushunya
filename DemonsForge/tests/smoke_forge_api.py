@@ -11,8 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from forge_service.server import app
 from forge_service.client import DemonsForgeClient
 from forge_service.queue import ForgeQueue
-from forge_service.schemas import JobSpec
+from forge_service.schemas import JobSpec, PlanRequest
 from forge_service.server import store
+from forge_service.thinker import PlannerThinker
 
 
 def wait_for_terminal(client: TestClient, job_id: str) -> dict:
@@ -170,6 +171,9 @@ def main() -> None:
     aspect_presets = client.get("/forge/aspect-presets")
     assert aspect_presets.status_code == 200, aspect_presets.text
     assert aspect_presets.json()["square"]["width"] == aspect_presets.json()["square"]["height"]
+    thinker = client.get("/forge/planner/thinker")
+    assert thinker.status_code == 200, thinker.text
+    assert thinker.json()["write_policy"] == "advisory-json-patch-only"
     refreshed = client.post("/forge/registries/refresh")
     assert refreshed.status_code == 200, refreshed.text
     assert refreshed.json()["ok"] is True
@@ -186,12 +190,38 @@ def main() -> None:
     assert spec["engine"] == "stable_diffusion"
     assert spec["prompt"]
     assert "memory_context" in spec["safety"]
+    assert "planner_thinker" in spec["safety"]
     plan_without_memory = client.post(
         "/forge/plan",
-        json={"request": "SDXL 512x512 fast plan", "use_memory": False},
+        json={"request": "SDXL 512x512 fast plan", "use_memory": False, "use_thinker": False},
     )
     assert plan_without_memory.status_code == 200, plan_without_memory.text
     assert plan_without_memory.json()["safety"]["memory_context"]["reason"] == "disabled by request"
+    assert plan_without_memory.json()["safety"]["planner_thinker"]["reason"] == "disabled by request"
+    baseline = JobSpec(
+        type="txt2img",
+        engine="sdxl",
+        model="stable-diffusion-xl-base-1.0",
+        prompt="baseline",
+        width=512,
+        height=512,
+        steps=1,
+    )
+    fake_thinker = PlannerThinker(
+        enabled=True,
+        base_url="http://127.0.0.1:1/v1",
+        api_key="",
+        model="fake",
+        timeout=0.1,
+    )
+    fake_thinker._request_patch = lambda _request, _baseline: '{"patch":{"model":"not-local-model"}}'  # type: ignore[method-assign]
+    guarded, thinker_meta = fake_thinker.improve_plan(
+        PlanRequest(request="try non-local model", use_memory=False),
+        baseline,
+    )
+    assert guarded.model == "stable-diffusion-xl-base-1.0"
+    assert thinker_meta["used"] is False
+    assert "non-local model" in thinker_meta["error"]
     smoke_plan = client.post(
         "/forge/plan",
         json={"request": "SDXL 512x512 smoke portrait", "use_memory": False},

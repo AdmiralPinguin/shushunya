@@ -69,6 +69,9 @@ class DemonsForgeClient:
     def aspect_presets(self) -> dict[str, dict[str, int]]:
         return self._request("GET", "/forge/aspect-presets")
 
+    def planner_thinker(self) -> dict[str, Any]:
+        return self._request("GET", "/forge/planner/thinker")
+
     def refresh_registries(self) -> dict[str, Any]:
         return self._request("POST", "/forge/registries/refresh")
 
@@ -138,11 +141,17 @@ class DemonsForgeClient:
         request: str,
         preferred_engine: str | None = None,
         use_memory: bool = True,
+        use_thinker: bool = True,
     ) -> dict[str, Any]:
         return self._request(
             "POST",
             "/forge/plan",
-            json={"request": request, "preferred_engine": preferred_engine, "use_memory": use_memory},
+            json={
+                "request": request,
+                "preferred_engine": preferred_engine,
+                "use_memory": use_memory,
+                "use_thinker": use_thinker,
+            },
         )
 
     def create_job(self, spec: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
