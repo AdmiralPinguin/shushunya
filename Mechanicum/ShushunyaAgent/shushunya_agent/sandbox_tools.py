@@ -453,6 +453,16 @@ def python_tool(config: SandboxConfig, action: dict[str, Any]) -> dict[str, Any]
     if len(code) > 50000:
         return {"ok": False, "error": "python code is too large"}
     timeout = min(int(action.get("timeout") or config.shell_timeout), 300)
+    cwd = str(action.get("cwd") or action.get("workdir") or "").strip()
+    if cwd:
+        if not cwd.startswith(("/work", "/sandbox-tmp", "/artifacts", "/state", "/logs", "/models", "/tools", "/home/agent")):
+            return {"ok": False, "error": "python cwd rejected by supervisor policy", "cwd": cwd}
+        shell_code = (
+            f"cd {shlex.quote(cwd)} && "
+            'export PYTHONPATH="$(pwd)${PYTHONPATH:+:$PYTHONPATH}" && '
+            f"exec /usr/bin/python3 -c {shlex.quote(code)}"
+        )
+        return run_sandbox_argv(config, ["/usr/bin/bash", "-lc", shell_code], timeout=timeout)
     return run_sandbox_argv(config, ["/usr/bin/python3", "-c", code], timeout=timeout)
 
 

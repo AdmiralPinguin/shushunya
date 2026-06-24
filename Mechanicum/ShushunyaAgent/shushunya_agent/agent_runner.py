@@ -169,7 +169,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 {"action":"search_text","path":"/work","query":"needle","case_sensitive":false,"max_matches":50}
 
 3. Выполнить короткий Python-код внутри sandbox:
-{"action":"python","code":"print('hello')","timeout":60}
+{"action":"python","cwd":"/work/project","code":"print('hello')","timeout":60}
 
 4. Проверить статус sandbox:
 {"action":"sandbox_status"}
@@ -280,7 +280,7 @@ COMPACT_SYSTEM_PROMPT = """Ты Шушуня-агент: локальный аг
 {"action":"file_info","path":"/work/file.txt","sha256":true}
 {"action":"find_files","path":"/work","pattern":"*.txt","max_depth":4,"limit":100,"offset":0}
 {"action":"search_text","path":"/work","query":"needle","case_sensitive":false,"max_matches":50}
-{"action":"python","code":"print('hello')","timeout":60}
+{"action":"python","cwd":"/work/project","code":"print('hello')","timeout":60}
 {"action":"shell","cmd":"pwd","timeout":60,"reason":"why"}
 {"action":"web_search","query":"query","limit":5}
 {"action":"web_fetch","url":"https://example.com","max_bytes":200000}
@@ -422,12 +422,23 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
                 "The shell command failed. Do not repeat the identical command unless a file or environment state changed. "
                 "Use the stderr/stdout to choose the next productive action: read the relevant file, patch it, or run a meaningfully different diagnostic."
             )
+            combined_output = f"{payload.get('stdout') or ''}\n{payload.get('stderr') or ''}".lower()
+            if "no module named pytest" in combined_output:
+                payload["supervisor_instruction"] += (
+                    " Pytest is unavailable in this environment; do not retry pytest. "
+                    "Use a focused python action with cwd set to the project root, or shell with cd <project> && PYTHONPATH=$(pwd) python3 -c '...'."
+                )
         if action_type == "python" and payload.get("ok") is False:
             combined_output = f"{payload.get('stdout') or ''}\n{payload.get('stderr') or ''}".lower()
             if "syntaxerror" in combined_output:
                 payload["supervisor_instruction"] = (
                     "Python failed before running because of SyntaxError. Do not retry the same code. "
                     "Use simpler Python without f-strings/complex escaping, or switch to write_file with explicit content."
+                )
+            elif "modulenotfounderror" in combined_output or "no module named" in combined_output:
+                payload["supervisor_instruction"] = (
+                    "Python could not import a local project module. Do not retry the same python action from the wrong directory. "
+                    "Set cwd to the project root in the next python action, or use shell with cd <project> && PYTHONPATH=$(pwd) python3 -c '...'."
                 )
     elif action_type in {"list_files", "find_files"} and isinstance(payload.get("items"), list):
         items = payload["items"]

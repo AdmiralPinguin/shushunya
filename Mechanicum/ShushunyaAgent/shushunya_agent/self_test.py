@@ -2352,6 +2352,18 @@ def main() -> int:
     if python_result.get("stdout", "").strip() != "15":
         raise AssertionError(f"unexpected python output: {python_result}")
     print("[ok] python output")
+    pycwd_dir = file_tool(config, {"action": "mkdir", "path": "/work/self-test/pycwd"})
+    assert_ok("mkdir python cwd", pycwd_dir)
+    pycwd_module = file_tool(config, {"action": "write_file", "path": "/work/self-test/pycwd/localmod.py", "content": "VALUE = 42\n"})
+    assert_ok("write python cwd module", pycwd_module)
+    python_cwd_result = python_tool(
+        config,
+        {"action": "python", "cwd": "/work/self-test/pycwd", "code": "import localmod; print(localmod.VALUE)", "timeout": 30},
+    )
+    assert_ok("python cwd", python_cwd_result)
+    if python_cwd_result.get("stdout", "").strip() != "42":
+        raise AssertionError(f"python cwd did not expose project root on PYTHONPATH: {python_cwd_result}")
+    print("[ok] python cwd imports local modules")
     timeout_result = python_tool(config, {"action": "python", "code": "import time; time.sleep(5)", "timeout": 1})
     if timeout_result.get("ok") is not False or timeout_result.get("error") != "command timed out" or timeout_result.get("killed_process_group") is not True:
         raise AssertionError(f"python timeout did not kill process group: {timeout_result}")
