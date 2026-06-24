@@ -241,3 +241,6 @@ class DemonsForgeClient:
 
     def artifact_verify(self, artifact_id: str) -> dict[str, Any]:
         return self._request("GET", f"/forge/artifacts/{artifact_id}/verify")
+
+    def artifact_evaluation(self, artifact_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/forge/artifacts/{artifact_id}/evaluation")

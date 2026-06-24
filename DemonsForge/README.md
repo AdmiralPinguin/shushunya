@@ -111,6 +111,7 @@ Core endpoints:
 - `GET /forge/artifacts/{artifact_id}/file`
 - `GET /forge/artifacts/{artifact_id}/metadata`
 - `GET /forge/artifacts/{artifact_id}/verify`
+- `GET /forge/artifacts/{artifact_id}/evaluation`
 - `GET /forge/artifacts/{artifact_id}/thumbnail`
 - `GET /forge/gallery`
 - `GET /forge/memory/status`
@@ -241,6 +242,10 @@ Architecture:
   accepts only approved jobs, stores source/license/hash metadata, keeps files
   inside DemonsForge, rejects unverified hosts, validates SHA-256 format, writes
   through `.part` files, and enforces `FORGE_MAX_ASSET_DOWNLOAD_BYTES`.
+- `forge_service/evaluator.py`: lightweight artifact evaluator. It reports
+  dimensions, image statistics, source-image differences, inpaint masked versus
+  unmasked differences, and prompt terms from metadata. It deliberately does
+  not claim semantic prompt-adherence scores without a vision/CLIP evaluator.
 - `forge_service/client.py`: thin client intended for later ShushunyaAgent tool
   integration.
 

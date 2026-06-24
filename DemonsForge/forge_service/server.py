@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import __version__, config
 from .archive_memory import ArchiveMemoryClient
+from .evaluator import evaluate_artifact
 from .planner import plan_txt2img
 from .queue import ForgeQueue
 from .registries import (
@@ -486,6 +487,17 @@ def verify_artifact(artifact_id: str) -> dict[str, object]:
         "verified_against_metadata": verified,
         "ok": not verified or str(expected).lower() == actual,
     }
+
+
+@app.get("/forge/artifacts/{artifact_id}/evaluation")
+def get_artifact_evaluation(artifact_id: str) -> dict[str, object]:
+    artifact = store.get_artifact(artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    path = Path(artifact.path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="artifact file missing")
+    return evaluate_artifact(path, artifact.metadata)
 
 
 @app.get("/forge/gallery")

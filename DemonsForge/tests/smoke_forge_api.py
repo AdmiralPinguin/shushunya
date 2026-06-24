@@ -530,6 +530,10 @@ def main() -> None:
     assert artifact_verify.status_code == 200, artifact_verify.text
     assert artifact_verify.json()["ok"] is True
     assert artifact_verify.json()["verified_against_metadata"] is True
+    artifact_evaluation = client.get(f"/forge/artifacts/{upscale_status['artifacts'][0]}/evaluation")
+    assert artifact_evaluation.status_code == 200, artifact_evaluation.text
+    assert artifact_evaluation.json()["dimension_match"]["ok"] is True
+    assert "Prompt adherence is not scored numerically." in artifact_evaluation.json()["limited_checks"]
     queued = client.post(
         "/forge/jobs",
         json={
