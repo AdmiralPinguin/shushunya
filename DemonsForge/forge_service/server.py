@@ -25,7 +25,7 @@ from .registries import (
     discover_loras,
     discover_models,
 )
-from .reports import list_reports, prune_reports, report_path
+from .reports import list_reports, prune_reports, report_path, summarize_reports
 from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest, utc_now
 from .storage import ForgeStore
 from .thinker import PlannerThinker
@@ -292,6 +292,11 @@ def get_asset_profiles() -> dict[str, object]:
 @app.get("/forge/reports")
 def get_reports(limit: int = 100) -> list[dict[str, object]]:
     return list_reports(limit=limit)
+
+
+@app.get("/forge/reports/summary")
+def get_report_summary(limit: int = 100) -> dict[str, object]:
+    return summarize_reports(limit=limit)
 
 
 @app.post("/forge/reports/prune")

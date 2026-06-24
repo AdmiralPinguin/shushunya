@@ -52,6 +52,9 @@ class DemonsForgeClient:
     def reports(self, limit: int = 100) -> list[dict[str, Any]]:
         return self._request("GET", f"/forge/reports?limit={limit}")
 
+    def report_summary(self, limit: int = 100) -> dict[str, Any]:
+        return self._request("GET", f"/forge/reports/summary?limit={limit}")
+
     def resume_queue(self) -> dict[str, Any]:
         return self._request("POST", "/forge/queue/resume")
 
