@@ -821,6 +821,7 @@ def task_with_execution_profile(task: str, config: AgentConfig) -> str:
         task
         + "\n\nExecutor profile: SWE/code task.\n"
         + "- Use a tight reproduce-edit-verify loop: identify the working directory, inspect only relevant files, reproduce the failure, edit the minimal files, run the requested or nearest equivalent verification, then final.\n"
+        + "- Before the first code edit, inspect existing tests/source files or reproduce the failure. If a tests directory exists or the task mentions tests/pytest, read or run those tests before changing behavior.\n"
         + "- If the user gives an explicit working directory, stay in it. Shell cwd is not persistent, so prefix every shell command with cd <workspace> && ... .\n"
         + "- Do not scan unrelated /work trees after relevant project files are known.\n"
         + f"- {shell_rule}\n"
@@ -988,6 +989,15 @@ STATE_MUTATING_ACTIONS = {
     "web_extract_link_list",
     "bundle_text_files",
     "ranobehub_chapter",
+}
+SWE_EDIT_ACTIONS = {"write_file", "append_file", "replace_in_file", "remove_file"}
+SWE_DIAGNOSTIC_ACTIONS = {"shell", "python", "read_file", "list_files", "find_files", "search_text", "file_info"}
+SUPERVISOR_REJECTION_ERRORS = {
+    "repeated identical action rejected by supervisor",
+    "repeated write_file path rejected by supervisor",
+    "repeated verified text verification rejected by supervisor",
+    "inspection stall rejected by supervisor",
+    "swe edit before diagnostic rejected by supervisor",
 }
 
 
@@ -2846,6 +2856,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     original_task = task
     execution_plan, planner_meta = build_execution_plan(original_task, config)
     task = task_with_execution_plan(original_task, execution_plan)
+    swe_task = looks_like_swe_task(task)
     task = task_with_execution_profile(task, config)
     system_prompt = SYSTEM_PROMPT
     if config.technical_output:
@@ -2862,6 +2873,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     successful_write_file_paths: dict[str, int] = {}
     successful_write_file_max_bytes: dict[str, int] = {}
     failed_verification_paths: set[str] = set()
+    swe_diagnostic_seen = False
     inspection_actions_since_progress = 0
     repeated_rejection_count = 0
     repeated_rejection_total = 0
@@ -3195,6 +3207,20 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     ),
                 }
             elif (
+                swe_task
+                and action_type in SWE_EDIT_ACTIONS
+                and not swe_diagnostic_seen
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe edit before diagnostic rejected by supervisor",
+                    "path": str(action.get("path") or ""),
+                    "instruction": (
+                        "This looks like a code/SWE task. Before editing files, inspect relevant source/tests or reproduce the failure. "
+                        "Run a diagnostic shell/python command or read/list/search the relevant files, then make the minimal edit."
+                    ),
+                }
+            elif (
                 action_type in {"write_file", "append_file", "replace_in_file"}
                 and str(action.get("path") or "") in verified_text_paths
                 and str(action.get("path") or "") not in failed_verification_paths
@@ -3319,6 +3345,13 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             result = {"ok": False, "error": str(exc), "exception": exc.__class__.__name__}
 
         action_duration_sec = round(time.time() - action_started, 3)
+        supervisor_rejection = (
+            str(result.get("error") or "") in SUPERVISOR_REJECTION_ERRORS
+            if isinstance(result, dict)
+            else False
+        )
+        if swe_task and action_type in SWE_DIAGNOSTIC_ACTIONS and not supervisor_rejection:
+            swe_diagnostic_seen = True
         if action_type in {"write_file", "append_file", "replace_in_file"} and isinstance(result, dict) and result.get("ok") is True:
             path = str(action.get("path") or "")
             verified_text_paths.discard(path)
@@ -3435,12 +3468,6 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "content": tool_result_content,
             }
         )
-        supervisor_rejection = str(result.get("error") or "") in {
-            "repeated identical action rejected by supervisor",
-            "repeated write_file path rejected by supervisor",
-            "repeated verified text verification rejected by supervisor",
-            "inspection stall rejected by supervisor",
-        } if isinstance(result, dict) else False
         if supervisor_rejection:
             repeated_rejection_count += 1
             repeated_rejection_total += 1

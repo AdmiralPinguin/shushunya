@@ -2119,6 +2119,43 @@ def main() -> int:
         raise AssertionError(f"productive progress should reset cumulative repeat guard: code={productive_reset_code}, payload={productive_reset_payload}")
     print("[ok] repeated rejection total resets on productive progress")
 
+    swe_diagnostic_stdout = io.StringIO()
+    swe_diagnostic_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-diagnostic-before-edit"),
+        json_output=True,
+        max_steps=6,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    first_edit = '{"action":"replace_in_file","path":"/work/project/calc.py","old":"return a - b","new":"return a + b","count":1}'
+    swe_diagnostic_actions = [
+        first_edit,
+        '{"action":"read_file","path":"/work/project/tests/test_calc.py","max_bytes":4000}',
+        first_edit,
+        '{"action":"final","message":"done"}',
+    ]
+    swe_file_results = [
+        {"ok": True, "path": "/work/project/tests/test_calc.py", "content": "assert add(2, 3) == 5"},
+        {"ok": True, "path": "/work/project/calc.py"},
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=swe_diagnostic_actions), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=swe_file_results) as mocked_swe_file_tool, \
+            contextlib.redirect_stdout(swe_diagnostic_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        swe_diagnostic_code = run_agent("Исправь Python-проект и запусти тесты", swe_diagnostic_config)
+    swe_diagnostic_payload = json.loads(swe_diagnostic_stdout.getvalue())
+    first_step_result = (swe_diagnostic_payload.get("steps") or [{}])[0].get("result") or {}
+    if (
+        swe_diagnostic_code != 0
+        or first_step_result.get("error") != "swe edit before diagnostic rejected by supervisor"
+        or mocked_swe_file_tool.call_count != 2
+    ):
+        raise AssertionError(
+            "SWE pre-edit diagnostic guard failed: "
+            f"code={swe_diagnostic_code}, file_tool_calls={mocked_swe_file_tool.call_count}, payload={swe_diagnostic_payload}"
+        )
+    print("[ok] SWE edits require initial diagnostic")
+
     verify_after_edit_stdout = io.StringIO()
     verify_after_edit_config = AgentConfig(
         task_id=safe_task_id("self-test-repeat-verification-after-edit"),
