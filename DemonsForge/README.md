@@ -102,6 +102,7 @@ Core endpoints:
 - `GET /forge/queue`
 - `GET /forge/events`
 - `GET /forge/reports`
+- `POST /forge/reports/prune`
 - `GET /forge/reports/{filename}`
 - `POST /forge/queue/pause`
 - `POST /forge/queue/resume`

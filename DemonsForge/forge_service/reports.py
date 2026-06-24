@@ -56,6 +56,26 @@ def list_reports(limit: int = 100) -> list[dict[str, Any]]:
     return reports
 
 
+def prune_reports(max_files: int | None = None) -> dict[str, Any]:
+    if not REPORTS_DIR.exists():
+        return {"ok": True, "deleted": 0, "kept": 0}
+    safe_max = max(1, int(max_files or config.REPORT_MAX_FILES))
+    files = [
+        path
+        for path in REPORTS_DIR.iterdir()
+        if path.is_file() and path.suffix in ALLOWED_SUFFIXES
+    ]
+    files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    deleted = 0
+    for path in files[safe_max:]:
+        try:
+            path.unlink()
+            deleted += 1
+        except OSError:
+            pass
+    return {"ok": True, "deleted": deleted, "kept": min(len(files), safe_max), "max_files": safe_max}
+
+
 def report_path(filename: str) -> Path:
     path = _safe_report_path(filename)
     if not path.is_file():

@@ -102,6 +102,9 @@ def main() -> None:
     reports = client.get("/forge/reports?limit=5")
     assert reports.status_code == 200, reports.text
     assert isinstance(reports.json(), list)
+    pruned_reports = client.post("/forge/reports/prune?max_files=500")
+    assert pruned_reports.status_code == 200, pruned_reports.text
+    assert pruned_reports.json()["ok"] is True
     external_worker = ForgeQueue(store, start_worker=False)
     external_worker.pause()
     paused_job = external_worker.submit(

@@ -13,6 +13,9 @@ from typing import Any
 import requests
 from PIL import Image, ImageChops, ImageDraw, ImageStat
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from forge_service.reports import prune_reports
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASE_URL = "http://127.0.0.1:8110"
@@ -543,6 +546,7 @@ def write_report(report: dict[str, Any], explicit_path: str | None = None) -> Pa
         path = ROOT / path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    prune_reports()
     return path
 
 

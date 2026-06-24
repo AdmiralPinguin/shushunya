@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,10 @@ from PIL import Image, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from forge_service.reports import prune_reports
+
 DEFAULT_BASE_URL = "http://127.0.0.1:8110"
 QUALITY_ASSETS = ROOT / "quality_assets"
 EXPECTED_NOTES = QUALITY_ASSETS / "expected_notes.json"
@@ -277,6 +282,7 @@ def main() -> int:
     summary_path = report_path.with_suffix(".md")
     report["summary_path"] = write_summary(report, summary_path)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    prune_reports()
     print(f"report: {report_path}", flush=True)
     print(f"summary: {summary_path}", flush=True)
     return 0 if report["ok"] else 1

@@ -23,6 +23,7 @@ MODEL_IDLE_SECONDS = int(os.environ.get("FORGE_MODEL_IDLE_SECONDS", "1800"))
 EMBEDDED_WORKER = os.environ.get("FORGE_EMBEDDED_WORKER", "1") not in {"0", "false", "False"}
 WORKER_MAX_JOBS = int(os.environ.get("FORGE_WORKER_MAX_JOBS", "0"))
 BUILD_COMMIT = os.environ.get("FORGE_GIT_COMMIT", "").strip()
+REPORT_MAX_FILES = int(os.environ.get("FORGE_REPORT_MAX_FILES", "500"))
 
 MEMORY_ENABLED = os.environ.get("FORGE_MEMORY_ENABLED", "1") not in {"0", "false", "False", "no", "off"}
 MEMORY_NAMESPACE = os.environ.get("FORGE_MEMORY_NAMESPACE", "demonsforge").strip() or "demonsforge"
