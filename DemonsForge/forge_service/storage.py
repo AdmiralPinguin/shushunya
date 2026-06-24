@@ -4,6 +4,7 @@ import json
 import hashlib
 import sqlite3
 import threading
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -266,6 +267,34 @@ class ForgeStore:
             LOGS_DIR.mkdir(parents=True, exist_ok=True)
             with (LOGS_DIR / "jobs.jsonl").open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+    def list_event_logs(self, limit: int = 100, job_id: str | None = None) -> dict[str, object]:
+        safe_limit = max(1, min(int(limit or 100), 1000))
+        log_path = LOGS_DIR / "jobs.jsonl"
+        if not log_path.is_file():
+            return {"ok": True, "events": [], "event_count": 0, "path": str(log_path)}
+        tail: deque[dict[str, object]] = deque(maxlen=safe_limit)
+        event_count = 0
+        with self._lock, log_path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    event = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if job_id and event.get("job_id") != job_id:
+                    continue
+                event_count += 1
+                tail.append(event)
+        return {
+            "ok": True,
+            "events": list(tail),
+            "event_count": event_count,
+            "path": str(log_path),
+            "truncated": event_count > safe_limit,
+        }
 
     def add_artifact(self, artifact: ArtifactRecord) -> None:
         with self._lock, self._connect() as conn:

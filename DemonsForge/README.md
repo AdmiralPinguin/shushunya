@@ -96,6 +96,7 @@ Core endpoints:
 - `POST /forge/jobs`
 - `GET /forge/jobs`
 - `GET /forge/queue`
+- `GET /forge/events`
 - `POST /forge/queue/pause`
 - `POST /forge/queue/resume`
 - `GET /forge/jobs/{job_id}`

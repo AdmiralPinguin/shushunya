@@ -114,6 +114,11 @@ def get_queue() -> dict[str, object]:
     return forge_queue.queue_state()
 
 
+@app.get("/forge/events")
+def get_events(limit: int = 100, job_id: str | None = None) -> dict[str, object]:
+    return store.list_event_logs(limit=limit, job_id=job_id)
+
+
 @app.post("/forge/queue/resume")
 def resume_queue() -> dict[str, object]:
     return forge_queue.resume()

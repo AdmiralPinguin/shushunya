@@ -91,6 +91,10 @@ def main() -> None:
     assert "status_counts" in queue_state.json()
     assert "queued" in queue_state.json()["status_counts"]
     assert queue_state.json()["pid"] > 0
+    events = client.get("/forge/events?limit=5")
+    assert events.status_code == 200, events.text
+    assert events.json()["ok"] is True
+    assert isinstance(events.json()["events"], list)
     external_worker = ForgeQueue(store, start_worker=False)
     external_worker.pause()
     paused_job = external_worker.submit(

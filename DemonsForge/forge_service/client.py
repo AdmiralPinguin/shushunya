@@ -45,6 +45,10 @@ class DemonsForgeClient:
     def queue(self) -> dict[str, Any]:
         return self._request("GET", "/forge/queue")
 
+    def events(self, limit: int = 100, job_id: str | None = None) -> dict[str, Any]:
+        params = {"limit": limit, "job_id": job_id}
+        return self._request("GET", "/forge/events", params={k: v for k, v in params.items() if v is not None})
+
     def resume_queue(self) -> dict[str, Any]:
         return self._request("POST", "/forge/queue/resume")
 
