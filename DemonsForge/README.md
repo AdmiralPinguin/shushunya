@@ -408,6 +408,7 @@ Smoke test without heavy image generation:
 ```bash
 DemonsForge/bin/python tests/smoke_forge_api.py
 DemonsForge/bin/python tests/forge_self_test.py
+DemonsForge/bin/python tests/forge_cycle.py --iterations 1
 ```
 
 Long live-API planner/dry-run matrix:
@@ -467,6 +468,17 @@ runs the benchmark jobs, writes JSON and Markdown summaries under
 expectations and known failure modes instead of relying on brittle golden
 images. `--concept-engines` adds SD3.5 and Flux first-concept probes so their
 txt2img behavior can be compared against SDXL editing workflows.
+
+Nightly/local cycles:
+
+```bash
+DemonsForge/bin/python tests/forge_cycle.py --iterations 3 --sleep-seconds 600
+FORGE_WORKER_MAX_JOBS=5 ./start-forge-worker.sh
+DemonsForge/bin/python tests/forge_cycle.py --iterations 1 --quality-run --concept-engines
+```
+
+The cycle runner executes `forge_self_test.py` and `quality_bench.py`, records a
+cycle report under `runtime/test-reports/`, and applies report retention.
 
 Memory gateway diagnostic:
 
