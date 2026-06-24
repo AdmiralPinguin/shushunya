@@ -24,6 +24,7 @@ QUALITY_PRESETS = {
 
 EDIT_PRESETS = {
     "edit_soft": {"strength": 0.35, "steps": 12},
+    "edit_balanced": {"strength": 0.62, "steps": 14},
     "edit_strong": {"strength": 0.8, "steps": 20},
     "inpaint_precise": {"strength": 0.65, "steps": 18},
 }
@@ -140,7 +141,7 @@ def _quality_preset(text: str, job_type: JobType) -> str:
             return "edit_strong"
         if job_type == JobType.inpaint:
             return "inpaint_precise"
-    return "draft" if job_type == JobType.txt2img else "edit_strong"
+    return "draft" if job_type == JobType.txt2img else "edit_balanced"
 
 
 def _preset_steps(text: str, default: int, preset: str) -> int:

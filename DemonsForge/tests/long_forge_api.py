@@ -474,6 +474,68 @@ def run_quality_generation(base_url: str, report: dict[str, Any]) -> None:
     }
 
 
+def run_edit_sweep(base_url: str, report: dict[str, Any]) -> None:
+    source, _mask = prepare_generation_inputs()
+    prompt = (
+        "convert the source into a cinematic demonic blacksmith portrait, "
+        "keep the humanoid silhouette and central face, add forge lighting"
+    )
+    jobs = [
+        ("img2img_soft", 0.35, 12, 52001),
+        ("img2img_balanced", 0.62, 14, 52002),
+        ("img2img_strong", 0.88, 18, 52003),
+    ]
+    sheet_items: list[tuple[str, str]] = [("source", source)]
+    sweep_jobs = []
+    for label, strength, steps, seed in jobs:
+        started = time.monotonic()
+        spec = {
+            "type": "img2img",
+            "engine": "sdxl",
+            "model": "stable-diffusion-xl-base-1.0",
+            "prompt": prompt,
+            "negative_prompt": "abstract emblem, logo, low quality, blurry, distorted face",
+            "source_images": [source],
+            "width": 512,
+            "height": 512,
+            "steps": steps,
+            "strength": strength,
+            "guidance": 7.0,
+            "seed": seed,
+            "quality_preset": label,
+            "safety": {"quality_preset": label},
+        }
+        record = request_json("POST", f"{base_url}/forge/jobs", json=spec)
+        finished = wait_job(base_url, record["id"], timeout_seconds=1800)
+        if finished["status"] != "succeeded":
+            raise AssertionError(f"edit sweep job failed: {finished}")
+        artifact_id = finished["artifacts"][0]
+        metadata = artifact_metadata(base_url, artifact_id)
+        path = metadata["path"]
+        sheet_items.append((label, path))
+        sweep_jobs.append(
+            {
+                "label": label,
+                "job_id": finished["id"],
+                "artifact_id": artifact_id,
+                "path": path,
+                "duration_sec": round(time.monotonic() - started, 3),
+                "strength": strength,
+                "steps": steps,
+                "diff_from_source": round(mean_abs_difference(source, path), 3),
+                "image_stats": image_stats(path),
+            }
+        )
+        print(f"{label} ok: {finished['id']} artifact={artifact_id}", flush=True)
+    sheet_path = make_contact_sheet(sheet_items, REPORTS_DIR / f"{report['run_id']}-edit-sweep-sheet.png")
+    report["edit_sweep"] = {
+        "prompt": prompt,
+        "jobs": sweep_jobs,
+        "contact_sheet": sheet_path,
+        "note": "Compare visual identity retention against source and diff_from_source.",
+    }
+
+
 def write_report(report: dict[str, Any], explicit_path: str | None = None) -> Path:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     path = Path(explicit_path) if explicit_path else REPORTS_DIR / f"{report['run_id']}.json"
@@ -490,6 +552,7 @@ def main() -> int:
     parser.add_argument("--cycles", type=int, default=10)
     parser.add_argument("--generate", action="store_true")
     parser.add_argument("--quality-generate", action="store_true")
+    parser.add_argument("--edit-sweep", action="store_true")
     parser.add_argument("--report-json", default="")
     args = parser.parse_args()
 
@@ -502,6 +565,7 @@ def main() -> int:
         "cycles": max(1, args.cycles),
         "generate": bool(args.generate),
         "quality_generate": bool(args.quality_generate),
+        "edit_sweep": bool(args.edit_sweep),
         "ok": False,
     }
     health = request_json("GET", f"{args.base_url}/health")
@@ -516,6 +580,8 @@ def main() -> int:
         run_generation_smoke(args.base_url.rstrip("/"), report)
     if args.quality_generate:
         run_quality_generation(args.base_url.rstrip("/"), report)
+    if args.edit_sweep:
+        run_edit_sweep(args.base_url.rstrip("/"), report)
     report["finished_at"] = utc_now()
     report["duration_sec"] = round(time.monotonic() - started, 3)
     report["ok"] = True

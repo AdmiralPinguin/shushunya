@@ -226,8 +226,10 @@ Architecture:
   It recognizes engine hints, explicit dimensions like `512x768`, `steps`,
   `seed`, negative prompts and local LoRA references like `lora:name@0.8`.
   It also emits a structured `quality_preset` such as `smoke`, `draft`,
-  `quality`, `edit_soft`, `edit_strong`, or `inpaint_precise` to make planner
-  tradeoffs visible to clients and artifact metadata.
+  `quality`, `edit_soft`, `edit_balanced`, `edit_strong`, or
+  `inpaint_precise` to make planner tradeoffs visible to clients and artifact
+  metadata. Plain `img2img` defaults to `edit_balanced`; strong edits require
+  explicit wording such as "сильно", "переделай", or "redesign".
   It also performs fail-soft read-only memory search through the `demonsforge`
   namespace and stores compact planning hints in `spec.safety.memory_context`.
   It recognizes `txt2img`, `img2img`, `inpaint`, and `upscale` intent; image
@@ -421,6 +423,16 @@ under `runtime/test-reports/`, and creates a contact sheet next to the report.
 For inpaint, the report includes masked and unmasked mean absolute differences
 so prompt-following can be judged separately from whether the pipeline merely
 produced an image.
+
+Optional SDXL img2img strength sweep:
+
+```bash
+FORGE_WORKER_MAX_JOBS=3 ./start-forge-worker.sh
+DemonsForge/bin/python tests/long_forge_api.py --cycles 1 --edit-sweep
+```
+
+This runs soft, balanced, and strong `img2img` variants from the same source,
+writes `diff_from_source` metrics, and creates an edit-sweep contact sheet.
 
 Memory gateway diagnostic:
 

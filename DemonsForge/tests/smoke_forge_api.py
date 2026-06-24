@@ -285,19 +285,27 @@ def main() -> None:
     assert planned_img2img.status_code == 200, planned_img2img.text
     assert planned_img2img.json()["type"] == "img2img"
     assert planned_img2img.json()["engine"] == "sdxl"
+    assert planned_img2img.json()["quality_preset"] == "edit_balanced"
     assert "source_images" in planned_img2img.json()["safety"]["planner_note"]
     assert planned_img2img.json()["safety"]["required_inputs"] == ["source_images"]
     planned_soft_edit = client.post(
         "/forge/plan",
         json={"request": "Слегка измени по картинке в кинематографичном стиле", "use_memory": False},
     )
+    planned_balanced_edit = client.post(
+        "/forge/plan",
+        json={"request": "Измени по картинке в кинематографичном стиле", "use_memory": False},
+    )
     planned_strong_edit = client.post(
         "/forge/plan",
         json={"request": "Сильно переделай по картинке в кинематографичном стиле", "use_memory": False},
     )
     assert planned_soft_edit.status_code == 200, planned_soft_edit.text
+    assert planned_balanced_edit.status_code == 200, planned_balanced_edit.text
     assert planned_strong_edit.status_code == 200, planned_strong_edit.text
+    assert planned_balanced_edit.json()["quality_preset"] == "edit_balanced"
     assert planned_soft_edit.json()["strength"] < planned_strong_edit.json()["strength"]
+    assert planned_soft_edit.json()["strength"] < planned_balanced_edit.json()["strength"] < planned_strong_edit.json()["strength"]
     planned_missing_lora = client.post(
         "/forge/plan",
         json={"request": "Нарисуй портрет lora: definitely_missing_lora"},
