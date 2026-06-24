@@ -445,6 +445,11 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
                     "Python could not import a local project module. Do not retry the same python action from the wrong directory. "
                     "Set cwd to the project root in the next python action, or use shell with cd <project> && PYTHONPATH=$(pwd) python3 -c '...'."
                 )
+    elif action_type == "replace_in_file" and payload.get("ok") is False and str(payload.get("error") or "") == "old text not found":
+        payload["supervisor_instruction"] = (
+            "The old text does not match the current file. Do not retry the same stale replace. "
+            "Read the current file if needed, then verify whether the desired change is already present or create a new patch from the current content."
+        )
     elif action_type in {"list_files", "find_files"} and isinstance(payload.get("items"), list):
         items = payload["items"]
         payload["items"] = items[:25]
@@ -1015,6 +1020,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "inspection stall rejected by supervisor",
     "swe edit before diagnostic rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
+    "stale replace_in_file rejected by supervisor",
 }
 
 
@@ -2919,6 +2925,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     swe_diagnostic_seen = resume_context_has_swe_diagnostic(original_task)
     inspection_actions_since_progress = 0
     shell_inline_python_syntax_failures = 0
+    stale_replace_failures_by_path: dict[str, int] = {}
     repeated_rejection_count = 0
     repeated_rejection_total = 0
     consecutive_parse_failures = 0
@@ -3297,6 +3304,20 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     ),
                 }
             elif (
+                action_type == "replace_in_file"
+                and stale_replace_failures_by_path.get(str(action.get("path") or ""), 0) >= 2
+            ):
+                result = {
+                    "ok": False,
+                    "error": "stale replace_in_file rejected by supervisor",
+                    "path": str(action.get("path") or ""),
+                    "instruction": (
+                        "replace_in_file already failed because the old text does not match this file. "
+                        "Do not keep applying the stale patch. Use the latest read_file content to decide whether the fix is already present; "
+                        "then run verification or write a new correction based on the current file."
+                    ),
+                }
+            elif (
                 action_type == "verify_text_file"
                 and str(action.get("path") or "") in verified_text_paths
                 and str(action.get("path") or "") not in failed_verification_paths
@@ -3421,10 +3442,19 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             and "syntaxerror" in f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}".lower()
         ):
             shell_inline_python_syntax_failures += 1
+        if (
+            action_type == "replace_in_file"
+            and isinstance(result, dict)
+            and result.get("ok") is False
+            and str(result.get("error") or "") == "old text not found"
+        ):
+            path = str(action.get("path") or "")
+            stale_replace_failures_by_path[path] = stale_replace_failures_by_path.get(path, 0) + 1
         if action_type in {"write_file", "append_file", "replace_in_file"} and isinstance(result, dict) and result.get("ok") is True:
             path = str(action.get("path") or "")
             verified_text_paths.discard(path)
             failed_verification_paths.discard(path)
+            stale_replace_failures_by_path.pop(path, None)
         elif action_type == "bundle_text_files" and isinstance(result, dict) and result.get("ok") is True:
             verified_text_paths.discard(str(action.get("output_txt") or ""))
             verified_text_paths.discard(str(action.get("output_fb2") or ""))

@@ -2152,6 +2152,37 @@ def main() -> int:
         )
     print("[ok] shell inline python syntax loop guard")
 
+    stale_replace_stdout = io.StringIO()
+    stale_replace_config = AgentConfig(
+        task_id=safe_task_id("self-test-stale-replace-loop"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    stale_replace_actions = [
+        '{"action":"replace_in_file","path":"/work/project/a.py","old":"old one","new":"new","count":1}',
+        '{"action":"replace_in_file","path":"/work/project/a.py","old":"old two","new":"new","count":1}',
+        '{"action":"replace_in_file","path":"/work/project/a.py","old":"old three","new":"new","count":1}',
+        '{"action":"final","message":"done"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=stale_replace_actions), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": False, "error": "old text not found", "path": "/work/project/a.py"}) as mocked_stale_file, \
+            contextlib.redirect_stdout(stale_replace_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        stale_replace_code = run_agent("patch stale file", stale_replace_config)
+    stale_replace_payload = json.loads(stale_replace_stdout.getvalue())
+    stale_replace_rejections = [
+        step for step in stale_replace_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "stale replace_in_file rejected by supervisor"
+    ]
+    if stale_replace_code != 0 or not stale_replace_rejections or mocked_stale_file.call_count != 2:
+        raise AssertionError(
+            "stale replace guard failed: "
+            f"code={stale_replace_code}, file_calls={mocked_stale_file.call_count}, payload={stale_replace_payload}"
+        )
+    print("[ok] stale replace_in_file loop guard")
+
     swe_diagnostic_stdout = io.StringIO()
     swe_diagnostic_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-diagnostic-before-edit"),
