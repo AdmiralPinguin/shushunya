@@ -352,6 +352,8 @@ def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
         task_id=safe_task_id(task_id),
         shell_enabled=http_shell_enabled(payload),
         shell_approval_required=bool_field(payload, "shell_approval_required", env_bool("SHUSHUNYA_AGENT_SHELL_APPROVAL_REQUIRED", False)),
+        planner_enabled=bool_field(payload, "planner_enabled", env_bool("SHUSHUNYA_AGENT_PLANNER_ENABLED", True)),
+        planner_thinking=bool_field(payload, "planner_thinking", env_bool("SHUSHUNYA_AGENT_PLANNER_THINKING", True)),
     )
 
 

@@ -1428,6 +1428,64 @@ def main() -> int:
         raise AssertionError(f"reasoning_content fallback failed: {reasoning_reply}")
     print("[ok] agent chat reads reasoning_content fallback")
 
+    planner_payloads: list[dict] = []
+
+    def planner_archive_payload(config_arg, method, path, payload=None, timeout=180):
+        planner_payloads.append(payload or {})
+        if len(planner_payloads) == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "summary": "planner ok",
+                                    "required_artifacts": ["/work/report.md"],
+                                    "steps": ["write report", "verify report"],
+                                    "verification": [{"path": "/work/report.md", "checks": ["marker"]}],
+                                    "risks": ["repeat"],
+                                    "executor_rules": ["do not rewrite verified artifacts"],
+                                },
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            }
+        return {"choices": [{"message": {"content": '{"action":"final","message":"planner execution ok"}'}}]}
+
+    planner_stdout = io.StringIO()
+    planner_events: list[dict] = []
+    planner_config = AgentConfig(
+        task_id=safe_task_id("self-test-planner-thinking"),
+        json_output=True,
+        max_steps=1,
+        inject_memory=False,
+        archive_internal_steps=False,
+        planner_enabled=True,
+        planner_thinking=True,
+    )
+    with mock.patch.object(agent_runner, "archive_request", side_effect=planner_archive_payload), \
+            contextlib.redirect_stdout(planner_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        planner_code = run_agent(
+            "Это сложный стресс-тест планирования: сначала сформируй стратегию, затем выполни минимальный итог.",
+            planner_config,
+            event_sink=planner_events.append,
+        )
+    planner_result = json.loads(planner_stdout.getvalue())
+    if planner_code != 0 or planner_result.get("message") != "planner execution ok":
+        raise AssertionError(f"planner run failed: code={planner_code}, result={planner_result}")
+    if not planner_payloads or planner_payloads[0].get("chat_template_kwargs") != {"enable_thinking": True}:
+        raise AssertionError(f"planner did not enable thinking: {planner_payloads}")
+    if planner_payloads[0].get("focus_enabled") is not False or planner_payloads[0].get("archive_enabled") is not False:
+        raise AssertionError(f"planner should not use archive memory/internal archiving: {planner_payloads[0]}")
+    if len(planner_payloads) < 2 or planner_payloads[1].get("chat_template_kwargs"):
+        raise AssertionError(f"executor should not inherit planner thinking kwargs: {planner_payloads}")
+    if not any(event.get("type") == "planner" and event.get("thinking_enabled") is True for event in planner_events):
+        raise AssertionError(f"planner event missing: {planner_events}")
+    print("[ok] planner thinking phase")
+
     verify_summary = agent_runner.result_summary(
         "verify_text_file",
         {

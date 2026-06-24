@@ -90,6 +90,19 @@ JSON_REPAIR_FAILURE_TOTAL_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_JSON_REPAI
 REPEATED_WRITE_FILE_PATH_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_REPEATED_WRITE_FILE_PATH_LIMIT", "2"))
 INSPECTION_STALL_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_INSPECTION_STALL_LIMIT", "8"))
 SANDBOX_STORAGE_LIMIT_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_STORAGE_LIMIT_BYTES", "536870912000"))
+PLANNER_ENABLED = os.environ.get("SHUSHUNYA_AGENT_PLANNER_ENABLED", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+PLANNER_THINKING_ENABLED = os.environ.get("SHUSHUNYA_AGENT_PLANNER_THINKING", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+PLANNER_MAX_TASK_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_PLANNER_MAX_TASK_CHARS", "12000"))
 SHELL_ENABLED = os.environ.get("SHUSHUNYA_AGENT_SHELL_ENABLED", "1").strip().lower() not in (
     "0",
     "false",
@@ -324,6 +337,8 @@ class AgentConfig:
     shell_enabled: bool = SHELL_ENABLED
     shell_approval_required: bool = SHELL_APPROVAL_REQUIRED
     initial_verified_text_paths: tuple[str, ...] = ()
+    planner_enabled: bool = False
+    planner_thinking: bool = PLANNER_THINKING_ENABLED
 
 
 def result_for_model(action_type: str, result: dict[str, Any], config: AgentConfig) -> dict[str, Any]:
@@ -578,6 +593,9 @@ def chat(
     *,
     inject_memory: bool | None = None,
     archive_enabled: bool | None = None,
+    chat_template_kwargs: dict[str, Any] | None = None,
+    temperature: float = 0.1,
+    max_tokens: int | None = None,
 ) -> str:
     budgets = [config.max_context_chars, 7000, 5500, 4000, 3000]
     last_error = ""
@@ -599,8 +617,8 @@ def chat(
                 "model": config.model,
                 "messages": compacted_messages,
                 "response_format": {"type": "json_object"},
-                "temperature": 0.1,
-                "max_tokens": config.max_model_tokens,
+                "temperature": temperature,
+                "max_tokens": max_tokens or config.max_model_tokens,
                 "archive_enabled": should_archive,
                 "archive_system_prompt_enabled": False,
                 "focus_enabled": profile_memory_enabled,
@@ -609,6 +627,8 @@ def chat(
                 "user": config.archive_user,
                 "memory_namespace": config.memory_namespace,
             }
+            if chat_template_kwargs is not None:
+                payload["chat_template_kwargs"] = chat_template_kwargs
             attempts = max(1, min(config.llm_retries, 5))
             for attempt in range(1, attempts + 1):
                 try:
@@ -661,6 +681,94 @@ def parse_action(raw: str) -> dict[str, Any]:
     if not isinstance(action, dict):
         raise ValueError("model returned non-object JSON")
     return action
+
+
+PLANNER_SYSTEM_PROMPT = """Ты планировщик локального агента. Верни только валидный JSON object.
+Не вызывай tools и не выдавай action. Твоя задача - составить короткий план выполнения для executor.
+
+Формат:
+{
+  "summary": "краткая цель",
+  "required_artifacts": ["/work/..."],
+  "steps": ["создать ...", "проверить ..."],
+  "verification": [{"path": "/work/...", "checks": ["marker", "min size"]}],
+  "risks": ["риск"],
+  "executor_rules": ["не переписывать verified artifacts"]
+}
+
+Правила:
+- Текущая user task главнее памяти.
+- Не добавляй пути из прошлых задач, если текущая задача явно не требует их.
+- Для текстовых required artifacts планируй verify_text_file перед final.
+- План должен помогать executor, а не заменять user task.
+"""
+
+
+def planner_should_run(task: str, config: AgentConfig) -> bool:
+    if not config.planner_enabled:
+        return False
+    if not task.strip():
+        return False
+    if "Authoritative resume context:" in task:
+        return False
+    if "Continuation cycle:" in task:
+        return False
+    lowered = task.lower()
+    complexity_markers = (
+        "обязательные артефакты",
+        "required artifacts",
+        "требования:",
+        "процесс:",
+        "создай",
+        "проверь",
+        "web_search",
+        "telegram",
+        "bundle",
+        "stress",
+        "стресс",
+    )
+    return len(task) >= 800 or any(marker in lowered for marker in complexity_markers)
+
+
+def compact_planner_payload(plan: dict[str, Any]) -> dict[str, Any]:
+    allowed = ("summary", "required_artifacts", "steps", "verification", "risks", "executor_rules")
+    return compact_json_value({key: plan.get(key) for key in allowed if key in plan}, string_limit=700, list_limit=20)
+
+
+def build_execution_plan(task: str, config: AgentConfig) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not planner_should_run(task, config):
+        return None, None
+    planner_task = truncate(task, PLANNER_MAX_TASK_CHARS)
+    messages = [
+        {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
+        {"role": "user", "content": planner_task},
+    ]
+    try:
+        raw = chat(
+            config,
+            messages,
+            inject_memory=False,
+            archive_enabled=False,
+            chat_template_kwargs={"enable_thinking": bool(config.planner_thinking)},
+            temperature=0.0,
+            max_tokens=min(max(config.max_model_tokens, 1024), 2048),
+        )
+        parsed = parse_action(raw)
+        plan = compact_planner_payload(parsed)
+        return plan, {"raw": truncate(raw, 4000), "thinking_enabled": bool(config.planner_thinking)}
+    except Exception as exc:
+        return None, {"error": str(exc), "thinking_enabled": bool(config.planner_thinking)}
+
+
+def task_with_execution_plan(task: str, plan: dict[str, Any] | None) -> str:
+    if not plan:
+        return task
+    return (
+        task
+        + "\n\nExecutor plan from planning phase (advisory, user task remains authoritative):\n"
+        + json.dumps(plan, ensure_ascii=False, indent=2)
+        + "\nFollow this plan unless current tool results prove it stale or wrong."
+    )
 
 
 def looks_like_oversized_inline_file_action(raw: str, error: Exception | None = None) -> bool:
@@ -2667,6 +2775,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     if not config.task_id:
         config.task_id = safe_task_id()
     run_started = time.time()
+    original_task = task
+    execution_plan, planner_meta = build_execution_plan(original_task, config)
+    task = task_with_execution_plan(original_task, execution_plan)
     system_prompt = SYSTEM_PROMPT
     if config.technical_output:
         system_prompt += (
@@ -2688,7 +2799,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     consecutive_parse_failures = 0
     total_parse_failures = 0
     verified_text_paths: set[str] = set(config.initial_verified_text_paths)
-    required_artifact_path_list = required_artifact_paths_from_task(task)
+    required_artifact_path_list = required_artifact_paths_from_task(original_task)
     required_artifact_paths = set(required_artifact_path_list)
     last_required_artifact_hint = ""
     trace: list[dict[str, Any]] = []
@@ -2696,14 +2807,26 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         config,
         "start",
         {
-            "task": task,
+            "task": original_task,
             "required_artifacts": required_artifact_path_list,
+            "planner_enabled": bool(config.planner_enabled),
+            "planner_thinking": bool(config.planner_thinking),
             "memory_namespace": config.memory_namespace,
             "archive_user": config.archive_user,
             "max_steps": config.max_steps,
             "max_runtime_sec": config.max_runtime_sec,
         },
     )
+    if planner_meta is not None:
+        planner_event = {
+            "ok": execution_plan is not None,
+            "thinking_enabled": bool(planner_meta.get("thinking_enabled")),
+            "plan": execution_plan,
+        }
+        if planner_meta.get("error"):
+            planner_event["error"] = planner_meta.get("error")
+        write_task_journal(config, "planner", planner_event)
+        emit(event_sink, {"type": "planner", **planner_event})
     emit(event_sink, {"type": "task", "task_id": config.task_id, "memory_namespace": config.memory_namespace})
 
     for step in range(1, config.max_steps + 1):
