@@ -1167,6 +1167,13 @@ def explicit_workspace_from_task(task: str) -> str:
     return ""
 
 
+def resume_context_has_swe_diagnostic(task: str) -> bool:
+    lowered = (task or "").lower()
+    if "resume context" not in lowered and "authoritative resume context" not in lowered:
+        return False
+    return any(re.search(r'"action"\s*:\s*"' + re.escape(action) + r'"', lowered) for action in SWE_DIAGNOSTIC_ACTIONS)
+
+
 def validate_final_artifacts(config: AgentConfig, message: str) -> dict[str, Any]:
     return validate_artifact_paths(config, extract_sandbox_paths_from_text(message))
 
@@ -2898,7 +2905,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     successful_write_file_paths: dict[str, int] = {}
     successful_write_file_max_bytes: dict[str, int] = {}
     failed_verification_paths: set[str] = set()
-    swe_diagnostic_seen = False
+    swe_diagnostic_seen = resume_context_has_swe_diagnostic(original_task)
     inspection_actions_since_progress = 0
     repeated_rejection_count = 0
     repeated_rejection_total = 0

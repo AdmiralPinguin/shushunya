@@ -2160,6 +2160,10 @@ def main() -> int:
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":
         raise AssertionError("explicit workspace was not extracted from task text")
     print("[ok] explicit task workspace extracted")
+    resume_diagnostic_task = 'Resume context from previous agent task journal x:\n[{"type":"action","action":{"action":"read_file","path":"/work/project/a.py"}}]'
+    if not agent_runner.resume_context_has_swe_diagnostic(resume_diagnostic_task):
+        raise AssertionError("SWE diagnostic was not detected in resume context")
+    print("[ok] resume context preserves SWE diagnostic state")
 
     verify_after_edit_stdout = io.StringIO()
     verify_after_edit_config = AgentConfig(
