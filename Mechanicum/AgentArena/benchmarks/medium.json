@@ -1,0 +1,35 @@
+{
+  "suite": "medium",
+  "tasks": [
+    {
+      "id": "multi_file_cli_repair",
+      "title": "Repair a small multi-file CLI project",
+      "seed_files": {
+        "textkit/__init__.py": "from .normalize import normalize_title, slugify\n",
+        "textkit/normalize.py": "import re\n\n\ndef normalize_title(value: str) -> str:\n    return \" \".join(value.strip().split()).title()\n\n\ndef slugify(value: str) -> str:\n    value = normalize_title(value)\n    value = re.sub(r\"[^a-zA-Z0-9]+\", \"-\", value)\n    return value.strip(\"-\")\n",
+        "textkit/cli.py": "from .normalize import slugify\n\n\ndef main(argv=None):\n    argv = list(argv or [])\n    if not argv:\n        raise SystemExit(\"missing title\")\n    print(slugify(\" \".join(argv)))\n",
+        "tests/test_textkit.py": "from textkit.normalize import normalize_title, slugify\n\n\ndef test_normalize_title():\n    assert normalize_title(\"  hello   world \") == \"Hello World\"\n\n\ndef test_slugify_lowercase():\n    assert slugify(\"Hello, World!\") == \"hello-world\"\n\n\ndef test_slugify_unicode_dash():\n    assert slugify(\"Gemma 4: Agent Loop\") == \"gemma-4-agent-loop\"\n",
+        "run_check.py": "from textkit.cli import main\n\nmain([\"Hello,\", \"World!\"])\n"
+      },
+      "prompt": "В текущем каталоге есть маленький Python-проект textkit. Проверка падает: slugify должен возвращать lowercase slug через дефисы, а CLI должен печатать такой slug. Исправь минимально нужный код. Проверь командой python3 -m pytest -q или, если pytest недоступен, эквивалентной проверкой через python3 -c для normalize_title, slugify и CLI. Завершай только после успешной проверки.",
+      "checks": [
+        {"type": "command", "command": "__PYTHON__ -c \"from textkit.normalize import normalize_title, slugify; assert normalize_title('  hello   world ') == 'Hello World'; assert slugify('Hello, World!') == 'hello-world'; assert slugify('Gemma 4: Agent Loop') == 'gemma-4-agent-loop'\"", "timeout_sec": 60},
+        {"type": "command", "command": "__PYTHON__ run_check.py | grep -Fx hello-world", "timeout_sec": 60}
+      ]
+    },
+    {
+      "id": "multi_artifact_contract",
+      "title": "Create coordinated report and audit artifacts",
+      "prompt": "Создай два файла в текущем рабочем каталоге: report.md и audit.json. report.md должен содержать разделы Summary, Evidence, Risks, Result. В Result должна быть строка STATUS: PASS. audit.json должен быть валидным JSON object с полями status=\"pass\", checks_count=3, files=[\"report.md\", \"audit.json\"]. После создания проверь содержимое report.md и валидность audit.json. Завершай только когда оба файла существуют и проверки пройдены.",
+      "checks": [
+        {"type": "file_exists", "path": "report.md"},
+        {"type": "file_contains", "path": "report.md", "text": "Summary"},
+        {"type": "file_contains", "path": "report.md", "text": "Evidence"},
+        {"type": "file_contains", "path": "report.md", "text": "Risks"},
+        {"type": "file_contains", "path": "report.md", "text": "STATUS: PASS"},
+        {"type": "file_exists", "path": "audit.json"},
+        {"type": "command", "command": "__PYTHON__ -c \"import json; data=json.load(open('audit.json', encoding='utf-8')); assert data['status'] == 'pass'; assert data['checks_count'] == 3; assert data['files'] == ['report.md', 'audit.json']\"", "timeout_sec": 60}
+      ]
+    }
+  ]
+}
