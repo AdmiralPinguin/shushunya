@@ -165,6 +165,10 @@ def run_shushunya(agent: dict[str, Any], task: dict[str, Any], workspace: Path, 
         "skip_previous_task_context": True,
         "max_auto_cycles": 1
     }
+    if agent.get("max_steps"):
+        payload["max_steps"] = int(agent["max_steps"])
+    if agent.get("max_runtime_sec"):
+        payload["max_runtime_sec"] = int(agent["max_runtime_sec"])
     started = time.time()
     status, response = http_json("POST", f"{base_url}/run", payload, timeout=int(agent.get("timeout_sec", 1800)))
     log_path.write_text(json.dumps({"status": status, "response": response}, ensure_ascii=False, indent=2), encoding="utf-8")
