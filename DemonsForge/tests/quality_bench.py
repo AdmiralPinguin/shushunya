@@ -183,6 +183,11 @@ def write_summary(report: dict[str, Any], path: Path) -> str:
             lines.append(f"- job_id: `{scenario['job_id']}`")
             lines.append(f"- artifact_id: `{scenario.get('artifact_id')}`")
             lines.append(f"- duration_sec: `{scenario.get('duration_sec')}`")
+        if scenario.get("quality_verdict"):
+            verdict = scenario["quality_verdict"]
+            lines.append(f"- quality_status: `{verdict.get('status')}`")
+            if verdict.get("warnings"):
+                lines.append(f"- quality_warnings: {', '.join(verdict['warnings'])}")
         evaluation = scenario.get("evaluation") or {}
         if evaluation:
             lines.append(f"- dimension_match: `{evaluation.get('dimension_match', {}).get('ok')}`")
@@ -206,6 +211,29 @@ def write_summary(report: dict[str, Any], path: Path) -> str:
         lines.extend(["## Contact Sheet", "", f"`{report['contact_sheet']}`", ""])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return str(path)
+
+
+def quality_verdict(name: str, evaluation: dict[str, Any]) -> dict[str, Any]:
+    warnings = []
+    actual = evaluation.get("actual_image") or {}
+    stddev = actual.get("stddev") if isinstance(actual, dict) else None
+    if isinstance(stddev, list) and stddev and sum(float(value) for value in stddev) / len(stddev) < 5.0:
+        warnings.append("flat_or_blank_image")
+    dimension_match = evaluation.get("dimension_match") or {}
+    if dimension_match.get("ok") is False:
+        warnings.append("dimension_mismatch")
+    edit_hint = evaluation.get("edit_delta_hint") or {}
+    if name.startswith("sdxl_img2img") and edit_hint.get("class") in {"very_low", "low"}:
+        warnings.append("edit_delta_low")
+    if edit_hint.get("identity_loss_risk"):
+        warnings.append("identity_loss_risk")
+    inpaint_hint = evaluation.get("inpaint_localization_hint") or {}
+    if inpaint_hint.get("underpaint_risk"):
+        warnings.append("underpaint_risk")
+    if inpaint_hint.get("overpaint_risk"):
+        warnings.append("overpaint_risk")
+    status = "pass" if not warnings else "warn"
+    return {"status": status, "warnings": warnings}
 
 
 def main() -> int:
@@ -264,6 +292,7 @@ def main() -> int:
                 evaluation = request_json("GET", f"{base_url}/forge/artifacts/{artifact_id}/evaluation")
                 entry["metadata"] = metadata
                 entry["evaluation"] = evaluation
+                entry["quality_verdict"] = quality_verdict(name, evaluation)
                 sheet_items.append((name, metadata["path"]))
         report["scenarios"].append(entry)
         print(f"{name}: dry_run={entry['dry_run_ok']} status={entry.get('status', 'not-run')}", flush=True)
@@ -273,6 +302,9 @@ def main() -> int:
         report["contact_sheet"] = make_contact_sheet(sheet_items, REPORTS_DIR / f"{run_id}-contact-sheet.png")
     report["finished_at"] = utc_now()
     report["duration_sec"] = round(time.monotonic() - started, 3)
+    report["quality_warning_count"] = sum(
+        len((item.get("quality_verdict") or {}).get("warnings") or []) for item in report["scenarios"]
+    )
     report["ok"] = all(item.get("dry_run_ok") and item.get("status", "succeeded") == "succeeded" for item in report["scenarios"])
     report_path = Path(args.report_json) if args.report_json else REPORTS_DIR / f"{run_id}.json"
     if not report_path.is_absolute():
