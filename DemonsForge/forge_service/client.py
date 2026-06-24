@@ -85,6 +85,9 @@ class DemonsForgeClient:
     def asset_downloads(self, limit: int = 100) -> list[dict[str, Any]]:
         return self._request("GET", f"/forge/assets/downloads?limit={limit}")
 
+    def asset_profiles(self) -> dict[str, Any]:
+        return self._request("GET", "/forge/assets/profiles")
+
     def memory_status(self) -> dict[str, Any]:
         return self._request("GET", "/forge/memory/status")
 

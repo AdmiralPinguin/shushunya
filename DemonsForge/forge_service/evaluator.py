@@ -74,6 +74,40 @@ def _prompt_terms(prompt: str | None) -> dict[str, object]:
     return {"terms": terms[:24], "count": len(terms)}
 
 
+def _edit_delta_hint(diff: float) -> dict[str, object]:
+    if diff < 2.0:
+        label = "very_low"
+    elif diff < 8.0:
+        label = "low"
+    elif diff < 24.0:
+        label = "moderate"
+    elif diff < 48.0:
+        label = "high"
+    else:
+        label = "very_high"
+    return {
+        "class": label,
+        "too_low_for_visible_edit": diff < 2.0,
+        "identity_loss_risk": diff > 35.0,
+    }
+
+
+def _inpaint_risk(region_diff: dict[str, float]) -> dict[str, object]:
+    masked = region_diff["masked"]
+    unmasked = region_diff["unmasked"]
+    ratio = round(masked / max(unmasked, 0.001), 3)
+    return {
+        "masked_gt_unmasked": masked > unmasked,
+        "ratio": ratio,
+        "underpaint_risk": masked < 2.0,
+        "overpaint_risk": unmasked > 8.0 or (masked > 0 and unmasked / max(masked, 0.001) > 0.75),
+        "notes": [
+            "underpaint_risk means the masked area barely changed",
+            "overpaint_risk means unmasked pixels changed too much for a localized inpaint",
+        ],
+    }
+
+
 def _local_path(value: object) -> Path:
     path = Path(str(value))
     if path.is_absolute():
@@ -118,14 +152,13 @@ def evaluate_artifact(path: Path, metadata: dict[str, Any]) -> dict[str, object]
             "actual": {"width": actual.get("width"), "height": actual.get("height")},
         }
     if source_images and source_images[0].exists():
-        result["diff_from_first_source"] = _mean_abs_difference(source_images[0], path)
+        source_diff = _mean_abs_difference(source_images[0], path)
+        result["diff_from_first_source"] = source_diff
+        result["edit_delta_hint"] = _edit_delta_hint(source_diff)
     elif source_images:
         result["source_warning"] = f"source image missing: {source_images[0]}"
     if mask_image and source_images and source_images[0].exists() and _local_path(mask_image).exists():
         region_diff = _masked_difference(source_images[0], path, _local_path(mask_image))
         result["inpaint_region_diff"] = region_diff
-        result["inpaint_localization_hint"] = {
-            "masked_gt_unmasked": region_diff["masked"] > region_diff["unmasked"],
-            "ratio": round(region_diff["masked"] / max(region_diff["unmasked"], 0.001), 3),
-        }
+        result["inpaint_localization_hint"] = _inpaint_risk(region_diff)
     return result

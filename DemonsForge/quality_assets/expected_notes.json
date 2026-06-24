@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "generated_assets_dir": "quality_assets/generated",
+  "scenarios": [
+    {
+      "name": "sdxl_txt2img_forge_character",
+      "job_type": "txt2img",
+      "engine": "sdxl",
+      "must_include": ["demonic blacksmith", "forge", "warm rim light", "clear silhouette"],
+      "failure_modes": ["abstract noise", "blank image", "unreadable composition"]
+    },
+    {
+      "name": "sdxl_img2img_identity_balanced",
+      "job_type": "img2img",
+      "engine": "sdxl",
+      "must_keep": ["central humanoid silhouette", "face position", "torso position"],
+      "must_change": ["lighting", "surface detail", "forge styling"],
+      "failure_modes": ["source unchanged", "abstract emblem", "identity destroyed", "full scene repaint"]
+    },
+    {
+      "name": "sdxl_inpaint_background_localized",
+      "job_type": "inpaint",
+      "engine": "sdxl",
+      "must_keep": ["central figure", "face area", "torso area"],
+      "must_change": ["masked top background", "forge sparks", "orange furnace light"],
+      "failure_modes": ["mask ignored", "underpaint", "overpaint outside mask", "face destroyed"]
+    }
+  ]
+}

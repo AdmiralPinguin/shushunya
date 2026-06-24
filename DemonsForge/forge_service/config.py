@@ -7,6 +7,7 @@ MODELS_DIR = ROOT / "models"
 LORAS_DIR = ROOT / "loras"
 EMBEDDINGS_DIR = ROOT / "embeddings"
 CONTROL_ASSETS_DIR = ROOT / "control_assets"
+QUALITY_ASSETS_DIR = ROOT / "quality_assets"
 ARTIFACTS_DIR = ROOT / "artifacts"
 RUNTIME_DIR = ROOT / "runtime"
 LOGS_DIR = RUNTIME_DIR / "logs"
@@ -53,6 +54,7 @@ def ensure_dirs() -> None:
         LORAS_DIR,
         EMBEDDINGS_DIR,
         CONTROL_ASSETS_DIR,
+        QUALITY_ASSETS_DIR,
         ARTIFACTS_DIR,
         RUNTIME_DIR,
         LOGS_DIR,

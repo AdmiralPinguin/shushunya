@@ -18,6 +18,7 @@ from .registries import (
     ASPECT_PRESETS,
     SAMPLERS,
     SCHEDULERS,
+    asset_profiles,
     capabilities,
     clear_registry_caches,
     discover_embeddings,
@@ -279,6 +280,11 @@ def refresh_registries() -> dict[str, object]:
 @app.get("/forge/assets/downloads")
 def list_asset_downloads(limit: int = 100) -> list[dict[str, object]]:
     return [item.model_dump() for item in store.list_asset_downloads(limit=max(1, min(limit, 500)))]
+
+
+@app.get("/forge/assets/profiles")
+def get_asset_profiles() -> dict[str, object]:
+    return asset_profiles()
 
 
 @app.get("/forge/jobs")

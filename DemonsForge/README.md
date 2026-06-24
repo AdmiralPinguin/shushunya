@@ -95,6 +95,7 @@ Core endpoints:
 - `GET /forge/planner/thinker`
 - `POST /forge/registries/refresh`
 - `GET /forge/assets/downloads`
+- `GET /forge/assets/profiles`
 - `POST /forge/plan`
 - `POST /forge/jobs`
 - `GET /forge/jobs`
@@ -251,6 +252,10 @@ Architecture:
   dimensions, image statistics, source-image differences, inpaint masked versus
   unmasked differences, and prompt terms from metadata. It deliberately does
   not claim semantic prompt-adherence scores without a vision/CLIP evaluator.
+- `quality_assets/asset_profiles.json`: quality-facing profile registry for
+  LoRA, embedding, control and reference assets. Profiles record intended use,
+  trigger words, recommended weights, approval state, license notes and risks.
+  `/forge/assets/profiles` merges those profiles with locally discovered files.
 - `forge_service/client.py`: thin client intended for later ShushunyaAgent tool
   integration.
 
@@ -436,6 +441,22 @@ DemonsForge/bin/python tests/long_forge_api.py --cycles 1 --edit-sweep
 
 This runs soft, balanced, and strong `img2img` variants from the same source,
 writes `diff_from_source` metrics, and creates an edit-sweep contact sheet.
+
+Quality bench:
+
+```bash
+DemonsForge/bin/python tests/quality_bench.py
+FORGE_WORKER_MAX_JOBS=3 ./start-forge-worker.sh
+DemonsForge/bin/python tests/quality_bench.py --run
+```
+
+The default mode is a dry-run validation of the scenario specs. `--run` creates
+deterministic synthetic source/mask assets under `quality_assets/generated/`,
+runs the benchmark jobs, writes JSON and Markdown summaries under
+`runtime/test-reports/`, and creates a contact sheet. Scenario contracts live in
+`quality_assets/expected_notes.json`; they describe must-keep/must-change
+expectations and known failure modes instead of relying on brittle golden
+images.
 
 Memory gateway diagnostic:
 

@@ -71,6 +71,7 @@ ASPECT_PRESETS = {
 SERVICE_JOB_TYPES = ["upscale", "prompt-enhance", "metadata-read", "asset-download"]
 UNSUPPORTED_JOB_TYPES = ["outpaint", "variation"]
 FUTURE_FEATURES = ["ControlNet", "IP-Adapter", "reference_image"]
+ASSET_PROFILES_PATH = config.QUALITY_ASSETS_DIR / "asset_profiles.json"
 
 
 @lru_cache(maxsize=1)
@@ -191,6 +192,58 @@ def discover_embeddings() -> list[dict[str, Any]]:
     ]
 
 
+def asset_profiles() -> dict[str, Any]:
+    payload: dict[str, Any] = {"version": 1, "profiles": []}
+    if ASSET_PROFILES_PATH.exists():
+        try:
+            payload = json.loads(ASSET_PROFILES_PATH.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            return {
+                "version": 1,
+                "profiles": [],
+                "error": f"invalid asset profile json: {exc}",
+                "path": str(ASSET_PROFILES_PATH),
+            }
+    local_loras = {item["name"].lower(): item for item in discover_loras()}
+    local_embeddings = {item["name"].lower(): item for item in discover_embeddings()}
+    profiles = []
+    for profile in payload.get("profiles", []):
+        item = dict(profile)
+        asset_type = str(item.get("asset_type", ""))
+        local = None
+        if asset_type == "lora":
+            local = local_loras.get(str(item.get("name", "")).lower())
+        elif asset_type == "embedding":
+            local = local_embeddings.get(str(item.get("name", "")).lower())
+        item["available"] = local is not None
+        if local is not None:
+            item["local"] = local
+        profiles.append(item)
+    profiled_names = {str(item.get("name", "")).lower() for item in profiles}
+    for lora in discover_loras():
+        if lora["name"].lower() not in profiled_names:
+            profiles.append(
+                {
+                    "name": lora["name"],
+                    "asset_type": "lora",
+                    "engine": "sdxl",
+                    "approved": False,
+                    "available": True,
+                    "local": lora,
+                    "intended_use": [],
+                    "trigger_words": [],
+                    "recommended_weight": 0.5,
+                    "license_note": lora.get("license_note"),
+                    "risks": ["local asset lacks an explicit quality profile"],
+                }
+            )
+    return {
+        "version": payload.get("version", 1),
+        "path": str(ASSET_PROFILES_PATH),
+        "profiles": profiles,
+    }
+
+
 def capabilities() -> dict[str, Any]:
     models = discover_models()
     model_by_engine = {m["engine"]: m for m in models}
@@ -223,6 +276,7 @@ def capabilities() -> dict[str, Any]:
         "models": models,
         "loras": discover_loras(),
         "embeddings": discover_embeddings(),
+        "asset_profiles": asset_profiles(),
         "samplers": SAMPLERS,
         "schedulers": SCHEDULERS,
         "aspect_presets": ASPECT_PRESETS,

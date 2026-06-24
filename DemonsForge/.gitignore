@@ -8,4 +8,5 @@ asset_requests/
 loras/
 embeddings/
 control_assets/
+quality_assets/generated/
 *.log

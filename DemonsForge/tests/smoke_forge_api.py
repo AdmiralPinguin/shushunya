@@ -56,6 +56,10 @@ def main() -> None:
     assert caps.json()["engines"]["sdxl"]["role"] == "image_edit_refine_workhorse"
     assert caps.json()["engines"]["stable_diffusion"]["role"] == "concept_txt2img"
     assert caps.json()["engine_policy"]["txt2img_default_order"][0] == "stable_diffusion"
+    asset_profiles = client.get("/forge/assets/profiles")
+    assert asset_profiles.status_code == 200, asset_profiles.text
+    assert "profiles" in asset_profiles.json()
+    assert "path" in asset_profiles.json()
     runtime = client.get("/forge/runtime")
     assert runtime.status_code == 200, runtime.text
     assert runtime.json()["cpu_only"] is True
@@ -541,6 +545,8 @@ def main() -> None:
     artifact_evaluation = client.get(f"/forge/artifacts/{upscale_status['artifacts'][0]}/evaluation")
     assert artifact_evaluation.status_code == 200, artifact_evaluation.text
     assert artifact_evaluation.json()["dimension_match"]["ok"] is True
+    assert artifact_evaluation.json()["dimension_match"]["expected"] == {"width": 32, "height": 32}
+    assert "edit_delta_hint" in artifact_evaluation.json()
     assert "Prompt adherence is not scored numerically." in artifact_evaluation.json()["limited_checks"]
     queued = client.post(
         "/forge/jobs",

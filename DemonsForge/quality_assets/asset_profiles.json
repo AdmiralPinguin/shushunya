@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "sd_xl_offset_example-lora_1.0",
+      "asset_type": "lora",
+      "intended_use": ["lighting_offset_smoke", "lora_pipeline_test"],
+      "trigger_words": [],
+      "recommended_weight": 0.5,
+      "engine": "sdxl",
+      "approved": true,
+      "license_note": "Bundled local test LoRA discovered in the local model cache; use for pipeline validation, not semantic style quality.",
+      "risks": ["not a character/style LoRA", "not useful for prompt adherence benchmarks"]
+    }
+  ]
+}
