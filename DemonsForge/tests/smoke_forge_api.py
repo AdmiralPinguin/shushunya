@@ -269,6 +269,12 @@ def main() -> None:
     assert planned_spec["height"] == 768
     assert planned_spec["steps"] == 7
     assert planned_spec["seed"] == 123
+    planned_first_concept = client.post(
+        "/forge/plan",
+        json={"request": "Нужна первая картинка first concept demonic blacksmith 512x512", "use_memory": False},
+    )
+    assert planned_first_concept.status_code == 200, planned_first_concept.text
+    assert planned_first_concept.json()["engine"] == "flux"
     planned_batch = client.post(
         "/forge/plan",
         json={"request": "SDXL 512x512 batch 3 cinematic portraits"},

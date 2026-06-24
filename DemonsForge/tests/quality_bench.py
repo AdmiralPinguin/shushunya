@@ -98,8 +98,50 @@ def load_expected_notes() -> dict[str, Any]:
     return json.loads(EXPECTED_NOTES.read_text(encoding="utf-8"))
 
 
-def scenario_specs(assets: dict[str, str]) -> list[dict[str, Any]]:
+def concept_scenario_specs() -> list[dict[str, Any]]:
     return [
+        {
+            "name": "sd35_txt2img_first_concept",
+            "spec": {
+                "type": "txt2img",
+                "engine": "stable_diffusion",
+                "model": "stable-diffusion-3.5-large",
+                "prompt": (
+                    "first concept image, cinematic demonic blacksmith in a fiery forge, "
+                    "clear concept silhouette, dramatic metal workshop"
+                ),
+                "negative_prompt": "abstract noise, blank image, blurry, low quality",
+                "width": 512,
+                "height": 512,
+                "steps": 1,
+                "guidance": 4.5,
+                "seed": 60001,
+                "quality_preset": "quality_bench_sd35_concept",
+            },
+        },
+        {
+            "name": "flux_txt2img_first_concept",
+            "spec": {
+                "type": "txt2img",
+                "engine": "flux",
+                "model": "FLUX.1-schnell",
+                "prompt": (
+                    "first concept image, cinematic demonic blacksmith in a fiery forge, "
+                    "clear concept silhouette, dramatic metal workshop"
+                ),
+                "width": 512,
+                "height": 512,
+                "steps": 1,
+                "guidance": 0.0,
+                "seed": 60002,
+                "quality_preset": "quality_bench_flux_concept",
+            },
+        },
+    ]
+
+
+def scenario_specs(assets: dict[str, str], include_concept_engines: bool = False) -> list[dict[str, Any]]:
+    scenarios = [
         {
             "name": "sdxl_txt2img_forge_character",
             "spec": {
@@ -160,6 +202,9 @@ def scenario_specs(assets: dict[str, str]) -> list[dict[str, Any]]:
             },
         },
     ]
+    if include_concept_engines:
+        return [*concept_scenario_specs(), *scenarios]
+    return scenarios
 
 
 def write_summary(report: dict[str, Any], path: Path) -> str:
@@ -168,6 +213,7 @@ def write_summary(report: dict[str, Any], path: Path) -> str:
         "",
         f"- run_id: `{report['run_id']}`",
         f"- mode: `{'run' if report['run_jobs'] else 'dry-run'}`",
+        f"- concept_engines: `{report.get('concept_engines', False)}`",
         f"- ok: `{report['ok']}`",
         f"- started_at: `{report['started_at']}`",
         f"- finished_at: `{report.get('finished_at', '')}`",
@@ -240,6 +286,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--run", action="store_true", help="enqueue real generation jobs")
+    parser.add_argument("--concept-engines", action="store_true", help="include SD3.5 and Flux concept txt2img probes")
     parser.add_argument("--report-json", default="")
     args = parser.parse_args()
 
@@ -254,13 +301,14 @@ def main() -> int:
         "started_at": utc_now(),
         "base_url": base_url,
         "run_jobs": bool(args.run),
+        "concept_engines": bool(args.concept_engines),
         "assets": assets,
         "expected_notes_path": str(EXPECTED_NOTES),
         "scenarios": [],
         "ok": False,
     }
     sheet_items: list[tuple[str, str]] = [("source", assets["source"])]
-    for scenario in scenario_specs(assets):
+    for scenario in scenario_specs(assets, include_concept_engines=args.concept_engines):
         name = scenario["name"]
         spec = scenario["spec"]
         entry: dict[str, Any] = {

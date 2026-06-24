@@ -44,6 +44,9 @@ def _choose_engine(text: str, preferred: str | None, job_type: JobType) -> str:
             return "stable_diffusion"
     if "sdxl" in lowered and caps["engines"]["sdxl"]["available"]:
         return "sdxl"
+    if any(token in lowered for token in ["first concept", "первый концепт", "первую картинку", "первое изображение"]):
+        if caps["engines"]["flux"]["available"]:
+            return "flux"
     for engine in caps.get("engine_policy", {}).get("txt2img_default_order", ["stable_diffusion", "flux", "sdxl"]):
         if caps["engines"][engine]["available"]:
             return engine

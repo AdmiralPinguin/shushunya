@@ -152,7 +152,10 @@ Engine policy:
   `inpaint`, future `outpaint`, variation/refinement, LoRA and control workflows.
 - The planner defaults plain `txt2img` requests to SD3.5 when available, then
   Flux, then SDXL. Explicit engine requests are respected when that engine
-  supports the requested job type.
+  supports the requested job type. Explicit first-concept wording such as
+  `first concept`, `первый концепт`, or `первую картинку` routes to Flux when
+  it is locally available, because CPU quality bench results show it produces a
+  more readable one-step concept than SD3.5.
 
 Example txt2img job:
 
@@ -452,6 +455,8 @@ Quality bench:
 DemonsForge/bin/python tests/quality_bench.py
 FORGE_WORKER_MAX_JOBS=3 ./start-forge-worker.sh
 DemonsForge/bin/python tests/quality_bench.py --run
+FORGE_WORKER_MAX_JOBS=5 ./start-forge-worker.sh
+DemonsForge/bin/python tests/quality_bench.py --run --concept-engines
 ```
 
 The default mode is a dry-run validation of the scenario specs. `--run` creates
@@ -460,7 +465,8 @@ runs the benchmark jobs, writes JSON and Markdown summaries under
 `runtime/test-reports/`, and creates a contact sheet. Scenario contracts live in
 `quality_assets/expected_notes.json`; they describe must-keep/must-change
 expectations and known failure modes instead of relying on brittle golden
-images.
+images. `--concept-engines` adds SD3.5 and Flux first-concept probes so their
+txt2img behavior can be compared against SDXL editing workflows.
 
 Memory gateway diagnostic:
 

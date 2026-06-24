@@ -3,6 +3,20 @@
   "generated_assets_dir": "quality_assets/generated",
   "scenarios": [
     {
+      "name": "sd35_txt2img_first_concept",
+      "job_type": "txt2img",
+      "engine": "stable_diffusion",
+      "must_include": ["demonic blacksmith", "forge", "clear concept silhouette"],
+      "failure_modes": ["abstract noise", "blank image", "unreadable concept"]
+    },
+    {
+      "name": "flux_txt2img_first_concept",
+      "job_type": "txt2img",
+      "engine": "flux",
+      "must_include": ["demonic blacksmith", "forge", "clear concept silhouette"],
+      "failure_modes": ["abstract noise", "blank image", "unreadable concept"]
+    },
+    {
       "name": "sdxl_txt2img_forge_character",
       "job_type": "txt2img",
       "engine": "sdxl",
