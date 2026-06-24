@@ -16,8 +16,11 @@ DB_PATH = RUNTIME_DIR / "forge.sqlite3"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8110
 CPU_THREADS = os.cpu_count() or 32
+TORCH_ACTIVE_THREADS = int(os.environ.get("FORGE_TORCH_ACTIVE_THREADS", str(CPU_THREADS)))
+TORCH_IDLE_THREADS = int(os.environ.get("FORGE_TORCH_IDLE_THREADS", "1"))
 MODEL_IDLE_SECONDS = int(os.environ.get("FORGE_MODEL_IDLE_SECONDS", "1800"))
 EMBEDDED_WORKER = os.environ.get("FORGE_EMBEDDED_WORKER", "1") not in {"0", "false", "False"}
+WORKER_MAX_JOBS = int(os.environ.get("FORGE_WORKER_MAX_JOBS", "0"))
 BUILD_COMMIT = os.environ.get("FORGE_GIT_COMMIT", "").strip()
 
 MEMORY_ENABLED = os.environ.get("FORGE_MEMORY_ENABLED", "1") not in {"0", "false", "False", "no", "off"}
@@ -64,4 +67,49 @@ def force_cpu_runtime() -> None:
     os.environ.setdefault("MKL_NUM_THREADS", str(CPU_THREADS))
     os.environ.setdefault("OPENBLAS_NUM_THREADS", str(CPU_THREADS))
     os.environ.setdefault("NUMEXPR_NUM_THREADS", str(CPU_THREADS))
+    os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+    os.environ.setdefault("KMP_BLOCKTIME", "0")
+    os.environ.setdefault("GOMP_SPINCOUNT", "0")
+    os.environ.setdefault("MKL_DYNAMIC", "FALSE")
     os.environ.setdefault("HF_HOME", str(ROOT / "hf_home"))
+
+
+def thread_policy() -> dict[str, str | int]:
+    actual_torch_threads: int | str = ""
+    try:
+        import torch
+
+        actual_torch_threads = torch.get_num_threads()
+    except Exception:
+        pass
+    return {
+        "cpu_threads": CPU_THREADS,
+        "torch_active_threads": TORCH_ACTIVE_THREADS,
+        "torch_idle_threads": TORCH_IDLE_THREADS,
+        "torch_current_threads": actual_torch_threads,
+        "omp_num_threads": os.environ.get("OMP_NUM_THREADS", ""),
+        "mkl_num_threads": os.environ.get("MKL_NUM_THREADS", ""),
+        "openblas_num_threads": os.environ.get("OPENBLAS_NUM_THREADS", ""),
+        "numexpr_num_threads": os.environ.get("NUMEXPR_NUM_THREADS", ""),
+        "omp_wait_policy": os.environ.get("OMP_WAIT_POLICY", ""),
+        "kmp_blocktime": os.environ.get("KMP_BLOCKTIME", ""),
+        "gomp_spincount": os.environ.get("GOMP_SPINCOUNT", ""),
+        "mkl_dynamic": os.environ.get("MKL_DYNAMIC", ""),
+    }
+
+
+def set_torch_threads(count: int) -> None:
+    try:
+        import torch
+
+        torch.set_num_threads(max(1, int(count)))
+    except Exception:
+        return
+
+
+def boost_torch_threads() -> None:
+    set_torch_threads(TORCH_ACTIVE_THREADS)
+
+
+def cooldown_torch_threads() -> None:
+    set_torch_threads(TORCH_IDLE_THREADS)

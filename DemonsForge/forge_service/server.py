@@ -44,6 +44,7 @@ def health() -> dict[str, object]:
         "artifacts": str(config.ARTIFACTS_DIR),
         "device_policy": "cpu-only",
         "cpu_threads": config.CPU_THREADS,
+        "thread_policy": config.thread_policy(),
         "git_commit": config.BUILD_COMMIT or None,
         "memory": ArchiveMemoryClient.from_config().status(),
     }

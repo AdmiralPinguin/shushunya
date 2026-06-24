@@ -4,6 +4,7 @@ import os
 import gc
 import inspect
 import time
+import re
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,7 @@ class DiffusersEngine(BaseEngine):
             raise EngineError(f"Model is not available locally: {model_dir}")
 
         config.force_cpu_runtime()
+        config.boost_torch_threads()
 
         from diffusers import FluxPipeline, StableDiffusion3Pipeline, StableDiffusionXLPipeline
 
@@ -115,6 +117,7 @@ class DiffusersEngine(BaseEngine):
         if not (model_dir / "model_index.json").exists():
             raise EngineError(f"Model is not available locally: {model_dir}")
         config.force_cpu_runtime()
+        config.boost_torch_threads()
         from diffusers import StableDiffusionXLImg2ImgPipeline
 
         self._img2img_pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
@@ -136,6 +139,7 @@ class DiffusersEngine(BaseEngine):
         if not (model_dir / "model_index.json").exists():
             raise EngineError(f"Model is not available locally: {model_dir}")
         config.force_cpu_runtime()
+        config.boost_torch_threads()
         from diffusers import StableDiffusionXLInpaintPipeline
 
         self._inpaint_pipe = StableDiffusionXLInpaintPipeline.from_pretrained(
@@ -175,7 +179,7 @@ class DiffusersEngine(BaseEngine):
             local = find_lora(item.name)
             if not local:
                 raise EngineError(f"LoRA is not available locally: {item.name}")
-            adapter_name = f"lora_{item.name}".replace(" ", "_")
+            adapter_name = re.sub(r"[^A-Za-z0-9_]", "_", f"lora_{item.name}")
             if adapter_name not in loaded_for_pipe:
                 pipe.load_lora_weights(local["path"], adapter_name=adapter_name)
                 loaded_for_pipe.add(adapter_name)

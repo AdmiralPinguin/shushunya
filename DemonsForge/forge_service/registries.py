@@ -73,6 +73,15 @@ UNSUPPORTED_JOB_TYPES = ["outpaint", "variation"]
 FUTURE_FEATURES = ["ControlNet", "IP-Adapter", "reference_image"]
 
 
+@lru_cache(maxsize=1)
+def peft_available() -> bool:
+    try:
+        import peft  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
 @lru_cache(maxsize=256)
 def _dir_size(path: Path) -> int:
     if not path.exists():
@@ -186,10 +195,13 @@ def capabilities() -> dict[str, Any]:
     models = discover_models()
     model_by_engine = {m["engine"]: m for m in models}
     engines = {}
+    has_peft = peft_available()
     for name, meta in ENGINE_MODELS.items():
         model = model_by_engine[name]
+        supports_lora = bool(meta.get("supports_lora")) and has_peft
         engines[name] = {
             **meta,
+            "supports_lora": supports_lora,
             "available": model["available"],
             "models": [model["name"]],
             "job_types": meta["job_types"],
@@ -197,7 +209,7 @@ def capabilities() -> dict[str, Any]:
                 "txt2img": "txt2img" in meta["job_types"],
                 "img2img": bool(meta.get("supports_img2img")),
                 "inpaint": bool(meta.get("supports_inpaint")),
-                "lora": bool(meta.get("supports_lora")),
+                "lora": supports_lora,
                 "negative_prompt": bool(meta.get("supports_negative_prompt")),
                 "control": bool(meta.get("supports_control")),
             },
@@ -221,6 +233,9 @@ def capabilities() -> dict[str, Any]:
             "max_batch": config.MAX_BATCH,
             "max_asset_download_bytes": config.MAX_ASSET_DOWNLOAD_BYTES,
         },
+        "dependencies": {
+            "peft": {"available": has_peft, "required_for": ["sdxl_lora"]},
+        },
         "implemented_job_types": sorted(
             set(SERVICE_JOB_TYPES)
             | {job_type for meta in ENGINE_MODELS.values() for job_type in meta["job_types"]}
@@ -243,6 +258,7 @@ def capabilities() -> dict[str, Any]:
 def clear_registry_caches() -> None:
     _dir_size.cache_clear()
     _modified_at.cache_clear()
+    peft_available.cache_clear()
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:

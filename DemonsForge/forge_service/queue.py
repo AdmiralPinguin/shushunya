@@ -18,7 +18,7 @@ from . import config
 from .archive_memory import ArchiveMemoryClient, asset_memory_proposal
 from .downloader import DownloadError, download_asset, target_dir_for, validate_download_spec
 from .engines.diffusers_adapter import DiffusersEngine
-from .registries import ENGINE_MODELS, SAMPLERS, SCHEDULERS, clear_registry_caches, find_lora, write_json
+from .registries import ENGINE_MODELS, SAMPLERS, SCHEDULERS, clear_registry_caches, find_lora, peft_available, write_json
 from .schemas import ArtifactRecord, AssetDownloadRecord, JobRecord, JobSpec, JobStatus, JobType, utc_now
 from .storage import ForgeStore
 
@@ -132,6 +132,8 @@ class ForgeQueue:
                 raise RuntimeError("flux adapter currently runs with guidance/cfg fixed at 0.0")
         if spec.loras and not meta.get("supports_lora"):
             raise RuntimeError(f"{engine_name} does not support LoRA")
+        if spec.loras and not peft_available():
+            raise RuntimeError("LoRA support requires the peft package in the DemonsForge runtime")
         for lora in spec.loras:
             if not find_lora(lora.name):
                 raise RuntimeError(f"LoRA is not available locally: {lora.name}")
@@ -196,6 +198,7 @@ class ForgeQueue:
             "loaded_engines": [engine.runtime_state() for engine in self._engines.values()],
             "cpu_only": True,
             "cpu_threads": config.CPU_THREADS,
+            "thread_policy": config.thread_policy(),
             "model_idle_seconds": config.MODEL_IDLE_SECONDS,
             "db_schema_version": self.store.schema_version(),
             "memory": self.memory.status(),
@@ -311,6 +314,7 @@ class ForgeQueue:
             self.store.update_job(job_id, status=status, error=str(exc))
             self.store.append_log(job_id, f"job {status.value}: {exc}")
         finally:
+            config.cooldown_torch_threads()
             self._cancel.discard(job_id)
 
     def _resolve_input_path(self, value: str) -> Path:

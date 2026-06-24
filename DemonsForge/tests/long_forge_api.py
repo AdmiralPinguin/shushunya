@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
 import requests
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageStat
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,6 +118,56 @@ def wait_job(base_url: str, job_id: str, timeout_seconds: int = 900) -> dict[str
     raise TimeoutError(f"job did not finish within {timeout_seconds}s: {job_id}")
 
 
+def mean_abs_difference(left: str, right: str) -> float:
+    with Image.open(left) as left_image, Image.open(right) as right_image:
+        left_rgb = left_image.convert("RGB")
+        right_rgb = right_image.convert("RGB").resize(left_rgb.size)
+        diff = ImageChops.difference(left_rgb, right_rgb)
+        stat = ImageStat.Stat(diff)
+        return sum(stat.mean) / len(stat.mean)
+
+
+def artifact_metadata(base_url: str, artifact_id: str) -> dict[str, Any]:
+    return request_json("GET", f"{base_url}/forge/artifacts/{artifact_id}/metadata")
+
+
+def assert_image_changed(base_url: str, artifact_id: str, source: str, min_mean_diff: float, label: str) -> None:
+    metadata = artifact_metadata(base_url, artifact_id)
+    output = metadata["path"]
+    diff = mean_abs_difference(source, output)
+    if diff < min_mean_diff:
+        raise AssertionError(f"{label}: output changed too little, mean abs diff={diff:.3f}")
+    print(f"{label}: mean abs diff={diff:.3f}", flush=True)
+
+
+def run_downloader_safety(base_url: str) -> None:
+    bad_specs = [
+        {
+            "type": "asset-download",
+            "asset_download": {
+                "name": "blocked_without_approval",
+                "asset_type": "lora",
+                "source_url": "https://huggingface.co/example/example/resolve/main/file.safetensors",
+                "approved": False,
+            },
+        },
+        {
+            "type": "asset-download",
+            "asset_download": {
+                "name": "blocked_unverified_url",
+                "asset_type": "lora",
+                "source_url": "http://127.0.0.1/file.safetensors",
+                "approved": True,
+            },
+        },
+    ]
+    for spec in bad_specs:
+        response = requests.post(f"{base_url}/forge/jobs?dry_run=true", json=spec, timeout=60)
+        if response.status_code != 400:
+            raise AssertionError(f"asset downloader safety should reject spec: {response.status_code} {response.text}")
+    print("asset downloader safety ok", flush=True)
+
+
 def prepare_generation_inputs() -> tuple[str, str]:
     inputs = ROOT / "runtime" / "long_test_inputs"
     inputs.mkdir(parents=True, exist_ok=True)
@@ -136,6 +187,7 @@ def prepare_generation_inputs() -> tuple[str, str]:
 
 def run_generation_smoke(base_url: str) -> None:
     source, mask = prepare_generation_inputs()
+    local_loras = request_json("GET", f"{base_url}/forge/loras")
     jobs = [
         {
             "type": "txt2img",
@@ -146,6 +198,7 @@ def run_generation_smoke(base_url: str) -> None:
             "height": 512,
             "steps": 2,
             "guidance": 5.0,
+            "seed": 41001,
         },
         {
             "type": "img2img",
@@ -155,9 +208,10 @@ def run_generation_smoke(base_url: str) -> None:
             "source_images": [source],
             "width": 512,
             "height": 512,
-            "steps": 2,
-            "strength": 0.55,
+            "steps": 4,
+            "strength": 0.85,
             "guidance": 5.0,
+            "seed": 41002,
         },
         {
             "type": "inpaint",
@@ -168,11 +222,27 @@ def run_generation_smoke(base_url: str) -> None:
             "mask_image": mask,
             "width": 512,
             "height": 512,
-            "steps": 2,
-            "strength": 0.65,
+            "steps": 4,
+            "strength": 0.85,
             "guidance": 5.0,
+            "seed": 41003,
         },
     ]
+    if local_loras:
+        jobs.append(
+            {
+                "type": "txt2img",
+                "engine": "sdxl",
+                "model": "stable-diffusion-xl-base-1.0",
+                "prompt": "small CPU LoRA smoke, bright offset lighting test",
+                "width": 512,
+                "height": 512,
+                "steps": 2,
+                "guidance": 5.0,
+                "seed": 41004,
+                "loras": [{"name": local_loras[0]["name"], "weight": 0.5}],
+            }
+        )
     for spec in jobs:
         record = request_json("POST", f"{base_url}/forge/jobs", json=spec)
         finished = wait_job(base_url, record["id"])
@@ -184,7 +254,33 @@ def run_generation_smoke(base_url: str) -> None:
             verified = request_json("GET", f"{base_url}/forge/artifacts/{artifact_id}/verify")
             if not verified.get("ok"):
                 raise AssertionError(f"artifact verify failed: {verified}")
+            metadata = artifact_metadata(base_url, artifact_id)
+            if spec["type"] == "img2img":
+                assert_image_changed(base_url, artifact_id, source, 1.5, "img2img")
+                if metadata.get("source_images") != [source]:
+                    raise AssertionError(f"img2img metadata lost source_images: {metadata}")
+            if spec["type"] == "inpaint":
+                assert_image_changed(base_url, artifact_id, source, 1.0, "inpaint")
+                if metadata.get("mask_image") != mask:
+                    raise AssertionError(f"inpaint metadata lost mask_image: {metadata}")
+            if spec.get("loras"):
+                if metadata.get("loras") != spec["loras"]:
+                    raise AssertionError(f"LoRA metadata mismatch: {metadata.get('loras')} != {spec['loras']}")
         print(f"{spec['type']} generation ok: {finished['id']} artifacts={finished['artifacts']}", flush=True)
+    if local_loras:
+        runtime = request_json("GET", f"{base_url}/forge/runtime")
+        if runtime.get("embedded_worker"):
+            loaded_loras = {
+                name
+                for engine in runtime.get("loaded_engines", [])
+                for name in engine.get("loaded_loras", [])
+            }
+            expected = re.sub(r"[^A-Za-z0-9_]", "_", f"lora_{local_loras[0]['name']}")
+            if expected not in loaded_loras:
+                raise AssertionError(f"runtime did not report loaded LoRA {expected!r}: {runtime}")
+            print(f"LoRA runtime load ok: {expected}", flush=True)
+        else:
+            print("LoRA metadata ok; runtime load check skipped for external worker mode", flush=True)
 
 
 def main() -> int:
@@ -199,6 +295,7 @@ def main() -> int:
     thinker = request_json("GET", f"{args.base_url}/forge/planner/thinker")
     print(f"thinker: enabled={thinker.get('enabled')} ready={thinker.get('ready')}", flush=True)
     run_planner_matrix(args.base_url.rstrip("/"), max(1, args.cycles))
+    run_downloader_safety(args.base_url.rstrip("/"))
     if args.generate:
         run_generation_smoke(args.base_url.rstrip("/"))
     print("long forge api ok", flush=True)

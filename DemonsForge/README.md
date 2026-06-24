@@ -61,6 +61,18 @@ FORGE_EMBEDDED_WORKER=0 ./start-forge-api.sh
 ./start-forge-worker.sh
 ```
 
+For long CPU test batches, recycle the worker after a known number of jobs so
+torch/OpenMP thread pools die with the worker instead of idling inside the HTTP
+API process:
+
+```bash
+FORGE_EMBEDDED_WORKER=0 ./start-forge-api.sh
+FORGE_WORKER_MAX_JOBS=4 ./start-forge-worker.sh
+```
+
+Start a fresh worker for the next batch. The API remains available on port
+`8110`.
+
 Core endpoints:
 
 - `GET /health`
