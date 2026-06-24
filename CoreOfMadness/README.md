@@ -59,16 +59,17 @@ Default settings:
 
 - Host: `0.0.0.0`
 - Port: `8080`
-- Context size: `32768`
-- Parallel slots: `1`
+- Context size: `65536` total, split across parallel slots
+- Parallel slots: `2` by default, giving two `32768` request slots
 - GPU layers: `999` by default, so Vulkan can offload to the GPU when available
 - Reasoning mode: `off` by default, so chat replies return normal `content`
 - Chat template kwargs: `{"enable_thinking":false}` by default, to keep Gemma 4
   agent/controller replies in normal assistant content instead of thinking output
 - KV cache quantization: `CACHE_TYPE_K=q4_0`, `CACHE_TYPE_V=q4_0`
-- Keep `PARALLEL=1` and q4 KV cache unless a larger GPU is installed. Q6_K is
-  available as an experiment with 16k context; Q8_0 is not a practical default
-  for this GPU at 16k+ context.
+- Keep q4 KV cache for the default two-slot setup. The RTX 2060 12GB host has
+  been smoke-tested with `PARALLEL=2`, `CTX_SIZE=65536`, and two near-limit
+  `32768` slots. Q6_K is available as an experiment with 16k context; Q8_0 is
+  not a practical default for this GPU at 16k+ context.
 - Prompt cache is disabled by default: `PROMPT_CACHE=0`,
   `CACHE_RAM=0`, `CACHE_REUSE=0`, `SLOT_PROMPT_SIMILARITY=0.0`,
   `CACHE_IDLE_SLOTS=0`. ArchiveOfHeresy is expected to assemble the full
@@ -103,7 +104,7 @@ Stop it with:
 Runtime settings can be overridden through environment variables:
 
 ```bash
-PORT=8081 CTX_SIZE=32768 PARALLEL=1 GPU_LAYERS=999 REASONING=off ./llm-host/scripts/start-host.sh
+PORT=8081 CTX_SIZE=65536 PARALLEL=2 GPU_LAYERS=999 REASONING=off ./llm-host/scripts/start-host.sh
 ```
 
 For a higher-quality but heavier KV cache profile, override the cache types:
