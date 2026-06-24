@@ -238,12 +238,14 @@ def main() -> None:
     )
     assert smoke_plan.status_code == 200, smoke_plan.text
     assert smoke_plan.json()["steps"] == 1
+    assert smoke_plan.json()["quality_preset"] == "smoke"
     assert smoke_plan.json()["safety"]["quality_preset"] == "smoke"
     quality_plan = client.post(
         "/forge/plan",
         json={"request": "SDXL 512x512 качественно cinematic portrait", "use_memory": False},
     )
     assert quality_plan.status_code == 200, quality_plan.text
+    assert quality_plan.json()["quality_preset"] == "quality"
     assert quality_plan.json()["safety"]["quality_preset"] == "quality"
     assert quality_plan.json()["steps"] > smoke_plan.json()["steps"]
     planned_custom = client.post(

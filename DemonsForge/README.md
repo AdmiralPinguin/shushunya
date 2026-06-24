@@ -224,6 +224,9 @@ Architecture:
   `asset_request` objects requiring user approval.
   It recognizes engine hints, explicit dimensions like `512x768`, `steps`,
   `seed`, negative prompts and local LoRA references like `lora:name@0.8`.
+  It also emits a structured `quality_preset` such as `smoke`, `draft`,
+  `quality`, `edit_soft`, `edit_strong`, or `inpaint_precise` to make planner
+  tradeoffs visible to clients and artifact metadata.
   It also performs fail-soft read-only memory search through the `demonsforge`
   namespace and stores compact planning hints in `spec.safety.memory_context`.
   It recognizes `txt2img`, `img2img`, `inpaint`, and `upscale` intent; image

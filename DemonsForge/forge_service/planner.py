@@ -307,6 +307,7 @@ def build_heuristic_plan(request: PlanRequest) -> JobSpec:
         width=width,
         height=height,
         aspect_preset=preset,
+        quality_preset=quality_preset,
         steps=_preset_steps(text, engine_caps["steps_default"], quality_preset),
         cfg=cfg,
         guidance=guidance,

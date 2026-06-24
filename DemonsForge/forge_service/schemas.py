@@ -66,6 +66,7 @@ class JobSpec(BaseModel):
     width: int = 1024
     height: int = 1024
     aspect_preset: str | None = None
+    quality_preset: str | None = None
     steps: int = 20
     cfg: float | None = None
     guidance: float | None = None

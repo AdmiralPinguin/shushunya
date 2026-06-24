@@ -614,6 +614,7 @@ class ForgeQueue:
             "negative_prompt": spec.negative_prompt,
             "engine": engine_name,
             "model": model_name,
+            "quality_preset": spec.quality_preset,
             "loras": [item.model_dump() for item in spec.loras],
             "embeddings": spec.embeddings,
             "seed": spec.seed,
