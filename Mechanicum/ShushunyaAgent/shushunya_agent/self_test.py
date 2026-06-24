@@ -626,6 +626,14 @@ def main() -> int:
     if agent_runner.task_with_execution_profile("Создай краткий отчет", AgentConfig()) != "Создай краткий отчет":
         raise AssertionError("SWE execution profile should not affect unrelated tasks")
     print("[ok] SWE execution profile")
+    if agent_runner.planner_should_run("Создай /work/report.md с текстом ok", AgentConfig(planner_enabled=True)):
+        raise AssertionError("simple create tasks should not spend a planner call")
+    if not agent_runner.planner_should_run(
+        "Сложный стресс-тест. Обязательные артефакты: /work/report.md и /work/audit.json",
+        AgentConfig(planner_enabled=True),
+    ):
+        raise AssertionError("complex artifact/stress tasks should use planner")
+    print("[ok] planner gating")
     if server.validate_task_text("").get("status") != 400:
         raise AssertionError("empty task should fail validation")
     old_max_task_chars = server.MAX_TASK_CHARS
