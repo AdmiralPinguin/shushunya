@@ -62,6 +62,12 @@ def main() -> None:
     assert runtime.json()["embedded_worker"] is True
     assert runtime.json()["pid"] > 0
     assert runtime.json()["memory"]["namespace"] == "demonsforge"
+    state = client.get("/forge/state")
+    assert state.status_code == 200, state.text
+    assert state.json()["ok"] is True
+    assert "uptime_sec" in state.json()
+    assert "job_status_counts" in state.json()
+    assert "dependencies" in state.json()
     memory_status = client.get("/forge/memory/status")
     assert memory_status.status_code == 200, memory_status.text
     assert memory_status.json()["write_policy"] == "proposal-only"

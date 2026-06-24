@@ -77,6 +77,7 @@ Core endpoints:
 
 - `GET /health`
 - `GET /forge/capabilities`
+- `GET /forge/state`
 - `GET /forge/runtime`
 - `POST /forge/runtime/unload`
 - `POST /forge/runtime/checkpoint`
@@ -388,6 +389,9 @@ Long live-API planner/dry-run matrix:
 ```bash
 DemonsForge/bin/python tests/long_forge_api.py --cycles 20
 ```
+
+Long-test JSON reports are written under `runtime/test-reports/` unless
+`--report-json` is supplied.
 
 Optional real CPU SDXL generation smoke:
 

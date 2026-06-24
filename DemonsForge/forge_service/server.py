@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import hashlib
+import time
 
 import asyncio
 
@@ -22,7 +23,7 @@ from .registries import (
     discover_loras,
     discover_models,
 )
-from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest
+from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest, utc_now
 from .storage import ForgeStore
 from .thinker import PlannerThinker
 
@@ -31,6 +32,8 @@ config.ensure_dirs()
 store = ForgeStore()
 forge_queue = ForgeQueue(store, start_worker=config.EMBEDDED_WORKER)
 app = FastAPI(title="DemonsForge Forge API", version=__version__)
+STARTED_AT = utc_now()
+STARTED_MONOTONIC = time.monotonic()
 
 
 @app.get("/health")
@@ -58,6 +61,37 @@ def get_capabilities() -> dict[str, object]:
 @app.get("/forge/runtime")
 def get_runtime() -> dict[str, object]:
     return forge_queue.runtime_state()
+
+
+@app.get("/forge/state")
+def get_state() -> dict[str, object]:
+    runtime = forge_queue.runtime_state()
+    queue_state = forge_queue.queue_state()
+    recent_failed = [
+        {
+            "id": item.id,
+            "type": item.spec.type.value,
+            "engine": item.spec.engine,
+            "updated_at": item.updated_at,
+            "error": item.error,
+        }
+        for item in store.list_jobs(status="failed", limit=5)
+    ]
+    caps = capabilities()
+    return {
+        "service": "DemonsForge",
+        "version": __version__,
+        "ok": True,
+        "started_at": STARTED_AT,
+        "uptime_sec": round(time.monotonic() - STARTED_MONOTONIC, 3),
+        "git_commit": config.BUILD_COMMIT or None,
+        "queue": queue_state,
+        "runtime": runtime,
+        "job_status_counts": queue_state["status_counts"],
+        "recent_failed_jobs": recent_failed,
+        "dependencies": caps.get("dependencies", {}),
+        "memory": runtime["memory"],
+    }
 
 
 @app.post("/forge/runtime/unload")

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import json
 import re
 import sys
 import time
@@ -14,6 +16,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageStat
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASE_URL = "http://127.0.0.1:8110"
+REPORTS_DIR = ROOT / "runtime" / "test-reports"
 
 
 SCENARIOS = [
@@ -79,9 +82,14 @@ def assert_plan(name: str, spec: dict[str, Any], expect: dict[str, Any]) -> None
         raise AssertionError(f"{name}: planner_thinker metadata missing")
 
 
-def run_planner_matrix(base_url: str, cycles: int) -> None:
+def utc_now() -> str:
+    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def run_planner_matrix(base_url: str, cycles: int, report: dict[str, Any]) -> None:
     for cycle in range(1, cycles + 1):
         started = time.monotonic()
+        cycle_checks = []
         for scenario in SCENARIOS:
             spec = request_json(
                 "POST",
@@ -92,6 +100,7 @@ def run_planner_matrix(base_url: str, cycles: int) -> None:
                 },
             )
             assert_plan(scenario["name"], spec, scenario["expect"])
+            cycle_checks.append({"scenario": scenario["name"], "type": spec.get("type"), "engine": spec.get("engine")})
             if spec.get("asset_request") is None:
                 dry_run = requests.post(f"{base_url}/forge/jobs?dry_run=true", json=spec, timeout=60)
                 if scenario["expect"].get("required_inputs"):
@@ -100,6 +109,9 @@ def run_planner_matrix(base_url: str, cycles: int) -> None:
                 elif dry_run.status_code != 200:
                     raise AssertionError(f"{scenario['name']}: dry-run failed: {dry_run.text}")
         elapsed = time.monotonic() - started
+        report.setdefault("planner_cycles", []).append(
+            {"cycle": cycle, "duration_sec": round(elapsed, 3), "checks": cycle_checks}
+        )
         print(f"cycle {cycle}/{cycles}: planner matrix ok in {elapsed:.2f}s", flush=True)
 
 
@@ -140,7 +152,7 @@ def assert_image_changed(base_url: str, artifact_id: str, source: str, min_mean_
     print(f"{label}: mean abs diff={diff:.3f}", flush=True)
 
 
-def run_downloader_safety(base_url: str) -> None:
+def run_downloader_safety(base_url: str, report: dict[str, Any]) -> None:
     bad_specs = [
         {
             "type": "asset-download",
@@ -165,6 +177,9 @@ def run_downloader_safety(base_url: str) -> None:
         response = requests.post(f"{base_url}/forge/jobs?dry_run=true", json=spec, timeout=60)
         if response.status_code != 400:
             raise AssertionError(f"asset downloader safety should reject spec: {response.status_code} {response.text}")
+        report.setdefault("checks", []).append(
+            {"name": "asset_downloader_safety", "ok": True, "status_code": response.status_code}
+        )
     print("asset downloader safety ok", flush=True)
 
 
@@ -185,7 +200,7 @@ def prepare_generation_inputs() -> tuple[str, str]:
     return str(source), str(mask)
 
 
-def run_generation_smoke(base_url: str) -> None:
+def run_generation_smoke(base_url: str, report: dict[str, Any]) -> None:
     source, mask = prepare_generation_inputs()
     local_loras = request_json("GET", f"{base_url}/forge/loras")
     jobs = [
@@ -244,6 +259,7 @@ def run_generation_smoke(base_url: str) -> None:
             }
         )
     for spec in jobs:
+        started = time.monotonic()
         record = request_json("POST", f"{base_url}/forge/jobs", json=spec)
         finished = wait_job(base_url, record["id"])
         if finished["status"] != "succeeded":
@@ -266,6 +282,17 @@ def run_generation_smoke(base_url: str) -> None:
             if spec.get("loras"):
                 if metadata.get("loras") != spec["loras"]:
                     raise AssertionError(f"LoRA metadata mismatch: {metadata.get('loras')} != {spec['loras']}")
+        report.setdefault("generation_jobs", []).append(
+            {
+                "job_id": finished["id"],
+                "type": spec["type"],
+                "engine": spec.get("engine"),
+                "status": finished["status"],
+                "duration_sec": round(time.monotonic() - started, 3),
+                "artifacts": finished.get("artifacts", []),
+                "loras": spec.get("loras", []),
+            }
+        )
         print(f"{spec['type']} generation ok: {finished['id']} artifacts={finished['artifacts']}", flush=True)
     if local_loras:
         runtime = request_json("GET", f"{base_url}/forge/runtime")
@@ -283,21 +310,49 @@ def run_generation_smoke(base_url: str) -> None:
             print("LoRA metadata ok; runtime load check skipped for external worker mode", flush=True)
 
 
+def write_report(report: dict[str, Any], explicit_path: str | None = None) -> Path:
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    path = Path(explicit_path) if explicit_path else REPORTS_DIR / f"{report['run_id']}.json"
+    if not path.is_absolute():
+        path = ROOT / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--cycles", type=int, default=10)
     parser.add_argument("--generate", action="store_true")
+    parser.add_argument("--report-json", default="")
     args = parser.parse_args()
 
+    run_id = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S-forge-long")
+    started = time.monotonic()
+    report: dict[str, Any] = {
+        "run_id": run_id,
+        "started_at": utc_now(),
+        "base_url": args.base_url,
+        "cycles": max(1, args.cycles),
+        "generate": bool(args.generate),
+        "ok": False,
+    }
     health = request_json("GET", f"{args.base_url}/health")
+    report["health"] = health
     print(f"health ok: commit={health.get('git_commit')} cpu_threads={health.get('cpu_threads')}", flush=True)
     thinker = request_json("GET", f"{args.base_url}/forge/planner/thinker")
+    report["thinker"] = thinker
     print(f"thinker: enabled={thinker.get('enabled')} ready={thinker.get('ready')}", flush=True)
-    run_planner_matrix(args.base_url.rstrip("/"), max(1, args.cycles))
-    run_downloader_safety(args.base_url.rstrip("/"))
+    run_planner_matrix(args.base_url.rstrip("/"), max(1, args.cycles), report)
+    run_downloader_safety(args.base_url.rstrip("/"), report)
     if args.generate:
-        run_generation_smoke(args.base_url.rstrip("/"))
+        run_generation_smoke(args.base_url.rstrip("/"), report)
+    report["finished_at"] = utc_now()
+    report["duration_sec"] = round(time.monotonic() - started, 3)
+    report["ok"] = True
+    report_path = write_report(report, args.report_json or None)
+    print(f"report: {report_path}", flush=True)
     print("long forge api ok", flush=True)
     return 0
 
