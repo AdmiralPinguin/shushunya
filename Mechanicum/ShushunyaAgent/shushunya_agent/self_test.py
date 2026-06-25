@@ -2802,6 +2802,47 @@ def main() -> int:
         raise AssertionError(f"SWE repeated file read guard should take priority over generic identical guard: {repeated_failing_read_payload}")
     print("[ok] repeated failing-test file read guard")
 
+    reread_after_tests_stdout = io.StringIO()
+    reread_after_tests_config = AgentConfig(
+        task_id=safe_task_id("self-test-reread-after-failing-tests"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"read_file","path":"/work/project/calc.py","max_bytes":20000}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"read_file","path":"/work/project/calc.py","max_bytes":20000,"offset":0}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_repeated_failing_tests), \
+            mock.patch.object(agent_runner, "file_tool", return_value={
+                "ok": True,
+                "path": "/work/project/calc.py",
+                "content": "def calc(): return 1",
+                "size": 20,
+            }), \
+            contextlib.redirect_stdout(reread_after_tests_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        reread_after_tests_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            reread_after_tests_config,
+        )
+    reread_after_tests_payload = json.loads(reread_after_tests_stdout.getvalue())
+    reread_after_tests_errors = [
+        (step.get("result") or {}).get("error")
+        for step in reread_after_tests_payload.get("steps", [])
+    ]
+    if reread_after_tests_code != 0 or "swe repeated failing-test file read rejected by supervisor" not in reread_after_tests_errors:
+        raise AssertionError(f"reread after failing tests guard failed: code={reread_after_tests_code}, payload={reread_after_tests_payload}")
+    print("[ok] reread after failing tests guard")
+
     caught_assert_stdout = io.StringIO()
     caught_assert_config = AgentConfig(
         task_id=safe_task_id("self-test-caught-assertion-verification"),

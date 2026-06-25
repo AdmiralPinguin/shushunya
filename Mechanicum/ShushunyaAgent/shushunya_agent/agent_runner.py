@@ -3305,6 +3305,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     pending_failing_tests = set(last_pytest_failing_tests)
     pending_failing_test_inspections = 0
     pending_failing_test_read_paths: set[str] = set()
+    read_file_paths_since_code_mutation: set[str] = set()
     non_test_diagnostics_before_test = 0
     last_successful_swe_edit_path = ""
     swe_verified_after_edit = False
@@ -3685,6 +3686,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and action_type == "read_file"
                 and (
                     str(action.get("path") or "") in pending_failing_test_read_paths
+                    or str(action.get("path") or "") in read_file_paths_since_code_mutation
                     or action_counts[fingerprint] >= 3
                 )
             ):
@@ -4101,6 +4103,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             code_mutated_since_last_pytest = True
             if swe_task and action_type in SWE_EDIT_ACTIONS:
                 last_successful_swe_edit_path = path
+                read_file_paths_since_code_mutation = set()
             pending_failing_test_inspections = 0
         if isinstance(result, dict) and (result.get("passing_tests") or result.get("failing_tests")):
             current_passing_tests, current_failing_tests = pytest_result_sets(result)
@@ -4178,6 +4181,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 successful_write_file_paths[path] = successful_write_file_paths.get(path, 0) + 1
                 content_bytes = len(str(action.get("content") or "").encode("utf-8"))
                 successful_write_file_max_bytes[path] = max(successful_write_file_max_bytes.get(path, 0), content_bytes)
+        if action_type == "read_file" and isinstance(result, dict) and result.get("ok") is True:
+            read_path = str(action.get("path") or result.get("path") or "")
+            if read_path:
+                read_file_paths_since_code_mutation.add(read_path)
         if (
             swe_task
             and swe_verified_after_edit
