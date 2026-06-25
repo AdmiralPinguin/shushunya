@@ -1338,6 +1338,18 @@ def action_runs_test_diagnostic(action_type: str, action: dict[str, Any]) -> boo
     )
 
 
+def action_looks_like_python_verification(action_type: str, action: dict[str, Any]) -> bool:
+    if action_type != "python":
+        return False
+    code = str(action.get("code") or "").lower()
+    return any(marker in code for marker in ("assert ", "pytest", "test_", "run_check", "expected"))
+
+
+def python_result_printed_assertion(result: dict[str, Any]) -> bool:
+    output = f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}".lower()
+    return "assertionerror" in output
+
+
 def resume_context_has_test_diagnostic(task: str) -> bool:
     lowered = (task or "").lower()
     if "resume context" not in lowered and "authoritative resume context" not in lowered:
@@ -3979,6 +3991,22 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 result = {"ok": False, "error": f"unsupported action: {action_type}"}
         except Exception as exc:
             result = {"ok": False, "error": str(exc), "exception": exc.__class__.__name__}
+
+        if (
+            swe_task
+            and action_looks_like_python_verification(action_type, action)
+            and isinstance(result, dict)
+            and result.get("ok") is True
+            and python_result_printed_assertion(result)
+        ):
+            result = dict(result)
+            result["ok"] = False
+            result["returncode"] = result.get("returncode") or 1
+            result["supervisor_instruction"] = (
+                "This Python verification printed AssertionError but exited with code 0, likely because the check caught the assertion. "
+                "Treat it as a failed verification. Do not catch AssertionError in verification code; fix the code under test, "
+                "then run an uncaught assert/full test command."
+            )
 
         action_duration_sec = round(time.time() - action_started, 3)
         supervisor_rejection = (

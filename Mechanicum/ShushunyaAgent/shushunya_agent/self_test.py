@@ -2722,6 +2722,33 @@ def main() -> int:
         raise AssertionError(f"failing test read scenario should reach final: code={failing_test_read_code}, payload={failing_test_read_payload}")
     print("[ok] failing test file read allowed")
 
+    caught_assert_stdout = io.StringIO()
+    caught_assert_config = AgentConfig(
+        task_id=safe_task_id("self-test-caught-assertion-verification"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"python","cwd":"/work/project","code":"try:\\n    assert calc() == 2\\nexcept AssertionError:\\n    print(\\"AssertionError\\")","timeout":60}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "python_tool", return_value={
+            "ok": True,
+            "returncode": 0,
+            "stdout": "AssertionError\n",
+            "stderr": "",
+    }), contextlib.redirect_stdout(caught_assert_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        caught_assert_code = run_agent("Исправь Python-проект и запусти тест", caught_assert_config)
+    caught_assert_payload = json.loads(caught_assert_stdout.getvalue())
+    caught_assert_results = [step.get("result") or {} for step in caught_assert_payload.get("steps", [])]
+    if caught_assert_code != 0 or not caught_assert_results or caught_assert_results[0].get("ok") is not False:
+        raise AssertionError(f"caught AssertionError verification should be failed: code={caught_assert_code}, payload={caught_assert_payload}")
+    if "printed AssertionError" not in caught_assert_results[0].get("supervisor_instruction", ""):
+        raise AssertionError(f"caught AssertionError guidance missing: {caught_assert_payload}")
+    print("[ok] caught AssertionError verification fails")
+
     failing_stall_stdout = io.StringIO()
     failing_stall_config = AgentConfig(
         task_id=safe_task_id("self-test-failing-test-stall"),
