@@ -1305,6 +1305,12 @@ def explicit_workspace_from_task(task: str) -> str:
     return ""
 
 
+def should_inject_step_memory(config: AgentConfig, explicit_workspace: str, step: int) -> bool:
+    if explicit_workspace:
+        return False
+    return config.inject_memory or (config.task_memory and step == 1)
+
+
 def resume_context_has_swe_diagnostic(task: str) -> bool:
     lowered = (task or "").lower()
     if "resume context" not in lowered and "authoritative resume context" not in lowered:
@@ -3368,7 +3374,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         print(f"\n[agent] step {step}/{config.max_steps}", file=sys.stderr)
         emit(event_sink, {"type": "step", "step": step, "max_steps": config.max_steps, "message": "думаю над следующим действием"})
         write_task_journal(config, "step", {"step": step, "max_steps": config.max_steps})
-        step_memory = config.inject_memory or (config.task_memory and step == 1)
+        step_memory = should_inject_step_memory(config, explicit_workspace, step)
         step_archive = config.archive_internal_steps or (config.archive_task and step == 1)
         try:
             raw = chat(config, messages, inject_memory=step_memory, archive_enabled=step_archive)

@@ -3180,6 +3180,11 @@ def main() -> int:
     workspace_task = "Запусти проверку Python.\n\nРабочий каталог для этой задачи: /work/project"
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":
         raise AssertionError("explicit workspace was not extracted from task text")
+    memory_config = AgentConfig(inject_memory=True, task_memory=True)
+    if not agent_runner.should_inject_step_memory(memory_config, "", 1):
+        raise AssertionError("ordinary tasks should keep memory injection")
+    if agent_runner.should_inject_step_memory(memory_config, "/work/project", 1):
+        raise AssertionError("explicit workspace tasks should not inject prior memory paths")
     print("[ok] explicit task workspace extracted")
     if agent_runner.action_workspace_violations({"path": "/work/other/file.py"}, "/work/project") != [{"field": "path", "path": "/work/other/file.py"}]:
         raise AssertionError("workspace boundary violation was not detected")
