@@ -444,6 +444,12 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
                     "Python failed before running because of SyntaxError. Do not retry the same code. "
                     "Use simpler Python without f-strings/complex escaping, or switch to write_file with explicit content."
                 )
+            elif "nameerror" in combined_output and "__file__" in combined_output:
+                payload["supervisor_instruction"] = (
+                    "Python action runs code with python -c, so __file__ is not defined. Do not retry the same code. "
+                    "The configured cwd is already on PYTHONPATH; remove the __file__ path hack, use Path.cwd(), "
+                    "or set cwd/workdir to the project root."
+                )
             elif "modulenotfounderror" in combined_output or "no module named" in combined_output:
                 payload["supervisor_instruction"] = (
                     "Python could not import a local project module. Do not retry the same python action from the wrong directory. "
@@ -1067,6 +1073,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe repeated same-file edit before verification rejected by supervisor",
     "swe shell inline python rejected by supervisor",
     "swe failing tests inspection stall rejected by supervisor",
+    "swe passing-test edit rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
 }
@@ -1348,6 +1355,42 @@ def pytest_result_sets(result: dict[str, Any]) -> tuple[set[str], set[str]]:
         if isinstance(item, str) and item
     }
     return passing, failing
+
+
+def pytest_interest_terms(tests: set[str]) -> set[str]:
+    terms: set[str] = set()
+    for test in tests:
+        raw_name = str(test).rsplit("::", 1)[-1].strip().lower()
+        if not raw_name:
+            continue
+        if raw_name.startswith("test_"):
+            raw_name = raw_name[5:]
+        raw_name = re.sub(r"[^a-z0-9_]+", "_", raw_name).strip("_")
+        if not raw_name:
+            continue
+        terms.add(raw_name)
+        terms.update(part for part in raw_name.split("_") if len(part) >= 3)
+    return terms
+
+
+def replace_edit_declared_symbols(action: dict[str, Any]) -> set[str]:
+    if str(action.get("action") or "") != "replace_in_file":
+        return set()
+    text = f"{action.get('old') or ''}\n{action.get('new') or ''}"
+    return {
+        match.group(1).lower()
+        for match in re.finditer(r"\b(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b", text)
+    }
+
+
+def passing_test_edit_risk(action: dict[str, Any], passing_tests: set[str], failing_tests: set[str]) -> list[str]:
+    if not passing_tests or not failing_tests:
+        return []
+    protected_terms = pytest_interest_terms(passing_tests) - pytest_interest_terms(failing_tests)
+    if not protected_terms:
+        return []
+    changed_symbols = replace_edit_declared_symbols(action)
+    return sorted(changed_symbols & protected_terms)
 
 
 def latest_pytest_sets_from_text(text: str) -> tuple[set[str], set[str]]:
@@ -3547,6 +3590,23 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "instruction": (
                         "This file was already edited successfully after the last test run. Do not rewrite the same file again before verification. "
                         "Run the full test command/fallback now. If tests fail, use their output for the next narrow edit."
+                    ),
+                }
+            elif (
+                swe_task
+                and action_type == "replace_in_file"
+                and (protected_symbols := passing_test_edit_risk(action, last_pytest_passing_tests, last_pytest_failing_tests))
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe passing-test edit rejected by supervisor",
+                    "protected_symbols": protected_symbols[:20],
+                    "passing_tests": sorted(last_pytest_passing_tests)[:20],
+                    "failing_tests": sorted(last_pytest_failing_tests)[:20],
+                    "instruction": (
+                        "This replace_in_file edits a symbol that is covered by tests that already passed, while current failing_tests "
+                        "point somewhere else. Do not change passing behavior to satisfy a related failure. Make a narrower edit that "
+                        "targets the failing test names, or run the full test/fallback if the previous change already addressed them."
                     ),
                 }
             elif (

@@ -1649,6 +1649,13 @@ def main() -> int:
     )
     if "Do not retry the same code" not in python_syntax_payload.get("supervisor_instruction", ""):
         raise AssertionError(f"Python SyntaxError payload missed retry guidance: {python_syntax_payload}")
+    python_file_payload = result_for_model(
+        "python",
+        {"ok": False, "stdout": "", "stderr": "NameError: name '__file__' is not defined", "returncode": 1},
+        config,
+    )
+    if "__file__ is not defined" not in python_file_payload.get("supervisor_instruction", ""):
+        raise AssertionError(f"Python __file__ payload missed retry guidance: {python_file_payload}")
     shell_failure_payload = result_for_model(
         "shell",
         {"ok": False, "stdout": "", "stderr": "AssertionError", "returncode": 1},
@@ -2498,6 +2505,50 @@ def main() -> int:
     ):
         raise AssertionError(f"pytest regression tracking failed: code={regression_code}, payload={regression_payload}")
     print("[ok] pytest regression tests tracked")
+
+    protected_edit_stdout = io.StringIO()
+    protected_edit_config = AgentConfig(
+        task_id=safe_task_id("self-test-protected-passing-edit"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+
+    def fake_protected_tests(_config: AgentConfig, action: dict) -> dict:
+        return {
+            "ok": False,
+            "returncode": 1,
+            "stdout": '{"results":[{"ok":true,"file":"tests/test_calc.py","test":"test_normalize_title"},{"ok":false,"file":"tests/test_calc.py","test":"test_slugify_lowercase"}]}',
+            "stderr": "",
+        }
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"replace_in_file","path":"/work/project/calc.py","old":"def normalize_title(value):\\n    return value.title()","new":"def normalize_title(value):\\n    return value.lower()","count":1}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_protected_tests), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/calc.py"}), \
+            contextlib.redirect_stdout(protected_edit_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        protected_edit_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            protected_edit_config,
+        )
+    protected_edit_payload = json.loads(protected_edit_stdout.getvalue())
+    protected_edit_errors = [
+        (step.get("result") or {}).get("error")
+        for step in protected_edit_payload.get("steps", [])
+    ]
+    if protected_edit_code != 0 or "swe passing-test edit rejected by supervisor" not in protected_edit_errors:
+        raise AssertionError(f"passing-test edit guard failed: code={protected_edit_code}, payload={protected_edit_payload}")
+    print("[ok] passing-test edit guard")
 
     failing_stall_stdout = io.StringIO()
     failing_stall_config = AgentConfig(
