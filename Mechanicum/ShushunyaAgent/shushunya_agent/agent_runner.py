@@ -3669,7 +3669,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 swe_task
                 and pending_failing_tests
                 and not code_mutated_since_last_pytest
-                and action_runs_test_diagnostic(action_type, action)
+                and (action_runs_test_diagnostic(action_type, action) or action_looks_like_python_verification(action_type, action))
             ):
                 result = {
                     "ok": False,

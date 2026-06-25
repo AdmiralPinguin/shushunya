@@ -2680,6 +2680,40 @@ def main() -> int:
         raise AssertionError(f"repeated failing test guard failed: code={repeated_test_code}, payload={repeated_test_payload}")
     print("[ok] repeated failing test diagnostic guard")
 
+    repeated_assert_stdout = io.StringIO()
+    repeated_assert_config = AgentConfig(
+        task_id=safe_task_id("self-test-repeated-assert-before-edit"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"python","cwd":"/work/project","code":"assert calc() == 2","timeout":60}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_repeated_failing_tests), \
+            contextlib.redirect_stdout(repeated_assert_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        repeated_assert_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            repeated_assert_config,
+        )
+    repeated_assert_payload = json.loads(repeated_assert_stdout.getvalue())
+    repeated_assert_errors = [
+        (step.get("result") or {}).get("error")
+        for step in repeated_assert_payload.get("steps", [])
+    ]
+    if repeated_assert_code != 0 or "swe repeated failing test diagnostic rejected by supervisor" not in repeated_assert_errors:
+        raise AssertionError(f"repeated assert-before-edit guard failed: code={repeated_assert_code}, payload={repeated_assert_payload}")
+    print("[ok] repeated assert before edit guard")
+
     failing_test_read_stdout = io.StringIO()
     failing_test_read_config = AgentConfig(
         task_id=safe_task_id("self-test-failing-test-read-allowed"),
