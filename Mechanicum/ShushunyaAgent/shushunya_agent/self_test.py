@@ -2800,6 +2800,13 @@ def main() -> int:
         )
     if "repeated identical action rejected by supervisor" in repeated_failing_read_errors:
         raise AssertionError(f"SWE repeated file read guard should take priority over generic identical guard: {repeated_failing_read_payload}")
+    repeated_read_results = [
+        step.get("result") or {}
+        for step in repeated_failing_read_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "swe repeated failing-test file read rejected by supervisor"
+    ]
+    if not repeated_read_results or "def calc()" not in str(repeated_read_results[0].get("last_read_excerpt") or ""):
+        raise AssertionError(f"repeated failing-test read guard omitted last read excerpt: {repeated_failing_read_payload}")
     print("[ok] repeated failing-test file read guard")
 
     reread_after_tests_stdout = io.StringIO()

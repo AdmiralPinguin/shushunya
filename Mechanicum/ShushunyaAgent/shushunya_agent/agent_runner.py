@@ -3305,6 +3305,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     pending_failing_test_inspections = 0
     pending_failing_test_read_paths: set[str] = set()
     read_file_paths_since_code_mutation: set[str] = set()
+    last_read_file_excerpts: dict[str, str] = {}
     non_test_diagnostics_before_test = 0
     last_successful_swe_edit_path = ""
     swe_verified_after_edit = False
@@ -3694,6 +3695,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "error": "swe repeated failing-test file read rejected by supervisor",
                     "path": str(action.get("path") or ""),
                     "failing_tests": sorted(pending_failing_tests)[:20],
+                    "last_read_excerpt": last_read_file_excerpts.get(str(action.get("path") or ""), ""),
                     "instruction": (
                         "This file was already read after the current failing_tests were discovered. "
                         "Do not reread the same file before editing. The previous read_file content and failing test output "
@@ -3712,6 +3714,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "ok": False,
                     "error": "swe repeated failing test diagnostic rejected by supervisor",
                     "failing_tests": sorted(pending_failing_tests)[:20],
+                    "available_read_excerpts": dict(list(last_read_file_excerpts.items())[-3:]),
                     "instruction": (
                         "The current failing_tests are already known and no code changed since that test result. "
                         "Do not rerun the same test/fallback loop before editing. The failure stdout is already available above. "
@@ -4206,6 +4209,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             read_path = str(action.get("path") or result.get("path") or "")
             if read_path:
                 read_file_paths_since_code_mutation.add(read_path)
+                content = str(result.get("content") or "")
+                if content:
+                    last_read_file_excerpts[read_path] = content[:4000]
         if (
             swe_task
             and swe_verified_after_edit
