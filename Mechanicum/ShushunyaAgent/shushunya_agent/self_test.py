@@ -784,6 +784,29 @@ def main() -> int:
     if resume_with_start[0].get("required_artifacts") != ["/work/report.md", "/work/matrix.md"]:
         raise AssertionError(f"resume context lost required artifacts: {resume_with_start[0]}")
     print("[ok] resume context preserves required artifacts")
+    resume_with_test_result = server.compact_resume_events(
+        [
+            {"type": "start", "task": "Fix tests."},
+            {
+                "type": "tool_result",
+                "action": "shell",
+                "result": {
+                    "ok": False,
+                    "passing_tests": ["tests/test_textkit.py::test_normalize_title"],
+                    "failing_tests": ["tests/test_textkit.py::test_slugify_lowercase"],
+                },
+            },
+            *({"type": "step", "step": index} for index in range(120)),
+        ],
+        max_chars=5000,
+    )
+    resume_with_test_text = json.dumps(resume_with_test_result, ensure_ascii=False)
+    if "passing_tests" not in resume_with_test_text or "test_normalize_title" not in resume_with_test_text:
+        raise AssertionError(f"resume context lost latest test result: {resume_with_test_result}")
+    parsed_passing, parsed_failing = agent_runner.latest_pytest_sets_from_text(resume_with_test_text)
+    if parsed_passing != {"tests/test_textkit.py::test_normalize_title"} or parsed_failing != {"tests/test_textkit.py::test_slugify_lowercase"}:
+        raise AssertionError(f"resume pytest sets were not parsed: {parsed_passing}, {parsed_failing}")
+    print("[ok] resume context preserves latest test result")
     contaminated_resume = server.compact_resume_events(
         [
             {
@@ -2354,6 +2377,68 @@ def main() -> int:
     if not agent_runner.pytest_unavailable_output("/usr/bin/bash: line 1: pytest: command not found\n"):
         raise AssertionError("pytest command-not-found output was not recognized")
     print("[ok] pytest command-not-found recognized")
+
+    regression_stdout = io.StringIO()
+    regression_config = AgentConfig(
+        task_id=safe_task_id("self-test-pytest-regression"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    regression_fallback_calls = 0
+
+    def fake_regression_fallback(_config: AgentConfig, action: dict) -> dict:
+        nonlocal regression_fallback_calls
+        regression_fallback_calls += 1
+        if regression_fallback_calls == 1:
+            stdout = (
+                '{"results":['
+                '{"ok":true,"file":"tests/test_calc.py","test":"test_old"},'
+                '{"ok":false,"file":"tests/test_calc.py","test":"test_new"}'
+                ']}'
+            )
+        else:
+            stdout = (
+                '{"results":['
+                '{"ok":false,"file":"tests/test_calc.py","test":"test_old"},'
+                '{"ok":true,"file":"tests/test_calc.py","test":"test_new"}'
+                ']}'
+            )
+        return {"ok": regression_fallback_calls > 1, "returncode": 0 if regression_fallback_calls > 1 else 1, "stdout": stdout, "stderr": ""}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"replace_in_file","path":"/work/project/calc.py","old":"old","new":"new","count":1}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"final","message":"done"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_regression_fallback), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/calc.py"}), \
+            contextlib.redirect_stdout(regression_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        regression_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            regression_config,
+        )
+    regression_payload = json.loads(regression_stdout.getvalue())
+    regression_results = [
+        (step.get("result") or {})
+        for step in regression_payload.get("steps", [])
+        if (step.get("result") or {}).get("fallback") == "simple_pytest_runner"
+    ]
+    if (
+        regression_code != 0
+        or len(regression_results) != 2
+        or regression_results[-1].get("regression_tests") != ["tests/test_calc.py::test_old"]
+    ):
+        raise AssertionError(f"pytest regression tracking failed: code={regression_code}, payload={regression_payload}")
+    print("[ok] pytest regression tests tracked")
 
     workspace_task = "Запусти проверку Python.\n\nРабочий каталог для этой задачи: /work/project"
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":

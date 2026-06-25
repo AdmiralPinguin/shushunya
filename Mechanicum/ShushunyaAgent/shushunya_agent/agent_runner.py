@@ -1269,6 +1269,37 @@ def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
     return enriched
 
 
+def pytest_result_sets(result: dict[str, Any]) -> tuple[set[str], set[str]]:
+    passing = {
+        str(item)
+        for item in result.get("passing_tests", [])
+        if isinstance(item, str) and item
+    }
+    failing = {
+        str(item)
+        for item in result.get("failing_tests", [])
+        if isinstance(item, str) and item
+    }
+    return passing, failing
+
+
+def latest_pytest_sets_from_text(text: str) -> tuple[set[str], set[str]]:
+    passing_matches = re.findall(r'"passing_tests"\s*:\s*(\[[^\]]*\])', text or "", flags=re.S)
+    failing_matches = re.findall(r'"failing_tests"\s*:\s*(\[[^\]]*\])', text or "", flags=re.S)
+
+    def as_set(raw: str) -> set[str]:
+        try:
+            values = json.loads(raw)
+        except json.JSONDecodeError:
+            return set()
+        return {str(item) for item in values if isinstance(item, str) and item}
+
+    return (
+        as_set(passing_matches[-1]) if passing_matches else set(),
+        as_set(failing_matches[-1]) if failing_matches else set(),
+    )
+
+
 PYTEST_FALLBACK_CODE = r'''
 import inspect
 import json
@@ -3054,6 +3085,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     required_artifact_path_list = required_artifact_paths_from_task(original_task)
     required_artifact_paths = set(required_artifact_path_list)
     explicit_workspace = explicit_workspace_from_task(original_task)
+    last_pytest_passing_tests, last_pytest_failing_tests = latest_pytest_sets_from_text(original_task)
+    code_mutated_since_last_pytest = False
     last_required_artifact_hint = ""
     trace: list[dict[str, Any]] = []
     write_task_journal(
@@ -3631,6 +3664,26 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             verified_text_paths.discard(path)
             failed_verification_paths.discard(path)
             stale_replace_failures_by_path.pop(path, None)
+            code_mutated_since_last_pytest = True
+        if isinstance(result, dict) and (result.get("passing_tests") or result.get("failing_tests")):
+            current_passing_tests, current_failing_tests = pytest_result_sets(result)
+            regression_tests = sorted(current_failing_tests & last_pytest_passing_tests)
+            if code_mutated_since_last_pytest and regression_tests:
+                result = dict(result)
+                result["regression_tests"] = regression_tests[:20]
+                regression_instruction = (
+                    "This test run introduced regressions: tests that previously passed are now failing. "
+                    "Treat this as evidence that the last code change was too broad or wrong. "
+                    "Do not ignore the regression. Revert or narrow the last change so regression_tests pass again, "
+                    "while preserving fixes for the originally failing tests, then rerun the full test set."
+                )
+                if result.get("supervisor_instruction"):
+                    result["supervisor_instruction"] = f"{regression_instruction} {result['supervisor_instruction']}"
+                else:
+                    result["supervisor_instruction"] = regression_instruction
+            last_pytest_passing_tests = current_passing_tests
+            last_pytest_failing_tests = current_failing_tests
+            code_mutated_since_last_pytest = False
         elif action_type == "bundle_text_files" and isinstance(result, dict) and result.get("ok") is True:
             verified_text_paths.discard(str(action.get("output_txt") or ""))
             verified_text_paths.discard(str(action.get("output_fb2") or ""))

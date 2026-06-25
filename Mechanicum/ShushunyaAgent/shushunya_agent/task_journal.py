@@ -285,6 +285,7 @@ def recent_task_summaries(limit: int = 20, prefix: str | None = None) -> dict[st
 
 def compact_resume_events(events: list[Any], max_chars: int = 6000) -> list[Any]:
     selected: list[Any] = []
+    preserved_events: list[Any] = []
     total = 2
     start_event = next((event for event in events if isinstance(event, dict) and event.get("type") == "start"), None)
     if start_event is not None:
@@ -301,8 +302,29 @@ def compact_resume_events(events: list[Any], max_chars: int = 6000) -> list[Any]
         if len(text) + 3 <= max_chars:
             selected.append(compacted_start)
             total += len(text) + 1
+            preserved_events.append(start_event)
+    last_test_result_event = next(
+        (
+            event
+            for event in reversed(events)
+            if (
+                isinstance(event, dict)
+                and event.get("type") == "tool_result"
+                and isinstance(event.get("result"), dict)
+                and (event["result"].get("passing_tests") or event["result"].get("failing_tests"))
+            )
+        ),
+        None,
+    )
+    if last_test_result_event is not None and last_test_result_event not in preserved_events:
+        compacted_test = compact_json_value(last_test_result_event, string_limit=1000, list_limit=30)
+        text = json.dumps(compacted_test, ensure_ascii=False, separators=(",", ":"))
+        if total + len(text) + 1 <= max_chars:
+            selected.append(compacted_test)
+            preserved_events.append(last_test_result_event)
+            total += len(text) + 1
     for event in reversed(events):
-        if event is start_event:
+        if any(event is preserved for preserved in preserved_events):
             continue
         compacted = compact_json_value(event, string_limit=500, list_limit=8)
         text = json.dumps(compacted, ensure_ascii=False, separators=(",", ":"))
