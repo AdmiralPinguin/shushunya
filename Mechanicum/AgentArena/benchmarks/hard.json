@@ -1,0 +1,48 @@
+{
+  "suite": "hard",
+  "tasks": [
+    {
+      "id": "inventory_cli_repair",
+      "title": "Repair inventory totals and CLI output across modules",
+      "seed_files": {
+        "inventory/__init__.py": "from .core import load_items, summarize\n",
+        "inventory/core.py": "import csv\nfrom pathlib import Path\n\n\ndef load_items(path: str | Path):\n    with open(path, newline='', encoding='utf-8') as fh:\n        return list(csv.DictReader(fh))\n\n\ndef summarize(items):\n    total_qty = 0\n    total_value = 0\n    categories = {}\n    for item in items:\n        qty = item['qty']\n        price = item['price']\n        category = item['category']\n        total_qty += qty\n        total_value += qty * price\n        categories[category] = categories.get(category, 0) + qty\n    return {\n        'total_qty': total_qty,\n        'total_value': round(total_value, 2),\n        'categories': categories,\n    }\n",
+        "inventory/cli.py": "import json\nimport sys\nfrom .core import load_items, summarize\n\n\ndef main(argv=None):\n    argv = list(argv or sys.argv[1:])\n    if not argv:\n        raise SystemExit('usage: inventory <csv>')\n    print(json.dumps(summarize(load_items(argv[0])), sort_keys=True))\n\n\nif __name__ == '__main__':\n    main()\n",
+        "data/items.csv": "sku,category,qty,price\nA-1,books,2,12.50\nB-2,games,3,20.00\nC-3,books,1,7.25\n",
+        "tests/test_inventory.py": "from inventory.core import load_items, summarize\n\n\ndef test_summarize_numbers():\n    summary = summarize(load_items('data/items.csv'))\n    assert summary['total_qty'] == 6\n    assert summary['total_value'] == 92.25\n\n\ndef test_categories_are_numeric():\n    summary = summarize(load_items('data/items.csv'))\n    assert summary['categories'] == {'books': 3, 'games': 3}\n"
+      },
+      "prompt": "В текущем каталоге есть Python-проект inventory. Почини его минимально: CSV-поля qty и price должны обрабатываться как числа, summarize должен считать total_qty, total_value и categories, а CLI должен печатать валидный JSON. Проверь существующие тесты командой python3 -m pytest -q или fallback через python3 -c, и дополнительно проверь CLI на data/items.csv. Завершай только после успешной проверки.",
+      "checks": [
+        {"type": "command", "command": "__PYTHON__ -c \"from inventory.core import load_items, summarize; s=summarize(load_items('data/items.csv')); assert s['total_qty']==6; assert s['total_value']==92.25; assert s['categories']=={'books':3,'games':3}\"", "timeout_sec": 60},
+        {"type": "command", "command": "__PYTHON__ -m inventory.cli data/items.csv | __PYTHON__ -c \"import json,sys; data=json.load(sys.stdin); assert data['total_qty']==6; assert data['total_value']==92.25; assert data['categories']=={'books':3,'games':3}\"", "timeout_sec": 60}
+      ]
+    },
+    {
+      "id": "jsonl_metrics_artifacts",
+      "title": "Create coordinated metrics artifacts from JSONL events",
+      "seed_files": {
+        "events.jsonl": "{\"service\":\"api\",\"status\":\"ok\",\"latency_ms\":120}\n{\"service\":\"api\",\"status\":\"error\",\"latency_ms\":900}\n{\"service\":\"worker\",\"status\":\"ok\",\"latency_ms\":240}\n{\"service\":\"worker\",\"status\":\"ok\",\"latency_ms\":180}\n{\"service\":\"api\",\"status\":\"ok\",\"latency_ms\":150}\n"
+      },
+      "prompt": "Проанализируй events.jsonl и создай три файла в текущем каталоге: summary.md, metrics.json, anomalies.csv. summary.md должен содержать разделы Summary, Evidence, Risks, Result и строку STATUS: PASS. metrics.json должен быть валидным JSON object с полями total_events=5, error_count=1, services={\"api\":3,\"worker\":2}, max_latency_ms=900. anomalies.csv должен иметь заголовок service,status,latency_ms,reason и одну строку для события api,error,900,error_status. После создания проверь содержимое всех трех файлов и валидность JSON/CSV. Завершай только когда проверки пройдены.",
+      "checks": [
+        {"type": "file_contains", "path": "summary.md", "text": "STATUS: PASS"},
+        {"type": "file_contains", "path": "summary.md", "text": "Evidence"},
+        {"type": "file_exists", "path": "metrics.json"},
+        {"type": "file_exists", "path": "anomalies.csv"},
+        {"type": "command", "command": "__PYTHON__ -c \"import csv,json; m=json.load(open('metrics.json', encoding='utf-8')); assert m['total_events']==5; assert m['error_count']==1; assert m['services']=={'api':3,'worker':2}; assert m['max_latency_ms']==900; rows=list(csv.DictReader(open('anomalies.csv', encoding='utf-8'))); assert rows==[{'service':'api','status':'error','latency_ms':'900','reason':'error_status'}]\"", "timeout_sec": 60}
+      ]
+    },
+    {
+      "id": "ini_parser_repair",
+      "title": "Repair nested INI parser behavior without breaking flat keys",
+      "seed_files": {
+        "settings_parser.py": "def parse_settings(text: str):\n    data = {}\n    section = data\n    for raw in text.splitlines():\n        line = raw.strip()\n        if not line or line.startswith('#'):\n            continue\n        if line.startswith('[') and line.endswith(']'):\n            name = line[1:-1]\n            section = data.setdefault(name, {})\n            continue\n        if '=' in line:\n            key, value = line.split('=', 1)\n            section[key.strip()] = value.strip()\n    return data\n",
+        "tests/test_settings_parser.py": "from settings_parser import parse_settings\n\n\ndef test_flat_keys_before_sections():\n    assert parse_settings('debug=true\\n') == {'debug': True}\n\n\ndef test_sections_and_numbers():\n    parsed = parse_settings('[server]\\nport=8080\\nhost=localhost\\n[limits]\\nworkers=4\\n')\n    assert parsed['server'] == {'port': 8080, 'host': 'localhost'}\n    assert parsed['limits'] == {'workers': 4}\n\n\ndef test_dotted_section_names_are_nested():\n    parsed = parse_settings('[database.primary]\\nhost=db.local\\nport=5432\\n')\n    assert parsed == {'database': {'primary': {'host': 'db.local', 'port': 5432}}}\n"
+      },
+      "prompt": "В текущем каталоге есть settings_parser.py с тестами. Почини parse_settings минимально: значения true/false должны становиться bool, целые числа должны становиться int, обычные секции должны работать как раньше, а секции с точками вроде [database.primary] должны создавать вложенные словари. Проверь python3 -m pytest -q или fallback через python3 -c для всех ожидаемых случаев. Завершай только после успешной проверки.",
+      "checks": [
+        {"type": "command", "command": "__PYTHON__ -c \"from settings_parser import parse_settings; assert parse_settings('debug=true\\n') == {'debug': True}; p=parse_settings('[server]\\nport=8080\\nhost=localhost\\n[database.primary]\\nport=5432\\n'); assert p['server']=={'port':8080,'host':'localhost'}; assert p['database']['primary']['port']==5432\"", "timeout_sec": 60}
+      ]
+    }
+  ]
+}
