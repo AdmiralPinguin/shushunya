@@ -770,6 +770,32 @@ def compact_planner_payload(plan: dict[str, Any]) -> dict[str, Any]:
     return compact_json_value({key: plan.get(key) for key in allowed if key in plan}, string_limit=700, list_limit=20)
 
 
+def repair_planner_json(config: AgentConfig, raw: str, error: Exception) -> dict[str, Any]:
+    repair_messages = [
+        {
+            "role": "system",
+            "content": (
+                "You repair malformed planner JSON. Return exactly one valid JSON object and nothing else. "
+                "Keep only planner fields: summary, required_artifacts, steps, verification, risks, executor_rules. "
+                "Do not invent task facts; preserve the intended plan when it is clear."
+            ),
+        },
+        {
+            "role": "user",
+            "content": "JSON parse error: " + str(error) + "\nMalformed planner output:\n" + truncate(raw, 8000),
+        },
+    ]
+    repaired = chat(
+        config,
+        repair_messages,
+        inject_memory=False,
+        archive_enabled=False,
+        temperature=0.0,
+        max_tokens=1024,
+    )
+    return parse_action(repaired)
+
+
 def build_execution_plan(task: str, config: AgentConfig) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if not planner_should_run(task, config):
         return None, None
@@ -788,9 +814,20 @@ def build_execution_plan(task: str, config: AgentConfig) -> tuple[dict[str, Any]
             temperature=0.0,
             max_tokens=min(max(config.max_model_tokens, 1024), 2048),
         )
-        parsed = parse_action(raw)
+        planner_repaired = False
+        planner_parse_error = ""
+        try:
+            parsed = parse_action(raw)
+        except Exception as parse_exc:
+            planner_parse_error = str(parse_exc)
+            parsed = repair_planner_json(config, raw, parse_exc)
+            planner_repaired = True
         plan = compact_planner_payload(parsed)
-        return plan, {"raw": truncate(raw, 4000), "thinking_enabled": bool(config.planner_thinking)}
+        meta = {"raw": truncate(raw, 4000), "thinking_enabled": bool(config.planner_thinking)}
+        if planner_repaired:
+            meta["repaired"] = True
+            meta["parse_error"] = planner_parse_error
+        return plan, meta
     except Exception as exc:
         return None, {"error": str(exc), "thinking_enabled": bool(config.planner_thinking)}
 
@@ -3145,6 +3182,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         }
         if planner_meta.get("error"):
             planner_event["error"] = planner_meta.get("error")
+        if planner_meta.get("repaired"):
+            planner_event["repaired"] = True
+            planner_event["parse_error"] = planner_meta.get("parse_error")
         write_task_journal(config, "planner", planner_event)
         emit(event_sink, {"type": "planner", **planner_event})
     emit(event_sink, {"type": "task", "task_id": config.task_id, "memory_namespace": config.memory_namespace})

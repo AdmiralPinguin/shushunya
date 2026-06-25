@@ -1542,6 +1542,62 @@ def main() -> int:
         raise AssertionError(f"planner event missing: {planner_events}")
     print("[ok] planner thinking phase")
 
+    planner_repair_payloads: list[dict] = []
+
+    def planner_repair_archive_payload(config_arg, method, path, payload=None, timeout=180):
+        planner_repair_payloads.append(payload or {})
+        if len(planner_repair_payloads) == 1:
+            return {"choices": [{"message": {"content": '{"summary":"bad\njson","steps":["write"]}'}}]}
+        if len(planner_repair_payloads) == 2:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "summary": "repaired planner ok",
+                                    "steps": ["write"],
+                                    "verification": [],
+                                    "risks": [],
+                                    "executor_rules": [],
+                                },
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            }
+        return {"choices": [{"message": {"content": '{"action":"final","message":"planner repair execution ok"}'}}]}
+
+    planner_repair_stdout = io.StringIO()
+    planner_repair_events: list[dict] = []
+    planner_repair_config = AgentConfig(
+        task_id=safe_task_id("self-test-planner-json-repair"),
+        json_output=True,
+        max_steps=1,
+        inject_memory=False,
+        archive_internal_steps=False,
+        planner_enabled=True,
+        planner_thinking=True,
+    )
+    with mock.patch.object(agent_runner, "archive_request", side_effect=planner_repair_archive_payload), \
+            contextlib.redirect_stdout(planner_repair_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        planner_repair_code = run_agent(
+            "Это сложный стресс-тест планирования: составь план, затем верни итог.",
+            planner_repair_config,
+            event_sink=planner_repair_events.append,
+        )
+    planner_repair_result = json.loads(planner_repair_stdout.getvalue())
+    if planner_repair_code != 0 or planner_repair_result.get("message") != "planner repair execution ok":
+        raise AssertionError(f"planner repair run failed: code={planner_repair_code}, result={planner_repair_result}")
+    planner_repair_event = next((event for event in planner_repair_events if event.get("type") == "planner"), {})
+    if planner_repair_event.get("ok") is not True or planner_repair_event.get("repaired") is not True:
+        raise AssertionError(f"planner repair event missing repaired marker: {planner_repair_events}")
+    if len(planner_repair_payloads) < 3 or planner_repair_payloads[1].get("chat_template_kwargs"):
+        raise AssertionError(f"planner repair should not use thinking/template kwargs: {planner_repair_payloads}")
+    print("[ok] planner JSON repair")
+
     verify_summary = agent_runner.result_summary(
         "verify_text_file",
         {
