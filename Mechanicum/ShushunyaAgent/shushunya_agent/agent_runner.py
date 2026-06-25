@@ -1144,7 +1144,6 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe shell inline python rejected by supervisor",
     "swe failing tests inspection stall rejected by supervisor",
     "swe repeated failing test diagnostic rejected by supervisor",
-    "swe repeated failing-test file read rejected by supervisor",
     "swe passing-test edit rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
