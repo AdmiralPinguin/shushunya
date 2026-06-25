@@ -484,9 +484,27 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
             if path.strip().lower().endswith(".json"):
                 payload["supervisor_instruction"] = (
                     "must_contain failures are exact literal substring checks, but this target is JSON. "
-                    "Do not use append_file for .json. Rewrite the complete valid JSON document with write_file "
-                    "or python/json.dump, then rerun verify_text_file."
+                    "Do not rewrite valid JSON just to match pseudo text like key=value. "
+                    "Rerun verify_text_file on this .json without must_contain/ordered_patterns to verify JSON validity, "
+                    "and use a python action with json.load assertions for required fields and values."
                 )
+                if path:
+                    payload["suggested_verify_json_action"] = {
+                        "action": "verify_text_file",
+                        "path": path,
+                        "min_bytes": 1,
+                    }
+                    payload["suggested_python_json_check_action"] = {
+                        "action": "python",
+                        "code": (
+                            "import json\n"
+                            f"with open({path!r}, encoding='utf-8') as f:\n"
+                            "    data = json.load(f)\n"
+                            "print(data)\n"
+                            "# Add assertions for the required JSON fields and values here.\n"
+                        ),
+                        "timeout": 60,
+                    }
             else:
                 append_content = "\n\nVerification literal markers:\n" + "\n".join(f"- {pattern}" for pattern in missing_literals) + "\n"
                 payload["supervisor_instruction"] = (
@@ -3140,7 +3158,10 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
                 details.append(truncate(str(failure), 60))
         suffix = f" missing={'; '.join(details)}" if details else ""
         if any(isinstance(failure, dict) and failure.get("check") == "must_contain" for failure in failures):
-            suffix += " note=must_contain patterns are exact literal substrings; add the missing text verbatim, without translating or paraphrasing"
+            if str(result.get("path") or "").strip().lower().endswith(".json"):
+                suffix += " note=must_contain patterns are exact literal substrings; for JSON field/value checks use python/json.load assertions and rerun verify_text_file without literal patterns for JSON validity"
+            else:
+                suffix += " note=must_contain patterns are exact literal substrings; add the missing text verbatim, without translating or paraphrasing"
         if any(isinstance(failure, dict) and failure.get("check") == "ordered_patterns" for failure in failures):
             suffix += " note=ordered_patterns is only required when the user explicitly asked for ordering; otherwise retry verify_text_file without ordered_patterns"
         if any(isinstance(failure, dict) and failure.get("check") == "json_valid" for failure in failures):

@@ -1640,8 +1640,12 @@ def main() -> int:
     )
     if "suggested_append_file_action" in json_verify_payload:
         raise AssertionError(f"JSON verify payload should not suggest append_file: {json_verify_payload}")
-    if "Do not use append_file for .json" not in json_verify_payload.get("supervisor_instruction", ""):
-        raise AssertionError(f"JSON verify payload missed rewrite guidance: {json_verify_payload}")
+    if "json.load assertions" not in json_verify_payload.get("supervisor_instruction", ""):
+        raise AssertionError(f"JSON verify payload missed semantic guidance: {json_verify_payload}")
+    if json_verify_payload.get("suggested_verify_json_action", {}).get("must_contain"):
+        raise AssertionError(f"JSON verify payload should suggest verification without literals: {json_verify_payload}")
+    if (json_verify_payload.get("suggested_python_json_check_action") or {}).get("action") != "python":
+        raise AssertionError(f"JSON verify payload missed suggested python check: {json_verify_payload}")
     python_syntax_payload = result_for_model(
         "python",
         {"ok": False, "stdout": "SyntaxError: invalid syntax", "stderr": "", "returncode": 1},
