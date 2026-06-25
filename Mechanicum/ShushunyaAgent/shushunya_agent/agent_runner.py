@@ -758,6 +758,25 @@ PLANNER_SYSTEM_PROMPT = """Ты планировщик локального аг
 """
 
 
+LOCAL_TEXT_ARTIFACT_RE = re.compile(
+    r"(?<![\w/.-])([A-Za-z0-9][A-Za-z0-9_.-]*\.(?:txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|fb2))(?![\w/.-])",
+    re.IGNORECASE,
+)
+
+
+def local_text_artifact_names_from_task(task: str) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for match in LOCAL_TEXT_ARTIFACT_RE.finditer(task or ""):
+        name = match.group(1).strip()
+        lowered = name.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        names.append(name)
+    return names[:20]
+
+
 def planner_should_run(task: str, config: AgentConfig) -> bool:
     if not config.planner_enabled:
         return False
@@ -769,7 +788,27 @@ def planner_should_run(task: str, config: AgentConfig) -> bool:
         return False
     lowered = task.lower()
     required_artifacts = required_artifact_paths_from_task(task)
-    if len(required_artifacts) == 1 and len(task) < 1500 and not any(marker in lowered for marker in ("stress", "стресс", "bundle", "telegram", "web_search")):
+    local_artifacts = local_text_artifact_names_from_task(task)
+    artifact_names = {Path(path).name.lower() for path in required_artifacts}
+    artifact_names.update(name.lower() for name in local_artifacts)
+    artifact_count = len(artifact_names)
+    heavy_markers = (
+        "stress",
+        "стресс",
+        "bundle",
+        "telegram",
+        "web_search",
+        "web search",
+        "скачай",
+        "download",
+        "исслед",
+        "research",
+        "сравни",
+        "compare",
+        "многошаг",
+        "длинн",
+    )
+    if 1 <= artifact_count <= 3 and len(task) < 2500 and not any(marker in lowered for marker in heavy_markers):
         return False
     complexity_markers = (
         "обязательные артефакты",
@@ -1078,6 +1117,7 @@ SWE_DIAGNOSTIC_ACTIONS = {"shell", "python", "read_file", "list_files", "find_fi
 SUPERVISOR_REJECTION_ERRORS = {
     "repeated identical action rejected by supervisor",
     "repeated write_file path rejected by supervisor",
+    "required artifact rewrite before verification rejected by supervisor",
     "repeated verified text verification rejected by supervisor",
     "inspection stall rejected by supervisor",
     "swe edit before diagnostic rejected by supervisor",
@@ -1596,6 +1636,9 @@ def contains(haystack, needle, regex):
         return re.search(needle, haystack) is not None
     return needle in haystack
 
+def compact_json_literal(value):
+    return re.sub(r"\s+", "", value)
+
 payload = json.loads(os.environ["VERIFY_TEXT_FILE_PAYLOAD"])
 path = safe_path(payload["path"])
 case_sensitive = bool(payload.get("case_sensitive", True))
@@ -1646,8 +1689,13 @@ if len(text) < min_chars:
     failures.append({"check": "min_chars", "expected": min_chars, "actual": len(text)})
 
 lower_text = text.lower()
+json_whitespace_insensitive_matches = []
+compact_json_text = compact_json_literal(search_text) if path.suffix.lower() == ".json" and not regex else ""
 for index, item in enumerate(required):
     if not contains(search_text, item, regex):
+        if compact_json_text and compact_json_literal(item) in compact_json_text:
+            json_whitespace_insensitive_matches.append(original_required[index] if index < len(original_required) else item)
+            continue
         failure = {"check": "must_contain", "pattern": item}
         if case_sensitive and not regex and item.lower() in lower_text:
             failure["case_mismatch"] = True
@@ -1687,7 +1735,9 @@ print(json.dumps({
         "must_not_contain": len(forbidden),
         "case_sensitive": case_sensitive,
         "regex": regex,
+        "json_whitespace_insensitive_matches": len(json_whitespace_insensitive_matches),
     },
+    "json_whitespace_insensitive_matches": json_whitespace_insensitive_matches[:20],
     "failures": failures[:20],
 }, ensure_ascii=False))
 '''
@@ -3699,6 +3749,26 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "This text artifact already passed verify_text_file in this task/resume chain. "
                         "Do not rewrite it unless a later verify_text_file failure proves it needs correction. "
                         "Verify remaining artifacts or return final."
+                    ),
+                }
+            elif (
+                action_type == "write_file"
+                and required_artifact_paths
+                and str(action.get("path") or "") in required_artifact_paths
+                and str(action.get("path") or "") in successful_write_file_paths
+                and str(action.get("path") or "") not in failed_verification_paths
+                and required_artifact_paths.issubset(set(successful_write_file_paths) | verified_text_paths)
+            ):
+                missing_verification = missing_text_verifications(required_artifact_path_list, verified_text_paths)
+                result = {
+                    "ok": False,
+                    "error": "required artifact rewrite before verification rejected by supervisor",
+                    "path": str(action.get("path") or ""),
+                    "unverified_required_artifacts": missing_verification,
+                    "instruction": (
+                        "All required artifacts already exist, and this required artifact was already written. "
+                        "Do not rewrite it again before content verification unless verify_text_file fails for this path. "
+                        "Run verify_text_file for the unverified required artifacts using checks from the user task."
                     ),
                 }
             elif (

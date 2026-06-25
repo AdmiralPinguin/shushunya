@@ -637,6 +637,21 @@ def main() -> int:
         AgentConfig(planner_enabled=True),
     ):
         raise AssertionError("single short required artifact tasks should not spend a planner call")
+    if agent_runner.planner_should_run(
+        'Создай report.md и audit.json в текущем каталоге. После создания проверь содержимое report.md и валидность audit.json.',
+        AgentConfig(planner_enabled=True),
+    ):
+        raise AssertionError("short local artifact-only tasks should not spend a planner call")
+    if agent_runner.planner_should_run(
+        'Создай report.md и audit.json. Обязательные артефакты: /work/task/report.md и /work/task/audit.json.',
+        AgentConfig(planner_enabled=True),
+    ):
+        raise AssertionError("relative plus absolute names for same artifacts should not inflate planner complexity")
+    if not agent_runner.planner_should_run(
+        "Исследуй и сравни источники, затем создай report.md и audit.json",
+        AgentConfig(planner_enabled=True),
+    ):
+        raise AssertionError("research/compare artifact tasks should still use planner")
     if not agent_runner.planner_should_run(
         "Сложный стресс-тест. Обязательные артефакты: /work/report.md и /work/audit.json",
         AgentConfig(planner_enabled=True),
@@ -1305,6 +1320,55 @@ def main() -> int:
     if not verified_mutation_rejections:
         raise AssertionError(f"verified mutation guard failed: code={verified_mutation_code}, payload={verified_mutation_payload}")
     print("[ok] verified artifact mutation guard")
+
+    required_rewrite_stdout = io.StringIO()
+    required_rewrite_config = AgentConfig(
+        task_id=safe_task_id("self-test-required-rewrite-before-verify"),
+        json_output=True,
+        max_steps=8,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    required_rewrite_actions = [
+        '{"action":"write_file","path":"/work/report.md","content":"# Summary\\nSTATUS: PASS"}',
+        '{"action":"write_file","path":"/work/audit.json","content":"{\\"status\\": \\"pass\\"}"}',
+        '{"action":"write_file","path":"/work/report.md","content":"# Summary\\n# Evidence\\nSTATUS: PASS"}',
+        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["STATUS: PASS"]}',
+        '{"action":"verify_text_file","path":"/work/audit.json","must_contain":["pass"]}',
+        '{"action":"final","message":"Готово: /work/report.md, /work/audit.json"}',
+        '{"action":"final","message":"Готово: /work/report.md, /work/audit.json"}',
+    ]
+    def fake_required_rewrite_verify(config_arg, action):
+        return {"ok": True, "path": action.get("path"), "failures": []}
+
+    def fake_required_rewrite_file_tool(config_arg, action):
+        return {
+            "ok": True,
+            "path": action.get("path") or "/work/report.md",
+            "exists": True,
+            "type": "file",
+            "size": 16,
+        }
+
+    with mock.patch.object(agent_runner, "chat", side_effect=required_rewrite_actions), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=fake_required_rewrite_file_tool), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_required_rewrite_verify), \
+            contextlib.redirect_stdout(required_rewrite_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        required_rewrite_code = run_agent(
+            "Обязательные артефакты: /work/report.md и /work/audit.json",
+            required_rewrite_config,
+        )
+    required_rewrite_payload = json.loads(required_rewrite_stdout.getvalue())
+    required_rewrite_rejections = [
+        step for step in required_rewrite_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "required artifact rewrite before verification rejected by supervisor"
+    ]
+    if required_rewrite_code != 0 or not required_rewrite_rejections:
+        raise AssertionError(
+            f"required artifact rewrite-before-verify guard failed: code={required_rewrite_code}, payload={required_rewrite_payload}"
+        )
+    print("[ok] required artifact rewrite before verification guard")
 
     inspection_stall_stdout = io.StringIO()
     inspection_stall_config = AgentConfig(
@@ -2909,6 +2973,30 @@ def main() -> int:
     if read_result.get("content") != "hello":
         raise AssertionError(f"unexpected file content: {read_result}")
     print("[ok] file content")
+
+    assert_ok(
+        "write_file json fixture",
+        file_tool(
+            config,
+            {
+                "action": "write_file",
+                "path": "/work/self-test/audit.json",
+                "content": '{"status": "pass", "checks_count": 3, "files": ["report.md", "audit.json"]}',
+            },
+        ),
+    )
+    json_literal_verify = agent_runner.verify_text_file_tool(
+        config,
+        {
+            "action": "verify_text_file",
+            "path": "/work/self-test/audit.json",
+            "must_contain": ['"status":"pass"', '"checks_count":3', '"files":["report.md","audit.json"]'],
+            "min_bytes": 1,
+        },
+    )
+    assert_ok("verify_text_file json whitespace-insensitive literals", json_literal_verify)
+    if json_literal_verify.get("checks", {}).get("json_whitespace_insensitive_matches") != 3:
+        raise AssertionError(f"JSON whitespace-insensitive literal matches missing: {json_literal_verify}")
 
     replace_result = file_tool(
         config,
