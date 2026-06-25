@@ -2440,6 +2440,53 @@ def main() -> int:
         raise AssertionError(f"pytest regression tracking failed: code={regression_code}, payload={regression_payload}")
     print("[ok] pytest regression tests tracked")
 
+    failing_stall_stdout = io.StringIO()
+    failing_stall_config = AgentConfig(
+        task_id=safe_task_id("self-test-failing-test-stall"),
+        json_output=True,
+        max_steps=6,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+
+    def fake_failing_tests(_config: AgentConfig, action: dict) -> dict:
+        return {
+            "ok": False,
+            "returncode": 1,
+            "stdout": '{"results":[{"ok":false,"file":"tests/test_calc.py","test":"test_new"}]}',
+            "stderr": "",
+        }
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"read_file","path":"/work/project/a.py","max_bytes":20000,"offset":0}',
+            '{"action":"read_file","path":"/work/project/b.py","max_bytes":20000,"offset":0}',
+            '{"action":"read_file","path":"/work/project/c.py","max_bytes":20000,"offset":0}',
+            '{"action":"read_file","path":"/work/project/d.py","max_bytes":20000,"offset":0}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_failing_tests), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "content": "x"}), \
+            contextlib.redirect_stdout(failing_stall_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        failing_stall_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            failing_stall_config,
+        )
+    failing_stall_payload = json.loads(failing_stall_stdout.getvalue())
+    failing_stall_errors = [
+        (step.get("result") or {}).get("error")
+        for step in failing_stall_payload.get("steps", [])
+    ]
+    if failing_stall_code != 0 or "swe failing tests inspection stall rejected by supervisor" not in failing_stall_errors:
+        raise AssertionError(f"failing test inspection stall guard failed: code={failing_stall_code}, payload={failing_stall_payload}")
+    print("[ok] failing test inspection stall guard")
+
     workspace_task = "Запусти проверку Python.\n\nРабочий каталог для этой задачи: /work/project"
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":
         raise AssertionError("explicit workspace was not extracted from task text")

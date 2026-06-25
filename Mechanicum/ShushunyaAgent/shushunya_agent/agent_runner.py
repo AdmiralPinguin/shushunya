@@ -1026,6 +1026,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe edit before diagnostic rejected by supervisor",
     "swe edit before test diagnostic rejected by supervisor",
     "swe shell inline python rejected by supervisor",
+    "swe failing tests inspection stall rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
 }
@@ -1225,6 +1226,11 @@ def looks_like_inline_python_shell(cmd: str) -> bool:
 def looks_like_pytest_shell(cmd: str) -> bool:
     lowered = f" {cmd.lower()} "
     return " pytest" in lowered or " -m pytest" in lowered
+
+
+def looks_like_inspection_shell(cmd: str) -> bool:
+    lowered = cmd.lower()
+    return bool(re.search(r"(^|[;&|]\s*|\s)(ls|find|cat|sed|grep|rg)\b", lowered))
 
 
 def pytest_unavailable_output(output: str) -> bool:
@@ -3087,6 +3093,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     explicit_workspace = explicit_workspace_from_task(original_task)
     last_pytest_passing_tests, last_pytest_failing_tests = latest_pytest_sets_from_text(original_task)
     code_mutated_since_last_pytest = False
+    pending_failing_tests = set(last_pytest_failing_tests)
+    pending_failing_test_inspections = 0
     last_required_artifact_hint = ""
     trace: list[dict[str, Any]] = []
     write_task_journal(
@@ -3415,6 +3423,23 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 }
             elif (
                 swe_task
+                and pending_failing_tests
+                and pending_failing_test_inspections >= 3
+                and (action_type in INSPECTION_ACTIONS or (action_type == "shell" and looks_like_inspection_shell(str(action.get("cmd", "")))))
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe failing tests inspection stall rejected by supervisor",
+                    "failing_tests": sorted(pending_failing_tests)[:20],
+                    "inspection_actions_since_failing_tests": pending_failing_test_inspections,
+                    "instruction": (
+                        "The failing tests are already known and enough source/test inspection has run. "
+                        "Do not keep listing or rereading files. Make a narrow code edit that targets failing_tests, "
+                        "run the full test command/fallback again, or return final only if no safe fix is possible."
+                    ),
+                }
+            elif (
+                swe_task
                 and action_type in SWE_EDIT_ACTIONS
                 and not swe_diagnostic_seen
             ):
@@ -3665,6 +3690,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             failed_verification_paths.discard(path)
             stale_replace_failures_by_path.pop(path, None)
             code_mutated_since_last_pytest = True
+            pending_failing_test_inspections = 0
         if isinstance(result, dict) and (result.get("passing_tests") or result.get("failing_tests")):
             current_passing_tests, current_failing_tests = pytest_result_sets(result)
             regression_tests = sorted(current_failing_tests & last_pytest_passing_tests)
@@ -3684,6 +3710,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             last_pytest_passing_tests = current_passing_tests
             last_pytest_failing_tests = current_failing_tests
             code_mutated_since_last_pytest = False
+            pending_failing_tests = set(current_failing_tests)
+            pending_failing_test_inspections = 0
         elif action_type == "bundle_text_files" and isinstance(result, dict) and result.get("ok") is True:
             verified_text_paths.discard(str(action.get("output_txt") or ""))
             verified_text_paths.discard(str(action.get("output_fb2") or ""))
@@ -3748,6 +3776,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 inspection_actions_since_progress = 0
             elif action_type in INSPECTION_ACTIONS:
                 inspection_actions_since_progress += 1
+            if pending_failing_tests and (action_type in INSPECTION_ACTIONS or (action_type == "shell" and looks_like_inspection_shell(str(action.get("cmd", ""))))):
+                pending_failing_test_inspections += 1
             auto_final = required_artifacts_auto_final(config, required_artifact_path_list, verified_text_paths)
             if auto_final is not None:
                 duration_sec = round(time.time() - run_started, 3)
