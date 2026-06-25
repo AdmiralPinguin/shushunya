@@ -1223,6 +1223,38 @@ def looks_like_pytest_shell(cmd: str) -> bool:
     return " pytest" in lowered or " -m pytest" in lowered
 
 
+def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(result)
+    try:
+        payload = json.loads(str(enriched.get("stdout") or "{}"))
+    except json.JSONDecodeError:
+        payload = {}
+    results = payload.get("results") if isinstance(payload, dict) else []
+    if not isinstance(results, list):
+        results = []
+    passing = [
+        f"{item.get('file')}::{item.get('test')}"
+        for item in results
+        if isinstance(item, dict) and item.get("ok") is True and item.get("test")
+    ]
+    failing = [
+        f"{item.get('file')}::{item.get('test')}"
+        for item in results
+        if isinstance(item, dict) and item.get("ok") is False and item.get("test")
+    ]
+    enriched["passing_tests"] = passing[:20]
+    enriched["failing_tests"] = failing[:20]
+    if failing:
+        enriched["supervisor_instruction"] = (
+            "The pytest fallback ran existing tests and some failed. Do not ignore these failures or verify only a subset. "
+            "Preserve behavior covered by passing tests and make the narrowest code change that makes every failing test pass. "
+            "Run pytest/fallback again after the edit and final only when all tests pass."
+        )
+    elif passing:
+        enriched["supervisor_instruction"] = "The pytest fallback ran existing tests and all discovered tests passed."
+    return enriched
+
+
 PYTEST_FALLBACK_CODE = r'''
 import inspect
 import json
@@ -3484,6 +3516,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                             "timeout": action.get("timeout") or 60,
                         },
                     )
+                    fallback = enrich_pytest_fallback_result(fallback)
                     result = {
                         **fallback,
                         "pytest_unavailable": True,

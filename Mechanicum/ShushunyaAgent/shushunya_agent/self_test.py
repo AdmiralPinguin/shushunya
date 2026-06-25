@@ -2301,7 +2301,12 @@ def main() -> int:
     def fake_pytest_fallback(_config: AgentConfig, action: dict) -> dict:
         if action.get("cwd") != "/work/project" or "test_files" not in action.get("code", ""):
             raise AssertionError(f"bad pytest fallback action: {action}")
-        return {"ok": False, "returncode": 1, "stdout": '{"failures":[{"test":"test_add"}]}', "stderr": ""}
+        return {
+            "ok": False,
+            "returncode": 1,
+            "stdout": '{"results":[{"ok":false,"file":"tests/test_calc.py","test":"test_add"}],"failures":[{"test":"test_add"}]}',
+            "stderr": "",
+        }
 
     with mock.patch.object(agent_runner, "chat", side_effect=[
             '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
@@ -2325,6 +2330,8 @@ def main() -> int:
         or mocked_pytest_shell.call_count != 1
         or mocked_pytest_python.call_count != 1
         or first_pytest_result.get("fallback") != "simple_pytest_runner"
+        or first_pytest_result.get("failing_tests") != ["tests/test_calc.py::test_add"]
+        or "Do not ignore" not in str(first_pytest_result.get("supervisor_instruction") or "")
     ):
         raise AssertionError(
             "pytest fallback runner was not used: "
