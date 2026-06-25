@@ -1144,6 +1144,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe shell inline python rejected by supervisor",
     "swe failing tests inspection stall rejected by supervisor",
     "swe repeated failing test diagnostic rejected by supervisor",
+    "swe repeated failing-test file read rejected by supervisor",
     "swe passing-test edit rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
@@ -3304,6 +3305,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     code_mutated_since_last_pytest = False
     pending_failing_tests = set(last_pytest_failing_tests)
     pending_failing_test_inspections = 0
+    pending_failing_test_read_paths: set[str] = set()
     non_test_diagnostics_before_test = 0
     last_successful_swe_edit_path = ""
     swe_verified_after_edit = False
@@ -3686,6 +3688,24 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "The failing tests are already known and enough source/test inspection has run. "
                         "Do not keep listing or rereading files. Make a narrow code edit that targets failing_tests, "
                         "run the full test command/fallback again, or return final only if no safe fix is possible."
+                    ),
+                }
+            elif (
+                swe_task
+                and pending_failing_tests
+                and not code_mutated_since_last_pytest
+                and action_type == "read_file"
+                and str(action.get("path") or "") in pending_failing_test_read_paths
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe repeated failing-test file read rejected by supervisor",
+                    "path": str(action.get("path") or ""),
+                    "failing_tests": sorted(pending_failing_tests)[:20],
+                    "instruction": (
+                        "This file was already read after the current failing_tests were discovered. "
+                        "Do not reread the same file before editing. Use the gathered context to make a narrow code edit, "
+                        "read a different directly relevant file if truly needed, or run the full test/fallback after an edit."
                     ),
                 }
             elif (
@@ -4100,6 +4120,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             last_successful_swe_edit_path = ""
             pending_failing_tests = set(current_failing_tests)
             pending_failing_test_inspections = 0
+            pending_failing_test_read_paths = set()
         elif action_type == "bundle_text_files" and isinstance(result, dict) and result.get("ok") is True:
             verified_text_paths.discard(str(action.get("output_txt") or ""))
             verified_text_paths.discard(str(action.get("output_fb2") or ""))
@@ -4209,6 +4230,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 inspection_actions_since_progress += 1
             if pending_failing_tests and (action_type in INSPECTION_ACTIONS or (action_type == "shell" and looks_like_inspection_shell(str(action.get("cmd", ""))))):
                 pending_failing_test_inspections += 1
+                if action_type == "read_file":
+                    read_path = str(action.get("path") or "")
+                    if read_path:
+                        pending_failing_test_read_paths.add(read_path)
             auto_final = required_artifacts_auto_final(config, required_artifact_path_list, verified_text_paths)
             if auto_final is not None:
                 duration_sec = round(time.time() - run_started, 3)
