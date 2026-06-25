@@ -1129,6 +1129,8 @@ STATE_MUTATING_ACTIONS = {
 }
 SWE_EDIT_ACTIONS = {"write_file", "append_file", "replace_in_file", "remove_file"}
 SWE_DIAGNOSTIC_ACTIONS = {"shell", "python", "read_file", "list_files", "find_files", "search_text", "file_info"}
+SWE_SOURCE_SUFFIXES = (".py", ".js", ".ts", ".tsx", ".jsx", ".kt", ".java")
+SWE_LOW_SIGNAL_SOURCE_NAMES = {"__init__.py"}
 SUPERVISOR_REJECTION_ERRORS = {
     "repeated identical action rejected by supervisor",
     "repeated write_file path rejected by supervisor",
@@ -1396,6 +1398,28 @@ def action_workspace_violations(action: dict[str, Any], workspace: str) -> list[
         if isinstance(value, str) and sandbox_path_outside_workspace(value, workspace):
             violations.append({"field": field, "path": value})
     return violations
+
+
+def source_candidates_from_listing(result: dict[str, Any]) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+    items = result.get("items")
+    if not isinstance(items, list):
+        return candidates
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "file":
+            continue
+        path = str(item.get("path") or "")
+        lowered = path.lower()
+        name = Path(path).name
+        if not lowered.endswith(SWE_SOURCE_SUFFIXES):
+            continue
+        if "__pycache__" in lowered or name in SWE_LOW_SIGNAL_SOURCE_NAMES:
+            continue
+        if path not in seen:
+            seen.add(path)
+            candidates.append(path)
+    return candidates[:20]
 
 
 def pytest_unavailable_output(output: str) -> bool:
@@ -3312,6 +3336,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     pending_failing_test_read_paths: set[str] = set()
     read_file_paths_since_code_mutation: set[str] = set()
     last_read_file_excerpts: dict[str, str] = {}
+    last_source_candidates: list[str] = []
     non_test_diagnostics_before_test = 0
     last_successful_swe_edit_path = ""
     swe_verified_after_edit = False
@@ -3721,11 +3746,13 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "error": "swe repeated failing test diagnostic rejected by supervisor",
                     "failing_tests": sorted(pending_failing_tests)[:20],
                     "available_read_excerpts": dict(list(last_read_file_excerpts.items())[-3:]),
+                    "candidate_source_paths": last_source_candidates[:10],
                     "instruction": (
                         "The current failing_tests are already known and no code changed since that test result. "
                         "Do not rerun the same test/fallback loop before editing. The failure stdout is already available above. "
-                        "If the relevant source has already been read, your next action should be a narrow write_file/replace_in_file "
-                        "edit that targets failing_tests. Otherwise inspect only one directly relevant uninspected file, then edit."
+                        "If candidate_source_paths is non-empty and no source excerpt is available, read exactly one likely source "
+                        "file from candidate_source_paths next, then edit. If the relevant source has already been read, your next "
+                        "action should be a narrow write_file/replace_in_file edit that targets failing_tests."
                     ),
                 }
             elif action_counts[fingerprint] >= 3:
@@ -4218,6 +4245,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 content = str(result.get("content") or "")
                 if content:
                     last_read_file_excerpts[read_path] = content[:4000]
+        if action_type == "list_files" and isinstance(result, dict) and result.get("ok") is True:
+            candidates = source_candidates_from_listing(result)
+            if candidates:
+                last_source_candidates = candidates
         if (
             swe_task
             and swe_verified_after_edit

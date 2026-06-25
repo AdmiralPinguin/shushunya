@@ -2680,6 +2680,55 @@ def main() -> int:
         raise AssertionError(f"repeated failing test guard failed: code={repeated_test_code}, payload={repeated_test_payload}")
     print("[ok] repeated failing test diagnostic guard")
 
+    repeated_test_candidates_stdout = io.StringIO()
+    repeated_test_candidates_config = AgentConfig(
+        task_id=safe_task_id("self-test-repeated-failing-test-candidates"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"list_files","path":"/work/project","max_depth":2,"limit":100}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_repeated_failing_tests), \
+            mock.patch.object(agent_runner, "file_tool", return_value={
+                "ok": True,
+                "items": [
+                    {"path": "/work/project/tests/test_calc.py", "type": "file"},
+                    {"path": "/work/project/calc.py", "type": "file"},
+                    {"path": "/work/project/__init__.py", "type": "file"},
+                    {"path": "/work/project/__pycache__/calc.cpython-312.pyc", "type": "file"},
+                ],
+            }), \
+            contextlib.redirect_stdout(repeated_test_candidates_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        repeated_test_candidates_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            repeated_test_candidates_config,
+        )
+    repeated_test_candidates_payload = json.loads(repeated_test_candidates_stdout.getvalue())
+    candidate_results = [
+        step.get("result") or {}
+        for step in repeated_test_candidates_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "swe repeated failing test diagnostic rejected by supervisor"
+    ]
+    if (
+        repeated_test_candidates_code != 0
+        or not candidate_results
+        or "/work/project/calc.py" not in candidate_results[-1].get("candidate_source_paths", [])
+    ):
+        raise AssertionError(f"repeated failing test guard omitted source candidates: {repeated_test_candidates_payload}")
+    print("[ok] repeated failing test guard includes source candidates")
+
     repeated_assert_stdout = io.StringIO()
     repeated_assert_config = AgentConfig(
         task_id=safe_task_id("self-test-repeated-assert-before-edit"),
