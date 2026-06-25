@@ -881,18 +881,14 @@ SWE_TASK_MARKERS = (
     "ошибк",
     "traceback",
     "stack trace",
-    ".py",
-    ".js",
-    ".ts",
-    ".kt",
-    ".java",
     "git",
 )
+SWE_FILE_EXTENSION_RE = re.compile(r"\.(?:py|js|ts|kt|java)(?:\b|$)")
 
 
 def looks_like_swe_task(task: str) -> bool:
     lowered = task.lower()
-    return any(marker in lowered for marker in SWE_TASK_MARKERS)
+    return any(marker in lowered for marker in SWE_TASK_MARKERS) or bool(SWE_FILE_EXTENSION_RE.search(lowered))
 
 
 def task_with_execution_profile(task: str, config: AgentConfig) -> str:

@@ -617,6 +617,10 @@ def main() -> int:
     print("[ok] shell approval gate")
     if not agent_runner.looks_like_swe_task("Исправь Python-проект и запусти pytest"):
         raise AssertionError("SWE task detector missed a coding task")
+    if not agent_runner.looks_like_swe_task("Fix /work/app.js and run tests"):
+        raise AssertionError("SWE task detector missed a JS coding task")
+    if agent_runner.looks_like_swe_task("Создай /work/audit.json с полем checks_count=3"):
+        raise AssertionError("SWE task detector treated JSON artifact as JS/code")
     swe_profile_task = agent_runner.task_with_execution_profile(
         "Исправь Python-проект и запусти pytest",
         AgentConfig(shell_enabled=True),
