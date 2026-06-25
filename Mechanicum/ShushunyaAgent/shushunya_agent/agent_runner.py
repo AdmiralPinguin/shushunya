@@ -1757,15 +1757,24 @@ if not case_sensitive and not regex:
     forbidden = [item.lower() for item in forbidden]
 
 failures = []
-if path.suffix.lower() == ".json":
+suffix = path.suffix.lower()
+structured_suffixes = {".json", ".jsonl", ".csv", ".tsv"}
+structured_min_size_ignored = False
+if suffix == ".json":
     try:
         json.loads(text)
     except json.JSONDecodeError as exc:
         failures.append({"check": "json_valid", "error": str(exc), "line": exc.lineno, "column": exc.colno})
 if size < min_bytes:
-    failures.append({"check": "min_bytes", "expected": min_bytes, "actual": size})
+    if suffix in structured_suffixes:
+        structured_min_size_ignored = True
+    else:
+        failures.append({"check": "min_bytes", "expected": min_bytes, "actual": size})
 if len(text) < min_chars:
-    failures.append({"check": "min_chars", "expected": min_chars, "actual": len(text)})
+    if suffix in structured_suffixes:
+        structured_min_size_ignored = True
+    else:
+        failures.append({"check": "min_chars", "expected": min_chars, "actual": len(text)})
 
 lower_text = text.lower()
 json_whitespace_insensitive_matches = []
@@ -1815,8 +1824,10 @@ print(json.dumps({
         "case_sensitive": case_sensitive,
         "regex": regex,
         "json_whitespace_insensitive_matches": len(json_whitespace_insensitive_matches),
+        "structured_min_size_ignored": structured_min_size_ignored,
     },
     "json_whitespace_insensitive_matches": json_whitespace_insensitive_matches[:20],
+    "structured_min_size_ignored": structured_min_size_ignored,
     "failures": failures[:20],
 }, ensure_ascii=False))
 '''

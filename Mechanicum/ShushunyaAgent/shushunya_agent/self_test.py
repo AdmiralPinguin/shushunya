@@ -3460,6 +3460,29 @@ def main() -> int:
     assert_ok("verify_text_file json whitespace-insensitive literals", json_literal_verify)
     if json_literal_verify.get("checks", {}).get("json_whitespace_insensitive_matches") != 3:
         raise AssertionError(f"JSON whitespace-insensitive literal matches missing: {json_literal_verify}")
+    assert_ok(
+        "write_file csv fixture",
+        file_tool(
+            config,
+            {
+                "action": "write_file",
+                "path": "/work/self-test/anomalies.csv",
+                "content": "service,status,latency_ms,reason\napi,error,900,error_status\n",
+            },
+        ),
+    )
+    csv_min_size_verify = agent_runner.verify_text_file_tool(
+        config,
+        {
+            "action": "verify_text_file",
+            "path": "/work/self-test/anomalies.csv",
+            "must_contain": ["api,error,900,error_status"],
+            "min_bytes": 100,
+        },
+    )
+    assert_ok("verify_text_file structured min size advisory", csv_min_size_verify)
+    if not csv_min_size_verify.get("structured_min_size_ignored"):
+        raise AssertionError(f"structured min size was not advisory: {csv_min_size_verify}")
 
     replace_result = file_tool(
         config,
