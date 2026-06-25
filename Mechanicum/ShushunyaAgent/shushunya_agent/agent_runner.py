@@ -1026,6 +1026,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe edit before diagnostic rejected by supervisor",
     "swe edit before test diagnostic rejected by supervisor",
     "swe test diagnostic inspection stall rejected by supervisor",
+    "explicit workspace boundary rejected by supervisor",
     "swe shell inline python rejected by supervisor",
     "swe failing tests inspection stall rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
@@ -1232,6 +1233,27 @@ def looks_like_pytest_shell(cmd: str) -> bool:
 def looks_like_inspection_shell(cmd: str) -> bool:
     lowered = cmd.lower()
     return bool(re.search(r"(^|[;&|]\s*|\s)(ls|find|cat|sed|grep|rg)\b", lowered))
+
+
+def sandbox_path_outside_workspace(path: str, workspace: str) -> bool:
+    raw_path = str(path or "").strip()
+    raw_workspace = str(workspace or "").strip().rstrip("/")
+    if not raw_path or not raw_workspace or not raw_path.startswith("/"):
+        return False
+    sandbox_roots = ("/work/", "/sandbox-tmp/", "/artifacts/", "/state/", "/logs/", "/models/", "/tools/", "/home/agent/")
+    if not raw_path.startswith(sandbox_roots):
+        return False
+    return raw_path != raw_workspace and not raw_path.startswith(raw_workspace + "/")
+
+
+def action_workspace_violations(action: dict[str, Any], workspace: str) -> list[dict[str, str]]:
+    fields = ("path", "cwd", "workdir", "output_txt", "output_fb2")
+    violations = []
+    for field in fields:
+        value = action.get(field)
+        if isinstance(value, str) and sandbox_path_outside_workspace(value, workspace):
+            violations.append({"field": field, "path": value})
+    return violations
 
 
 def pytest_unavailable_output(output: str) -> bool:
@@ -3399,7 +3421,19 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         action_counts[fingerprint] = action_counts.get(fingerprint, 0) + 1
         action_started = time.time()
         try:
-            if action_counts[fingerprint] >= 3:
+            workspace_violations = action_workspace_violations(action, explicit_workspace)
+            if workspace_violations:
+                result = {
+                    "ok": False,
+                    "error": "explicit workspace boundary rejected by supervisor",
+                    "workspace": explicit_workspace,
+                    "violations": workspace_violations,
+                    "instruction": (
+                        "This task has an explicit working directory. Do not use paths from previous tasks or other workspaces. "
+                        "Retry with paths/cwd under the current workspace only: " + explicit_workspace
+                    ),
+                }
+            elif action_counts[fingerprint] >= 3:
                 result = {
                     "ok": False,
                     "error": "repeated identical action rejected by supervisor",

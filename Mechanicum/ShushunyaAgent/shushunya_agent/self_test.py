@@ -2522,6 +2522,11 @@ def main() -> int:
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":
         raise AssertionError("explicit workspace was not extracted from task text")
     print("[ok] explicit task workspace extracted")
+    if agent_runner.action_workspace_violations({"path": "/work/other/file.py"}, "/work/project") != [{"field": "path", "path": "/work/other/file.py"}]:
+        raise AssertionError("workspace boundary violation was not detected")
+    if agent_runner.action_workspace_violations({"path": "/work/project/file.py", "cwd": "/work/project"}, "/work/project"):
+        raise AssertionError("valid workspace paths were rejected")
+    print("[ok] explicit workspace boundary guard")
     escaped_workspace_task = "Рабочий каталог для этой задачи: /work/project\\nВсе файлы внутри него"
     if agent_runner.explicit_workspace_from_task(escaped_workspace_task) != "/work/project":
         raise AssertionError("explicit workspace parser kept escaped newline suffix")
