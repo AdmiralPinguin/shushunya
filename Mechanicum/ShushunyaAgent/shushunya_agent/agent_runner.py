@@ -3973,6 +3973,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "original_shell": result_for_model(action_type, result, config),
                     }
             elif action_type in FILE_ACTIONS:
+                if swe_task and pending_failing_tests and not code_mutated_since_last_pytest and action_type == "read_file":
+                    pending_read_path = str(action.get("path") or "")
+                    if pending_read_path:
+                        pending_failing_test_read_paths.add(pending_read_path)
                 result = file_tool(config, action)
             elif action_type == "python":
                 result = python_tool(config, action)
