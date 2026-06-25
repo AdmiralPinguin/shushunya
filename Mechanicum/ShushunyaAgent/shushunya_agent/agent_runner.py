@@ -418,10 +418,14 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
         if isinstance(payload.get("stderr"), str):
             payload["stderr"] = truncate(payload["stderr"], 4000)
         if action_type == "shell" and payload.get("ok") is False:
-            payload["supervisor_instruction"] = (
+            base_shell_instruction = (
                 "The shell command failed. Do not repeat the identical command unless a file or environment state changed. "
                 "Use the stderr/stdout to choose the next productive action: read the relevant file, patch it, or run a meaningfully different diagnostic."
             )
+            if payload.get("supervisor_instruction"):
+                payload["supervisor_instruction"] = f"{payload['supervisor_instruction']} {base_shell_instruction}"
+            else:
+                payload["supervisor_instruction"] = base_shell_instruction
             combined_output = f"{payload.get('stdout') or ''}\n{payload.get('stderr') or ''}".lower()
             if "no module named pytest" in combined_output:
                 payload["supervisor_instruction"] += (

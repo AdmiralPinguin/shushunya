@@ -2340,6 +2340,17 @@ def main() -> int:
         )
     print("[ok] pytest unavailable falls back to simple runner")
 
+    compacted_fallback_result = agent_runner.result_for_model("shell", {
+        "ok": False,
+        "stdout": "",
+        "stderr": "",
+        "supervisor_instruction": "Specific fallback instruction.",
+    }, AgentConfig())
+    compacted_fallback_instruction = str(compacted_fallback_result.get("supervisor_instruction") or "")
+    if "Specific fallback instruction." not in compacted_fallback_instruction or "The shell command failed" not in compacted_fallback_instruction:
+        raise AssertionError(f"specific shell supervisor instruction was not preserved: {compacted_fallback_result}")
+    print("[ok] specific shell supervisor instruction preserved")
+
     workspace_task = "Запусти проверку Python.\n\nРабочий каталог для этой задачи: /work/project"
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":
         raise AssertionError("explicit workspace was not extracted from task text")
