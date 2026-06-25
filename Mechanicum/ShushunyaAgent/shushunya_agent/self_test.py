@@ -2251,10 +2251,51 @@ def main() -> int:
         )
     print("[ok] SWE edits require initial diagnostic")
 
+    swe_test_diagnostic_stdout = io.StringIO()
+    swe_test_diagnostic_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-test-diagnostic-before-edit"),
+        json_output=True,
+        max_steps=6,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    test_edit = '{"action":"replace_in_file","path":"/work/project/calc.py","old":"return a - b","new":"return a + b","count":1}'
+    swe_test_diagnostic_actions = [
+        '{"action":"read_file","path":"/work/project/calc.py","max_bytes":4000}',
+        test_edit,
+        '{"action":"read_file","path":"/work/project/tests/test_calc.py","max_bytes":4000}',
+        test_edit,
+        '{"action":"final","message":"done"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=swe_test_diagnostic_actions), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=[
+                {"ok": True, "path": "/work/project/calc.py", "content": "def add(a,b): return a-b"},
+                {"ok": True, "path": "/work/project/tests/test_calc.py", "content": "def test_add(): assert add(2,3)==5"},
+                {"ok": True, "path": "/work/project/calc.py"},
+            ]) as mocked_swe_test_file_tool, \
+            contextlib.redirect_stdout(swe_test_diagnostic_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        swe_test_diagnostic_code = run_agent("Исправь Python-проект и запусти pytest", swe_test_diagnostic_config)
+    swe_test_diagnostic_payload = json.loads(swe_test_diagnostic_stdout.getvalue())
+    test_rejections = [
+        step for step in swe_test_diagnostic_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "swe edit before test diagnostic rejected by supervisor"
+    ]
+    if swe_test_diagnostic_code != 0 or not test_rejections or mocked_swe_test_file_tool.call_count != 3:
+        raise AssertionError(
+            "SWE test diagnostic guard failed: "
+            f"code={swe_test_diagnostic_code}, file_calls={mocked_swe_test_file_tool.call_count}, payload={swe_test_diagnostic_payload}"
+        )
+    print("[ok] SWE edits require test diagnostic when tests are requested")
+
     workspace_task = "Запусти проверку Python.\n\nРабочий каталог для этой задачи: /work/project"
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":
         raise AssertionError("explicit workspace was not extracted from task text")
     print("[ok] explicit task workspace extracted")
+    escaped_workspace_task = "Рабочий каталог для этой задачи: /work/project\\nВсе файлы внутри него"
+    if agent_runner.explicit_workspace_from_task(escaped_workspace_task) != "/work/project":
+        raise AssertionError("explicit workspace parser kept escaped newline suffix")
+    print("[ok] escaped workspace suffix stripped")
     resume_diagnostic_task = 'Resume context from previous agent task journal x:\n[{"type":"action","action":{"action":"read_file","path":"/work/project/a.py"}}]'
     if not agent_runner.resume_context_has_swe_diagnostic(resume_diagnostic_task):
         raise AssertionError("SWE diagnostic was not detected in resume context")

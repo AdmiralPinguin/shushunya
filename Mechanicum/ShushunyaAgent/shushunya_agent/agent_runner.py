@@ -1020,6 +1020,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "repeated verified text verification rejected by supervisor",
     "inspection stall rejected by supervisor",
     "swe edit before diagnostic rejected by supervisor",
+    "swe edit before test diagnostic rejected by supervisor",
     "swe shell inline python rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
@@ -1078,6 +1079,7 @@ def extract_sandbox_paths_from_text(text: str) -> list[str]:
     seen: set[str] = set()
     for match in SANDBOX_ARTIFACT_PATH_RE.finditer(text or ""):
         path = match.group(1).rstrip(".,;:!?)]}»”")
+        path = path.split("\\n", 1)[0].split("\\t", 1)[0]
         if path and path not in seen:
             seen.add(path)
             paths.append(path)
@@ -1186,6 +1188,29 @@ def resume_context_has_swe_diagnostic(task: str) -> bool:
     if "resume context" not in lowered and "authoritative resume context" not in lowered:
         return False
     return any(re.search(r'"action"\s*:\s*"' + re.escape(action) + r'"', lowered) for action in SWE_DIAGNOSTIC_ACTIONS)
+
+
+def task_requires_test_diagnostic(task: str) -> bool:
+    lowered = (task or "").lower()
+    return any(marker in lowered for marker in ("pytest", "тест", "test", "/tests", "tests/"))
+
+
+def action_is_test_diagnostic(action_type: str, action: dict[str, Any]) -> bool:
+    path = str(action.get("path") or "").lower()
+    cmd = str(action.get("cmd") or "").lower()
+    code = str(action.get("code") or "").lower()
+    if action_type == "read_file" and ("/test" in path or "tests/" in path or path.endswith("_test.py")):
+        return True
+    if action_type in {"shell", "python"} and any(marker in (cmd + "\n" + code) for marker in ("pytest", "test_", "tests/", "run_check")):
+        return True
+    return False
+
+
+def resume_context_has_test_diagnostic(task: str) -> bool:
+    lowered = (task or "").lower()
+    if "resume context" not in lowered and "authoritative resume context" not in lowered:
+        return False
+    return any(marker in lowered for marker in ("/tests/", "tests/", "test_", "pytest", "run_check.py"))
 
 
 def looks_like_inline_python_shell(cmd: str) -> bool:
@@ -2925,6 +2950,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     successful_write_file_max_bytes: dict[str, int] = {}
     failed_verification_paths: set[str] = set()
     swe_diagnostic_seen = resume_context_has_swe_diagnostic(original_task)
+    swe_test_diagnostic_seen = resume_context_has_test_diagnostic(original_task)
+    swe_requires_test_diagnostic = task_requires_test_diagnostic(original_task)
     inspection_actions_since_progress = 0
     shell_inline_python_syntax_failures = 0
     stale_replace_failures_by_path: dict[str, int] = {}
@@ -3277,6 +3304,21 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     ),
                 }
             elif (
+                swe_task
+                and swe_requires_test_diagnostic
+                and action_type in SWE_EDIT_ACTIONS
+                and not swe_test_diagnostic_seen
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe edit before test diagnostic rejected by supervisor",
+                    "path": str(action.get("path") or ""),
+                    "instruction": (
+                        "This code task mentions tests/pytest. Before editing behavior, inspect the relevant test file(s) "
+                        "or run the requested tests/fallback checks. Source inspection alone is not enough when tests exist."
+                    ),
+                }
+            elif (
                 action_type in {"write_file", "append_file", "replace_in_file"}
                 and str(action.get("path") or "") in verified_text_paths
                 and str(action.get("path") or "") not in failed_verification_paths
@@ -3450,6 +3492,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         )
         if swe_task and action_type in SWE_DIAGNOSTIC_ACTIONS and not supervisor_rejection:
             swe_diagnostic_seen = True
+        if swe_task and action_is_test_diagnostic(action_type, action) and not supervisor_rejection:
+            swe_test_diagnostic_seen = True
         if (
             action_type == "shell"
             and isinstance(result, dict)
