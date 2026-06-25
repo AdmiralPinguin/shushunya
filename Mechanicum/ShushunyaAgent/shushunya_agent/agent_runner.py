@@ -1218,6 +1218,51 @@ def looks_like_inline_python_shell(cmd: str) -> bool:
     return (" python " in lowered or " python3 " in lowered or "/python3 " in lowered) and " -c " in lowered
 
 
+def looks_like_pytest_shell(cmd: str) -> bool:
+    lowered = f" {cmd.lower()} "
+    return " pytest" in lowered or " -m pytest" in lowered
+
+
+PYTEST_FALLBACK_CODE = r'''
+import inspect
+import json
+import runpy
+import sys
+import traceback
+from pathlib import Path
+
+root = Path.cwd()
+sys.path.insert(0, str(root))
+test_files = sorted((root / "tests").glob("test_*.py")) if (root / "tests").exists() else sorted(root.glob("test_*.py"))
+results = []
+failures = []
+for path in test_files:
+    try:
+        namespace = runpy.run_path(str(path))
+    except Exception:
+        failure = {"file": str(path.relative_to(root)), "test": "<module>", "traceback": traceback.format_exc(limit=8)}
+        failures.append(failure)
+        results.append({"ok": False, **failure})
+        continue
+    for name, value in sorted(namespace.items()):
+        if not name.startswith("test_") or not callable(value):
+            continue
+        try:
+            if inspect.signature(value).parameters:
+                raise RuntimeError("fallback runner cannot call tests with fixtures/parameters")
+            value()
+            results.append({"ok": True, "file": str(path.relative_to(root)), "test": name})
+        except Exception:
+            failure = {"file": str(path.relative_to(root)), "test": name, "traceback": traceback.format_exc(limit=8)}
+            failures.append(failure)
+            results.append({"ok": False, **failure})
+payload = {"test_files": [str(path.relative_to(root)) for path in test_files], "results": results, "failures": failures}
+print(json.dumps(payload, ensure_ascii=False, indent=2))
+if failures or not test_files:
+    raise SystemExit(1)
+'''
+
+
 def validate_final_artifacts(config: AgentConfig, message: str) -> dict[str, Any]:
     return validate_artifact_paths(config, extract_sandbox_paths_from_text(message))
 
@@ -3421,6 +3466,30 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 }
             elif action_type == "shell":
                 result = run_shell(config, str(action.get("cmd", "")), action.get("timeout"), bool(action.get("approved", False)))
+                combined_shell_output = f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}".lower() if isinstance(result, dict) else ""
+                if (
+                    swe_task
+                    and explicit_workspace
+                    and isinstance(result, dict)
+                    and result.get("ok") is False
+                    and looks_like_pytest_shell(str(action.get("cmd", "")))
+                    and "no module named pytest" in combined_shell_output
+                ):
+                    fallback = python_tool(
+                        config,
+                        {
+                            "action": "python",
+                            "cwd": explicit_workspace,
+                            "code": PYTEST_FALLBACK_CODE,
+                            "timeout": action.get("timeout") or 60,
+                        },
+                    )
+                    result = {
+                        **fallback,
+                        "pytest_unavailable": True,
+                        "fallback": "simple_pytest_runner",
+                        "original_shell": result_for_model(action_type, result, config),
+                    }
             elif action_type in FILE_ACTIONS:
                 result = file_tool(config, action)
             elif action_type == "python":

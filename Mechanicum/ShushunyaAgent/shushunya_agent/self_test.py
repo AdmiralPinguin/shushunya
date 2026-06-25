@@ -2288,6 +2288,51 @@ def main() -> int:
         )
     print("[ok] SWE edits require test diagnostic when tests are requested")
 
+    pytest_fallback_stdout = io.StringIO()
+    pytest_fallback_config = AgentConfig(
+        task_id=safe_task_id("self-test-pytest-fallback"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+
+    def fake_pytest_fallback(_config: AgentConfig, action: dict) -> dict:
+        if action.get("cwd") != "/work/project" or "test_files" not in action.get("code", ""):
+            raise AssertionError(f"bad pytest fallback action: {action}")
+        return {"ok": False, "returncode": 1, "stdout": '{"failures":[{"test":"test_add"}]}', "stderr": ""}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"final","message":"done"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }) as mocked_pytest_shell, mock.patch.object(agent_runner, "python_tool", side_effect=fake_pytest_fallback) as mocked_pytest_python, \
+            contextlib.redirect_stdout(pytest_fallback_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        pytest_fallback_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            pytest_fallback_config,
+        )
+    pytest_fallback_payload = json.loads(pytest_fallback_stdout.getvalue())
+    first_pytest_result = (pytest_fallback_payload.get("steps") or [{}])[0].get("result") or {}
+    if (
+        pytest_fallback_code != 0
+        or mocked_pytest_shell.call_count != 1
+        or mocked_pytest_python.call_count != 1
+        or first_pytest_result.get("fallback") != "simple_pytest_runner"
+    ):
+        raise AssertionError(
+            "pytest fallback runner was not used: "
+            f"code={pytest_fallback_code}, shell_calls={mocked_pytest_shell.call_count}, "
+            f"python_calls={mocked_pytest_python.call_count}, payload={pytest_fallback_payload}"
+        )
+    print("[ok] pytest unavailable falls back to simple runner")
+
     workspace_task = "Запусти проверку Python.\n\nРабочий каталог для этой задачи: /work/project"
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":
         raise AssertionError("explicit workspace was not extracted from task text")
