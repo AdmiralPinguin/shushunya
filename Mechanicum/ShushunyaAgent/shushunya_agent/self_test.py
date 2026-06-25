@@ -2749,6 +2749,56 @@ def main() -> int:
         raise AssertionError(f"caught AssertionError guidance missing: {caught_assert_payload}")
     print("[ok] caught AssertionError verification fails")
 
+    swe_auto_final_stdout = io.StringIO()
+    swe_auto_final_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-auto-final"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    swe_auto_final_python_results = [
+        {
+            "ok": False,
+            "returncode": 1,
+            "stdout": '{"results":[{"ok":false,"file":"tests/test_calc.py","test":"test_new"}]}',
+            "stderr": "",
+        },
+        {
+            "ok": True,
+            "returncode": 0,
+            "stdout": '{"results":[{"ok":true,"file":"tests/test_calc.py","test":"test_new"}]}',
+            "stderr": "",
+            "passing_tests": ["tests/test_calc.py::test_new"],
+            "failing_tests": [],
+        },
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"replace_in_file","path":"/work/project/calc.py","old":"return 1","new":"return 2"}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"final","message":"should not be needed"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=swe_auto_final_python_results), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/calc.py"}), \
+            contextlib.redirect_stdout(swe_auto_final_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        swe_auto_final_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            swe_auto_final_config,
+        )
+    swe_auto_final_payload = json.loads(swe_auto_final_stdout.getvalue())
+    if swe_auto_final_code != 0 or swe_auto_final_payload.get("message") != "Готово: code edit verified by tests/fallback.":
+        raise AssertionError(f"SWE auto-final after passing tests failed: code={swe_auto_final_code}, payload={swe_auto_final_payload}")
+    if len(swe_auto_final_payload.get("steps", [])) != 3:
+        raise AssertionError(f"SWE auto-final should not consume a final model step: {swe_auto_final_payload}")
+    print("[ok] SWE auto-final after passing tests")
+
     failing_stall_stdout = io.StringIO()
     failing_stall_config = AgentConfig(
         task_id=safe_task_id("self-test-failing-test-stall"),

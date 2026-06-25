@@ -3306,6 +3306,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     pending_failing_test_inspections = 0
     non_test_diagnostics_before_test = 0
     last_successful_swe_edit_path = ""
+    swe_verified_after_edit = False
     last_required_artifact_hint = ""
     trace: list[dict[str, Any]] = []
     write_task_journal(
@@ -4055,6 +4056,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if isinstance(result, dict) and (result.get("passing_tests") or result.get("failing_tests")):
             current_passing_tests, current_failing_tests = pytest_result_sets(result)
             regression_tests = sorted(current_failing_tests & last_pytest_passing_tests)
+            if swe_task and code_mutated_since_last_pytest and current_passing_tests and not current_failing_tests:
+                swe_verified_after_edit = True
             if code_mutated_since_last_pytest and regression_tests:
                 result = dict(result)
                 result["regression_tests"] = regression_tests[:20]
@@ -4125,6 +4128,49 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 successful_write_file_paths[path] = successful_write_file_paths.get(path, 0) + 1
                 content_bytes = len(str(action.get("content") or "").encode("utf-8"))
                 successful_write_file_max_bytes[path] = max(successful_write_file_max_bytes.get(path, 0), content_bytes)
+        if (
+            swe_task
+            and swe_verified_after_edit
+            and isinstance(result, dict)
+            and result.get("ok") is True
+            and action_type in SWE_DIAGNOSTIC_ACTIONS
+        ):
+            duration_sec = round(time.time() - run_started, 3)
+            message = "Готово: code edit verified by tests/fallback."
+            final_payload: dict[str, Any] = {
+                "ok": True,
+                "task_id": config.task_id,
+                "message": message,
+                "duration_sec": duration_sec,
+                "steps": trace,
+                "exit_code": 0,
+            }
+            write_task_journal(
+                config,
+                "final",
+                {
+                    "step": step,
+                    "ok": True,
+                    "message": message,
+                    "duration_sec": duration_sec,
+                    "auto_final": True,
+                    "reason": "swe_verified_after_edit",
+                },
+            )
+            emit(
+                event_sink,
+                {
+                    "type": "final",
+                    "ok": True,
+                    "step": step,
+                    "duration_sec": duration_sec,
+                    "message": message,
+                    "auto_final": True,
+                    "reason": "swe_verified_after_edit",
+                },
+            )
+            print(json.dumps(final_payload, ensure_ascii=False, indent=2))
+            return 0
         if isinstance(result, dict) and result.get("ok") is True:
             if action_type in STATE_MUTATING_ACTIONS:
                 action_counts.clear()
