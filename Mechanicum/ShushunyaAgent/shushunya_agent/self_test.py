@@ -2204,6 +2204,9 @@ def main() -> int:
             "SWE shell inline python guard failed: "
             f"code={swe_shell_python_code}, shell_called={mocked_swe_shell.called}, payload={swe_shell_python_payload}"
         )
+    suggested = (swe_shell_rejections[0].get("result") or {}).get("suggested_action") or {}
+    if suggested.get("action") != "python" or suggested.get("cwd") != "/work/project":
+        raise AssertionError(f"SWE shell inline python guard did not provide a valid suggested python action: {suggested}")
     print("[ok] SWE shell inline python rejected")
 
     stale_replace_stdout = io.StringIO()
@@ -2562,6 +2565,42 @@ def main() -> int:
     if same_file_edit_code != 0 or "swe repeated same-file edit before verification rejected by supervisor" not in same_file_edit_errors:
         raise AssertionError(f"same-file edit before verification guard failed: code={same_file_edit_code}, payload={same_file_edit_payload}")
     print("[ok] same-file edit before verification guard")
+
+    inspect_after_edit_stdout = io.StringIO()
+    inspect_after_edit_config = AgentConfig(
+        task_id=safe_task_id("self-test-inspection-after-edit-before-test"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"replace_in_file","path":"/work/project/calc.py","old":"old","new":"new","count":1}',
+            '{"action":"read_file","path":"/work/project/calc.py","max_bytes":20000}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_same_file_tests), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/calc.py"}), \
+            contextlib.redirect_stdout(inspect_after_edit_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        inspect_after_edit_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            inspect_after_edit_config,
+        )
+    inspect_after_edit_payload = json.loads(inspect_after_edit_stdout.getvalue())
+    inspect_after_edit_errors = [
+        (step.get("result") or {}).get("error")
+        for step in inspect_after_edit_payload.get("steps", [])
+    ]
+    if inspect_after_edit_code != 0 or "swe inspection after edit before verification rejected by supervisor" not in inspect_after_edit_errors:
+        raise AssertionError(f"inspection after edit before verification guard failed: code={inspect_after_edit_code}, payload={inspect_after_edit_payload}")
+    print("[ok] inspection after edit before verification guard")
 
     workspace_task = "Запусти проверку Python.\n\nРабочий каталог для этой задачи: /work/project"
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":

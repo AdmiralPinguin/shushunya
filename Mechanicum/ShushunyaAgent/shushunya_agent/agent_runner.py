@@ -3511,6 +3511,20 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 }
             elif (
                 swe_task
+                and code_mutated_since_last_pytest
+                and action_type in INSPECTION_ACTIONS
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe inspection after edit before verification rejected by supervisor",
+                    "last_edited_path": last_successful_swe_edit_path,
+                    "instruction": (
+                        "A code file was already edited after the last test run. Do not inspect more files before verification. "
+                        "Run the full requested test command or an equivalent python action/fallback now. If tests fail, inspect only the files named by the failure output."
+                    ),
+                }
+            elif (
+                swe_task
                 and action_type in SWE_EDIT_ACTIONS
                 and not swe_diagnostic_seen
             ):
@@ -3559,13 +3573,20 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and explicit_workspace
                 and looks_like_inline_python_shell(str(action.get("cmd", "")))
             ):
+                suggested_action = {
+                    "action": "python",
+                    "cwd": explicit_workspace,
+                    "code": "# Put the focused Python check here; cwd is valid and on PYTHONPATH.\nprint('ready')",
+                    "timeout": action.get("timeout") or 60,
+                }
                 result = {
                     "ok": False,
                     "error": "swe shell inline python rejected by supervisor",
+                    "suggested_action": suggested_action,
                     "instruction": (
                         "This is a SWE/code task with an explicit workspace. Do not run Python one-liners through shell quoting. "
                         f"The python action explicitly supports cwd/workdir; use action=python with cwd={explicit_workspace!r}, "
-                        "or write a temporary .py script and run that script with shell."
+                        "or write a temporary .py script and run that script with shell. The suggested_action field shows a valid python action shape."
                     ),
                 }
             elif (

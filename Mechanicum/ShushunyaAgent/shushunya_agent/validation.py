@@ -160,7 +160,7 @@ ACTION_SCHEMAS: dict[str, dict[str, Any]] = {
     "archive_memory_read": {"required": {"kind"}, "fields": {"action", "kind", "id", "title", "max_chars"}},
     "archive_memory_propose": {"required": {"proposal"}, "fields": {"action", "target", "importance", "proposal", "evidence"}},
     "shell": {"required": {"cmd"}, "fields": {"action", "cmd", "timeout", "approved"}},
-    "python": {"required": {"code"}, "fields": {"action", "code", "timeout"}},
+    "python": {"required": {"code"}, "fields": {"action", "code", "cwd", "workdir", "timeout"}},
     "web_search": {"required": {"query"}, "fields": {"action", "query", "limit"}},
     "web_fetch": {"required": {"url"}, "fields": {"action", "url", "max_bytes"}},
     "web_links": {"required": {"url"}, "fields": {"action", "url", "pattern", "limit"}},
@@ -251,6 +251,9 @@ def validate_action(action: Mapping[str, Any]) -> dict[str, Any]:
         _validate_bool(action_dict, "approved", errors)
     elif action_type == "python":
         _validate_string(action_dict, "code", errors, min_len=1, max_len=50000)
+        for field in ("cwd", "workdir"):
+            if field in action_dict:
+                _validate_string(action_dict, field, errors, min_len=1, max_len=4096)
         _validate_int(action_dict, "timeout", errors, minimum=1, maximum=300)
     elif action_type == "web_search":
         _validate_string(action_dict, "query", errors, min_len=1, max_len=10000)

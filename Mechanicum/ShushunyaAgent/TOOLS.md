@@ -54,10 +54,11 @@ model context.
 ## Python
 
 ```json
-{"action":"python","code":"print('hello')","timeout":60}
+{"action":"python","cwd":"/work/project","code":"print('hello')","timeout":60}
 ```
 
-Runs `/usr/bin/python3 -c` inside the sandbox.
+Runs `/usr/bin/python3 -c` inside the sandbox. When `cwd` or `workdir` is
+provided, the command runs from that directory and adds it to `PYTHONPATH`.
 
 ## Web
 

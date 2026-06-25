@@ -102,6 +102,8 @@
       "properties": {
         "action": "python",
         "code": "string",
+        "cwd": "optional sandbox working directory; also added to PYTHONPATH",
+        "workdir": "alias for cwd",
         "timeout": "integer"
       }
     },
