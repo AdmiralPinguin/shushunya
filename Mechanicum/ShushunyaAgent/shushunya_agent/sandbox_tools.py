@@ -276,7 +276,15 @@ try:
             text = path.read_text(encoding="utf-8", errors="replace")
             occurrences = text.count(old)
             if occurrences == 0:
-                respond({"ok": False, "error": "old text not found", "path": str(path)})
+                excerpt = text[:12000]
+                respond({
+                    "ok": False,
+                    "error": "old text not found",
+                    "path": str(path),
+                    "size": path.stat().st_size,
+                    "current_excerpt": excerpt,
+                    "current_excerpt_truncated": len(text) > len(excerpt),
+                })
             else:
                 replaced = occurrences if count < 0 else min(count, occurrences)
                 path.write_text(text.replace(old, new, count), encoding="utf-8")

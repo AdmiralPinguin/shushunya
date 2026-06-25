@@ -2825,6 +2825,18 @@ def main() -> int:
         raise AssertionError(f"replace_in_file large file guard failed: {replace_large_guard}")
     print("[ok] replace_in_file size guard")
 
+    stale_replace_result = file_tool(
+        config,
+        {"action": "replace_in_file", "path": "/work/self-test/hello.txt", "old": "missing block", "new": "x", "count": 1},
+    )
+    if (
+        stale_replace_result.get("ok") is not False
+        or stale_replace_result.get("error") != "old text not found"
+        or "hello-updated" not in str(stale_replace_result.get("current_excerpt") or "")
+    ):
+        raise AssertionError(f"replace_in_file stale result missed current excerpt: {stale_replace_result}")
+    print("[ok] replace_in_file stale excerpt")
+
     info_result = file_tool(config, {"action": "file_info", "path": "/work/self-test/hello.txt", "sha256": True})
     assert_ok("file_info sha256", info_result)
     expected_hash = hashlib.sha256(b"hello-updated").hexdigest()
