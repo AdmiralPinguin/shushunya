@@ -427,7 +427,7 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
             else:
                 payload["supervisor_instruction"] = base_shell_instruction
             combined_output = f"{payload.get('stdout') or ''}\n{payload.get('stderr') or ''}".lower()
-            if "no module named pytest" in combined_output:
+            if pytest_unavailable_output(combined_output):
                 payload["supervisor_instruction"] += (
                     " Pytest is unavailable in this environment; do not retry pytest. "
                     "Use a focused python action with cwd set to the project root, or shell with cd <project> && PYTHONPATH=$(pwd) python3 -c '...'."
@@ -1225,6 +1225,16 @@ def looks_like_inline_python_shell(cmd: str) -> bool:
 def looks_like_pytest_shell(cmd: str) -> bool:
     lowered = f" {cmd.lower()} "
     return " pytest" in lowered or " -m pytest" in lowered
+
+
+def pytest_unavailable_output(output: str) -> bool:
+    lowered = output.lower()
+    return (
+        "no module named pytest" in lowered
+        or "pytest: command not found" in lowered
+        or "pytest: not found" in lowered
+        or "pytest': no such file or directory" in lowered
+    )
 
 
 def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -3509,7 +3519,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     and isinstance(result, dict)
                     and result.get("ok") is False
                     and looks_like_pytest_shell(str(action.get("cmd", "")))
-                    and "no module named pytest" in combined_shell_output
+                    and pytest_unavailable_output(combined_shell_output)
                 ):
                     fallback = python_tool(
                         config,

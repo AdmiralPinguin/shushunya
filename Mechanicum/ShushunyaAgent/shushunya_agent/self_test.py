@@ -2351,6 +2351,10 @@ def main() -> int:
         raise AssertionError(f"specific shell supervisor instruction was not preserved: {compacted_fallback_result}")
     print("[ok] specific shell supervisor instruction preserved")
 
+    if not agent_runner.pytest_unavailable_output("/usr/bin/bash: line 1: pytest: command not found\n"):
+        raise AssertionError("pytest command-not-found output was not recognized")
+    print("[ok] pytest command-not-found recognized")
+
     workspace_task = "Запусти проверку Python.\n\nРабочий каталог для этой задачи: /work/project"
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":
         raise AssertionError("explicit workspace was not extracted from task text")
