@@ -2760,13 +2760,14 @@ def main() -> int:
     repeated_failing_read_config = AgentConfig(
         task_id=safe_task_id("self-test-repeated-failing-file-read"),
         json_output=True,
-        max_steps=4,
+        max_steps=5,
         inject_memory=False,
         archive_internal_steps=False,
         shell_enabled=True,
     )
     with mock.patch.object(agent_runner, "chat", side_effect=[
             '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"read_file","path":"/work/project/calc.py","max_bytes":20000,"offset":0}',
             '{"action":"read_file","path":"/work/project/calc.py","max_bytes":20000,"offset":0}',
             '{"action":"read_file","path":"/work/project/calc.py","max_bytes":20000,"offset":0}',
             '{"action":"final","message":"blocked"}',
@@ -2797,6 +2798,8 @@ def main() -> int:
         raise AssertionError(
             f"repeated failing-test file read guard failed: code={repeated_failing_read_code}, payload={repeated_failing_read_payload}"
         )
+    if "repeated identical action rejected by supervisor" in repeated_failing_read_errors:
+        raise AssertionError(f"SWE repeated file read guard should take priority over generic identical guard: {repeated_failing_read_payload}")
     print("[ok] repeated failing-test file read guard")
 
     caught_assert_stdout = io.StringIO()

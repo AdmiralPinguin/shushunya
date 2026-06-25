@@ -3648,17 +3648,6 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "Retry with paths/cwd under the current workspace only: " + explicit_workspace
                     ),
                 }
-            elif action_counts[fingerprint] >= 3:
-                result = {
-                    "ok": False,
-                    "error": "repeated identical action rejected by supervisor",
-                    "repeated_action": action,
-                    "instruction": (
-                        "This exact action was already attempted enough times. Treat any previous ok=true result for it as done. "
-                        "Choose a genuinely new productive action such as writing/checking the artifact, reading a different target, "
-                        "or return final if enough work is done. Do not alternate filler actions just to retry this action."
-                    ),
-                }
             elif (
                 action_type in INSPECTION_ACTIONS
                 and inspection_actions_since_progress >= max(1, INSPECTION_STALL_LIMIT)
@@ -3694,7 +3683,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and pending_failing_tests
                 and not code_mutated_since_last_pytest
                 and action_type == "read_file"
-                and str(action.get("path") or "") in pending_failing_test_read_paths
+                and (
+                    str(action.get("path") or "") in pending_failing_test_read_paths
+                    or action_counts[fingerprint] >= 3
+                )
             ):
                 result = {
                     "ok": False,
@@ -3721,6 +3713,17 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "The current failing_tests are already known and no code changed since that test result. "
                         "Do not rerun the same test/fallback loop before editing. Inspect a directly relevant uninspected file if truly needed, "
                         "or make a narrow code edit that targets failing_tests, then run the full test/fallback."
+                    ),
+                }
+            elif action_counts[fingerprint] >= 3:
+                result = {
+                    "ok": False,
+                    "error": "repeated identical action rejected by supervisor",
+                    "repeated_action": action,
+                    "instruction": (
+                        "This exact action was already attempted enough times. Treat any previous ok=true result for it as done. "
+                        "Choose a genuinely new productive action such as writing/checking the artifact, reading a different target, "
+                        "or return final if enough work is done. Do not alternate filler actions just to retry this action."
                     ),
                 }
             elif (
