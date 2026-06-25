@@ -1073,6 +1073,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe repeated same-file edit before verification rejected by supervisor",
     "swe shell inline python rejected by supervisor",
     "swe failing tests inspection stall rejected by supervisor",
+    "swe repeated failing test diagnostic rejected by supervisor",
     "swe passing-test edit rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
@@ -3557,6 +3558,22 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "The failing tests are already known and enough source/test inspection has run. "
                         "Do not keep listing or rereading files. Make a narrow code edit that targets failing_tests, "
                         "run the full test command/fallback again, or return final only if no safe fix is possible."
+                    ),
+                }
+            elif (
+                swe_task
+                and pending_failing_tests
+                and not code_mutated_since_last_pytest
+                and action_is_test_diagnostic(action_type, action)
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe repeated failing test diagnostic rejected by supervisor",
+                    "failing_tests": sorted(pending_failing_tests)[:20],
+                    "instruction": (
+                        "The current failing_tests are already known and no code changed since that test result. "
+                        "Do not rerun the same test/fallback loop before editing. Inspect a directly relevant uninspected file if truly needed, "
+                        "or make a narrow code edit that targets failing_tests, then run the full test/fallback."
                     ),
                 }
             elif (

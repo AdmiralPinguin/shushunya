@@ -2550,6 +2550,49 @@ def main() -> int:
         raise AssertionError(f"passing-test edit guard failed: code={protected_edit_code}, payload={protected_edit_payload}")
     print("[ok] passing-test edit guard")
 
+    repeated_test_stdout = io.StringIO()
+    repeated_test_config = AgentConfig(
+        task_id=safe_task_id("self-test-repeated-failing-test"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+
+    def fake_repeated_failing_tests(_config: AgentConfig, action: dict) -> dict:
+        return {
+            "ok": False,
+            "returncode": 1,
+            "stdout": '{"results":[{"ok":true,"file":"tests/test_calc.py","test":"test_old"},{"ok":false,"file":"tests/test_calc.py","test":"test_new"}]}',
+            "stderr": "",
+        }
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_repeated_failing_tests), \
+            contextlib.redirect_stdout(repeated_test_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        repeated_test_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            repeated_test_config,
+        )
+    repeated_test_payload = json.loads(repeated_test_stdout.getvalue())
+    repeated_test_errors = [
+        (step.get("result") or {}).get("error")
+        for step in repeated_test_payload.get("steps", [])
+    ]
+    if repeated_test_code != 0 or "swe repeated failing test diagnostic rejected by supervisor" not in repeated_test_errors:
+        raise AssertionError(f"repeated failing test guard failed: code={repeated_test_code}, payload={repeated_test_payload}")
+    print("[ok] repeated failing test diagnostic guard")
+
     failing_stall_stdout = io.StringIO()
     failing_stall_config = AgentConfig(
         task_id=safe_task_id("self-test-failing-test-stall"),
