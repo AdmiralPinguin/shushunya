@@ -1329,6 +1329,15 @@ def action_is_test_diagnostic(action_type: str, action: dict[str, Any]) -> bool:
     return False
 
 
+def action_runs_test_diagnostic(action_type: str, action: dict[str, Any]) -> bool:
+    cmd = str(action.get("cmd") or "").lower()
+    code = str(action.get("code") or "").lower()
+    return action_type in {"shell", "python"} and any(
+        marker in (cmd + "\n" + code)
+        for marker in ("pytest", "test_", "tests/", "run_check")
+    )
+
+
 def resume_context_has_test_diagnostic(task: str) -> bool:
     lowered = (task or "").lower()
     if "resume context" not in lowered and "authoritative resume context" not in lowered:
@@ -3647,7 +3656,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 swe_task
                 and pending_failing_tests
                 and not code_mutated_since_last_pytest
-                and action_is_test_diagnostic(action_type, action)
+                and action_runs_test_diagnostic(action_type, action)
             ):
                 result = {
                     "ok": False,

@@ -2680,6 +2680,48 @@ def main() -> int:
         raise AssertionError(f"repeated failing test guard failed: code={repeated_test_code}, payload={repeated_test_payload}")
     print("[ok] repeated failing test diagnostic guard")
 
+    failing_test_read_stdout = io.StringIO()
+    failing_test_read_config = AgentConfig(
+        task_id=safe_task_id("self-test-failing-test-read-allowed"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"read_file","path":"/work/project/tests/test_calc.py","max_bytes":20000,"offset":0}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_repeated_failing_tests), \
+            mock.patch.object(agent_runner, "file_tool", return_value={
+                "ok": True,
+                "path": "/work/project/tests/test_calc.py",
+                "content": "def test_new(): assert calc() == 2",
+                "size": 34,
+            }), \
+            contextlib.redirect_stdout(failing_test_read_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        failing_test_read_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            failing_test_read_config,
+        )
+    failing_test_read_payload = json.loads(failing_test_read_stdout.getvalue())
+    failing_test_read_errors = [
+        (step.get("result") or {}).get("error")
+        for step in failing_test_read_payload.get("steps", [])
+    ]
+    if "swe repeated failing test diagnostic rejected by supervisor" in failing_test_read_errors:
+        raise AssertionError(f"reading a failing test file should be allowed: {failing_test_read_payload}")
+    if failing_test_read_code != 0:
+        raise AssertionError(f"failing test read scenario should reach final: code={failing_test_read_code}, payload={failing_test_read_payload}")
+    print("[ok] failing test file read allowed")
+
     failing_stall_stdout = io.StringIO()
     failing_stall_config = AgentConfig(
         task_id=safe_task_id("self-test-failing-test-stall"),
