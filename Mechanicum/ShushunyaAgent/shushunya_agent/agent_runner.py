@@ -3696,8 +3696,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "failing_tests": sorted(pending_failing_tests)[:20],
                     "instruction": (
                         "This file was already read after the current failing_tests were discovered. "
-                        "Do not reread the same file before editing. Use the gathered context to make a narrow code edit, "
-                        "read a different directly relevant file if truly needed, or run the full test/fallback after an edit."
+                        "Do not reread the same file before editing. The previous read_file content and failing test output "
+                        "are already in this conversation. Your next action should be a narrow write_file/replace_in_file edit "
+                        "that targets failing_tests, unless a different uninspected file is directly named by the failure output. "
+                        "Run the full test/fallback only after an edit."
                     ),
                 }
             elif (
@@ -3712,8 +3714,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "failing_tests": sorted(pending_failing_tests)[:20],
                     "instruction": (
                         "The current failing_tests are already known and no code changed since that test result. "
-                        "Do not rerun the same test/fallback loop before editing. Inspect a directly relevant uninspected file if truly needed, "
-                        "or make a narrow code edit that targets failing_tests, then run the full test/fallback."
+                        "Do not rerun the same test/fallback loop before editing. The failure stdout is already available above. "
+                        "If the relevant source has already been read, your next action should be a narrow write_file/replace_in_file "
+                        "edit that targets failing_tests. Otherwise inspect only one directly relevant uninspected file, then edit."
                     ),
                 }
             elif action_counts[fingerprint] >= 3:
