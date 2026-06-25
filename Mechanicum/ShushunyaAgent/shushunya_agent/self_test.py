@@ -629,6 +629,21 @@ def main() -> int:
         raise AssertionError(f"SWE execution profile was not appended: {swe_profile_task}")
     if agent_runner.task_with_execution_profile("Создай краткий отчет", AgentConfig()) != "Создай краткий отчет":
         raise AssertionError("SWE execution profile should not affect unrelated tasks")
+    swe_no_shell_profile = agent_runner.task_with_execution_profile(
+        "Исправь Python-проект и запусти pytest",
+        AgentConfig(shell_enabled=False),
+    )
+    if "Shell is disabled for this run" not in swe_no_shell_profile or "Do not emit shell actions" not in swe_no_shell_profile:
+        raise AssertionError(f"SWE no-shell profile missed strict shell guidance: {swe_no_shell_profile}")
+    shell_disabled_payload = agent_runner.result_for_model(
+        "shell",
+        {"ok": False, "error": "shell tool is disabled by supervisor policy"},
+        AgentConfig(shell_enabled=False),
+    )
+    if "Do not emit another shell action" not in shell_disabled_payload.get("supervisor_instruction", ""):
+        raise AssertionError(f"shell disabled payload missed no-shell instruction: {shell_disabled_payload}")
+    if (shell_disabled_payload.get("suggested_python_action") or {}).get("action") != "python":
+        raise AssertionError(f"shell disabled payload missed suggested python action: {shell_disabled_payload}")
     print("[ok] SWE execution profile")
     if agent_runner.planner_should_run("Создай /work/report.md с текстом ok", AgentConfig(planner_enabled=True)):
         raise AssertionError("simple create tasks should not spend a planner call")

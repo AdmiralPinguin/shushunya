@@ -188,6 +188,9 @@ full, new runs fail with `429 agent queue full`. `/run-stream` returns that
 normal HTTP error.
 HTTP requests cannot enable the shell tool unless `SHUSHUNYA_AGENT_API_KEY` is
 configured or `SHUSHUNYA_AGENT_HTTP_ALLOW_SHELL_WITHOUT_API_KEY=1` is set.
+`scripts/start-agent-api.sh` sets that override by default only for loopback
+hosts (`127.*`, `localhost`, `::1`) so local dev/arena runs can use shell
+without weakening non-local API starts.
 The phone client sends `shell_enabled=false`.
 Set `SHUSHUNYA_AGENT_SHELL_APPROVAL_REQUIRED=1` or
 `"shell_approval_required": true` when shell actions must include

@@ -422,6 +422,18 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
                 "The shell command failed. Do not repeat the identical command unless a file or environment state changed. "
                 "Use the stderr/stdout to choose the next productive action: read the relevant file, patch it, or run a meaningfully different diagnostic."
             )
+            if str(payload.get("error") or "") == "shell tool is disabled by supervisor policy":
+                base_shell_instruction = (
+                    "Shell is disabled for this run. Do not emit another shell action. "
+                    "Use list_files/read_file/search_text for inspection, replace_in_file/write_file for edits, "
+                    "and python with cwd set to the project root for checks."
+                )
+                payload["suggested_python_action"] = {
+                    "action": "python",
+                    "cwd": "<project root>",
+                    "code": "# Put the focused Python diagnostic or verification here.\nprint('ready')",
+                    "timeout": 60,
+                }
             if payload.get("supervisor_instruction"):
                 payload["supervisor_instruction"] = f"{payload['supervisor_instruction']} {base_shell_instruction}"
             else:
@@ -936,7 +948,10 @@ def task_with_execution_profile(task: str, config: AgentConfig) -> str:
     shell_rule = (
         "Prefer shell for repo inspection and verification commands."
         if config.shell_enabled
-        else "Shell may be unavailable; if shell is rejected, use file tools and python instead of repeating shell."
+        else (
+            "Shell is disabled for this run. Do not emit shell actions. "
+            "Use list_files/read_file/search_text for inspection and python actions with cwd=<workspace> for diagnostics or verification."
+        )
     )
     return (
         task
@@ -1118,6 +1133,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "repeated identical action rejected by supervisor",
     "repeated write_file path rejected by supervisor",
     "required artifact rewrite before verification rejected by supervisor",
+    "shell tool is disabled by supervisor policy",
     "repeated verified text verification rejected by supervisor",
     "inspection stall rejected by supervisor",
     "swe edit before diagnostic rejected by supervisor",

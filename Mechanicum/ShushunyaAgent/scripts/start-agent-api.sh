@@ -43,6 +43,11 @@ if [[ ! -x "$PYTHON" ]]; then
 fi
 
 export SHUSHUNYA_AGENT_SEARXNG_URL="${SHUSHUNYA_AGENT_SEARXNG_URL:-http://127.0.0.1:8888}"
+case "${SHUSHUNYA_AGENT_HOST:-127.0.0.1}" in
+  127.*|localhost|::1)
+    export SHUSHUNYA_AGENT_HTTP_ALLOW_SHELL_WITHOUT_API_KEY="${SHUSHUNYA_AGENT_HTTP_ALLOW_SHELL_WITHOUT_API_KEY:-1}"
+    ;;
+esac
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 setsid "$PYTHON" -m shushunya_agent.server >"$LOG_FILE" 2>&1 </dev/null &
 echo "$!" > "$PID_FILE"
