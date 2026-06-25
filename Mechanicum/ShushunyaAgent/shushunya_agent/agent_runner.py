@@ -1025,6 +1025,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "inspection stall rejected by supervisor",
     "swe edit before diagnostic rejected by supervisor",
     "swe edit before test diagnostic rejected by supervisor",
+    "swe test diagnostic inspection stall rejected by supervisor",
     "swe shell inline python rejected by supervisor",
     "swe failing tests inspection stall rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
@@ -3095,6 +3096,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     code_mutated_since_last_pytest = False
     pending_failing_tests = set(last_pytest_failing_tests)
     pending_failing_test_inspections = 0
+    non_test_diagnostics_before_test = 0
     last_required_artifact_hint = ""
     trace: list[dict[str, Any]] = []
     write_task_journal(
@@ -3440,6 +3442,23 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 }
             elif (
                 swe_task
+                and swe_requires_test_diagnostic
+                and not swe_test_diagnostic_seen
+                and non_test_diagnostics_before_test >= 3
+                and (action_type in INSPECTION_ACTIONS or (action_type == "shell" and looks_like_inspection_shell(str(action.get("cmd", "")))))
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe test diagnostic inspection stall rejected by supervisor",
+                    "non_test_diagnostics_before_test": non_test_diagnostics_before_test,
+                    "instruction": (
+                        "This task requires a test diagnostic before editing, and enough non-test inspection has already run. "
+                        "Do not keep listing or rereading files. Run the requested test command/fallback, or use action=python "
+                        "with cwd set to the project root for an equivalent focused test of the failing functions/CLI."
+                    ),
+                }
+            elif (
+                swe_task
                 and action_type in SWE_EDIT_ACTIONS
                 and not swe_diagnostic_seen
             ):
@@ -3668,6 +3687,15 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             swe_diagnostic_seen = True
         if swe_task and action_is_test_diagnostic(action_type, action) and not supervisor_rejection:
             swe_test_diagnostic_seen = True
+        elif (
+            swe_task
+            and swe_requires_test_diagnostic
+            and not swe_test_diagnostic_seen
+            and action_type in SWE_DIAGNOSTIC_ACTIONS
+            and isinstance(result, dict)
+            and result.get("ok") is True
+        ):
+            non_test_diagnostics_before_test += 1
         if (
             action_type == "shell"
             and isinstance(result, dict)

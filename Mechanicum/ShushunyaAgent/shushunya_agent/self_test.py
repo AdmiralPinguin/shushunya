@@ -2487,6 +2487,37 @@ def main() -> int:
         raise AssertionError(f"failing test inspection stall guard failed: code={failing_stall_code}, payload={failing_stall_payload}")
     print("[ok] failing test inspection stall guard")
 
+    test_diag_stall_stdout = io.StringIO()
+    test_diag_stall_config = AgentConfig(
+        task_id=safe_task_id("self-test-test-diagnostic-stall"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"read_file","path":"/work/project/a.py","max_bytes":20000,"offset":0}',
+            '{"action":"read_file","path":"/work/project/b.py","max_bytes":20000,"offset":0}',
+            '{"action":"read_file","path":"/work/project/c.py","max_bytes":20000,"offset":0}',
+            '{"action":"read_file","path":"/work/project/d.py","max_bytes":20000,"offset":0}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "content": "x"}), \
+            contextlib.redirect_stdout(test_diag_stall_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        test_diag_stall_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            test_diag_stall_config,
+        )
+    test_diag_stall_payload = json.loads(test_diag_stall_stdout.getvalue())
+    test_diag_stall_errors = [
+        (step.get("result") or {}).get("error")
+        for step in test_diag_stall_payload.get("steps", [])
+    ]
+    if test_diag_stall_code != 0 or "swe test diagnostic inspection stall rejected by supervisor" not in test_diag_stall_errors:
+        raise AssertionError(f"test diagnostic inspection stall guard failed: code={test_diag_stall_code}, payload={test_diag_stall_payload}")
+    print("[ok] test diagnostic inspection stall guard")
+
     workspace_task = "Запусти проверку Python.\n\nРабочий каталог для этой задачи: /work/project"
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":
         raise AssertionError("explicit workspace was not extracted from task text")
