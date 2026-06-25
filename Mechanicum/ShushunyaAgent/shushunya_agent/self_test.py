@@ -2383,7 +2383,7 @@ def main() -> int:
         step for step in stale_replace_payload.get("steps", [])
         if (step.get("result") or {}).get("error") == "stale replace_in_file rejected by supervisor"
     ]
-    if stale_replace_code != 0 or not stale_replace_rejections or mocked_stale_file.call_count != 2:
+    if stale_replace_code != 0 or not stale_replace_rejections or mocked_stale_file.call_count != 1:
         raise AssertionError(
             "stale replace guard failed: "
             f"code={stale_replace_code}, file_calls={mocked_stale_file.call_count}, payload={stale_replace_payload}"

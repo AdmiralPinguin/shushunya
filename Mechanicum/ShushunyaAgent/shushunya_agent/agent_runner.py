@@ -3894,7 +3894,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 }
             elif (
                 action_type == "replace_in_file"
-                and stale_replace_failures_by_path.get(str(action.get("path") or ""), 0) >= 2
+                and stale_replace_failures_by_path.get(str(action.get("path") or ""), 0) >= 1
             ):
                 result = {
                     "ok": False,
@@ -3902,8 +3902,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "path": str(action.get("path") or ""),
                     "instruction": (
                         "replace_in_file already failed because the old text does not match this file. "
-                        "Do not keep applying the stale patch. Use the latest read_file content to decide whether the fix is already present; "
-                        "then run verification or write a new correction based on the current file."
+                        "Do not keep applying stale patches. Use the current_excerpt from the failed replace result to build an exact patch, "
+                        "or use write_file with the complete corrected file content. Then run verification."
                     ),
                 }
             elif (
