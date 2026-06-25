@@ -2518,6 +2518,51 @@ def main() -> int:
         raise AssertionError(f"test diagnostic inspection stall guard failed: code={test_diag_stall_code}, payload={test_diag_stall_payload}")
     print("[ok] test diagnostic inspection stall guard")
 
+    same_file_edit_stdout = io.StringIO()
+    same_file_edit_config = AgentConfig(
+        task_id=safe_task_id("self-test-same-file-edit-before-test"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+
+    def fake_same_file_tests(_config: AgentConfig, action: dict) -> dict:
+        return {
+            "ok": False,
+            "returncode": 1,
+            "stdout": '{"results":[{"ok":true,"file":"tests/test_calc.py","test":"test_old"},{"ok":false,"file":"tests/test_calc.py","test":"test_new"}]}',
+            "stderr": "",
+        }
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"replace_in_file","path":"/work/project/calc.py","old":"old","new":"new","count":1}',
+            '{"action":"write_file","path":"/work/project/calc.py","content":"whole rewrite"}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_same_file_tests), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/calc.py"}), \
+            contextlib.redirect_stdout(same_file_edit_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        same_file_edit_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            same_file_edit_config,
+        )
+    same_file_edit_payload = json.loads(same_file_edit_stdout.getvalue())
+    same_file_edit_errors = [
+        (step.get("result") or {}).get("error")
+        for step in same_file_edit_payload.get("steps", [])
+    ]
+    if same_file_edit_code != 0 or "swe repeated same-file edit before verification rejected by supervisor" not in same_file_edit_errors:
+        raise AssertionError(f"same-file edit before verification guard failed: code={same_file_edit_code}, payload={same_file_edit_payload}")
+    print("[ok] same-file edit before verification guard")
+
     workspace_task = "Запусти проверку Python.\n\nРабочий каталог для этой задачи: /work/project"
     if agent_runner.explicit_workspace_from_task(workspace_task) != "/work/project":
         raise AssertionError("explicit workspace was not extracted from task text")

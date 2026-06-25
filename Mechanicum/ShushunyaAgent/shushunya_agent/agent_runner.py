@@ -1027,6 +1027,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe edit before test diagnostic rejected by supervisor",
     "swe test diagnostic inspection stall rejected by supervisor",
     "explicit workspace boundary rejected by supervisor",
+    "swe repeated same-file edit before verification rejected by supervisor",
     "swe shell inline python rejected by supervisor",
     "swe failing tests inspection stall rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
@@ -3119,6 +3120,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     pending_failing_tests = set(last_pytest_failing_tests)
     pending_failing_test_inspections = 0
     non_test_diagnostics_before_test = 0
+    last_successful_swe_edit_path = ""
     last_required_artifact_hint = ""
     trace: list[dict[str, Any]] = []
     write_task_journal(
@@ -3494,6 +3496,22 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             elif (
                 swe_task
                 and action_type in SWE_EDIT_ACTIONS
+                and code_mutated_since_last_pytest
+                and last_successful_swe_edit_path
+                and str(action.get("path") or "") == last_successful_swe_edit_path
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe repeated same-file edit before verification rejected by supervisor",
+                    "path": last_successful_swe_edit_path,
+                    "instruction": (
+                        "This file was already edited successfully after the last test run. Do not rewrite the same file again before verification. "
+                        "Run the full test command/fallback now. If tests fail, use their output for the next narrow edit."
+                    ),
+                }
+            elif (
+                swe_task
+                and action_type in SWE_EDIT_ACTIONS
                 and not swe_diagnostic_seen
             ):
                 result = {
@@ -3546,7 +3564,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "error": "swe shell inline python rejected by supervisor",
                     "instruction": (
                         "This is a SWE/code task with an explicit workspace. Do not run Python one-liners through shell quoting. "
-                        f"Use action=python with cwd={explicit_workspace!r}, or write a temporary .py script and run that script with shell."
+                        f"The python action explicitly supports cwd/workdir; use action=python with cwd={explicit_workspace!r}, "
+                        "or write a temporary .py script and run that script with shell."
                     ),
                 }
             elif (
@@ -3752,6 +3771,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             failed_verification_paths.discard(path)
             stale_replace_failures_by_path.pop(path, None)
             code_mutated_since_last_pytest = True
+            if swe_task and action_type in SWE_EDIT_ACTIONS:
+                last_successful_swe_edit_path = path
             pending_failing_test_inspections = 0
         if isinstance(result, dict) and (result.get("passing_tests") or result.get("failing_tests")):
             current_passing_tests, current_failing_tests = pytest_result_sets(result)
@@ -3772,6 +3793,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             last_pytest_passing_tests = current_passing_tests
             last_pytest_failing_tests = current_failing_tests
             code_mutated_since_last_pytest = False
+            last_successful_swe_edit_path = ""
             pending_failing_tests = set(current_failing_tests)
             pending_failing_test_inspections = 0
         elif action_type == "bundle_text_files" and isinstance(result, dict) and result.get("ok") is True:
