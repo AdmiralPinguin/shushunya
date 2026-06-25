@@ -2729,6 +2729,62 @@ def main() -> int:
         raise AssertionError(f"repeated failing test guard omitted source candidates: {repeated_test_candidates_payload}")
     print("[ok] repeated failing test guard includes source candidates")
 
+    extra_source_read_stdout = io.StringIO()
+    extra_source_read_config = AgentConfig(
+        task_id=safe_task_id("self-test-extra-source-read-before-edit"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+
+    def fake_slugify_failing_tests(_config: AgentConfig, action: dict) -> dict:
+        return {
+            "ok": False,
+            "returncode": 1,
+            "stdout": '{"results":[{"ok":false,"file":"tests/test_textkit.py","test":"test_slugify_lowercase"}]}',
+            "stderr": "",
+        }
+
+    def fake_extra_source_file(_config: AgentConfig, action: dict) -> dict:
+        path = str(action.get("path") or "")
+        if path.endswith("normalize.py"):
+            return {"ok": True, "path": path, "content": "def slugify(value):\n    return value\n", "size": 32}
+        return {"ok": True, "path": path, "content": "def main(): pass\n", "size": 16}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"read_file","path":"/work/project/textkit/normalize.py","max_bytes":20000}',
+            '{"action":"read_file","path":"/work/project/textkit/cli.py","max_bytes":20000}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_slugify_failing_tests), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=fake_extra_source_file), \
+            contextlib.redirect_stdout(extra_source_read_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        extra_source_read_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            extra_source_read_config,
+        )
+    extra_source_read_payload = json.loads(extra_source_read_stdout.getvalue())
+    extra_source_results = [
+        step.get("result") or {}
+        for step in extra_source_read_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "swe extra source read before edit rejected by supervisor"
+    ]
+    if (
+        extra_source_read_code != 0
+        or not extra_source_results
+        or "/work/project/textkit/normalize.py" not in extra_source_results[-1].get("matching_source_paths", [])
+    ):
+        raise AssertionError(f"extra source read guard failed: {extra_source_read_payload}")
+    print("[ok] extra source read before edit guard")
+
     repeated_assert_stdout = io.StringIO()
     repeated_assert_config = AgentConfig(
         task_id=safe_task_id("self-test-repeated-assert-before-edit"),

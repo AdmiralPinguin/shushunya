@@ -1143,6 +1143,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe test diagnostic inspection stall rejected by supervisor",
     "explicit workspace boundary rejected by supervisor",
     "swe repeated same-file edit before verification rejected by supervisor",
+    "swe extra source read before edit rejected by supervisor",
     "swe shell inline python rejected by supervisor",
     "swe failing tests inspection stall rejected by supervisor",
     "swe passing-test edit rejected by supervisor",
@@ -1492,6 +1493,18 @@ def pytest_interest_terms(tests: set[str]) -> set[str]:
         terms.add(raw_name)
         terms.update(part for part in raw_name.split("_") if len(part) >= 3)
     return terms
+
+
+def source_excerpts_matching_tests(excerpts: dict[str, str], tests: set[str]) -> list[str]:
+    terms = pytest_interest_terms(tests)
+    if not terms:
+        return []
+    matches: list[str] = []
+    for path, content in excerpts.items():
+        lowered = str(content or "").lower()
+        if any(term in lowered for term in terms):
+            matches.append(path)
+    return matches[:10]
 
 
 def replace_edit_declared_symbols(action: dict[str, Any]) -> set[str]:
@@ -3708,6 +3721,27 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "The failing tests are already known and enough source/test inspection has run. "
                         "Do not keep listing or rereading files. Make a narrow code edit that targets failing_tests, "
                         "run the full test command/fallback again, or return final only if no safe fix is possible."
+                    ),
+                }
+            elif (
+                swe_task
+                and pending_failing_tests
+                and not code_mutated_since_last_pytest
+                and action_type == "read_file"
+                and (matching_source_paths := source_excerpts_matching_tests(last_read_file_excerpts, pending_failing_tests))
+                and str(action.get("path") or "") not in matching_source_paths
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe extra source read before edit rejected by supervisor",
+                    "path": str(action.get("path") or ""),
+                    "failing_tests": sorted(pending_failing_tests)[:20],
+                    "matching_source_paths": matching_source_paths,
+                    "available_read_excerpts": {path: last_read_file_excerpts.get(path, "") for path in matching_source_paths[:3]},
+                    "instruction": (
+                        "A previously read source file already contains terms from the current failing_tests. "
+                        "Do not read more source files before the first fix. Use available_read_excerpts to make a narrow "
+                        "write_file/replace_in_file edit, then run the full test/fallback."
                     ),
                 }
             elif (
