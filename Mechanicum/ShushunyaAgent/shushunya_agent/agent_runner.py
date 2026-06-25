@@ -3495,6 +3495,29 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
 
         if action_type == "final":
             message = str(action.get("message", "")).strip()
+            if swe_task and pending_failing_tests and code_mutated_since_last_pytest:
+                warning_payload = {
+                    "failing_tests": sorted(pending_failing_tests)[:20],
+                    "last_edited_path": last_successful_swe_edit_path,
+                }
+                warning_message = (
+                    "Supervisor rejected final because code changed after known failing tests, but the full test/fallback set "
+                    "has not been rerun successfully: "
+                    + json.dumps(warning_payload, ensure_ascii=False)
+                )
+                emit(event_sink, {"type": "warning", "code": "final_swe_full_verification_required", "step": step, "message": warning_message})
+                messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            warning_message
+                            + "\nRun the full requested test command or fallback that covers every current failing_tests entry. "
+                            "Return final only after that full test/fallback reports no failing_tests."
+                        ),
+                    }
+                )
+                continue
             artifact_validation = validate_final_artifacts(config, message)
             final_paths = set(artifact_validation.get("paths") or [])
             missing_required_paths = sorted(required_artifact_paths - final_paths)

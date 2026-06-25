@@ -2833,6 +2833,67 @@ def main() -> int:
         raise AssertionError(f"SWE auto-final should not consume a final model step: {swe_auto_final_payload}")
     print("[ok] SWE auto-final after passing tests")
 
+    swe_final_requires_full_verify_stdout = io.StringIO()
+    swe_final_requires_full_verify_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-final-requires-full-verify"),
+        json_output=True,
+        max_steps=6,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    swe_final_requires_full_verify_python_results = [
+        {
+            "ok": False,
+            "returncode": 1,
+            "stdout": '{"results":[{"ok":false,"file":"tests/test_calc.py","test":"test_new"}]}',
+            "stderr": "",
+        },
+        {
+            "ok": True,
+            "returncode": 0,
+            "stdout": "manual check passed\n",
+            "stderr": "",
+        },
+        {
+            "ok": True,
+            "returncode": 0,
+            "stdout": '{"results":[{"ok":true,"file":"tests/test_calc.py","test":"test_new"}]}',
+            "stderr": "",
+            "passing_tests": ["tests/test_calc.py::test_new"],
+            "failing_tests": [],
+        },
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"replace_in_file","path":"/work/project/calc.py","old":"return 1","new":"return 2"}',
+            '{"action":"python","cwd":"/work/project","code":"assert calc() == 2","timeout":60}',
+            '{"action":"final","message":"premature"}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"final","message":"should not be needed"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=swe_final_requires_full_verify_python_results), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/calc.py"}), \
+            contextlib.redirect_stdout(swe_final_requires_full_verify_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        swe_final_requires_full_verify_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            swe_final_requires_full_verify_config,
+        )
+    swe_final_requires_full_verify_payload = json.loads(swe_final_requires_full_verify_stdout.getvalue())
+    if swe_final_requires_full_verify_code != 0 or swe_final_requires_full_verify_payload.get("message") != "Готово: code edit verified by tests/fallback.":
+        raise AssertionError(
+            "SWE final after focused check should require full verification: "
+            f"code={swe_final_requires_full_verify_code}, payload={swe_final_requires_full_verify_payload}"
+        )
+    if len(swe_final_requires_full_verify_payload.get("steps", [])) != 4:
+        raise AssertionError(f"SWE final rejection should force one full verification step: {swe_final_requires_full_verify_payload}")
+    print("[ok] SWE final requires full verification after edit")
+
     failing_stall_stdout = io.StringIO()
     failing_stall_config = AgentConfig(
         task_id=safe_task_id("self-test-failing-test-stall"),
@@ -2915,31 +2976,41 @@ def main() -> int:
     same_file_edit_config = AgentConfig(
         task_id=safe_task_id("self-test-same-file-edit-before-test"),
         json_output=True,
-        max_steps=4,
+        max_steps=5,
         inject_memory=False,
         archive_internal_steps=False,
         shell_enabled=True,
     )
 
-    def fake_same_file_tests(_config: AgentConfig, action: dict) -> dict:
-        return {
+    same_file_test_results = [
+        {
             "ok": False,
             "returncode": 1,
             "stdout": '{"results":[{"ok":true,"file":"tests/test_calc.py","test":"test_old"},{"ok":false,"file":"tests/test_calc.py","test":"test_new"}]}',
             "stderr": "",
-        }
+        },
+        {
+            "ok": True,
+            "returncode": 0,
+            "stdout": '{"results":[{"ok":true,"file":"tests/test_calc.py","test":"test_old"},{"ok":true,"file":"tests/test_calc.py","test":"test_new"}]}',
+            "stderr": "",
+            "passing_tests": ["tests/test_calc.py::test_old", "tests/test_calc.py::test_new"],
+            "failing_tests": [],
+        },
+    ]
 
     with mock.patch.object(agent_runner, "chat", side_effect=[
             '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
             '{"action":"replace_in_file","path":"/work/project/calc.py","old":"old","new":"new","count":1}',
             '{"action":"write_file","path":"/work/project/calc.py","content":"whole rewrite"}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
             '{"action":"final","message":"blocked"}',
     ]), mock.patch.object(agent_runner, "run_shell", return_value={
             "ok": False,
             "returncode": 1,
             "stdout": "",
             "stderr": "/usr/bin/python3: No module named pytest\n",
-    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_same_file_tests), \
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=same_file_test_results), \
             mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/calc.py"}), \
             contextlib.redirect_stdout(same_file_edit_stdout), \
             contextlib.redirect_stderr(io.StringIO()):
@@ -2960,22 +3031,39 @@ def main() -> int:
     inspect_after_edit_config = AgentConfig(
         task_id=safe_task_id("self-test-inspection-after-edit-before-test"),
         json_output=True,
-        max_steps=4,
+        max_steps=5,
         inject_memory=False,
         archive_internal_steps=False,
         shell_enabled=True,
     )
+    inspect_after_edit_test_results = [
+        {
+            "ok": False,
+            "returncode": 1,
+            "stdout": '{"results":[{"ok":true,"file":"tests/test_calc.py","test":"test_old"},{"ok":false,"file":"tests/test_calc.py","test":"test_new"}]}',
+            "stderr": "",
+        },
+        {
+            "ok": True,
+            "returncode": 0,
+            "stdout": '{"results":[{"ok":true,"file":"tests/test_calc.py","test":"test_old"},{"ok":true,"file":"tests/test_calc.py","test":"test_new"}]}',
+            "stderr": "",
+            "passing_tests": ["tests/test_calc.py::test_old", "tests/test_calc.py::test_new"],
+            "failing_tests": [],
+        },
+    ]
     with mock.patch.object(agent_runner, "chat", side_effect=[
             '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
             '{"action":"replace_in_file","path":"/work/project/calc.py","old":"old","new":"new","count":1}',
             '{"action":"read_file","path":"/work/project/calc.py","max_bytes":20000}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
             '{"action":"final","message":"blocked"}',
     ]), mock.patch.object(agent_runner, "run_shell", return_value={
             "ok": False,
             "returncode": 1,
             "stdout": "",
             "stderr": "/usr/bin/python3: No module named pytest\n",
-    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_same_file_tests), \
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=inspect_after_edit_test_results), \
             mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/calc.py"}), \
             contextlib.redirect_stdout(inspect_after_edit_stdout), \
             contextlib.redirect_stderr(io.StringIO()):
