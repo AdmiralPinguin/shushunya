@@ -2979,6 +2979,9 @@ def main() -> int:
         )
     if len(swe_final_requires_full_verify_payload.get("steps", [])) != 4:
         raise AssertionError(f"SWE final rejection should force one full verification step: {swe_final_requires_full_verify_payload}")
+    focused_verify_result = (swe_final_requires_full_verify_payload.get("steps") or [{}, {}, {}])[2].get("result") or {}
+    if focused_verify_result.get("error") != "swe focused verification after failing tests rejected by supervisor":
+        raise AssertionError(f"SWE focused verification after failing tests was not rejected: {swe_final_requires_full_verify_payload}")
     print("[ok] SWE final requires full verification after edit")
 
     failing_stall_stdout = io.StringIO()

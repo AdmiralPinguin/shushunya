@@ -4058,6 +4058,25 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "Treat it as a failed verification. Do not catch AssertionError in verification code; fix the code under test, "
                 "then run an uncaught assert/full test command."
             )
+        if (
+            swe_task
+            and pending_failing_tests
+            and code_mutated_since_last_pytest
+            and (action_runs_test_diagnostic(action_type, action) or action_looks_like_python_verification(action_type, action))
+            and isinstance(result, dict)
+            and result.get("ok") is True
+            and not (result.get("passing_tests") or result.get("failing_tests"))
+        ):
+            result = dict(result)
+            result["ok"] = False
+            result["returncode"] = result.get("returncode") or 1
+            result["error"] = "swe focused verification after failing tests rejected by supervisor"
+            result["known_failing_tests"] = sorted(pending_failing_tests)[:20]
+            result["supervisor_instruction"] = (
+                "Known failing_tests existed before the last code edit, but this verification did not report the full "
+                "existing test/fallback set. Do not rely on newly written ad-hoc tests or a focused script as completion proof. "
+                "Run the requested full test command or the pytest fallback that enumerates existing test files and reports no failing_tests."
+            )
 
         action_duration_sec = round(time.time() - action_started, 3)
         supervisor_rejection = (
