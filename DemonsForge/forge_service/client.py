@@ -223,6 +223,29 @@ class DemonsForgeClient:
     def refresh_project(self, project_id: str) -> dict[str, Any]:
         return self._request("POST", f"/forge/projects/{project_id}/refresh")
 
+    def refine_project(
+        self,
+        project_id: str,
+        artifact_id: str | None = None,
+        prompt: str | None = None,
+        strength: float = 0.62,
+        steps: int = 14,
+        seed: int | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        suffix = "?dry_run=true" if dry_run else ""
+        return self._request(
+            "POST",
+            f"/forge/projects/{project_id}/refine{suffix}",
+            json={
+                "artifact_id": artifact_id,
+                "prompt": prompt,
+                "strength": strength,
+                "steps": steps,
+                "seed": seed,
+            },
+        )
+
     def create_job(self, spec: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
         suffix = "?dry_run=true" if dry_run else ""
         return self._request("POST", f"/forge/jobs{suffix}", json=spec)

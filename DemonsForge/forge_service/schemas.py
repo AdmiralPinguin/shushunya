@@ -187,6 +187,14 @@ class ProjectSpec(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class ProjectRefineRequest(BaseModel):
+    artifact_id: str | None = None
+    prompt: str | None = None
+    strength: float = Field(default=0.62, ge=0.0, le=1.0)
+    steps: int = Field(default=14, ge=1, le=config.MAX_STEPS)
+    seed: int | None = None
+
+
 class MemoryProposal(BaseModel):
     proposal: str = Field(min_length=1)
     evidence: str | None = None

@@ -29,7 +29,7 @@ from .registries import (
     discover_models,
 )
 from .reports import list_reports, prune_reports, report_path, summarize_reports
-from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest, ProjectPlanRequest, utc_now
+from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest, ProjectPlanRequest, ProjectRefineRequest, ProjectStep, utc_now
 from .storage import ForgeStore
 from .thinker import PlannerThinker
 
@@ -706,3 +706,97 @@ def refresh_forge_project(project_id: str) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="project not found")
     project = _refresh_project_from_jobs(project)
     return project.model_dump(mode="json")
+
+
+@app.post("/forge/projects/{project_id}/refine")
+def refine_forge_project(project_id: str, request: ProjectRefineRequest, dry_run: bool = False) -> dict[str, object]:
+    try:
+        project = get_project(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    project = _refresh_project_from_jobs(project)
+    artifact_id = request.artifact_id
+    source_step_id = None
+    if artifact_id is None:
+        for step in project.steps:
+            if step.status == "succeeded" and step.artifacts:
+                artifact_id = step.artifacts[0]
+                source_step_id = step.id
+                break
+    else:
+        for step in project.steps:
+            if artifact_id in step.artifacts:
+                source_step_id = step.id
+                break
+    if artifact_id is None:
+        raise HTTPException(status_code=400, detail="project has no artifact to refine")
+    artifact = store.get_artifact(artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    character_prompt = ""
+    if project.character_profile:
+        character_prompt = str(project.character_profile.get("canonical_prompt") or "")
+    prompt = request.prompt or (
+        f"{project.request}, SDXL img2img refinement, keep small feline silhouette, "
+        "increase asymmetry, expose more dark mutated demon flesh, reduce full blue fur coverage, "
+        "preserve only a few bright blue cat fragments, make the body-horror design more readable"
+    )
+    if character_prompt:
+        prompt = f"{prompt}, {character_prompt}"
+    spec = JobSpec(
+        type="img2img",
+        engine="sdxl",
+        model="stable-diffusion-xl-base-1.0",
+        prompt=prompt,
+        negative_prompt=(
+            str(project.character_profile.get("negative_prompt"))
+            if project.character_profile and project.character_profile.get("negative_prompt")
+            else "low quality, blurry, distorted"
+        ),
+        width=512,
+        height=512,
+        quality_preset="edit_balanced",
+        steps=request.steps,
+        guidance=7.0,
+        sampler="default",
+        scheduler="native",
+        seed=request.seed,
+        strength=request.strength,
+        source_images=[artifact.path],
+        safety={
+            "project_id": project.id,
+            "project_role": "sdxl_refine",
+            "source_artifact_id": artifact_id,
+            "source_step_id": source_step_id,
+            "character_profile": {
+                "id": project.character_profile.get("id"),
+                "name": project.character_profile.get("name"),
+                "must_preserve": project.character_profile.get("must_preserve", []),
+                "avoid": project.character_profile.get("avoid", []),
+                "profile_source": "quality_assets/character_profiles.json",
+            }
+            if project.character_profile
+            else None,
+        },
+    )
+    validation = forge_queue.validate(spec)
+    step = ProjectStep(
+        id=f"refine_{len([item for item in project.steps if item.phase == 'refine']) + 1}",
+        phase="refine",
+        title="SDXL refine",
+        role="sdxl_refine",
+        spec=spec,
+        depends_on=[source_step_id] if source_step_id else [],
+        status="planned",
+    )
+    if dry_run:
+        return {"project_id": project.id, "step": step.model_dump(mode="json"), "validation": validation}
+    record = forge_queue.submit(spec)
+    step.job_id = record.id
+    step.status = record.status.value
+    project.steps.append(step)
+    project.status = "submitted"
+    save_project(project)
+    return {"project": project.model_dump(mode="json"), "step": step.model_dump(mode="json"), "job": record.model_dump()}
