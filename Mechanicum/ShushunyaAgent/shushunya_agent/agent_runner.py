@@ -81,7 +81,7 @@ SANDBOX_RUNNER = os.environ.get(
 )
 MAX_STEPS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_STEPS", "200"))
 MAX_RUNTIME_SEC = int(os.environ.get("SHUSHUNYA_AGENT_MAX_RUNTIME_SEC", "1800"))
-MAX_MODEL_TOKENS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "1024"))
+MAX_MODEL_TOKENS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "2048"))
 MAX_CONTEXT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_CONTEXT_CHARS", "8000"))
 SHELL_TIMEOUT = int(os.environ.get("SHUSHUNYA_AGENT_SHELL_TIMEOUT", "60"))
 MAX_TOOL_OUTPUT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_TOOL_OUTPUT_CHARS", "12000"))
@@ -1107,6 +1107,9 @@ def salvage_loose_action_json(raw: str) -> dict[str, Any] | None:
         if not code:
             return None
         action: dict[str, Any] = {"action": "python", "code": code}
+        cwd_match = re.search(r'"cwd"\s*:\s*"([^"]+)"', text)
+        if cwd_match:
+            action["cwd"] = cwd_match.group(1)
         timeout_match = re.search(r'"timeout"\s*:\s*(\d+)', text)
         if timeout_match:
             action["timeout"] = int(timeout_match.group(1))

@@ -1196,10 +1196,14 @@ def main() -> int:
     if repaired_action != {"action": "final", "message": "repaired"}:
         raise AssertionError(f"unexpected repaired action: {repaired_action}")
     loose_python = (
-        '{"action":"python","code":"print(\\"ok\\")\\ntext = "quoted value"\\nprint(text)","timeout":60}'
+        '{"action":"python","cwd":"/work/project","code":"print(\\"ok\\")\\ntext = "quoted value"\\nprint(text)","timeout":60}'
     )
     loose_action = repair_action_json(config, loose_python, ValueError("Expecting ',' delimiter"))
-    if loose_action.get("action") != "python" or 'text = "quoted value"' not in loose_action.get("code", ""):
+    if (
+        loose_action.get("action") != "python"
+        or loose_action.get("cwd") != "/work/project"
+        or 'text = "quoted value"' not in loose_action.get("code", "")
+    ):
         raise AssertionError(f"loose python action was not salvaged: {loose_action}")
     loose_double_escaped = '{"action":"python","code":"print(\\"one\\")\\\\nprint(\\"two\\")","timeout":60}'
     loose_double_action = repair_action_json(config, loose_double_escaped, ValueError("Expecting ',' delimiter"))
