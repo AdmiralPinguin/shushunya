@@ -104,6 +104,7 @@ Core endpoints:
 - `GET /forge/projects/{project_id}`
 - `POST /forge/projects/{project_id}/refresh`
 - `POST /forge/projects/{project_id}/refine`
+- `POST /forge/projects/{project_id}/inpaint`
 - `POST /forge/jobs`
 - `GET /forge/jobs`
 - `GET /forge/queue`
@@ -263,10 +264,14 @@ Architecture:
   `runtime/projects`, and keeps selection manual until a real semantic/vision
   evaluator is configured. This is the first layer for workflows where the
   forge-agent creates several concepts or panels, then later refines selected
-  artifacts with SDXL. Character concept batches default to Flux first concepts;
-  `engine_strategy=mixed_concept` is an explicit diagnostic mode for comparing
-  Flux against SDXL txt2img, while SDXL remains the preferred refine/edit
-  workhorse after a source artifact exists.
+  artifacts with SDXL. `POST /forge/projects/{project_id}/refine` creates a
+  global SDXL `img2img` pass; `POST /forge/projects/{project_id}/inpaint`
+  creates a localized SDXL `inpaint` pass with deterministic local masks
+  (`right_body`, `body`, `head_right`, `background`) saved under
+  `runtime/projects/<project_id>/masks`. Character concept batches default to
+  Flux first concepts; `engine_strategy=mixed_concept` is an explicit
+  diagnostic mode for comparing Flux against SDXL txt2img, while SDXL remains
+  the preferred refine/edit workhorse after a source artifact exists.
 - `forge_service/thinker.py`: optional OpenAI-compatible planner thinker. It is
   advisory only: the deterministic planner builds the baseline plan first, the
   thinker can return a compact JSON patch, and Forge filters plus validates that

@@ -18,6 +18,69 @@ def _project_path(project_id: str) -> Path:
     return config.PROJECTS_DIR / f"{safe}.json"
 
 
+def _project_mask_dir(project_id: str) -> Path:
+    safe = Path(str(project_id)).name
+    if safe != project_id or not safe:
+        raise ValueError("project_id must be a basename")
+    return config.PROJECTS_DIR / safe / "masks"
+
+
+def create_project_mask(project_id: str, artifact_id: str, source_path: str, mask_mode: str) -> Path:
+    """Create a deterministic inpaint mask for project-level SDXL edit passes."""
+    from PIL import Image, ImageDraw
+
+    source = Path(source_path).resolve()
+    root = config.ROOT.resolve()
+    try:
+        source.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("source artifact must be inside DemonsForge") from exc
+    if not source.is_file():
+        raise ValueError("source artifact file does not exist")
+
+    with Image.open(source) as image:
+        width, height = image.size
+    mask = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(mask)
+
+    if mask_mode == "right_body":
+        draw.rounded_rectangle(
+            (int(width * 0.42), int(height * 0.14), int(width * 0.96), int(height * 0.92)),
+            radius=max(8, int(min(width, height) * 0.08)),
+            fill=255,
+        )
+        draw.ellipse(
+            (int(width * 0.28), int(height * 0.38), int(width * 0.92), int(height * 0.98)),
+            fill=255,
+        )
+    elif mask_mode == "body":
+        draw.ellipse(
+            (int(width * 0.16), int(height * 0.28), int(width * 0.88), int(height * 0.98)),
+            fill=255,
+        )
+    elif mask_mode == "head_right":
+        draw.rounded_rectangle(
+            (int(width * 0.48), int(height * 0.02), int(width * 0.94), int(height * 0.48)),
+            radius=max(8, int(min(width, height) * 0.07)),
+            fill=255,
+        )
+    elif mask_mode == "background":
+        mask.paste(255)
+        draw.ellipse(
+            (int(width * 0.12), int(height * 0.08), int(width * 0.88), int(height * 0.98)),
+            fill=0,
+        )
+    else:
+        raise ValueError(f"unsupported mask_mode: {mask_mode}")
+
+    target_dir = _project_mask_dir(project_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    safe_artifact = Path(str(artifact_id)).name
+    target = target_dir / f"{safe_artifact}-{mask_mode}.png"
+    mask.save(target)
+    return target
+
+
 def _profile_by_id(profile_id: str | None) -> dict[str, Any] | None:
     if not profile_id:
         return None

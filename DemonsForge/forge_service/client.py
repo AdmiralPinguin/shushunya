@@ -228,7 +228,7 @@ class DemonsForgeClient:
         project_id: str,
         artifact_id: str | None = None,
         prompt: str | None = None,
-        strength: float = 0.62,
+        strength: float = 0.42,
         steps: int = 14,
         seed: int | None = None,
         dry_run: bool = False,
@@ -240,6 +240,31 @@ class DemonsForgeClient:
             json={
                 "artifact_id": artifact_id,
                 "prompt": prompt,
+                "strength": strength,
+                "steps": steps,
+                "seed": seed,
+            },
+        )
+
+    def inpaint_project(
+        self,
+        project_id: str,
+        artifact_id: str | None = None,
+        prompt: str | None = None,
+        mask_mode: str = "right_body",
+        strength: float = 0.65,
+        steps: int = 18,
+        seed: int | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        suffix = "?dry_run=true" if dry_run else ""
+        return self._request(
+            "POST",
+            f"/forge/projects/{project_id}/inpaint{suffix}",
+            json={
+                "artifact_id": artifact_id,
+                "prompt": prompt,
+                "mask_mode": mask_mode,
                 "strength": strength,
                 "steps": steps,
                 "seed": seed,

@@ -15,7 +15,7 @@ from .archive_memory import ArchiveMemoryClient
 from .characters import character_profiles
 from .evaluator import evaluate_artifact
 from .planner import plan_txt2img
-from .projects import get_project, list_projects, plan_project, save_project
+from .projects import create_project_mask, get_project, list_projects, plan_project, save_project
 from .queue import ForgeQueue
 from .registries import (
     ASPECT_PRESETS,
@@ -29,7 +29,17 @@ from .registries import (
     discover_models,
 )
 from .reports import list_reports, prune_reports, report_path, summarize_reports
-from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest, ProjectPlanRequest, ProjectRefineRequest, ProjectStep, utc_now
+from .schemas import (
+    JobCloneRequest,
+    JobSpec,
+    MemoryProposal,
+    PlanRequest,
+    ProjectInpaintRequest,
+    ProjectPlanRequest,
+    ProjectRefineRequest,
+    ProjectStep,
+    utc_now,
+)
 from .storage import ForgeStore
 from .thinker import PlannerThinker
 
@@ -73,6 +83,37 @@ def _refresh_project_from_jobs(project):
     if changed:
         save_project(project)
     return project
+
+
+def _character_safety(project) -> dict[str, object] | None:
+    if not project.character_profile:
+        return None
+    return {
+        "id": project.character_profile.get("id"),
+        "name": project.character_profile.get("name"),
+        "must_preserve": project.character_profile.get("must_preserve", []),
+        "avoid": project.character_profile.get("avoid", []),
+        "profile_source": "quality_assets/character_profiles.json",
+    }
+
+
+def _select_project_artifact(project, artifact_id: str | None, action: str) -> tuple[str, str | None]:
+    source_step_id = None
+    selected_artifact = artifact_id
+    if selected_artifact is None:
+        for step in project.steps:
+            if step.status == "succeeded" and step.artifacts:
+                selected_artifact = step.artifacts[0]
+                source_step_id = step.id
+                break
+    else:
+        for step in project.steps:
+            if selected_artifact in step.artifacts:
+                source_step_id = step.id
+                break
+    if selected_artifact is None:
+        raise HTTPException(status_code=400, detail=f"project has no artifact to {action}")
+    return selected_artifact, source_step_id
 
 
 @app.get("/health")
@@ -717,21 +758,7 @@ def refine_forge_project(project_id: str, request: ProjectRefineRequest, dry_run
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
     project = _refresh_project_from_jobs(project)
-    artifact_id = request.artifact_id
-    source_step_id = None
-    if artifact_id is None:
-        for step in project.steps:
-            if step.status == "succeeded" and step.artifacts:
-                artifact_id = step.artifacts[0]
-                source_step_id = step.id
-                break
-    else:
-        for step in project.steps:
-            if artifact_id in step.artifacts:
-                source_step_id = step.id
-                break
-    if artifact_id is None:
-        raise HTTPException(status_code=400, detail="project has no artifact to refine")
+    artifact_id, source_step_id = _select_project_artifact(project, request.artifact_id, "refine")
     artifact = store.get_artifact(artifact_id)
     if artifact is None:
         raise HTTPException(status_code=404, detail="artifact not found")
@@ -766,15 +793,7 @@ def refine_forge_project(project_id: str, request: ProjectRefineRequest, dry_run
             "project_role": "sdxl_refine",
             "source_artifact_id": artifact_id,
             "source_step_id": source_step_id,
-            "character_profile": {
-                "id": project.character_profile.get("id"),
-                "name": project.character_profile.get("name"),
-                "must_preserve": project.character_profile.get("must_preserve", []),
-                "avoid": project.character_profile.get("avoid", []),
-                "profile_source": "quality_assets/character_profiles.json",
-            }
-            if project.character_profile
-            else None,
+            "character_profile": _character_safety(project),
         },
     )
     validation = forge_queue.validate(spec)
@@ -796,3 +815,88 @@ def refine_forge_project(project_id: str, request: ProjectRefineRequest, dry_run
     project.status = "submitted"
     save_project(project)
     return {"project": project.model_dump(mode="json"), "step": step.model_dump(mode="json"), "job": record.model_dump()}
+
+
+@app.post("/forge/projects/{project_id}/inpaint")
+def inpaint_forge_project(project_id: str, request: ProjectInpaintRequest, dry_run: bool = False) -> dict[str, object]:
+    try:
+        project = get_project(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    project = _refresh_project_from_jobs(project)
+    artifact_id, source_step_id = _select_project_artifact(project, request.artifact_id, "inpaint")
+    artifact = store.get_artifact(artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    try:
+        mask_path = create_project_mask(project.id, artifact_id, artifact.path, request.mask_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    prompt = request.prompt or (
+        "SDXL inpaint masked corrupted regions only, replace the masked area with asymmetric dark mutated "
+        "demonic flesh, scales, feathers, small tentacles, embedded closed eyes, bone spikes, turquoise violet "
+        "warp glow, preserve the unmasked feline silhouette and any remaining bright blue fur fragments, "
+        "organic body horror texture, no mechanical pattern, no text"
+    )
+    spec = JobSpec(
+        type="inpaint",
+        engine="sdxl",
+        model="stable-diffusion-xl-base-1.0",
+        prompt=prompt,
+        negative_prompt=(
+            str(project.character_profile.get("negative_prompt"))
+            if project.character_profile and project.character_profile.get("negative_prompt")
+            else "low quality, blurry, distorted, mechanical pattern, decorative armor"
+        ),
+        width=512,
+        height=512,
+        quality_preset="inpaint_precise",
+        steps=request.steps,
+        guidance=7.0,
+        sampler="default",
+        scheduler="native",
+        seed=request.seed,
+        strength=request.strength,
+        source_images=[artifact.path],
+        mask_image=str(mask_path),
+        safety={
+            "project_id": project.id,
+            "project_role": "sdxl_masked_inpaint",
+            "source_artifact_id": artifact_id,
+            "source_step_id": source_step_id,
+            "mask_mode": request.mask_mode,
+            "mask_path": str(mask_path),
+            "character_profile": _character_safety(project),
+        },
+    )
+    validation = forge_queue.validate(spec)
+    step = ProjectStep(
+        id=f"inpaint_{len([item for item in project.steps if item.phase == 'inpaint']) + 1}",
+        phase="inpaint",
+        title="SDXL masked inpaint",
+        role="sdxl_masked_inpaint",
+        spec=spec,
+        depends_on=[source_step_id] if source_step_id else [],
+        status="planned",
+    )
+    if dry_run:
+        return {
+            "project_id": project.id,
+            "step": step.model_dump(mode="json"),
+            "validation": validation,
+            "mask_path": str(mask_path),
+        }
+    record = forge_queue.submit(spec)
+    step.job_id = record.id
+    step.status = record.status.value
+    project.steps.append(step)
+    project.status = "submitted"
+    save_project(project)
+    return {
+        "project": project.model_dump(mode="json"),
+        "step": step.model_dump(mode="json"),
+        "job": record.model_dump(),
+        "mask_path": str(mask_path),
+    }
