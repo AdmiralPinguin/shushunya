@@ -2706,7 +2706,7 @@ def main() -> int:
             "returncode": 1,
             "stdout": "",
             "stderr": "/usr/bin/python3: No module named pytest\n",
-    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_regression_fallback), \
+    }) as mocked_regression_shell, mock.patch.object(agent_runner, "python_tool", side_effect=fake_regression_fallback), \
             mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/calc.py"}), \
             contextlib.redirect_stdout(regression_stdout), \
             contextlib.redirect_stderr(io.StringIO()):
@@ -2723,9 +2723,13 @@ def main() -> int:
     if (
         regression_code != 0
         or len(regression_results) != 2
+        or mocked_regression_shell.call_count != 1
         or regression_results[-1].get("regression_tests") != ["tests/test_calc.py::test_old"]
     ):
-        raise AssertionError(f"pytest regression tracking failed: code={regression_code}, payload={regression_payload}")
+        raise AssertionError(
+            "pytest regression tracking failed: "
+            f"code={regression_code}, shell_calls={mocked_regression_shell.call_count}, payload={regression_payload}"
+        )
     print("[ok] pytest regression tests tracked")
 
     protected_edit_stdout = io.StringIO()

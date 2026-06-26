@@ -3587,6 +3587,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     explicit_workspace = explicit_workspace_from_task(original_task)
     last_pytest_passing_tests, last_pytest_failing_tests = latest_pytest_sets_from_text(original_task)
     code_mutated_since_last_pytest = False
+    pytest_unavailable_seen = False
     pending_failing_tests = set(last_pytest_failing_tests)
     pending_failing_test_inspections = 0
     pending_failing_test_read_paths: set[str] = set()
@@ -4382,15 +4383,34 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     ),
                 }
             elif action_type == "shell":
-                result = run_shell(config, str(action.get("cmd", "")), action.get("timeout"), bool(action.get("approved", False)))
+                shell_cmd = str(action.get("cmd", ""))
+                skip_known_missing_pytest = (
+                    swe_task
+                    and explicit_workspace
+                    and pytest_unavailable_seen
+                    and looks_like_pytest_shell(shell_cmd)
+                )
+                if skip_known_missing_pytest:
+                    result = {
+                        "ok": False,
+                        "returncode": 127,
+                        "stdout": "",
+                        "stderr": "pytest is unavailable in this run; using simple_pytest_runner fallback directly",
+                        "supervisor_instruction": (
+                            "Pytest was already unavailable earlier in this run. "
+                            "The agent skipped retrying the identical unavailable pytest tool and used fallback verification."
+                        ),
+                    }
+                else:
+                    result = run_shell(config, shell_cmd, action.get("timeout"), bool(action.get("approved", False)))
                 combined_shell_output = f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}".lower() if isinstance(result, dict) else ""
                 if (
                     swe_task
                     and explicit_workspace
                     and isinstance(result, dict)
                     and result.get("ok") is False
-                    and looks_like_pytest_shell(str(action.get("cmd", "")))
-                    and pytest_unavailable_output(combined_shell_output)
+                    and looks_like_pytest_shell(shell_cmd)
+                    and (skip_known_missing_pytest or pytest_unavailable_output(combined_shell_output))
                 ):
                     fallback = python_tool(
                         config,
@@ -4408,6 +4428,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "fallback": "simple_pytest_runner",
                         "original_shell": result_for_model(action_type, result, config),
                     }
+                    pytest_unavailable_seen = True
             elif action_type in FILE_ACTIONS:
                 if swe_task and pending_failing_tests and not code_mutated_since_last_pytest and action_type == "read_file":
                     pending_read_path = str(action.get("path") or "")
