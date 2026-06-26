@@ -1492,6 +1492,22 @@ def action_workspace_violations(action: dict[str, Any], workspace: str) -> list[
     return violations
 
 
+def corrected_required_artifact_path(path: str, workspace: str, required_paths: list[str]) -> str:
+    raw_path = str(path or "").strip()
+    if not sandbox_path_outside_workspace(raw_path, workspace):
+        return ""
+    basename = posixpath.basename(posixpath.normpath(raw_path))
+    if not basename:
+        return ""
+    matches = [
+        candidate
+        for candidate in required_paths
+        if posixpath.basename(posixpath.normpath(str(candidate or ""))) == basename
+        and not sandbox_path_outside_workspace(str(candidate or ""), workspace)
+    ]
+    return matches[0] if len(matches) == 1 else ""
+
+
 def source_candidates_from_listing(result: dict[str, Any]) -> list[str]:
     candidates: list[str] = []
     seen: set[str] = set()
@@ -3937,6 +3953,25 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 }
             )
             continue
+        if action_type in {"read_file", "file_info", "verify_text_file"} and explicit_workspace:
+            corrected_path = corrected_required_artifact_path(
+                str(action.get("path") or ""),
+                explicit_workspace,
+                required_artifact_path_list,
+            )
+            if corrected_path:
+                original_path = str(action.get("path") or "")
+                action["path"] = corrected_path
+                emit(
+                    event_sink,
+                    {
+                        "type": "warning",
+                        "code": "workspace_path_autocorrected",
+                        "step": step,
+                        "message": f"Corrected workspace artifact path from {original_path} to {corrected_path}",
+                        "display_message": f"Исправил опечатку в пути к {display_path(corrected_path)}.",
+                    },
+                )
         forced_supervisor_result: dict[str, Any] | None = None
         if repair_source_path:
             repair_violation = ""

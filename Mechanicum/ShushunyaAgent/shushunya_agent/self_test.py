@@ -3704,6 +3704,50 @@ def main() -> int:
     if agent_runner.action_workspace_violations({"path": "/work/project/file.py", "cwd": "/work/project"}, "/work/project"):
         raise AssertionError("valid workspace paths were rejected")
     print("[ok] explicit workspace boundary guard")
+    workspace_autocorrect_stdout = io.StringIO()
+    workspace_autocorrect_events: list[dict] = []
+    workspace_autocorrect_config = AgentConfig(
+        task_id=safe_task_id("self-test-workspace-path-autocorrect"),
+        json_output=True,
+        max_steps=2,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+
+    def fake_workspace_autocorrect_verify(_config: AgentConfig, action: dict) -> dict:
+        if action.get("path") != "/work/project/audit.json":
+            raise AssertionError(f"workspace path was not autocorrected before verify: {action}")
+        return {"ok": True, "path": action.get("path"), "failures": [], "size": 42, "chars": 42}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"verify_text_file","path":"/work/projct/audit.json","must_contain":["status"],"min_bytes":1}',
+            '{"action":"final","message":"Готово: /work/project/audit.json"}',
+    ]), mock.patch.object(agent_runner, "file_tool", return_value={
+            "ok": True,
+            "path": "/work/project/audit.json",
+            "exists": True,
+            "type": "file",
+            "size": 42,
+    }), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_workspace_autocorrect_verify), \
+            contextlib.redirect_stdout(workspace_autocorrect_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        workspace_autocorrect_code = run_agent(
+            "Required artifacts: /work/project/audit.json\n\nРабочий каталог для этой задачи: /work/project",
+            workspace_autocorrect_config,
+            event_sink=workspace_autocorrect_events.append,
+        )
+    workspace_autocorrect_payload = json.loads(workspace_autocorrect_stdout.getvalue())
+    if (
+        workspace_autocorrect_code != 0
+        or not any(event.get("code") == "workspace_path_autocorrected" for event in workspace_autocorrect_events)
+        or any((step.get("result") or {}).get("error") == "explicit workspace boundary rejected by supervisor" for step in workspace_autocorrect_payload.get("steps", []))
+    ):
+        raise AssertionError(
+            "workspace required artifact path autocorrect failed: "
+            f"code={workspace_autocorrect_code}, payload={workspace_autocorrect_payload}, events={workspace_autocorrect_events}"
+        )
+    print("[ok] workspace required artifact path autocorrect")
     escaped_workspace_task = "Рабочий каталог для этой задачи: /work/project\\nВсе файлы внутри него"
     if agent_runner.explicit_workspace_from_task(escaped_workspace_task) != "/work/project":
         raise AssertionError("explicit workspace parser kept escaped newline suffix")
