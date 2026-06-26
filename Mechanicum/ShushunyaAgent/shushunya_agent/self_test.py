@@ -2909,6 +2909,65 @@ def main() -> int:
         raise AssertionError(f"repeated failing test guard omitted source candidates: {repeated_test_candidates_payload}")
     print("[ok] repeated failing test guard includes source candidates")
 
+    source_hint_read_stdout = io.StringIO()
+    source_hint_read_config = AgentConfig(
+        task_id=safe_task_id("self-test-source-hint-read-nudge"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+
+    def fake_source_hint_failing_tests(_config: AgentConfig, action: dict) -> dict:
+        return {
+            "ok": False,
+            "returncode": 1,
+            "stdout": json.dumps({
+                "results": [{"ok": False, "file": "tests/test_calc.py", "test": "test_add"}],
+                "source_hints": ["/work/project/calc.py"],
+            }),
+            "stderr": "",
+        }
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"read_file","path":"/work/project/calc.py","max_bytes":20000}',
+            '{"action":"final","message":"blocked"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_source_hint_failing_tests), \
+            mock.patch.object(agent_runner, "file_tool", return_value={
+                "ok": True,
+                "path": "/work/project/calc.py",
+                "content": "def add(a, b):\n    return a - b\n",
+                "size": 32,
+            }), \
+            contextlib.redirect_stdout(source_hint_read_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        source_hint_read_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            source_hint_read_config,
+        )
+    source_hint_read_payload = json.loads(source_hint_read_stdout.getvalue())
+    read_results = [
+        step.get("result") or {}
+        for step in source_hint_read_payload.get("steps", [])
+        if (step.get("action") or {}).get("action") == "read_file"
+    ]
+    if (
+        source_hint_read_code != 0
+        or not read_results
+        or read_results[-1].get("failing_tests") != ["tests/test_calc.py::test_add"]
+        or read_results[-1].get("candidate_source_paths") != ["/work/project/calc.py"]
+        or "narrow write_file/replace_in_file edit" not in str(read_results[-1].get("supervisor_instruction") or "")
+    ):
+        raise AssertionError(f"source hint read nudge failed: code={source_hint_read_code}, payload={source_hint_read_payload}")
+    print("[ok] source hint read nudges immediate edit")
+
     extra_source_read_stdout = io.StringIO()
     extra_source_read_config = AgentConfig(
         task_id=safe_task_id("self-test-extra-source-read-before-edit"),
