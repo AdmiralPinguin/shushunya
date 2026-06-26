@@ -4703,7 +4703,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "result": result_for_model(action_type, result, config),
             },
         )
-        trace.append({"step": step, "action": action, "duration_sec": action_duration_sec, "result": result})
+        trace_item = {"step": step, "action": action, "duration_sec": action_duration_sec, "result": result}
+        if repair_source_path:
+            trace_item["mode"] = "swe_repair"
+            trace_item["mode_source_path"] = repair_source_path
+        trace.append(trace_item)
         if action_type == "write_file" and isinstance(result, dict) and result.get("ok") is True:
             path = str(action.get("path") or "")
             if path:

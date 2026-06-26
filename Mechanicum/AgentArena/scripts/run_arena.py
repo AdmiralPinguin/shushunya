@@ -36,6 +36,7 @@ class RunResult:
     error: str = ""
     log_path: str = ""
     workspace: str = ""
+    orchestration: dict[str, Any] | None = None
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -251,6 +252,51 @@ def run_openhands(agent: dict[str, Any], workspace: Path, log_path: Path) -> tup
     return 78, "adapter not configured"
 
 
+def analyze_shushunya_orchestration(log_path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(log_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"ok": False, "error": "log is not readable JSON"}
+    response = payload.get("response") if isinstance(payload.get("response"), dict) else {}
+    steps = response.get("steps") if isinstance(response.get("steps"), list) else []
+    edit_steps: list[int] = []
+    failing_diagnostic_steps: list[int] = []
+    passing_verification_steps: list[int] = []
+    repair_mode_steps: list[int] = []
+    verified_after_last_edit = False
+    for item in steps:
+        if not isinstance(item, dict):
+            continue
+        step = int(item.get("step") or 0)
+        action = item.get("action") if isinstance(item.get("action"), dict) else {}
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        action_type = str(action.get("action") or "")
+        if item.get("mode") == "swe_repair":
+            repair_mode_steps.append(step)
+        if action_type in {"write_file", "append_file", "replace_in_file"} and result.get("ok") is True:
+            edit_steps.append(step)
+        failing_tests = result.get("failing_tests") if isinstance(result.get("failing_tests"), list) else []
+        passing_tests = result.get("passing_tests") if isinstance(result.get("passing_tests"), list) else []
+        if failing_tests:
+            failing_diagnostic_steps.append(step)
+        if passing_tests and not failing_tests:
+            passing_verification_steps.append(step)
+    if edit_steps:
+        last_edit_step = edit_steps[-1]
+        verified_after_last_edit = any(step > last_edit_step for step in passing_verification_steps)
+    ok = bool(failing_diagnostic_steps and edit_steps and verified_after_last_edit)
+    return {
+        "ok": ok,
+        "style": "main_agent_orchestrates_repair_function_then_verifies",
+        "steps": len(steps),
+        "failing_diagnostic_steps": failing_diagnostic_steps,
+        "edit_steps": edit_steps,
+        "repair_mode_steps": repair_mode_steps,
+        "passing_verification_steps": passing_verification_steps,
+        "verified_after_last_edit": verified_after_last_edit,
+    }
+
+
 def evaluate_check(workspace: Path, check: dict[str, Any]) -> dict[str, Any]:
     kind = check["type"]
     sandbox_workspace = str(workspace) == "/work" or str(workspace).startswith("/work/")
@@ -320,6 +366,7 @@ def run_one(agent_name: str, agent: dict[str, Any], model: dict[str, Any], task:
         exit_code, error = 1, repr(exc)
         log_path.write_text(error + "\n", encoding="utf-8")
     checks = [evaluate_check(workspace, item) for item in task.get("checks", [])]
+    orchestration = analyze_shushunya_orchestration(log_path) if agent["type"] == "shushunya" else None
     ok = exit_code == 0 and all(item.get("ok") for item in checks)
     return RunResult(
         agent=agent_name,
@@ -331,6 +378,7 @@ def run_one(agent_name: str, agent: dict[str, Any], model: dict[str, Any], task:
         error="" if ok else error,
         log_path=str(log_path),
         workspace=str(workspace),
+        orchestration=orchestration,
     )
 
 
