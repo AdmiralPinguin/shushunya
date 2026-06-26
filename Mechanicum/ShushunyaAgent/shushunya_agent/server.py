@@ -1115,7 +1115,14 @@ class AgentHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
-            write_ndjson(self, {"type": "start", "message": "агент принят в очередь"})
+            write_ndjson(
+                self,
+                {
+                    "type": "start",
+                    "message": "агент принят в очередь",
+                    "display_message": "Принял задачу в очередь.",
+                },
+            )
 
             stdout = io.StringIO()
             stderr = io.StringIO()
@@ -1131,7 +1138,14 @@ class AgentHandler(BaseHTTPRequestHandler):
                 with RUN_LOCK_FILE.open("w", encoding="utf-8") as lock_fh:
                     fcntl.flock(lock_fh, fcntl.LOCK_EX)
                     try:
-                        write_ndjson(self, {"type": "start", "message": "агент получил слот выполнения"})
+                        write_ndjson(
+                            self,
+                            {
+                                "type": "start",
+                                "message": "агент получил слот выполнения",
+                                "display_message": "Получил слот выполнения, начинаю работу.",
+                            },
+                        )
                         events: queue.Queue[dict[str, Any]] = queue.Queue()
                         code_box = {"code": 1}
 
@@ -1166,6 +1180,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                                                 "task_id": config.task_id,
                                                 "busy": state.get("busy", False),
                                                 "current_task_duration_sec": state.get("current_task_duration_sec", 0.0),
+                                                "display_message": "Задача еще выполняется, жду следующий результат.",
                                             },
                                         )
                                     except OSError:
@@ -1206,9 +1221,26 @@ class AgentHandler(BaseHTTPRequestHandler):
                     result = {"ok": False, "message": "agent returned non-json output", "raw": text}
                 if bool_field(payload, "include_stderr", False):
                     result["stderr"] = stderr.getvalue()
-                write_ndjson(self, {"type": "done", "ok": False, "exit_code": code, "result": result})
+                write_ndjson(
+                    self,
+                    {
+                        "type": "done",
+                        "ok": False,
+                        "exit_code": code,
+                        "result": result,
+                        "display_message": "Задача остановилась, состояние сохранено.",
+                    },
+                )
             else:
-                write_ndjson(self, {"type": "done", "ok": True, "exit_code": code})
+                write_ndjson(
+                    self,
+                    {
+                        "type": "done",
+                        "ok": True,
+                        "exit_code": code,
+                        "display_message": "Задача завершена.",
+                    },
+                )
         except RequestError as exc:
             write_json(self, exc.status, exc.payload)
         except Exception as exc:

@@ -3625,7 +3625,41 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
     return truncate(str(result.get("error") or result.get("message") or "done"), 180)
 
 
+def event_display_message(payload: dict[str, Any]) -> str:
+    event_type = str(payload.get("type") or "")
+    code = str(payload.get("code") or "")
+    if event_type == "step":
+        return "Думаю над следующим действием."
+    if event_type == "heartbeat":
+        return "Задача еще выполняется, жду следующий результат."
+    if event_type == "warning":
+        if code in {"required_artifact_verification_hint", "final_text_verification_required"}:
+            return "Артефакт уже создан, теперь проверяю его содержимое перед завершением."
+        if code == "auto_final_required_artifacts_verified":
+            return "Все обязательные артефакты проверены, завершаю задачу."
+        if code in {"json_parse_error", "json_repair_failed"}:
+            return "Модель вернула кривой JSON, чиню формат ответа."
+        if code == "json_repaired":
+            return "JSON-ответ восстановлен, продолжаю выполнение."
+        if code == "validation_error":
+            return "Отклонил неверное действие модели и запрашиваю корректный шаг."
+        if "rejected" in code or "supervisor" in str(payload.get("message") or "").lower():
+            return "Остановил бесполезный шаг и направляю агента к следующему полезному действию."
+        return "Есть служебная подсказка по текущему шагу."
+    if event_type == "final":
+        if payload.get("ok") is True:
+            return "Задача завершена."
+        return "Задача остановилась, сохраняю состояние для продолжения."
+    if event_type == "start":
+        return str(payload.get("message") or "Запускаю задачу.")
+    return str(payload.get("message") or "")
+
+
 def emit(event_sink: AgentEventSink | None, payload: dict[str, Any]) -> None:
+    if "display_message" not in payload:
+        display_message = event_display_message(payload)
+        if display_message:
+            payload = {**payload, "display_message": display_message}
     if event_sink is not None:
         event_sink(payload)
 
