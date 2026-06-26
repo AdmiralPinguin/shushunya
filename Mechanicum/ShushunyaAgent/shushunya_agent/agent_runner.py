@@ -1536,22 +1536,20 @@ def action_is_cli_verification(action_type: str, action: dict[str, Any]) -> bool
     if action_type not in {"shell", "python"}:
         return False
     text = (str(action.get("cmd") or "") + "\n" + str(action.get("code") or "")).lower()
-    return any(
-        marker in text
-        for marker in (
-            "python -m",
-            "python3 -m",
-            "run_check",
-            "subprocess.run",
-            "subprocess.check",
-            "stdout",
-            "json.load",
-            "json.loads",
-            ".cli",
-            "/cli.",
-            " cli ",
-        )
+    explicit_cli_markers = (
+        "run_check",
+        "subprocess.run",
+        "subprocess.check",
+        "stdout",
+        "json.load",
+        "json.loads",
+        ".cli",
+        "/cli.",
+        " cli ",
     )
+    if "pytest" in text:
+        return any(marker in text for marker in explicit_cli_markers)
+    return any(marker in text for marker in ("python -m", "python3 -m", *explicit_cli_markers))
 
 
 def action_is_test_diagnostic(action_type: str, action: dict[str, Any]) -> bool:

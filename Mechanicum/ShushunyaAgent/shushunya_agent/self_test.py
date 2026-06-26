@@ -630,6 +630,13 @@ def main() -> int:
         raise AssertionError("SWE task detector treated JSON artifact as JS/code")
     if agent_runner.looks_like_swe_task("Короткий smoke-test UI сообщений: создай /work/ui-display-smoke/report.md"):
         raise AssertionError("SWE task detector treated a smoke/artifact task as code repair")
+    if agent_runner.action_is_cli_verification("shell", {"cmd": "python3 -m pytest -q"}):
+        raise AssertionError("pytest command must not count as CLI verification")
+    if not agent_runner.action_is_cli_verification(
+        "shell",
+        {"cmd": "python3 -m package.cli data.csv | python3 -c \"import sys,json; json.load(sys.stdin)\""},
+    ):
+        raise AssertionError("module CLI JSON check was not recognized")
     swe_profile_task = agent_runner.task_with_execution_profile(
         "Исправь Python-проект и запусти pytest",
         AgentConfig(shell_enabled=True),
