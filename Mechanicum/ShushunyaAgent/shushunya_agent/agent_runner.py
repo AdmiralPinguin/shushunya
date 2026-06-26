@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import html
 import json
 import os
@@ -3804,6 +3805,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     successful_mkdir_paths: set[str] = set()
     non_test_diagnostics_before_test = 0
     last_successful_swe_edit_path = ""
+    last_swe_test_action: dict[str, Any] | None = None
     swe_verified_after_edit = False
     last_required_artifact_hint = ""
     trace: list[dict[str, Any]] = []
@@ -3902,6 +3904,35 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "candidate_source_paths": last_source_candidates[:20],
                     },
                 )
+        if (
+            automated_action is None
+            and not repair_source_path
+            and swe_task
+            and code_mutated_since_last_pytest
+            and pending_failing_tests
+            and last_swe_test_action is not None
+        ):
+            automated_action = copy.deepcopy(last_swe_test_action)
+            emit(
+                event_sink,
+                {
+                    "type": "warning",
+                    "code": "swe_auto_verify_after_edit",
+                    "step": step,
+                    "message": "SWE code changed after known failing tests; rerunning the last full test/fallback command automatically.",
+                    "display_message": "Код исправлен, автоматически запускаю последнюю полную проверку.",
+                },
+            )
+            write_task_journal(
+                config,
+                "swe_auto_verify_after_edit",
+                {
+                    "step": step,
+                    "action": automated_action,
+                    "pending_failing_tests": sorted(pending_failing_tests)[:20],
+                    "last_edited_path": last_successful_swe_edit_path,
+                },
+            )
         if not repair_source_path and required_artifact_paths:
             missing_artifact_verification = missing_text_verifications(required_artifact_path_list, verified_text_paths)
             if (
@@ -4880,6 +4911,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             swe_diagnostic_seen = True
         if swe_task and action_is_test_diagnostic(action_type, action) and not supervisor_rejection:
             swe_test_diagnostic_seen = True
+            if isinstance(result, dict) and (result.get("passing_tests") or result.get("failing_tests")):
+                last_swe_test_action = copy.deepcopy(action)
         elif (
             swe_task
             and swe_requires_test_diagnostic

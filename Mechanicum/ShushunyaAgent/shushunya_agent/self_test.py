@@ -2813,7 +2813,7 @@ def main() -> int:
     regression_config = AgentConfig(
         task_id=safe_task_id("self-test-pytest-regression"),
         json_output=True,
-        max_steps=4,
+        max_steps=5,
         inject_memory=False,
         archive_internal_steps=False,
         shell_enabled=True,
@@ -2830,10 +2830,17 @@ def main() -> int:
                 '{"ok":false,"file":"tests/test_calc.py","test":"test_new"}'
                 ']}'
             )
-        else:
+        elif regression_fallback_calls == 2:
             stdout = (
                 '{"results":['
                 '{"ok":false,"file":"tests/test_calc.py","test":"test_old"},'
+                '{"ok":true,"file":"tests/test_calc.py","test":"test_new"}'
+                ']}'
+            )
+        else:
+            stdout = (
+                '{"results":['
+                '{"ok":true,"file":"tests/test_calc.py","test":"test_old"},'
                 '{"ok":true,"file":"tests/test_calc.py","test":"test_new"}'
                 ']}'
             )
@@ -2842,7 +2849,7 @@ def main() -> int:
     with mock.patch.object(agent_runner, "chat", side_effect=[
             '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
             '{"action":"replace_in_file","path":"/work/project/calc.py","old":"old","new":"new","count":1}',
-            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"replace_in_file","path":"/work/project/calc.py","old":"new","new":"fixed","count":1}',
             '{"action":"final","message":"done"}',
     ]), mock.patch.object(agent_runner, "run_shell", return_value={
             "ok": False,
@@ -2865,9 +2872,10 @@ def main() -> int:
     ]
     if (
         regression_code != 0
-        or len(regression_results) != 2
+        or len(regression_results) != 3
         or mocked_regression_shell.call_count != 1
-        or regression_results[-1].get("regression_tests") != ["tests/test_calc.py::test_old"]
+        or regression_results[1].get("regression_tests") != ["tests/test_calc.py::test_old"]
+        or regression_results[-1].get("failing_tests")
     ):
         raise AssertionError(
             "pytest regression tracking failed: "
@@ -3670,7 +3678,7 @@ def main() -> int:
             '{"action":"write_file","path":"/work/project/calc.py","content":"whole rewrite"}',
             '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
             '{"action":"final","message":"blocked"}',
-    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+    ]) as mocked_same_file_chat, mock.patch.object(agent_runner, "run_shell", return_value={
             "ok": False,
             "returncode": 1,
             "stdout": "",
@@ -3688,7 +3696,19 @@ def main() -> int:
         (step.get("result") or {}).get("error")
         for step in same_file_edit_payload.get("steps", [])
     ]
-    if same_file_edit_code != 0 or "swe repeated same-file edit before verification rejected by supervisor" not in same_file_edit_errors:
+    same_file_auto_verified = (
+        same_file_edit_code == 0
+        and mocked_same_file_chat.call_count == 2
+        and [step.get("action", {}).get("action") for step in same_file_edit_payload.get("steps", [])]
+        == ["shell", "replace_in_file", "shell"]
+    )
+    if (
+        same_file_edit_code != 0
+        or (
+            "swe repeated same-file edit before verification rejected by supervisor" not in same_file_edit_errors
+            and not same_file_auto_verified
+        )
+    ):
         raise AssertionError(f"same-file edit before verification guard failed: code={same_file_edit_code}, payload={same_file_edit_payload}")
     print("[ok] same-file edit before verification guard")
 
@@ -3723,7 +3743,7 @@ def main() -> int:
             '{"action":"read_file","path":"/work/project/calc.py","max_bytes":20000}',
             '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
             '{"action":"final","message":"blocked"}',
-    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+    ]) as mocked_inspect_after_edit_chat, mock.patch.object(agent_runner, "run_shell", return_value={
             "ok": False,
             "returncode": 1,
             "stdout": "",
@@ -3741,7 +3761,19 @@ def main() -> int:
         (step.get("result") or {}).get("error")
         for step in inspect_after_edit_payload.get("steps", [])
     ]
-    if inspect_after_edit_code != 0 or "swe inspection after edit before verification rejected by supervisor" not in inspect_after_edit_errors:
+    inspect_after_edit_auto_verified = (
+        inspect_after_edit_code == 0
+        and mocked_inspect_after_edit_chat.call_count == 2
+        and [step.get("action", {}).get("action") for step in inspect_after_edit_payload.get("steps", [])]
+        == ["shell", "replace_in_file", "shell"]
+    )
+    if (
+        inspect_after_edit_code != 0
+        or (
+            "swe inspection after edit before verification rejected by supervisor" not in inspect_after_edit_errors
+            and not inspect_after_edit_auto_verified
+        )
+    ):
         raise AssertionError(f"inspection after edit before verification guard failed: code={inspect_after_edit_code}, payload={inspect_after_edit_payload}")
     print("[ok] inspection after edit before verification guard")
 
