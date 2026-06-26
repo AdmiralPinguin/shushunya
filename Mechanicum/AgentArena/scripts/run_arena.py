@@ -159,6 +159,7 @@ def http_json(method: str, url: str, payload: dict[str, Any] | None = None, time
 
 def run_shushunya(agent: dict[str, Any], task: dict[str, Any], workspace: Path, run_id: str, log_path: Path) -> tuple[int, str]:
     base_url = agent["base_url"].rstrip("/")
+    task_id = f"arena-{run_id}-{task['id']}"
     required_paths = [str(workspace / item["path"]) for item in task.get("checks", []) if "path" in item]
     required_block = "\n".join(f"- {path}" for path in required_paths)
     prompt = (
@@ -171,7 +172,7 @@ def run_shushunya(agent: dict[str, Any], task: dict[str, Any], workspace: Path, 
         prompt += "\n\nОбязательные артефакты должны быть именно по этим абсолютным путям:\n" + required_block
     payload = {
         "task": prompt,
-        "task_id": f"arena-{run_id}-{task['id']}",
+        "task_id": task_id,
         "technical": True,
         "shell_enabled": True,
         "archive_task": False,
@@ -185,7 +186,20 @@ def run_shushunya(agent: dict[str, Any], task: dict[str, Any], workspace: Path, 
         payload["max_runtime_sec"] = int(agent["max_runtime_sec"])
     started = time.time()
     status, response = http_json("POST", f"{base_url}/run", payload, timeout=int(agent.get("timeout_sec", 1800)))
-    log_path.write_text(json.dumps({"status": status, "response": response}, ensure_ascii=False, indent=2), encoding="utf-8")
+    journal_status, journal_response = http_json("GET", f"{base_url}/task-journal?task_id={task_id}&limit=800", timeout=30)
+    log_path.write_text(
+        json.dumps(
+            {
+                "status": status,
+                "response": response,
+                "journal_status": journal_status,
+                "journal": journal_response,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     if status >= 400:
         return status, f"http {status}"
     return int(response.get("exit_code", 0) or 0), f"finished in {time.time() - started:.1f}s"
@@ -259,18 +273,51 @@ def task_looks_like_code_repair(task: dict[str, Any]) -> bool:
     return any(marker in prompt for marker in ("pytest", "тест", "tests/", "python-проект", "python project"))
 
 
+def shushunya_steps_from_journal(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    journal = payload.get("journal") if isinstance(payload.get("journal"), dict) else {}
+    events = journal.get("events") if isinstance(journal.get("events"), list) else []
+    steps: list[dict[str, Any]] = []
+    repair_mode_steps: set[int] = set()
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("type") or "")
+        step = int(event.get("step") or 0)
+        if event_type == "swe_repair_mode" and step:
+            repair_mode_steps.add(step)
+            continue
+        if event_type == "action" and isinstance(event.get("action"), dict):
+            item: dict[str, Any] = {
+                "step": step,
+                "_seq": len(steps) + 1,
+                "action": event["action"],
+            }
+            if step in repair_mode_steps:
+                item["mode"] = "swe_repair"
+                item["mode_source_path"] = event.get("source_path")
+            steps.append(item)
+            continue
+        if event_type == "tool_result" and steps:
+            steps[-1]["result"] = event.get("result") if isinstance(event.get("result"), dict) else {}
+    return steps
+
+
 def analyze_shushunya_orchestration(log_path: Path, task: dict[str, Any]) -> dict[str, Any]:
     try:
         payload = json.loads(log_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"ok": False, "error": "log is not readable JSON"}
+    steps = shushunya_steps_from_journal(payload)
+    source = "task_journal" if steps else "response"
     response = payload.get("response") if isinstance(payload.get("response"), dict) else {}
-    steps = response.get("steps") if isinstance(response.get("steps"), list) else []
+    if not steps:
+        steps = response.get("steps") if isinstance(response.get("steps"), list) else []
     if not task_looks_like_code_repair(task):
         return {
             "kind": "general_or_artifact",
             "ok": None,
             "steps": len(steps),
+            "source": source,
             "note": "Code-repair orchestration chain is not required for this task type.",
         }
     edit_steps: list[int] = []
@@ -285,16 +332,17 @@ def analyze_shushunya_orchestration(log_path: Path, task: dict[str, Any]) -> dic
         action = item.get("action") if isinstance(item.get("action"), dict) else {}
         result = item.get("result") if isinstance(item.get("result"), dict) else {}
         action_type = str(action.get("action") or "")
+        seq = int(item.get("_seq") or step)
         if item.get("mode") == "swe_repair":
-            repair_mode_steps.append(step)
+            repair_mode_steps.append(seq)
         if action_type in {"write_file", "append_file", "replace_in_file"} and result.get("ok") is True:
-            edit_steps.append(step)
+            edit_steps.append(seq)
         failing_tests = result.get("failing_tests") if isinstance(result.get("failing_tests"), list) else []
         passing_tests = result.get("passing_tests") if isinstance(result.get("passing_tests"), list) else []
         if failing_tests:
-            failing_diagnostic_steps.append(step)
+            failing_diagnostic_steps.append(seq)
         if passing_tests and not failing_tests:
-            passing_verification_steps.append(step)
+            passing_verification_steps.append(seq)
     if edit_steps:
         last_edit_step = edit_steps[-1]
         verified_after_last_edit = any(step > last_edit_step for step in passing_verification_steps)
@@ -303,6 +351,7 @@ def analyze_shushunya_orchestration(log_path: Path, task: dict[str, Any]) -> dic
         "ok": ok,
         "style": "main_agent_orchestrates_repair_function_then_verifies",
         "steps": len(steps),
+        "source": source,
         "failing_diagnostic_steps": failing_diagnostic_steps,
         "edit_steps": edit_steps,
         "repair_mode_steps": repair_mode_steps,

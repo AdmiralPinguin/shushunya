@@ -4837,6 +4837,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             elif (
                 action_type == "replace_in_file"
                 and stale_replace_failures_by_path.get(str(action.get("path") or ""), 0) >= 1
+                and str(action.get("old") or "") not in last_read_file_excerpts.get(str(action.get("path") or ""), "")
             ):
                 result = {
                     "ok": False,
@@ -5129,6 +5130,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         ):
             path = str(action.get("path") or "")
             stale_replace_failures_by_path[path] = stale_replace_failures_by_path.get(path, 0) + 1
+            current_excerpt = str(result.get("current_excerpt") or "")
+            if path and current_excerpt:
+                last_read_file_excerpts[path] = current_excerpt[:4000]
         if action_type in {"write_file", "append_file", "replace_in_file"} and isinstance(result, dict) and result.get("ok") is True:
             path = str(action.get("path") or "")
             verified_text_paths.discard(path)

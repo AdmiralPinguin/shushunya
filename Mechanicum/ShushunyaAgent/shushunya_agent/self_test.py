@@ -2643,6 +2643,92 @@ def main() -> int:
         )
     print("[ok] stale replace_in_file loop guard")
 
+    stale_repair_prompt_stdout = io.StringIO()
+    stale_repair_prompt_config = AgentConfig(
+        task_id=safe_task_id("self-test-stale-repair-prompt-refresh"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    stale_repair_chat_calls = 0
+    stale_repair_prompts: list[str] = []
+
+    def fake_stale_repair_chat(_config, messages, **_kwargs):
+        nonlocal stale_repair_chat_calls
+        stale_repair_chat_calls += 1
+        combined = "\n".join(str(item.get("content", "")) for item in messages if isinstance(item, dict))
+        stale_repair_prompts.append(combined)
+        if stale_repair_chat_calls == 1:
+            return '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}'
+        if stale_repair_chat_calls == 2:
+            return '{"action":"read_file","path":"/work/project/calc.py","max_bytes":20000}'
+        if stale_repair_chat_calls == 3:
+            return '{"action":"replace_in_file","path":"/work/project/calc.py","old":"return a - b","new":"return a + b","count":1}'
+        return '{"action":"replace_in_file","path":"/work/project/calc.py","old":"return a * b","new":"return a + b","count":1}'
+
+    stale_repair_python_results = [
+        {
+            "ok": False,
+            "returncode": 1,
+            "stdout": json.dumps({
+                "results": [{"ok": False, "file": "tests/test_calc.py", "test": "test_add"}],
+                "source_hints": ["/work/project/calc.py"],
+            }),
+            "stderr": "",
+        },
+        {
+            "ok": True,
+            "returncode": 0,
+            "stdout": json.dumps({
+                "results": [{"ok": True, "file": "tests/test_calc.py", "test": "test_add"}],
+                "source_hints": ["/work/project/calc.py"],
+            }),
+            "stderr": "",
+        },
+    ]
+
+    def fake_stale_repair_file(_config, action):
+        if action.get("action") == "read_file":
+            return {
+                "ok": True,
+                "path": "/work/project/calc.py",
+                "content": "def add(a, b):\n    return a - b\n",
+                "size": 32,
+            }
+        if action.get("old") == "return a - b":
+            return {
+                "ok": False,
+                "error": "old text not found",
+                "path": "/work/project/calc.py",
+                "current_excerpt": "def add(a, b):\n    return a * b\n",
+            }
+        return {"ok": True, "path": "/work/project/calc.py", "replaced": 1, "size": 32}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=fake_stale_repair_chat), \
+            mock.patch.object(agent_runner, "run_shell", return_value={
+                "ok": False,
+                "returncode": 1,
+                "stdout": "",
+                "stderr": "/usr/bin/python3: No module named pytest\n",
+            }), \
+            mock.patch.object(agent_runner, "python_tool", side_effect=stale_repair_python_results), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=fake_stale_repair_file), \
+            contextlib.redirect_stdout(stale_repair_prompt_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        stale_repair_prompt_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            stale_repair_prompt_config,
+        )
+    stale_repair_prompt_payload = json.loads(stale_repair_prompt_stdout.getvalue())
+    if stale_repair_prompt_code != 0 or not any("return a * b" in prompt for prompt in stale_repair_prompts[3:]):
+        raise AssertionError(
+            "stale replace current_excerpt was not reused by SWE repair prompt: "
+            f"code={stale_repair_prompt_code}, payload={stale_repair_prompt_payload}, prompts={stale_repair_prompts}"
+        )
+    print("[ok] stale replace current excerpt refreshes SWE repair prompt")
+
     swe_diagnostic_stdout = io.StringIO()
     swe_diagnostic_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-diagnostic-before-edit"),
