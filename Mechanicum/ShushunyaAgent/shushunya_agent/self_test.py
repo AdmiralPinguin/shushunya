@@ -3461,6 +3461,30 @@ def main() -> int:
     if json_literal_verify.get("checks", {}).get("json_whitespace_insensitive_matches") != 3:
         raise AssertionError(f"JSON whitespace-insensitive literal matches missing: {json_literal_verify}")
     assert_ok(
+        "write_file json metrics fixture",
+        file_tool(
+            config,
+            {
+                "action": "write_file",
+                "path": "/work/self-test/metrics.json",
+                "content": '{"total_events":5,"error_count":1,"services":{"api":3,"worker":2},"max_latency_ms":900}',
+            },
+        ),
+    )
+    json_semantic_verify = agent_runner.verify_text_file_tool(
+        config,
+        {
+            "action": "verify_text_file",
+            "path": "/work/self-test/metrics.json",
+            "must_contain": ["total_events=5", "error_count=1"],
+            "ordered_patterns": ["max_latency_ms=900"],
+            "min_bytes": 1,
+        },
+    )
+    assert_ok("verify_text_file json key=value semantic checks", json_semantic_verify)
+    if json_semantic_verify.get("checks", {}).get("json_semantic_matches") != 3:
+        raise AssertionError(f"JSON key=value semantic matches missing: {json_semantic_verify}")
+    assert_ok(
         "write_file csv fixture",
         file_tool(
             config,

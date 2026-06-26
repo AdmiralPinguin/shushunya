@@ -1718,6 +1718,32 @@ def contains(haystack, needle, regex):
 def compact_json_literal(value):
     return re.sub(r"\s+", "", value)
 
+def parse_scalar(value):
+    raw = str(value).strip()
+    lowered = raw.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered == "null":
+        return None
+    try:
+        if "." in raw:
+            return float(raw)
+        return int(raw)
+    except ValueError:
+        return raw.strip('"\'')
+
+def json_pseudo_match(data, pattern):
+    if not isinstance(data, dict):
+        return False
+    text = str(pattern).strip()
+    match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)", text)
+    if not match:
+        return False
+    key, expected = match.group(1), parse_scalar(match.group(2))
+    return key in data and data.get(key) == expected
+
 payload = json.loads(os.environ["VERIFY_TEXT_FILE_PAYLOAD"])
 path = safe_path(payload["path"])
 case_sensitive = bool(payload.get("case_sensitive", True))
@@ -1760,9 +1786,10 @@ failures = []
 suffix = path.suffix.lower()
 structured_suffixes = {".json", ".jsonl", ".csv", ".tsv"}
 structured_min_size_ignored = False
+json_data = None
 if suffix == ".json":
     try:
-        json.loads(text)
+        json_data = json.loads(text)
     except json.JSONDecodeError as exc:
         failures.append({"check": "json_valid", "error": str(exc), "line": exc.lineno, "column": exc.colno})
 if size < min_bytes:
@@ -1778,9 +1805,13 @@ if len(text) < min_chars:
 
 lower_text = text.lower()
 json_whitespace_insensitive_matches = []
+json_semantic_matches = []
 compact_json_text = compact_json_literal(search_text) if path.suffix.lower() == ".json" and not regex else ""
 for index, item in enumerate(required):
     if not contains(search_text, item, regex):
+        if suffix == ".json" and json_pseudo_match(json_data, original_required[index] if index < len(original_required) else item):
+            json_semantic_matches.append(original_required[index] if index < len(original_required) else item)
+            continue
         if compact_json_text and compact_json_literal(item) in compact_json_text:
             json_whitespace_insensitive_matches.append(original_required[index] if index < len(original_required) else item)
             continue
@@ -1792,6 +1823,9 @@ for index, item in enumerate(required):
 
 cursor = 0
 for item in ordered:
+    if suffix == ".json" and json_pseudo_match(json_data, item):
+        json_semantic_matches.append(item)
+        continue
     if regex:
         match = re.search(item, search_text[cursor:])
         if not match:
@@ -1824,9 +1858,11 @@ print(json.dumps({
         "case_sensitive": case_sensitive,
         "regex": regex,
         "json_whitespace_insensitive_matches": len(json_whitespace_insensitive_matches),
+        "json_semantic_matches": len(json_semantic_matches),
         "structured_min_size_ignored": structured_min_size_ignored,
     },
     "json_whitespace_insensitive_matches": json_whitespace_insensitive_matches[:20],
+    "json_semantic_matches": json_semantic_matches[:20],
     "structured_min_size_ignored": structured_min_size_ignored,
     "failures": failures[:20],
 }, ensure_ascii=False))
