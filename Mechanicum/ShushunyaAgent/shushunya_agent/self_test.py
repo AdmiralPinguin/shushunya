@@ -2804,6 +2804,7 @@ def main() -> int:
         repeated_test_candidates_code != 0
         or not candidate_results
         or "/work/project/calc.py" not in candidate_results[-1].get("candidate_source_paths", [])
+        or "/work/project/tests/test_calc.py" in candidate_results[-1].get("candidate_source_paths", [])
     ):
         raise AssertionError(f"repeated failing test guard omitted source candidates: {repeated_test_candidates_payload}")
     print("[ok] repeated failing test guard includes source candidates")

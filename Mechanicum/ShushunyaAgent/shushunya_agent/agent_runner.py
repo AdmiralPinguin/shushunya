@@ -1467,6 +1467,8 @@ def source_candidates_from_listing(result: dict[str, Any]) -> list[str]:
         name = Path(path).name
         if not lowered.endswith(SWE_SOURCE_SUFFIXES):
             continue
+        if path_looks_like_test_file(path):
+            continue
         if "__pycache__" in lowered or name in SWE_LOW_SIGNAL_SOURCE_NAMES:
             continue
         if path not in seen:
@@ -3938,9 +3940,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "error": "swe test-file edit before source fix rejected by supervisor",
                     "path": str(action.get("path") or ""),
                     "failing_tests": sorted(pending_failing_tests)[:20],
+                    "available_read_excerpts": dict(list(last_read_file_excerpts.items())[-3:]),
+                    "candidate_source_paths": [path for path in last_source_candidates[:10] if not path_looks_like_test_file(path)],
                     "instruction": (
                         "Existing tests are failing. Do not create or edit test files unless the user explicitly asked for test changes. "
-                        "Make a narrow source-code edit that targets failing_tests, then run the full test/fallback again."
+                        "Do not list files or rerun the same failing tests before editing. Use available_read_excerpts or "
+                        "candidate_source_paths to make a narrow source-code edit that targets failing_tests, then run the full test/fallback again."
                     ),
                 }
             elif (
