@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -247,6 +248,12 @@ def main() -> int:
         except ValueError:
             pass
     print("[ok] model action JSON must be an object")
+    runner_source = Path(agent_runner.__file__).read_text(encoding="utf-8")
+    supervisor_rejection_errors = set(re.findall(r'"([^"]* rejected by supervisor)"', runner_source))
+    missing_supervisor_rejection_errors = supervisor_rejection_errors - set(agent_runner.SUPERVISOR_REJECTION_ERRORS)
+    if missing_supervisor_rejection_errors:
+        raise AssertionError(f"supervisor rejection errors are not counted: {sorted(missing_supervisor_rejection_errors)}")
+    print("[ok] supervisor rejection errors are counted")
     valid_action = agent_runner.validate_action({"action": "web_search", "query": "OpenAI", "limit": 1, "reason": "smoke"})
     if not valid_action.get("ok"):
         raise AssertionError(f"valid action schema was rejected: {valid_action}")

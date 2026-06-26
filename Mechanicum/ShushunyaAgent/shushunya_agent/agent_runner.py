@@ -1142,14 +1142,20 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe edit before diagnostic rejected by supervisor",
     "swe edit before test diagnostic rejected by supervisor",
     "swe test diagnostic inspection stall rejected by supervisor",
+    "swe repeated failing-test file read rejected by supervisor",
+    "swe repeated failing test diagnostic rejected by supervisor",
+    "swe focused verification after failing tests rejected by supervisor",
     "explicit workspace boundary rejected by supervisor",
     "swe repeated same-file edit before verification rejected by supervisor",
+    "swe inspection after edit before verification rejected by supervisor",
     "swe extra source read before edit rejected by supervisor",
     "swe shell inline python rejected by supervisor",
     "swe failing tests inspection stall rejected by supervisor",
     "swe passing-test edit rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
+    "append_file to JSON rejected by supervisor",
+    "verified text artifact mutation rejected by supervisor",
 }
 
 
