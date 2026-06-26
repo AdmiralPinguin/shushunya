@@ -1203,6 +1203,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe repair mode action rejected by supervisor",
     "artifact verification mode action rejected by supervisor",
     "data source inspection required by supervisor",
+    "data source reread rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
     "append_file to JSON rejected by supervisor",
@@ -1377,20 +1378,53 @@ def action_references_path_text(action: dict[str, Any], path: str) -> bool:
     return path in haystack or (basename and basename in haystack)
 
 
-def action_reads_data_source(action: dict[str, Any], data_paths: list[str]) -> str:
+def action_read_data_sources(action: dict[str, Any], data_paths: list[str]) -> list[str]:
     action_type = str(action.get("action") or "").strip().lower()
     if action_type == "read_file":
         path = posixpath.normpath(str(action.get("path") or ""))
-        return path if path in data_paths else ""
+        return [path] if path in data_paths else []
+    read_paths: list[str] = []
     if action_type in {"python", "shell"}:
         text = str(action.get("code") or action.get("cmd") or "")
-        lowered = text.lower()
-        if not any(token in lowered for token in ("open(", "read", "csv", "json.load", "json.loads", "cat ")):
-            return ""
         for path in data_paths:
-            if action_references_path_text(action, path):
-                return path
-    return ""
+            basename = posixpath.basename(path)
+            for line in text.splitlines():
+                lowered = line.lower()
+                if not any(token in lowered for token in ("open(", "read", "csv", "json.load", "json.loads", "cat ")):
+                    continue
+                if path in line or (basename and basename in line):
+                    read_paths.append(path)
+                    break
+            if action_type == "shell" and action_references_path_text(action, path):
+                read_paths.append(path)
+    return list(dict.fromkeys(read_paths))
+
+
+def action_reads_data_source(action: dict[str, Any], data_paths: list[str]) -> str:
+    paths = action_read_data_sources(action, data_paths)
+    return paths[0] if paths else ""
+
+
+def resume_context_inspected_data_sources(task: str, data_paths: list[str]) -> list[str]:
+    if "Resume context from previous agent task journal" not in (task or ""):
+        return []
+    inspected: list[str] = []
+    for path in data_paths:
+        start = 0
+        while True:
+            index = task.find(path, start)
+            if index < 0:
+                break
+            window = task[max(0, index - 2000): index + 3000]
+            if (
+                re.search(r'"action"\s*:\s*"read_file"', window)
+                and re.search(r'"ok"\s*:\s*true', window)
+                and re.search(r'"content"\s*:', window)
+            ):
+                inspected.append(path)
+                break
+            start = index + len(path)
+    return inspected
 
 
 def action_writes_required_artifact(action: dict[str, Any], required_paths: set[str]) -> bool:
@@ -3930,7 +3964,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     explicit_workspace = explicit_workspace_from_task(original_task)
     data_source_path_list = data_source_paths_from_task(original_task, explicit_workspace, required_artifact_path_list)
     data_source_paths = set(data_source_path_list)
-    inspected_data_source_paths: set[str] = set()
+    inspected_data_source_paths: set[str] = set(resume_context_inspected_data_sources(original_task, data_source_path_list))
     last_pytest_passing_tests, last_pytest_failing_tests = latest_pytest_sets_from_text(original_task)
     code_mutated_since_last_pytest = False
     pytest_unavailable_seen = False
@@ -4322,12 +4356,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if (
             data_source_paths
             and required_artifact_paths
-            and not inspected_data_source_paths
             and forced_supervisor_result is None
             and action_writes_required_artifact(action, required_artifact_paths)
-            and not action_reads_data_source(action, data_source_path_list)
+            and not data_source_paths.issubset(inspected_data_source_paths | set(action_read_data_sources(action, data_source_path_list)))
         ):
-            source_list = ", ".join(data_source_path_list)
+            missing_sources = sorted(data_source_paths - inspected_data_source_paths - set(action_read_data_sources(action, data_source_path_list)))
+            source_list = ", ".join(missing_sources or data_source_path_list)
             emit(
                 event_sink,
                 {
@@ -4343,11 +4377,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "ok": False,
                 "error": "data source inspection required by supervisor",
                 "data_sources": data_source_path_list,
+                "missing_data_sources": missing_sources,
                 "required_artifacts": required_artifact_path_list,
                 "instruction": (
-                    "The task requires deriving artifacts from input data files. Read or process one of these data sources "
-                    f"before writing required artifacts: {source_list}. Use read_file for a small source, or a python action "
-                    "that opens/parses the input file and writes artifacts from parsed data."
+                    "The task requires deriving artifacts from input data files. Read or process these missing data sources "
+                    f"before writing required artifacts: {source_list}. Use read_file for small sources, or a python action "
+                    "that opens/parses every missing input file and writes artifacts from parsed data."
                 ),
             }
 
@@ -4528,6 +4563,26 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "This workspace is already created, and the requested input/listing was already inspected. "
                         "Do not repeat mkdir/list/read cycles. Use the gathered content to write the required artifacts, "
                         "then verify them or return final if they are already verified."
+                    ),
+                }
+            elif (
+                data_source_paths
+                and required_artifact_paths
+                and action_type == "read_file"
+                and posixpath.normpath(str(action.get("path") or "")) in inspected_data_source_paths
+                and int(action.get("offset") or 0) == 0
+            ):
+                path = posixpath.normpath(str(action.get("path") or ""))
+                result = {
+                    "ok": False,
+                    "error": "data source reread rejected by supervisor",
+                    "path": path,
+                    "inspected_data_sources": sorted(inspected_data_source_paths),
+                    "missing_data_sources": sorted(data_source_paths - inspected_data_source_paths),
+                    "instruction": (
+                        "This data source was already read successfully and its content is already in the conversation or resume context. "
+                        "Do not reread it from offset 0. If all data sources are inspected, process the saved data and write/verify the required artifacts. "
+                        "If the previous read_file was truncated, continue with the next offset instead of rereading from the beginning."
                     ),
                 }
             elif action_type == "mkdir" and (
@@ -5071,10 +5126,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             )
 
         action_duration_sec = round(time.time() - action_started, 3)
-        inspected_data_source_path = ""
         if data_source_paths and isinstance(result, dict) and result.get("ok") is True:
-            inspected_data_source_path = action_reads_data_source(action, data_source_path_list)
-            if inspected_data_source_path:
+            inspected_now = action_read_data_sources(action, data_source_path_list)
+            for inspected_data_source_path in inspected_now:
+                if inspected_data_source_path in inspected_data_source_paths:
+                    continue
                 inspected_data_source_paths.add(inspected_data_source_path)
                 write_task_journal(
                     config,

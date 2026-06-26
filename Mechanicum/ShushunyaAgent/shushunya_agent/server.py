@@ -767,7 +767,9 @@ def continuation_task(base_task: str, task_id: str, cycle: int, previous_result:
             "До первого продуктивного действия запрещены inspection-действия: list_files, find_files, search_text, "
             "read_file, file_info, web_search, web_fetch, web_links. "
             "Следующий шаг должен быть продуктивным: write_file, append_file, replace_in_file, python, "
-            "web_extract_to_file, bundle_text_files, verify_text_file, telegram_send_document или final."
+            "web_extract_to_file, bundle_text_files, verify_text_file, telegram_send_document или final. "
+            "Если задача зависит от входных data files, используй только факты из сохраненных read_file tool_result в resume context "
+            "или python, который открывает и парсит реальные файлы из рабочего каталога. Не выдумывай строки, даты, сообщения или числа."
         )
     return (
         "Продолжи выполнение той же задачи по task journal. "

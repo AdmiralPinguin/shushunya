@@ -323,6 +323,29 @@ def compact_resume_events(events: list[Any], max_chars: int = 6000) -> list[Any]
             selected.append(compacted_test)
             preserved_events.append(last_test_result_event)
             total += len(text) + 1
+    data_sources = set()
+    if isinstance(start_event, dict):
+        raw_data_sources = start_event.get("data_sources")
+        if isinstance(raw_data_sources, list):
+            data_sources = {str(path) for path in raw_data_sources if isinstance(path, str) and path}
+    if data_sources:
+        latest_source_reads: dict[str, Any] = {}
+        for event in events:
+            if not isinstance(event, dict) or event.get("type") != "tool_result" or event.get("action") != "read_file":
+                continue
+            result = event.get("result") if isinstance(event.get("result"), dict) else {}
+            path = str(result.get("path") or "")
+            if path in data_sources and result.get("ok") is True and result.get("content"):
+                latest_source_reads[path] = event
+        for event in latest_source_reads.values():
+            if any(event is preserved for preserved in preserved_events):
+                continue
+            compacted_source = compact_json_value(event, string_limit=2500, list_limit=20)
+            text = json.dumps(compacted_source, ensure_ascii=False, separators=(",", ":"))
+            if total + len(text) + 1 <= max_chars:
+                selected.append(compacted_source)
+                preserved_events.append(event)
+                total += len(text) + 1
     for event in reversed(events):
         if any(event is preserved for preserved in preserved_events):
             continue

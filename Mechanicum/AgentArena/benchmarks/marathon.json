@@ -1,0 +1,37 @@
+{
+  "suite": "marathon",
+  "tasks": [
+    {
+      "id": "incident_correlation_artifacts",
+      "title": "Correlate incident JSONL and owner CSV into verified artifacts",
+      "seed_files": {
+        "events.jsonl": "{\"ts\":\"2026-02-01T10:00:00Z\",\"service\":\"api\",\"severity\":\"info\",\"message\":\"deploy started\"}\n{\"ts\":\"2026-02-01T10:05:00Z\",\"service\":\"api\",\"severity\":\"critical\",\"message\":\"5xx spike\"}\n{\"ts\":\"2026-02-01T10:07:00Z\",\"service\":\"worker\",\"severity\":\"warning\",\"message\":\"queue lag\"}\n{\"ts\":\"2026-02-01T10:10:00Z\",\"service\":\"api\",\"severity\":\"critical\",\"message\":\"database timeout\"}\n{\"ts\":\"2026-02-01T10:12:00Z\",\"service\":\"billing\",\"severity\":\"warning\",\"message\":\"retry storm\"}\n{\"ts\":\"2026-02-01T10:20:00Z\",\"service\":\"worker\",\"severity\":\"info\",\"message\":\"queue recovered\"}\n",
+        "owners.csv": "service,owner,tier\napi,platform,p0\nworker,ops,p1\nbilling,finance,p1\n"
+      },
+      "prompt": "Проанализируй events.jsonl и owners.csv в текущем каталоге. Создай summary.md, timeline.csv, owners.json. summary.md должен содержать разделы Summary, Evidence, Risks, Result и строку STATUS: PASS. timeline.csv должен иметь заголовок ts,service,severity,owner,tier,message и включать только warning/critical события в хронологическом порядке, всего 4 строки данных. owners.json должен быть валидным JSON object: critical_count=2, warning_count=2, services={\"api\":{\"owner\":\"platform\",\"tier\":\"p0\",\"critical\":2,\"warning\":0},\"worker\":{\"owner\":\"ops\",\"tier\":\"p1\",\"critical\":0,\"warning\":1},\"billing\":{\"owner\":\"finance\",\"tier\":\"p1\",\"critical\":0,\"warning\":1}}, highest_risk_owner=\"platform\". Проверь JSON/CSV и заверши только после проверки.",
+      "checks": [
+        {"type": "file_contains", "path": "summary.md", "text": "STATUS: PASS"},
+        {"type": "file_contains", "path": "summary.md", "text": "Evidence"},
+        {"type": "file_exists", "path": "timeline.csv"},
+        {"type": "file_exists", "path": "owners.json"},
+        {"type": "command", "command": "__PYTHON__ -c \"import csv,json; owners=json.load(open('owners.json', encoding='utf-8')); assert owners['critical_count']==2; assert owners['warning_count']==2; assert owners['highest_risk_owner']=='platform'; assert owners['services']['api']=={'owner':'platform','tier':'p0','critical':2,'warning':0}; rows=list(csv.DictReader(open('timeline.csv', encoding='utf-8'))); assert len(rows)==4; assert [r['service'] for r in rows]==['api','worker','api','billing']; assert [r['owner'] for r in rows]==['platform','ops','platform','finance']\"", "timeout_sec": 60}
+      ]
+    },
+    {
+      "id": "returns_pipeline_repair",
+      "title": "Repair returns pipeline parsing, aggregation, and CLI",
+      "seed_files": {
+        "returns/__init__.py": "from .pipeline import load_returns, summarize_returns, eligible_refunds\n",
+        "returns/pipeline.py": "import csv\n\n\ndef load_returns(path):\n    with open(path, newline='', encoding='utf-8') as fh:\n        return list(csv.DictReader(fh))\n\n\ndef summarize_returns(rows):\n    total_refund = 0\n    by_reason = {}\n    for row in rows:\n        if row['status'] == 'rejected':\n            continue\n        amount = row['refund_amount']\n        total_refund += amount\n        reason = row['reason']\n        by_reason[reason] = by_reason.get(reason, 0) + 1\n    return {'count': len(rows), 'total_refund': round(total_refund, 2), 'by_reason': by_reason}\n\n\ndef eligible_refunds(rows):\n    return [row for row in rows if row['status'] == 'approved' and row['received']]\n",
+        "returns/cli.py": "import json\nimport sys\nfrom .pipeline import load_returns, summarize_returns, eligible_refunds\n\n\ndef main(argv=None):\n    argv = list(argv or sys.argv[1:])\n    rows = load_returns(argv[0])\n    print(json.dumps({'summary': summarize_returns(rows), 'eligible': eligible_refunds(rows)}, sort_keys=True))\n\n\nif __name__ == '__main__':\n    main()\n",
+        "data/returns.csv": "id,reason,status,refund_amount,received\nR1,damaged,approved,25.50,true\nR2,late,rejected,10.00,true\nR3,damaged,approved,40.00,false\nR4,wrong_item,approved,15.25,true\n",
+        "tests/test_returns.py": "from returns.pipeline import load_returns, summarize_returns, eligible_refunds\n\n\ndef test_summary_excludes_rejected_and_uses_numbers():\n    rows = load_returns('data/returns.csv')\n    assert summarize_returns(rows) == {'count': 3, 'total_refund': 80.75, 'by_reason': {'damaged': 2, 'wrong_item': 1}}\n\n\ndef test_eligible_refunds_only_approved_and_received_true():\n    rows = load_returns('data/returns.csv')\n    eligible = eligible_refunds(rows)\n    assert [row['id'] for row in eligible] == ['R1', 'R4']\n"
+      },
+      "prompt": "В текущем каталоге есть Python-проект returns. Почини pipeline минимально: refund_amount должен быть числом, rejected не учитываются ни в count ни в total_refund/by_reason, received из CSV должен интерпретироваться как bool, eligible_refunds должен возвращать только approved и received=true. CLI должен печатать валидный JSON. Проверь python3 -m pytest -q или fallback через python3 -c для summarize_returns, eligible_refunds и CLI. Завершай только после успешной проверки.",
+      "checks": [
+        {"type": "command", "command": "__PYTHON__ -c \"from returns.pipeline import load_returns, summarize_returns, eligible_refunds; rows=load_returns('data/returns.csv'); assert summarize_returns(rows)=={'count':3,'total_refund':80.75,'by_reason':{'damaged':2,'wrong_item':1}}; assert [r['id'] for r in eligible_refunds(rows)]==['R1','R4']\"", "timeout_sec": 60},
+        {"type": "command", "command": "__PYTHON__ -m returns.cli data/returns.csv | __PYTHON__ -c \"import json,sys; data=json.load(sys.stdin); assert data['summary']['total_refund']==80.75; assert [r['id'] for r in data['eligible']]==['R1','R4']\"", "timeout_sec": 60}
+      ]
+    }
+  ]
+}

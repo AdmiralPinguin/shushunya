@@ -827,6 +827,37 @@ def main() -> int:
     if resume_with_start[0].get("required_artifacts") != ["/work/report.md", "/work/matrix.md"]:
         raise AssertionError(f"resume context lost required artifacts: {resume_with_start[0]}")
     print("[ok] resume context preserves required artifacts")
+    resume_with_data_sources = server.compact_resume_events(
+        [
+            {
+                "type": "start",
+                "task": "Read /work/events.jsonl and create /work/timeline.csv.",
+                "required_artifacts": ["/work/timeline.csv"],
+                "data_sources": ["/work/events.jsonl"],
+            },
+            {
+                "type": "tool_result",
+                "action": "read_file",
+                "result": {
+                    "ok": True,
+                    "path": "/work/events.jsonl",
+                    "content": "{\"service\":\"api\",\"message\":\"real source row\"}\n",
+                },
+            },
+            *({"type": "step", "step": index, "noise": "x" * 1000} for index in range(120)),
+            {
+                "type": "final",
+                "ok": False,
+                "continuable": True,
+                "message": "repeated actions without progress",
+            },
+        ],
+        max_chars=5000,
+    )
+    resume_with_data_text = json.dumps(resume_with_data_sources, ensure_ascii=False)
+    if "real source row" not in resume_with_data_text or "/work/events.jsonl" not in resume_with_data_text:
+        raise AssertionError(f"resume context lost data source content: {resume_with_data_sources}")
+    print("[ok] resume context preserves data source excerpts")
     resume_with_test_result = server.compact_resume_events(
         [
             {"type": "start", "task": "Fix tests."},
@@ -2304,6 +2335,65 @@ def main() -> int:
             f"code={data_source_guard_code}, payload={data_source_guard_payload}, actions={data_source_guard_actions}, events={data_source_guard_events}"
         )
     print("[ok] data source artifacts require input inspection before writing")
+    data_source_reread_stdout = io.StringIO()
+    data_source_reread_config = AgentConfig(
+        task_id=safe_task_id("self-test-data-source-reread-guard"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"read_file","path":"/work/input.csv"}',
+            '{"action":"read_file","path":"/work/input.csv"}',
+            '{"action":"write_file","path":"/work/report.md","content":"Summary\\nTotal: 42"}',
+    ]), mock.patch.object(agent_runner, "file_tool", side_effect=fake_data_file_tool), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_verify), \
+            contextlib.redirect_stdout(data_source_reread_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        data_source_reread_code = run_agent(
+            "Workspace: /work/.\nRead input.csv and derive the required artifact.\nRequired artifacts: /work/report.md. report.md must contain Total: 42.",
+            data_source_reread_config,
+        )
+    data_source_reread_payload = json.loads(data_source_reread_stdout.getvalue())
+    reread_errors = [
+        (step.get("result") or {}).get("error")
+        for step in data_source_reread_payload.get("steps", [])
+    ]
+    if data_source_reread_code != 0 or "data source reread rejected by supervisor" not in reread_errors:
+        raise AssertionError(f"data source reread guard failed: {data_source_reread_payload}")
+    print("[ok] data source reread guard")
+    if agent_runner.action_reads_data_source(
+        {"action": "python", "code": "# events.jsonl is mentioned here\nopen('timeline.csv', 'w').write('fake')"},
+        ["/work/events.jsonl"],
+    ):
+        raise AssertionError("data source read detector accepted a comment-only source mention")
+    if not agent_runner.action_reads_data_source(
+        {"action": "python", "code": "import json\nrows=[json.loads(line) for line in open('events.jsonl', encoding='utf-8')]"},
+        ["/work/events.jsonl"],
+    ):
+        raise AssertionError("data source read detector rejected a real relative open()")
+    multi_source_reads = set(agent_runner.action_read_data_sources(
+        {
+            "action": "python",
+            "code": (
+                "import csv, json\n"
+                "events=[json.loads(line) for line in open('events.jsonl', encoding='utf-8')]\n"
+                "owners=list(csv.DictReader(open('owners.csv', encoding='utf-8')))\n"
+            ),
+        },
+        ["/work/events.jsonl", "/work/owners.csv"],
+    ))
+    if multi_source_reads != {"/work/events.jsonl", "/work/owners.csv"}:
+        raise AssertionError(f"data source read detector missed multi-source python IO: {multi_source_reads}")
+    restored_sources = agent_runner.resume_context_inspected_data_sources(
+        'Resume context from previous agent task journal x:\n'
+        '[{"type":"tool_result","action":"read_file","result":{"ok":true,"path":"/work/events.jsonl","content":"row"}}]',
+        ["/work/events.jsonl"],
+    )
+    if restored_sources != ["/work/events.jsonl"]:
+        raise AssertionError(f"resume context did not restore inspected data sources: {restored_sources}")
+    print("[ok] data source read detector requires same-line IO")
 
     restored_required_events: list[dict] = []
     restored_required_stdout = io.StringIO()
