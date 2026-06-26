@@ -3817,6 +3817,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 }
             )
             continue
+        forced_supervisor_result: dict[str, Any] | None = None
         if repair_source_path:
             repair_violation = ""
             repair_path = str(action.get("path") or "")
@@ -3835,20 +3836,16 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "action": action,
                 }
                 emit(event_sink, {"type": "warning", "code": "swe_repair_mode_rejected", "step": step, "message": repair_violation})
-                messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "Supervisor rejected SWE repair mode action:\n"
-                            + json.dumps(warning_payload, ensure_ascii=False, indent=2)
-                            + "\nReturn a narrow replace_in_file/write_file edit for source_path, or read_file one non-test source file only if this source cannot contain the bug."
-                        ),
-                    }
-                )
-                continue
+                forced_supervisor_result = {
+                    "ok": False,
+                    **warning_payload,
+                    "instruction": (
+                        "Return a narrow replace_in_file/write_file edit for source_path, or read_file one non-test "
+                        "source file only if this source cannot contain the bug."
+                    ),
+                }
 
-        if action_type == "final":
+        if action_type == "final" and forced_supervisor_result is None:
             message = str(action.get("message", "")).strip()
             if swe_task and pending_failing_tests and code_mutated_since_last_pytest:
                 warning_payload = {
@@ -3991,7 +3988,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         action_started = time.time()
         try:
             workspace_violations = action_workspace_violations(action, explicit_workspace)
-            if workspace_violations:
+            if forced_supervisor_result is not None:
+                result = forced_supervisor_result
+            elif workspace_violations:
                 result = {
                     "ok": False,
                     "error": "explicit workspace boundary rejected by supervisor",
