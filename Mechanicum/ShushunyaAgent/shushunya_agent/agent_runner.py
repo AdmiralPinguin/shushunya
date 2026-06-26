@@ -1231,6 +1231,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe shell inline python rejected by supervisor",
     "swe failing tests inspection stall rejected by supervisor",
     "swe passing-test edit rejected by supervisor",
+    "swe public contract regression rejected by supervisor",
     "swe repair mode action rejected by supervisor",
     "artifact verification mode action rejected by supervisor",
     "data source inspection required by supervisor",
@@ -1575,6 +1576,65 @@ def python_action_written_code_paths(action_type: str, action: dict[str, Any]) -
             else:
                 paths.append(raw_path)
     return list(dict.fromkeys(paths))
+
+
+def swe_edit_candidate_text(action_type: str, action: dict[str, Any]) -> str:
+    if action_type == "write_file":
+        return str(action.get("content") or "")
+    if action_type == "append_file":
+        return str(action.get("content") or "")
+    if action_type == "replace_in_file":
+        return str(action.get("new") or "")
+    if action_type == "write_files":
+        parts: list[str] = []
+        for item in action.get("files", []) if isinstance(action.get("files"), list) else []:
+            if isinstance(item, dict):
+                parts.append(str(item.get("content") or ""))
+        return "\n".join(parts)
+    if action_type == "python":
+        return str(action.get("code") or "")
+    return ""
+
+
+def result_indicates_public_shape_contract_failure(result: dict[str, Any]) -> bool:
+    text = "\n".join(
+        str(result.get(key) or "")
+        for key in ("stdout", "stderr", "error", "supervisor_instruction")
+    ).lower()
+    return any(
+        marker in text
+        for marker in (
+            "object is not subscriptable",
+            "tuple indices must be integers",
+            "list indices must be integers",
+            "string indices must be integers",
+            "has no attribute 'get'",
+            "has no attribute \"get\"",
+            "not a mapping",
+        )
+    )
+
+
+def action_risks_public_shape_contract_regression(action_type: str, action: dict[str, Any]) -> bool:
+    if action_type not in (SWE_EDIT_ACTIONS | {"write_files", "python"}):
+        return False
+    text = swe_edit_candidate_text(action_type, action)
+    if not text:
+        return False
+    lowered = text.lower()
+    risky_markers = (
+        "@dataclass",
+        "dataclass(",
+        "class ",
+        "namedtuple",
+        "tuple[",
+        "typing.tuple",
+    )
+    if any(marker in lowered for marker in risky_markers):
+        return True
+    if re.search(r"\breturn\s+[A-Za-z_][A-Za-z0-9_]*\s*,\s*[A-Za-z_][A-Za-z0-9_]*", text):
+        return True
+    return False
 
 
 def action_is_test_diagnostic(action_type: str, action: dict[str, Any]) -> bool:
@@ -4089,6 +4149,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     code_mutated_since_last_pytest = False
     pytest_unavailable_seen = False
     pending_failing_tests = set(last_pytest_failing_tests)
+    pending_public_shape_contract_failure = False
     pending_failing_test_inspections = 0
     pending_failing_test_read_paths: set[str] = set()
     read_file_paths_since_code_mutation: set[str] = set()
@@ -4961,6 +5022,23 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 }
             elif (
                 swe_task
+                and pending_failing_tests
+                and pending_public_shape_contract_failure
+                and action_risks_public_shape_contract_regression(action_type, action)
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe public contract regression rejected by supervisor",
+                    "failing_tests": sorted(pending_failing_tests)[:20],
+                    "instruction": (
+                        "The latest failing tests show a public data-shape contract error, such as code returning an object/tuple "
+                        "where callers use dict/list indexing. Do not introduce custom classes, dataclasses, namedtuples, or tuple "
+                        "returns as the repair. Preserve the existing public shape expected by tests, usually dict/list values with "
+                        "the same keys, and make the narrowest source edit."
+                    ),
+                }
+            elif (
+                swe_task
                 and code_mutated_since_last_pytest
                 and action_type in INSPECTION_ACTIONS
             ):
@@ -5471,6 +5549,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             code_mutated_since_last_pytest = False
             last_successful_swe_edit_path = ""
             pending_failing_tests = set(current_failing_tests)
+            pending_public_shape_contract_failure = bool(current_failing_tests) and result_indicates_public_shape_contract_failure(result)
             pending_failing_test_inspections = 0
             pending_failing_test_read_paths = set()
         if (

@@ -648,6 +648,23 @@ def main() -> int:
     )
     if written_code_paths != ["/work/project/scheduler/core.py"]:
         raise AssertionError(f"python code write detector missed open(..., w): {written_code_paths}")
+    shape_failure_result = {
+        "stdout": "TypeError: 'Job' object is not subscriptable\nassert jobs[0]['duration_min'] == 60",
+        "stderr": "",
+    }
+    if not agent_runner.result_indicates_public_shape_contract_failure(shape_failure_result):
+        raise AssertionError("public shape contract detector missed subscriptable traceback")
+    if not agent_runner.action_risks_public_shape_contract_regression(
+        "write_file",
+        {"content": "from dataclasses import dataclass\n@dataclass\nclass Job:\n    id: str\n"},
+    ):
+        raise AssertionError("public shape contract edit detector missed dataclass/class rewrite")
+    if agent_runner.action_risks_public_shape_contract_regression(
+        "write_file",
+        {"content": "def parse_jobs(rows):\n    return [{'duration_min': int(row['duration_min'])} for row in rows]\n"},
+    ):
+        raise AssertionError("public shape contract edit detector rejected dict-preserving rewrite")
+    print("[ok] public shape contract detectors")
     swe_profile_task = agent_runner.task_with_execution_profile(
         "Исправь Python-проект и запусти pytest",
         AgentConfig(shell_enabled=True),
@@ -2768,6 +2785,63 @@ def main() -> int:
             f"code={noop_replace_code}, file_called={mocked_noop_file.called}, payload={noop_replace_payload}"
         )
     print("[ok] no-op replace_in_file rejected")
+
+    public_shape_stdout = io.StringIO()
+    public_shape_config = AgentConfig(
+        task_id=safe_task_id("self-test-public-shape-contract"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+
+    def fake_public_shape_fallback(_config: AgentConfig, _action: dict) -> dict:
+        return {
+            "ok": False,
+            "returncode": 1,
+            "stdout": json.dumps({
+                "results": [
+                    {
+                        "ok": False,
+                        "file": "tests/test_scheduler.py",
+                        "test": "test_parse_jobs_uses_datetime_and_int_duration",
+                        "traceback": "TypeError: 'Job' object is not subscriptable\nassert jobs[0]['duration_min'] == 60",
+                    }
+                ],
+                "source_hints": ["/work/project/scheduler/core.py"],
+            }),
+            "stderr": "",
+        }
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"write_file","path":"/work/project/scheduler/core.py","content":"from dataclasses import dataclass\\n@dataclass\\nclass Job:\\n    id: str\\n\\ndef parse_jobs(rows):\\n    return [Job(row[\\\"id\\\"]) for row in rows]\\n"}',
+            '{"action":"final","message":"done"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_public_shape_fallback), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True}) as mocked_public_shape_file, \
+            contextlib.redirect_stdout(public_shape_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        public_shape_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            public_shape_config,
+        )
+    public_shape_payload = json.loads(public_shape_stdout.getvalue())
+    public_shape_rejections = [
+        step for step in public_shape_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "swe public contract regression rejected by supervisor"
+    ]
+    if public_shape_code != 0 or not public_shape_rejections or mocked_public_shape_file.called:
+        raise AssertionError(
+            "public shape contract guard failed: "
+            f"code={public_shape_code}, file_called={mocked_public_shape_file.called}, payload={public_shape_payload}"
+        )
+    print("[ok] public shape contract guard")
 
     stale_replace_stdout = io.StringIO()
     stale_replace_config = AgentConfig(
