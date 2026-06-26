@@ -1145,6 +1145,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe repeated failing-test file read rejected by supervisor",
     "swe repeated failing test diagnostic rejected by supervisor",
     "swe focused verification after failing tests rejected by supervisor",
+    "swe test-file edit before source fix rejected by supervisor",
     "explicit workspace boundary rejected by supervisor",
     "swe repeated same-file edit before verification rejected by supervisor",
     "swe inspection after edit before verification rejected by supervisor",
@@ -1342,6 +1343,50 @@ def action_is_test_diagnostic(action_type: str, action: dict[str, Any]) -> bool:
     if action_type in {"shell", "python"} and any(marker in (cmd + "\n" + code) for marker in ("pytest", "test_", "tests/", "run_check")):
         return True
     return False
+
+
+def path_looks_like_test_file(path: str) -> bool:
+    normalized = str(path or "").replace("\\", "/").lower()
+    name = normalized.rsplit("/", 1)[-1]
+    return (
+        "/tests/" in normalized
+        or normalized.endswith("/tests")
+        or name.startswith("test_")
+        or name.endswith("_test.py")
+        or name.endswith(".test.js")
+        or name.endswith(".test.ts")
+        or name.endswith(".spec.js")
+        or name.endswith(".spec.ts")
+    )
+
+
+def task_allows_test_file_edits(task: str) -> bool:
+    lowered = str(task or "").lower()
+    explicit_markers = (
+        "add test",
+        "add tests",
+        "create test",
+        "create tests",
+        "write test",
+        "write tests",
+        "update test",
+        "update tests",
+        "modify test",
+        "modify tests",
+        "edit test",
+        "edit tests",
+        "добавь тест",
+        "добавить тест",
+        "создай тест",
+        "создать тест",
+        "напиши тест",
+        "написать тест",
+        "обнови тест",
+        "обновить тест",
+        "измени тест",
+        "изменить тест",
+    )
+    return any(marker in lowered for marker in explicit_markers)
 
 
 def action_runs_test_diagnostic(action_type: str, action: dict[str, Any]) -> bool:
@@ -3879,6 +3924,23 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "This task requires a test diagnostic before editing, and enough non-test inspection has already run. "
                         "Do not keep listing or rereading files. Run the requested test command/fallback, or use action=python "
                         "with cwd set to the project root for an equivalent focused test of the failing functions/CLI."
+                    ),
+                }
+            elif (
+                swe_task
+                and action_type in SWE_EDIT_ACTIONS
+                and pending_failing_tests
+                and path_looks_like_test_file(str(action.get("path") or ""))
+                and not task_allows_test_file_edits(original_task)
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe test-file edit before source fix rejected by supervisor",
+                    "path": str(action.get("path") or ""),
+                    "failing_tests": sorted(pending_failing_tests)[:20],
+                    "instruction": (
+                        "Existing tests are failing. Do not create or edit test files unless the user explicitly asked for test changes. "
+                        "Make a narrow source-code edit that targets failing_tests, then run the full test/fallback again."
                     ),
                 }
             elif (
