@@ -3993,7 +3993,7 @@ def main() -> int:
     swe_resume_cli_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-resume-cli-requires-verify"),
         json_output=True,
-        max_steps=4,
+        max_steps=5,
         inject_memory=False,
         archive_internal_steps=False,
         shell_enabled=True,
@@ -4007,10 +4007,12 @@ def main() -> int:
         "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":true,\"passing_tests\":[\"tests/test_core.py::test_core\"],\"failing_tests\":[]}}]"
     )
     with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"python","cwd":"/work/project","code":"import scheduler.core as core; print(dir(core))","timeout":60}',
             '{"action":"final","message":"premature from resume"}',
             '{"action":"shell","cmd":"cd /work/project && python3 -m package.cli data.csv | python3 -c \\"import sys,json; json.load(sys.stdin)\\"","timeout":60}',
             '{"action":"final","message":"done after cli"}',
     ]), mock.patch.object(agent_runner, "run_shell", return_value={"ok": True, "returncode": 0, "stdout": "", "stderr": ""}), \
+            mock.patch.object(agent_runner, "python_tool", return_value={"ok": True, "stdout": "should not run"}) as mocked_resume_cli_python, \
             contextlib.redirect_stdout(swe_resume_cli_stdout), \
             contextlib.redirect_stderr(io.StringIO()):
         swe_resume_cli_code = run_agent(resume_cli_task, swe_resume_cli_config, event_sink=swe_resume_cli_events.append)
@@ -4019,6 +4021,11 @@ def main() -> int:
         raise AssertionError(f"SWE resume CLI verification did not recover after CLI command: {swe_resume_cli_payload}")
     if not any(event.get("code") == "final_swe_cli_verification_required" for event in swe_resume_cli_events):
         raise AssertionError(f"SWE resume final was not blocked before CLI verification: {swe_resume_cli_payload}")
+    resume_cli_results = [step.get("result") or {} for step in swe_resume_cli_payload.get("steps", [])]
+    if not any(result.get("error") == "swe cli verification required by supervisor" for result in resume_cli_results):
+        raise AssertionError(f"SWE resume non-CLI action was not blocked before CLI verification: {swe_resume_cli_payload}")
+    if mocked_resume_cli_python.called:
+        raise AssertionError(f"SWE resume non-CLI python action reached python_tool: {swe_resume_cli_payload}")
     print("[ok] SWE resume final requires CLI verification")
 
     failing_stall_stdout = io.StringIO()
