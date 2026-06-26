@@ -735,16 +735,12 @@ def refine_forge_project(project_id: str, request: ProjectRefineRequest, dry_run
     artifact = store.get_artifact(artifact_id)
     if artifact is None:
         raise HTTPException(status_code=404, detail="artifact not found")
-    character_prompt = ""
-    if project.character_profile:
-        character_prompt = str(project.character_profile.get("canonical_prompt") or "")
     prompt = request.prompt or (
-        f"{project.request}, SDXL img2img refinement, keep small feline silhouette, "
-        "increase asymmetry, expose more dark mutated demon flesh, reduce full blue fur coverage, "
-        "preserve only a few bright blue cat fragments, make the body-horror design more readable"
+        "SDXL img2img refinement of the source image, keep the small feline silhouette and pose, "
+        "make the creature less like a normal blue cat, add asymmetric dark mutated demon flesh patches, "
+        "preserve only a few bright blue cat-fur fragments, add turquoise or violet warp glow, "
+        "keep organic body-horror texture, avoid decorative mechanical patterns"
     )
-    if character_prompt:
-        prompt = f"{prompt}, {character_prompt}"
     spec = JobSpec(
         type="img2img",
         engine="sdxl",

@@ -190,7 +190,7 @@ class ProjectSpec(BaseModel):
 class ProjectRefineRequest(BaseModel):
     artifact_id: str | None = None
     prompt: str | None = None
-    strength: float = Field(default=0.62, ge=0.0, le=1.0)
+    strength: float = Field(default=0.42, ge=0.0, le=1.0)
     steps: int = Field(default=14, ge=1, le=config.MAX_STEPS)
     seed: int | None = None
 
