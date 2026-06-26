@@ -1466,7 +1466,10 @@ def main() -> int:
     required_rewrite_payload = json.loads(required_rewrite_stdout.getvalue())
     required_rewrite_rejections = [
         step for step in required_rewrite_payload.get("steps", [])
-        if (step.get("result") or {}).get("error") == "required artifact rewrite before verification rejected by supervisor"
+        if (step.get("result") or {}).get("error") in {
+            "required artifact rewrite before verification rejected by supervisor",
+            "artifact verification mode action rejected by supervisor",
+        }
     ]
     if required_rewrite_code != 0 or not required_rewrite_rejections:
         raise AssertionError(
@@ -2072,9 +2075,12 @@ def main() -> int:
         '{"action":"final","message":"Готово: /work/report.md"}',
         '{"action":"final","message":"Готово: /work/report.md и /work/matrix.md"}',
     ]
+    def fake_omitted_final_missing_verifications(paths: list[str], verified_paths: set[str]) -> list[str]:
+        return ["/work/matrix.md"] if set(paths) == {"/work/matrix.md"} else []
+
     with mock.patch.object(agent_runner, "chat", side_effect=omitted_replies), \
             mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "exists": True, "type": "file", "size": 2000}), \
-            mock.patch.object(agent_runner, "missing_text_verifications", side_effect=[["/work/matrix.md"], []]), \
+            mock.patch.object(agent_runner, "missing_text_verifications", side_effect=fake_omitted_final_missing_verifications), \
             contextlib.redirect_stdout(omitted_final_stdout), \
             contextlib.redirect_stderr(io.StringIO()):
         omitted_final_code = run_agent(
@@ -2205,6 +2211,44 @@ def main() -> int:
     if not any(event.get("code") == "auto_final_required_artifacts_verified" for event in auto_final_events):
         raise AssertionError(f"required artifact auto-final warning was not emitted: {auto_final_events}")
     print("[ok] required artifacts auto-final after verification")
+
+    artifact_verify_mode_events: list[dict] = []
+    artifact_verify_mode_stdout = io.StringIO()
+    artifact_verify_mode_config = AgentConfig(
+        task_id=safe_task_id("self-test-artifact-verify-mode"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"write_file","path":"/work/report.md","content":"Summary\\nSTATUS: PASS"}',
+            '{"action":"write_file","path":"/work/audit.json","content":"{\\"status\\":\\"pass\\"}"}',
+            '{"action":"verify_text_file","path":"/work/report.md","must_contain":["STATUS: PASS"],"min_bytes":1}',
+            '{"action":"verify_text_file","path":"/work/audit.json","must_contain":["status=\\"pass\\""],"min_bytes":1}',
+    ]) as mocked_artifact_verify_chat, mock.patch.object(agent_runner, "file_tool", side_effect=fake_file_info), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_verify), \
+            contextlib.redirect_stdout(artifact_verify_mode_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        artifact_verify_mode_code = run_agent(
+            "Required artifacts: /work/report.md and /work/audit.json. report.md must contain STATUS: PASS. audit.json status=\"pass\".",
+            artifact_verify_mode_config,
+            event_sink=artifact_verify_mode_events.append,
+        )
+    artifact_verify_mode_payload = json.loads(artifact_verify_mode_stdout.getvalue())
+    artifact_verify_messages = mocked_artifact_verify_chat.call_args_list[2].args[1]
+    if (
+        artifact_verify_mode_code != 0
+        or artifact_verify_messages[0].get("content") != agent_runner.ARTIFACT_VERIFY_SYSTEM_PROMPT
+        or not any(event.get("code") == "artifact_verify_mode" for event in artifact_verify_mode_events)
+        or "/work/report.md" not in artifact_verify_mode_payload.get("message", "")
+        or "/work/audit.json" not in artifact_verify_mode_payload.get("message", "")
+    ):
+        raise AssertionError(
+            "artifact verification mode did not narrow the post-write step: "
+            f"code={artifact_verify_mode_code}, payload={artifact_verify_mode_payload}, messages={artifact_verify_messages}, events={artifact_verify_mode_events}"
+        )
+    print("[ok] artifact verification mode narrows post-write steps")
 
     restored_required_events: list[dict] = []
     restored_required_stdout = io.StringIO()

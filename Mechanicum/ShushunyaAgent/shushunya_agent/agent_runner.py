@@ -331,6 +331,24 @@ SWE_REPAIR_SYSTEM_PROMPT = """Ты ShushunyaAgent SWE repair mode: узкий и
 """
 
 
+ARTIFACT_VERIFY_SYSTEM_PROMPT = """Ты ShushunyaAgent artifact verification mode: узкий исполнитель проверки готовых артефактов.
+
+Отвечай только одним валидным JSON-объектом без markdown и пояснений.
+
+Твоя задача: проверить один из уже созданных required artifacts через verify_text_file.
+
+Разрешенное действие:
+{"action":"verify_text_file","path":"/work/project/file.md","must_contain":["marker"],"ordered_patterns":["A","B"],"min_bytes":1}
+
+Правила:
+- Не возвращай final.
+- Не вызывай write_file, append_file, replace_in_file, mkdir, read_file, list_files.
+- Выбери ровно один path из missing_required_artifacts.
+- Проверки должны следовать user task: ключевые маркеры, порядок разделов, JSON/CSV смысловые поля через must_contain key=value где это поддерживается.
+- Если сомневаешься в точных проверках, все равно верни verify_text_file с path и min_bytes=1, добавив очевидные must_contain из user task.
+"""
+
+
 @dataclass
 class AgentConfig:
     archive_base_url: str = ARCHIVE_BASE_URL
@@ -1180,6 +1198,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe failing tests inspection stall rejected by supervisor",
     "swe passing-test edit rejected by supervisor",
     "swe repair mode action rejected by supervisor",
+    "artifact verification mode action rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
     "append_file to JSON rejected by supervisor",
@@ -1680,6 +1699,26 @@ def build_swe_repair_messages(
     }
     return [
         {"role": "system", "content": SWE_REPAIR_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
+    ]
+
+
+def build_artifact_verify_messages(
+    original_task: str,
+    missing_required_artifacts: list[str],
+    verified_paths: set[str],
+) -> list[dict[str, str]]:
+    payload = {
+        "task": truncate(original_task, 4000),
+        "missing_required_artifacts": missing_required_artifacts[:20],
+        "already_verified_artifacts": sorted(verified_paths)[:20],
+        "required_next_action": (
+            "Return exactly one verify_text_file JSON action for one path from missing_required_artifacts. "
+            "Do not write, rewrite, list, read, mkdir, or final."
+        ),
+    }
+    return [
+        {"role": "system", "content": ARTIFACT_VERIFY_SYSTEM_PROMPT},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
     ]
 
@@ -3796,6 +3835,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         step_memory = should_inject_step_memory(config, explicit_workspace, step)
         step_archive = config.archive_internal_steps or (config.archive_task and step == 1)
         repair_source_path = ""
+        artifact_verify_paths: list[str] = []
         chat_messages = messages
         if swe_task and pending_failing_tests and not code_mutated_since_last_pytest:
             repair_source_path = swe_repair_source_path(pending_failing_tests, last_source_candidates, last_read_file_excerpts)
@@ -3827,6 +3867,40 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "source_path": repair_source_path,
                         "failing_tests": sorted(pending_failing_tests)[:20],
                         "candidate_source_paths": last_source_candidates[:20],
+                    },
+                )
+        if not repair_source_path and required_artifact_paths:
+            missing_artifact_verification = missing_text_verifications(required_artifact_path_list, verified_text_paths)
+            if (
+                missing_artifact_verification
+                and required_artifact_paths.issubset(set(successful_write_file_paths) | verified_text_paths)
+            ):
+                artifact_verify_paths = missing_artifact_verification
+                chat_messages = build_artifact_verify_messages(
+                    original_task=original_task,
+                    missing_required_artifacts=artifact_verify_paths,
+                    verified_paths=verified_text_paths,
+                )
+                step_memory = False
+                step_archive = False
+                emit(
+                    event_sink,
+                    {
+                        "type": "warning",
+                        "code": "artifact_verify_mode",
+                        "step": step,
+                        "message": "Artifact verification mode active for unverified required artifacts.",
+                        "display_message": "Артефакты уже созданы, переключаюсь на проверку содержимого.",
+                        "missing_verification": artifact_verify_paths,
+                    },
+                )
+                write_task_journal(
+                    config,
+                    "artifact_verify_mode",
+                    {
+                        "step": step,
+                        "missing_verification": artifact_verify_paths,
+                        "verified_paths": sorted(verified_text_paths)[:20],
                     },
                 )
         try:
@@ -3997,6 +4071,38 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "instruction": (
                         "Return a narrow replace_in_file/write_file edit for source_path, or read_file one non-test "
                         "source file only if this source cannot contain the bug."
+                    ),
+                }
+        if artifact_verify_paths and forced_supervisor_result is None:
+            artifact_verify_violation = ""
+            verify_path = str(action.get("path") or "")
+            if action_type != "verify_text_file":
+                artifact_verify_violation = "Artifact verification mode allows only verify_text_file."
+            elif verify_path not in set(artifact_verify_paths):
+                artifact_verify_violation = "Artifact verification mode path must be one of missing_required_artifacts."
+            if artifact_verify_violation:
+                warning_payload = {
+                    "error": "artifact verification mode action rejected by supervisor",
+                    "violation": artifact_verify_violation,
+                    "missing_required_artifacts": artifact_verify_paths,
+                    "action": action,
+                }
+                emit(
+                    event_sink,
+                    {
+                        "type": "warning",
+                        "code": "artifact_verify_mode_rejected",
+                        "step": step,
+                        "message": artifact_verify_violation,
+                        "display_message": "Артефакты уже есть, нужен шаг проверки, а не новая запись.",
+                    },
+                )
+                forced_supervisor_result = {
+                    "ok": False,
+                    **warning_payload,
+                    "instruction": (
+                        "Return verify_text_file for one path from missing_required_artifacts. "
+                        "Do not write, rewrite, list, read, mkdir, or final."
                     ),
                 }
 
