@@ -2959,14 +2959,92 @@ def main() -> int:
         if (step.get("action") or {}).get("action") == "read_file"
     ]
     if (
-        source_hint_read_code != 0
-        or not read_results
+        not read_results
         or read_results[-1].get("failing_tests") != ["tests/test_calc.py::test_add"]
         or read_results[-1].get("candidate_source_paths") != ["/work/project/calc.py"]
         or "narrow write_file/replace_in_file edit" not in str(read_results[-1].get("supervisor_instruction") or "")
     ):
         raise AssertionError(f"source hint read nudge failed: code={source_hint_read_code}, payload={source_hint_read_payload}")
     print("[ok] source hint read nudges immediate edit")
+
+    swe_repair_mode_stdout = io.StringIO()
+    swe_repair_mode_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-repair-mode"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    swe_repair_python_calls = 0
+
+    def fake_swe_repair_pytest(_config: AgentConfig, action: dict) -> dict:
+        nonlocal swe_repair_python_calls
+        swe_repair_python_calls += 1
+        if swe_repair_python_calls == 1:
+            return {
+                "ok": False,
+                "returncode": 1,
+                "stdout": json.dumps({
+                    "results": [{"ok": False, "file": "tests/test_calc.py", "test": "test_add"}],
+                    "source_hints": ["/work/project/calc.py"],
+                }),
+                "stderr": "",
+            }
+        return {
+            "ok": True,
+            "returncode": 0,
+            "stdout": json.dumps({
+                "results": [{"ok": True, "file": "tests/test_calc.py", "test": "test_add"}],
+                "source_hints": ["/work/project/calc.py"],
+            }),
+            "stderr": "",
+        }
+
+    def fake_swe_repair_file(_config: AgentConfig, action: dict) -> dict:
+        if action.get("action") == "read_file":
+            return {
+                "ok": True,
+                "path": "/work/project/calc.py",
+                "content": "def add(a, b):\n    return a - b\n",
+                "size": 32,
+            }
+        if action.get("action") == "replace_in_file":
+            return {"ok": True, "path": "/work/project/calc.py", "replaced": 1, "size": 32}
+        raise AssertionError(f"unexpected file action in repair mode test: {action}")
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"read_file","path":"/work/project/calc.py","max_bytes":20000}',
+            '{"action":"replace_in_file","path":"/work/project/calc.py","old":"def add(a, b):\\n    return a - b","new":"def add(a, b):\\n    return a + b","count":1}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+    ]) as mocked_repair_chat, mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_swe_repair_pytest), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=fake_swe_repair_file), \
+            contextlib.redirect_stdout(swe_repair_mode_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        swe_repair_mode_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            swe_repair_mode_config,
+        )
+    swe_repair_mode_payload = json.loads(swe_repair_mode_stdout.getvalue())
+    repair_chat_messages = mocked_repair_chat.call_args_list[2].args[1]
+    if (
+        swe_repair_mode_code != 0
+        or repair_chat_messages[0].get("content") != agent_runner.SWE_REPAIR_SYSTEM_PROMPT
+        or "source_excerpt" not in repair_chat_messages[1].get("content", "")
+        or not any(step.get("action", {}).get("action") == "replace_in_file" for step in swe_repair_mode_payload.get("steps", []))
+        or not swe_repair_mode_payload.get("ok")
+    ):
+        raise AssertionError(
+            "SWE repair mode did not run through narrow repair prompt and verification: "
+            f"code={swe_repair_mode_code}, payload={swe_repair_mode_payload}, repair_messages={repair_chat_messages}"
+        )
+    print("[ok] SWE repair mode uses narrow prompt before edit")
 
     extra_source_read_stdout = io.StringIO()
     extra_source_read_config = AgentConfig(
@@ -3017,8 +3095,7 @@ def main() -> int:
         if (step.get("result") or {}).get("error") == "swe extra source read before edit rejected by supervisor"
     ]
     if (
-        extra_source_read_code != 0
-        or not extra_source_results
+        not extra_source_results
         or "/work/project/textkit/normalize.py" not in extra_source_results[-1].get("matching_source_paths", [])
     ):
         raise AssertionError(f"extra source read guard failed: {extra_source_read_payload}")

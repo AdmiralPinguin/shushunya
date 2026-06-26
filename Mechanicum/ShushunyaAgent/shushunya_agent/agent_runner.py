@@ -310,6 +310,27 @@ COMPACT_SYSTEM_PROMPT = """Ты Шушуня-агент: локальный аг
 """
 
 
+SWE_REPAIR_SYSTEM_PROMPT = """Ты ShushunyaAgent SWE repair mode: узкий исполнитель исправления кода.
+
+Отвечай только одним валидным JSON-объектом без markdown и пояснений.
+
+Твоя задача: по текущим failing_tests и одному прочитанному source-файлу сделать минимальную правку source-кода.
+
+Разрешенные действия:
+{"action":"replace_in_file","path":"/work/project/file.py","old":"old exact text","new":"new exact text","count":1}
+{"action":"write_file","path":"/work/project/file.py","content":"complete corrected file"}
+{"action":"read_file","path":"/work/project/other_source.py","max_bytes":20000,"offset":0}
+
+Правила:
+- Предпочитай replace_in_file для маленькой точечной правки.
+- Не редактируй tests/test_*.py, test_*.py, *_test.py, *_spec.py, если пользователь явно не просил менять тесты.
+- Не запускай shell/python в repair mode. После успешной правки основной агент сам запустит полную проверку.
+- Не возвращай final.
+- Если прочитанный source явно не может содержать баг, верни read_file ровно одного другого source-файла из candidate_source_paths или из traceback/import context.
+- Не читай соседние файлы из любопытства. Если можешь исправить по текущему source excerpt, сразу верни edit action.
+"""
+
+
 @dataclass
 class AgentConfig:
     archive_base_url: str = ARCHIVE_BASE_URL
@@ -1158,6 +1179,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe shell inline python rejected by supervisor",
     "swe failing tests inspection stall rejected by supervisor",
     "swe passing-test edit rejected by supervisor",
+    "swe repair mode action rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
     "append_file to JSON rejected by supervisor",
@@ -1588,6 +1610,60 @@ def source_excerpts_matching_tests(excerpts: dict[str, str], tests: set[str]) ->
         if any(term in lowered for term in terms):
             matches.append(path)
     return matches[:10]
+
+
+def swe_repair_source_path(
+    pending_failing_tests: set[str],
+    source_candidates: list[str],
+    read_excerpts: dict[str, str],
+) -> str:
+    if not pending_failing_tests:
+        return ""
+    readable_candidates = [
+        path
+        for path in source_candidates
+        if path in read_excerpts and not path_looks_like_test_file(path)
+    ]
+    if len(readable_candidates) == 1:
+        return readable_candidates[0]
+    matching = [
+        path
+        for path in source_excerpts_matching_tests(read_excerpts, pending_failing_tests)
+        if not path_looks_like_test_file(path)
+    ]
+    if len(matching) == 1:
+        return matching[0]
+    return ""
+
+
+def build_swe_repair_messages(
+    original_task: str,
+    failing_tests: set[str],
+    passing_tests: set[str],
+    source_path: str,
+    source_excerpt: str,
+    candidate_source_paths: list[str],
+) -> list[dict[str, str]]:
+    payload = {
+        "task": truncate(original_task, 3000),
+        "failing_tests": sorted(failing_tests)[:20],
+        "passing_tests": sorted(passing_tests)[:20],
+        "source_path": source_path,
+        "candidate_source_paths": [
+            path
+            for path in candidate_source_paths[:20]
+            if not path_looks_like_test_file(path)
+        ],
+        "source_excerpt": truncate(source_excerpt, 12000),
+        "required_next_action": (
+            "Return exactly one JSON action. Prefer replace_in_file against source_path. "
+            "Use write_file only if replace_in_file is unsafe. Use read_file only if this source cannot contain the bug."
+        ),
+    }
+    return [
+        {"role": "system", "content": SWE_REPAIR_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
+    ]
 
 
 def replace_edit_declared_symbols(action: dict[str, Any]) -> set[str]:
@@ -3582,8 +3658,42 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         write_task_journal(config, "step", {"step": step, "max_steps": config.max_steps})
         step_memory = should_inject_step_memory(config, explicit_workspace, step)
         step_archive = config.archive_internal_steps or (config.archive_task and step == 1)
+        repair_source_path = ""
+        chat_messages = messages
+        if swe_task and pending_failing_tests and not code_mutated_since_last_pytest:
+            repair_source_path = swe_repair_source_path(pending_failing_tests, last_source_candidates, last_read_file_excerpts)
+            if repair_source_path:
+                chat_messages = build_swe_repair_messages(
+                    original_task=original_task,
+                    failing_tests=pending_failing_tests,
+                    passing_tests=last_pytest_passing_tests,
+                    source_path=repair_source_path,
+                    source_excerpt=last_read_file_excerpts.get(repair_source_path, ""),
+                    candidate_source_paths=last_source_candidates,
+                )
+                step_memory = False
+                step_archive = False
+                emit(
+                    event_sink,
+                    {
+                        "type": "warning",
+                        "code": "swe_repair_mode",
+                        "step": step,
+                        "message": f"SWE repair mode active for {repair_source_path}",
+                    },
+                )
+                write_task_journal(
+                    config,
+                    "swe_repair_mode",
+                    {
+                        "step": step,
+                        "source_path": repair_source_path,
+                        "failing_tests": sorted(pending_failing_tests)[:20],
+                        "candidate_source_paths": last_source_candidates[:20],
+                    },
+                )
         try:
-            raw = chat(config, messages, inject_memory=step_memory, archive_enabled=step_archive)
+            raw = chat(config, chat_messages, inject_memory=step_memory, archive_enabled=step_archive)
         except Exception as exc:
             duration_sec = round(time.time() - run_started, 3)
             message = (
@@ -3706,6 +3816,36 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 }
             )
             continue
+        if repair_source_path:
+            repair_violation = ""
+            repair_path = str(action.get("path") or "")
+            if action_type not in {"replace_in_file", "write_file", "read_file"}:
+                repair_violation = "SWE repair mode allows only replace_in_file, write_file, or read_file."
+            elif action_type in {"replace_in_file", "write_file"} and repair_path != repair_source_path:
+                repair_violation = "SWE repair mode edit must target the loaded source_path."
+            elif action_type == "read_file" and path_looks_like_test_file(repair_path):
+                repair_violation = "SWE repair mode must not read test files before the first source fix."
+            if repair_violation:
+                warning_payload = {
+                    "error": "swe repair mode action rejected by supervisor",
+                    "violation": repair_violation,
+                    "source_path": repair_source_path,
+                    "failing_tests": sorted(pending_failing_tests)[:20],
+                    "action": action,
+                }
+                emit(event_sink, {"type": "warning", "code": "swe_repair_mode_rejected", "step": step, "message": repair_violation})
+                messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Supervisor rejected SWE repair mode action:\n"
+                            + json.dumps(warning_payload, ensure_ascii=False, indent=2)
+                            + "\nReturn a narrow replace_in_file/write_file edit for source_path, or read_file one non-test source file only if this source cannot contain the bug."
+                        ),
+                    }
+                )
+                continue
 
         if action_type == "final":
             message = str(action.get("message", "")).strip()
