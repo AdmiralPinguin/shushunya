@@ -4578,6 +4578,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if supervisor_rejection:
             repeated_rejection_count += 1
             repeated_rejection_total += 1
+            if isinstance(result, dict) and result.get("error") == "ready workspace inspection rejected by supervisor":
+                repeated_rejection_total = max(repeated_rejection_total, max(1, REPEATED_REJECTION_TOTAL_LIMIT))
             if (
                 repeated_rejection_count >= max(1, REPEATED_REJECTION_CONSECUTIVE_LIMIT)
                 or repeated_rejection_total >= max(1, REPEATED_REJECTION_TOTAL_LIMIT)

@@ -1324,7 +1324,11 @@ def main() -> int:
         for step in ready_workspace_payload.get("steps", [])
         if isinstance(step, dict)
     ]
-    if ready_workspace_code != 0 or "ready workspace inspection rejected by supervisor" not in ready_workspace_errors:
+    if (
+        ready_workspace_code != 2
+        or ready_workspace_payload.get("continuable") is not True
+        or "ready workspace inspection rejected by supervisor" not in ready_workspace_errors
+    ):
         raise AssertionError(f"ready workspace inspection guard failed: code={ready_workspace_code}, payload={ready_workspace_payload}")
     print("[ok] ready workspace inspection guard")
 
