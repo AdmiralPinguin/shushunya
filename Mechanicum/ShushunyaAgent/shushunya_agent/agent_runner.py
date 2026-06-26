@@ -1133,6 +1133,7 @@ SWE_SOURCE_SUFFIXES = (".py", ".js", ".ts", ".tsx", ".jsx", ".kt", ".java")
 SWE_LOW_SIGNAL_SOURCE_NAMES = {"__init__.py"}
 SUPERVISOR_REJECTION_ERRORS = {
     "repeated identical action rejected by supervisor",
+    "repeated mkdir rejected by supervisor",
     "repeated write_file path rejected by supervisor",
     "required artifact rewrite before verification rejected by supervisor",
     "shell tool is disabled by supervisor policy",
