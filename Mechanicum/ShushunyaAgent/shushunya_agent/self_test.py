@@ -2742,6 +2742,33 @@ def main() -> int:
         raise AssertionError(f"SWE shell inline python guard did not provide a valid suggested python action: {suggested}")
     print("[ok] SWE shell inline python rejected")
 
+    noop_replace_stdout = io.StringIO()
+    noop_replace_config = AgentConfig(
+        task_id=safe_task_id("self-test-noop-replace"),
+        json_output=True,
+        max_steps=2,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"replace_in_file","path":"/work/project/a.py","old":"return x","new":"return x","count":1}',
+            '{"action":"final","message":"done"}',
+    ]), mock.patch.object(agent_runner, "file_tool", return_value={"ok": True}) as mocked_noop_file, \
+            contextlib.redirect_stdout(noop_replace_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        noop_replace_code = run_agent("patch no-op replace", noop_replace_config)
+    noop_replace_payload = json.loads(noop_replace_stdout.getvalue())
+    noop_replace_rejections = [
+        step for step in noop_replace_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "no-op replace_in_file rejected by supervisor"
+    ]
+    if noop_replace_code != 0 or not noop_replace_rejections or mocked_noop_file.called:
+        raise AssertionError(
+            "no-op replace guard failed: "
+            f"code={noop_replace_code}, file_called={mocked_noop_file.called}, payload={noop_replace_payload}"
+        )
+    print("[ok] no-op replace_in_file rejected")
+
     stale_replace_stdout = io.StringIO()
     stale_replace_config = AgentConfig(
         task_id=safe_task_id("self-test-stale-replace-loop"),

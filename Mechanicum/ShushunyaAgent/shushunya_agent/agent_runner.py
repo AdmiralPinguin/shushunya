@@ -326,11 +326,13 @@ SWE_REPAIR_SYSTEM_PROMPT = """Ты ShushunyaAgent SWE repair mode: узкий и
 
 Правила:
 - Предпочитай replace_in_file для маленькой точечной правки.
+- В replace_in_file old и new не должны быть одинаковыми; правка обязана менять поведение или код.
 - Не редактируй tests/test_*.py, test_*.py, *_test.py, *_spec.py, если пользователь явно не просил менять тесты.
 - Не запускай shell/python в repair mode. После успешной правки основной агент сам запустит полную проверку.
 - Не возвращай final.
 - Если прочитанный source явно не может содержать баг, верни read_file ровно одного другого source-файла из candidate_source_paths или из traceback/import context.
 - Не читай соседние файлы из любопытства. Если можешь исправить по текущему source excerpt, сразу верни edit action.
+- Сохраняй публичный контракт функций. Если failing_tests обращаются к результату как к dict/list (`x['key']`, `plan['scheduled']`) или ошибка говорит object is not subscriptable / tuple indices / list indices, не заменяй контракт классом, tuple или другим shape; верни тот shape, который ожидают тесты и CLI.
 """
 
 
@@ -1223,6 +1225,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe test-file edit before source fix rejected by supervisor",
     "explicit workspace boundary rejected by supervisor",
     "swe repeated same-file edit before verification rejected by supervisor",
+    "no-op replace_in_file rejected by supervisor",
     "swe inspection after edit before verification rejected by supervisor",
     "swe extra source read before edit rejected by supervisor",
     "swe shell inline python rejected by supervisor",
@@ -1895,7 +1898,8 @@ def build_swe_repair_messages(
         "source_excerpt": truncate(source_excerpt, 12000),
         "required_next_action": (
             "Return exactly one JSON action. Prefer replace_in_file against source_path. "
-            "Use write_file only if replace_in_file is unsafe. Use read_file only if this source cannot contain the bug."
+            "Use write_file only if replace_in_file is unsafe. Use read_file only if this source cannot contain the bug. "
+            "Do not return a no-op replace where old and new are identical. Preserve public data shapes expected by failing_tests."
         ),
     }
     return [
@@ -4416,6 +4420,16 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     },
                 )
         forced_supervisor_result: dict[str, Any] | None = None
+        if action_type == "replace_in_file" and str(action.get("old") or "") == str(action.get("new") or ""):
+            forced_supervisor_result = {
+                "ok": False,
+                "error": "no-op replace_in_file rejected by supervisor",
+                "path": str(action.get("path") or ""),
+                "instruction": (
+                    "replace_in_file old and new are identical, so this edit cannot change behavior or fix failing tests. "
+                    "Return a real edit with different new text, use write_file for a complete corrected file, or run verification if no edit is needed."
+                ),
+            }
         if repair_source_path:
             repair_violation = ""
             repair_path = str(action.get("path") or "")
