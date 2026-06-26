@@ -637,6 +637,11 @@ def main() -> int:
         {"cmd": "python3 -m package.cli data.csv | python3 -c \"import sys,json; json.load(sys.stdin)\""},
     ):
         raise AssertionError("module CLI JSON check was not recognized")
+    if agent_runner.action_is_cli_verification(
+        "python",
+        {"code": "with open('scheduler/cli.py', 'r') as f:\n    print(f.read())"},
+    ):
+        raise AssertionError("reading cli.py must not count as CLI verification")
     swe_profile_task = agent_runner.task_with_execution_profile(
         "Исправь Python-проект и запусти pytest",
         AgentConfig(shell_enabled=True),
