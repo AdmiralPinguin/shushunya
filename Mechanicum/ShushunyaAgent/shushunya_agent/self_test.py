@@ -885,6 +885,8 @@ def main() -> int:
         long_resume_task = server.apply_resume_context("continue", long_resume_config, {"resume_task_id": "previous"})
     if "/work/report.md" not in long_resume_task or "/work/matrix.md" not in long_resume_task:
         raise AssertionError(f"long resume context lost required artifact paths: {long_resume_task[-1000:]}")
+    if long_resume_config.initial_required_artifact_paths != ("/work/report.md", "/work/matrix.md"):
+        raise AssertionError(f"resume config lost required artifact paths: {long_resume_config.initial_required_artifact_paths}")
     print("[ok] long resume context keeps original required artifacts")
     verified_events = [
         {"type": "action", "action": {"action": "verify_text_file", "path": "/work/report.md"}},
@@ -897,6 +899,13 @@ def main() -> int:
     if server.verified_text_paths_from_events(verified_events) != ["/work/matrix.md", "/work/report.md"]:
         raise AssertionError(f"resume verified path extraction failed: {server.verified_text_paths_from_events(verified_events)}")
     print("[ok] resume context restores verified text paths")
+    required_events = [
+        {"type": "start", "required_artifacts": ["/work/report.md", "/work/report.md", "/work/metrics.json"]},
+        {"type": "start", "required_artifacts": ["/work/audit.csv"]},
+    ]
+    if server.required_artifact_paths_from_events(required_events) != ["/work/report.md", "/work/metrics.json", "/work/audit.csv"]:
+        raise AssertionError(f"resume required artifact extraction failed: {server.required_artifact_paths_from_events(required_events)}")
+    print("[ok] resume context restores required artifact paths")
     if server.should_apply_previous_task_context({"task_id": "new-explicit-task"}):
         raise AssertionError("explicit new task_id should not inherit previous task context")
     if server.should_apply_previous_task_context({"resume_task_id": "old-task"}):

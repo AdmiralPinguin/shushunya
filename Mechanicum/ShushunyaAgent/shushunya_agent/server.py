@@ -396,6 +396,7 @@ def apply_resume_context(task: str, config: AgentConfig, payload: dict[str, Any]
     events = journal.get("events", [])
     if isinstance(events, list):
         config.initial_verified_text_paths = tuple(verified_text_paths_from_events(events))
+        config.initial_required_artifact_paths = tuple(required_artifact_paths_from_events(events))
     compact_events = compact_resume_events(events if isinstance(events, list) else [])
     return (
         task
@@ -437,6 +438,24 @@ def verified_text_paths_from_events(events: list[object]) -> list[str]:
             verified.discard(str(action.get("output_txt") or ""))
             verified.discard(str(action.get("output_fb2") or ""))
     return sorted(path for path in verified if path)
+
+
+def required_artifact_paths_from_events(events: list[object]) -> list[str]:
+    required: list[str] = []
+    seen: set[str] = set()
+    for event in events:
+        if not isinstance(event, dict) or str(event.get("type") or "") != "start":
+            continue
+        values = event.get("required_artifacts")
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            path = str(value or "")
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            required.append(path)
+    return required[:20]
 
 
 def should_apply_previous_task_context(payload: dict[str, Any]) -> bool:
