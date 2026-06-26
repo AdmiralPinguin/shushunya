@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "id": "shushunya",
+      "name": "Shushunya",
+      "aliases": ["шушуня", "shushunya", "шушуню", "шушуни", "шушуней"],
+      "kind": "character",
+      "preferred_workflow": {
+        "first_concept_engines": ["flux", "stable_diffusion"],
+        "edit_engine": "sdxl",
+        "recommended_jobs": ["txt2img", "img2img", "inpaint", "variation"]
+      },
+      "canonical_prompt": "maximally terrifying small cat-sized asymmetrical warp demon creature, recognizably feline silhouette but horribly corrupted, about 70 to 80 percent mutated chaotic demon flesh, dark blue purple and black organic body with diseased smooth skin patches, sharp scales, ragged feathers, wet warp growths, thin twitching tentacles and bone splinters, upper left head quadrant preserved as bright blue cat fur with one blue cat ear and one frightened normal left cat eye, right side of head fully demonic with torn deformed mouth, many small needle teeth and exposed dark gums, uneven small twisted horns, scattered feathers and bone spikes, right eye glowing turquoise or violet warp light like a cursed wound, tiny closed eyes partly embedded under the skin, right front paw preserved as bright blue cat-like fur, other limbs demonic and uneven with long black crooked claws, long irregular tail with fur at the base transitioning into demonic flesh and ending in feathers tentacles or bony growths, no full wings or only broken rudimentary demonic back growths, tragic body horror, pitiful disgusting and profoundly wrong, not a huge monster but a small cursed familiar that should not exist",
+      "negative_prompt": "cute mascot, adorable expression, clean cartoon pet, friendly creature, large monster, giant creature, human body, fully symmetrical body, normal cute blue cat, full feathered wings, angel wings, generic horned demon, smooth uniform skin, extra full-size limbs, readable text, logo, low quality, blurry",
+      "style_neutral_traits": [
+        "maximally terrifying small cat-sized body",
+        "recognizable feline silhouette",
+        "asymmetrical body",
+        "70-80 percent dark blue purple black mutated demon flesh",
+        "bright blue preserved cat fur on upper left head and right front paw",
+        "normal left cat eye and glowing turquoise or violet right demon eye",
+        "torn deformed demonic right mouth with many needle teeth",
+        "uneven horns, feathers, bone spikes, scales, warp growths and thin tentacles",
+        "long irregular mixed fur and demonic tail",
+        "no full wings; at most broken rudimentary back growths",
+        "tragic body horror rather than clean mascot design"
+      ],
+      "must_preserve": [
+        "small scale",
+        "feline readability",
+        "asymmetry",
+        "bright blue preserved cat fragments",
+        "dark blue purple black demon palette",
+        "turquoise or violet warp glow"
+      ],
+      "avoid": [
+        "cute mascot tone",
+        "friendly expression",
+        "clean cartoon pet",
+        "giant monster scale",
+        "fully normal cat",
+        "fully symmetrical demon",
+        "humanized body",
+        "large functional wings",
+        "pure cute mascot tone"
+      ],
+      "palette": {
+        "primary": ["dark blue", "purple", "black"],
+        "accent": ["bright blue fur", "turquoise warp light", "violet warp light"]
+      },
+      "notes": "Profile is based on the user's canonical Shushunya appearance description and intentionally biases toward a maximally frightening body-horror interpretation. Local LoRA/IP-Adapter is not assumed; request one through asset_request if stronger identity lock is needed."
+    }
+  ]
+}

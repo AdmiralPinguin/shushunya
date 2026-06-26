@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import __version__, config
 from .archive_memory import ArchiveMemoryClient
+from .characters import character_profiles
 from .evaluator import evaluate_artifact
 from .planner import plan_txt2img
 from .queue import ForgeQueue
@@ -287,6 +288,11 @@ def list_asset_downloads(limit: int = 100) -> list[dict[str, object]]:
 @app.get("/forge/assets/profiles")
 def get_asset_profiles() -> dict[str, object]:
     return asset_profiles()
+
+
+@app.get("/forge/characters")
+def get_character_profiles() -> dict[str, object]:
+    return character_profiles()
 
 
 @app.get("/forge/reports")

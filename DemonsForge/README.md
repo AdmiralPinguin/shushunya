@@ -96,6 +96,7 @@ Core endpoints:
 - `POST /forge/registries/refresh`
 - `GET /forge/assets/downloads`
 - `GET /forge/assets/profiles`
+- `GET /forge/characters`
 - `POST /forge/plan`
 - `POST /forge/jobs`
 - `GET /forge/jobs`
@@ -266,6 +267,11 @@ Architecture:
   LoRA, embedding, control and reference assets. Profiles record intended use,
   trigger words, recommended weights, approval state, license notes and risks.
   `/forge/assets/profiles` merges those profiles with locally discovered files.
+- `quality_assets/character_profiles.json`: style-neutral canonical character
+  profile registry. The initial `shushunya` profile biases toward a maximally
+  frightening body-horror interpretation and is injected by the planner when a
+  request mentions Shushunya. Forge records `safety.character_profile` metadata
+  and does not assume a local LoRA/IP-Adapter exists.
 - `forge_service/client.py`: thin client intended for later ShushunyaAgent tool
   integration.
 

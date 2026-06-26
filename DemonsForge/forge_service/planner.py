@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from .archive_memory import ArchiveMemoryClient
+from .characters import character_profile_for_text
 from .registries import ASPECT_PRESETS, SCHEDULERS, capabilities
 from .schemas import AssetRequest, JobSpec, JobType, LoraRef, PlanRequest
 from .thinker import PlannerThinker
@@ -223,6 +224,23 @@ def _negative(text: str, supports_negative: bool) -> str | None:
     return "low quality, blurry, distorted"
 
 
+def _merge_negative(base: str | None, addition: str | None, supports_negative: bool) -> str | None:
+    if not supports_negative:
+        return None
+    parts = [item.strip() for item in [base, addition] if item and item.strip()]
+    if not parts:
+        return None
+    seen = set()
+    merged = []
+    for part in ", ".join(parts).split(","):
+        item = part.strip()
+        key = item.lower()
+        if item and key not in seen:
+            seen.add(key)
+            merged.append(item)
+    return ", ".join(merged)
+
+
 def _job_type(text: str) -> JobType:
     lowered = text.lower()
     if any(token in lowered for token in ["inpaint", "инпейнт", "замаж", "маск", "mask"]):
@@ -285,12 +303,23 @@ def build_heuristic_plan(request: PlanRequest) -> JobSpec:
     quality_preset = _quality_preset(text, job_type)
     prompt = text
     additions = [value for key, value in QUALITY_HINTS.items() if key in text.lower()]
+    character_profile = character_profile_for_text(text)
+    if character_profile:
+        additions.append(str(character_profile.get("canonical_prompt", "")))
     if additions:
-        prompt = f"{prompt}, {', '.join(additions)}"
+        prompt = f"{prompt}, {', '.join(item for item in additions if item)}"
     safety: dict[str, object] = {
         "memory_context": _memory_context(text, enabled=request.use_memory),
         "quality_preset": quality_preset,
     }
+    if character_profile:
+        safety["character_profile"] = {
+            "id": character_profile.get("id"),
+            "name": character_profile.get("name"),
+            "must_preserve": character_profile.get("must_preserve", []),
+            "avoid": character_profile.get("avoid", []),
+            "profile_source": "quality_assets/character_profiles.json",
+        }
     if engine in {"flux", "stable_diffusion"}:
         safety["runtime_warning"] = (
             f"{engine} is available but heavy in CPU-only mode; use low steps for smoke runs "
@@ -307,7 +336,11 @@ def build_heuristic_plan(request: PlanRequest) -> JobSpec:
         engine=engine,
         model=model,
         prompt=prompt,
-        negative_prompt=_negative(text, engine_caps["supports_negative_prompt"]),
+        negative_prompt=_merge_negative(
+            _negative(text, engine_caps["supports_negative_prompt"]),
+            str(character_profile.get("negative_prompt", "")) if character_profile else None,
+            engine_caps["supports_negative_prompt"],
+        ),
         width=width,
         height=height,
         aspect_preset=preset,

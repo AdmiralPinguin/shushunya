@@ -8,6 +8,7 @@ from functools import lru_cache
 
 from . import config
 from . import __version__
+from .characters import character_profiles
 
 
 ENGINE_MODELS = {
@@ -290,6 +291,7 @@ def capabilities() -> dict[str, Any]:
         "loras": discover_loras(),
         "embeddings": discover_embeddings(),
         "asset_profiles": asset_profiles(),
+        "character_profiles": character_profiles(),
         "samplers": SAMPLERS,
         "schedulers": SCHEDULERS,
         "aspect_presets": ASPECT_PRESETS,

@@ -94,6 +94,9 @@ class DemonsForgeClient:
     def asset_profiles(self) -> dict[str, Any]:
         return self._request("GET", "/forge/assets/profiles")
 
+    def characters(self) -> dict[str, Any]:
+        return self._request("GET", "/forge/characters")
+
     def memory_status(self) -> dict[str, Any]:
         return self._request("GET", "/forge/memory/status")
 

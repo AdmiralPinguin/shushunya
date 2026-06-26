@@ -52,6 +52,7 @@ def main() -> None:
     assert caps.json()["job_types"] == caps.json()["implemented_job_types"]
     assert caps.json()["defaults"]["engine"] == "stable_diffusion"
     assert caps.json()["defaults"]["image_operation_engine"] == "sdxl"
+    assert any(item["id"] == "shushunya" for item in caps.json()["character_profiles"]["profiles"])
     assert "modified_at" in caps.json()["models"][0]
     assert caps.json()["limits"]["max_asset_download_bytes"] > 0
     assert caps.json()["engines"]["sdxl"]["implemented"]["img2img"] is True
@@ -63,6 +64,9 @@ def main() -> None:
     assert asset_profiles.status_code == 200, asset_profiles.text
     assert "profiles" in asset_profiles.json()
     assert "path" in asset_profiles.json()
+    characters = client.get("/forge/characters")
+    assert characters.status_code == 200, characters.text
+    assert any(item["id"] == "shushunya" for item in characters.json()["profiles"])
     runtime = client.get("/forge/runtime")
     assert runtime.status_code == 200, runtime.text
     assert runtime.json()["cpu_only"] is True
@@ -226,6 +230,16 @@ def main() -> None:
     assert plan_without_memory.status_code == 200, plan_without_memory.text
     assert plan_without_memory.json()["safety"]["memory_context"]["reason"] == "disabled by request"
     assert plan_without_memory.json()["safety"]["planner_thinker"]["reason"] == "disabled by request"
+    shushunya_plan = client.post(
+        "/forge/plan",
+        json={"request": "Нарисуй Шушуню 512x512 first concept", "use_memory": False, "use_thinker": False},
+    )
+    assert shushunya_plan.status_code == 200, shushunya_plan.text
+    shushunya_spec = shushunya_plan.json()
+    assert shushunya_spec["safety"]["character_profile"]["id"] == "shushunya"
+    assert "maximally terrifying small cat-sized asymmetrical warp demon creature" in shushunya_spec["prompt"]
+    if shushunya_spec["negative_prompt"]:
+        assert "cute mascot" in shushunya_spec["negative_prompt"]
     baseline = JobSpec(
         type="txt2img",
         engine="sdxl",
