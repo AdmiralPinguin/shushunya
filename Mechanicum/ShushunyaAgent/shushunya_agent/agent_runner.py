@@ -4425,6 +4425,13 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if isinstance(result, dict) and (result.get("passing_tests") or result.get("failing_tests")):
             current_passing_tests, current_failing_tests = pytest_result_sets(result)
             regression_tests = sorted(current_failing_tests & last_pytest_passing_tests)
+            result_source_candidates = [
+                str(path)
+                for path in result.get("candidate_source_paths", [])
+                if isinstance(path, str) and path
+            ]
+            if result_source_candidates:
+                last_source_candidates = result_source_candidates[:20]
             if swe_task and code_mutated_since_last_pytest and current_passing_tests and not current_failing_tests:
                 swe_verified_after_edit = True
             if code_mutated_since_last_pytest and regression_tests:
@@ -4447,6 +4454,23 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             pending_failing_tests = set(current_failing_tests)
             pending_failing_test_inspections = 0
             pending_failing_test_read_paths = set()
+        if (
+            swe_task
+            and pending_failing_tests
+            and not code_mutated_since_last_pytest
+            and action_type == "read_file"
+            and isinstance(result, dict)
+            and result.get("ok") is True
+            and str(action.get("path") or result.get("path") or "") in set(last_source_candidates)
+        ):
+            result = dict(result)
+            result["failing_tests"] = sorted(pending_failing_tests)[:20]
+            result["candidate_source_paths"] = last_source_candidates[:10]
+            result["supervisor_instruction"] = (
+                "This read_file loaded a likely source file from candidate_source_paths for the current failing_tests. "
+                "Do not read or list more files before the first fix unless this file clearly cannot contain the bug. "
+                "Use this content for a narrow write_file/replace_in_file edit, then run the full test/fallback again."
+            )
         elif action_type == "bundle_text_files" and isinstance(result, dict) and result.get("ok") is True:
             verified_text_paths.discard(str(action.get("output_txt") or ""))
             verified_text_paths.discard(str(action.get("output_fb2") or ""))
