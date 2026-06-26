@@ -93,7 +93,7 @@ def _concept_steps(request: ProjectPlanRequest, character: dict[str, Any] | None
         "expression study, pitiful frightened left eye and predatory right eye",
     ]
     steps = []
-    mixed_engines = ["flux", "sdxl"] if character and request.engine_strategy in {"auto", "mixed_concept"} and variants > 1 else []
+    mixed_engines = ["flux", "sdxl"] if character and request.engine_strategy == "mixed_concept" and variants > 1 else []
     for index in range(variants):
         prompt = f"{base}, first concept, {angles[index]}"
         preferred_engine = mixed_engines[index % len(mixed_engines)] if mixed_engines else None

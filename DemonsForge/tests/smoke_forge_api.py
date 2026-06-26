@@ -279,8 +279,24 @@ def main() -> None:
     dry_project = shushunya_project_dry_run.json()
     assert len(dry_project["project"]["steps"]) == 2
     assert all(item["valid"] for item in dry_project["validations"])
-    assert {step["spec"]["engine"] for step in dry_project["project"]["steps"]} == {"flux", "sdxl"}
-    sdxl_project_step = next(step for step in dry_project["project"]["steps"] if step["spec"]["engine"] == "sdxl")
+    assert {step["spec"]["engine"] for step in dry_project["project"]["steps"]} == {"flux"}
+    shushunya_mixed_dry_run = client.post(
+        "/forge/projects?dry_run=true",
+        json={
+            "request": "Сделай 2 концепта Шушуни",
+            "project_type": "concept_batch",
+            "variants": 2,
+            "width": 512,
+            "height": 512,
+            "engine_strategy": "mixed_concept",
+            "use_memory": False,
+            "use_thinker": False,
+        },
+    )
+    assert shushunya_mixed_dry_run.status_code == 200, shushunya_mixed_dry_run.text
+    mixed_project = shushunya_mixed_dry_run.json()
+    assert {step["spec"]["engine"] for step in mixed_project["project"]["steps"]} == {"flux", "sdxl"}
+    sdxl_project_step = next(step for step in mixed_project["project"]["steps"] if step["spec"]["engine"] == "sdxl")
     assert sdxl_project_step["spec"]["steps"] >= 12
     if "project_adjustment" in sdxl_project_step["spec"]["safety"]:
         assert "steps raised to 12" in sdxl_project_step["spec"]["safety"]["project_adjustment"]

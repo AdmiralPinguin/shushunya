@@ -262,9 +262,10 @@ Architecture:
   `runtime/projects`, and keeps selection manual until a real semantic/vision
   evaluator is configured. This is the first layer for workflows where the
   forge-agent creates several concepts or panels, then later refines selected
-  artifacts with SDXL. Character concept batches use a mixed Flux/SDXL strategy
-  by default so first-concept quality can be compared against SDXL constraint
-  adherence.
+  artifacts with SDXL. Character concept batches default to Flux first concepts;
+  `engine_strategy=mixed_concept` is an explicit diagnostic mode for comparing
+  Flux against SDXL txt2img, while SDXL remains the preferred refine/edit
+  workhorse after a source artifact exists.
 - `forge_service/thinker.py`: optional OpenAI-compatible planner thinker. It is
   advisory only: the deterministic planner builds the baseline plan first, the
   thinker can return a compact JSON patch, and Forge filters plus validates that
