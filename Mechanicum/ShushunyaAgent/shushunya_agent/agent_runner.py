@@ -1797,6 +1797,8 @@ def parse_scalar(value):
     if lowered == "null":
         return None
     try:
+        if raw.startswith("{") or raw.startswith("["):
+            return json.loads(raw)
         if "." in raw:
             return float(raw)
         return int(raw)
@@ -1882,9 +1884,14 @@ if len(text) < min_chars:
 lower_text = text.lower()
 json_whitespace_insensitive_matches = []
 json_semantic_matches = []
+path_metadata_matches = []
 compact_json_text = compact_json_literal(search_text) if path.suffix.lower() == ".json" and not regex else ""
 for index, item in enumerate(required):
     if not contains(search_text, item, regex):
+        original_item = original_required[index] if index < len(original_required) else item
+        if suffix in structured_suffixes and str(original_item).strip() in {path.name, str(path)}:
+            path_metadata_matches.append(original_item)
+            continue
         if suffix == ".json" and json_pseudo_match(json_data, original_required[index] if index < len(original_required) else item):
             json_semantic_matches.append(original_required[index] if index < len(original_required) else item)
             continue
@@ -1935,10 +1942,12 @@ print(json.dumps({
         "regex": regex,
         "json_whitespace_insensitive_matches": len(json_whitespace_insensitive_matches),
         "json_semantic_matches": len(json_semantic_matches),
+        "path_metadata_matches": len(path_metadata_matches),
         "structured_min_size_ignored": structured_min_size_ignored,
     },
     "json_whitespace_insensitive_matches": json_whitespace_insensitive_matches[:20],
     "json_semantic_matches": json_semantic_matches[:20],
+    "path_metadata_matches": path_metadata_matches[:20],
     "structured_min_size_ignored": structured_min_size_ignored,
     "failures": failures[:20],
 }, ensure_ascii=False))
