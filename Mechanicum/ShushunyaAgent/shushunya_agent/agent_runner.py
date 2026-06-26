@@ -1876,6 +1876,40 @@ def missing_text_verifications(paths: list[str], verified_paths: set[str]) -> li
     return [path for path in paths if path_needs_text_verification(path) and path not in verified_paths]
 
 
+def task_literal_markers_for_path(task: str, path: str) -> list[str]:
+    lowered_path = path.lower()
+    markers: list[str] = []
+
+    def add(value: str) -> None:
+        value = value.strip()
+        if value and value not in markers:
+            markers.append(value)
+
+    if lowered_path.endswith((".md", ".markdown")):
+        for marker in ("Summary", "Evidence", "Risks", "Result", "STATUS: PASS"):
+            if marker.lower() in task.lower():
+                add(marker)
+    if lowered_path.endswith(".csv"):
+        for match in re.finditer(r"\b[\w-]+(?:,[\w-]+){1,}\b", task):
+            add(match.group(0))
+    if lowered_path.endswith(".json"):
+        for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\"[^\"]+\"|'[^']+'|-?\d+(?:\.\d+)?|true|false|null)", task):
+            key = match.group(1)
+            value = match.group(2).strip().strip("\"'")
+            add(f"{key}={value}")
+    return markers[:12]
+
+
+def build_required_artifact_verify_action(task: str, path: str) -> dict[str, Any]:
+    action: dict[str, Any] = {"action": "verify_text_file", "path": path, "min_bytes": 1}
+    markers = task_literal_markers_for_path(task, path)
+    if markers:
+        action["must_contain"] = markers
+        if path.lower().endswith((".md", ".markdown", ".csv")) and len(markers) > 1:
+            action["ordered_patterns"] = markers
+    return action
+
+
 def required_artifacts_auto_final(config: AgentConfig, required_paths: list[str], verified_paths: set[str]) -> dict[str, Any] | None:
     if not required_paths:
         return None
@@ -3834,6 +3868,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         step_archive = config.archive_internal_steps or (config.archive_task and step == 1)
         repair_source_path = ""
         artifact_verify_paths: list[str] = []
+        automated_action: dict[str, Any] | None = None
         chat_messages = messages
         if swe_task and pending_failing_tests and not code_mutated_since_last_pytest:
             repair_source_path = swe_repair_source_path(pending_failing_tests, last_source_candidates, last_read_file_excerpts)
@@ -3899,116 +3934,122 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "step": step,
                         "missing_verification": artifact_verify_paths,
                         "verified_paths": sorted(verified_text_paths)[:20],
+                        "automated": True,
                     },
                 )
-        try:
-            raw = chat(config, chat_messages, inject_memory=step_memory, archive_enabled=step_archive)
-        except Exception as exc:
-            duration_sec = round(time.time() - run_started, 3)
-            message = (
-                "Агент остановлен супервизором: модельный запрос не завершился успешно "
-                f"({exc.__class__.__name__}: {truncate(str(exc), 240)}). "
-                f"Задачу можно продолжить с resume_task_id={config.task_id}; последние действия сохранены в task journal."
-            )
-            emit(
-                event_sink,
-                {
-                    "type": "final",
-                    "step": step,
-                    "ok": False,
-                    "continuable": True,
-                    "resume_task_id": config.task_id,
-                    "message": message,
-                    "duration_sec": duration_sec,
-                    "stop_reason": "model_request_failed",
-                },
-            )
-            write_task_journal(
-                config,
-                "final",
-                {
-                    "step": step,
-                    "ok": False,
-                    "continuable": True,
-                    "resume_task_id": config.task_id,
-                    "message": message,
-                    "duration_sec": duration_sec,
-                    "stop_reason": "model_request_failed",
-                    "error": f"{exc.__class__.__name__}: {str(exc)}",
-                },
-            )
-            if config.json_output:
-                print(json.dumps({"ok": False, "continuable": True, "resume_task_id": config.task_id, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
-            else:
-                print(message, file=sys.stderr)
-            return 2
-        print(f"[model] {raw}", file=sys.stderr)
-
-        try:
-            action = parse_action(raw)
-        except Exception as exc:
-            if looks_like_oversized_inline_file_action(raw, exc):
+                automated_action = build_required_artifact_verify_action(original_task, artifact_verify_paths[0])
+        if automated_action is not None:
+            action = automated_action
+            write_task_journal(config, "automated_action", {"step": step, "action": action, "reason": "artifact_verify_mode"})
+        else:
+            try:
+                raw = chat(config, chat_messages, inject_memory=step_memory, archive_enabled=step_archive)
+            except Exception as exc:
+                duration_sec = round(time.time() - run_started, 3)
                 message = (
-                    "Supervisor blocked an oversized inline file write. The model tried to put a large document directly "
-                    "inside JSON content, which is unreliable and was truncated. Do not retry the same write_file/append_file. "
-                    "Use short append_file chunks under 12000 chars, or run Python inside sandbox to fetch/clean/write files."
+                    "Агент остановлен супервизором: модельный запрос не завершился успешно "
+                    f"({exc.__class__.__name__}: {truncate(str(exc), 240)}). "
+                    f"Задачу можно продолжить с resume_task_id={config.task_id}; последние действия сохранены в task journal."
                 )
-                emit(event_sink, {"type": "warning", "code": "oversized_inline_file_action", "step": step, "message": message})
+                emit(
+                    event_sink,
+                    {
+                        "type": "final",
+                        "step": step,
+                        "ok": False,
+                        "continuable": True,
+                        "resume_task_id": config.task_id,
+                        "message": message,
+                        "duration_sec": duration_sec,
+                        "stop_reason": "model_request_failed",
+                    },
+                )
                 write_task_journal(
                     config,
-                    "oversized_inline_file_action",
-                    {"step": step, "error": str(exc), "raw_prefix": truncate(raw, 1200)},
+                    "final",
+                    {
+                        "step": step,
+                        "ok": False,
+                        "continuable": True,
+                        "resume_task_id": config.task_id,
+                        "message": message,
+                        "duration_sec": duration_sec,
+                        "stop_reason": "model_request_failed",
+                        "error": f"{exc.__class__.__name__}: {str(exc)}",
+                    },
                 )
-                messages.append({"role": "assistant", "content": truncate(raw, 1200)})
-                messages.append({"role": "user", "content": message})
-                continue
-            emit(event_sink, {"type": "warning", "code": "json_parse_error", "step": step, "message": f"модель вернула невалидный JSON, пробую repair: {exc}"})
-            write_task_journal(config, "json_parse_error", {"step": step, "error": str(exc), "raw": truncate(raw, 4000)})
+                if config.json_output:
+                    print(json.dumps({"ok": False, "continuable": True, "resume_task_id": config.task_id, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
+                else:
+                    print(message, file=sys.stderr)
+                return 2
+            print(f"[model] {raw}", file=sys.stderr)
+
             try:
-                action = repair_action_json(config, raw, exc)
-                emit(event_sink, {"type": "warning", "code": "json_repaired", "step": step, "message": "JSON восстановлен repair-проходом"})
-                write_task_journal(config, "json_repaired", {"step": step, "action": action})
-            except Exception as repair_exc:
-                consecutive_parse_failures += 1
-                total_parse_failures += 1
-                emit(event_sink, {"type": "warning", "code": "json_repair_failed", "step": step, "message": f"repair не помог: {repair_exc}"})
-                write_task_journal(config, "json_repair_failed", {"step": step, "error": str(repair_exc)})
-                if consecutive_parse_failures >= 3 or total_parse_failures >= max(1, JSON_REPAIR_FAILURE_TOTAL_LIMIT):
-                    duration_sec = round(time.time() - run_started, 3)
+                action = parse_action(raw)
+            except Exception as exc:
+                if looks_like_oversized_inline_file_action(raw, exc):
                     message = (
-                        "Агент остановлен супервизором: модель несколько раз вернула невалидный JSON, "
-                        "и repair не смог восстановить действие. Задачу можно продолжить с более коротким действием: "
-                        "не генерировать большие файлы/код одним JSON, а использовать короткие append_file/python шаги."
+                        "Supervisor blocked an oversized inline file write. The model tried to put a large document directly "
+                        "inside JSON content, which is unreliable and was truncated. Do not retry the same write_file/append_file. "
+                        "Use short append_file chunks under 12000 chars, or run Python inside sandbox to fetch/clean/write files."
                     )
-                    emit(event_sink, {"type": "final", "step": step, "ok": False, "continuable": True, "resume_task_id": config.task_id, "message": message, "duration_sec": duration_sec})
+                    emit(event_sink, {"type": "warning", "code": "oversized_inline_file_action", "step": step, "message": message})
                     write_task_journal(
                         config,
-                        "final",
-                        {
-                            "step": step,
-                            "ok": False,
-                            "continuable": True,
-                            "resume_task_id": config.task_id,
-                            "message": message,
-                            "duration_sec": duration_sec,
-                            "stop_reason": "json_parse_stall",
-                            "consecutive_parse_failures": consecutive_parse_failures,
-                            "total_parse_failures": total_parse_failures,
-                        },
+                        "oversized_inline_file_action",
+                        {"step": step, "error": str(exc), "raw_prefix": truncate(raw, 1200)},
                     )
-                    if config.json_output:
-                        print(json.dumps({"ok": False, "continuable": True, "resume_task_id": config.task_id, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
-                    else:
-                        print(message, file=sys.stderr)
-                    return 2
-                messages.append({"role": "assistant", "content": raw})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"Твой ответ не был валидным JSON. Ошибка: {exc}. Верни ровно один JSON-объект.",
-                    }
-                )
-                continue
+                    messages.append({"role": "assistant", "content": truncate(raw, 1200)})
+                    messages.append({"role": "user", "content": message})
+                    continue
+                emit(event_sink, {"type": "warning", "code": "json_parse_error", "step": step, "message": f"модель вернула невалидный JSON, пробую repair: {exc}"})
+                write_task_journal(config, "json_parse_error", {"step": step, "error": str(exc), "raw": truncate(raw, 4000)})
+                try:
+                    action = repair_action_json(config, raw, exc)
+                    emit(event_sink, {"type": "warning", "code": "json_repaired", "step": step, "message": "JSON восстановлен repair-проходом"})
+                    write_task_journal(config, "json_repaired", {"step": step, "action": action})
+                except Exception as repair_exc:
+                    consecutive_parse_failures += 1
+                    total_parse_failures += 1
+                    emit(event_sink, {"type": "warning", "code": "json_repair_failed", "step": step, "message": f"repair не помог: {repair_exc}"})
+                    write_task_journal(config, "json_repair_failed", {"step": step, "error": str(repair_exc)})
+                    if consecutive_parse_failures >= 3 or total_parse_failures >= max(1, JSON_REPAIR_FAILURE_TOTAL_LIMIT):
+                        duration_sec = round(time.time() - run_started, 3)
+                        message = (
+                            "Агент остановлен супервизором: модель несколько раз вернула невалидный JSON, "
+                            "и repair не смог восстановить действие. Задачу можно продолжить с более коротким действием: "
+                            "не генерировать большие файлы/код одним JSON, а использовать короткие append_file/python шаги."
+                        )
+                        emit(event_sink, {"type": "final", "step": step, "ok": False, "continuable": True, "resume_task_id": config.task_id, "message": message, "duration_sec": duration_sec})
+                        write_task_journal(
+                            config,
+                            "final",
+                            {
+                                "step": step,
+                                "ok": False,
+                                "continuable": True,
+                                "resume_task_id": config.task_id,
+                                "message": message,
+                                "duration_sec": duration_sec,
+                                "stop_reason": "json_parse_stall",
+                                "consecutive_parse_failures": consecutive_parse_failures,
+                                "total_parse_failures": total_parse_failures,
+                            },
+                        )
+                        if config.json_output:
+                            print(json.dumps({"ok": False, "continuable": True, "resume_task_id": config.task_id, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
+                        else:
+                            print(message, file=sys.stderr)
+                        return 2
+                    messages.append({"role": "assistant", "content": raw})
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": f"Твой ответ не был валидным JSON. Ошибка: {exc}. Верни ровно один JSON-объект.",
+                        }
+                    )
+                    continue
 
         action_type = str(action.get("action", "")).strip().lower()
         if action_type == "python" and explicit_workspace and not (action.get("cwd") or action.get("workdir")):

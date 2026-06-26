@@ -1456,7 +1456,7 @@ def main() -> int:
             "size": 16,
         }
 
-    with mock.patch.object(agent_runner, "chat", side_effect=required_rewrite_actions), \
+    with mock.patch.object(agent_runner, "chat", side_effect=required_rewrite_actions) as mocked_required_rewrite_chat, \
             mock.patch.object(agent_runner, "file_tool", side_effect=fake_required_rewrite_file_tool), \
             mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_required_rewrite_verify), \
             contextlib.redirect_stdout(required_rewrite_stdout), \
@@ -1473,7 +1473,15 @@ def main() -> int:
             "artifact verification mode action rejected by supervisor",
         }
     ]
-    if required_rewrite_code != 0 or not required_rewrite_rejections:
+    required_rewrite_auto_verified = (
+        required_rewrite_code == 0
+        and mocked_required_rewrite_chat.call_count == 2
+        and [
+            step.get("action", {}).get("action")
+            for step in required_rewrite_payload.get("steps", [])
+        ] == ["write_file", "write_file", "verify_text_file", "verify_text_file"]
+    )
+    if required_rewrite_code != 0 or (not required_rewrite_rejections and not required_rewrite_auto_verified):
         raise AssertionError(
             f"required artifact rewrite-before-verify guard failed: code={required_rewrite_code}, payload={required_rewrite_payload}"
         )
@@ -2238,17 +2246,18 @@ def main() -> int:
             event_sink=artifact_verify_mode_events.append,
         )
     artifact_verify_mode_payload = json.loads(artifact_verify_mode_stdout.getvalue())
-    artifact_verify_messages = mocked_artifact_verify_chat.call_args_list[2].args[1]
+    artifact_verify_actions = [step.get("action", {}).get("action") for step in artifact_verify_mode_payload.get("steps", [])]
     if (
         artifact_verify_mode_code != 0
-        or artifact_verify_messages[0].get("content") != agent_runner.ARTIFACT_VERIFY_SYSTEM_PROMPT
+        or mocked_artifact_verify_chat.call_count != 2
+        or artifact_verify_actions != ["write_file", "write_file", "verify_text_file", "verify_text_file"]
         or not any(event.get("code") == "artifact_verify_mode" for event in artifact_verify_mode_events)
         or "/work/report.md" not in artifact_verify_mode_payload.get("message", "")
         or "/work/audit.json" not in artifact_verify_mode_payload.get("message", "")
     ):
         raise AssertionError(
             "artifact verification mode did not narrow the post-write step: "
-            f"code={artifact_verify_mode_code}, payload={artifact_verify_mode_payload}, messages={artifact_verify_messages}, events={artifact_verify_mode_events}"
+            f"code={artifact_verify_mode_code}, payload={artifact_verify_mode_payload}, actions={artifact_verify_actions}, events={artifact_verify_mode_events}"
         )
     print("[ok] artifact verification mode narrows post-write steps")
 
