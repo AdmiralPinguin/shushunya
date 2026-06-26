@@ -3714,6 +3714,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     last_read_file_excerpts: dict[str, str] = {}
     last_source_candidates: list[str] = []
     ready_workspace_paths: set[str] = set()
+    successful_mkdir_paths: set[str] = set()
     non_test_diagnostics_before_test = 0
     last_successful_swe_edit_path = ""
     swe_verified_after_edit = False
@@ -4143,7 +4144,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "then verify them or return final if they are already verified."
                     ),
                 }
-            elif action_type == "mkdir" and action_counts[fingerprint] >= 2:
+            elif action_type == "mkdir" and (
+                action_counts[fingerprint] >= 2
+                or str(action.get("path") or "") in successful_mkdir_paths
+            ):
                 result = {
                     "ok": False,
                     "error": "repeated mkdir rejected by supervisor",
@@ -4681,10 +4685,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if (
             action_type == "mkdir"
             and isinstance(result, dict)
-            and result.get("error") == "repeated mkdir rejected by supervisor"
+            and (result.get("ok") is True or result.get("error") == "repeated mkdir rejected by supervisor")
             and action.get("path")
         ):
             ready_workspace_paths.add(str(action.get("path") or ""))
+            if result.get("ok") is True:
+                successful_mkdir_paths.add(str(action.get("path") or ""))
         supervisor_rejection = (
             str(result.get("error") or "") in SUPERVISOR_REJECTION_ERRORS
             if isinstance(result, dict)

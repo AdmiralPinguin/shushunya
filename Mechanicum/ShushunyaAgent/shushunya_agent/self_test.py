@@ -1277,12 +1277,13 @@ def main() -> int:
     repeated_mkdir_config = AgentConfig(
         task_id=safe_task_id("self-test-repeated-mkdir"),
         json_output=True,
-        max_steps=3,
+        max_steps=4,
         inject_memory=False,
         archive_internal_steps=False,
     )
     repeated_mkdir_actions = [
         '{"action":"mkdir","path":"/work/repeated-mkdir"}',
+        '{"action":"write_file","path":"/work/repeated-mkdir/report.md","content":"ready"}',
         '{"action":"mkdir","path":"/work/repeated-mkdir"}',
         '{"action":"final","message":"done"}',
     ]
