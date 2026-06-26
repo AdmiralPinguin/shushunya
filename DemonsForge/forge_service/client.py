@@ -173,6 +173,44 @@ class DemonsForgeClient:
             },
         )
 
+    def plan_project(
+        self,
+        request: str,
+        project_type: str = "auto",
+        character_id: str | None = None,
+        variants: int = 4,
+        panels: int = 4,
+        width: int | None = None,
+        height: int | None = None,
+        use_memory: bool = True,
+        use_thinker: bool = True,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/forge/projects/plan",
+            json={
+                "request": request,
+                "project_type": project_type,
+                "character_id": character_id,
+                "variants": variants,
+                "panels": panels,
+                "width": width,
+                "height": height,
+                "use_memory": use_memory,
+                "use_thinker": use_thinker,
+            },
+        )
+
+    def create_project(self, spec: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
+        suffix = "?dry_run=true" if dry_run else ""
+        return self._request("POST", f"/forge/projects{suffix}", json=spec)
+
+    def projects(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self._request("GET", "/forge/projects", params={"limit": limit})
+
+    def project(self, project_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/forge/projects/{project_id}")
+
     def create_job(self, spec: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
         suffix = "?dry_run=true" if dry_run else ""
         return self._request("POST", f"/forge/jobs{suffix}", json=spec)

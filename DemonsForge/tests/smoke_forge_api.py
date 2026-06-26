@@ -240,6 +240,41 @@ def main() -> None:
     assert "maximally terrifying small cat-sized asymmetrical warp demon creature" in shushunya_spec["prompt"]
     if shushunya_spec["negative_prompt"]:
         assert "cute mascot" in shushunya_spec["negative_prompt"]
+    shushunya_project_plan = client.post(
+        "/forge/projects/plan",
+        json={
+            "request": "Сделай комикс про Шушуню в демонической кузне",
+            "project_type": "comic_storyboard",
+            "panels": 4,
+            "width": 512,
+            "height": 512,
+            "use_memory": False,
+            "use_thinker": False,
+        },
+    )
+    assert shushunya_project_plan.status_code == 200, shushunya_project_plan.text
+    project = shushunya_project_plan.json()
+    assert project["project_type"] == "comic_storyboard"
+    assert project["character_profile"]["id"] == "shushunya"
+    assert len(project["steps"]) == 4
+    assert all(step["spec"]["safety"]["project_step_id"] == step["id"] for step in project["steps"])
+    assert all(step["spec"]["safety"]["character_profile"]["id"] == "shushunya" for step in project["steps"])
+    shushunya_project_dry_run = client.post(
+        "/forge/projects?dry_run=true",
+        json={
+            "request": "Сделай 2 концепта Шушуни",
+            "project_type": "concept_batch",
+            "variants": 2,
+            "width": 512,
+            "height": 512,
+            "use_memory": False,
+            "use_thinker": False,
+        },
+    )
+    assert shushunya_project_dry_run.status_code == 200, shushunya_project_dry_run.text
+    dry_project = shushunya_project_dry_run.json()
+    assert len(dry_project["project"]["steps"]) == 2
+    assert all(item["valid"] for item in dry_project["validations"])
     baseline = JobSpec(
         type="txt2img",
         engine="sdxl",

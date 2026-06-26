@@ -14,6 +14,7 @@ from .archive_memory import ArchiveMemoryClient
 from .characters import character_profiles
 from .evaluator import evaluate_artifact
 from .planner import plan_txt2img
+from .projects import get_project, list_projects, plan_project, save_project
 from .queue import ForgeQueue
 from .registries import (
     ASPECT_PRESETS,
@@ -27,7 +28,7 @@ from .registries import (
     discover_models,
 )
 from .reports import list_reports, prune_reports, report_path, summarize_reports
-from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest, utc_now
+from .schemas import JobCloneRequest, JobSpec, MemoryProposal, PlanRequest, ProjectPlanRequest, utc_now
 from .storage import ForgeStore
 from .thinker import PlannerThinker
 
@@ -570,3 +571,55 @@ def get_gallery(
 def plan(request: PlanRequest) -> JSONResponse:
     spec = plan_txt2img(request)
     return JSONResponse(content=spec.model_dump(mode="json"))
+
+
+@app.post("/forge/projects/plan")
+def plan_forge_project(request: ProjectPlanRequest) -> JSONResponse:
+    project = plan_project(request)
+    return JSONResponse(content=project.model_dump(mode="json"))
+
+
+@app.post("/forge/projects")
+def create_forge_project(request: ProjectPlanRequest, dry_run: bool = False) -> dict[str, object]:
+    project = plan_project(request)
+    validations = []
+    for step in project.steps:
+        try:
+            validations.append({"step_id": step.id, "valid": True, "validation": forge_queue.validate(step.spec)})
+        except RuntimeError as exc:
+            validations.append({"step_id": step.id, "valid": False, "error": str(exc)})
+    if dry_run:
+        return {"project": project.model_dump(mode="json"), "validations": validations}
+    if not all(item["valid"] for item in validations):
+        raise HTTPException(status_code=400, detail={"message": "project contains invalid steps", "validations": validations})
+    submitted = []
+    for step in project.steps:
+        try:
+            record = forge_queue.submit(step.spec)
+        except RuntimeError as exc:
+            step.status = "failed"
+            project.status = "partially_submitted" if submitted else "failed"
+            save_project(project)
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        step.job_id = record.id
+        step.status = record.status.value
+        submitted.append({"step_id": step.id, "job_id": record.id})
+    project.status = "submitted"
+    save_project(project)
+    return {"project": project.model_dump(mode="json"), "submitted": submitted}
+
+
+@app.get("/forge/projects")
+def get_forge_projects(limit: int = 100) -> list[dict[str, object]]:
+    return list_projects(limit=limit)
+
+
+@app.get("/forge/projects/{project_id}")
+def get_forge_project(project_id: str) -> dict[str, object]:
+    try:
+        project = get_project(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    return project.model_dump(mode="json")

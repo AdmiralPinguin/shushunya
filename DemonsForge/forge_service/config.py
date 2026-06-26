@@ -11,6 +11,7 @@ QUALITY_ASSETS_DIR = ROOT / "quality_assets"
 ARTIFACTS_DIR = ROOT / "artifacts"
 RUNTIME_DIR = ROOT / "runtime"
 LOGS_DIR = RUNTIME_DIR / "logs"
+PROJECTS_DIR = RUNTIME_DIR / "projects"
 ASSET_REQUESTS_DIR = ROOT / "asset_requests"
 DB_PATH = RUNTIME_DIR / "forge.sqlite3"
 
@@ -59,6 +60,7 @@ def ensure_dirs() -> None:
         ARTIFACTS_DIR,
         RUNTIME_DIR,
         LOGS_DIR,
+        PROJECTS_DIR,
         ASSET_REQUESTS_DIR,
     ]:
         path.mkdir(parents=True, exist_ok=True)

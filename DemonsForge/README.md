@@ -98,6 +98,10 @@ Core endpoints:
 - `GET /forge/assets/profiles`
 - `GET /forge/characters`
 - `POST /forge/plan`
+- `POST /forge/projects/plan`
+- `POST /forge/projects`
+- `GET /forge/projects`
+- `GET /forge/projects/{project_id}`
 - `POST /forge/jobs`
 - `GET /forge/jobs`
 - `GET /forge/queue`
@@ -249,6 +253,13 @@ Architecture:
   It recognizes `txt2img`, `img2img`, `inpaint`, and `upscale` intent; image
   editing plans include `planner_note` reminders for required source/mask
   inputs instead of pretending those assets exist.
+- `forge_service/projects.py`: lightweight project/workflow planner. It builds
+  `concept_batch`, `comic_storyboard`, and `character_sheet` project specs from
+  ordinary Forge `JobSpec` steps, stores submitted projects under
+  `runtime/projects`, and keeps selection manual until a real semantic/vision
+  evaluator is configured. This is the first layer for workflows where the
+  forge-agent creates several concepts or panels, then later refines selected
+  artifacts with SDXL.
 - `forge_service/thinker.py`: optional OpenAI-compatible planner thinker. It is
   advisory only: the deterministic planner builds the baseline plan first, the
   thinker can return a compact JSON patch, and Forge filters plus validates that

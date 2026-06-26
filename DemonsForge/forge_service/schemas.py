@@ -148,6 +148,43 @@ class PlanRequest(BaseModel):
     use_thinker: bool = True
 
 
+class ProjectPlanRequest(BaseModel):
+    request: str
+    project_type: Literal["auto", "concept_batch", "comic_storyboard", "character_sheet"] = "auto"
+    character_id: str | None = None
+    variants: int = Field(default=4, ge=1, le=8)
+    panels: int = Field(default=4, ge=1, le=8)
+    width: int | None = None
+    height: int | None = None
+    use_memory: bool = True
+    use_thinker: bool = True
+
+
+class ProjectStep(BaseModel):
+    id: str
+    phase: str
+    title: str
+    role: str
+    spec: JobSpec
+    depends_on: list[str] = Field(default_factory=list)
+    job_id: str | None = None
+    status: str = "planned"
+
+
+class ProjectSpec(BaseModel):
+    id: str
+    title: str
+    request: str
+    project_type: Literal["concept_batch", "comic_storyboard", "character_sheet"]
+    character_profile: dict[str, Any] | None = None
+    selection_policy: Literal["manual", "best_technical", "first_success", "all"] = "manual"
+    steps: list[ProjectStep] = Field(default_factory=list)
+    created_at: str = Field(default_factory=utc_now)
+    updated_at: str = Field(default_factory=utc_now)
+    status: Literal["planned", "submitted", "partially_submitted", "failed"] = "planned"
+    notes: list[str] = Field(default_factory=list)
+
+
 class MemoryProposal(BaseModel):
     proposal: str = Field(min_length=1)
     evidence: str | None = None
