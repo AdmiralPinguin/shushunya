@@ -628,6 +628,8 @@ def main() -> int:
         raise AssertionError("SWE task detector missed a JS coding task")
     if agent_runner.looks_like_swe_task("Создай /work/audit.json с полем checks_count=3"):
         raise AssertionError("SWE task detector treated JSON artifact as JS/code")
+    if agent_runner.looks_like_swe_task("Короткий smoke-test UI сообщений: создай /work/ui-display-smoke/report.md"):
+        raise AssertionError("SWE task detector treated a smoke/artifact task as code repair")
     swe_profile_task = agent_runner.task_with_execution_profile(
         "Исправь Python-проект и запусти pytest",
         AgentConfig(shell_enabled=True),

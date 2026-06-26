@@ -966,8 +966,6 @@ SWE_TASK_MARKERS = (
     "python project",
     "код",
     "code",
-    "тест",
-    "test",
     "pytest",
     "исправь",
     "fix",
