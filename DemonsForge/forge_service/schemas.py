@@ -168,6 +168,7 @@ class ProjectStep(BaseModel):
     spec: JobSpec
     depends_on: list[str] = Field(default_factory=list)
     job_id: str | None = None
+    artifacts: list[str] = Field(default_factory=list)
     status: str = "planned"
 
 
@@ -181,7 +182,7 @@ class ProjectSpec(BaseModel):
     steps: list[ProjectStep] = Field(default_factory=list)
     created_at: str = Field(default_factory=utc_now)
     updated_at: str = Field(default_factory=utc_now)
-    status: Literal["planned", "submitted", "partially_submitted", "failed"] = "planned"
+    status: Literal["planned", "submitted", "running", "succeeded", "partially_submitted", "failed"] = "planned"
     notes: list[str] = Field(default_factory=list)
 
 

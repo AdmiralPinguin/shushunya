@@ -42,6 +42,39 @@ STARTED_AT = utc_now()
 STARTED_MONOTONIC = time.monotonic()
 
 
+def _refresh_project_from_jobs(project):
+    changed = False
+    for step in project.steps:
+        if not step.job_id:
+            continue
+        job = store.get_job(step.job_id)
+        if job is None:
+            continue
+        status = job.status.value
+        artifacts = list(job.artifacts)
+        if step.status != status or step.artifacts != artifacts:
+            step.status = status
+            step.artifacts = artifacts
+            changed = True
+    submitted_steps = [step for step in project.steps if step.job_id]
+    if submitted_steps and all(step.status == "succeeded" for step in submitted_steps):
+        new_status = "succeeded"
+    elif any(step.status in {"failed", "canceled"} for step in project.steps):
+        new_status = "failed"
+    elif any(step.status == "running" for step in project.steps):
+        new_status = "running"
+    elif any(step.job_id for step in project.steps):
+        new_status = "submitted"
+    else:
+        new_status = "planned"
+    if project.status != new_status:
+        project.status = new_status
+        changed = True
+    if changed:
+        save_project(project)
+    return project
+
+
 @app.get("/health")
 def health() -> dict[str, object]:
     return {
@@ -644,6 +677,10 @@ def create_forge_project(request: ProjectPlanRequest, dry_run: bool = False) -> 
 
 @app.get("/forge/projects")
 def get_forge_projects(limit: int = 100) -> list[dict[str, object]]:
+    for item in list_projects(limit=limit):
+        project = get_project(str(item["id"]))
+        if project is not None:
+            _refresh_project_from_jobs(project)
     return list_projects(limit=limit)
 
 
@@ -655,4 +692,17 @@ def get_forge_project(project_id: str) -> dict[str, object]:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
+    project = _refresh_project_from_jobs(project)
+    return project.model_dump(mode="json")
+
+
+@app.post("/forge/projects/{project_id}/refresh")
+def refresh_forge_project(project_id: str) -> dict[str, object]:
+    try:
+        project = get_project(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    project = _refresh_project_from_jobs(project)
     return project.model_dump(mode="json")

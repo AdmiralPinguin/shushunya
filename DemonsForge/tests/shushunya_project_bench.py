@@ -97,6 +97,20 @@ def write_summary(report: dict[str, Any], path: Path) -> str:
             f"| `{step.get('step_id')}` | `{step.get('engine')}` | `{step.get('status')}` | "
             f"`{step.get('job_id') or ''}` | `{step.get('artifact_id') or ''}` | {', '.join(warnings)} |"
         )
+    if report.get("review_criteria"):
+        criteria = report["review_criteria"]
+        lines.extend(
+            [
+                "",
+                "## Review Criteria",
+                "",
+                f"- character_id: `{criteria.get('character_id')}`",
+                f"- must_preserve: {', '.join(criteria.get('must_preserve') or [])}",
+                f"- avoid: {', '.join(criteria.get('avoid') or [])}",
+            ]
+        )
+        for item in criteria.get("manual_focus") or []:
+            lines.append(f"- {item}")
     if report.get("contact_sheet"):
         lines.extend(["", "## Contact Sheet", "", f"`{report['contact_sheet']}`", ""])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -148,6 +162,18 @@ def _main() -> int:
     report["health"] = health
     dry_run = request_json("POST", f"{base_url}/forge/projects?dry_run=true", json=project_request)
     report["dry_run"] = dry_run
+    character_profile = dry_run.get("project", {}).get("character_profile") or {}
+    if character_profile:
+        report["review_criteria"] = {
+            "character_id": character_profile.get("id"),
+            "must_preserve": character_profile.get("must_preserve", []),
+            "avoid": character_profile.get("avoid", []),
+            "manual_focus": [
+                "reject images that read as a mostly normal blue cat",
+                "prefer obvious asymmetry and mostly mutated demon flesh",
+                "prefer visible preserved blue cat fragments rather than full blue fur coverage",
+            ],
+        }
     validations = dry_run.get("validations", [])
     if not all(item.get("valid") for item in validations):
         report["finished_at"] = utc_now()
@@ -180,6 +206,7 @@ def _main() -> int:
                 elif finished.get("error"):
                     entry["error"] = finished["error"]
             report["steps"].append(entry)
+        report["refreshed_project"] = request_json("POST", f"{base_url}/forge/projects/{created['project']['id']}/refresh")
         if sheet_items:
             report["contact_sheet"] = make_contact_sheet(sheet_items, REPORTS_DIR / f"{run_id}-contact-sheet.png")
         report["ok"] = all(step.get("status") == "succeeded" for step in report["steps"])

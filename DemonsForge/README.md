@@ -102,6 +102,7 @@ Core endpoints:
 - `POST /forge/projects`
 - `GET /forge/projects`
 - `GET /forge/projects/{project_id}`
+- `POST /forge/projects/{project_id}/refresh`
 - `POST /forge/jobs`
 - `GET /forge/jobs`
 - `GET /forge/queue`

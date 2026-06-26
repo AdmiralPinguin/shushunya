@@ -241,7 +241,7 @@ def main() -> None:
     assert shushunya_plan.status_code == 200, shushunya_plan.text
     shushunya_spec = shushunya_plan.json()
     assert shushunya_spec["safety"]["character_profile"]["id"] == "shushunya"
-    assert "maximally terrifying small cat-sized asymmetrical warp demon creature" in shushunya_spec["prompt"]
+    assert "maximally terrifying small cat-sized asymmetrical warp demon chimera" in shushunya_spec["prompt"]
     if shushunya_spec["negative_prompt"]:
         assert "cute mascot" in shushunya_spec["negative_prompt"]
     shushunya_project_plan = client.post(

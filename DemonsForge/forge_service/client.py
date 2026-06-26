@@ -218,6 +218,9 @@ class DemonsForgeClient:
     def project(self, project_id: str) -> dict[str, Any]:
         return self._request("GET", f"/forge/projects/{project_id}")
 
+    def refresh_project(self, project_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/forge/projects/{project_id}/refresh")
+
     def create_job(self, spec: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
         suffix = "?dry_run=true" if dry_run else ""
         return self._request("POST", f"/forge/jobs{suffix}", json=spec)
