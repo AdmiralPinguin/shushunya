@@ -3848,6 +3848,7 @@ def main() -> int:
             '{"action":"python","cwd":"/work/project","code":"assert core_ok()","timeout":60}',
             '{"action":"replace_in_file","path":"/work/project/core.py","old":"return 1","new":"return 2"}',
             '{"action":"python","cwd":"/work/project","code":"assert core_ok()","timeout":60}',
+            '{"action":"read_file","path":"/work/project/core.py","max_bytes":2000,"offset":0}',
             '{"action":"final","message":"premature"}',
             '{"action":"shell","cmd":"cd /work/project && python3 -m package.cli data.csv | python3 -c \\"import sys,json; json.load(sys.stdin)\\"","timeout":60}',
             '{"action":"final","message":"should not be needed"}',
@@ -3869,7 +3870,10 @@ def main() -> int:
         )
     if not any(event.get("code") == "final_swe_cli_verification_required" for event in swe_cli_requires_verify_events):
         raise AssertionError(f"SWE CLI final rejection warning missing: {swe_cli_requires_verify_payload}")
-    if len(swe_cli_requires_verify_payload.get("steps", [])) != 4:
+    cli_required_results = [step.get("result") or {} for step in swe_cli_requires_verify_payload.get("steps", [])]
+    if not any(result.get("error") == "swe cli verification required by supervisor" for result in cli_required_results):
+        raise AssertionError(f"SWE CLI non-CLI action was not rejected before CLI verification: {swe_cli_requires_verify_payload}")
+    if len(swe_cli_requires_verify_payload.get("steps", [])) != 5:
         raise AssertionError(f"SWE CLI verification should run after rejected final: {swe_cli_requires_verify_payload}")
     print("[ok] SWE final requires CLI verification after edit")
 

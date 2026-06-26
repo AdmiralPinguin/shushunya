@@ -1214,6 +1214,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "inspection stall rejected by supervisor",
     "swe edit before diagnostic rejected by supervisor",
     "swe edit before test diagnostic rejected by supervisor",
+    "swe cli verification required by supervisor",
     "swe test diagnostic inspection stall rejected by supervisor",
     "swe syntax edit loop rejected by supervisor",
     "swe repeated failing-test file read rejected by supervisor",
@@ -4072,6 +4073,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     last_swe_test_action: dict[str, Any] | None = None
     swe_verified_after_edit = False
     swe_cli_verified_after_edit = False
+    swe_cli_verification_attempted_after_edit = False
     swe_syntax_error_cycles = 0
     last_swe_syntax_error = ""
     last_required_artifact_hint = ""
@@ -4991,10 +4993,30 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     ),
                 }
             elif (
+                swe_task
+                and swe_requires_cli_verification
+                and swe_verified_after_edit
+                and last_cli_required_swe_edit_path
+                and not swe_cli_verification_attempted_after_edit
+                and not action_is_cli_verification(action_type, action)
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe cli verification required by supervisor",
+                    "last_edited_path": last_cli_required_swe_edit_path,
+                    "instruction": (
+                        "The code already passed the unit-test/fallback verification after the last edit, but the user task "
+                        "also requires CLI/command-interface behavior. Do not inspect files or run marker checks before the "
+                        "first CLI verification. Run the requested CLI command or an equivalent action that invokes the "
+                        "entrypoint/subprocess and validates stdout/JSON output."
+                    ),
+                }
+            elif (
                 action_type == "shell"
                 and swe_task
                 and explicit_workspace
                 and looks_like_inline_python_shell(str(action.get("cmd", "")))
+                and not action_is_cli_verification(action_type, action)
             ):
                 suggested_action = {
                     "action": "python",
@@ -5344,7 +5366,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             failed_verification_paths.discard(path)
             stale_replace_failures_by_path.pop(path, None)
             code_mutated_since_last_pytest = True
+            swe_verified_after_edit = False
             swe_cli_verified_after_edit = False
+            swe_cli_verification_attempted_after_edit = False
             if swe_task and action_type in SWE_EDIT_ACTIONS:
                 last_successful_swe_edit_path = path
                 if swe_requires_cli_verification:
@@ -5389,6 +5413,13 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             pending_failing_tests = set(current_failing_tests)
             pending_failing_test_inspections = 0
             pending_failing_test_read_paths = set()
+        if (
+            swe_task
+            and swe_requires_cli_verification
+            and action_is_cli_verification(action_type, action)
+            and not supervisor_rejection
+        ):
+            swe_cli_verification_attempted_after_edit = True
         if (
             swe_task
             and swe_requires_cli_verification
