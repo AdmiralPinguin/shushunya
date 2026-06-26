@@ -1521,13 +1521,25 @@ def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
         for item in results
         if isinstance(item, dict) and item.get("ok") is False and item.get("test")
     ]
+    source_hints = [
+        str(item)
+        for item in payload.get("source_hints", [])
+        if isinstance(item, str) and item
+    ] if isinstance(payload, dict) else []
     enriched["passing_tests"] = passing[:20]
     enriched["failing_tests"] = failing[:20]
+    if source_hints:
+        enriched["candidate_source_paths"] = source_hints[:20]
     if failing:
         enriched["supervisor_instruction"] = (
             "The pytest fallback ran existing tests and some failed. Do not ignore these failures or verify only a subset. "
             "Preserve behavior covered by passing tests and make the narrowest code change that makes every failing test pass. "
-            "Run pytest/fallback again after the edit and final only when all tests pass."
+            + (
+                "Read exactly one likely source file from candidate_source_paths, make a narrow source edit, then run pytest/fallback again. "
+                if source_hints
+                else ""
+            )
+            + "Run pytest/fallback again after the edit and final only when all tests pass."
         )
     elif passing:
         enriched["supervisor_instruction"] = "The pytest fallback ran existing tests and all discovered tests passed."
@@ -1626,6 +1638,7 @@ sys.path.insert(0, str(root))
 test_files = sorted((root / "tests").glob("test_*.py")) if (root / "tests").exists() else sorted(root.glob("test_*.py"))
 results = []
 failures = []
+source_hints = set()
 for path in test_files:
     try:
         namespace = runpy.run_path(str(path))
@@ -1634,6 +1647,24 @@ for path in test_files:
         failures.append(failure)
         results.append({"ok": False, **failure})
         continue
+    for name, value in namespace.items():
+        if name.startswith("test_") or not callable(value):
+            continue
+        try:
+            source_path = inspect.getsourcefile(value)
+        except TypeError:
+            source_path = None
+        if not source_path:
+            continue
+        candidate = Path(source_path).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            continue
+        lowered = str(candidate.relative_to(root)).lower()
+        if lowered.startswith("tests/") or lowered.startswith("test_") or "/test_" in lowered:
+            continue
+        source_hints.add(str(candidate))
     for name, value in sorted(namespace.items()):
         if not name.startswith("test_") or not callable(value):
             continue
@@ -1646,7 +1677,7 @@ for path in test_files:
             failure = {"file": str(path.relative_to(root)), "test": name, "traceback": traceback.format_exc(limit=8)}
             failures.append(failure)
             results.append({"ok": False, **failure})
-payload = {"test_files": [str(path.relative_to(root)) for path in test_files], "results": results, "failures": failures}
+payload = {"test_files": [str(path.relative_to(root)) for path in test_files], "results": results, "failures": failures, "source_hints": sorted(source_hints)}
 print(json.dumps(payload, ensure_ascii=False, indent=2))
 if failures or not test_files:
     raise SystemExit(1)

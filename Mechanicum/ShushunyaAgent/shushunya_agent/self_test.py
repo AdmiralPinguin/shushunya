@@ -2636,6 +2636,21 @@ def main() -> int:
         )
     print("[ok] pytest unavailable falls back to simple runner")
 
+    enriched_source_hints = agent_runner.enrich_pytest_fallback_result({
+        "ok": False,
+        "stdout": json.dumps({
+            "results": [{"ok": False, "file": "tests/test_textkit.py", "test": "test_slugify_lowercase"}],
+            "failures": [{"test": "test_slugify_lowercase"}],
+            "source_hints": ["/work/project/textkit/normalize.py"],
+        }),
+    })
+    if (
+        enriched_source_hints.get("candidate_source_paths") != ["/work/project/textkit/normalize.py"]
+        or "candidate_source_paths" not in str(enriched_source_hints.get("supervisor_instruction") or "")
+    ):
+        raise AssertionError(f"pytest fallback source hints missing from model result: {enriched_source_hints}")
+    print("[ok] pytest fallback includes source hints")
+
     compacted_fallback_result = agent_runner.result_for_model("shell", {
         "ok": False,
         "stdout": "",
