@@ -1202,6 +1202,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe passing-test edit rejected by supervisor",
     "swe repair mode action rejected by supervisor",
     "artifact verification mode action rejected by supervisor",
+    "data source inspection required by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
     "append_file to JSON rejected by supervisor",
@@ -1350,6 +1351,58 @@ def required_artifact_paths_from_task(task: str) -> list[str]:
                 seen.add(path)
                 required.append(path)
     return required[:20]
+
+
+def data_source_paths_from_task(task: str, workspace: str, required_paths: list[str]) -> list[str]:
+    if not workspace:
+        return []
+    required_set = {posixpath.normpath(path) for path in required_paths}
+    required_names = {posixpath.basename(path) for path in required_set}
+    paths: list[str] = []
+    for match in re.finditer(r"(?<![\w/-])([\w./-]+\.(?:csv|tsv|jsonl|json|txt))(?![\w/-])", task, flags=re.I):
+        raw = match.group(1).strip().strip(".,;:()[]{}\"'")
+        if not raw:
+            continue
+        path = posixpath.normpath(raw if raw.startswith("/") else posixpath.join(workspace, raw))
+        if path in required_set or posixpath.basename(path) in required_names:
+            continue
+        if path not in paths:
+            paths.append(path)
+    return paths[:20]
+
+
+def action_references_path_text(action: dict[str, Any], path: str) -> bool:
+    basename = posixpath.basename(path)
+    haystack = json.dumps(action, ensure_ascii=False)
+    return path in haystack or (basename and basename in haystack)
+
+
+def action_reads_data_source(action: dict[str, Any], data_paths: list[str]) -> str:
+    action_type = str(action.get("action") or "").strip().lower()
+    if action_type == "read_file":
+        path = posixpath.normpath(str(action.get("path") or ""))
+        return path if path in data_paths else ""
+    if action_type in {"python", "shell"}:
+        text = str(action.get("code") or action.get("cmd") or "")
+        lowered = text.lower()
+        if not any(token in lowered for token in ("open(", "read", "csv", "json.load", "json.loads", "cat ")):
+            return ""
+        for path in data_paths:
+            if action_references_path_text(action, path):
+                return path
+    return ""
+
+
+def action_writes_required_artifact(action: dict[str, Any], required_paths: set[str]) -> bool:
+    action_type = str(action.get("action") or "").strip().lower()
+    if action_type in {"write_file", "append_file", "replace_in_file"}:
+        return posixpath.normpath(str(action.get("path") or "")) in required_paths
+    if action_type == "write_files":
+        files = action.get("files") if isinstance(action.get("files"), list) else []
+        return any(isinstance(item, dict) and posixpath.normpath(str(item.get("path") or "")) in required_paths for item in files)
+    if action_type == "python":
+        return any(action_references_path_text(action, path) for path in required_paths)
+    return False
 
 
 def explicit_workspace_from_task(task: str) -> str:
@@ -1891,6 +1944,18 @@ def missing_text_verifications(paths: list[str], verified_paths: set[str]) -> li
 
 def task_literal_markers_for_path(task: str, path: str) -> list[str]:
     lowered_path = path.lower()
+    basename = posixpath.basename(lowered_path)
+    marker_source = task
+    lowered_task = task.lower()
+    if basename and basename in lowered_task:
+        start = lowered_task.find(basename)
+        end = len(task)
+        for match in re.finditer(r"\b[\w.-]+\.(?:md|markdown|json|jsonl|csv|tsv|xml|txt|html|htm|fb2)\b", task[start + len(basename):], flags=re.I):
+            candidate = match.group(0).lower()
+            if candidate != basename:
+                end = start + len(basename) + match.start()
+                break
+        marker_source = task[start:end]
     markers: list[str] = []
 
     def add(value: str) -> None:
@@ -1900,13 +1965,13 @@ def task_literal_markers_for_path(task: str, path: str) -> list[str]:
 
     if lowered_path.endswith((".md", ".markdown")):
         for marker in ("Summary", "Evidence", "Risks", "Result", "STATUS: PASS"):
-            if marker.lower() in task.lower():
+            if marker.lower() in marker_source.lower():
                 add(marker)
     if lowered_path.endswith(".csv"):
-        for match in re.finditer(r"\b[\w-]+(?:,[\w-]+){1,}\b", task):
+        for match in re.finditer(r"\b[\w-]+(?:,[\w-]+){1,}\b", marker_source):
             add(match.group(0))
     if lowered_path.endswith(".json"):
-        for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\"[^\"]+\"|'[^']+'|-?\d+(?:\.\d+)?|true|false|null)", task):
+        for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\"[^\"]+\"|'[^']+'|-?\d+(?:\.\d+)?|true|false|null)", marker_source):
             key = match.group(1)
             value = match.group(2).strip().strip("\"'")
             add(f"{key}={value}")
@@ -1921,6 +1986,25 @@ def build_required_artifact_verify_action(task: str, path: str) -> dict[str, Any
         if path.lower().endswith((".md", ".markdown", ".csv")) and len(markers) > 1:
             action["ordered_patterns"] = markers
     return action
+
+
+def build_swe_auto_test_action(config: AgentConfig, workspace: str) -> dict[str, Any] | None:
+    if not workspace:
+        return None
+    if config.shell_enabled:
+        return {
+            "action": "shell",
+            "cmd": f"cd {shlex.quote(workspace)} && python3 -m pytest -q",
+            "timeout": 60,
+            "reason": "automatic full verification after code edit",
+        }
+    return {
+        "action": "python",
+        "cwd": workspace,
+        "code": PYTEST_FALLBACK_CODE,
+        "timeout": 60,
+        "reason": "automatic fallback verification after code edit",
+    }
 
 
 def required_artifacts_auto_final(config: AgentConfig, required_paths: list[str], verified_paths: set[str]) -> dict[str, Any] | None:
@@ -3844,6 +3928,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     required_artifact_path_list = list(dict.fromkeys([*parsed_required_artifacts, *restored_required_artifacts]))[:20]
     required_artifact_paths = set(required_artifact_path_list)
     explicit_workspace = explicit_workspace_from_task(original_task)
+    data_source_path_list = data_source_paths_from_task(original_task, explicit_workspace, required_artifact_path_list)
+    data_source_paths = set(data_source_path_list)
+    inspected_data_source_paths: set[str] = set()
     last_pytest_passing_tests, last_pytest_failing_tests = latest_pytest_sets_from_text(original_task)
     code_mutated_since_last_pytest = False
     pytest_unavailable_seen = False
@@ -3867,6 +3954,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         {
             "task": original_task,
             "required_artifacts": required_artifact_path_list,
+            "data_sources": data_source_path_list,
             "planner_enabled": bool(config.planner_enabled),
             "planner_thinking": bool(config.planner_thinking),
             "memory_namespace": config.memory_namespace,
@@ -3962,9 +4050,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             and swe_task
             and code_mutated_since_last_pytest
             and pending_failing_tests
-            and last_swe_test_action is not None
+            and (last_swe_test_action is not None or explicit_workspace)
         ):
-            automated_action = copy.deepcopy(last_swe_test_action)
+            automated_action = copy.deepcopy(last_swe_test_action) if last_swe_test_action is not None else build_swe_auto_test_action(config, explicit_workspace)
             emit(
                 event_sink,
                 {
@@ -3981,12 +4069,16 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 {
                     "step": step,
                     "action": automated_action,
+                    "fallback_action": last_swe_test_action is None,
                     "pending_failing_tests": sorted(pending_failing_tests)[:20],
                     "last_edited_path": last_successful_swe_edit_path,
                 },
             )
         if not repair_source_path and required_artifact_paths:
-            missing_artifact_verification = missing_text_verifications(required_artifact_path_list, verified_text_paths)
+            missing_artifact_verification = [
+                path for path in missing_text_verifications(required_artifact_path_list, verified_text_paths)
+                if path not in failed_verification_paths
+            ]
             if (
                 missing_artifact_verification
                 and required_artifact_paths.issubset(set(successful_write_file_paths) | verified_text_paths)
@@ -4227,6 +4319,37 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "Do not write, rewrite, list, read, mkdir, or final."
                     ),
                 }
+        if (
+            data_source_paths
+            and required_artifact_paths
+            and not inspected_data_source_paths
+            and forced_supervisor_result is None
+            and action_writes_required_artifact(action, required_artifact_paths)
+            and not action_reads_data_source(action, data_source_path_list)
+        ):
+            source_list = ", ".join(data_source_path_list)
+            emit(
+                event_sink,
+                {
+                    "type": "warning",
+                    "code": "data_source_inspection_required",
+                    "step": step,
+                    "message": "Required artifacts appear to be derived from input data, but no data source was read before writing.",
+                    "display_message": "Сначала нужно прочитать входные данные, потом создавать артефакты.",
+                    "data_sources": data_source_path_list,
+                },
+            )
+            forced_supervisor_result = {
+                "ok": False,
+                "error": "data source inspection required by supervisor",
+                "data_sources": data_source_path_list,
+                "required_artifacts": required_artifact_path_list,
+                "instruction": (
+                    "The task requires deriving artifacts from input data files. Read or process one of these data sources "
+                    f"before writing required artifacts: {source_list}. Use read_file for a small source, or a python action "
+                    "that opens/parses the input file and writes artifacts from parsed data."
+                ),
+            }
 
         if action_type == "final" and forced_supervisor_result is None:
             message = str(action.get("message", "")).strip()
@@ -4947,6 +5070,20 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             )
 
         action_duration_sec = round(time.time() - action_started, 3)
+        inspected_data_source_path = ""
+        if data_source_paths and isinstance(result, dict) and result.get("ok") is True:
+            inspected_data_source_path = action_reads_data_source(action, data_source_path_list)
+            if inspected_data_source_path:
+                inspected_data_source_paths.add(inspected_data_source_path)
+                write_task_journal(
+                    config,
+                    "data_source_inspected",
+                    {
+                        "step": step,
+                        "path": inspected_data_source_path,
+                        "action": action_type,
+                    },
+                )
         if (
             action_type == "mkdir"
             and isinstance(result, dict)

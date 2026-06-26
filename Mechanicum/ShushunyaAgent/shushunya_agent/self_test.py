@@ -2261,6 +2261,50 @@ def main() -> int:
         )
     print("[ok] artifact verification mode narrows post-write steps")
 
+    data_source_guard_events: list[dict] = []
+    data_source_guard_stdout = io.StringIO()
+    data_source_guard_config = AgentConfig(
+        task_id=safe_task_id("self-test-data-source-artifact-guard"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+
+    def fake_data_file_tool(_config, action):
+        if action.get("action") == "read_file":
+            return {"ok": True, "path": action.get("path"), "content": "id,value\n1,42\n"}
+        return fake_file_info(_config, action)
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"write_file","path":"/work/report.md","content":"Summary\\nTotal: 42"}',
+            '{"action":"read_file","path":"/work/input.csv"}',
+            '{"action":"write_file","path":"/work/report.md","content":"Summary\\nTotal: 42"}',
+    ]) as mocked_data_source_chat, mock.patch.object(agent_runner, "file_tool", side_effect=fake_data_file_tool), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_verify), \
+            contextlib.redirect_stdout(data_source_guard_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        data_source_guard_code = run_agent(
+            "Workspace: /work/.\nRead input.csv and derive the required artifact.\nRequired artifacts: /work/report.md. report.md must contain Total: 42.",
+            data_source_guard_config,
+            event_sink=data_source_guard_events.append,
+        )
+    data_source_guard_payload = json.loads(data_source_guard_stdout.getvalue())
+    data_source_guard_actions = [step.get("action", {}).get("action") for step in data_source_guard_payload.get("steps", [])]
+    first_result = data_source_guard_payload.get("steps", [{}])[0].get("result", {})
+    if (
+        data_source_guard_code != 0
+        or mocked_data_source_chat.call_count != 3
+        or data_source_guard_actions != ["write_file", "read_file", "write_file", "verify_text_file"]
+        or first_result.get("error") != "data source inspection required by supervisor"
+        or not any(event.get("code") == "data_source_inspection_required" for event in data_source_guard_events)
+    ):
+        raise AssertionError(
+            "data source artifact guard did not reject write-before-read: "
+            f"code={data_source_guard_code}, payload={data_source_guard_payload}, actions={data_source_guard_actions}, events={data_source_guard_events}"
+        )
+    print("[ok] data source artifacts require input inspection before writing")
+
     restored_required_events: list[dict] = []
     restored_required_stdout = io.StringIO()
     restored_required_config = AgentConfig(

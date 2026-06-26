@@ -1,0 +1,37 @@
+{
+  "suite": "stress",
+  "tasks": [
+    {
+      "id": "ledger_reconcile_artifacts",
+      "title": "Reconcile ledger CSV into coordinated artifacts",
+      "seed_files": {
+        "ledger.csv": "date,account,kind,amount,currency,note\n2026-01-02,cash,income,1200.00,USD,invoice-a\n2026-01-03,cash,expense,150.25,USD,hosting\n2026-01-04,bank,income,800.00,USD,invoice-b\n2026-01-05,bank,expense,99.75,USD,tools\n2026-01-06,cash,expense,1200.00,EUR,wrong-currency\n2026-01-07,bank,expense,-10.00,USD,negative-expense\n"
+      },
+      "prompt": "Проанализируй ledger.csv и создай четыре файла в текущем каталоге: summary.md, totals.json, exceptions.csv, normalized.csv. Учитывай только USD-записи с положительным amount для нормальных totals. summary.md должен содержать разделы Summary, Evidence, Risks, Result и строку STATUS: PASS. totals.json должен быть валидным JSON object с полями total_income=2000.0, total_expense=250.0, net=1750.0, accounts={\"cash\":1049.75,\"bank\":700.25}, ignored_count=2. exceptions.csv должен иметь заголовок date,account,kind,amount,currency,note,reason и две строки: wrong-currency с reason non_usd и negative-expense с reason non_positive_amount. normalized.csv должен иметь заголовок date,account,kind,amount_usd,note и четыре нормальные USD-положительные строки. После создания проверь содержимое всех файлов и валидность JSON/CSV. Завершай только когда проверки пройдены.",
+      "checks": [
+        {"type": "file_contains", "path": "summary.md", "text": "STATUS: PASS"},
+        {"type": "file_contains", "path": "summary.md", "text": "Evidence"},
+        {"type": "file_exists", "path": "totals.json"},
+        {"type": "file_exists", "path": "exceptions.csv"},
+        {"type": "file_exists", "path": "normalized.csv"},
+        {"type": "command", "command": "__PYTHON__ -c \"import csv,json; t=json.load(open('totals.json', encoding='utf-8')); assert t['total_income']==2000.0; assert t['total_expense']==250.0; assert t['net']==1750.0; assert t['accounts']=={'cash':1049.75,'bank':700.25}; assert t['ignored_count']==2; exc=list(csv.DictReader(open('exceptions.csv', encoding='utf-8'))); assert [r['reason'] for r in exc]==['non_usd','non_positive_amount']; norm=list(csv.DictReader(open('normalized.csv', encoding='utf-8'))); assert len(norm)==4; assert sum(float(r['amount_usd']) for r in norm if r['kind']=='income')==2000.0\"", "timeout_sec": 60}
+      ]
+    },
+    {
+      "id": "order_pipeline_repair",
+      "title": "Repair order pipeline totals, filtering, and CLI JSON",
+      "seed_files": {
+        "orders/__init__.py": "from .pipeline import load_orders, summarize_orders, filter_shipments\n",
+        "orders/pipeline.py": "import csv\n\n\ndef load_orders(path):\n    with open(path, newline='', encoding='utf-8') as fh:\n        return list(csv.DictReader(fh))\n\n\ndef summarize_orders(rows):\n    total = 0\n    by_region = {}\n    for row in rows:\n        if row['status'] == 'cancelled':\n            continue\n        amount = row['amount']\n        total += amount\n        region = row['region']\n        by_region[region] = by_region.get(region, 0) + amount\n    return {'count': len(rows), 'total': round(total, 2), 'by_region': by_region}\n\n\ndef filter_shipments(rows):\n    return [row for row in rows if row['status'] == 'paid' and row['shipped']]\n",
+        "orders/cli.py": "import json\nimport sys\nfrom .pipeline import load_orders, summarize_orders, filter_shipments\n\n\ndef main(argv=None):\n    argv = list(argv or sys.argv[1:])\n    rows = load_orders(argv[0])\n    print(json.dumps({'summary': summarize_orders(rows), 'shipments': filter_shipments(rows)}, sort_keys=True))\n\n\nif __name__ == '__main__':\n    main()\n",
+        "data/orders.csv": "id,region,status,amount,shipped\nA,north,paid,100.50,true\nB,south,cancelled,40.00,false\nC,north,paid,50.25,false\nD,south,paid,80.00,true\n",
+        "tests/test_orders.py": "from orders.pipeline import load_orders, summarize_orders, filter_shipments\n\n\ndef test_summary_uses_numbers_and_excludes_cancelled():\n    rows = load_orders('data/orders.csv')\n    assert summarize_orders(rows) == {'count': 3, 'total': 230.75, 'by_region': {'north': 150.75, 'south': 80.0}}\n\n\ndef test_shipments_only_paid_and_shipped_true():\n    rows = load_orders('data/orders.csv')\n    shipments = filter_shipments(rows)\n    assert [row['id'] for row in shipments] == ['A', 'D']\n"
+      },
+      "prompt": "В текущем каталоге есть Python-проект orders. Почини pipeline минимально: amount должен быть числом, cancelled не учитываются ни в count ни в total/by_region, shipped из CSV должен интерпретироваться как bool, filter_shipments должен возвращать только paid и shipped=true. CLI должен печатать валидный JSON. Проверь python3 -m pytest -q или fallback через python3 -c для summarize_orders, filter_shipments и CLI. Завершай только после успешной проверки.",
+      "checks": [
+        {"type": "command", "command": "__PYTHON__ -c \"from orders.pipeline import load_orders, summarize_orders, filter_shipments; rows=load_orders('data/orders.csv'); assert summarize_orders(rows)=={'count':3,'total':230.75,'by_region':{'north':150.75,'south':80.0}}; assert [r['id'] for r in filter_shipments(rows)]==['A','D']\"", "timeout_sec": 60},
+        {"type": "command", "command": "__PYTHON__ -m orders.cli data/orders.csv | __PYTHON__ -c \"import json,sys; data=json.load(sys.stdin); assert data['summary']['total']==230.75; assert [r['id'] for r in data['shipments']]==['A','D']\"", "timeout_sec": 60}
+      ]
+    }
+  ]
+}
