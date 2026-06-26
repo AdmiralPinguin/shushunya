@@ -1552,6 +1552,28 @@ def action_is_cli_verification(action_type: str, action: dict[str, Any]) -> bool
     )
 
 
+def python_action_written_code_paths(action_type: str, action: dict[str, Any]) -> list[str]:
+    if action_type != "python":
+        return []
+    code = str(action.get("code") or "")
+    cwd = str(action.get("cwd") or action.get("workdir") or "").strip()
+    paths: list[str] = []
+    patterns = (
+        r"open\(\s*['\"]([^'\"]+\.(?:py|js|ts|tsx|jsx|kt|java))['\"]\s*,\s*['\"][^'\"]*w",
+        r"Path\(\s*['\"]([^'\"]+\.(?:py|js|ts|tsx|jsx|kt|java))['\"]\s*\)\.write_text\(",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, code):
+            raw_path = match.group(1)
+            if raw_path.startswith("/"):
+                paths.append(posixpath.normpath(raw_path))
+            elif cwd:
+                paths.append(posixpath.normpath(posixpath.join(cwd, raw_path)))
+            else:
+                paths.append(raw_path)
+    return list(dict.fromkeys(paths))
+
+
 def action_is_test_diagnostic(action_type: str, action: dict[str, Any]) -> bool:
     path = str(action.get("path") or "").lower()
     cmd = str(action.get("cmd") or "").lower()
@@ -4039,6 +4061,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     swe_test_diagnostic_seen = resume_context_has_test_diagnostic(original_task)
     swe_requires_test_diagnostic = task_requires_test_diagnostic(original_task)
     swe_requires_cli_verification = task_requires_cli_verification(original_task)
+    swe_resume_requires_cli_verification = (
+        swe_requires_cli_verification
+        and ("resume context" in original_task.lower() or "authoritative task snapshot" in original_task.lower())
+    )
     inspection_actions_since_progress = 0
     shell_inline_python_syntax_failures = 0
     stale_replace_failures_by_path: dict[str, int] = {}
@@ -4506,9 +4532,15 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     }
                 )
                 continue
-            if swe_task and swe_requires_cli_verification and last_cli_required_swe_edit_path and not swe_cli_verified_after_edit:
+            if (
+                swe_task
+                and swe_requires_cli_verification
+                and (last_cli_required_swe_edit_path or swe_resume_requires_cli_verification)
+                and not swe_cli_verified_after_edit
+            ):
                 warning_payload = {
                     "last_edited_path": last_cli_required_swe_edit_path,
+                    "resume_requires_cli_verification": swe_resume_requires_cli_verification,
                     "required_verification": "cli_or_command_interface",
                 }
                 warning_message = (
@@ -5373,6 +5405,21 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 if swe_requires_cli_verification:
                     last_cli_required_swe_edit_path = path
                 read_file_paths_since_code_mutation = set()
+            pending_failing_test_inspections = 0
+        python_written_code_paths = python_action_written_code_paths(action_type, action) if isinstance(result, dict) and result.get("ok") is True else []
+        if swe_task and python_written_code_paths:
+            for path in python_written_code_paths:
+                verified_text_paths.discard(path)
+                failed_verification_paths.discard(path)
+                stale_replace_failures_by_path.pop(path, None)
+            code_mutated_since_last_pytest = True
+            swe_verified_after_edit = False
+            swe_cli_verified_after_edit = False
+            swe_cli_verification_attempted_after_edit = False
+            last_successful_swe_edit_path = python_written_code_paths[0]
+            if swe_requires_cli_verification:
+                last_cli_required_swe_edit_path = python_written_code_paths[0]
+            read_file_paths_since_code_mutation = set()
             pending_failing_test_inspections = 0
         if action_type == "write_files" and isinstance(result, dict) and result.get("ok") is True:
             for path in result.get("written", []) if isinstance(result.get("written"), list) else []:

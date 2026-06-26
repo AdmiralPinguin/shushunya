@@ -642,6 +642,12 @@ def main() -> int:
         {"code": "with open('scheduler/cli.py', 'r') as f:\n    print(f.read())"},
     ):
         raise AssertionError("reading cli.py must not count as CLI verification")
+    written_code_paths = agent_runner.python_action_written_code_paths(
+        "python",
+        {"cwd": "/work/project", "code": "with open('scheduler/core.py', 'w') as f:\n    f.write('x')"},
+    )
+    if written_code_paths != ["/work/project/scheduler/core.py"]:
+        raise AssertionError(f"python code write detector missed open(..., w): {written_code_paths}")
     swe_profile_task = agent_runner.task_with_execution_profile(
         "Исправь Python-проект и запусти pytest",
         AgentConfig(shell_enabled=True),
@@ -3881,6 +3887,38 @@ def main() -> int:
     if len(swe_cli_requires_verify_payload.get("steps", [])) != 5:
         raise AssertionError(f"SWE CLI verification should run after rejected final: {swe_cli_requires_verify_payload}")
     print("[ok] SWE final requires CLI verification after edit")
+
+    swe_resume_cli_stdout = io.StringIO()
+    swe_resume_cli_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-resume-cli-requires-verify"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    swe_resume_cli_events: list[dict] = []
+    resume_cli_task = (
+        "Продолжи выполнение той же задачи по task journal.\n\n"
+        "Resume context from previous agent task journal:\n"
+        "[{\"type\":\"start\",\"task\":\"Исправь Python-проект. CLI должен печатать валидный JSON; "
+        "проверь python3 -m package.cli data.csv.\"},"
+        "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":true,\"passing_tests\":[\"tests/test_core.py::test_core\"],\"failing_tests\":[]}}]"
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"final","message":"premature from resume"}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m package.cli data.csv | python3 -c \\"import sys,json; json.load(sys.stdin)\\"","timeout":60}',
+            '{"action":"final","message":"done after cli"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={"ok": True, "returncode": 0, "stdout": "", "stderr": ""}), \
+            contextlib.redirect_stdout(swe_resume_cli_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        swe_resume_cli_code = run_agent(resume_cli_task, swe_resume_cli_config, event_sink=swe_resume_cli_events.append)
+    swe_resume_cli_payload = json.loads(swe_resume_cli_stdout.getvalue())
+    if swe_resume_cli_code != 0 or swe_resume_cli_payload.get("message") != "done after cli":
+        raise AssertionError(f"SWE resume CLI verification did not recover after CLI command: {swe_resume_cli_payload}")
+    if not any(event.get("code") == "final_swe_cli_verification_required" for event in swe_resume_cli_events):
+        raise AssertionError(f"SWE resume final was not blocked before CLI verification: {swe_resume_cli_payload}")
+    print("[ok] SWE resume final requires CLI verification")
 
     failing_stall_stdout = io.StringIO()
     failing_stall_config = AgentConfig(
