@@ -1803,14 +1803,21 @@ def parse_scalar(value):
         return raw.strip('"\'')
 
 def json_pseudo_match(data, pattern):
-    if not isinstance(data, dict):
-        return False
     text = str(pattern).strip()
-    match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)", text)
+    match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*(.+)", text)
     if not match:
         return False
     key, expected = match.group(1), parse_scalar(match.group(2))
-    return key in data and data.get(key) == expected
+    stack = [data]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            if key in current and current.get(key) == expected:
+                return True
+            stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
+    return False
 
 payload = json.loads(os.environ["VERIFY_TEXT_FILE_PAYLOAD"])
 path = safe_path(payload["path"])
