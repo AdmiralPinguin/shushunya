@@ -3975,6 +3975,23 @@ def main() -> int:
     if read_result.get("content") != "hello":
         raise AssertionError(f"unexpected file content: {read_result}")
     print("[ok] file content")
+    write_files_result = agent_runner.write_files_tool(
+        config,
+        {
+            "action": "write_files",
+            "files": [
+                {"path": "/work/self-test/batch-a.txt", "content": "A"},
+                {"path": "/work/self-test/batch-b.txt", "content": "B"},
+            ],
+        },
+    )
+    assert_ok("write_files", write_files_result)
+    if sorted(write_files_result.get("written", [])) != ["/work/self-test/batch-a.txt", "/work/self-test/batch-b.txt"]:
+        raise AssertionError(f"write_files did not report written paths: {write_files_result}")
+    batch_read = file_tool(config, {"action": "read_file", "path": "/work/self-test/batch-b.txt"})
+    if batch_read.get("content") != "B":
+        raise AssertionError(f"write_files did not write expected content: {batch_read}")
+    print("[ok] write_files content")
 
     assert_ok(
         "write_file json fixture",

@@ -182,6 +182,7 @@ ACTION_SCHEMAS: dict[str, dict[str, Any]] = {
     "list_files": {"required": {"path"}, "fields": {"action", "path", "max_depth", "limit", "offset"}},
     "read_file": {"required": {"path"}, "fields": {"action", "path", "max_bytes", "offset"}},
     "write_file": {"required": {"path", "content"}, "fields": {"action", "path", "content"}},
+    "write_files": {"required": {"files"}, "fields": {"action", "files"}},
     "append_file": {"required": {"path", "content"}, "fields": {"action", "path", "content"}},
     "replace_in_file": {"required": {"path", "old", "new"}, "fields": {"action", "path", "old", "new", "count", "max_file_bytes"}},
     "mkdir": {"required": {"path"}, "fields": {"action", "path"}},
@@ -315,6 +316,23 @@ def validate_action(action: Mapping[str, Any]) -> dict[str, Any]:
         _validate_int(action_dict, "max_bytes", errors, minimum=1024, maximum=200000000)
         _validate_bool(action_dict, "case_sensitive", errors)
         _validate_bool(action_dict, "regex", errors)
+    elif action_type == "write_files":
+        files = action_dict.get("files")
+        if not isinstance(files, list):
+            errors.append({"field": "files", "error": "expected array", "actual": _field_type(files)})
+        else:
+            if len(files) < 1 or len(files) > 20:
+                errors.append({"field": "files", "error": "array length out of range", "minimum": 1, "maximum": 20, "actual": len(files)})
+            for index, item in enumerate(files):
+                if not isinstance(item, Mapping):
+                    errors.append({"field": "files", "index": index, "error": "expected object", "actual": _field_type(item)})
+                    continue
+                file_action = {"action": "write_file", "path": item.get("path"), "content": item.get("content")}
+                file_errors: list[dict[str, Any]] = []
+                _validate_path(file_action, file_errors)
+                _validate_string(file_action, "content", file_errors, max_len=12000)
+                for error in file_errors:
+                    errors.append({"field": "files", "index": index, **error})
     elif action_type in {"list_files", "read_file", "write_file", "append_file", "replace_in_file", "mkdir", "remove_file", "file_info", "find_files", "search_text"}:
         _validate_path(action_dict, errors)
         if action_type in {"write_file", "append_file"}:

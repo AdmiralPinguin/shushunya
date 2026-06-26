@@ -162,6 +162,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 {"action":"list_files","path":"/work","max_depth":2,"limit":100,"offset":0}
 {"action":"read_file","path":"/work/file.txt","max_bytes":20000,"offset":0}
 {"action":"write_file","path":"/work/file.txt","content":"текст"}
+{"action":"write_files","files":[{"path":"/work/a.md","content":"текст"},{"path":"/work/b.json","content":"{}"}]}
 {"action":"append_file","path":"/work/file.txt","content":"текст"}
 {"action":"replace_in_file","path":"/work/file.txt","old":"старый текст","new":"новый текст","count":1,"max_file_bytes":5000000}
 {"action":"mkdir","path":"/work/dir"}
@@ -231,6 +232,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Никогда не помещай большие тексты, HTML, главы книг или длинные исходники прямо в JSON content/code. Держи content/code короче 12000 символов.
 - Для больших артефактов создавай файл маленькими append_file чанками или пиши короткий Python-код, который сам собирает/парсит данные внутри sandbox.
 - Если строишь большой файл частями, используй write_file только один раз для заголовка/начала, а дальше append_file. Не перезаписывай тот же путь через write_file, если уже начал накапливать содержимое, кроме явного исправления поврежденного файла.
+- Если нужно создать несколько небольших артефактов сразу, используй write_files с массивом files вместо нескольких отдельных write_file шагов.
 - Если нужно сохранить текст из web_fetch, не копируй весь текст в JSON. Сохрани URL/метаданные, затем используй более узкие fetch/read/append шаги.
 - Для сохранения больших HTML-страниц используй web_extract_to_file: он сам скачает, очистит и запишет текст в файл. Не копируй большой текст в write_file content.
 - Когда нужно продолжать по оглавлению, пагинации или списку глав, сначала используй web_links по странице оглавления. Не угадывай следующие URL арифметикой, если tool result дает ссылку на страницу другого тома/раздела.
@@ -1146,6 +1148,7 @@ def parse_bool(value: Any, default: bool = False) -> bool:
 INSPECTION_ACTIONS = {"list_files", "find_files", "search_text", "read_file", "file_info", "web_search", "web_fetch", "web_links"}
 PRODUCTIVE_ACTIONS = {
     "write_file",
+    "write_files",
     "append_file",
     "replace_in_file",
     "remove_file",
@@ -1161,6 +1164,7 @@ PRODUCTIVE_ACTIONS = {
 }
 STATE_MUTATING_ACTIONS = {
     "write_file",
+    "write_files",
     "append_file",
     "replace_in_file",
     "remove_file",
@@ -1225,6 +1229,7 @@ REQUIRED_FIELDS = {
     "list_files": {"path"},
     "read_file": {"path"},
     "write_file": {"path", "content"},
+    "write_files": {"files"},
     "append_file": {"path", "content"},
     "replace_in_file": {"path", "old", "new"},
     "mkdir": {"path"},
@@ -1507,6 +1512,13 @@ def action_workspace_violations(action: dict[str, Any], workspace: str) -> list[
         value = action.get(field)
         if isinstance(value, str) and sandbox_path_outside_workspace(value, workspace):
             violations.append({"field": field, "path": value})
+    if str(action.get("action") or "").strip().lower() == "write_files":
+        files = action.get("files") if isinstance(action.get("files"), list) else []
+        for index, item in enumerate(files):
+            if isinstance(item, dict):
+                value = item.get("path")
+                if isinstance(value, str) and sandbox_path_outside_workspace(value, workspace):
+                    violations.append({"field": f"files[{index}].path", "path": value})
     return violations
 
 
@@ -2180,6 +2192,36 @@ def verify_text_file_tool(config: AgentConfig, action: dict[str, Any]) -> dict[s
     except json.JSONDecodeError:
         return {"ok": False, "error": "verify_text_file returned non-json output", "stdout": truncate(stdout, 2000), "runner": result}
     return parsed if isinstance(parsed, dict) else {"ok": False, "error": "verify_text_file returned non-object"}
+
+
+def write_files_tool(config: AgentConfig, action: dict[str, Any]) -> dict[str, Any]:
+    files = action.get("files") if isinstance(action.get("files"), list) else []
+    results: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    for index, item in enumerate(files):
+        if not isinstance(item, dict):
+            result = {"ok": False, "error": "file entry must be an object", "index": index}
+        else:
+            result = file_tool(
+                config,
+                {
+                    "action": "write_file",
+                    "path": str(item.get("path") or ""),
+                    "content": str(item.get("content") or ""),
+                },
+            )
+            result = {"index": index, **result}
+        results.append(result)
+        if not result.get("ok"):
+            failures.append(result)
+    written = [str(item.get("path")) for item in results if item.get("ok") and item.get("path")]
+    return {
+        "ok": not failures,
+        "written": written,
+        "count": len(files),
+        "results": results,
+        "failures": failures[:10],
+    }
 
 
 def read_dotenv_value(path: Path, key: str) -> str:
@@ -3495,6 +3537,9 @@ def action_summary(action: dict[str, Any]) -> str:
         return f"{action.get('path', '/work')} -> {action.get('output_txt', '/work/bundle.txt')}"
     if action_type == "verify_text_file":
         return str(action.get("path", "/work"))
+    if action_type == "write_files":
+        files = action.get("files") if isinstance(action.get("files"), list) else []
+        return f"{len(files)} file(s)"
     if action_type == "telegram_send_document":
         return str(action.get("path", "/work"))
     if action_type == "ranobehub_chapter":
@@ -3534,6 +3579,9 @@ def action_display_message(action: dict[str, Any], mode: str = "") -> str:
         return prefix + "Ищу нужный текст по файлам."
     if action_type == "write_file":
         return prefix + f"Записываю файл {display_path(action.get('path'))}."
+    if action_type == "write_files":
+        files = action.get("files") if isinstance(action.get("files"), list) else []
+        return prefix + f"Записываю несколько файлов: {len(files)}."
     if action_type == "append_file":
         return prefix + f"Добавляю данные в {display_path(action.get('path'))}."
     if action_type == "replace_in_file":
@@ -3577,6 +3625,8 @@ def result_display_message(action_type: str, result: dict[str, Any]) -> str:
         return f"Прочитал {display_path(result.get('path'))}, выбираю следующий шаг."
     if action_type in {"write_file", "append_file", "replace_in_file"}:
         return f"Файл {display_path(result.get('path'))} обновлен."
+    if action_type == "write_files":
+        return f"Файлы записаны: {len(result.get('written', []) or [])}."
     if action_type == "verify_text_file":
         return f"Проверка файла {display_path(result.get('path'))} прошла."
     if action_type in {"shell", "python"}:
@@ -3610,6 +3660,8 @@ def result_summary(action_type: str, result: dict[str, Any]) -> str:
         next_offset = result.get("next_offset")
         suffix = f" next_offset={next_offset}" if next_offset is not None else ""
         return f"read {bytes_read}/{size} byte(s) offset={offset}{suffix}"
+    if action_type == "write_files":
+        return f"{len(result.get('written', []) or [])}/{result.get('count', 0)} file(s) written"
     if action_type in {"write_file", "append_file", "replace_in_file", "mkdir", "remove_file", "file_info"}:
         return str(result.get("path") or result.get("error") or "file tool done")
     if action_type in {"shell", "python"}:
@@ -4770,6 +4822,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     if pending_read_path:
                         pending_failing_test_read_paths.add(pending_read_path)
                 result = file_tool(config, action)
+            elif action_type == "write_files":
+                result = write_files_tool(config, action)
             elif action_type == "python":
                 result = python_tool(config, action)
                 combined_python_output = f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}".lower() if isinstance(result, dict) else ""
@@ -4948,6 +5002,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 last_successful_swe_edit_path = path
                 read_file_paths_since_code_mutation = set()
             pending_failing_test_inspections = 0
+        if action_type == "write_files" and isinstance(result, dict) and result.get("ok") is True:
+            for path in result.get("written", []) if isinstance(result.get("written"), list) else []:
+                path = str(path)
+                verified_text_paths.discard(path)
+                failed_verification_paths.discard(path)
+                stale_replace_failures_by_path.pop(path, None)
         if isinstance(result, dict) and (result.get("passing_tests") or result.get("failing_tests")):
             current_passing_tests, current_failing_tests = pytest_result_sets(result)
             regression_tests = sorted(current_failing_tests & last_pytest_passing_tests)
@@ -5053,6 +5113,18 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 successful_write_file_paths[path] = successful_write_file_paths.get(path, 0) + 1
                 content_bytes = len(str(action.get("content") or "").encode("utf-8"))
                 successful_write_file_max_bytes[path] = max(successful_write_file_max_bytes.get(path, 0), content_bytes)
+        if action_type == "write_files" and isinstance(result, dict) and result.get("ok") is True:
+            result_items = result.get("results") if isinstance(result.get("results"), list) else []
+            action_items = action.get("files") if isinstance(action.get("files"), list) else []
+            for index, item in enumerate(result_items):
+                if not isinstance(item, dict) or not item.get("ok") or not item.get("path"):
+                    continue
+                path = str(item.get("path"))
+                successful_write_file_paths[path] = successful_write_file_paths.get(path, 0) + 1
+                content = ""
+                if index < len(action_items) and isinstance(action_items[index], dict):
+                    content = str(action_items[index].get("content") or "")
+                successful_write_file_max_bytes[path] = max(successful_write_file_max_bytes.get(path, 0), len(content.encode("utf-8")))
         if action_type == "read_file" and isinstance(result, dict) and result.get("ok") is True:
             read_path = str(action.get("path") or result.get("path") or "")
             if read_path:

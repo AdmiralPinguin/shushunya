@@ -239,6 +239,14 @@
         "content": "string, max 12000 chars; use append_file chunks or python for larger artifacts"
       }
     },
+    "write_files": {
+      "required": ["action", "files"],
+      "properties": {
+        "action": "write_files",
+        "files": "array of 1..20 objects with sandbox_path path and string content, max 12000 chars per content",
+        "returns": "writes multiple small files sequentially and returns per-file results"
+      }
+    },
     "append_file": {
       "required": ["action", "path", "content"],
       "properties": {
