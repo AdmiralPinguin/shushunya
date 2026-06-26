@@ -280,6 +280,10 @@ def main() -> None:
     assert len(dry_project["project"]["steps"]) == 2
     assert all(item["valid"] for item in dry_project["validations"])
     assert {step["spec"]["engine"] for step in dry_project["project"]["steps"]} == {"flux", "sdxl"}
+    sdxl_project_step = next(step for step in dry_project["project"]["steps"] if step["spec"]["engine"] == "sdxl")
+    assert sdxl_project_step["spec"]["steps"] >= 8
+    if "project_adjustment" in sdxl_project_step["spec"]["safety"]:
+        assert sdxl_project_step["spec"]["safety"]["project_adjustment"].startswith("SDXL txt2img concept steps raised")
     baseline = JobSpec(
         type="txt2img",
         engine="sdxl",

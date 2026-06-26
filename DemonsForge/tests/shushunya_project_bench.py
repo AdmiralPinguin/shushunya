@@ -93,6 +93,10 @@ def write_summary(report: dict[str, Any], path: Path) -> str:
         stddev = actual.get("stddev") if isinstance(actual, dict) else None
         if isinstance(stddev, list) and stddev and sum(float(value) for value in stddev) / len(stddev) < 5.0:
             warnings.append("flat_or_blank_image")
+        metadata = step.get("metadata") or {}
+        step_count = int(metadata.get("steps") or step.get("steps") or 0)
+        if step.get("engine") == "sdxl" and step_count < 8:
+            warnings.append("sdxl_understepped_noise_risk")
         lines.append(
             f"| `{step.get('step_id')}` | `{step.get('engine')}` | `{step.get('status')}` | "
             f"`{step.get('job_id') or ''}` | `{step.get('artifact_id') or ''}` | {', '.join(warnings)} |"
@@ -220,6 +224,7 @@ def _main() -> int:
                     "step_id": step["id"],
                     "role": step["role"],
                     "engine": step["spec"].get("engine"),
+                    "steps": step["spec"].get("steps"),
                     "status": "dry-run-valid" if validation.get("valid") else "dry-run-invalid",
                     "validation": validation,
                 }

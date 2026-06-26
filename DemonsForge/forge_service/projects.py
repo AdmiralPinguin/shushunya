@@ -69,6 +69,11 @@ def _make_spec(
     )
     baseline.safety["project_role"] = role
     baseline.safety["project_seed_offset"] = seed_offset
+    if preferred_engine == "sdxl" and baseline.type.value == "txt2img" and baseline.steps < 8:
+        baseline.steps = 8
+        baseline.quality_preset = "draft"
+        baseline.safety["quality_preset"] = "draft"
+        baseline.safety["project_adjustment"] = "SDXL txt2img concept steps raised to 8 to avoid one-step noise mosaics."
     if baseline.seed is not None:
         baseline.seed += seed_offset
     return baseline
