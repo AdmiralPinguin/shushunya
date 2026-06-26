@@ -58,6 +58,13 @@ class DemonsForgeClient:
     def resume_queue(self) -> dict[str, Any]:
         return self._request("POST", "/forge/queue/resume")
 
+    def recover_stale_jobs(self, max_age_seconds: int = 3600, dry_run: bool = True) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/forge/queue/recover-stale",
+            params={"max_age_seconds": max_age_seconds, "dry_run": dry_run},
+        )
+
     def job_schema(self) -> dict[str, Any]:
         return self._request("GET", "/forge/schema/job")
 

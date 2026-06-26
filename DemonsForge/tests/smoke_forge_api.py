@@ -102,6 +102,10 @@ def main() -> None:
     assert "status_counts" in queue_state.json()
     assert "queued" in queue_state.json()["status_counts"]
     assert queue_state.json()["pid"] > 0
+    stale_recovery = client.post("/forge/queue/recover-stale?max_age_seconds=999999&dry_run=true")
+    assert stale_recovery.status_code == 200, stale_recovery.text
+    assert stale_recovery.json()["dry_run"] is True
+    assert isinstance(stale_recovery.json()["recovered"], list)
     events = client.get("/forge/events?limit=5")
     assert events.status_code == 200, events.text
     assert events.json()["ok"] is True

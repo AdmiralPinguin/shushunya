@@ -112,6 +112,7 @@ Core endpoints:
 - `GET /forge/reports/{filename}`
 - `POST /forge/queue/pause`
 - `POST /forge/queue/resume`
+- `POST /forge/queue/recover-stale`
 - `GET /forge/jobs/{job_id}`
 - `GET /forge/jobs/{job_id}/manifest`
 - `GET /forge/jobs/{job_id}/spec`
@@ -231,7 +232,8 @@ Architecture:
 - `forge_service/queue.py`: single-worker VRAM/RAM-aware job queue with
   progress logs, cancellation state, runtime status and idle model unload. It
   can run embedded in the API process or as a separate worker process polling
-  SQLite.
+  SQLite. `/forge/queue/recover-stale` can mark old interrupted `running` jobs
+  as failed after a dry-run check.
 - `forge_service/storage.py`: SQLite job and gallery store at
   `runtime/forge.sqlite3`.
 - `forge_service/engines/`: backend adapters. The current vertical slice uses a

@@ -5,6 +5,7 @@ import hashlib
 import time
 
 import asyncio
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -128,6 +129,38 @@ def get_events(limit: int = 100, job_id: str | None = None) -> dict[str, object]
 @app.post("/forge/queue/resume")
 def resume_queue() -> dict[str, object]:
     return forge_queue.resume()
+
+
+@app.post("/forge/queue/recover-stale")
+def recover_stale_jobs(max_age_seconds: int = 3600, dry_run: bool = True) -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    recovered = []
+    for item in store.list_jobs(status="running", limit=500):
+        try:
+            updated_at = datetime.fromisoformat(item.updated_at)
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+        except ValueError:
+            updated_at = now
+        age_seconds = max(0.0, (now - updated_at).total_seconds())
+        if age_seconds < max(1, max_age_seconds):
+            continue
+        entry = {
+            "id": item.id,
+            "type": item.spec.type.value,
+            "engine": item.spec.engine,
+            "updated_at": item.updated_at,
+            "age_seconds": round(age_seconds, 3),
+        }
+        if not dry_run:
+            store.update_job(
+                item.id,
+                status="failed",
+                progress=item.progress,
+                error=f"recovered stale running job after {int(age_seconds)} seconds",
+            )
+        recovered.append(entry)
+    return {"ok": True, "dry_run": dry_run, "max_age_seconds": max_age_seconds, "recovered": recovered}
 
 
 @app.get("/forge/memory/status")
