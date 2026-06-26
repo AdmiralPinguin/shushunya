@@ -252,13 +252,27 @@ def run_openhands(agent: dict[str, Any], workspace: Path, log_path: Path) -> tup
     return 78, "adapter not configured"
 
 
-def analyze_shushunya_orchestration(log_path: Path) -> dict[str, Any]:
+def task_looks_like_code_repair(task: dict[str, Any]) -> bool:
+    if any("/test_" in f"/{path}" or path.startswith("tests/") for path in task.get("seed_files", {})):
+        return True
+    prompt = str(task.get("prompt") or "").lower()
+    return any(marker in prompt for marker in ("pytest", "тест", "tests/", "python-проект", "python project"))
+
+
+def analyze_shushunya_orchestration(log_path: Path, task: dict[str, Any]) -> dict[str, Any]:
     try:
         payload = json.loads(log_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"ok": False, "error": "log is not readable JSON"}
     response = payload.get("response") if isinstance(payload.get("response"), dict) else {}
     steps = response.get("steps") if isinstance(response.get("steps"), list) else []
+    if not task_looks_like_code_repair(task):
+        return {
+            "kind": "general_or_artifact",
+            "ok": None,
+            "steps": len(steps),
+            "note": "Code-repair orchestration chain is not required for this task type.",
+        }
     edit_steps: list[int] = []
     failing_diagnostic_steps: list[int] = []
     passing_verification_steps: list[int] = []
@@ -366,7 +380,7 @@ def run_one(agent_name: str, agent: dict[str, Any], model: dict[str, Any], task:
         exit_code, error = 1, repr(exc)
         log_path.write_text(error + "\n", encoding="utf-8")
     checks = [evaluate_check(workspace, item) for item in task.get("checks", [])]
-    orchestration = analyze_shushunya_orchestration(log_path) if agent["type"] == "shushunya" else None
+    orchestration = analyze_shushunya_orchestration(log_path, task) if agent["type"] == "shushunya" else None
     ok = exit_code == 0 and all(item.get("ok") for item in checks)
     return RunResult(
         agent=agent_name,
