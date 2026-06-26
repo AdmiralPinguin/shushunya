@@ -3471,14 +3471,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     consecutive_parse_failures = 0
     total_parse_failures = 0
     verified_text_paths: set[str] = set(config.initial_verified_text_paths)
-    required_artifact_path_list = list(
-        dict.fromkeys(
-            [
-                *required_artifact_paths_from_task(original_task),
-                *[path for path in config.initial_required_artifact_paths if path_needs_text_verification(path)],
-            ]
-        )
-    )[:20]
+    restored_required_artifacts = [path for path in config.initial_required_artifact_paths if path_needs_text_verification(path)]
+    parsed_required_artifacts = [] if restored_required_artifacts else required_artifact_paths_from_task(original_task)
+    required_artifact_path_list = list(dict.fromkeys([*parsed_required_artifacts, *restored_required_artifacts]))[:20]
     required_artifact_paths = set(required_artifact_path_list)
     explicit_workspace = explicit_workspace_from_task(original_task)
     last_pytest_passing_tests, last_pytest_failing_tests = latest_pytest_sets_from_text(original_task)

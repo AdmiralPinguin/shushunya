@@ -2172,6 +2172,34 @@ def main() -> int:
         raise AssertionError(f"required artifact auto-final warning was not emitted: {auto_final_events}")
     print("[ok] required artifacts auto-final after verification")
 
+    restored_required_events: list[dict] = []
+    restored_required_stdout = io.StringIO()
+    restored_required_config = AgentConfig(
+        task_id=safe_task_id("self-test-restored-required-artifacts"),
+        json_output=True,
+        max_steps=2,
+        inject_memory=False,
+        archive_internal_steps=False,
+        initial_required_artifact_paths=("/work/report.md", "/work/matrix.md"),
+        initial_verified_text_paths=("/work/report.md",),
+    )
+    with mock.patch.object(agent_runner, "chat", return_value='{"action":"verify_text_file","path":"/work/matrix.md","must_contain":["Risk"]}'), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=fake_file_info), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_verify), \
+            contextlib.redirect_stdout(restored_required_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        restored_required_code = run_agent(
+            "Continuation cycle: 1\nResume context includes input /work/events.jsonl and required_artifacts [\"/work/report.md\", \"/work/matrix.md\"].",
+            restored_required_config,
+            event_sink=restored_required_events.append,
+        )
+    restored_required_payload = json.loads(restored_required_stdout.getvalue())
+    if restored_required_code != 0 or "/work/events.jsonl" in restored_required_payload.get("message", ""):
+        raise AssertionError(f"restored required artifact auto-final failed: {restored_required_payload}")
+    if "/work/report.md" not in restored_required_payload.get("message", "") or "/work/matrix.md" not in restored_required_payload.get("message", ""):
+        raise AssertionError(f"restored required artifact auto-final omitted restored paths: {restored_required_payload}")
+    print("[ok] restored required artifacts ignore resume context noise")
+
     progress_hint_events: list[dict] = []
     progress_hint_stdout = io.StringIO()
     progress_hint_config = AgentConfig(
