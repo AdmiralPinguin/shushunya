@@ -3418,6 +3418,89 @@ def action_summary(action: dict[str, Any]) -> str:
     return action_type or "unknown"
 
 
+def display_path(path: Any) -> str:
+    text = str(path or "").strip()
+    if not text:
+        return "файл"
+    try:
+        name = Path(text).name
+    except Exception:
+        name = ""
+    return name or text
+
+
+def action_display_message(action: dict[str, Any], mode: str = "") -> str:
+    action_type = str(action.get("action", "")).strip().lower()
+    prefix = "Передаю узкую правку repair-функции: " if mode == "swe_repair" else ""
+    if action_type == "shell":
+        return prefix + "Запускаю проверку или команду в рабочем каталоге."
+    if action_type == "python":
+        return prefix + "Запускаю короткую Python-проверку."
+    if action_type == "read_file":
+        return prefix + f"Смотрю файл {display_path(action.get('path'))}."
+    if action_type == "list_files":
+        return prefix + f"Смотрю содержимое {display_path(action.get('path'))}."
+    if action_type == "find_files":
+        return prefix + "Ищу подходящие файлы в рабочем каталоге."
+    if action_type == "search_text":
+        return prefix + "Ищу нужный текст по файлам."
+    if action_type == "write_file":
+        return prefix + f"Записываю файл {display_path(action.get('path'))}."
+    if action_type == "append_file":
+        return prefix + f"Добавляю данные в {display_path(action.get('path'))}."
+    if action_type == "replace_in_file":
+        return prefix + f"Делаю точечную правку в {display_path(action.get('path'))}."
+    if action_type == "mkdir":
+        return prefix + f"Готовлю каталог {display_path(action.get('path'))}."
+    if action_type == "verify_text_file":
+        return prefix + f"Проверяю содержимое {display_path(action.get('path'))}."
+    if action_type == "bundle_text_files":
+        return prefix + "Собираю текстовые файлы в итоговый артефакт."
+    if action_type == "telegram_send_document":
+        return prefix + f"Отправляю файл {display_path(action.get('path'))} в Telegram."
+    if action_type == "web_search":
+        return prefix + "Ищу источники в интернете."
+    if action_type in {"web_fetch", "web_links", "web_extract_to_file", "web_extract_link_list", "ranobehub_chapter"}:
+        return prefix + "Забираю и разбираю страницу."
+    if action_type.startswith("archive_"):
+        return prefix + "Проверяю память проекта."
+    if action_type == "final":
+        return "Формирую итог."
+    return prefix + "Выполняю следующий шаг."
+
+
+def result_display_message(action_type: str, result: dict[str, Any]) -> str:
+    if not isinstance(result, dict):
+        return "Инструмент вернул неожиданный ответ, разбираю дальше."
+    if result.get("ok") is False:
+        error = str(result.get("error") or "").strip()
+        if "rejected by supervisor" in error:
+            return "Остановил бесполезный шаг и выбираю более продуктивное действие."
+        if result.get("pytest_unavailable") or pytest_unavailable_output(f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}"):
+            return "Pytest недоступен, переключаюсь на встроенную fallback-проверку."
+        if error:
+            return f"Шаг не прошел: {truncate(error, 120)}"
+        return "Шаг не прошел, использую вывод как диагностическую подсказку."
+    if result.get("passing_tests") and not result.get("failing_tests"):
+        return "Проверка прошла: известных падающих тестов больше нет."
+    if result.get("failing_tests"):
+        return "Воспроизвел падение тестов и сузил место для правки."
+    if action_type == "read_file":
+        return f"Прочитал {display_path(result.get('path'))}, выбираю следующий шаг."
+    if action_type in {"write_file", "append_file", "replace_in_file"}:
+        return f"Файл {display_path(result.get('path'))} обновлен."
+    if action_type == "verify_text_file":
+        return f"Проверка файла {display_path(result.get('path'))} прошла."
+    if action_type in {"shell", "python"}:
+        return "Команда выполнилась, анализирую результат."
+    if action_type == "web_search":
+        count = len(result.get("results", [])) if isinstance(result.get("results"), list) else 0
+        return f"Нашел {count} результатов, отбираю полезные."
+    if action_type in {"web_fetch", "web_links", "web_extract_to_file", "web_extract_link_list", "ranobehub_chapter"}:
+        return "Страница обработана, продолжаю по найденным данным."
+    return "Шаг выполнен, перехожу к следующему."
+
+
 def result_summary(action_type: str, result: dict[str, Any]) -> str:
     if not isinstance(result, dict):
         return "tool returned non-object result"
@@ -3981,6 +4064,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "step": step,
                 "action": action_type,
                 "summary": action_summary(action),
+                "message": action_display_message(action, "swe_repair" if repair_source_path else ""),
+                "display_message": action_display_message(action, "swe_repair" if repair_source_path else ""),
                 "reason": str(action.get("reason", "")).strip(),
             },
         )
@@ -4689,6 +4774,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "action": action_type,
                 "ok": bool(result.get("ok", False)) if isinstance(result, dict) else False,
                 "message": result_summary(action_type, result if isinstance(result, dict) else {"error": str(result)}),
+                "display_message": result_display_message(action_type, result if isinstance(result, dict) else {"error": str(result)}),
                 "duration_sec": action_duration_sec,
                 **event_extra,
             },

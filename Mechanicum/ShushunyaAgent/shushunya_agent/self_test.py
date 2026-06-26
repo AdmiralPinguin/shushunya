@@ -1937,6 +1937,39 @@ def main() -> int:
         raise AssertionError(f"supervisor rejection summary hid the error: {rejected_summary}")
     print("[ok] supervisor rejection result summary")
 
+    step_message_events: list[dict] = []
+    step_message_stdout = io.StringIO()
+    step_message_config = AgentConfig(
+        task_id=safe_task_id("self-test-step-display-messages"),
+        json_output=True,
+        max_steps=2,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"read_file","path":"/work/input.txt","max_bytes":1000}',
+            '{"action":"final","message":"ok"}',
+    ]), mock.patch.object(agent_runner, "file_tool", return_value={
+            "ok": True,
+            "path": "/work/input.txt",
+            "content": "hello",
+            "size": 5,
+            "bytes_read": 5,
+            "offset": 0,
+    }), contextlib.redirect_stdout(step_message_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        step_message_code = run_agent("read then final", step_message_config, event_sink=step_message_events.append)
+    action_event = next((event for event in step_message_events if event.get("type") == "action"), {})
+    tool_event = next((event for event in step_message_events if event.get("type") == "tool_result"), {})
+    if (
+        step_message_code != 0
+        or "Смотрю файл input.txt" not in str(action_event.get("message") or "")
+        or "Прочитал input.txt" not in str(tool_event.get("display_message") or "")
+        or "read 5/5 byte(s)" not in str(tool_event.get("message") or "")
+    ):
+        raise AssertionError(f"step display messages missing: code={step_message_code}, events={step_message_events}")
+    print("[ok] step events include display messages")
+
     final_events: list[dict] = []
     final_stdout = io.StringIO()
     final_config = AgentConfig(
