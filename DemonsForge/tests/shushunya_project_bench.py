@@ -95,8 +95,16 @@ def write_summary(report: dict[str, Any], path: Path) -> str:
             warnings.append("flat_or_blank_image")
         metadata = step.get("metadata") or {}
         step_count = int(metadata.get("steps") or step.get("steps") or 0)
-        if step.get("engine") == "sdxl" and step_count < 8:
+        if step.get("engine") == "sdxl" and step_count < 12:
             warnings.append("sdxl_understepped_noise_risk")
+        if (
+            step.get("engine") == "sdxl"
+            and isinstance(stddev, list)
+            and stddev
+            and sum(float(value) for value in stddev) / len(stddev) > 65.0
+            and int(metadata.get("image_size_bytes") or 0) > 400_000
+        ):
+            warnings.append("sdxl_high_variance_pattern_risk")
         lines.append(
             f"| `{step.get('step_id')}` | `{step.get('engine')}` | `{step.get('status')}` | "
             f"`{step.get('job_id') or ''}` | `{step.get('artifact_id') or ''}` | {', '.join(warnings)} |"
