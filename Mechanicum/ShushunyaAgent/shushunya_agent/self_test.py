@@ -1407,7 +1407,11 @@ def main() -> int:
         step for step in verified_mutation_payload.get("steps", [])
         if (step.get("result") or {}).get("error") == "verified text artifact mutation rejected by supervisor"
     ]
-    if not verified_mutation_rejections:
+    if (
+        verified_mutation_code != 2
+        or verified_mutation_payload.get("continuable") is not True
+        or not verified_mutation_rejections
+    ):
         raise AssertionError(f"verified mutation guard failed: code={verified_mutation_code}, payload={verified_mutation_payload}")
     print("[ok] verified artifact mutation guard")
 
@@ -1572,7 +1576,11 @@ def main() -> int:
         step for step in repeated_verify_rewrite_payload.get("steps", [])
         if (step.get("result") or {}).get("error") == "verified text artifact mutation rejected by supervisor"
     ]
-    if repeated_verify_rewrite_code != 0 or not repeated_verify_rewrite_rejections:
+    if (
+        repeated_verify_rewrite_code != 2
+        or repeated_verify_rewrite_payload.get("continuable") is not True
+        or not repeated_verify_rewrite_rejections
+    ):
         raise AssertionError(
             "rejected repeated verification unlocked rewrite: "
             f"code={repeated_verify_rewrite_code}, payload={repeated_verify_rewrite_payload}"
