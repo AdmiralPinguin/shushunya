@@ -532,6 +532,29 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
             payload["omitted_matches"] = len(matches) - 80
     elif action_type == "verify_text_file":
         failures = payload.get("failures") if isinstance(payload.get("failures"), list) else []
+        if any(isinstance(failure, dict) and failure.get("check") == "structured_content_checks" for failure in failures):
+            path = str(payload.get("path") or "")
+            payload["supervisor_instruction"] = (
+                "This structured artifact was only checked for existence/min size. That is not enough. "
+                "Use verify_text_file with task-derived key=value or exact row markers, or run a python action "
+                "with json/csv assertions for the required fields, values, ordering, and row counts."
+            )
+            if path:
+                payload["suggested_python_structured_check_action"] = {
+                    "action": "python",
+                    "code": (
+                        "import csv, json\n"
+                        f"path = {path!r}\n"
+                        "if path.endswith('.json'):\n"
+                        "    data = json.load(open(path, encoding='utf-8'))\n"
+                        "    print(data)\n"
+                        "else:\n"
+                        "    rows = list(csv.DictReader(open(path, encoding='utf-8')))\n"
+                        "    print(rows)\n"
+                        "# Add assertions from the user task here.\n"
+                    ),
+                    "timeout": 60,
+                }
         missing_literals = [
             str(failure.get("pattern"))
             for failure in failures
@@ -1189,6 +1212,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe edit before diagnostic rejected by supervisor",
     "swe edit before test diagnostic rejected by supervisor",
     "swe test diagnostic inspection stall rejected by supervisor",
+    "swe syntax edit loop rejected by supervisor",
     "swe repeated failing-test file read rejected by supervisor",
     "swe repeated failing test diagnostic rejected by supervisor",
     "swe focused verification after failing tests rejected by supervisor",
@@ -1406,23 +1430,37 @@ def action_reads_data_source(action: dict[str, Any], data_paths: list[str]) -> s
 def resume_context_inspected_data_sources(task: str, data_paths: list[str]) -> list[str]:
     if "Resume context from previous agent task journal" not in (task or ""):
         return []
-    inspected: list[str] = []
-    for path in data_paths:
-        start = 0
-        while True:
-            index = task.find(path, start)
-            if index < 0:
-                break
-            window = task[max(0, index - 2000): index + 3000]
-            if (
-                re.search(r'"action"\s*:\s*"read_file"', window)
-                and re.search(r'"ok"\s*:\s*true', window)
-                and re.search(r'"content"\s*:', window)
-            ):
-                inspected.append(path)
-                break
-            start = index + len(path)
-    return inspected
+    marker = "Resume context from previous agent task journal"
+    marker_index = task.find(marker)
+    if marker_index < 0:
+        return []
+    json_start = task.find("[", marker_index)
+    if json_start < 0:
+        return []
+    try:
+        events, _end = json.JSONDecoder().raw_decode(task[json_start:])
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(events, list):
+        return []
+    data_path_set = set(data_paths)
+    inspected: set[str] = set()
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("type") or "")
+        if event_type == "data_source_inspected":
+            path = posixpath.normpath(str(event.get("path") or ""))
+            if path in data_path_set:
+                inspected.add(path)
+            continue
+        if event_type != "tool_result" or str(event.get("action") or "") != "read_file":
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        path = posixpath.normpath(str(result.get("path") or ""))
+        if path in data_path_set and result.get("ok") is True and isinstance(result.get("content"), str):
+            inspected.add(path)
+    return [path for path in data_paths if path in inspected]
 
 
 def action_writes_required_artifact(action: dict[str, Any], required_paths: set[str]) -> bool:
@@ -2197,6 +2235,14 @@ if suffix == ".json":
         json_data = json.loads(text)
     except json.JSONDecodeError as exc:
         failures.append({"check": "json_valid", "error": str(exc), "line": exc.lineno, "column": exc.colno})
+if suffix in structured_suffixes and not original_required and not original_ordered and not original_forbidden:
+    failures.append({
+        "check": "structured_content_checks",
+        "instruction": (
+            "Structured artifacts need semantic checks, not only existence/min size. "
+            "Use must_contain key=value markers derived from the task, or run a python action with json/csv assertions."
+        ),
+    })
 if size < min_bytes:
     if suffix in structured_suffixes:
         structured_min_size_ignored = True
@@ -3978,6 +4024,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     last_successful_swe_edit_path = ""
     last_swe_test_action: dict[str, Any] | None = None
     swe_verified_after_edit = False
+    swe_syntax_error_cycles = 0
+    last_swe_syntax_error = ""
     last_required_artifact_hint = ""
     trace: list[dict[str, Any]] = []
     write_task_journal(
@@ -4723,6 +4771,25 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             elif (
                 swe_task
                 and action_type in SWE_EDIT_ACTIONS
+                and action_type == "replace_in_file"
+                and swe_syntax_error_cycles >= 3
+                and last_successful_swe_edit_path
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe syntax edit loop rejected by supervisor",
+                    "path": last_successful_swe_edit_path,
+                    "syntax_error_cycles": swe_syntax_error_cycles,
+                    "last_syntax_error": truncate(last_swe_syntax_error, 1200),
+                    "instruction": (
+                        "Repeated narrow replace_in_file edits are only moving or preserving a SyntaxError. "
+                        "Do not emit another replace_in_file. Read the current source if needed, then use write_file "
+                        "to replace the full damaged source file with syntactically valid code, and rerun the full test/fallback."
+                    ),
+                }
+            elif (
+                swe_task
+                and action_type in SWE_EDIT_ACTIONS
                 and pending_failing_tests
                 and path_looks_like_test_file(str(action.get("path") or ""))
                 and not task_allows_test_file_edits(original_task)
@@ -5159,6 +5226,18 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             swe_test_diagnostic_seen = True
             if isinstance(result, dict) and (result.get("passing_tests") or result.get("failing_tests")):
                 last_swe_test_action = copy.deepcopy(action)
+            if isinstance(result, dict):
+                combined_test_output = (
+                    f"{result.get('stdout') or ''}\n"
+                    f"{result.get('stderr') or ''}\n"
+                    f"{json.dumps(result.get('failures') or [], ensure_ascii=False)}"
+                )
+                if result.get("ok") is False and "syntaxerror" in combined_test_output.lower() and last_successful_swe_edit_path:
+                    swe_syntax_error_cycles += 1
+                    last_swe_syntax_error = combined_test_output[-4000:]
+                elif result.get("ok") is True or "syntaxerror" not in combined_test_output.lower():
+                    swe_syntax_error_cycles = 0
+                    last_swe_syntax_error = ""
         elif (
             swe_task
             and swe_requires_test_diagnostic

@@ -2403,6 +2403,14 @@ def main() -> int:
     )
     if restored_sources != ["/work/events.jsonl"]:
         raise AssertionError(f"resume context did not restore inspected data sources: {restored_sources}")
+    falsely_restored_sources = agent_runner.resume_context_inspected_data_sources(
+        'Resume context from previous agent task journal x:\n'
+        '[{"type":"tool_result","action":"read_file","result":{"ok":true,"path":"/work/customers.csv","content":"row"}},'
+        '{"type":"tool_result","action":"read_file","result":{"ok":false,"path":"/work/tickets.jsonl","missing_data_sources":["/work/tickets.jsonl"]}}]',
+        ["/work/customers.csv", "/work/tickets.jsonl"],
+    )
+    if falsely_restored_sources != ["/work/customers.csv"]:
+        raise AssertionError(f"resume context falsely restored missing data source: {falsely_restored_sources}")
     print("[ok] data source read detector requires same-line IO")
 
     restored_required_events: list[dict] = []
@@ -4246,6 +4254,21 @@ def main() -> int:
     assert_ok("verify_text_file json whitespace-insensitive literals", json_literal_verify)
     if json_literal_verify.get("checks", {}).get("json_whitespace_insensitive_matches") != 3:
         raise AssertionError(f"JSON whitespace-insensitive literal matches missing: {json_literal_verify}")
+    json_weak_verify = agent_runner.verify_text_file_tool(
+        config,
+        {
+            "action": "verify_text_file",
+            "path": "/work/self-test/audit.json",
+            "min_bytes": 1,
+        },
+    )
+    if json_weak_verify.get("ok") is not False or not any(
+        failure.get("check") == "structured_content_checks"
+        for failure in json_weak_verify.get("failures", [])
+        if isinstance(failure, dict)
+    ):
+        raise AssertionError(f"structured JSON without content checks should fail: {json_weak_verify}")
+    print("[ok] verify_text_file rejects weak structured checks")
     assert_ok(
         "write_file json metrics fixture",
         file_tool(

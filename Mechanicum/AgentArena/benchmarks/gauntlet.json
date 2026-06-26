@@ -1,0 +1,56 @@
+{
+  "suite": "gauntlet",
+  "tasks": [
+    {
+      "id": "customer_risk_correlation",
+      "title": "Correlate customers, invoices, and tickets into risk artifacts",
+      "seed_files": {
+        "customers.csv": "customer_id,tier,region\nC1,gold,north\nC2,silver,south\nC3,gold,south\nC4,bronze,east\n",
+        "invoices.csv": "invoice_id,customer_id,status,amount\nI1,C1,paid,120.00\nI2,C1,overdue,80.00\nI3,C2,paid,55.00\nI4,C3,disputed,200.00\nI5,C5,paid,999.00\n",
+        "tickets.jsonl": "{\"ticket_id\":\"T1\",\"customer_id\":\"C1\",\"severity\":2,\"state\":\"open\"}\n{\"ticket_id\":\"T2\",\"customer_id\":\"C1\",\"severity\":1,\"state\":\"closed\"}\n{\"ticket_id\":\"T3\",\"customer_id\":\"C2\",\"severity\":3,\"state\":\"open\"}\n{\"ticket_id\":\"T4\",\"customer_id\":\"C3\",\"severity\":1,\"state\":\"open\"}\n{\"ticket_id\":\"T5\",\"customer_id\":\"C4\",\"severity\":2,\"state\":\"open\"}\n"
+      },
+      "prompt": "В текущем каталоге есть customers.csv, invoices.csv, tickets.jsonl. Создай три артефакта: report.md, customer_scores.json, alerts.csv. Обязательно сначала прочитай все три входных файла, не делай выводы из имен файлов. Для известных customers посчитай risk_score: overdue invoice amount * 2 + disputed invoice amount * 3 + open ticket severity 1 * 50 + open ticket severity 2 * 20 + open ticket severity 3 * 5. Paid invoices дают paid_revenue, но не добавляют риск. Closed tickets не добавляют риск. Неизвестные customer_id из invoices/tickets не попадают в customer_scores, но должны попасть в report.md в Data Quality. customer_scores.json должен быть валидным JSON object с полем customers: массив объектов, отсортированный по risk_score desc, для каждого customer_id, tier, region, paid_revenue, risk_score, open_tickets. Ожидаемые risk_score: C3=650.0, C1=180.0, C4=20.0, C2=5.0. alerts.csv должен иметь заголовок customer_id,risk_score,reason и строки только для risk_score >= 100: C3 high_risk и C1 high_risk в этом порядке. report.md должен содержать разделы Summary, Method, Data Quality, Result и строку STATUS: PASS. Перед final проверь report.md и JSON/CSV.",
+      "checks": [
+        {"type": "file_contains", "path": "report.md", "text": "STATUS: PASS"},
+        {"type": "file_contains", "path": "report.md", "text": "Data Quality"},
+        {"type": "file_contains", "path": "report.md", "text": "C5"},
+        {"type": "file_exists", "path": "customer_scores.json"},
+        {"type": "file_exists", "path": "alerts.csv"},
+        {"type": "command", "command": "__PYTHON__ -c \"import csv,json; data=json.load(open('customer_scores.json', encoding='utf-8')); rows=data['customers']; assert [r['customer_id'] for r in rows]==['C3','C1','C4','C2']; assert [r['risk_score'] for r in rows]==[650.0,180.0,20.0,5.0]; assert {r['customer_id']:r['paid_revenue'] for r in rows}=={'C1':120.0,'C2':55.0,'C3':0.0,'C4':0.0}; alerts=list(csv.DictReader(open('alerts.csv', encoding='utf-8'))); assert [(r['customer_id'], float(r['risk_score']), r['reason']) for r in alerts]==[('C3',650.0,'high_risk'),('C1',180.0,'high_risk')]\"", "timeout_sec": 60}
+      ]
+    },
+    {
+      "id": "scheduler_overlap_repair",
+      "title": "Repair scheduler parsing, sorting, and overlap logic",
+      "seed_files": {
+        "scheduler/__init__.py": "from .core import parse_jobs, build_schedule, summarize_schedule\n",
+        "scheduler/core.py": "from datetime import datetime\n\n\ndef parse_jobs(rows):\n    jobs = []\n    for row in rows:\n        jobs.append({\n            'id': row['id'],\n            'owner': row['owner'],\n            'start': row['start'],\n            'duration_min': row['duration_min'],\n            'priority': row.get('priority', 'normal'),\n        })\n    return jobs\n\n\ndef build_schedule(jobs):\n    scheduled = []\n    rejected = []\n    for job in sorted(jobs, key=lambda item: item['start']):\n        conflict = False\n        for existing in scheduled:\n            if job['start'] == existing['start']:\n                conflict = True\n        if conflict:\n            rejected.append({'id': job['id'], 'reason': 'overlap'})\n        else:\n            scheduled.append(job)\n    return {'scheduled': scheduled, 'rejected': rejected}\n\n\ndef summarize_schedule(plan):\n    return {'scheduled_count': len(plan['scheduled']), 'rejected_count': len(plan['rejected'])}\n",
+        "scheduler/cli.py": "import csv\nimport json\nimport sys\nfrom .core import parse_jobs, build_schedule, summarize_schedule\n\n\ndef main(argv=None):\n    argv = list(argv or sys.argv[1:])\n    with open(argv[0], newline='', encoding='utf-8') as fh:\n        rows = list(csv.DictReader(fh))\n    plan = build_schedule(parse_jobs(rows))\n    print(json.dumps({'summary': summarize_schedule(plan), 'plan': plan}, sort_keys=True))\n\n\nif __name__ == '__main__':\n    main()\n",
+        "jobs.csv": "id,owner,start,duration_min,priority\nJ1,alice,2026-01-01T09:00:00,60,normal\nJ2,bob,2026-01-01T09:30:00,45,high\nJ3,carol,2026-01-01T10:00:00,30,normal\nJ4,dana,2026-01-01T11:00:00,30,high\nJ5,erin,2026-01-01T08:00:00,30,normal\n",
+        "tests/test_scheduler.py": "from scheduler.core import parse_jobs, build_schedule, summarize_schedule\n\nROWS = [\n    {'id':'J1','owner':'alice','start':'2026-01-01T09:00:00','duration_min':'60','priority':'normal'},\n    {'id':'J2','owner':'bob','start':'2026-01-01T09:30:00','duration_min':'45','priority':'high'},\n    {'id':'J3','owner':'carol','start':'2026-01-01T10:00:00','duration_min':'30','priority':'normal'},\n    {'id':'J4','owner':'dana','start':'2026-01-01T11:00:00','duration_min':'30','priority':'high'},\n    {'id':'J5','owner':'erin','start':'2026-01-01T08:00:00','duration_min':'30','priority':'normal'},\n]\n\n\ndef test_parse_jobs_uses_datetime_and_int_duration():\n    jobs = parse_jobs(ROWS)\n    assert jobs[0]['duration_min'] == 60\n    assert jobs[0]['start'].isoformat() == '2026-01-01T09:00:00'\n\n\ndef test_build_schedule_rejects_real_interval_overlaps():\n    plan = build_schedule(parse_jobs(ROWS))\n    assert [job['id'] for job in plan['scheduled']] == ['J5', 'J1', 'J3', 'J4']\n    assert plan['rejected'] == [{'id': 'J2', 'reason': 'overlap_with_J1'}]\n\n\ndef test_summary_counts():\n    plan = build_schedule(parse_jobs(ROWS))\n    assert summarize_schedule(plan) == {'scheduled_count': 4, 'rejected_count': 1, 'owners': ['erin', 'alice', 'carol', 'dana']}\n"
+      },
+      "prompt": "В текущем каталоге есть Python-проект scheduler. Почини минимально scheduler/core.py: parse_jobs должен превращать start в datetime и duration_min в int; build_schedule должен сортировать по start и отклонять реальные interval overlaps, где job.start < existing.end and existing.start < job.end. В rejected reason должен быть overlap_with_<existing id>. summarize_schedule должен вернуть scheduled_count, rejected_count и owners в порядке scheduled. CLI должен печатать валидный JSON; datetime в plan надо сделать JSON-сериализуемым, не ломая тесты core.py. Проверь python3 -m pytest -q или fallback через python3 -c и CLI. Завершай только после успешной проверки.",
+      "checks": [
+        {"type": "command", "command": "__PYTHON__ -c \"from scheduler.core import parse_jobs, build_schedule, summarize_schedule; import csv; rows=list(csv.DictReader(open('jobs.csv', encoding='utf-8'))); plan=build_schedule(parse_jobs(rows)); assert [j['id'] for j in plan['scheduled']]==['J5','J1','J3','J4']; assert plan['rejected']==[{'id':'J2','reason':'overlap_with_J1'}]; assert summarize_schedule(plan)=={'scheduled_count':4,'rejected_count':1,'owners':['erin','alice','carol','dana']}\"", "timeout_sec": 60},
+        {"type": "command", "command": "__PYTHON__ -m scheduler.cli jobs.csv | __PYTHON__ -c \"import json,sys; data=json.load(sys.stdin); assert data['summary']['scheduled_count']==4; assert data['summary']['owners']==['erin','alice','carol','dana']; assert data['plan']['rejected'][0]['reason']=='overlap_with_J1'\"", "timeout_sec": 60}
+      ]
+    },
+    {
+      "id": "deployment_routing_artifacts",
+      "title": "Build deployment routing artifacts from services and routes",
+      "seed_files": {
+        "services.json": "{\n  \"services\": [\n    {\"name\": \"api\", \"version\": \"2.4.1\", \"region\": \"us\", \"health\": \"green\", \"replicas\": 3},\n    {\"name\": \"worker\", \"version\": \"2.4.1\", \"region\": \"us\", \"health\": \"yellow\", \"replicas\": 2},\n    {\"name\": \"billing\", \"version\": \"2.3.9\", \"region\": \"eu\", \"health\": \"green\", \"replicas\": 2},\n    {\"name\": \"legacy\", \"version\": \"1.8.0\", \"region\": \"eu\", \"health\": \"red\", \"replicas\": 1}\n  ]\n}\n",
+        "routes.csv": "route,service,weight\n/api,api,80\n/api,worker,20\n/pay,billing,100\n/old,legacy,100\n/missing,ghost,100\n",
+        "policy.txt": "Only green or yellow services may receive traffic. Red services must be disabled. Routes referencing unknown services must be reported. Minimum total enabled replicas for PASS is 7.\n"
+      },
+      "prompt": "В текущем каталоге есть services.json, routes.csv, policy.txt. Создай deployment_plan.md, routing.json, warnings.csv. Обязательно прочитай все входные файлы. В routing.json должен быть валидный JSON object с enabled_routes только для routes к green/yellow известным сервисам: /api -> api 80, worker 20; /pay -> billing 100. disabled_routes должны включать /old с reason red_service и /missing с reason unknown_service. summary должен содержать enabled_route_count=2, disabled_route_count=2, total_enabled_replicas=7, status=\"pass\". warnings.csv должен иметь header route,service,reason и две строки /old legacy red_service и /missing ghost unknown_service. deployment_plan.md должен содержать разделы Summary, Enabled Routes, Disabled Routes, Policy Check, Result и строку STATUS: PASS. Перед final проверь все три файла.",
+      "checks": [
+        {"type": "file_contains", "path": "deployment_plan.md", "text": "STATUS: PASS"},
+        {"type": "file_contains", "path": "deployment_plan.md", "text": "Policy Check"},
+        {"type": "file_exists", "path": "routing.json"},
+        {"type": "file_exists", "path": "warnings.csv"},
+        {"type": "command", "command": "__PYTHON__ -c \"import csv,json; data=json.load(open('routing.json', encoding='utf-8')); assert data['summary']=={'enabled_route_count':2,'disabled_route_count':2,'total_enabled_replicas':7,'status':'pass'}; assert [r['route'] for r in data['enabled_routes']]==['/api','/pay']; assert data['enabled_routes'][0]['targets']==[{'service':'api','weight':80},{'service':'worker','weight':20}]; assert data['disabled_routes']==[{'route':'/old','service':'legacy','reason':'red_service'},{'route':'/missing','service':'ghost','reason':'unknown_service'}]; rows=list(csv.DictReader(open('warnings.csv', encoding='utf-8'))); assert rows==[{'route':'/old','service':'legacy','reason':'red_service'},{'route':'/missing','service':'ghost','reason':'unknown_service'}]\"", "timeout_sec": 60}
+      ]
+    }
+  ]
+}
