@@ -189,6 +189,7 @@ class DemonsForgeClient:
         panels: int = 4,
         width: int | None = None,
         height: int | None = None,
+        engine_strategy: str = "auto",
         use_memory: bool = True,
         use_thinker: bool = True,
     ) -> dict[str, Any]:
@@ -203,6 +204,7 @@ class DemonsForgeClient:
                 "panels": panels,
                 "width": width,
                 "height": height,
+                "engine_strategy": engine_strategy,
                 "use_memory": use_memory,
                 "use_thinker": use_thinker,
             },

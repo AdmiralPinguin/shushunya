@@ -53,6 +53,7 @@ def _make_spec(
     request: ProjectPlanRequest,
     role: str,
     seed_offset: int,
+    preferred_engine: str | None = None,
 ) -> JobSpec:
     width, height = _dims(request)
     plan_text = prompt
@@ -61,6 +62,7 @@ def _make_spec(
     baseline = plan_txt2img(
         PlanRequest(
             request=plan_text,
+            preferred_engine=preferred_engine,
             use_memory=request.use_memory,
             use_thinker=request.use_thinker,
         )
@@ -86,15 +88,17 @@ def _concept_steps(request: ProjectPlanRequest, character: dict[str, Any] | None
         "expression study, pitiful frightened left eye and predatory right eye",
     ]
     steps = []
+    mixed_engines = ["flux", "sdxl"] if character and request.engine_strategy in {"auto", "mixed_concept"} and variants > 1 else []
     for index in range(variants):
         prompt = f"{base}, first concept, {angles[index]}"
+        preferred_engine = mixed_engines[index % len(mixed_engines)] if mixed_engines else None
         steps.append(
             ProjectStep(
                 id=f"concept_{index + 1}",
                 phase="concept",
                 title=f"Concept {index + 1}",
                 role="first_concept",
-                spec=_make_spec(prompt, request, "first_concept", index),
+                spec=_make_spec(prompt, request, "first_concept", index, preferred_engine=preferred_engine),
             )
         )
     return steps

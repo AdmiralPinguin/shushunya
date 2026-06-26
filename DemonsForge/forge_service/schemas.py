@@ -156,6 +156,7 @@ class ProjectPlanRequest(BaseModel):
     panels: int = Field(default=4, ge=1, le=8)
     width: int | None = None
     height: int | None = None
+    engine_strategy: Literal["auto", "planner", "mixed_concept"] = "auto"
     use_memory: bool = True
     use_thinker: bool = True
 

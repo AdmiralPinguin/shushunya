@@ -131,6 +131,7 @@ def _main() -> int:
     parser.add_argument("--panels", type=int, default=4)
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--height", type=int, default=512)
+    parser.add_argument("--engine-strategy", choices=["auto", "planner", "mixed_concept"], default="auto")
     parser.add_argument("--request", default="Сделай максимально устрашающий комикс про Шушуню в демонической кузне")
     parser.add_argument("--report-json", default="")
     args = parser.parse_args()
@@ -145,6 +146,7 @@ def _main() -> int:
         "panels": args.panels,
         "width": args.width,
         "height": args.height,
+        "engine_strategy": args.engine_strategy,
         "use_memory": False,
         "use_thinker": False,
     }

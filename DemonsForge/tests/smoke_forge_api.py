@@ -279,6 +279,7 @@ def main() -> None:
     dry_project = shushunya_project_dry_run.json()
     assert len(dry_project["project"]["steps"]) == 2
     assert all(item["valid"] for item in dry_project["validations"])
+    assert {step["spec"]["engine"] for step in dry_project["project"]["steps"]} == {"flux", "sdxl"}
     baseline = JobSpec(
         type="txt2img",
         engine="sdxl",

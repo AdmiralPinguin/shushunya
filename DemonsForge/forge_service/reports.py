@@ -66,6 +66,8 @@ def _report_kind(path: Path, payload: dict[str, Any]) -> str:
         return "self_test"
     if "forge-long" in run_id:
         return "long"
+    if "shushunya-project" in run_id:
+        return "shushunya_project"
     return "unknown"
 
 
