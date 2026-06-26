@@ -20,6 +20,10 @@ from archivist_agent.quality_report import generate_quality_report
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
 
 
+class ArchiveThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+
 ROOT = Path(__file__).resolve().parent
 HOST = os.environ.get("ARCHIVE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("ARCHIVE_PORT", "8090"))
@@ -83,7 +87,30 @@ ARCHIVE_SYSTEM_PROMPT = os.environ.get(
     "Не используй это выражение при прямом обращении к пользователю и не заменяй им имена.",
 )
 ARCHIVE_LOCK = threading.Lock()
-CHAT_QUEUE_LOCK = threading.Lock()
+CHAT_QUEUE_WAIT_TIMEOUT_SEC = float(os.environ.get("ARCHIVE_CHAT_QUEUE_WAIT_TIMEOUT_SEC", "30"))
+
+
+class ChatQueueBusy(Exception):
+    pass
+
+
+class TimedChatQueueLock:
+    def __init__(self, timeout_sec):
+        self._lock = threading.Lock()
+        self.timeout_sec = max(0.0, float(timeout_sec))
+
+    def __enter__(self):
+        acquired = self._lock.acquire(timeout=self.timeout_sec)
+        if not acquired:
+            raise ChatQueueBusy(f"chat queue is busy after {self.timeout_sec:g}s")
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._lock.release()
+        return False
+
+
+CHAT_QUEUE_LOCK = TimedChatQueueLock(CHAT_QUEUE_WAIT_TIMEOUT_SEC)
 MAINTENANCE_LOCK = threading.Lock()
 MOBILE_JOB_LOCK = threading.Lock()
 LIBRARIAN = None
@@ -2033,7 +2060,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if self.path == "/archive/chat/completions":
             if not require_auth(self, allow_mobile=True):
                 return
-            self.mobile_chat_completion()
+            try:
+                self.mobile_chat_completion()
+            except ChatQueueBusy as exc:
+                write_json(self, 503, {"error": str(exc), "type": "chat_queue_busy"})
             return
 
         if self.path == "/archive/mobile/chat/start":
@@ -2087,7 +2117,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/chat/completions":
             if not require_auth(self):
                 return
-            self.chat_completion()
+            try:
+                self.chat_completion()
+            except ChatQueueBusy as exc:
+                write_json(self, 503, {"error": str(exc), "type": "chat_queue_busy"})
             return
 
         if not require_auth(self):
@@ -2847,7 +2880,7 @@ def main():
     FOCUS_BOOKSHELF = default_components["bookshelf"]
     LIBRARIAN = default_components["librarian"]
     MAGOS = default_components["magos"]
-    server = ThreadingHTTPServer((HOST, PORT), ArchiveHandler)
+    server = ArchiveThreadingHTTPServer((HOST, PORT), ArchiveHandler)
     print(f"ArchiveOfHeresy main started: http://{HOST}:{PORT}", flush=True)
     print(f"Upstream LLM: {LLM_BASE_URL}", flush=True)
     print(f"JSONL archive: {JSONL_ROOT}", flush=True)
