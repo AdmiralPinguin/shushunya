@@ -3809,6 +3809,63 @@ def main() -> int:
         raise AssertionError(f"SWE focused verification after failing tests was not rejected: {swe_final_requires_full_verify_payload}")
     print("[ok] SWE final requires full verification after edit")
 
+    swe_cli_requires_verify_stdout = io.StringIO()
+    swe_cli_requires_verify_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-cli-requires-verify"),
+        json_output=True,
+        max_steps=7,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    swe_cli_requires_verify_events: list[dict] = []
+    swe_cli_python_results = [
+        {
+            "ok": False,
+            "returncode": 1,
+            "stdout": '{"results":[{"ok":false,"file":"tests/test_core.py","test":"test_core"}]}',
+            "stderr": "",
+            "passing_tests": [],
+            "failing_tests": ["tests/test_core.py::test_core"],
+        },
+        {
+            "ok": True,
+            "returncode": 0,
+            "stdout": '{"results":[{"ok":true,"file":"tests/test_core.py","test":"test_core"}]}',
+            "stderr": "",
+            "passing_tests": ["tests/test_core.py::test_core"],
+            "failing_tests": [],
+        },
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"python","cwd":"/work/project","code":"assert core_ok()","timeout":60}',
+            '{"action":"replace_in_file","path":"/work/project/core.py","old":"return 1","new":"return 2"}',
+            '{"action":"python","cwd":"/work/project","code":"assert core_ok()","timeout":60}',
+            '{"action":"final","message":"premature"}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m package.cli data.csv | python3 -c \\"import sys,json; json.load(sys.stdin)\\"","timeout":60}',
+            '{"action":"final","message":"should not be needed"}',
+    ]), mock.patch.object(agent_runner, "python_tool", side_effect=swe_cli_python_results), \
+            mock.patch.object(agent_runner, "run_shell", return_value={"ok": True, "returncode": 0, "stdout": "", "stderr": ""}), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/core.py"}), \
+            contextlib.redirect_stdout(swe_cli_requires_verify_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        swe_cli_requires_verify_code = run_agent(
+            "Исправь Python-проект. CLI должен печатать валидный JSON; проверь python3 -m package.cli data.csv.",
+            swe_cli_requires_verify_config,
+            event_sink=swe_cli_requires_verify_events.append,
+        )
+    swe_cli_requires_verify_payload = json.loads(swe_cli_requires_verify_stdout.getvalue())
+    if swe_cli_requires_verify_code != 0 or swe_cli_requires_verify_payload.get("message") != "Готово: code edit verified by tests/fallback.":
+        raise AssertionError(
+            "SWE CLI task should require post-edit CLI verification before final: "
+            f"code={swe_cli_requires_verify_code}, payload={swe_cli_requires_verify_payload}"
+        )
+    if not any(event.get("code") == "final_swe_cli_verification_required" for event in swe_cli_requires_verify_events):
+        raise AssertionError(f"SWE CLI final rejection warning missing: {swe_cli_requires_verify_payload}")
+    if len(swe_cli_requires_verify_payload.get("steps", [])) != 4:
+        raise AssertionError(f"SWE CLI verification should run after rejected final: {swe_cli_requires_verify_payload}")
+    print("[ok] SWE final requires CLI verification after edit")
+
     failing_stall_stdout = io.StringIO()
     failing_stall_config = AgentConfig(
         task_id=safe_task_id("self-test-failing-test-stall"),

@@ -1510,6 +1510,50 @@ def task_requires_test_diagnostic(task: str) -> bool:
     return any(marker in lowered for marker in ("pytest", "тест", "test", "/tests", "tests/"))
 
 
+def task_requires_cli_verification(task: str) -> bool:
+    lowered = (task or "").lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "cli",
+            "command-line",
+            "command line",
+            "entrypoint",
+            "entry point",
+            "python -m",
+            "python3 -m",
+            "run_check",
+            "stdout",
+            "stderr",
+            "валидный json",
+            "печата",
+            "командн",
+        )
+    )
+
+
+def action_is_cli_verification(action_type: str, action: dict[str, Any]) -> bool:
+    if action_type not in {"shell", "python"}:
+        return False
+    text = (str(action.get("cmd") or "") + "\n" + str(action.get("code") or "")).lower()
+    return any(
+        marker in text
+        for marker in (
+            "python -m",
+            "python3 -m",
+            "run_check",
+            "subprocess.run",
+            "subprocess.check",
+            "stdout",
+            "json.load",
+            "json.loads",
+            ".cli",
+            "/cli.",
+            " cli ",
+        )
+    )
+
+
 def action_is_test_diagnostic(action_type: str, action: dict[str, Any]) -> bool:
     path = str(action.get("path") or "").lower()
     cmd = str(action.get("cmd") or "").lower()
@@ -3996,6 +4040,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     swe_diagnostic_seen = resume_context_has_swe_diagnostic(original_task)
     swe_test_diagnostic_seen = resume_context_has_test_diagnostic(original_task)
     swe_requires_test_diagnostic = task_requires_test_diagnostic(original_task)
+    swe_requires_cli_verification = task_requires_cli_verification(original_task)
     inspection_actions_since_progress = 0
     shell_inline_python_syntax_failures = 0
     stale_replace_failures_by_path: dict[str, int] = {}
@@ -4025,8 +4070,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     successful_mkdir_paths: set[str] = set()
     non_test_diagnostics_before_test = 0
     last_successful_swe_edit_path = ""
+    last_cli_required_swe_edit_path = ""
     last_swe_test_action: dict[str, Any] | None = None
     swe_verified_after_edit = False
+    swe_cli_verified_after_edit = False
     swe_syntax_error_cycles = 0
     last_swe_syntax_error = ""
     last_required_artifact_hint = ""
@@ -4456,6 +4503,30 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                             warning_message
                             + "\nRun the full requested test command or fallback that covers every current failing_tests entry. "
                             "Return final only after that full test/fallback reports no failing_tests."
+                        ),
+                    }
+                )
+                continue
+            if swe_task and swe_requires_cli_verification and last_cli_required_swe_edit_path and not swe_cli_verified_after_edit:
+                warning_payload = {
+                    "last_edited_path": last_cli_required_swe_edit_path,
+                    "required_verification": "cli_or_command_interface",
+                }
+                warning_message = (
+                    "Supervisor rejected final because the user task explicitly required CLI/command-interface behavior, "
+                    "but no successful post-edit CLI/command verification has run: "
+                    + json.dumps(warning_payload, ensure_ascii=False)
+                )
+                emit(event_sink, {"type": "warning", "code": "final_swe_cli_verification_required", "step": step, "message": warning_message})
+                messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            warning_message
+                            + "\nRun the requested CLI/command-interface check after the code edit, for example the user-provided "
+                            "python -m/run_check command or an equivalent command that validates stdout/stderr/JSON output. "
+                            "Return final only after that command succeeds."
                         ),
                     }
                 )
@@ -5275,8 +5346,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             failed_verification_paths.discard(path)
             stale_replace_failures_by_path.pop(path, None)
             code_mutated_since_last_pytest = True
+            swe_cli_verified_after_edit = False
             if swe_task and action_type in SWE_EDIT_ACTIONS:
                 last_successful_swe_edit_path = path
+                if swe_requires_cli_verification:
+                    last_cli_required_swe_edit_path = path
                 read_file_paths_since_code_mutation = set()
             pending_failing_test_inspections = 0
         if action_type == "write_files" and isinstance(result, dict) and result.get("ok") is True:
@@ -5317,6 +5391,14 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             pending_failing_tests = set(current_failing_tests)
             pending_failing_test_inspections = 0
             pending_failing_test_read_paths = set()
+        if (
+            swe_task
+            and swe_requires_cli_verification
+            and action_is_cli_verification(action_type, action)
+            and isinstance(result, dict)
+            and result.get("ok") is True
+        ):
+            swe_cli_verified_after_edit = True
         if (
             swe_task
             and pending_failing_tests
@@ -5416,6 +5498,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if (
             swe_task
             and swe_verified_after_edit
+            and (not swe_requires_cli_verification or swe_cli_verified_after_edit)
             and isinstance(result, dict)
             and result.get("ok") is True
             and action_type in SWE_DIAGNOSTIC_ACTIONS
