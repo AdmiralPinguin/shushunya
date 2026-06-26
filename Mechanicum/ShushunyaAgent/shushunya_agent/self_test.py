@@ -1292,6 +1292,42 @@ def main() -> int:
         raise AssertionError(f"repeated mkdir guard failed: code={repeated_mkdir_code}, payload={repeated_mkdir_payload}")
     print("[ok] repeated mkdir guard")
 
+    ready_workspace_stdout = io.StringIO()
+    ready_workspace_config = AgentConfig(
+        task_id=safe_task_id("self-test-ready-workspace-inspection"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    ready_workspace_actions = [
+        '{"action":"mkdir","path":"/work/ready-artifact"}',
+        '{"action":"read_file","path":"/work/ready-artifact/input.jsonl"}',
+        '{"action":"mkdir","path":"/work/ready-artifact"}',
+        '{"action":"read_file","path":"/work/ready-artifact/input.jsonl"}',
+        '{"action":"final","message":"done"}',
+    ]
+
+    def fake_ready_workspace_file_tool(_config: AgentConfig, action: dict) -> dict:
+        if action.get("action") == "read_file":
+            return {"ok": True, "path": action.get("path"), "size": 8, "bytes_read": 8, "offset": 0, "content": "payload\n"}
+        return {"ok": True, "path": action.get("path")}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=ready_workspace_actions), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=fake_ready_workspace_file_tool), \
+            contextlib.redirect_stdout(ready_workspace_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        ready_workspace_code = run_agent("ready workspace repeat", ready_workspace_config)
+    ready_workspace_payload = json.loads(ready_workspace_stdout.getvalue())
+    ready_workspace_errors = [
+        (step.get("result") or {}).get("error")
+        for step in ready_workspace_payload.get("steps", [])
+        if isinstance(step, dict)
+    ]
+    if ready_workspace_code != 0 or "ready workspace inspection rejected by supervisor" not in ready_workspace_errors:
+        raise AssertionError(f"ready workspace inspection guard failed: code={ready_workspace_code}, payload={ready_workspace_payload}")
+    print("[ok] ready workspace inspection guard")
+
     growing_rewrite_stdout = io.StringIO()
     growing_rewrite_config = AgentConfig(
         task_id=safe_task_id("self-test-growing-write-file"),

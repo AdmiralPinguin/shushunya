@@ -5,6 +5,7 @@ import argparse
 import html
 import json
 import os
+import posixpath
 import re
 import shlex
 import subprocess
@@ -1134,6 +1135,7 @@ SWE_LOW_SIGNAL_SOURCE_NAMES = {"__init__.py"}
 SUPERVISOR_REJECTION_ERRORS = {
     "repeated identical action rejected by supervisor",
     "repeated mkdir rejected by supervisor",
+    "ready workspace inspection rejected by supervisor",
     "repeated write_file path rejected by supervisor",
     "required artifact rewrite before verification rejected by supervisor",
     "shell tool is disabled by supervisor policy",
@@ -1441,6 +1443,18 @@ def sandbox_path_outside_workspace(path: str, workspace: str) -> bool:
     if not raw_path.startswith(sandbox_roots):
         return False
     return raw_path != raw_workspace and not raw_path.startswith(raw_workspace + "/")
+
+
+def sandbox_path_inside_any(path: str, roots: set[str]) -> bool:
+    raw_path = str(path or "").strip()
+    if not raw_path or not raw_path.startswith("/"):
+        return False
+    normalized_path = posixpath.normpath(raw_path)
+    for root in roots:
+        raw_root = str(root or "").strip().rstrip("/")
+        if raw_root and (normalized_path == raw_root or normalized_path.startswith(raw_root + "/")):
+            return True
+    return False
 
 
 def action_workspace_violations(action: dict[str, Any], workspace: str) -> list[dict[str, str]]:
@@ -3451,6 +3465,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     read_file_paths_since_code_mutation: set[str] = set()
     last_read_file_excerpts: dict[str, str] = {}
     last_source_candidates: list[str] = []
+    ready_workspace_paths: set[str] = set()
     non_test_diagnostics_before_test = 0
     last_successful_swe_edit_path = ""
     swe_verified_after_edit = False
@@ -3792,6 +3807,27 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "instruction": (
                         "This task has an explicit working directory. Do not use paths from previous tasks or other workspaces. "
                         "Retry with paths/cwd under the current workspace only: " + explicit_workspace
+                    ),
+                }
+            elif (
+                not swe_task
+                and ready_workspace_paths
+                and action_type in {"read_file", "list_files", "find_files", "file_info"}
+                and sandbox_path_inside_any(str(action.get("path") or ""), ready_workspace_paths)
+                and (
+                    (action_type == "read_file" and str(action.get("path") or "") in last_read_file_excerpts)
+                    or (action_type in {"list_files", "find_files", "file_info"} and action_counts[fingerprint] >= 2)
+                )
+            ):
+                result = {
+                    "ok": False,
+                    "error": "ready workspace inspection rejected by supervisor",
+                    "path": str(action.get("path") or ""),
+                    "ready_workspace_paths": sorted(ready_workspace_paths)[:10],
+                    "instruction": (
+                        "This workspace is already created, and the requested input/listing was already inspected. "
+                        "Do not repeat mkdir/list/read cycles. Use the gathered content to write the required artifacts, "
+                        "then verify them or return final if they are already verified."
                     ),
                 }
             elif action_type == "mkdir" and action_counts[fingerprint] >= 2:
@@ -4283,6 +4319,13 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             )
 
         action_duration_sec = round(time.time() - action_started, 3)
+        if (
+            action_type == "mkdir"
+            and isinstance(result, dict)
+            and result.get("error") == "repeated mkdir rejected by supervisor"
+            and action.get("path")
+        ):
+            ready_workspace_paths.add(str(action.get("path") or ""))
         supervisor_rejection = (
             str(result.get("error") or "") in SUPERVISOR_REJECTION_ERRORS
             if isinstance(result, dict)
