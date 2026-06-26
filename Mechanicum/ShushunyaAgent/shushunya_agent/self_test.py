@@ -2386,6 +2386,16 @@ def main() -> int:
     ))
     if multi_source_reads != {"/work/events.jsonl", "/work/owners.csv"}:
         raise AssertionError(f"data source read detector missed multi-source python IO: {multi_source_reads}")
+    if agent_runner.action_reads_data_source(
+        {"action": "shell", "cmd": "ls -la /work && echo ledger.csv"},
+        ["/work/ledger.csv"],
+    ):
+        raise AssertionError("data source read detector accepted shell listing as source read")
+    if not agent_runner.action_reads_data_source(
+        {"action": "shell", "cmd": "cat /work/ledger.csv"},
+        ["/work/ledger.csv"],
+    ):
+        raise AssertionError("data source read detector rejected shell cat source read")
     restored_sources = agent_runner.resume_context_inspected_data_sources(
         'Resume context from previous agent task journal x:\n'
         '[{"type":"tool_result","action":"read_file","result":{"ok":true,"path":"/work/events.jsonl","content":"row"}}]',

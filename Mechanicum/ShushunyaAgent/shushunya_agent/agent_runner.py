@@ -1390,13 +1390,11 @@ def action_read_data_sources(action: dict[str, Any], data_paths: list[str]) -> l
             basename = posixpath.basename(path)
             for line in text.splitlines():
                 lowered = line.lower()
-                if not any(token in lowered for token in ("open(", "read", "csv", "json.load", "json.loads", "cat ")):
+                if not any(token in lowered for token in ("open(", "read", "json.load", "json.loads", "cat ")):
                     continue
                 if path in line or (basename and basename in line):
                     read_paths.append(path)
                     break
-            if action_type == "shell" and action_references_path_text(action, path):
-                read_paths.append(path)
     return list(dict.fromkeys(read_paths))
 
 
