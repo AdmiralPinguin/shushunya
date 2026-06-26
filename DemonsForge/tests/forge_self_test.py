@@ -42,11 +42,13 @@ def py_compile() -> dict[str, Any]:
         "forge_service/config.py",
         "forge_service/evaluator.py",
         "forge_service/planner.py",
+        "forge_service/projects.py",
         "forge_service/queue.py",
         "forge_service/registries.py",
         "forge_service/reports.py",
         "forge_service/server.py",
         "tests/quality_bench.py",
+        "tests/shushunya_project_bench.py",
         "tests/long_forge_api.py",
         "tests/smoke_forge_api.py",
     ]

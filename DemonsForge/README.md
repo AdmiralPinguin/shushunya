@@ -503,6 +503,18 @@ paired JSON/Markdown cycle reports under `runtime/test-reports/`, and applies
 report retention. `forge_self_test.py` also records paired JSON/Markdown
 reports.
 
+Shushunya project workflow bench:
+
+```bash
+DemonsForge/bin/python tests/shushunya_project_bench.py
+FORGE_WORKER_MAX_JOBS=4 ./start-forge-worker.sh
+DemonsForge/bin/python tests/shushunya_project_bench.py --run --project-type comic_storyboard --panels 4
+```
+
+The dry-run validates a multi-step project without generation. `--run` submits
+ordinary Forge jobs, waits for artifacts, evaluates them, and writes JSON,
+Markdown and contact-sheet reports under `runtime/test-reports/`.
+
 Memory gateway diagnostic:
 
 ```bash
