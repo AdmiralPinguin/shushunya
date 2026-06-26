@@ -3740,6 +3740,16 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "Retry with paths/cwd under the current workspace only: " + explicit_workspace
                     ),
                 }
+            elif action_type == "mkdir" and action_counts[fingerprint] >= 2:
+                result = {
+                    "ok": False,
+                    "error": "repeated mkdir rejected by supervisor",
+                    "repeated_action": action,
+                    "instruction": (
+                        "This directory was already created or checked. Treat the previous mkdir ok=true as complete. "
+                        "Do not create the same directory again; write the required files, run verification, or return final if done."
+                    ),
+                }
             elif (
                 action_type in INSPECTION_ACTIONS
                 and inspection_actions_since_progress >= max(1, INSPECTION_STALL_LIMIT)

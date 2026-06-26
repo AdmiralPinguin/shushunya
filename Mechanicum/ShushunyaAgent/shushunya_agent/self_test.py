@@ -1257,6 +1257,34 @@ def main() -> int:
         raise AssertionError(f"repeated write_file path guard failed: code={repeated_write_code}, payload={repeated_write_payload}")
     print("[ok] repeated write_file path guard")
 
+    repeated_mkdir_stdout = io.StringIO()
+    repeated_mkdir_config = AgentConfig(
+        task_id=safe_task_id("self-test-repeated-mkdir"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    repeated_mkdir_actions = [
+        '{"action":"mkdir","path":"/work/repeated-mkdir"}',
+        '{"action":"mkdir","path":"/work/repeated-mkdir"}',
+        '{"action":"final","message":"done"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=repeated_mkdir_actions), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/repeated-mkdir"}), \
+            contextlib.redirect_stdout(repeated_mkdir_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        repeated_mkdir_code = run_agent("repeated mkdir", repeated_mkdir_config)
+    repeated_mkdir_payload = json.loads(repeated_mkdir_stdout.getvalue())
+    repeated_mkdir_errors = [
+        (step.get("result") or {}).get("error")
+        for step in repeated_mkdir_payload.get("steps", [])
+        if isinstance(step, dict)
+    ]
+    if repeated_mkdir_code != 0 or "repeated mkdir rejected by supervisor" not in repeated_mkdir_errors:
+        raise AssertionError(f"repeated mkdir guard failed: code={repeated_mkdir_code}, payload={repeated_mkdir_payload}")
+    print("[ok] repeated mkdir guard")
+
     growing_rewrite_stdout = io.StringIO()
     growing_rewrite_config = AgentConfig(
         task_id=safe_task_id("self-test-growing-write-file"),
