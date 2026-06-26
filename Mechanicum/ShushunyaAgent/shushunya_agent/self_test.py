@@ -2636,6 +2636,60 @@ def main() -> int:
         )
     print("[ok] pytest unavailable falls back to simple runner")
 
+    python_pytest_fallback_stdout = io.StringIO()
+    python_pytest_fallback_config = AgentConfig(
+        task_id=safe_task_id("self-test-python-pytest-fallback"),
+        json_output=True,
+        max_steps=1,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    python_pytest_calls = 0
+
+    def fake_python_pytest_fallback(_config: AgentConfig, action: dict) -> dict:
+        nonlocal python_pytest_calls
+        python_pytest_calls += 1
+        if python_pytest_calls == 1:
+            return {
+                "ok": False,
+                "returncode": 1,
+                "stdout": "",
+                "stderr": "ModuleNotFoundError: No module named 'pytest'\n",
+            }
+        return {
+            "ok": False,
+            "returncode": 1,
+            "stdout": json.dumps({
+                "results": [{"ok": False, "file": "tests/test_calc.py", "test": "test_add"}],
+                "source_hints": ["/work/project/calc.py"],
+            }),
+            "stderr": "",
+        }
+
+    with mock.patch.object(agent_runner, "chat", return_value='{"action":"python","cwd":"/work/project","code":"import pytest; pytest.main([\\"-q\\"])","timeout":60}'), \
+            mock.patch.object(agent_runner, "python_tool", side_effect=fake_python_pytest_fallback), \
+            contextlib.redirect_stdout(python_pytest_fallback_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        python_pytest_fallback_code = run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            python_pytest_fallback_config,
+        )
+    python_pytest_fallback_payload = json.loads(python_pytest_fallback_stdout.getvalue())
+    python_pytest_result = (python_pytest_fallback_payload.get("steps") or [{}])[0].get("result") or {}
+    if (
+        python_pytest_fallback_code != 2
+        or python_pytest_calls != 2
+        or python_pytest_result.get("fallback") != "simple_pytest_runner"
+        or python_pytest_result.get("failing_tests") != ["tests/test_calc.py::test_add"]
+        or not python_pytest_result.get("original_python")
+    ):
+        raise AssertionError(
+            "python pytest fallback runner was not used: "
+            f"code={python_pytest_fallback_code}, calls={python_pytest_calls}, payload={python_pytest_fallback_payload}"
+        )
+    print("[ok] python pytest unavailable falls back to simple runner")
+
     enriched_source_hints = agent_runner.enrich_pytest_fallback_result({
         "ok": False,
         "stdout": json.dumps({

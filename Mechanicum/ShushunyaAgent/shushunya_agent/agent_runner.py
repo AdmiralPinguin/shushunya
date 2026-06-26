@@ -1520,6 +1520,8 @@ def pytest_unavailable_output(output: str) -> bool:
     lowered = output.lower()
     return (
         "no module named pytest" in lowered
+        or "no module named 'pytest'" in lowered
+        or 'no module named "pytest"' in lowered
         or "pytest: command not found" in lowered
         or "pytest: not found" in lowered
         or "pytest': no such file or directory" in lowered
@@ -4436,6 +4438,32 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 result = file_tool(config, action)
             elif action_type == "python":
                 result = python_tool(config, action)
+                combined_python_output = f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}".lower() if isinstance(result, dict) else ""
+                if (
+                    swe_task
+                    and explicit_workspace
+                    and isinstance(result, dict)
+                    and result.get("ok") is False
+                    and "pytest" in str(action.get("code") or "").lower()
+                    and pytest_unavailable_output(combined_python_output)
+                ):
+                    fallback = python_tool(
+                        config,
+                        {
+                            "action": "python",
+                            "cwd": explicit_workspace,
+                            "code": PYTEST_FALLBACK_CODE,
+                            "timeout": action.get("timeout") or 60,
+                        },
+                    )
+                    fallback = enrich_pytest_fallback_result(fallback)
+                    result = {
+                        **fallback,
+                        "pytest_unavailable": True,
+                        "fallback": "simple_pytest_runner",
+                        "original_python": result_for_model(action_type, result, config),
+                    }
+                    pytest_unavailable_seen = True
             elif action_type == "web_search":
                 result = web_search(config, str(action.get("query", "")), action.get("limit"))
             elif action_type == "web_fetch":
