@@ -1000,14 +1000,11 @@ def task_with_execution_plan(task: str, plan: dict[str, Any] | None) -> str:
 SWE_TASK_MARKERS = (
     "python-проект",
     "python project",
-    "код",
-    "code",
     "pytest",
-    "bug",
     "traceback",
     "stack trace",
-    "git",
 )
+SWE_WORD_MARKERS = ("код", "code", "bug", "git")
 SWE_WEAK_REPAIR_MARKERS = ("исправь", "fix", "ошибк")
 SWE_FILE_EXTENSION_RE = re.compile(r"\.(?:py|js|ts|kt|java)(?:\b|$)")
 
@@ -1016,6 +1013,9 @@ def looks_like_swe_task(task: str) -> bool:
     lowered = task.lower()
     if any(marker in lowered for marker in SWE_TASK_MARKERS) or bool(SWE_FILE_EXTENSION_RE.search(lowered)):
         return True
+    for marker in SWE_WORD_MARKERS:
+        if re.search(r"(?<![\wа-яё])" + re.escape(marker) + r"(?![\wа-яё])", lowered):
+            return True
     return any(marker in lowered for marker in SWE_WEAK_REPAIR_MARKERS) and bool(SWE_FILE_EXTENSION_RE.search(lowered))
 
 
