@@ -34,9 +34,10 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["worker", "purpose"],
+        "required": ["step_id", "worker", "purpose"],
         "additionalProperties": false,
         "properties": {
+          "step_id": { "type": "string", "minLength": 1 },
           "worker": { "type": "string" },
           "purpose": { "type": "string" },
           "depends_on": {
@@ -52,4 +53,3 @@
     }
   }
 }
-

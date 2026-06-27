@@ -42,6 +42,8 @@ def main() -> int:
     if "/work/skalathrax/source_snapshots.json" not in payload["required_artifacts"]:
         raise AssertionError(f"source snapshots missing: {payload['required_artifacts']}")
     step_workers = [step["worker"] for step in payload["worker_plan"]]
+    if not all(step.get("step_id") for step in payload["worker_plan"]):
+        raise AssertionError(f"worker steps must expose stable step_id: {payload['worker_plan']}")
     expected_order = [
         "Lexmechanic",
         "AuspexBrowser",
