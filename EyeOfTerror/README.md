@@ -57,6 +57,10 @@ Gateway endpoints:
 `Mechanicum/*/worker.json` metadata. Add `?health=1` to include a live
 best-effort `/health` snapshot for each worker service.
 
+`POST /runs/<task_id>/cancel` marks the Warmaster ledger as cancelling and
+best-effort forwards cancellation to HTTP worker task endpoints from the run
+dispatch package.
+
 ## Iskandar Service
 
 Run the first Inner Circle governor:

@@ -7,11 +7,23 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from eye_of_terror.warmaster_gateway import make_handler
 from eye_of_terror.ledger import TaskLedger
+
+
+def write_json(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def patch_dispatch_ports(run_dir: Path, port: int) -> None:
+    for dispatch_path in sorted((run_dir / "dispatch").glob("*.json")):
+        packet = json.loads(dispatch_path.read_text(encoding="utf-8"))
+        if isinstance(packet, dict):
+            packet["port"] = port
+            write_json(dispatch_path, packet)
 
 
 def request_json(url: str, payload: dict | None = None, timeout: int = 5) -> dict:
@@ -26,6 +38,24 @@ def request_options(url: str) -> int:
     req = urllib.request.Request(url, method="OPTIONS")
     with urllib.request.urlopen(req, timeout=5) as response:
         return response.status
+
+
+def make_cancel_handler(calls: list[str]) -> type[BaseHTTPRequestHandler]:
+    class CancelHandler(BaseHTTPRequestHandler):
+        def log_message(self, fmt: str, *args: object) -> None:
+            return
+
+        def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+            calls.append(self.path)
+            body = {"ok": True, "task": {"status": "cancelled"}}
+            data = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    return CancelHandler
 
 
 def main() -> int:
@@ -132,9 +162,20 @@ def main() -> int:
             )
             if not cancel_task.get("ok"):
                 raise AssertionError(f"bad cancel task response: {cancel_task}")
-            cancelled = request_json(base + "/runs/warmaster-cancel-test/cancel", {"reason": "test"})
+            cancel_calls: list[str] = []
+            worker_server = ThreadingHTTPServer(("127.0.0.1", 0), make_cancel_handler(cancel_calls))
+            worker_thread = threading.Thread(target=worker_server.serve_forever, daemon=True)
+            worker_thread.start()
+            try:
+                patch_dispatch_ports(Path(cancel_task["run_dir"]), worker_server.server_port)
+                cancelled = request_json(base + "/runs/warmaster-cancel-test/cancel", {"reason": "test"})
+            finally:
+                worker_server.shutdown()
+                worker_thread.join(timeout=5)
             if not cancelled.get("ok") or not cancelled["ledger"].get("cancel_requested"):
                 raise AssertionError(f"bad cancel response: {cancelled}")
+            if not cancel_calls or not any(item.get("ok") for item in cancelled.get("worker_cancellations", [])):
+                raise AssertionError(f"cancel was not propagated to worker tasks: {cancelled}")
             try:
                 request_json(base + "/runs/warmaster-cancel-test/execute_local", {"timeout_sec": 30}, timeout=60)
             except urllib.error.HTTPError as exc:

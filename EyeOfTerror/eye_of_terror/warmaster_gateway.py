@@ -8,7 +8,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from .inner_circle.iskandar import plan_lore_reconstruction
 from .http_executor import execute_run as execute_http_run
@@ -204,6 +204,34 @@ def worker_registry_snapshot(include_health: bool = False, host: str = "127.0.0.
     return workers
 
 
+def cancel_http_worker_tasks(run_dir: Path, host: str = "127.0.0.1", timeout_sec: float = 1.0) -> list[dict[str, Any]]:
+    dispatch_dir = run_dir / "dispatch"
+    if not dispatch_dir.exists():
+        return []
+    results: list[dict[str, Any]] = []
+    for dispatch_path in sorted(dispatch_dir.glob("*.json")):
+        packet = json.loads(dispatch_path.read_text(encoding="utf-8"))
+        if not isinstance(packet, dict):
+            continue
+        request_payload = packet.get("request") if isinstance(packet.get("request"), dict) else {}
+        task_id = str(request_payload.get("task_id") or packet.get("task_id") or "")
+        worker = str(packet.get("worker") or "")
+        port = int(packet.get("port") or 0)
+        if not task_id or not port:
+            results.append({"worker": worker, "port": port, "task_id": task_id, "ok": False, "error": "missing task_id or port"})
+            continue
+        url = f"http://{host}:{port}/tasks/{quote(task_id, safe='')}/cancel"
+        try:
+            data = json.dumps({}).encode("utf-8")
+            request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            results.append({"worker": worker, "port": port, "task_id": task_id, "ok": bool(isinstance(payload, dict) and payload.get("ok")), "response": payload})
+        except Exception as exc:  # noqa: BLE001 - cancellation fan-out is best-effort.
+            results.append({"worker": worker, "port": port, "task_id": task_id, "ok": False, "error": str(exc)})
+    return results
+
+
 def start_background(task_id: str, target: Any) -> bool:
     with ACTIVE_RUNS_LOCK:
         if task_id in ACTIVE_RUNS:
@@ -325,7 +353,19 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     reason = str(payload.get("reason") or "").strip()
                     ledger = TaskLedger.load(ledger_path)
                     ledger.request_cancel(reason)
-                    response(self, 200, {"ok": True, "task_id": task_id, "status": "cancelling", "ledger": ledger.to_dict()})
+                    host = str(payload.get("host") or "127.0.0.1")
+                    worker_cancellations = cancel_http_worker_tasks(run_root / task_id, host=host)
+                    response(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "task_id": task_id,
+                            "status": "cancelling",
+                            "ledger": ledger.to_dict(),
+                            "worker_cancellations": worker_cancellations,
+                        },
+                    )
                     return
                 if len(parts) == 3 and parts[0] == "runs" and parts[2] in {"execute_local", "execute_http", "start_local", "start_http"}:
                     task_id = parts[1]
