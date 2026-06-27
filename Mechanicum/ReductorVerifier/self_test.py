@@ -34,6 +34,7 @@ def main() -> int:
                 ]
             },
         )
+        write_json(base / "source_snapshots.json", {"snapshots": [{"source_title": "Lexicanum", "ok": True}], "skipped": []})
         events = [
             "moon_parley",
             "dreagher_shoots_anteus",
@@ -42,7 +43,16 @@ def main() -> int:
             "kharn_burns_shelters",
             "fratricide_spreads",
         ]
-        write_json(base / "direct_event_notes.json", {"events": [{"event_id": item} for item in events], "gaps": ["gap"]})
+        write_json(
+            base / "direct_event_notes.json",
+            {
+                "events": [
+                    {"event_id": item, "evidence_snapshots": [{"source_title": "Lexicanum", "matched_markers": item}]}
+                    for item in events
+                ],
+                "gaps": ["gap"],
+            },
+        )
         write_json(base / "timeline.json", {"timeline": [{"event_id": item} for item in events], "gaps": ["gap"]})
         write(
             base / "reconstruction_ru.md",
@@ -64,6 +74,14 @@ def main() -> int:
         report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
         if report["approved"] or report["status"] != "needs_revision":
             raise AssertionError(f"expected missing events to fail: {report}")
+        write_json(base / "timeline.json", {"timeline": [{"event_id": item} for item in events], "gaps": []})
+        write_json(base / "direct_event_notes.json", {"events": [{"event_id": item} for item in events], "gaps": []})
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on evidence pass: {result}")
+        report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
+        if report["approved"] or "lacks fetched source evidence" not in json.dumps(report):
+            raise AssertionError(f"expected missing evidence to fail: {report}")
     print("[ok] ReductorVerifier review")
     return 0
 

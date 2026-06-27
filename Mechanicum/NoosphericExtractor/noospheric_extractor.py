@@ -18,6 +18,71 @@ def source_map_path_for_output(output_path: str) -> str:
     return f"{parent}/source_map.json"
 
 
+def source_snapshots_path_for_output(output_path: str) -> str:
+    if not output_path.startswith("/work/"):
+        raise ValueError(f"unsupported output path: {output_path}")
+    parent = output_path.rsplit("/", 1)[0]
+    return f"{parent}/source_snapshots.json"
+
+
+EVENT_EVIDENCE_MARKERS = {
+    "ec_claim_system": ["first discovered by the Emperor's Children", "laid claim"],
+    "world_eaters_arrival": ["large World Eaters fleet also arrived"],
+    "world_eaters_internal_dispute": ["Goghur", "Argus Brond", "Solax"],
+    "moon_parley": ["parlay on a moon of Skalathrax"],
+    "anteus_hedonarch_presence": ["Tiberius Angellus Anteus", "Hedonarch"],
+    "dreagher_shoots_anteus": ["Dreagher", "Anteus", "open fire"],
+    "golden_absolute": ["Golden Absolute"],
+    "planetary_battle": ["fell upon Skalathrax", "Lucius"],
+    "cold_night_shelters": ["extremely cold night", "seek shelter"],
+    "kharn_burns_shelters": ["flamer", "burning his fellow"],
+    "fratricide_spreads": ["turned against their comrades"],
+    "legion_fractures": ["Legion shattered", "unified Legion"],
+}
+
+
+def load_optional_snapshots(workspace_root: Path, output_path: str) -> dict[str, Any]:
+    snapshots_path = sandbox_path(workspace_root, source_snapshots_path_for_output(output_path))
+    if not snapshots_path.exists():
+        return {}
+    payload = json.loads(snapshots_path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else {}
+
+
+def snapshot_evidence(event_id: str, snapshots: dict[str, Any]) -> list[dict[str, str]]:
+    markers = EVENT_EVIDENCE_MARKERS.get(event_id, [])
+    evidence: list[dict[str, str]] = []
+    for snapshot in snapshots.get("snapshots", []):
+        if not isinstance(snapshot, dict) or not snapshot.get("ok"):
+            continue
+        text = str(snapshot.get("text_excerpt") or "")
+        lowered = text.lower()
+        matched = [marker for marker in markers if marker.lower() in lowered]
+        if matched:
+            evidence.append(
+                {
+                    "source_title": str(snapshot.get("source_title") or ""),
+                    "matched_markers": ", ".join(matched),
+                }
+            )
+    return evidence
+
+
+def snapshot_gaps(snapshots: dict[str, Any]) -> list[str]:
+    gaps: list[str] = []
+    for snapshot in snapshots.get("snapshots", []):
+        if isinstance(snapshot, dict) and not snapshot.get("ok"):
+            title = snapshot.get("source_title") or snapshot.get("requested_url") or "unknown source"
+            error = snapshot.get("error") or "fetch failed"
+            gaps.append(f"Source snapshot unavailable for {title}: {error}")
+    for skipped in snapshots.get("skipped", []):
+        if isinstance(skipped, dict):
+            title = skipped.get("source_title") or "unknown source"
+            reason = skipped.get("reason") or "skipped"
+            gaps.append(f"Source not fetched for {title}: {reason}")
+    return gaps
+
+
 def skalathrax_events(source_titles: set[str]) -> list[dict[str, Any]]:
     source_refs = sorted(source_titles)
     return [
@@ -108,8 +173,9 @@ def skalathrax_events(source_titles: set[str]) -> list[dict[str, Any]]:
     ]
 
 
-def extract_events(source_map: dict[str, Any]) -> dict[str, Any]:
+def extract_events(source_map: dict[str, Any], source_snapshots: dict[str, Any] | None = None) -> dict[str, Any]:
     topic = str(source_map.get("topic") or "")
+    source_snapshots = source_snapshots or {}
     source_titles = {
         str(item.get("title") or "")
         for item in source_map.get("sources", [])
@@ -119,13 +185,16 @@ def extract_events(source_map: dict[str, Any]) -> dict[str, Any]:
         events = skalathrax_events(source_titles)
     else:
         events = []
+    for event in events:
+        if isinstance(event, dict):
+            event["evidence_snapshots"] = snapshot_evidence(str(event.get("event_id") or ""), source_snapshots)
     return {
         "topic": topic,
         "events": events,
         "gaps": [
             "Extractor needs direct source text for exact wording and chapter-level evidence.",
             "Events marked medium confidence require confirmation from official narrative text.",
-        ],
+        ] + snapshot_gaps(source_snapshots),
     }
 
 
@@ -142,7 +211,8 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     if not source_host_path.exists():
         return {"ok": False, "worker": "NoosphericExtractor", "error": "source_map is missing", "missing": source_path}
     source_map = json.loads(source_host_path.read_text(encoding="utf-8"))
-    notes = extract_events(source_map)
+    source_snapshots = load_optional_snapshots(workspace_root, output_path)
+    notes = extract_events(source_map, source_snapshots)
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(notes, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -174,4 +244,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

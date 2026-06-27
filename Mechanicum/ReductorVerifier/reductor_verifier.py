@@ -61,9 +61,10 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
     reconstruction_path = sibling_artifact(critic_path, "reconstruction_ru.md")
     coverage_path = sibling_artifact(critic_path, "coverage_report.md")
     source_path = sibling_artifact(critic_path, "source_map.json")
+    source_snapshots_path = sibling_artifact(critic_path, "source_snapshots.json")
     notes_path = sibling_artifact(critic_path, "direct_event_notes.json")
     timeline_path = sibling_artifact(critic_path, "timeline.json")
-    required_paths = [reconstruction_path, coverage_path, source_path, notes_path, timeline_path]
+    required_paths = [reconstruction_path, coverage_path, source_path, source_snapshots_path, notes_path, timeline_path]
     missing_artifacts = [path for path in required_paths if not artifact_exists(workspace_root, path)]
     if missing_artifacts:
         return {
@@ -84,6 +85,11 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
         for item in timeline.get("timeline", [])
         if isinstance(item, dict) and item.get("event_id")
     }
+    note_by_event_id = {
+        str(item.get("event_id")): item
+        for item in notes.get("events", [])
+        if isinstance(item, dict) and item.get("event_id")
+    }
     findings: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
     for event_id, label in REQUIRED_DIRECT_EVENT_IDS.items():
@@ -91,6 +97,8 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
             findings.append({"severity": "blocker", "message": f"Missing required direct event in timeline: {label}"})
         elif not text_contains_markers(reconstruction, EVENT_TEXT_MARKERS[event_id]):
             findings.append({"severity": "blocker", "message": f"Draft does not visibly cover required event: {label}"})
+        elif not note_by_event_id.get(event_id, {}).get("evidence_snapshots"):
+            findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {label}"})
 
     source_classes = {
         str(item.get("source_class") or item.get("type") or "")
