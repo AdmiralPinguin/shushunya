@@ -2,8 +2,7 @@
   "name": "ReductorVerifier",
   "port": 7006,
   "role": "critic and verifier",
-  "status": "planned",
+  "status": "prototype",
   "capabilities": ["contract_review", "source_coverage_review", "hallucination_risk"],
   "api_contract": "EyeOfTerror/contracts/worker_api.md"
 }
-

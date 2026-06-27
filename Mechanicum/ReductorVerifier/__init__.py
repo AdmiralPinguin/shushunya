@@ -1,0 +1,1 @@
+"""ReductorVerifier worker prototype."""
