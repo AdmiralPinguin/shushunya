@@ -15,7 +15,7 @@ from doctor import run_doctor
 from .http_executor import execute_run as execute_http_run
 from .governors import governor_by_name, governor_refs
 from .ledger import TaskLedger
-from .local_executor import execute_run as execute_local_run
+from .local_executor import execute_run as execute_local_run, ordered_dispatch_paths
 from .pipeline import write_pipeline_run
 from .registry import worker_refs
 from .routing import route_message
@@ -140,7 +140,8 @@ def run_dispatch_packets(run_dir: Path) -> dict[str, Any]:
     if not dispatch_dir.exists():
         return {"ok": False, "error": "dispatch directory not found"}
     packets: list[dict[str, Any]] = []
-    for dispatch_path in sorted(dispatch_dir.glob("*.json")):
+    dispatch_paths = ordered_dispatch_paths(run_dir) if (run_dir / "status.json").exists() else sorted(dispatch_dir.glob("*.json"))
+    for dispatch_path in dispatch_paths:
         try:
             packet = json.loads(dispatch_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:

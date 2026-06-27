@@ -150,7 +150,11 @@ def main() -> int:
             if not dispatch.get("ok") or not any(item.get("packet", {}).get("worker") == "Lexmechanic" for item in dispatch.get("dispatch", [])):
                 raise AssertionError(f"bad run dispatch: {dispatch}")
             worker_tasks = request_json(base + "/runs/warmaster-test/worker_tasks")
-            if not worker_tasks.get("ok") or not any(item.get("task_id") == "warmaster-test:source_discovery" for item in worker_tasks.get("worker_tasks", [])):
+            if (
+                not worker_tasks.get("ok")
+                or not worker_tasks.get("worker_tasks")
+                or worker_tasks["worker_tasks"][0].get("task_id") != "warmaster-test:source_discovery"
+            ):
                 raise AssertionError(f"bad worker task mapping: {worker_tasks}")
             events = request_json(base + "/runs/warmaster-test/events?limit=1")
             if not events.get("ok") or len(events.get("events", [])) != 1:
