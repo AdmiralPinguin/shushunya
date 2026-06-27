@@ -7,6 +7,7 @@ from typing import Any
 
 PACKAGE_FILES = [
     "source_map.json",
+    "source_snapshots.json",
     "direct_event_notes.json",
     "timeline.json",
     "reconstruction_ru.md",

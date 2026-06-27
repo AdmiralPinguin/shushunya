@@ -11,6 +11,7 @@ from typing import Any
 
 WORKER_COMMANDS = {
     "Lexmechanic": ("Mechanicum/Lexmechanic", "Mechanicum/Lexmechanic/lexmechanic.py"),
+    "AuspexBrowser": ("Mechanicum/AuspexBrowser", "Mechanicum/AuspexBrowser/auspex_browser.py"),
     "NoosphericExtractor": ("Mechanicum/NoosphericExtractor", "Mechanicum/NoosphericExtractor/noospheric_extractor.py"),
     "Chronologis": ("Mechanicum/Chronologis", "Mechanicum/Chronologis/chronologis.py"),
     "ScriptoriumDaemon": ("Mechanicum/ScriptoriumDaemon", "Mechanicum/ScriptoriumDaemon/scriptorium_daemon.py"),

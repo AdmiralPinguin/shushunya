@@ -1,0 +1,1 @@
+"""AuspexBrowser worker prototype."""

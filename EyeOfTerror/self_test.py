@@ -20,6 +20,7 @@ def main() -> int:
     required = {
         "ShushunyaAgent",
         "Lexmechanic",
+        "AuspexBrowser",
         "NoosphericExtractor",
         "Chronologis",
         "ScriptoriumDaemon",
@@ -38,9 +39,12 @@ def main() -> int:
         raise AssertionError(f"bad lore contract routing: {payload}")
     if "/work/skalathrax/source_map.json" not in payload["required_artifacts"]:
         raise AssertionError(f"skalathrax artifacts not derived: {payload['required_artifacts']}")
+    if "/work/skalathrax/source_snapshots.json" not in payload["required_artifacts"]:
+        raise AssertionError(f"source snapshots missing: {payload['required_artifacts']}")
     step_workers = [step["worker"] for step in payload["worker_plan"]]
     expected_order = [
         "Lexmechanic",
+        "AuspexBrowser",
         "NoosphericExtractor",
         "Chronologis",
         "ScriptoriumDaemon",
@@ -61,6 +65,7 @@ def main() -> int:
     packets = build_dispatch_packets(contract)
     if [packet.step_id for packet in packets] != [
         "source_discovery",
+        "source_acquisition",
         "fact_extraction",
         "timeline",
         "draft_reconstruction",
@@ -70,8 +75,8 @@ def main() -> int:
         raise AssertionError(f"wrong dispatch packet sequence: {[packet.step_id for packet in packets]}")
     if packets[0].port != 7002 or packets[-1].port != 7007:
         raise AssertionError(f"dispatch packets target wrong ports: {[packet.port for packet in packets]}")
-    if packets[1].request["task_id"] != "test-skalathrax:fact_extraction":
-        raise AssertionError(f"dispatch task id is not stable: {packets[1].request}")
+    if packets[2].request["task_id"] != "test-skalathrax:fact_extraction":
+        raise AssertionError(f"dispatch task id is not stable: {packets[2].request}")
     print("[ok] Iskandar dispatch packets")
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -82,6 +87,7 @@ def main() -> int:
             "contract.json",
             "status.json",
             "dispatch/source_discovery.json",
+            "dispatch/source_acquisition.json",
             "dispatch/fact_extraction.json",
             "dispatch/timeline.json",
             "dispatch/draft_reconstruction.json",

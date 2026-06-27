@@ -23,6 +23,7 @@ def main() -> int:
         base = root / "skalathrax"
         for filename in [
             "source_map.json",
+            "source_snapshots.json",
             "direct_event_notes.json",
             "timeline.json",
             "critic_report.json",

@@ -71,6 +71,7 @@ def lore_required_artifacts(slug: str) -> list[str]:
     base = f"/work/{slug}"
     return [
         f"{base}/source_map.json",
+        f"{base}/source_snapshots.json",
         f"{base}/direct_event_notes.json",
         f"{base}/timeline.json",
         f"{base}/reconstruction_ru.md",
@@ -90,10 +91,17 @@ def lore_worker_plan(slug: str) -> list[WorkerPlanStep]:
             expected_artifacts=[f"{base}/source_map.json"],
         ),
         WorkerPlanStep(
+            step_id="source_acquisition",
+            worker="AuspexBrowser",
+            purpose="Fetch accessible public source URLs and record blocked or binary sources as coverage data.",
+            depends_on=["source_discovery"],
+            expected_artifacts=[f"{base}/source_snapshots.json"],
+        ),
+        WorkerPlanStep(
             step_id="fact_extraction",
             worker="NoosphericExtractor",
             purpose="Extract direct event facts with confidence labels and source references.",
-            depends_on=["source_discovery"],
+            depends_on=["source_acquisition"],
             expected_artifacts=[f"{base}/direct_event_notes.json"],
         ),
         WorkerPlanStep(
