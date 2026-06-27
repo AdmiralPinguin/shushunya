@@ -67,6 +67,16 @@ def preflight_workers(run_dir: Path, host: str, timeout_sec: int) -> list[dict[s
             payload = get_json(f"http://{host}:{port}/health", min(timeout_sec, 10))
             if not payload.get("ok"):
                 failures.append({"worker": worker, "port": port, "error": str(payload.get("error") or "health returned ok=false")})
+                continue
+            reported_worker = str(payload.get("worker") or "")
+            if reported_worker != worker:
+                failures.append(
+                    {
+                        "worker": worker,
+                        "port": port,
+                        "error": f"worker identity mismatch: expected {worker}, got {reported_worker or 'unknown'}",
+                    }
+                )
         except Exception as exc:  # noqa: BLE001 - preflight should report all unavailable workers.
             failures.append({"worker": worker, "port": port, "error": str(exc)})
     return failures

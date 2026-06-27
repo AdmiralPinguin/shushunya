@@ -13,6 +13,28 @@ GET  /tasks/{task_id}
 POST /tasks/{task_id}/cancel
 ```
 
+## GET /health and GET /capabilities
+
+Both endpoints should identify the service and expose its public worker
+metadata. Orchestrators must be able to verify that the expected worker is
+running on the selected port before sending work.
+
+```json
+{
+  "ok": true,
+  "worker": "Lexmechanic",
+  "workspace_root": "/work/mechanicum",
+  "metadata": {
+    "name": "Lexmechanic",
+    "role": "source researcher",
+    "capabilities": ["web_search", "source_map", "reliability_labels"],
+    "api_contract": "EyeOfTerror/contracts/worker_api.md"
+  },
+  "capabilities": ["web_search", "source_map", "reliability_labels"],
+  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+}
+```
+
 ## POST /run Request
 
 ```json
@@ -48,4 +70,3 @@ POST /tasks/{task_id}/cancel
 - Writers must not invent facts that are absent from researcher/extractor
   outputs.
 - Critics must be independent from the writer role.
-

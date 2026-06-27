@@ -24,6 +24,14 @@ def write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def patch_dispatch_ports(run_dir: Path, ports_by_worker: dict[str, int]) -> None:
+    for dispatch_path in sorted((run_dir / "dispatch").glob("*.json")):
+        packet = json.loads(dispatch_path.read_text(encoding="utf-8"))
+        if isinstance(packet, dict) and packet.get("worker") in ports_by_worker:
+            packet["port"] = ports_by_worker[str(packet["worker"])]
+            write_json(dispatch_path, packet)
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -75,6 +83,18 @@ def main() -> int:
             summary = execute_run(run_dir, timeout_sec=1)
             if summary.get("ok") or not summary.get("preflight_failures"):
                 raise AssertionError(f"expected preflight failure: {summary}")
+            wrong_server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler("WrongWorker", work, run_worker))
+            wrong_thread = threading.Thread(target=wrong_server.serve_forever, daemon=True)
+            wrong_thread.start()
+            try:
+                patch_dispatch_ports(run_dir, {"NoosphericExtractor": wrong_server.server_port})
+                summary = execute_run(run_dir, timeout_sec=5)
+                failures = summary.get("preflight_failures") or []
+                if summary.get("ok") or not any("identity mismatch" in item.get("error", "") for item in failures):
+                    raise AssertionError(f"expected identity mismatch preflight failure: {summary}")
+            finally:
+                wrong_server.shutdown()
+                wrong_thread.join(timeout=5)
         finally:
             try:
                 server.shutdown()

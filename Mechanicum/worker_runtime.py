@@ -22,27 +22,70 @@ def load_worker(module_path: Path, module_name: str) -> WorkerRun:
     return run
 
 
+def load_worker_metadata(module_path: Path, worker_name: str) -> dict[str, Any]:
+    metadata_path = module_path / "worker.json"
+    metadata: dict[str, Any] = {}
+    if metadata_path.exists():
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError(f"worker metadata must be a JSON object: {metadata_path}")
+        metadata = payload
+    metadata.setdefault("name", worker_name)
+    metadata.setdefault("capabilities", [])
+    metadata.setdefault("api_contract", "EyeOfTerror/contracts/worker_api.md")
+    return metadata
+
+
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
     data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    handler.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
     handler.send_header("Content-Length", str(len(data)))
     handler.end_headers()
     handler.wfile.write(data)
 
 
-def make_handler(worker_name: str, workspace_root: Path, run_worker: WorkerRun) -> type[BaseHTTPRequestHandler]:
+def make_handler(
+    worker_name: str,
+    workspace_root: Path,
+    run_worker: WorkerRun,
+    metadata: dict[str, Any] | None = None,
+) -> type[BaseHTTPRequestHandler]:
+    worker_metadata = dict(metadata or {})
+    worker_metadata.setdefault("name", worker_name)
+    worker_metadata.setdefault("capabilities", [])
+    worker_metadata.setdefault("api_contract", "EyeOfTerror/contracts/worker_api.md")
+
+    def service_manifest() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "worker": worker_name,
+            "workspace_root": str(workspace_root),
+            "metadata": worker_metadata,
+            "capabilities": worker_metadata.get("capabilities", []),
+            "api_contract": worker_metadata.get("api_contract", ""),
+        }
+
     class WorkerHandler(BaseHTTPRequestHandler):
         server_version = f"{worker_name}Worker/0.1"
 
         def log_message(self, fmt: str, *args: Any) -> None:
             return
 
+        def do_OPTIONS(self) -> None:  # noqa: N802 - stdlib handler API
+            response(self, 200, {"ok": True, "worker": worker_name})
+
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-            if self.path != "/health":
-                response(self, 404, {"ok": False, "error": "not found"})
+            if self.path == "/health":
+                response(self, 200, service_manifest())
                 return
-            response(self, 200, {"ok": True, "worker": worker_name, "workspace_root": str(workspace_root)})
+            if self.path == "/capabilities":
+                response(self, 200, service_manifest())
+                return
+            response(self, 404, {"ok": False, "error": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             if self.path != "/run":
@@ -64,8 +107,9 @@ def make_handler(worker_name: str, workspace_root: Path, run_worker: WorkerRun) 
 
 def serve(worker_name: str, module_path: Path, module_name: str, host: str, port: int, workspace_root: Path) -> None:
     run_worker = load_worker(module_path, module_name)
+    metadata = load_worker_metadata(module_path, worker_name)
     workspace_root.mkdir(parents=True, exist_ok=True)
-    server = ThreadingHTTPServer((host, port), make_handler(worker_name, workspace_root, run_worker))
+    server = ThreadingHTTPServer((host, port), make_handler(worker_name, workspace_root, run_worker, metadata))
     server.serve_forever()
 
 
