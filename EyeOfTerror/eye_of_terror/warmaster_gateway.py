@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .inner_circle.iskandar import plan_lore_reconstruction
+from .http_executor import execute_run as execute_http_run
 from .ledger import TaskLedger
 from .local_executor import execute_run as execute_local_run
 from .pipeline import write_pipeline_run
@@ -101,7 +102,7 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     response(self, 200, prepare_task(message, task_id, run_root))
                     return
                 parts = [part for part in self.path.split("?")[0].split("/") if part]
-                if len(parts) == 3 and parts[0] == "runs" and parts[2] == "execute_local":
+                if len(parts) == 3 and parts[0] == "runs" and parts[2] in {"execute_local", "execute_http"}:
                     task_id = parts[1]
                     run_dir = run_root / task_id
                     if not run_dir.exists():
@@ -124,7 +125,11 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                             return
                     workspace_root = Path(str(payload.get("workspace_root") or run_dir / "work"))
                     timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
-                    summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
+                    if parts[2] == "execute_local":
+                        summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
+                    else:
+                        host = str(payload.get("host") or "127.0.0.1")
+                        summary = execute_http_run(run_dir, host=host, timeout_sec=timeout_sec)
                     response(self, 200 if summary.get("ok") else 500, {"ok": bool(summary.get("ok")), "summary": summary})
                     return
                 response(self, 404, {"ok": False, "error": "not found"})

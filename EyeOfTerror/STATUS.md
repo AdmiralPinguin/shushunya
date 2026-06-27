@@ -16,7 +16,7 @@
 - EyeOfTerror can execute dispatch packets through HTTP services with `eye_of_terror.http_executor`.
 - The end-to-end HTTP pipeline test reaches a `ready` final manifest for the Skalathrax test task.
 - Local and HTTP executors write `task_ledger.json` with task status, step status, artifacts, and event history.
-- Warmaster Gateway can prepare Iskandar run packages, expose run status, and execute local dev pipelines.
+- Warmaster Gateway can prepare Iskandar run packages, expose run status, execute local dev pipelines, and execute HTTP worker-service pipelines.
 
 ## Main Check
 
@@ -39,11 +39,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `NoosphericExtractor` still uses rule-based event playbooks; Skalathrax rules now live in data, not Python code.
 - `AuspexBrowser` performs guarded HTTP text fetches; it does not yet render JavaScript pages or screenshots.
 - The pipeline records inaccessible primary books as gaps instead of solving book acquisition.
-- Warmaster Gateway local execution is for development; production execution through long-running worker services still needs controls.
+- Warmaster Gateway HTTP execution is available, but still synchronous; long-running background execution controls are not implemented yet.
 
 ## Next Good Steps
 
 - Add richer ranking and source-type classification for live discovery results.
 - Add more playbooks only when they are task-class patterns, not one-off hacks.
-- Expose task ledger state and execution controls through Warmaster Gateway.
-- Add Warmaster Gateway only after the Iskandar/Mechanicum boundary remains stable.
+- Add background execution controls and cancellation through Warmaster Gateway.
