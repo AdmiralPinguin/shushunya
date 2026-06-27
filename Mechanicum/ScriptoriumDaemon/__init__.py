@@ -1,0 +1,1 @@
+"""ScriptoriumDaemon worker prototype."""
