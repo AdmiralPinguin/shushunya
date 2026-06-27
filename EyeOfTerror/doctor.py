@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 from pathlib import Path
 from typing import Any
 
@@ -111,8 +112,14 @@ def run_doctor() -> dict[str, Any]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Check EyeOfTerror and Mechanicum registry consistency.")
+    parser.add_argument("--quiet", action="store_true", help="Print only one status line on success.")
+    args = parser.parse_args()
     payload = run_doctor()
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    if args.quiet and payload["ok"]:
+        print("[ok] EyeOfTerror doctor")
+    else:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0 if payload["ok"] else 1
 
 
