@@ -27,7 +27,7 @@ and the end-to-end HTTP worker pipeline.
 
 ## Current Limits
 
-- `Lexmechanic` uses source playbooks plus a generic fallback; live source discovery is not implemented yet.
+- `Lexmechanic` uses source playbooks plus live discovery results; discovered URLs are recorded but not trusted until classified.
 - `NoosphericExtractor` still uses rule-based event playbooks; Skalathrax rules now live in data, not Python code.
 - `AuspexBrowser` performs guarded HTTP text fetches; it does not yet render JavaScript pages or screenshots.
 - The pipeline records inaccessible primary books as gaps instead of solving book acquisition.
@@ -35,7 +35,7 @@ and the end-to-end HTTP worker pipeline.
 
 ## Next Good Steps
 
-- Make `Lexmechanic` support pluggable search providers and generic source discovery.
+- Add classification rules that can promote live discovery results into source candidates.
 - Add more playbooks only when they are task-class patterns, not one-off hacks.
 - Add a persistent task ledger for governor runs and worker artifacts.
 - Add Warmaster Gateway only after the Iskandar/Mechanicum boundary remains stable.

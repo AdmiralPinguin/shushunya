@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 PLAYBOOK_DIR = Path(__file__).resolve().parent / "playbooks"
+SHUSHUNYA_AGENT_DIR = Path(__file__).resolve().parents[1] / "ShushunyaAgent"
+if str(SHUSHUNYA_AGENT_DIR) not in sys.path:
+    sys.path.insert(0, str(SHUSHUNYA_AGENT_DIR))
+
+from shushunya_agent.web_tools import web_search  # noqa: E402
+
+
+class SearchConfig:
+    max_tool_output_chars = 12000
+
+
+SearchFn = Callable[[str, int], dict[str, Any]]
 
 
 def load_playbook(name: str) -> dict[str, Any]:
@@ -55,7 +68,32 @@ def generic_search_queries(goal: str) -> list[str]:
     ]
 
 
-def source_map_for_contract(contract: dict[str, Any]) -> dict[str, Any]:
+def default_search(query: str, limit: int) -> dict[str, Any]:
+    return web_search(SearchConfig(), query, limit)
+
+
+def run_discovery_queries(search_queries: list[str], searcher: SearchFn | None, limit: int = 5) -> list[dict[str, Any]]:
+    if searcher is None:
+        return []
+    results: list[dict[str, Any]] = []
+    for query in search_queries[:4]:
+        try:
+            payload = searcher(query, limit)
+        except Exception as exc:  # noqa: BLE001 - discovery failures are recorded as source-map data.
+            payload = {"ok": False, "error": str(exc)}
+        results.append(
+            {
+                "query": query,
+                "ok": bool(payload.get("ok")),
+                "provider": payload.get("source") or payload.get("provider", ""),
+                "results": payload.get("results", [])[:limit] if isinstance(payload.get("results"), list) else [],
+                "error": payload.get("error", ""),
+            }
+        )
+    return results
+
+
+def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None = None) -> dict[str, Any]:
     goal = str(contract.get("goal") or "")
     playbooks = matching_playbooks(goal)
     sources = dedupe_sources(
@@ -90,18 +128,20 @@ def source_map_for_contract(contract: dict[str, Any]) -> dict[str, Any]:
         "A pass requires at least one reliable primary or official source candidate.",
         "Secondary summaries can guide discovery but must not become sole evidence.",
     ]
+    discovery_results = run_discovery_queries(search_queries, searcher)
     return {
         "topic": goal,
         "sources": sources,
         "search_queries": search_queries,
         "discovery_status": discovery_status,
+        "discovery_results": discovery_results,
         "matched_playbooks": [str(playbook.get("name") or playbook.get("match_terms", ["unknown"])[0]) for playbook in playbooks],
         "coverage_gaps": coverage_gaps,
         "quality_notes": quality_notes,
     }
 
 
-def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
+def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None = default_search) -> dict[str, Any]:
     contract = request.get("contract")
     step = request.get("step")
     if not isinstance(contract, dict):
@@ -112,7 +152,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     if not isinstance(expected_artifacts, list) or not expected_artifacts:
         return {"ok": False, "worker": "Lexmechanic", "error": "step.expected_artifacts is empty"}
     output_path = str(expected_artifacts[0])
-    source_map = source_map_for_contract(contract)
+    source_map = source_map_for_contract(contract, searcher)
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(source_map, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

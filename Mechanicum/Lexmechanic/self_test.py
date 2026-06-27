@@ -5,10 +5,34 @@ import json
 import tempfile
 from pathlib import Path
 
-from lexmechanic import run
+from lexmechanic import run, source_map_for_contract
 
 
 def main() -> int:
+    fake_search_calls = []
+
+    def fake_search(query: str, limit: int) -> dict:
+        fake_search_calls.append((query, limit))
+        return {
+            "ok": True,
+            "source": "fake",
+            "results": [
+                {
+                    "title": "Candidate",
+                    "url": "https://example.com/candidate",
+                    "snippet": "candidate source",
+                }
+            ],
+        }
+
+    discovered = source_map_for_contract({"goal": "unknown topic"}, fake_search)
+    if discovered["sources"] != []:
+        raise AssertionError("live discovery results must not become trusted sources automatically")
+    if not discovered["discovery_results"] or discovered["discovery_results"][0]["provider"] != "fake":
+        raise AssertionError(f"fake discovery was not recorded: {discovered['discovery_results']}")
+    if not fake_search_calls:
+        raise AssertionError("fake searcher was not called")
+
     request = {
         "task_id": "test-skalathrax:source_discovery",
         "contract": {
@@ -19,7 +43,7 @@ def main() -> int:
         },
     }
     with tempfile.TemporaryDirectory() as temp_dir:
-        result = run(request, Path(temp_dir))
+        result = run(request, Path(temp_dir), searcher=None)
         if not result.get("ok"):
             raise AssertionError(f"Lexmechanic failed: {result}")
         output = Path(temp_dir) / "skalathrax" / "source_map.json"
@@ -41,7 +65,7 @@ def main() -> int:
             "contract": {"goal": "Собери историю неизвестной битвы."},
             "step": {"expected_artifacts": ["/work/generic/source_map.json"]},
         }
-        generic_result = run(generic_request, Path(temp_dir))
+        generic_result = run(generic_request, Path(temp_dir), searcher=fake_search)
         if not generic_result.get("ok"):
             raise AssertionError(f"Lexmechanic generic fallback failed: {generic_result}")
         generic = json.loads((Path(temp_dir) / "generic" / "source_map.json").read_text(encoding="utf-8"))
@@ -49,6 +73,8 @@ def main() -> int:
             raise AssertionError(f"generic fallback should not invent sources: {generic['sources']}")
         if generic.get("discovery_status") != "needs_live_discovery":
             raise AssertionError(f"generic fallback should request live discovery: {generic}")
+        if not generic.get("discovery_results"):
+            raise AssertionError(f"generic fallback should record discovery results: {generic}")
         if not any("live source discovery" in gap for gap in generic.get("coverage_gaps", [])):
             raise AssertionError(f"generic fallback should demand live discovery: {generic}")
     print("[ok] Lexmechanic source map")
