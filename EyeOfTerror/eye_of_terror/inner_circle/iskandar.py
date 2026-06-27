@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ..contracts import TaskContract, build_lore_reconstruction_contract
+from ..pipeline import build_dispatch_packets, pipeline_status, write_pipeline_run
 from ..registry import worker_by_name
 
 
@@ -41,12 +43,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build an Iskandar Khayon lore reconstruction plan.")
     parser.add_argument("task", help="User task text")
     parser.add_argument("--task-id", default="", help="Stable task id")
+    parser.add_argument("--run-dir", default="", help="Write contract and dispatch packets to this directory")
     args = parser.parse_args()
     plan = plan_lore_reconstruction(args.task, task_id=args.task_id or None)
-    print(json.dumps(plan.to_dict(), ensure_ascii=False, indent=2))
+    if args.run_dir:
+        status = write_pipeline_run(plan.contract, Path(args.run_dir))
+        print(json.dumps(status, ensure_ascii=False, indent=2))
+    else:
+        payload = plan.to_dict()
+        payload["pipeline"] = pipeline_status(plan.contract, build_dispatch_packets(plan.contract))
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

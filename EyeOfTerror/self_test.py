@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from pathlib import Path
 
 from eye_of_terror.contracts import build_lore_reconstruction_contract
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
+from eye_of_terror.pipeline import build_dispatch_packets, write_pipeline_run
 from eye_of_terror.registry import worker_refs
 
 
@@ -54,6 +57,41 @@ def main() -> int:
     if "Do not deliver a shallow wiki summary" not in " ".join(plan["contract"]["non_goals"]):
         raise AssertionError("Iskandar contract does not guard against shallow wiki summaries")
     print("[ok] Iskandar worker plan")
+
+    packets = build_dispatch_packets(contract)
+    if [packet.step_id for packet in packets] != [
+        "source_discovery",
+        "fact_extraction",
+        "timeline",
+        "draft_reconstruction",
+        "critic_review",
+        "finalize",
+    ]:
+        raise AssertionError(f"wrong dispatch packet sequence: {[packet.step_id for packet in packets]}")
+    if packets[0].port != 7002 or packets[-1].port != 7007:
+        raise AssertionError(f"dispatch packets target wrong ports: {[packet.port for packet in packets]}")
+    if packets[1].request["task_id"] != "test-skalathrax:fact_extraction":
+        raise AssertionError(f"dispatch task id is not stable: {packets[1].request}")
+    print("[ok] Iskandar dispatch packets")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        status = write_pipeline_run(contract, Path(temp_dir))
+        if not status["ok"]:
+            raise AssertionError(f"pipeline status failed: {status}")
+        expected_files = [
+            "contract.json",
+            "status.json",
+            "dispatch/source_discovery.json",
+            "dispatch/fact_extraction.json",
+            "dispatch/timeline.json",
+            "dispatch/draft_reconstruction.json",
+            "dispatch/critic_review.json",
+            "dispatch/finalize.json",
+        ]
+        missing = [name for name in expected_files if not (Path(temp_dir) / name).exists()]
+        if missing:
+            raise AssertionError(f"pipeline run did not write expected files: {missing}")
+    print("[ok] Iskandar pipeline run package")
     return 0
 
 
