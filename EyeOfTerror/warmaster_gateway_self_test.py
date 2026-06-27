@@ -39,6 +39,9 @@ def main() -> int:
             run_dir = Path(task["run_dir"])
             if not (run_dir / "dispatch" / "source_discovery.json").exists():
                 raise AssertionError(f"gateway did not prepare run package: {task}")
+            run_status = request_json(base + "/runs/warmaster-test")
+            if not run_status.get("ok") or run_status.get("task_id") != "warmaster-test":
+                raise AssertionError(f"bad run status: {run_status}")
         finally:
             server.shutdown()
             thread.join(timeout=5)

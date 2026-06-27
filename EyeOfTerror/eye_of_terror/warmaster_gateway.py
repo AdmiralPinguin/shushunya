@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .inner_circle.iskandar import plan_lore_reconstruction
+from .ledger import TaskLedger
 from .pipeline import write_pipeline_run
 
 
@@ -59,10 +60,29 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
             return
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-            if self.path != "/health":
-                response(self, 404, {"ok": False, "error": "not found"})
+            if self.path == "/health":
+                response(self, 200, {"ok": True, "gateway": "WarmasterGateway"})
                 return
-            response(self, 200, {"ok": True, "gateway": "WarmasterGateway"})
+            parts = [part for part in self.path.split("?")[0].split("/") if part]
+            if len(parts) in {2, 3} and parts[0] == "runs":
+                task_id = parts[1]
+                run_dir = run_root / task_id
+                status_path = run_dir / "status.json"
+                ledger_path = run_dir / "task_ledger.json"
+                if not run_dir.exists():
+                    response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
+                    return
+                if len(parts) == 3 and parts[2] == "ledger":
+                    if not ledger_path.exists():
+                        response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
+                        return
+                    response(self, 200, {"ok": True, "ledger": TaskLedger.load(ledger_path).to_dict()})
+                    return
+                status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
+                ledger = TaskLedger.load(ledger_path).to_dict() if ledger_path.exists() else {}
+                response(self, 200, {"ok": True, "task_id": task_id, "run_dir": str(run_dir), "status": status, "ledger": ledger})
+                return
+            response(self, 404, {"ok": False, "error": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             try:

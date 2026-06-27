@@ -34,6 +34,13 @@ Run the gateway:
 PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.warmaster_gateway
 ```
 
+Gateway endpoints:
+
+- `GET /health`
+- `POST /task`
+- `GET /runs/<task_id>`
+- `GET /runs/<task_id>/ledger`
+
 ## Iskandar Service
 
 Run the first Inner Circle governor:
