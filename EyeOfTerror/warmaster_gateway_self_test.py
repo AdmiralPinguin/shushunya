@@ -86,6 +86,14 @@ def main() -> int:
             doctor = request_json(base + "/doctor")
             if not doctor.get("ok") or "worker_manifests" not in doctor.get("checks", []):
                 raise AssertionError(f"bad doctor response: {doctor}")
+            corrupt_dir = run_root / "corrupt-ledger-test"
+            corrupt_dir.mkdir(parents=True, exist_ok=True)
+            (corrupt_dir / "status.json").write_text(json.dumps({"task_id": "corrupt-ledger-test"}), encoding="utf-8")
+            (corrupt_dir / "task_ledger.json").write_text("{", encoding="utf-8")
+            corrupt_runs = request_json(base + "/runs")
+            corrupt_item = next((item for item in corrupt_runs.get("runs", []) if item.get("task_id") == "corrupt-ledger-test"), None)
+            if not corrupt_item or corrupt_item.get("status") != "corrupt" or not corrupt_item.get("ledger_error"):
+                raise AssertionError(f"corrupt ledger was not represented safely: {corrupt_runs}")
             governors = request_json(base + "/governors")
             if not governors.get("ok") or not any(item.get("name") == "IskandarKhayon" for item in governors.get("governors", [])):
                 raise AssertionError(f"bad governors response: {governors}")
@@ -126,7 +134,7 @@ def main() -> int:
                 or not any(item.get("task_id") == "warmaster-test" for item in state.get("runs", []))
                 or not any(item.get("name") == "Lexmechanic" for item in state.get("workers", []))
                 or "state_snapshot" not in state.get("capabilities", {}).get("capabilities", [])
-                or state.get("run_summary", {}).get("total") != 1
+                or state.get("run_summary", {}).get("total", 0) < 2
             ):
                 raise AssertionError(f"bad gateway state: {state}")
             run_dir = Path(task["run_dir"])

@@ -75,21 +75,38 @@ def prepare_task(message: str, task_id: str | None, run_root: Path) -> dict[str,
     }
 
 
+def load_ledger_dict(ledger_path: Path) -> tuple[dict[str, Any], str]:
+    if not ledger_path.exists():
+        return {}, "ledger not found"
+    try:
+        return TaskLedger.load(ledger_path).to_dict(), ""
+    except Exception as exc:  # noqa: BLE001 - gateway must report corrupt run state instead of crashing.
+        return {}, str(exc)
+
+
 def run_summary(run_dir: Path) -> dict[str, Any]:
     status_path = run_dir / "status.json"
     ledger_path = run_dir / "task_ledger.json"
-    status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
-    ledger = TaskLedger.load(ledger_path).to_dict() if ledger_path.exists() else {}
-    return {
+    try:
+        status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
+        if not isinstance(status, dict):
+            status = {}
+    except Exception:
+        status = {}
+    ledger, ledger_error = load_ledger_dict(ledger_path)
+    summary = {
         "task_id": ledger.get("task_id") or status.get("task_id") or run_dir.name,
         "run_dir": str(run_dir),
-        "status": ledger.get("status") or status.get("status") or "unknown",
+        "status": "corrupt" if ledger_error and ledger_path.exists() else ledger.get("status") or status.get("status") or "unknown",
         "goal": ledger.get("goal") or "",
         "governor": ledger.get("governor") or status.get("governor") or "",
         "created_at": ledger.get("created_at") or "",
         "updated_at": ledger.get("updated_at") or "",
         "result": ledger.get("result", {}),
     }
+    if ledger_error and ledger_path.exists():
+        summary["ledger_error"] = ledger_error
+    return summary
 
 
 def list_runs(run_root: Path) -> list[dict[str, Any]]:
@@ -135,9 +152,9 @@ def run_dispatch_packets(run_dir: Path) -> dict[str, Any]:
 
 def run_events(run_dir: Path, limit: int | None = None) -> dict[str, Any]:
     ledger_path = run_dir / "task_ledger.json"
-    if not ledger_path.exists():
-        return {"ok": False, "error": "ledger not found"}
-    ledger = TaskLedger.load(ledger_path).to_dict()
+    ledger, ledger_error = load_ledger_dict(ledger_path)
+    if ledger_error:
+        return {"ok": False, "error": ledger_error}
     events = ledger.get("events", [])
     if not isinstance(events, list):
         events = []
@@ -158,7 +175,11 @@ def recover_stale_runs(run_root: Path) -> list[dict[str, Any]]:
         ledger_path = run_dir / "task_ledger.json"
         if not ledger_path.exists():
             continue
-        ledger = TaskLedger.load(ledger_path)
+        try:
+            ledger = TaskLedger.load(ledger_path)
+        except Exception:  # noqa: BLE001 - corrupt runs are reported by run_summary and must not block recovery.
+            recovered.append(run_summary(run_dir))
+            continue
         if ledger.data.get("status") in {"running", "cancelling"}:
             ledger.set_status("interrupted")
             ledger.record_event("recovered_stale_run", {"reason": "gateway process has no active worker thread"})
@@ -465,7 +486,11 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     if not ledger_path.exists():
                         response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
                         return
-                    response(self, 200, {"ok": True, "ledger": TaskLedger.load(ledger_path).to_dict()})
+                    ledger, ledger_error = load_ledger_dict(ledger_path)
+                    if ledger_error:
+                        response(self, 500, {"ok": False, "error": ledger_error, "task_id": task_id})
+                        return
+                    response(self, 200, {"ok": True, "ledger": ledger})
                     return
                 if len(parts) == 3 and parts[2] == "contract":
                     payload = run_contract(run_dir)
@@ -486,7 +511,11 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     if not ledger_path.exists():
                         response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
                         return
-                    response(self, 200, {"ok": True, "task_id": task_id, **artifact_status(TaskLedger.load(ledger_path).to_dict())})
+                    ledger, ledger_error = load_ledger_dict(ledger_path)
+                    if ledger_error:
+                        response(self, 500, {"ok": False, "error": ledger_error, "task_id": task_id})
+                        return
+                    response(self, 200, {"ok": True, "task_id": task_id, **artifact_status(ledger)})
                     return
                 if len(parts) == 3 and parts[2] == "artifact_text":
                     if not ledger_path.exists():
@@ -494,15 +523,22 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         return
                     query = parse_qs(parsed.query)
                     artifact_path = query.get("path", [""])[0]
+                    ledger, ledger_error = load_ledger_dict(ledger_path)
+                    if ledger_error:
+                        response(self, 500, {"ok": False, "error": ledger_error, "task_id": task_id})
+                        return
                     try:
-                        payload = artifact_text(TaskLedger.load(ledger_path).to_dict(), artifact_path)
+                        payload = artifact_text(ledger, artifact_path)
                     except ValueError as exc:
                         response(self, 400, {"ok": False, "error": str(exc)})
                         return
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
-                ledger = TaskLedger.load(ledger_path).to_dict() if ledger_path.exists() else {}
+                ledger, ledger_error = load_ledger_dict(ledger_path)
+                if ledger_error and ledger_path.exists():
+                    response(self, 200, {"ok": True, "task_id": task_id, "run_dir": str(run_dir), "status": status, "ledger": {}, "ledger_error": ledger_error})
+                    return
                 response(self, 200, {"ok": True, "task_id": task_id, "run_dir": str(run_dir), "status": status, "ledger": ledger})
                 return
             response(self, 404, {"ok": False, "error": "not found"})
