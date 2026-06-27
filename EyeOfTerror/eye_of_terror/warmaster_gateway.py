@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ from .pipeline import write_pipeline_run
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+ACTIVE_RUNS: set[str] = set()
+ACTIVE_RUNS_LOCK = threading.Lock()
 
 
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -82,6 +85,23 @@ def list_runs(run_root: Path) -> list[dict[str, Any]]:
     return sorted(runs, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
 
 
+def start_background(task_id: str, target: Any) -> bool:
+    with ACTIVE_RUNS_LOCK:
+        if task_id in ACTIVE_RUNS:
+            return False
+        ACTIVE_RUNS.add(task_id)
+
+    def wrapped() -> None:
+        try:
+            target()
+        finally:
+            with ACTIVE_RUNS_LOCK:
+                ACTIVE_RUNS.discard(task_id)
+
+    threading.Thread(target=wrapped, daemon=True).start()
+    return True
+
+
 def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
     class WarmasterHandler(BaseHTTPRequestHandler):
         server_version = "WarmasterGateway/0.1"
@@ -129,7 +149,7 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     response(self, 200, prepare_task(message, task_id, run_root))
                     return
                 parts = [part for part in self.path.split("?")[0].split("/") if part]
-                if len(parts) == 3 and parts[0] == "runs" and parts[2] in {"execute_local", "execute_http"}:
+                if len(parts) == 3 and parts[0] == "runs" and parts[2] in {"execute_local", "execute_http", "start_local", "start_http"}:
                     task_id = parts[1]
                     run_dir = run_root / task_id
                     if not run_dir.exists():
@@ -152,6 +172,18 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                             return
                     workspace_root = Path(str(payload.get("workspace_root") or run_dir / "work"))
                     timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
+                    if parts[2] in {"execute_local", "start_local"}:
+                        executor = lambda: execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
+                    else:
+                        host = str(payload.get("host") or "127.0.0.1")
+                        executor = lambda: execute_http_run(run_dir, host=host, timeout_sec=timeout_sec)
+                    if parts[2].startswith("start_"):
+                        started = start_background(task_id, executor)
+                        if not started:
+                            response(self, 409, {"ok": False, "error": "run already active", "task_id": task_id})
+                            return
+                        response(self, 202, {"ok": True, "task_id": task_id, "status": "started"})
+                        return
                     if parts[2] == "execute_local":
                         summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
                     else:

@@ -43,6 +43,8 @@ Gateway endpoints:
 - `GET /runs/<task_id>/ledger`
 - `POST /runs/<task_id>/execute_local`
 - `POST /runs/<task_id>/execute_http`
+- `POST /runs/<task_id>/start_local`
+- `POST /runs/<task_id>/start_http`
 
 ## Iskandar Service
 

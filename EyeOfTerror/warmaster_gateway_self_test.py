@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -68,6 +69,22 @@ def main() -> int:
             forced = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30, "force": True}, timeout=60)
             if not forced.get("ok"):
                 raise AssertionError(f"forced rerun failed: {forced}")
+            background_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-background-test"},
+            )
+            if not background_task.get("ok"):
+                raise AssertionError(f"bad background task response: {background_task}")
+            started = request_json(base + "/runs/warmaster-background-test/start_local", {"timeout_sec": 30})
+            if started.get("status") != "started":
+                raise AssertionError(f"background start failed: {started}")
+            for _ in range(60):
+                background_ledger = request_json(base + "/runs/warmaster-background-test/ledger")
+                if background_ledger["ledger"].get("status") == "completed":
+                    break
+                time.sleep(0.2)
+            else:
+                raise AssertionError(f"background run did not complete: {background_ledger}")
         finally:
             server.shutdown()
             thread.join(timeout=5)
