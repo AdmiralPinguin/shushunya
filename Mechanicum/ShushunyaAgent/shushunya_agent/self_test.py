@@ -2821,6 +2821,42 @@ def main() -> int:
         raise AssertionError(f"cumulative repeat guard stopped too late: {len(repeat_payload.get('steps', []))} steps")
     print("[ok] cumulative repeated action guard")
 
+    failed_web_fetch_repeat_stdout = io.StringIO()
+    failed_web_fetch_repeat_config = AgentConfig(
+        task_id=safe_task_id("self-test-failed-web-fetch-repeat"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    failed_url = "https://example.com/blocked"
+    failed_web_fetch_repeat_actions = [
+        json.dumps({"action": "web_fetch", "url": failed_url}, ensure_ascii=False),
+        json.dumps({"action": "web_fetch", "url": failed_url}, ensure_ascii=False),
+        '{"action":"web_search","query":"alternate source","limit":1}',
+        '{"action":"final","message":"done"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=failed_web_fetch_repeat_actions), \
+            mock.patch.object(agent_runner, "web_fetch", return_value={"ok": False, "error": "HTTP Error 403: Forbidden"}) as mocked_failed_fetch, \
+            mock.patch.object(agent_runner, "web_search", return_value={"ok": True, "results": []}), \
+            contextlib.redirect_stdout(failed_web_fetch_repeat_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        failed_web_fetch_repeat_code = run_agent("recover from blocked web source", failed_web_fetch_repeat_config)
+    failed_web_fetch_repeat_payload = json.loads(failed_web_fetch_repeat_stdout.getvalue())
+    failed_web_fetch_repeat_errors = [
+        (step.get("result") or {}).get("error")
+        for step in failed_web_fetch_repeat_payload.get("steps", [])
+        if isinstance(step.get("result"), dict)
+    ]
+    if failed_web_fetch_repeat_code != 0 or "web_fetch failed url rejected by supervisor" not in failed_web_fetch_repeat_errors:
+        raise AssertionError(
+            "failed web_fetch repeat guard failed: "
+            f"code={failed_web_fetch_repeat_code}, payload={failed_web_fetch_repeat_payload}"
+        )
+    if mocked_failed_fetch.call_count != 1:
+        raise AssertionError(f"failed URL should be fetched once, got {mocked_failed_fetch.call_count}")
+    print("[ok] failed web_fetch repeat guard")
+
     productive_reset_stdout = io.StringIO()
     productive_reset_config = AgentConfig(
         task_id=safe_task_id("self-test-repeat-reset-on-progress"),

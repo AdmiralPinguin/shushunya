@@ -1244,6 +1244,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "artifact verification mode action rejected by supervisor",
     "data source inspection required by supervisor",
     "data source reread rejected by supervisor",
+    "web_fetch failed url rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
     "append_file to JSON rejected by supervisor",
@@ -4128,6 +4129,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         {"role": "user", "content": task},
     ]
     action_counts: dict[str, int] = {}
+    failed_web_fetch_urls: set[str] = set()
     successful_write_file_paths: dict[str, int] = {}
     successful_write_file_max_bytes: dict[str, int] = {}
     failed_verification_paths: set[str] = set()
@@ -4936,6 +4938,17 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "action should be a narrow write_file/replace_in_file edit that targets failing_tests."
                     ),
                 }
+            elif action_type == "web_fetch" and str(action.get("url") or "").strip() in failed_web_fetch_urls:
+                result = {
+                    "ok": False,
+                    "error": "web_fetch failed url rejected by supervisor",
+                    "url": str(action.get("url") or "").strip(),
+                    "instruction": (
+                        "This exact URL already failed with web_fetch. Do not fetch it again in this task. "
+                        "Use web_search/web_links to find a different source, mirror, cached page, official index, "
+                        "or summarize the source as unavailable and continue with alternate evidence."
+                    ),
+                }
             elif action_counts[fingerprint] >= 3:
                 result = {
                     "ok": False,
@@ -5636,6 +5649,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             and result.get("failures")
         ):
             failed_verification_paths.add(str(result.get("path")))
+        elif action_type == "web_fetch" and isinstance(result, dict):
+            url = str(action.get("url") or "").strip()
+            if url and result.get("ok") is False:
+                failed_web_fetch_urls.add(url)
+            elif url and result.get("ok") is True:
+                failed_web_fetch_urls.discard(url)
         event_extra: dict[str, Any] = {}
         if isinstance(result, dict):
             if action_type == "web_search":
