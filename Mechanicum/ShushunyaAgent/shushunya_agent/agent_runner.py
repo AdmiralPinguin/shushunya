@@ -1655,6 +1655,32 @@ def action_uses_cli_input_path(action: dict[str, Any], input_paths: Iterable[str
     return False
 
 
+def cli_semantic_markers_from_task(task: str) -> list[str]:
+    if "resume context" in (task or "").lower():
+        return []
+    markers: list[str] = []
+    for match in re.finditer(r"\b[A-Za-z_][A-Za-z0-9_]{2,}\b", task or ""):
+        marker = match.group(0)
+        lowered = marker.lower()
+        if lowered in {"python", "pytest", "json", "cli", "datetime", "fallback", "true", "false"}:
+            continue
+        if "_" in marker or lowered in {"owners", "owner", "rejected", "scheduled", "reason", "summary", "plan", "count"}:
+            markers.append(marker)
+    return list(dict.fromkeys(markers))[:12]
+
+
+def action_checks_cli_semantics(action: dict[str, Any], markers: Iterable[str]) -> bool:
+    marker_list = list(dict.fromkeys(markers))
+    if not marker_list:
+        return True
+    cmd = str(action.get("cmd") or "")
+    code = str(action.get("code") or "")
+    text = f"{cmd}\n{code}".lower()
+    matched = sum(1 for marker in marker_list if marker.lower() in text)
+    required = min(2, len(marker_list))
+    return matched >= required
+
+
 def action_is_cli_verification(
     action_type: str,
     action: dict[str, Any],
@@ -1669,6 +1695,9 @@ def action_is_cli_verification(
         return False
     required_inputs = list(dict.fromkeys(expected_input_paths or []))
     if required_inputs and not action_uses_cli_input_path(action, required_inputs):
+        return False
+    semantic_markers = cli_semantic_markers_from_task(task)
+    if semantic_markers and not action_checks_cli_semantics(action, semantic_markers):
         return False
     cmd = str(action.get("cmd") or "").lower()
     code = str(action.get("code") or "").lower()

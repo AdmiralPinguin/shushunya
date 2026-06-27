@@ -735,6 +735,38 @@ def main() -> int:
         {"/work/project/jobs.csv"},
     ):
         raise AssertionError("known workspace input CLI verification was not recognized")
+    semantic_task = "CLI должен вернуть scheduled_count, owners и rejected reason в JSON."
+    if agent_runner.action_is_cli_verification(
+        "python",
+        {
+            "code": (
+                "import subprocess,json\n"
+                "r=subprocess.run(['python3','-m','scheduler.cli','jobs.csv'], capture_output=True, text=True)\n"
+                "json.loads(r.stdout)\nassert r.returncode == 0"
+            )
+        },
+        semantic_task,
+        {"scheduler.cli"},
+        {"/work/project/jobs.csv"},
+    ):
+        raise AssertionError("CLI semantic task must not accept JSON-only verification")
+    if not agent_runner.action_is_cli_verification(
+        "python",
+        {
+            "code": (
+                "import subprocess,json\n"
+                "r=subprocess.run(['python3','-m','scheduler.cli','jobs.csv'], capture_output=True, text=True)\n"
+                "data=json.loads(r.stdout)\n"
+                "assert data['summary']['scheduled_count'] == 4\n"
+                "assert data['summary']['owners']\n"
+                "assert data['plan']['rejected'][0]['reason']"
+            )
+        },
+        semantic_task,
+        {"scheduler.cli"},
+        {"/work/project/jobs.csv"},
+    ):
+        raise AssertionError("CLI semantic task should accept field-level JSON assertions")
     if not agent_runner.action_is_cli_verification(
         "shell",
         {"cmd": "python3 -m package.cli data.csv | python3 -c \"import sys,json; json.load(sys.stdin)\""},
