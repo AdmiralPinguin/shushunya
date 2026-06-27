@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .inner_circle.iskandar import plan_lore_reconstruction
 from .http_executor import execute_run as execute_http_run
+from .governors import governor_by_name
 from .ledger import TaskLedger
 from .local_executor import execute_run as execute_local_run
 from .pipeline import write_pipeline_run
@@ -46,6 +47,9 @@ def prepare_task(message: str, task_id: str | None, run_root: Path) -> dict[str,
     if not route.ok:
         return {"ok": False, "gateway": "WarmasterGateway", "error": route.reason, "kind": route.kind}
     governor = route.governor
+    governor_ref = governor_by_name(governor)
+    if governor_ref is None or not governor_ref.active():
+        return {"ok": False, "gateway": "WarmasterGateway", "error": f"governor is not active: {governor}", "kind": route.kind}
     plan = plan_lore_reconstruction(message, task_id=task_id)
     run_dir = run_root / plan.contract.task_id
     status = write_pipeline_run(plan.contract, run_dir)

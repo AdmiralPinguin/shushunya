@@ -22,6 +22,7 @@
 - Warmaster Gateway can request cooperative cancellation through the task ledger; executors stop before the next worker step.
 - HTTP execution preflights all worker `/health` endpoints before running steps.
 - Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.
+- Inner Circle governors are tracked in `EyeOfTerror/registry/governors.json`; code/image governors are explicit planned entries.
 
 ## Main Check
 

@@ -1,0 +1,20 @@
+{
+  "IskandarKhayon": {
+    "status": "active",
+    "port": 7101,
+    "task_kinds": ["research", "lore_reconstruction"],
+    "service": "eye_of_terror.inner_circle.iskandar_service"
+  },
+  "CogitatorCodewrightGovernor": {
+    "status": "planned",
+    "port": 7102,
+    "task_kinds": ["code"],
+    "service": ""
+  },
+  "ForgeMasterGovernor": {
+    "status": "planned",
+    "port": 7103,
+    "task_kinds": ["image_generation"],
+    "service": ""
+  }
+}
