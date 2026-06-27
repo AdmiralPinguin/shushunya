@@ -2,6 +2,9 @@
 
 Inner Circle governors coordinate Mechanicum workers for a task class.
 
+Governor services should expose the standard contract in
+`EyeOfTerror/contracts/governor_api.md`.
+
 Active governors:
 
 - `IskandarKhayon`: lore, research, reconstruction.

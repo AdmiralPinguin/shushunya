@@ -78,6 +78,8 @@ It exposes:
 - `POST /plan`
 - `POST /prepare_run`
 
+Governor services should follow `EyeOfTerror/contracts/governor_api.md`.
+
 ## Local Prototype Run
 
 Build an Iskandar run package:
