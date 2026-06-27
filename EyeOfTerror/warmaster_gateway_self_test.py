@@ -83,6 +83,9 @@ def main() -> int:
             required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout"}
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
                 raise AssertionError(f"bad gateway capabilities response: {capabilities}")
+            doctor = request_json(base + "/doctor")
+            if not doctor.get("ok") or "worker_manifests" not in doctor.get("checks", []):
+                raise AssertionError(f"bad doctor response: {doctor}")
             governors = request_json(base + "/governors")
             if not governors.get("ok") or not any(item.get("name") == "IskandarKhayon" for item in governors.get("governors", [])):
                 raise AssertionError(f"bad governors response: {governors}")

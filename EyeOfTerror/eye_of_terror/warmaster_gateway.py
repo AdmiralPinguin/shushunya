@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
 from .inner_circle.iskandar import plan_lore_reconstruction
+from doctor import run_doctor
 from .http_executor import execute_run as execute_http_run
 from .governors import governor_by_name, governor_refs
 from .ledger import TaskLedger
@@ -295,11 +296,13 @@ def gateway_capabilities() -> dict[str, Any]:
             "worker_registry",
             "worker_health_snapshot",
             "state_snapshot",
+            "doctor",
         ],
         "endpoints": [
             "GET /health",
             "GET /capabilities",
             "GET /state",
+            "GET /doctor",
             "GET /governors",
             "GET /governors?health=1",
             "GET /workers",
@@ -414,6 +417,10 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 raw_limit = query.get("run_limit", ["20"])[0]
                 run_limit = parse_limit(raw_limit, default=20)
                 response(self, 200, gateway_state(run_root, run_limit=run_limit))
+                return
+            if parsed.path == "/doctor":
+                payload = run_doctor()
+                response(self, 200 if payload.get("ok") else 500, payload)
                 return
             if parsed.path == "/governors":
                 query = parse_qs(parsed.query)
