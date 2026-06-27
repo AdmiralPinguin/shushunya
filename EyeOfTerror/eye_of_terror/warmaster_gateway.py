@@ -23,6 +23,13 @@ from .routing import route_message
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ACTIVE_RUNS: set[str] = set()
 ACTIVE_RUNS_LOCK = threading.Lock()
+MAX_LIST_LIMIT = 200
+
+
+def parse_limit(raw_value: str, default: int, maximum: int = MAX_LIST_LIMIT) -> int:
+    if not raw_value.isdigit():
+        return default
+    return max(0, min(int(raw_value), maximum))
 
 
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -318,7 +325,7 @@ def gateway_capabilities() -> dict[str, Any]:
 
 def gateway_state(run_root: Path, run_limit: int = 20) -> dict[str, Any]:
     all_runs = list_runs(run_root)
-    runs = all_runs[: max(0, run_limit)]
+    runs = all_runs[: parse_limit(str(run_limit), default=20)]
     return {
         "ok": True,
         "gateway": "WarmasterGateway",
@@ -405,7 +412,7 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/state":
                 query = parse_qs(parsed.query)
                 raw_limit = query.get("run_limit", ["20"])[0]
-                run_limit = int(raw_limit) if raw_limit.isdigit() else 20
+                run_limit = parse_limit(raw_limit, default=20)
                 response(self, 200, gateway_state(run_root, run_limit=run_limit))
                 return
             if parsed.path == "/governors":
@@ -464,7 +471,7 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 if len(parts) == 3 and parts[2] == "events":
                     query = parse_qs(parsed.query)
                     raw_limit = query.get("limit", [""])[0]
-                    limit = int(raw_limit) if raw_limit.isdigit() else None
+                    limit = parse_limit(raw_limit, default=MAX_LIST_LIMIT) if raw_limit else None
                     payload = run_events(run_dir, limit=limit)
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return

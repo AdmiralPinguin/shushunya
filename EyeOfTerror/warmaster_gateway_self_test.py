@@ -10,7 +10,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler
+from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit
 from eye_of_terror.ledger import TaskLedger
 
 
@@ -59,6 +59,8 @@ def make_cancel_handler(calls: list[str]) -> type[BaseHTTPRequestHandler]:
 
 
 def main() -> int:
+    if parse_limit("999999", default=20) != 200 or parse_limit("bad", default=20) != 20:
+        raise AssertionError("limit parser did not clamp values")
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir) / "runs"
         bad_dispatch = Path(temp_dir) / "bad-dispatch" / "dispatch"
