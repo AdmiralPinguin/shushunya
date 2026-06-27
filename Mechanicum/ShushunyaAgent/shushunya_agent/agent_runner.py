@@ -1384,7 +1384,7 @@ def required_artifact_paths_from_task(task: str) -> list[str]:
         if any(marker in lowered for marker in NON_REQUIRED_ARTIFACT_MARKERS):
             continue
         for path in paths:
-            if Path(path).suffix.lower() not in TEXT_VERIFICATION_EXTENSIONS:
+            if Path(path).suffix.lower() not in REQUIRED_ARTIFACT_EXTENSIONS:
                 continue
             if path not in seen:
                 seen.add(path)
@@ -1401,7 +1401,7 @@ def required_artifact_paths_from_task(task: str) -> list[str]:
         if not any(marker in lowered for marker in REQUIRED_ARTIFACT_MARKERS):
             continue
         for path in paths:
-            if Path(path).suffix.lower() not in TEXT_VERIFICATION_EXTENSIONS:
+            if Path(path).suffix.lower() not in REQUIRED_ARTIFACT_EXTENSIONS:
                 continue
             if path not in seen:
                 seen.add(path)
@@ -2322,8 +2322,6 @@ TEXT_VERIFICATION_EXTENSIONS = {
     ".txt",
     ".md",
     ".markdown",
-    ".json",
-    ".jsonl",
     ".csv",
     ".tsv",
     ".xml",
@@ -2334,6 +2332,10 @@ TEXT_VERIFICATION_EXTENSIONS = {
 }
 
 
+STRUCTURED_JSON_EXTENSIONS = {".json", ".jsonl"}
+REQUIRED_ARTIFACT_EXTENSIONS = TEXT_VERIFICATION_EXTENSIONS | STRUCTURED_JSON_EXTENSIONS
+
+
 def path_needs_text_verification(path: str) -> bool:
     lowered = path.lower()
     return any(lowered.endswith(extension) for extension in TEXT_VERIFICATION_EXTENSIONS)
@@ -2341,6 +2343,11 @@ def path_needs_text_verification(path: str) -> bool:
 
 def missing_text_verifications(paths: list[str], verified_paths: set[str]) -> list[str]:
     return [path for path in paths if path_needs_text_verification(path) and path not in verified_paths]
+
+
+def path_needs_json_validation(path: str) -> bool:
+    lowered = path.lower()
+    return any(lowered.endswith(extension) for extension in STRUCTURED_JSON_EXTENSIONS)
 
 
 def task_literal_markers_for_path(task: str, path: str) -> list[str]:
@@ -2398,6 +2405,79 @@ def build_required_artifact_verify_action(task: str, path: str) -> dict[str, Any
     return action
 
 
+def required_json_markers_for_path(task: str, path: str) -> list[str]:
+    markers = task_literal_markers_for_path(task, path)
+    lowered_path = path.lower()
+    if not markers and lowered_path.endswith(".json"):
+        basename = posixpath.basename(lowered_path)
+        if "source" in basename:
+            markers = ['"sources"']
+        elif "event" in basename or "note" in basename:
+            markers = ['"events"']
+        elif "timeline" in basename or "chronolog" in basename:
+            markers = ['"timeline"']
+    return markers[:12]
+
+
+def json_marker_matches(data: Any, marker: str) -> bool:
+    marker = marker.strip()
+    if not marker:
+        return True
+    if "=" in marker and not marker.startswith(("\"", "'")):
+        key, expected_raw = marker.split("=", 1)
+        key = key.strip()
+        expected_raw = expected_raw.strip()
+        try:
+            expected = json.loads(expected_raw)
+        except json.JSONDecodeError:
+            expected = expected_raw.strip("\"'")
+        if isinstance(data, dict) and key in data:
+            return data.get(key) == expected or str(data.get(key)) == str(expected)
+        return False
+    if marker.startswith(("\"", "'")) and marker.endswith(("\"", "'")):
+        key = marker[1:-1]
+        if isinstance(data, dict):
+            return key in data
+        if isinstance(data, list):
+            return any(isinstance(item, dict) and key in item for item in data)
+    raw = json.dumps(data, ensure_ascii=False)
+    return marker in raw
+
+
+def validate_json_required_artifacts(config: AgentConfig, paths: list[str], task: str) -> dict[str, Any]:
+    checked: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    for path in paths:
+        if not path_needs_json_validation(path):
+            continue
+        record: dict[str, Any] = {"path": path}
+        try:
+            host_path = sandbox_path_to_host_path(path)
+            raw = host_path.read_text(encoding="utf-8")
+            if path.lower().endswith(".jsonl"):
+                values = [json.loads(line) for line in raw.splitlines() if line.strip()]
+                if not values:
+                    raise ValueError("jsonl file has no records")
+                data: Any = values
+                record["records"] = len(values)
+            else:
+                data = json.loads(raw)
+                if hasattr(data, "__len__"):
+                    record["len"] = len(data)
+            markers = required_json_markers_for_path(task, path)
+            missing_markers = [marker for marker in markers if not json_marker_matches(data, marker)]
+            record.update({"ok": not missing_markers, "markers": markers, "missing_markers": missing_markers})
+            if missing_markers:
+                failures.append({**record, "reason": "missing_json_markers"})
+        except Exception as exc:
+            record.update({"ok": False, "error": str(exc), "reason": "invalid_json"})
+            failures.append(record)
+        checked.append(record)
+    if failures:
+        return {"ok": False, "checked": checked, "failures": failures[:10]}
+    return {"ok": True, "checked": checked}
+
+
 def build_swe_auto_test_action(config: AgentConfig, workspace: str) -> dict[str, Any] | None:
     if not workspace:
         return None
@@ -2417,11 +2497,14 @@ def build_swe_auto_test_action(config: AgentConfig, workspace: str) -> dict[str,
     }
 
 
-def required_artifacts_auto_final(config: AgentConfig, required_paths: list[str], verified_paths: set[str]) -> dict[str, Any] | None:
+def required_artifacts_auto_final(config: AgentConfig, required_paths: list[str], verified_paths: set[str], task: str) -> dict[str, Any] | None:
     if not required_paths:
         return None
     artifact_validation = validate_artifact_paths(config, required_paths)
     if not artifact_validation.get("ok"):
+        return None
+    json_validation = validate_json_required_artifacts(config, required_paths, task)
+    if not json_validation.get("ok"):
         return None
     missing_verification = missing_text_verifications(required_paths, verified_paths)
     if missing_verification:
@@ -2429,7 +2512,7 @@ def required_artifacts_auto_final(config: AgentConfig, required_paths: list[str]
     return {
         "ok": True,
         "message": "Готово: " + ", ".join(required_paths),
-        "artifact_validation": artifact_validation,
+        "artifact_validation": {**artifact_validation, "json_validation": json_validation},
     }
 
 
@@ -6081,7 +6164,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     read_path = str(action.get("path") or "")
                     if read_path:
                         pending_failing_test_read_paths.add(read_path)
-            auto_final = required_artifacts_auto_final(config, required_artifact_path_list, verified_text_paths)
+            auto_final = required_artifacts_auto_final(config, required_artifact_path_list, verified_text_paths, original_task)
             if auto_final is not None:
                 duration_sec = round(time.time() - run_started, 3)
                 final_payload = {

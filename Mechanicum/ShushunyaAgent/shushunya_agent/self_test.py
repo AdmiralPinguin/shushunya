@@ -1787,6 +1787,8 @@ def main() -> int:
     with mock.patch.object(agent_runner, "chat", side_effect=required_rewrite_actions) as mocked_required_rewrite_chat, \
             mock.patch.object(agent_runner, "file_tool", side_effect=fake_required_rewrite_file_tool), \
             mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_required_rewrite_verify), \
+            mock.patch.object(agent_runner, "sandbox_path_to_host_path", side_effect=lambda path: Path("/tmp/self-test-required-rewrite" + path.replace("/", "_"))), \
+            mock.patch.object(Path, "read_text", return_value='{"status":"pass"}'), \
             contextlib.redirect_stdout(required_rewrite_stdout), \
             contextlib.redirect_stderr(io.StringIO()):
         required_rewrite_code = run_agent(
@@ -1807,7 +1809,7 @@ def main() -> int:
         and [
             step.get("action", {}).get("action")
             for step in required_rewrite_payload.get("steps", [])
-        ] == ["write_file", "write_file", "verify_text_file", "verify_text_file"]
+        ] == ["write_file", "write_file", "verify_text_file"]
     )
     if required_rewrite_code != 0 or (not required_rewrite_rejections and not required_rewrite_auto_verified):
         raise AssertionError(
@@ -2776,9 +2778,10 @@ def main() -> int:
             '{"action":"write_file","path":"/work/report.md","content":"Summary\\nSTATUS: PASS"}',
             '{"action":"write_file","path":"/work/audit.json","content":"{\\"status\\":\\"pass\\"}"}',
             '{"action":"verify_text_file","path":"/work/report.md","must_contain":["STATUS: PASS"],"min_bytes":1}',
-            '{"action":"verify_text_file","path":"/work/audit.json","must_contain":["status=\\"pass\\""],"min_bytes":1}',
     ]) as mocked_artifact_verify_chat, mock.patch.object(agent_runner, "file_tool", side_effect=fake_file_info), \
             mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_verify), \
+            mock.patch.object(agent_runner, "sandbox_path_to_host_path", side_effect=lambda path: Path("/tmp/shushunya-self-test-audit.json")), \
+            mock.patch.object(Path, "read_text", return_value='{"status":"pass"}'), \
             contextlib.redirect_stdout(artifact_verify_mode_stdout), \
             contextlib.redirect_stderr(io.StringIO()):
         artifact_verify_mode_code = run_agent(
@@ -2791,7 +2794,7 @@ def main() -> int:
     if (
         artifact_verify_mode_code != 0
         or mocked_artifact_verify_chat.call_count != 2
-        or artifact_verify_actions != ["write_file", "write_file", "verify_text_file", "verify_text_file"]
+        or artifact_verify_actions != ["write_file", "write_file", "verify_text_file"]
         or not any(event.get("code") == "artifact_verify_mode" for event in artifact_verify_mode_events)
         or "/work/report.md" not in artifact_verify_mode_payload.get("message", "")
         or "/work/audit.json" not in artifact_verify_mode_payload.get("message", "")
@@ -2995,6 +2998,62 @@ def main() -> int:
         if action.get("must_contain") != expected_markers:
             raise AssertionError(f"json required artifact verify action too weak for {path}: {action}")
     print("[ok] JSON required artifact verify action markers")
+
+    json_auto_final_events: list[dict] = []
+    json_auto_final_stdout = io.StringIO()
+    json_auto_final_config = AgentConfig(
+        task_id=safe_task_id("self-test-json-artifact-auto-final"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    json_auto_final_replies = [
+        '{"action":"write_file","path":"/work/source_map.json","content":"{\\"sources\\":[{\\"title\\":\\"Lexicanum\\"}]}"}',
+        '{"action":"write_file","path":"/work/report.md","content":"Summary\\nSTATUS: PASS"}',
+        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["STATUS: PASS"],"min_bytes":1}',
+    ]
+    json_paths = {
+        "/work/source_map.json": '{"sources":[{"title":"Lexicanum"}]}',
+        "/work/report.md": "Summary\nSTATUS: PASS",
+    }
+
+    def fake_json_auto_final_host_path(path):
+        return Path("/tmp/shushunya-self-test-json-auto-final" + path.replace("/", "_"))
+
+    def fake_json_auto_final_read_text(path_obj, *args, **kwargs):
+        path_text = str(path_obj)
+        if path_text.endswith("_work_source_map.json"):
+            return json_paths["/work/source_map.json"]
+        if path_text.endswith("_work_report.md"):
+            return json_paths["/work/report.md"]
+        return ""
+
+    with mock.patch.object(agent_runner, "chat", side_effect=json_auto_final_replies), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=fake_file_info), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_verify), \
+            mock.patch.object(agent_runner, "sandbox_path_to_host_path", side_effect=fake_json_auto_final_host_path), \
+            mock.patch.object(Path, "read_text", fake_json_auto_final_read_text), \
+            contextlib.redirect_stdout(json_auto_final_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        json_auto_final_code = run_agent(
+            "Required artifacts: /work/source_map.json and /work/report.md.",
+            json_auto_final_config,
+            event_sink=json_auto_final_events.append,
+        )
+    json_auto_final_payload = json.loads(json_auto_final_stdout.getvalue())
+    json_auto_final_actions = [step.get("action", {}).get("action") for step in json_auto_final_payload.get("steps", [])]
+    if (
+        json_auto_final_code != 0
+        or json_auto_final_actions != ["write_file", "write_file", "verify_text_file"]
+        or "/work/source_map.json" not in json_auto_final_payload.get("message", "")
+        or not any(event.get("code") == "auto_final_required_artifacts_verified" for event in json_auto_final_events)
+    ):
+        raise AssertionError(
+            f"json artifact auto-final failed: code={json_auto_final_code}, "
+            f"payload={json_auto_final_payload}, actions={json_auto_final_actions}, events={json_auto_final_events}"
+        )
+    print("[ok] JSON artifacts auto-final through structural validation")
 
     timeout_stdout = io.StringIO()
     timeout_events: list[dict] = []
