@@ -127,6 +127,9 @@ def main() -> int:
             dispatch = request_json(base + "/runs/warmaster-test/dispatch")
             if not dispatch.get("ok") or not any(item.get("packet", {}).get("worker") == "Lexmechanic" for item in dispatch.get("dispatch", [])):
                 raise AssertionError(f"bad run dispatch: {dispatch}")
+            events = request_json(base + "/runs/warmaster-test/events?limit=1")
+            if not events.get("ok") or len(events.get("events", [])) != 1:
+                raise AssertionError(f"bad run events: {events}")
             run_list = request_json(base + "/runs")
             if not run_list.get("ok") or not any(item.get("task_id") == "warmaster-test" for item in run_list.get("runs", [])):
                 raise AssertionError(f"bad run list: {run_list}")

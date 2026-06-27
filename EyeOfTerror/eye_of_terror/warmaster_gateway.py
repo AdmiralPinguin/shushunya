@@ -116,6 +116,19 @@ def run_dispatch_packets(run_dir: Path) -> dict[str, Any]:
     return {"ok": True, "dispatch": packets}
 
 
+def run_events(run_dir: Path, limit: int | None = None) -> dict[str, Any]:
+    ledger_path = run_dir / "task_ledger.json"
+    if not ledger_path.exists():
+        return {"ok": False, "error": "ledger not found"}
+    ledger = TaskLedger.load(ledger_path).to_dict()
+    events = ledger.get("events", [])
+    if not isinstance(events, list):
+        events = []
+    if limit is not None and limit >= 0:
+        events = events[-limit:]
+    return {"ok": True, "task_id": ledger.get("task_id") or run_dir.name, "events": events}
+
+
 def recover_stale_runs(run_root: Path) -> list[dict[str, Any]]:
     recovered: list[dict[str, Any]] = []
     if not run_root.exists():
@@ -253,6 +266,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "artifact_text_read",
             "run_contract_read",
             "run_dispatch_read",
+            "run_events_read",
             "local_execution",
             "http_worker_execution",
             "background_execution",
@@ -277,6 +291,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/ledger",
             "GET /runs/{task_id}/contract",
             "GET /runs/{task_id}/dispatch",
+            "GET /runs/{task_id}/events",
             "GET /runs/{task_id}/artifacts",
             "GET /runs/{task_id}/artifact_text?path=/work/...",
             "POST /runs/{task_id}/execute_local",
@@ -411,6 +426,13 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 if len(parts) == 3 and parts[2] == "dispatch":
                     payload = run_dispatch_packets(run_dir)
+                    response(self, 200 if payload.get("ok") else 404, payload)
+                    return
+                if len(parts) == 3 and parts[2] == "events":
+                    query = parse_qs(parsed.query)
+                    raw_limit = query.get("limit", [""])[0]
+                    limit = int(raw_limit) if raw_limit.isdigit() else None
+                    payload = run_events(run_dir, limit=limit)
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 if len(parts) == 3 and parts[2] == "artifacts":
