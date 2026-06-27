@@ -4,7 +4,7 @@
     "7000": {
       "name": "WarmasterGateway",
       "role": "user-facing chat and orchestration gateway",
-      "path": "EyeOfTerror/gateway"
+      "path": "EyeOfTerror/eye_of_terror/warmaster_gateway.py"
     },
     "7101": {
       "name": "IskandarKhayon",
@@ -72,4 +72,3 @@
     }
   }
 }
-

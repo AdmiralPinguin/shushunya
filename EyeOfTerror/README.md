@@ -86,6 +86,14 @@ Governor services should follow `EyeOfTerror/contracts/governor_api.md`.
 
 ## Local Prototype Run
 
+Run a fast registry and manifest doctor:
+
+```bash
+python3 EyeOfTerror/doctor.py
+```
+
+## Local Prototype Run
+
 Build an Iskandar run package:
 
 ```bash
