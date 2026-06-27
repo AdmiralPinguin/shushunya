@@ -71,11 +71,16 @@ def run_step(dispatch_path: Path, host: str, timeout_sec: int) -> HttpStepResult
 
 def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800) -> dict[str, Any]:
     contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
-    ledger = TaskLedger.create(
-        run_dir / "task_ledger.json",
-        str(contract.get("task_id") or run_dir.name),
-        str(contract.get("goal") or ""),
-        str(contract.get("assigned_governor") or ""),
+    ledger_path = run_dir / "task_ledger.json"
+    ledger = (
+        TaskLedger.load(ledger_path)
+        if ledger_path.exists()
+        else TaskLedger.create(
+            ledger_path,
+            str(contract.get("task_id") or run_dir.name),
+            str(contract.get("goal") or ""),
+            str(contract.get("assigned_governor") or ""),
+        )
     )
     ledger.set_status("running")
     results: list[HttpStepResult] = []
