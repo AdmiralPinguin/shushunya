@@ -1716,6 +1716,23 @@ def python_result_printed_assertion(result: dict[str, Any]) -> bool:
     return "assertionerror" in output
 
 
+def python_result_printed_nested_cli_failure(result: dict[str, Any]) -> bool:
+    output = f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}".lower()
+    return any(
+        marker in output
+        for marker in (
+            "cli_failed: true",
+            "json_valid: false",
+            "failure: output is not valid json",
+            "return_code: 1",
+            "return_code=1",
+            "returncode: 1",
+            "return code: 1",
+            "jsondecodeerror",
+        )
+    )
+
+
 def resume_context_has_test_diagnostic(task: str) -> bool:
     lowered = (task or "").lower()
     if "resume context" not in lowered and "authoritative resume context" not in lowered:
@@ -5390,6 +5407,21 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "This Python verification printed AssertionError but exited with code 0, likely because the check caught the assertion. "
                 "Treat it as a failed verification. Do not catch AssertionError in verification code; fix the code under test, "
                 "then run an uncaught assert/full test command."
+            )
+        if (
+            swe_task
+            and action_is_cli_verification(action_type, action)
+            and isinstance(result, dict)
+            and result.get("ok") is True
+            and python_result_printed_nested_cli_failure(result)
+        ):
+            result = dict(result)
+            result["ok"] = False
+            result["returncode"] = result.get("returncode") or 1
+            result["supervisor_instruction"] = (
+                "This CLI verification wrapper exited with code 0, but its captured CLI command or JSON validation failed. "
+                "Treat it as a failed CLI verification. Do not catch or print nested CLI failures as success; run the real "
+                "CLI command with JSON/assert validation so failures propagate as a non-zero tool result."
             )
         if (
             swe_task

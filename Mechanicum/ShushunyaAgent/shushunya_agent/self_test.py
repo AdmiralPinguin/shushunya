@@ -676,6 +676,14 @@ def main() -> int:
         {"content": "def parse_jobs(rows):\n    return [{'duration_min': int(row['duration_min'])} for row in rows]\n"},
     ):
         raise AssertionError("public shape contract edit detector rejected dict-preserving rewrite")
+    nested_cli_failure_result = {
+        "ok": True,
+        "returncode": 0,
+        "stdout": "STDERR: Traceback ...\nRETURN_CODE: 1\nCLI_FAILED: True\n",
+        "stderr": "",
+    }
+    if not agent_runner.python_result_printed_nested_cli_failure(nested_cli_failure_result):
+        raise AssertionError("nested CLI failure detector missed captured non-zero CLI result")
     print("[ok] public shape contract detectors")
     swe_profile_task = agent_runner.task_with_execution_profile(
         "Исправь Python-проект и запусти pytest",
