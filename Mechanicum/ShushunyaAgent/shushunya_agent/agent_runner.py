@@ -1257,6 +1257,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "data source reread rejected by supervisor",
     "web_fetch failed url rejected by supervisor",
     "invalid JSON write rejected by supervisor",
+    "artifact creation required by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
     "append_file to JSON rejected by supervisor",
@@ -5019,6 +5020,26 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "This exact URL already failed with web_fetch. Do not fetch it again in this task. "
                         "Use web_search/web_links to find a different source, mirror, cached page, official index, "
                         "or summarize the source as unavailable and continue with alternate evidence."
+                    ),
+                }
+            elif (
+                not swe_task
+                and required_artifact_paths
+                and step >= 8
+                and len(set(successful_write_file_paths) & required_artifact_paths) >= 1
+                and (missing_artifacts := sorted(required_artifact_paths - set(successful_write_file_paths) - verified_text_paths))
+                and (action_type in INSPECTION_ACTIONS or (action_type == "shell" and looks_like_inspection_shell(str(action.get("cmd", "")))))
+            ):
+                result = {
+                    "ok": False,
+                    "error": "artifact creation required by supervisor",
+                    "missing_required_artifacts": missing_artifacts[:10],
+                    "created_required_artifacts": sorted(set(successful_write_file_paths) & required_artifact_paths)[:10],
+                    "instruction": (
+                        "Some required artifacts are already created, but required artifacts are still missing. "
+                        "Do not keep inspecting/searching before creating the next missing artifact. "
+                        "Use write_file, write_files, append_file, or python to create one of missing_required_artifacts next. "
+                        "Use facts already available in the conversation and saved files; you can verify/refine after the missing artifact exists."
                     ),
                 }
             elif action_counts[fingerprint] >= 3:

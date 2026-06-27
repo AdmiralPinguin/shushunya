@@ -1782,6 +1782,60 @@ def main() -> int:
         )
     print("[ok] required artifact rewrite before verification guard")
 
+    artifact_creation_stdout = io.StringIO()
+    artifact_creation_config = AgentConfig(
+        task_id=safe_task_id("self-test-artifact-creation-required"),
+        json_output=True,
+        max_steps=14,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    artifact_creation_actions = [
+        '{"action":"write_file","path":"/work/a.md","content":"alpha"}',
+        *[
+            json.dumps({"action": "web_search", "query": f"source lookup {index}", "limit": 3})
+            for index in range(7)
+        ],
+        '{"action":"write_file","path":"/work/b.md","content":"beta"}',
+        '{"action":"final","message":"Готово: /work/a.md, /work/b.md"}',
+        '{"action":"final","message":"Готово: /work/a.md, /work/b.md"}',
+        '{"action":"final","message":"Готово: /work/a.md, /work/b.md"}',
+    ]
+
+    def fake_artifact_creation_file_tool(config_arg, action):
+        return {"ok": True, "path": action.get("path"), "size": len(str(action.get("content") or ""))}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=artifact_creation_actions), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=fake_artifact_creation_file_tool), \
+            mock.patch.object(
+                agent_runner,
+                "verify_text_file_tool",
+                side_effect=lambda _config, action: {"ok": True, "path": action.get("path"), "failures": []},
+            ), \
+            mock.patch.object(agent_runner, "web_search", return_value={"ok": True, "results": []}), \
+            contextlib.redirect_stdout(artifact_creation_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        artifact_creation_code = run_agent(
+            "Создай обязательные артефакты: /work/a.md и /work/b.md",
+            artifact_creation_config,
+        )
+    artifact_creation_payload = json.loads(artifact_creation_stdout.getvalue())
+    artifact_creation_rejections = [
+        step for step in artifact_creation_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "artifact creation required by supervisor"
+    ]
+    artifact_creation_wrote_missing = any(
+        step.get("action", {}).get("action") == "write_file"
+        and step.get("action", {}).get("path") == "/work/b.md"
+        and (step.get("result") or {}).get("ok") is True
+        for step in artifact_creation_payload.get("steps", [])
+    )
+    if not artifact_creation_rejections or not artifact_creation_wrote_missing:
+        raise AssertionError(
+            f"artifact creation required guard failed: code={artifact_creation_code}, payload={artifact_creation_payload}"
+        )
+    print("[ok] artifact creation required guard")
+
     inspection_stall_stdout = io.StringIO()
     inspection_stall_config = AgentConfig(
         task_id=safe_task_id("self-test-inspection-stall"),
