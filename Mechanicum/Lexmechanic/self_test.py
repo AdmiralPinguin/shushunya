@@ -5,7 +5,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from lexmechanic import run, source_map_for_contract
+from lexmechanic import classify_discovered_result, run, source_map_for_contract
 
 
 def main() -> int:
@@ -18,16 +18,18 @@ def main() -> int:
             "source": "fake",
             "results": [
                 {
-                    "title": "Candidate",
-                    "url": "https://example.com/candidate",
+                    "title": "Lexicanum Candidate",
+                    "url": "https://wh40k.lexicanum.com/wiki/Candidate",
                     "snippet": "candidate source",
                 }
             ],
         }
 
     discovered = source_map_for_contract({"goal": "unknown topic"}, fake_search)
-    if discovered["sources"] != []:
-        raise AssertionError("live discovery results must not become trusted sources automatically")
+    if not discovered["sources"] or discovered["sources"][0].get("discovery_method") != "live_search":
+        raise AssertionError(f"live discovery should create classified source candidates: {discovered['sources']}")
+    if classify_discovered_result({"title": "Bad", "url": "https://example.com/nope"}) is not None:
+        raise AssertionError("unknown domains must not become source candidates")
     if not discovered["discovery_results"] or discovered["discovery_results"][0]["provider"] != "fake":
         raise AssertionError(f"fake discovery was not recorded: {discovered['discovery_results']}")
     if not fake_search_calls:
@@ -69,8 +71,8 @@ def main() -> int:
         if not generic_result.get("ok"):
             raise AssertionError(f"Lexmechanic generic fallback failed: {generic_result}")
         generic = json.loads((Path(temp_dir) / "generic" / "source_map.json").read_text(encoding="utf-8"))
-        if generic.get("sources") != []:
-            raise AssertionError(f"generic fallback should not invent sources: {generic['sources']}")
+        if not generic.get("sources") or generic["sources"][0].get("source_class") != "secondary_wiki":
+            raise AssertionError(f"generic fallback should classify live candidates: {generic['sources']}")
         if generic.get("discovery_status") != "needs_live_discovery":
             raise AssertionError(f"generic fallback should request live discovery: {generic}")
         if not generic.get("discovery_results"):

@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 
 PLAYBOOK_DIR = Path(__file__).resolve().parent / "playbooks"
@@ -61,6 +62,39 @@ def dedupe_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+def classify_discovered_result(result: dict[str, Any]) -> dict[str, Any] | None:
+    url = str(result.get("url") or "").strip()
+    title = " ".join(str(result.get("title") or "").split())
+    if not url or not title:
+        return None
+    host = (urlparse(url).hostname or "").lower()
+    if host.endswith("lexicanum.com"):
+        return {
+            "title": title,
+            "type": "wiki",
+            "language": "unknown",
+            "url": url,
+            "reliability": "medium-high",
+            "direct_event_detail_level": "unknown",
+            "source_class": "secondary_wiki",
+            "expected_use": "live-discovered chronology or named-entity lead; verify before final use",
+            "discovery_method": "live_search",
+        }
+    if host.endswith("warhammer-community.com"):
+        return {
+            "title": title,
+            "type": "article",
+            "language": "unknown",
+            "url": url,
+            "reliability": "high",
+            "direct_event_detail_level": "unknown",
+            "source_class": "official_secondary",
+            "expected_use": "live-discovered official context; verify relevance before final use",
+            "discovery_method": "live_search",
+        }
+    return None
+
+
 def generic_search_queries(goal: str) -> list[str]:
     return [
         f"{goal} primary source",
@@ -93,6 +127,18 @@ def run_discovery_queries(search_queries: list[str], searcher: SearchFn | None, 
             }
         )
     return results
+
+
+def classified_live_sources(discovery_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for discovery in discovery_results:
+        for result in discovery.get("results", []):
+            if not isinstance(result, dict):
+                continue
+            candidate = classify_discovered_result(result)
+            if candidate:
+                candidates.append(candidate)
+    return dedupe_sources(candidates)
 
 
 def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None = None) -> dict[str, Any]:
@@ -131,12 +177,15 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
         "Secondary summaries can guide discovery but must not become sole evidence.",
     ]
     discovery_results = run_discovery_queries(search_queries, searcher)
+    live_candidates = classified_live_sources(discovery_results)
+    sources = dedupe_sources(sources + live_candidates)
     return {
         "topic": goal,
         "sources": sources,
         "search_queries": search_queries,
         "discovery_status": discovery_status,
         "discovery_results": discovery_results,
+        "live_source_candidates": live_candidates,
         "matched_playbooks": [str(playbook.get("name") or playbook.get("match_terms", ["unknown"])[0]) for playbook in playbooks],
         "coverage_gaps": coverage_gaps,
         "quality_notes": quality_notes,
