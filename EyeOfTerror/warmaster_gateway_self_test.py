@@ -40,7 +40,7 @@ def main() -> int:
             if not (run_dir / "dispatch" / "source_discovery.json").exists():
                 raise AssertionError(f"gateway did not prepare run package: {task}")
             run_status = request_json(base + "/runs/warmaster-test")
-            if not run_status.get("ok") or run_status.get("task_id") != "warmaster-test":
+            if not run_status.get("ok") or run_status.get("task_id") != "warmaster-test" or not run_status.get("ledger"):
                 raise AssertionError(f"bad run status: {run_status}")
             executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
             if not executed.get("ok"):

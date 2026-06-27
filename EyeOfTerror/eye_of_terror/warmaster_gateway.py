@@ -46,6 +46,7 @@ def prepare_task(message: str, task_id: str | None, run_root: Path) -> dict[str,
     plan = plan_lore_reconstruction(message, task_id=task_id)
     run_dir = run_root / plan.contract.task_id
     status = write_pipeline_run(plan.contract, run_dir)
+    TaskLedger.create(run_dir / "task_ledger.json", plan.contract.task_id, plan.contract.goal, governor)
     return {
         "ok": status["ok"],
         "gateway": "WarmasterGateway",
