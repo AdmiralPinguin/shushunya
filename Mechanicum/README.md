@@ -47,4 +47,5 @@ python3 Mechanicum/start_all_workers.py --workspace-root runtime/mechanicum-work
 The runtime exposes:
 
 - `GET /health`
+- `GET /capabilities`
 - `POST /run` with either a dispatch packet or raw worker request JSON
