@@ -6,6 +6,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from .inner_circle.iskandar import plan_lore_reconstruction
 from .http_executor import execute_run as execute_http_run
@@ -107,6 +108,37 @@ def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
     return {"workspace_root": workspace_root, "artifacts": items}
 
 
+def resolve_artifact(ledger: dict[str, Any], artifact_path: str) -> Path:
+    result = ledger.get("result", {}) if isinstance(ledger.get("result"), dict) else {}
+    workspace_root = str(result.get("workspace_root") or "")
+    if not workspace_root:
+        raise ValueError("workspace_root is not recorded for this run")
+    if not artifact_path.startswith("/work/"):
+        raise ValueError("artifact path must start with /work/")
+    root = Path(workspace_root).resolve()
+    host_path = (root / artifact_path.removeprefix("/work/")).resolve()
+    if root not in host_path.parents and host_path != root:
+        raise ValueError("artifact path escapes workspace_root")
+    return host_path
+
+
+def artifact_text(ledger: dict[str, Any], artifact_path: str, max_bytes: int = 500000) -> dict[str, Any]:
+    host_path = resolve_artifact(ledger, artifact_path)
+    if not host_path.exists():
+        return {"ok": False, "error": "artifact not found", "path": artifact_path}
+    data = host_path.read_bytes()[: max_bytes + 1]
+    truncated = len(data) > max_bytes
+    data = data[:max_bytes]
+    return {
+        "ok": True,
+        "path": artifact_path,
+        "host_path": str(host_path),
+        "bytes": host_path.stat().st_size,
+        "truncated": truncated,
+        "text": data.decode("utf-8", errors="replace"),
+    }
+
+
 def start_background(task_id: str, target: Any) -> bool:
     with ACTIVE_RUNS_LOCK:
         if task_id in ACTIVE_RUNS:
@@ -132,10 +164,11 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
             return
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-            if self.path == "/health":
+            parsed = urlparse(self.path)
+            if parsed.path == "/health":
                 response(self, 200, {"ok": True, "gateway": "WarmasterGateway"})
                 return
-            parts = [part for part in self.path.split("?")[0].split("/") if part]
+            parts = [part for part in parsed.path.split("/") if part]
             if parts == ["runs"]:
                 response(self, 200, {"ok": True, "runs": list_runs(run_root)})
                 return
@@ -158,6 +191,19 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
                         return
                     response(self, 200, {"ok": True, "task_id": task_id, **artifact_status(TaskLedger.load(ledger_path).to_dict())})
+                    return
+                if len(parts) == 3 and parts[2] == "artifact_text":
+                    if not ledger_path.exists():
+                        response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
+                        return
+                    query = parse_qs(parsed.query)
+                    artifact_path = query.get("path", [""])[0]
+                    try:
+                        payload = artifact_text(TaskLedger.load(ledger_path).to_dict(), artifact_path)
+                    except ValueError as exc:
+                        response(self, 400, {"ok": False, "error": str(exc)})
+                        return
+                    response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
                 ledger = TaskLedger.load(ledger_path).to_dict() if ledger_path.exists() else {}
