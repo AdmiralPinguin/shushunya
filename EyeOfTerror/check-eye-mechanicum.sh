@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PYTHONPATH=EyeOfTerror python3 EyeOfTerror/self_test.py
+PYTHONPATH=Mechanicum/Lexmechanic python3 Mechanicum/Lexmechanic/self_test.py
+PYTHONPATH=Mechanicum/AuspexBrowser python3 Mechanicum/AuspexBrowser/self_test.py
+PYTHONPATH=Mechanicum/NoosphericExtractor python3 Mechanicum/NoosphericExtractor/self_test.py
+PYTHONPATH=Mechanicum/Chronologis python3 Mechanicum/Chronologis/self_test.py
+PYTHONPATH=Mechanicum/ScriptoriumDaemon python3 Mechanicum/ScriptoriumDaemon/self_test.py
+PYTHONPATH=Mechanicum/ReductorVerifier python3 Mechanicum/ReductorVerifier/self_test.py
+PYTHONPATH=Mechanicum/FabricatorFinalis python3 Mechanicum/FabricatorFinalis/self_test.py
+PYTHONPATH=Mechanicum python3 Mechanicum/worker_runtime_self_test.py
+PYTHONPATH=Mechanicum python3 Mechanicum/worker_services_self_test.py
+PYTHONPATH=EyeOfTerror python3 EyeOfTerror/iskandar_service_self_test.py
+PYTHONPATH=EyeOfTerror python3 EyeOfTerror/local_executor_self_test.py
+PYTHONPATH=EyeOfTerror python3 EyeOfTerror/http_executor_self_test.py
+PYTHONPATH=EyeOfTerror:Mechanicum python3 EyeOfTerror/http_pipeline_self_test.py
