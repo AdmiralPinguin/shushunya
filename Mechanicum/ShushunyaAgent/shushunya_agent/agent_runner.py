@@ -1003,20 +1003,20 @@ SWE_TASK_MARKERS = (
     "код",
     "code",
     "pytest",
-    "исправь",
-    "fix",
     "bug",
-    "ошибк",
     "traceback",
     "stack trace",
     "git",
 )
+SWE_WEAK_REPAIR_MARKERS = ("исправь", "fix", "ошибк")
 SWE_FILE_EXTENSION_RE = re.compile(r"\.(?:py|js|ts|kt|java)(?:\b|$)")
 
 
 def looks_like_swe_task(task: str) -> bool:
     lowered = task.lower()
-    return any(marker in lowered for marker in SWE_TASK_MARKERS) or bool(SWE_FILE_EXTENSION_RE.search(lowered))
+    if any(marker in lowered for marker in SWE_TASK_MARKERS) or bool(SWE_FILE_EXTENSION_RE.search(lowered)):
+        return True
+    return any(marker in lowered for marker in SWE_WEAK_REPAIR_MARKERS) and bool(SWE_FILE_EXTENSION_RE.search(lowered))
 
 
 def task_with_execution_profile(task: str, config: AgentConfig) -> str:
