@@ -28,6 +28,20 @@ The Warmaster Gateway should only do top-level routing:
 
 The gateway should not micromanage individual worker steps.
 
+## Iskandar Service
+
+Run the first Inner Circle governor:
+
+```bash
+PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.inner_circle.iskandar_service
+```
+
+It exposes:
+
+- `GET /health`
+- `POST /plan`
+- `POST /prepare_run`
+
 ## Local Prototype Run
 
 Build an Iskandar run package:
