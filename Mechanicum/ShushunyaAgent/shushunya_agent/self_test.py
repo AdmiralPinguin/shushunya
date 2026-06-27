@@ -655,6 +655,13 @@ def main() -> int:
     discovered_cli = agent_runner.cli_module_from_path("/work/project/scheduler/cli.py", "/work/project")
     if discovered_cli != "scheduler.cli":
         raise AssertionError(f"CLI module path detector missed scheduler/cli.py: {discovered_cli}")
+    with tempfile.TemporaryDirectory() as tmp:
+        package_dir = Path(tmp) / "scheduler"
+        package_dir.mkdir()
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+        (package_dir / "cli.py").write_text("def main(): pass\n", encoding="utf-8")
+        if agent_runner.cli_modules_from_workspace(tmp) != ["scheduler.cli"]:
+            raise AssertionError("workspace CLI module discovery missed package cli.py")
     if agent_runner.action_is_cli_verification(
         "python",
         {

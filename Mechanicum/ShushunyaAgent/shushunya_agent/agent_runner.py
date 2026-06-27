@@ -1566,6 +1566,29 @@ def cli_module_from_path(path: str, workspace: str = "") -> str:
     return ".".join(parts)
 
 
+def cli_modules_from_workspace(workspace: str, limit: int = 20) -> list[str]:
+    root = Path(workspace or "")
+    if not workspace or not root.exists() or not root.is_dir():
+        return []
+    modules: list[str] = []
+    skipped_dirs = {".git", ".hg", ".svn", "__pycache__", ".pytest_cache", ".venv", "venv", "node_modules", "tests"}
+    visited_dirs = 0
+    for current, dirs, files in os.walk(root):
+        visited_dirs += 1
+        if visited_dirs > 300:
+            break
+        dirs[:] = [name for name in dirs if name not in skipped_dirs and not name.startswith(".")]
+        for filename in files:
+            if filename not in {"cli.py", "main.py", "__main__.py"}:
+                continue
+            module = cli_module_from_path(str(Path(current) / filename), str(root))
+            if module:
+                modules.append(module)
+                if len(modules) >= limit:
+                    return list(dict.fromkeys(modules))
+    return list(dict.fromkeys(modules))
+
+
 def action_invokes_cli_module(action_type: str, action: dict[str, Any], module: str) -> bool:
     cmd = str(action.get("cmd") or "")
     code = str(action.get("code") or "")
@@ -4217,6 +4240,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     required_artifact_paths = set(required_artifact_path_list)
     explicit_workspace = explicit_workspace_from_task(original_task)
     expected_cli_modules: set[str] = set(cli_modules_from_task(original_task))
+    if swe_requires_cli_verification and explicit_workspace:
+        expected_cli_modules.update(cli_modules_from_workspace(explicit_workspace))
     data_source_path_list = data_source_paths_from_task(original_task, explicit_workspace, required_artifact_path_list)
     data_source_paths = set(data_source_path_list)
     inspected_data_source_paths: set[str] = set(resume_context_inspected_data_sources(original_task, data_source_path_list))
@@ -5203,11 +5228,13 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "ok": False,
                     "error": "swe cli verification required by supervisor",
                     "last_edited_path": last_cli_required_swe_edit_path,
+                    "expected_cli_modules": sorted(expected_cli_modules),
                     "instruction": (
                         "The code already passed the unit-test/fallback verification after the last edit, but the user task "
                         "also requires CLI/command-interface behavior. Do not inspect files or run marker checks before the "
                         "first CLI verification. Run the requested CLI command or an equivalent action that invokes the "
-                        "entrypoint/subprocess and validates stdout/JSON output."
+                        "entrypoint/subprocess and validates stdout/JSON output. If expected_cli_modules is non-empty, "
+                        "invoke one of those modules with python -m and the real input file from the workspace."
                     ),
                 }
             elif (
