@@ -19,6 +19,12 @@ def request_json(url: str, payload: dict | None = None) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+def request_options(url: str) -> int:
+    req = urllib.request.Request(url, method="OPTIONS")
+    with urllib.request.urlopen(req, timeout=5) as response:
+        return response.status
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -27,9 +33,14 @@ def main() -> int:
         thread.start()
         try:
             base = f"http://127.0.0.1:{server.server_port}"
+            if request_options(base + "/plan") != 200:
+                raise AssertionError("OPTIONS did not return 200")
             health = request_json(base + "/health")
             if not health.get("ok"):
                 raise AssertionError(f"bad health: {health}")
+            capabilities = request_json(base + "/capabilities")
+            if "dispatch_packet_preparation" not in capabilities.get("capabilities", []):
+                raise AssertionError(f"bad capabilities: {capabilities}")
             plan = request_json(base + "/plan", {"task": "Собери события Скалатракса", "task_id": "iskandar-http-test"})
             if not plan.get("ok") or plan["contract"]["assigned_governor"] != "IskandarKhayon":
                 raise AssertionError(f"bad plan: {plan}")

@@ -73,6 +73,7 @@ PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.inner_circle.iskandar_service
 It exposes:
 
 - `GET /health`
+- `GET /capabilities`
 - `POST /plan`
 - `POST /prepare_run`
 

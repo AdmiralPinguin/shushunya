@@ -14,6 +14,9 @@ def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, An
     data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    handler.send_header("Access-Control-Allow-Headers", "Content-Type, Accept")
     handler.send_header("Content-Length", str(len(data)))
     handler.end_headers()
     handler.wfile.write(data)
@@ -27,6 +30,29 @@ def payload_from(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     return payload
 
 
+def service_capabilities() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "governor": "IskandarKhayon",
+        "api_version": 1,
+        "task_kinds": ["research", "lore_reconstruction"],
+        "capabilities": [
+            "lore_reconstruction_planning",
+            "worker_plan_resolution",
+            "dispatch_packet_preparation",
+            "source_research_coordination",
+            "timeline_coordination",
+            "writer_verifier_finalizer_coordination",
+        ],
+        "endpoints": [
+            "GET /health",
+            "GET /capabilities",
+            "POST /plan",
+            "POST /prepare_run",
+        ],
+    }
+
+
 def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
     class IskandarHandler(BaseHTTPRequestHandler):
         server_version = "IskandarKhayon/0.1"
@@ -34,11 +60,17 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
         def log_message(self, fmt: str, *args: Any) -> None:
             return
 
-        def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-            if self.path != "/health":
-                response(self, 404, {"ok": False, "error": "not found"})
-                return
+        def do_OPTIONS(self) -> None:  # noqa: N802 - stdlib handler API
             response(self, 200, {"ok": True, "governor": "IskandarKhayon"})
+
+        def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+            if self.path == "/health":
+                response(self, 200, {"ok": True, "governor": "IskandarKhayon"})
+                return
+            if self.path == "/capabilities":
+                response(self, 200, service_capabilities())
+                return
+            response(self, 404, {"ok": False, "error": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             try:
