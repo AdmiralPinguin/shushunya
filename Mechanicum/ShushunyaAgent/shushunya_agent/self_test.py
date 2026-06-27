@@ -1931,6 +1931,13 @@ def main() -> int:
     )
     if scoped_min_chars_requirement != {"/work/story.md": 12000}:
         raise AssertionError(f"required min chars should stay in artifact clause: {scoped_min_chars_requirement}")
+    explicit_path_min_chars_requirement = required_min_chars_by_path_from_task(
+        "Сделай /work/report.md с разделами. Проверь: /work/story.md содержит рассказ не короче 12000 символов; "
+        "report содержит разделы Источники, Пробелы, Итоговая оценка.",
+        ["/work/story.md", "/work/report.md"],
+    )
+    if explicit_path_min_chars_requirement != {"/work/story.md": 12000}:
+        raise AssertionError(f"explicit path min chars leaked to report token: {explicit_path_min_chars_requirement}")
     min_chars_stdout = io.StringIO()
     min_chars_config = AgentConfig(
         task_id=safe_task_id("self-test-required-min-chars"),

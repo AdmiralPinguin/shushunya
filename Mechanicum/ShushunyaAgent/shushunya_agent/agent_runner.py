@@ -1428,21 +1428,27 @@ def required_min_chars_by_path_from_task(task: str, paths: list[str]) -> dict[st
         # inside the current semicolon/newline clause so a story length like
         # "story.md ... 12000 symbols; report.md contains sections" does not
         # accidentally become a report length requirement too.
-        clause_start_candidates = [text.rfind(sep, 0, match.start()) for sep in (";", "\n")]
+        clause_start_candidates = [text.rfind(sep, 0, match.start()) for sep in (";", "\n", ". ", "! ", "? ")]
         clause_start = max(clause_start_candidates)
-        clause_start = 0 if clause_start < 0 else clause_start + 1
-        clause_end_candidates = [idx for idx in (text.find(sep, match.end()) for sep in (";", "\n")) if idx >= 0]
+        clause_start = 0 if clause_start < 0 else clause_start + len(
+            next((sep for sep in (";", "\n", ". ", "! ", "? ") if text.rfind(sep, 0, match.start()) == clause_start), "")
+        )
+        clause_end_candidates = [idx for idx in (text.find(sep, match.end()) for sep in (";", "\n", ". ", "! ", "? ")) if idx >= 0]
         clause_end = min(clause_end_candidates) if clause_end_candidates else len(text)
         window = lowered[clause_start:clause_end]
+        explicit_paths_in_clause = set(extract_sandbox_paths_from_text(text[clause_start:clause_end]))
         for path in paths:
             path_lower = path.lower()
             basename = posixpath.basename(path_lower)
             stem = basename.rsplit(".", 1)[0]
             tokens = {path_lower, basename, stem}
-            if "story" in stem:
-                tokens.update({"story", "рассказ"})
-            if "report" in stem:
-                tokens.update({"report", "отчет", "отчёт"})
+            if explicit_paths_in_clause:
+                tokens = {path_lower, basename, stem}
+            else:
+                if "story" in stem:
+                    tokens.update({"story", "рассказ"})
+                if "report" in stem:
+                    tokens.update({"report", "отчет", "отчёт"})
             if any(token and token in window for token in tokens):
                 requirements[path] = max(requirements.get(path, 0), number)
     return requirements
