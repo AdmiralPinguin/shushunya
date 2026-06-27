@@ -84,6 +84,9 @@ def main() -> int:
             governors = request_json(base + "/governors")
             if not governors.get("ok") or not any(item.get("name") == "IskandarKhayon" for item in governors.get("governors", [])):
                 raise AssertionError(f"bad governors response: {governors}")
+            governor_health = request_json(base + "/governors?health=1")
+            if not governor_health.get("health_checked") or not all("runtime" in item for item in governor_health.get("governors", [])):
+                raise AssertionError(f"bad governor health response: {governor_health}")
             workers = request_json(base + "/workers")
             if not workers.get("ok") or not any(item.get("name") == "Lexmechanic" for item in workers.get("workers", [])):
                 raise AssertionError(f"bad workers response: {workers}")

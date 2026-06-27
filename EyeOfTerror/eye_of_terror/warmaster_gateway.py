@@ -204,6 +204,16 @@ def worker_registry_snapshot(include_health: bool = False, host: str = "127.0.0.
     return workers
 
 
+def governor_registry_snapshot(include_health: bool = False, host: str = "127.0.0.1") -> list[dict[str, Any]]:
+    governors = [governor.to_dict() for governor in governor_refs()]
+    if not include_health:
+        return governors
+    for governor in governors:
+        port = int(governor.get("port") or 0)
+        governor["runtime"] = fetch_worker_health(host, port) if port else {"reachable": False, "error": "missing port"}
+    return governors
+
+
 def gateway_capabilities() -> dict[str, Any]:
     return {
         "ok": True,
@@ -223,6 +233,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "worker_cancel_fanout",
             "stale_run_recovery",
             "governor_registry",
+            "governor_health_snapshot",
             "worker_registry",
             "worker_health_snapshot",
         ],
@@ -230,6 +241,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /health",
             "GET /capabilities",
             "GET /governors",
+            "GET /governors?health=1",
             "GET /workers",
             "GET /workers?health=1",
             "POST /task",
@@ -321,7 +333,17 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 response(self, 200, gateway_capabilities())
                 return
             if parsed.path == "/governors":
-                response(self, 200, {"ok": True, "governors": [governor.to_dict() for governor in governor_refs()]})
+                query = parse_qs(parsed.query)
+                include_health = query.get("health", ["0"])[0] in {"1", "true", "yes"}
+                response(
+                    self,
+                    200,
+                    {
+                        "ok": True,
+                        "health_checked": include_health,
+                        "governors": governor_registry_snapshot(include_health=include_health),
+                    },
+                )
                 return
             if parsed.path == "/workers":
                 query = parse_qs(parsed.query)
