@@ -12,6 +12,7 @@ PYTHONPATH=Mechanicum/ReductorVerifier python3 Mechanicum/ReductorVerifier/self_
 PYTHONPATH=Mechanicum/FabricatorFinalis python3 Mechanicum/FabricatorFinalis/self_test.py
 PYTHONPATH=Mechanicum python3 Mechanicum/worker_runtime_self_test.py
 PYTHONPATH=Mechanicum python3 Mechanicum/worker_services_self_test.py
+PYTHONPATH=Mechanicum python3 Mechanicum/start_all_workers_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/iskandar_service_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/warmaster_gateway_self_test.py
 PYTHONPATH=EyeOfTerror:Mechanicum python3 EyeOfTerror/warmaster_http_execution_self_test.py

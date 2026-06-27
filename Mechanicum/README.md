@@ -38,6 +38,12 @@ Prototype workers can be served through the shared runtime:
 python3 Mechanicum/start_worker.py Lexmechanic --workspace-root runtime/mechanicum-work
 ```
 
+Start the current lore pipeline worker set:
+
+```bash
+python3 Mechanicum/start_all_workers.py --workspace-root runtime/mechanicum-work
+```
+
 The runtime exposes:
 
 - `GET /health`
