@@ -44,7 +44,9 @@ class TaskLedger:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.data["updated_at"] = now_iso()
-        self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp_path = self.path.with_name(f".{self.path.name}.tmp")
+        tmp_path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp_path.replace(self.path)
 
     def record_event(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
         self.data.setdefault("events", []).append({"at": now_iso(), "type": event_type, "payload": payload or {}})

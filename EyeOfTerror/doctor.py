@@ -27,6 +27,7 @@ def require(condition: bool, message: str, errors: list[str]) -> None:
 
 
 def check_governors(errors: list[str]) -> None:
+    require((REPO_ROOT / GOVERNOR_CONTRACT).exists(), f"governor API contract missing: {GOVERNOR_CONTRACT}", errors)
     registry = load_json(REPO_ROOT / "EyeOfTerror" / "registry" / "governors.json")
     seen_ports: dict[int, str] = {}
     for name, item in registry.items():
@@ -65,6 +66,7 @@ def check_port_registry(errors: list[str]) -> None:
 
 
 def check_worker_manifests(errors: list[str]) -> None:
+    require((REPO_ROOT / WORKER_CONTRACT).exists(), f"worker API contract missing: {WORKER_CONTRACT}", errors)
     seen_ports: dict[int, str] = {}
     for metadata_path in sorted((REPO_ROOT / "Mechanicum").glob("*/worker.json")):
         metadata = load_json(metadata_path)
