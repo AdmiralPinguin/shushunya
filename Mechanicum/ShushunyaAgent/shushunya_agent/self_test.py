@@ -637,6 +637,18 @@ def main() -> int:
         {"cmd": "python3 -m package.cli data.csv | python3 -c \"import sys,json; json.load(sys.stdin)\""},
     ):
         raise AssertionError("module CLI JSON check was not recognized")
+    if agent_runner.action_is_cli_verification("shell", {"cmd": "python3 -m package.cli data.csv"}):
+        raise AssertionError("unvalidated python -m command must not count as CLI verification")
+    if agent_runner.action_is_cli_verification(
+        "python",
+        {"code": "import subprocess,json\nr=subprocess.run(['python3','-m','scheduler.core'], capture_output=True, text=True)\njson.loads(r.stdout)"},
+    ):
+        raise AssertionError("running a non-CLI module must not count as CLI verification")
+    if not agent_runner.action_is_cli_verification(
+        "python",
+        {"code": "import subprocess,json\nr=subprocess.run(['python3','-m','scheduler.cli','jobs.csv'], capture_output=True, text=True)\njson.loads(r.stdout)\nassert r.returncode == 0"},
+    ):
+        raise AssertionError("subprocess CLI JSON check was not recognized")
     if agent_runner.action_is_cli_verification(
         "python",
         {"code": "with open('scheduler/cli.py', 'r') as f:\n    print(f.read())"},

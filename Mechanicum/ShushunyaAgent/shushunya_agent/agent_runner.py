@@ -1543,16 +1543,19 @@ def action_is_cli_verification(action_type: str, action: dict[str, Any]) -> bool
     cmd = str(action.get("cmd") or "").lower()
     code = str(action.get("code") or "").lower()
     text = f"{cmd}\n{code}"
+    validation_markers = ("assert ", "json.load", "json.loads")
+    entrypoint_markers = ("run_check", ".cli", "/cli", " cli", "main(", "runpy.run_module")
     if "pytest" in text:
-        return "run_check" in text or (
-            any(marker in code for marker in ("subprocess.run", "subprocess.check", "runpy.run_module"))
-            and any(marker in code for marker in ("assert ", "json.load", "json.loads"))
-        )
+        return "run_check" in text
     if action_type == "shell":
-        return "run_check" in cmd or "python -m" in cmd or "python3 -m" in cmd
+        return "run_check" in cmd or (
+            ("python -m" in cmd or "python3 -m" in cmd)
+            and any(marker in cmd for marker in validation_markers)
+        )
     return "run_check" in code or (
         any(marker in code for marker in ("subprocess.run", "subprocess.check", "runpy.run_module"))
-        and any(marker in code for marker in ("assert ", "json.load", "json.loads"))
+        and any(marker in code for marker in validation_markers)
+        and any(marker in code for marker in entrypoint_markers)
     )
 
 
