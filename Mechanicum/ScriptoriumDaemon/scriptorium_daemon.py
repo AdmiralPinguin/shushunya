@@ -120,14 +120,27 @@ def build_reconstruction(source_map: dict[str, Any], notes: dict[str, Any], time
     return "\n".join(lines).rstrip() + "\n"
 
 
-def build_coverage_report(source_map: dict[str, Any], notes: dict[str, Any], timeline: dict[str, Any]) -> str:
+def build_coverage_report(
+    source_map: dict[str, Any],
+    source_snapshots: dict[str, Any],
+    notes: dict[str, Any],
+    timeline: dict[str, Any],
+) -> str:
     sources = [item for item in source_map.get("sources", []) if isinstance(item, dict)]
+    snapshots = [item for item in source_snapshots.get("snapshots", []) if isinstance(item, dict)]
     events = [item for item in timeline.get("timeline", []) if isinstance(item, dict)]
+    notes_by_id = {
+        str(item.get("event_id")): item
+        for item in notes.get("events", [])
+        if isinstance(item, dict) and item.get("event_id")
+    }
     gaps = list(source_map.get("coverage_gaps", [])) + list(notes.get("gaps", [])) + list(timeline.get("gaps", []))
     lines = [
         "# Coverage Report",
         "",
         f"- Sources mapped: {len(sources)}",
+        f"- Source URLs fetched: {sum(1 for item in snapshots if item.get('ok'))}",
+        f"- Source URL failures: {sum(1 for item in snapshots if not item.get('ok'))}",
         f"- Direct events extracted: {len(notes.get('events', []))}",
         f"- Timeline events: {len(events)}",
         "",
@@ -140,13 +153,31 @@ def build_coverage_report(source_map: dict[str, Any], notes: dict[str, Any], tim
         reliability = source.get("reliability", "")
         use = source.get("expected_use", "")
         lines.append(f"- {title} | {source_class} | reliability={reliability} | {use}")
+    if snapshots:
+        lines.extend(["", "## Source Snapshots", ""])
+        for snapshot in snapshots:
+            status = "ok" if snapshot.get("ok") else "failed"
+            title = snapshot.get("source_title", "")
+            final_url = snapshot.get("final_url") or snapshot.get("requested_url") or ""
+            detail = snapshot.get("title") or snapshot.get("error") or ""
+            lines.append(f"- {title} | {status} | {final_url} | {detail}")
     lines.extend(["", "## Gaps", ""])
     for gap in dict.fromkeys(str(item) for item in gaps if item):
         lines.append(f"- {gap}")
     lines.extend(["", "## Event Coverage", ""])
     for event in events:
         refs = ", ".join(str(item) for item in event.get("source_refs", []) if item)
-        lines.append(f"- {event.get('event_id')} | phase={event.get('phase')} | confidence={event.get('confidence')} | refs={refs}")
+        note = notes_by_id.get(str(event.get("event_id") or ""), {})
+        evidence = "; ".join(
+            f"{item.get('source_title')}: {item.get('matched_markers')}"
+            for item in note.get("evidence_snapshots", [])
+            if isinstance(item, dict)
+        )
+        evidence_text = f" | evidence={evidence}" if evidence else " | evidence=missing"
+        lines.append(
+            f"- {event.get('event_id')} | phase={event.get('phase')} | "
+            f"confidence={event.get('confidence')} | refs={refs}{evidence_text}"
+        )
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -160,17 +191,19 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     reconstruction_path = str(expected_artifacts[0])
     coverage_path = str(expected_artifacts[1])
     source_path = sibling_artifact(reconstruction_path, "source_map.json")
+    source_snapshots_path = sibling_artifact(reconstruction_path, "source_snapshots.json")
     notes_path = sibling_artifact(reconstruction_path, "direct_event_notes.json")
     timeline_path = sibling_artifact(reconstruction_path, "timeline.json")
     try:
         source_map = load_json_artifact(workspace_root, source_path)
+        source_snapshots = load_json_artifact(workspace_root, source_snapshots_path)
         notes = load_json_artifact(workspace_root, notes_path)
         timeline = load_json_artifact(workspace_root, timeline_path)
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         return {"ok": False, "worker": "ScriptoriumDaemon", "error": str(exc)}
 
     reconstruction = build_reconstruction(source_map, notes, timeline)
-    coverage_report = build_coverage_report(source_map, notes, timeline)
+    coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline)
     for output_path, content in ((reconstruction_path, reconstruction), (coverage_path, coverage_report)):
         host_path = sandbox_path(workspace_root, output_path)
         host_path.parent.mkdir(parents=True, exist_ok=True)

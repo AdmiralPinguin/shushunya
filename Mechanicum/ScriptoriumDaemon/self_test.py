@@ -37,6 +37,19 @@ def main() -> int:
             },
         )
         write_json(
+            base / "source_snapshots.json",
+            {
+                "snapshots": [
+                    {
+                        "source_title": "Kharn: Eater of Worlds",
+                        "ok": True,
+                        "final_url": "https://example.com",
+                        "title": "source",
+                    }
+                ]
+            },
+        )
+        write_json(
             base / "direct_event_notes.json",
             {
                 "topic": "Skalathrax",
@@ -48,6 +61,9 @@ def main() -> int:
                         "narrative_ru": "На луне Скалатракса прошли переговоры.",
                         "confidence": "medium",
                         "source_refs": ["Kharn: Eater of Worlds"],
+                        "evidence_snapshots": [
+                            {"source_title": "Kharn: Eater of Worlds", "matched_markers": "parley"}
+                        ],
                     }
                 ],
                 "gaps": ["needs chapter evidence"],
@@ -81,6 +97,8 @@ def main() -> int:
                 raise AssertionError(f"missing reconstruction text: {needle}")
         if "Sources mapped: 1" not in coverage or "moon_parley" not in coverage:
             raise AssertionError("coverage report is incomplete")
+        if "evidence=Kharn: Eater of Worlds: parley" not in coverage:
+            raise AssertionError("coverage report should include event evidence")
     print("[ok] ScriptoriumDaemon draft")
     return 0
 
