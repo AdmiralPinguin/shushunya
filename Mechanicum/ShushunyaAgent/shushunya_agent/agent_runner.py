@@ -5121,6 +5121,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             elif (
                 swe_task
                 and swe_requires_cli_verification
+                and not pending_failing_tests
                 and (swe_verified_after_edit or swe_resume_requires_cli_verification)
                 and (last_cli_required_swe_edit_path or swe_resume_requires_cli_verification)
                 and not swe_cli_verification_attempted_after_edit

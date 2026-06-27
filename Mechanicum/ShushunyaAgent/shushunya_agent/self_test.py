@@ -4040,6 +4040,40 @@ def main() -> int:
         raise AssertionError(f"SWE resume non-CLI python action reached python_tool: {swe_resume_cli_payload}")
     print("[ok] SWE resume final requires CLI verification")
 
+    swe_resume_failing_cli_stdout = io.StringIO()
+    swe_resume_failing_cli_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-resume-failing-cli-allows-edit"),
+        json_output=True,
+        max_steps=2,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    resume_failing_cli_task = (
+        "Продолжи выполнение той же задачи по task journal.\n\n"
+        "Resume context from previous agent task journal:\n"
+        "[{\"type\":\"start\",\"task\":\"Исправь Python-проект. CLI должен печатать валидный JSON; "
+        "проверь python3 -m package.cli data.csv.\"},"
+        "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":false,"
+        "\"passing_tests\":[\"tests/test_core.py::test_parse\"],"
+        "\"failing_tests\":[\"tests/test_core.py::test_schedule\"],"
+        "\"stdout\":\"TypeError: unsupported operand type(s) for +: 'datetime.datetime' and 'int'\"}}]"
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"replace_in_file","path":"/work/project/core.py","old":"start + minutes","new":"start + timedelta(minutes=minutes)"}',
+            '{"action":"final","message":"blocked until tests"}',
+    ]), mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/core.py"}) as mocked_resume_failing_file, \
+            contextlib.redirect_stdout(swe_resume_failing_cli_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(resume_failing_cli_task, swe_resume_failing_cli_config)
+    swe_resume_failing_cli_payload = json.loads(swe_resume_failing_cli_stdout.getvalue())
+    resume_failing_cli_results = [step.get("result") or {} for step in swe_resume_failing_cli_payload.get("steps", [])]
+    if not mocked_resume_failing_file.called:
+        raise AssertionError(f"SWE resume with failing tests should allow source edit before CLI verification: {swe_resume_failing_cli_payload}")
+    if any(result.get("error") == "swe cli verification required by supervisor" for result in resume_failing_cli_results):
+        raise AssertionError(f"SWE resume CLI gate blocked a failing-test repair: {swe_resume_failing_cli_payload}")
+    print("[ok] SWE resume failing tests allow repair before CLI verification")
+
     failing_stall_stdout = io.StringIO()
     failing_stall_config = AgentConfig(
         task_id=safe_task_id("self-test-failing-test-stall"),
