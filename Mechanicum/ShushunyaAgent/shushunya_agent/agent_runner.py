@@ -1624,16 +1624,51 @@ def action_invokes_cli_module(action_type: str, action: dict[str, Any], module: 
     return any(re.search(pattern, text) for pattern in patterns)
 
 
+CLI_INPUT_EXTENSIONS = {".csv", ".json", ".jsonl", ".txt", ".tsv", ".yaml", ".yml"}
+
+
+def cli_input_path_from_listing_item(item: dict[str, Any]) -> str:
+    if item.get("type") not in {None, "file"}:
+        return ""
+    path = str(item.get("path") or "")
+    suffix = Path(path).suffix.lower()
+    if suffix not in CLI_INPUT_EXTENSIONS:
+        return ""
+    normalized = posixpath.normpath(path)
+    lowered_parts = {part.lower() for part in normalized.split("/")}
+    if "tests" in lowered_parts or "__pycache__" in lowered_parts:
+        return ""
+    return normalized
+
+
+def action_uses_cli_input_path(action: dict[str, Any], input_paths: Iterable[str]) -> bool:
+    cmd = str(action.get("cmd") or "")
+    code = str(action.get("code") or "")
+    text = f"{cmd}\n{code}"
+    for path in input_paths:
+        normalized = posixpath.normpath(str(path))
+        basename = posixpath.basename(normalized)
+        if normalized and normalized in text:
+            return True
+        if basename and re.search(r"(?<![\w.-])" + re.escape(basename) + r"(?![\w.-])", text):
+            return True
+    return False
+
+
 def action_is_cli_verification(
     action_type: str,
     action: dict[str, Any],
     task: str = "",
     expected_modules: Iterable[str] | None = None,
+    expected_input_paths: Iterable[str] | None = None,
 ) -> bool:
     if action_type not in {"shell", "python"}:
         return False
     required_modules = list(dict.fromkeys([*cli_modules_from_task(task), *(expected_modules or [])]))
     if required_modules and not any(action_invokes_cli_module(action_type, action, module) for module in required_modules):
+        return False
+    required_inputs = list(dict.fromkeys(expected_input_paths or []))
+    if required_inputs and not action_uses_cli_input_path(action, required_inputs):
         return False
     cmd = str(action.get("cmd") or "").lower()
     code = str(action.get("code") or "").lower()
@@ -4263,6 +4298,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     explicit_workspace = explicit_workspace_from_task(original_task)
     expected_cli_modules: set[str] = set(cli_modules_from_task(original_task))
     expected_cli_modules.update(cli_modules_from_text_paths(original_task, explicit_workspace))
+    expected_cli_input_paths: set[str] = set()
     if swe_requires_cli_verification and explicit_workspace:
         expected_cli_modules.update(cli_modules_from_workspace(explicit_workspace))
     data_source_path_list = data_source_paths_from_task(original_task, explicit_workspace, required_artifact_path_list)
@@ -5245,19 +5281,21 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and (swe_verified_after_edit or swe_resume_requires_cli_verification)
                 and (last_cli_required_swe_edit_path or swe_resume_requires_cli_verification)
                 and not swe_cli_verification_attempted_after_edit
-                and not action_is_cli_verification(action_type, action, original_task, expected_cli_modules)
+                and not action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
             ):
                 result = {
                     "ok": False,
                     "error": "swe cli verification required by supervisor",
                     "last_edited_path": last_cli_required_swe_edit_path,
                     "expected_cli_modules": sorted(expected_cli_modules),
+                    "expected_cli_input_paths": sorted(expected_cli_input_paths),
                     "instruction": (
                         "The code already passed the unit-test/fallback verification after the last edit, but the user task "
                         "also requires CLI/command-interface behavior. Do not inspect files or run marker checks before the "
                         "first CLI verification. Run the requested CLI command or an equivalent action that invokes the "
                         "entrypoint/subprocess and validates stdout/JSON output. If expected_cli_modules is non-empty, "
-                        "invoke one of those modules with python -m and the real input file from the workspace."
+                        "invoke one of those modules with python -m and the real input file from the workspace. If "
+                        "expected_cli_input_paths is non-empty, use one of those existing files instead of generating a dummy input."
                     ),
                 }
             elif (
@@ -5265,7 +5303,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and swe_task
                 and explicit_workspace
                 and looks_like_inline_python_shell(str(action.get("cmd", "")))
-                and not action_is_cli_verification(action_type, action, original_task, expected_cli_modules)
+                and not action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
             ):
                 suggested_action = {
                     "action": "python",
@@ -5515,7 +5553,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             )
         if (
             swe_task
-            and action_is_cli_verification(action_type, action, original_task, expected_cli_modules)
+            and action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
             and isinstance(result, dict)
             and result.get("ok") is True
             and python_result_printed_nested_cli_failure(result)
@@ -5696,14 +5734,14 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if (
             swe_task
             and swe_requires_cli_verification
-            and action_is_cli_verification(action_type, action, original_task, expected_cli_modules)
+            and action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
             and not supervisor_rejection
         ):
             swe_cli_verification_attempted_after_edit = True
         if (
             swe_task
             and swe_requires_cli_verification
-            and action_is_cli_verification(action_type, action, original_task, expected_cli_modules)
+            and action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
             and isinstance(result, dict)
             and result.get("ok") is True
         ):
@@ -5812,6 +5850,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 cli_module = cli_module_from_path(str(item.get("path") or ""), explicit_workspace)
                 if cli_module:
                     expected_cli_modules.add(cli_module)
+                cli_input_path = cli_input_path_from_listing_item(item)
+                if cli_input_path:
+                    expected_cli_input_paths.add(cli_input_path)
             candidates = source_candidates_from_listing(result)
             if candidates:
                 last_source_candidates = candidates

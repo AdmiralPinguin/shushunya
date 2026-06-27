@@ -703,6 +703,38 @@ def main() -> int:
         {"scheduler.cli"},
     ):
         raise AssertionError("inspecting an internal module must not satisfy discovered CLI verification")
+    input_item = {"path": "/work/project/jobs.csv", "type": "file"}
+    if agent_runner.cli_input_path_from_listing_item(input_item) != "/work/project/jobs.csv":
+        raise AssertionError("CLI input detector missed workspace csv input")
+    if agent_runner.action_is_cli_verification(
+        "python",
+        {
+            "code": (
+                "import subprocess,json\n"
+                "open('test_input.json','w').write('[]')\n"
+                "r=subprocess.run(['python3','-m','scheduler.cli','test_input.json'], capture_output=True, text=True)\n"
+                "json.loads(r.stdout)\nassert r.returncode == 0"
+            )
+        },
+        "",
+        {"scheduler.cli"},
+        {"/work/project/jobs.csv"},
+    ):
+        raise AssertionError("generated dummy CLI input must not satisfy known workspace input verification")
+    if not agent_runner.action_is_cli_verification(
+        "python",
+        {
+            "code": (
+                "import subprocess,json\n"
+                "r=subprocess.run(['python3','-m','scheduler.cli','jobs.csv'], capture_output=True, text=True)\n"
+                "json.loads(r.stdout)\nassert r.returncode == 0"
+            )
+        },
+        "",
+        {"scheduler.cli"},
+        {"/work/project/jobs.csv"},
+    ):
+        raise AssertionError("known workspace input CLI verification was not recognized")
     if not agent_runner.action_is_cli_verification(
         "shell",
         {"cmd": "python3 -m package.cli data.csv | python3 -c \"import sys,json; json.load(sys.stdin)\""},
