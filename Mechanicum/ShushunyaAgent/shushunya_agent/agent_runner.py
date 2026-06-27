@@ -2382,6 +2382,15 @@ def task_literal_markers_for_path(task: str, path: str) -> list[str]:
 def build_required_artifact_verify_action(task: str, path: str) -> dict[str, Any]:
     action: dict[str, Any] = {"action": "verify_text_file", "path": path, "min_bytes": 1}
     markers = task_literal_markers_for_path(task, path)
+    lowered_path = path.lower()
+    if not markers and lowered_path.endswith(".json"):
+        basename = posixpath.basename(lowered_path)
+        if "source" in basename:
+            markers = ['"sources"']
+        elif "event" in basename or "note" in basename:
+            markers = ['"events"']
+        elif "timeline" in basename or "chronolog" in basename:
+            markers = ['"timeline"']
     if markers:
         action["must_contain"] = markers
         if path.lower().endswith((".md", ".markdown", ".csv")) and len(markers) > 1:

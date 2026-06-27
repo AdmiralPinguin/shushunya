@@ -2963,6 +2963,17 @@ def main() -> int:
         )
     print("[ok] required artifact verification hint")
 
+    json_verify_actions = {
+        "/work/skalathrax_full_source_map.json": ['"sources"'],
+        "/work/skalathrax_direct_event_notes.json": ['"events"'],
+        "/work/skalathrax_direct_timeline.json": ['"timeline"'],
+    }
+    for path, expected_markers in json_verify_actions.items():
+        action = agent_runner.build_required_artifact_verify_action("Required artifacts: " + path, path)
+        if action.get("must_contain") != expected_markers:
+            raise AssertionError(f"json required artifact verify action too weak for {path}: {action}")
+    print("[ok] JSON required artifact verify action markers")
+
     timeout_stdout = io.StringIO()
     timeout_events: list[dict] = []
     timeout_config = AgentConfig(
