@@ -28,7 +28,7 @@ and the end-to-end HTTP worker pipeline.
 ## Current Limits
 
 - `Lexmechanic` still uses a prototype source map for Skalathrax instead of a general live search strategy.
-- `NoosphericExtractor` still contains known-event extraction logic for the Skalathrax training task.
+- `NoosphericExtractor` still uses rule-based event playbooks; Skalathrax rules now live in data, not Python code.
 - `AuspexBrowser` performs guarded HTTP text fetches; it does not yet render JavaScript pages or screenshots.
 - The pipeline records inaccessible primary books as gaps instead of solving book acquisition.
 - Warmaster Gateway is not implemented yet; Iskandar and Mechanicum are ready for it to call.
@@ -36,6 +36,6 @@ and the end-to-end HTTP worker pipeline.
 ## Next Good Steps
 
 - Make `Lexmechanic` support pluggable search providers and generic source discovery.
-- Move known-event extraction rules out of `NoosphericExtractor` into data files or task playbooks.
+- Add more playbooks only when they are task-class patterns, not one-off hacks.
 - Add a persistent task ledger for governor runs and worker artifacts.
 - Add Warmaster Gateway only after the Iskandar/Mechanicum boundary remains stable.
