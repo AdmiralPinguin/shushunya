@@ -12,10 +12,13 @@ def main() -> int:
         path = Path(temp_dir) / "ledger.json"
         ledger = TaskLedger.create(path, "task-1", "goal", "IskandarKhayon")
         ledger.record_step("source_discovery", "Lexmechanic", "completed", ["/work/x/source_map.json"], "done")
+        ledger.set_result({"ok": True, "artifacts": ["/work/x/final_manifest.json"]})
         ledger.set_status("completed")
         loaded = TaskLedger.load(path)
         data = loaded.to_dict()
         if data["status"] != "completed" or data["steps"][0]["worker"] != "Lexmechanic":
+            raise AssertionError(data)
+        if data["result"]["artifacts"] != ["/work/x/final_manifest.json"]:
             raise AssertionError(data)
         if len(data["events"]) < 3:
             raise AssertionError("ledger did not record events")

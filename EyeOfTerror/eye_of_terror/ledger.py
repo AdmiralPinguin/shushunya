@@ -54,6 +54,10 @@ class TaskLedger:
         self.data["status"] = status
         self.record_event("status_changed", {"status": status})
 
+    def set_result(self, result: dict[str, Any]) -> None:
+        self.data["result"] = result
+        self.record_event("result_recorded", result)
+
     def record_step(self, step_id: str, worker: str, status: str, artifacts: list[str] | None = None, summary: str = "") -> None:
         steps = self.data.setdefault("steps", [])
         existing = next((step for step in steps if step.get("step_id") == step_id), None)

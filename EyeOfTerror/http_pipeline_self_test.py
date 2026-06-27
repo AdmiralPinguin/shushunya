@@ -74,6 +74,8 @@ def main() -> int:
             ledger = read_json(run_dir / "task_ledger.json")
             if ledger.get("status") != "completed" or len(ledger.get("steps", [])) != len(workers):
                 raise AssertionError(f"bad task ledger: {ledger}")
+            if ledger.get("result", {}).get("final_step") != "finalize":
+                raise AssertionError(f"ledger did not record final result: {ledger}")
         finally:
             for server in servers:
                 server.shutdown()

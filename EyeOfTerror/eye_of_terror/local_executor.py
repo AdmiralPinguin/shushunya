@@ -134,6 +134,17 @@ def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_se
     }
     report_path = run_dir / "execution_report.json"
     report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    final_payload = results[-1].payload if results else {}
+    if isinstance(final_payload, dict):
+        ledger.set_result(
+            {
+                "ok": summary["ok"],
+                "final_step": results[-1].step_id if results else "",
+                "artifacts": final_payload.get("artifacts", []),
+                "status": final_payload.get("status", ""),
+                "summary": final_payload.get("summary", ""),
+            }
+        )
     ledger.set_status("completed" if summary["ok"] else "failed")
     return summary
 
