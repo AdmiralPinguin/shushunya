@@ -1,0 +1,10 @@
+{
+  "name": "ForgeRelay",
+  "port": 7010,
+  "role": "DemonsForge adapter",
+  "status": "planned",
+  "backend": "http://127.0.0.1:8110",
+  "capabilities": ["txt2img", "img2img", "inpaint", "project_plan", "forge_jobs"],
+  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+}
+

@@ -1,0 +1,9 @@
+{
+  "name": "Lexmechanic",
+  "port": 7002,
+  "role": "source researcher",
+  "status": "planned",
+  "capabilities": ["web_search", "source_map", "reliability_labels"],
+  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+}
+

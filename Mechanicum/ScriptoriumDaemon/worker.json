@@ -1,0 +1,9 @@
+{
+  "name": "ScriptoriumDaemon",
+  "port": 7005,
+  "role": "writer",
+  "status": "planned",
+  "capabilities": ["longform_writing", "translation_ru", "style_revision"],
+  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+}
+

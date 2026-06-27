@@ -1,0 +1,9 @@
+{
+  "name": "CogitatorCodewright",
+  "port": 7008,
+  "role": "code worker",
+  "status": "planned",
+  "capabilities": ["diagnostics", "code_edit", "test_verification"],
+  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+}
+

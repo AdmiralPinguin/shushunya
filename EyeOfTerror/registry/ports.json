@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "eye_of_terror": {
+    "7000": {
+      "name": "WarmasterGateway",
+      "role": "user-facing chat and orchestration gateway",
+      "path": "EyeOfTerror/gateway"
+    },
+    "7101": {
+      "name": "IskandarKhayon",
+      "role": "lore research and reconstruction governor",
+      "path": "EyeOfTerror/InnerCircle/IskandarKhayon"
+    }
+  },
+  "mechanicum": {
+    "7001": {
+      "name": "ShushunyaAgent",
+      "role": "general worker",
+      "path": "Mechanicum/ShushunyaAgent"
+    },
+    "7002": {
+      "name": "Lexmechanic",
+      "role": "source researcher",
+      "path": "Mechanicum/Lexmechanic"
+    },
+    "7003": {
+      "name": "NoosphericExtractor",
+      "role": "fact extractor",
+      "path": "Mechanicum/NoosphericExtractor"
+    },
+    "7004": {
+      "name": "Chronologis",
+      "role": "timeline builder",
+      "path": "Mechanicum/Chronologis"
+    },
+    "7005": {
+      "name": "ScriptoriumDaemon",
+      "role": "writer",
+      "path": "Mechanicum/ScriptoriumDaemon"
+    },
+    "7006": {
+      "name": "ReductorVerifier",
+      "role": "critic and verifier",
+      "path": "Mechanicum/ReductorVerifier"
+    },
+    "7007": {
+      "name": "FabricatorFinalis",
+      "role": "finalizer, packager, telegram sender",
+      "path": "Mechanicum/FabricatorFinalis"
+    },
+    "7008": {
+      "name": "CogitatorCodewright",
+      "role": "code worker",
+      "path": "Mechanicum/CogitatorCodewright"
+    },
+    "7009": {
+      "name": "AuspexBrowser",
+      "role": "browser worker",
+      "path": "Mechanicum/AuspexBrowser"
+    },
+    "7010": {
+      "name": "ForgeRelay",
+      "role": "DemonsForge adapter",
+      "path": "Mechanicum/ForgeRelay",
+      "backend": "http://127.0.0.1:8110"
+    },
+    "7011": {
+      "name": "MnemosyneRelay",
+      "role": "ArchiveOfHeresy adapter",
+      "path": "Mechanicum/MnemosyneRelay",
+      "backend": "http://127.0.0.1:8090"
+    }
+  }
+}
+

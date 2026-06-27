@@ -1,0 +1,9 @@
+{
+  "name": "AuspexBrowser",
+  "port": 7009,
+  "role": "browser worker",
+  "status": "planned",
+  "capabilities": ["browser_render", "js_pages", "screenshots"],
+  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+}
+

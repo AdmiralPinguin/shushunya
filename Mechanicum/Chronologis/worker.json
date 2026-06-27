@@ -1,0 +1,9 @@
+{
+  "name": "Chronologis",
+  "port": 7004,
+  "role": "timeline builder",
+  "status": "planned",
+  "capabilities": ["timeline", "sequence_repair", "gap_detection"],
+  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+}
+

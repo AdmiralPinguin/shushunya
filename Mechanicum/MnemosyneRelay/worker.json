@@ -1,0 +1,9 @@
+{
+  "name": "MnemosyneRelay",
+  "port": 7011,
+  "role": "ArchiveOfHeresy adapter",
+  "status": "planned",
+  "backend": "http://127.0.0.1:8090",
+  "capabilities": ["memory_search", "memory_read", "memory_write_proposal"],
+  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+}

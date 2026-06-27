@@ -1,0 +1,9 @@
+{
+  "name": "NoosphericExtractor",
+  "port": 7003,
+  "role": "fact extractor",
+  "status": "planned",
+  "capabilities": ["fact_extraction", "confidence_labels", "contradiction_notes"],
+  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+}
+
