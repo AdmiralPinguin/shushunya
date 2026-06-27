@@ -1770,6 +1770,53 @@ def action_looks_like_python_verification(action_type: str, action: dict[str, An
     return any(marker in code for marker in ("assert ", "pytest", "test_", "run_check", "expected"))
 
 
+def action_looks_like_python_file_write(action_type: str, action: dict[str, Any]) -> bool:
+    if action_type != "python":
+        return False
+    code = str(action.get("code") or "").lower()
+    return any(
+        marker in code
+        for marker in (
+            "write_text(",
+            "write_bytes(",
+            ".write(",
+            "json.dump(",
+            "yaml.dump(",
+            "toml.dump(",
+            "csv.writer(",
+            "dictwriter(",
+            "shutil.copy",
+            "os.rename(",
+            "os.replace(",
+        )
+    ) or bool(re.search(r"open\s*\([^)]*,\s*['\"][wax+]", code))
+
+
+def action_looks_like_python_inspection(action_type: str, action: dict[str, Any]) -> bool:
+    if action_type != "python":
+        return False
+    if action_looks_like_python_file_write(action_type, action):
+        return False
+    code = str(action.get("code") or "").lower()
+    return any(
+        marker in code
+        for marker in (
+            "open(",
+            "read_text(",
+            "read_bytes(",
+            ".read(",
+            "json.load(",
+            "os.listdir(",
+            "glob.glob(",
+            "path.glob(",
+            "pathlib",
+            "os.path.exists(",
+            "os.path.getsize(",
+            "print(",
+        )
+    )
+
+
 def python_result_printed_assertion(result: dict[str, Any]) -> bool:
     output = f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}".lower()
     return "assertionerror" in output
@@ -4916,7 +4963,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     ),
                 }
             elif (
-                action_type in INSPECTION_ACTIONS
+                (action_type in INSPECTION_ACTIONS or action_looks_like_python_inspection(action_type, action))
                 and inspection_actions_since_progress >= max(1, INSPECTION_STALL_LIMIT)
             ):
                 result = {
@@ -5028,7 +5075,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and step >= 8
                 and len(set(successful_write_file_paths) & required_artifact_paths) >= 1
                 and (missing_artifacts := sorted(required_artifact_paths - set(successful_write_file_paths) - verified_text_paths))
-                and (action_type in INSPECTION_ACTIONS or (action_type == "shell" and looks_like_inspection_shell(str(action.get("cmd", "")))))
+                and (
+                    action_type in INSPECTION_ACTIONS
+                    or (action_type == "shell" and looks_like_inspection_shell(str(action.get("cmd", ""))))
+                    or action_looks_like_python_inspection(action_type, action)
+                )
             ):
                 result = {
                     "ok": False,
@@ -5882,9 +5933,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             elif action_type == "bundle_text_files":
                 reset_path_dependent_action_counts(action_counts, str(action.get("output_txt") or ""))
                 reset_path_dependent_action_counts(action_counts, str(action.get("output_fb2") or ""))
-            if action_type in PRODUCTIVE_ACTIONS:
+            python_inspection_action = action_looks_like_python_inspection(action_type, action)
+            if action_type in PRODUCTIVE_ACTIONS and not python_inspection_action:
                 inspection_actions_since_progress = 0
-            elif action_type in INSPECTION_ACTIONS:
+            elif action_type in INSPECTION_ACTIONS or python_inspection_action:
                 inspection_actions_since_progress += 1
             if pending_failing_tests and (action_type in INSPECTION_ACTIONS or (action_type == "shell" and looks_like_inspection_shell(str(action.get("cmd", ""))))):
                 pending_failing_test_inspections += 1
@@ -6007,7 +6059,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 return 2
         elif isinstance(result, dict) and result.get("ok") is True:
             repeated_rejection_count = 0
-            if action_type in PRODUCTIVE_ACTIONS:
+            if action_type in PRODUCTIVE_ACTIONS and not action_looks_like_python_inspection(action_type, action):
                 repeated_rejection_total = 0
 
     message = (

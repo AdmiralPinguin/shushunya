@@ -1794,8 +1794,13 @@ def main() -> int:
         '{"action":"write_file","path":"/work/a.md","content":"alpha"}',
         *[
             json.dumps({"action": "web_search", "query": f"source lookup {index}", "limit": 3})
-            for index in range(7)
+            for index in range(6)
         ],
+        json.dumps({
+            "action": "python",
+            "cwd": "/work",
+            "code": "from pathlib import Path\nprint(Path('/work/a.md').read_text(encoding='utf-8'))",
+        }),
         '{"action":"write_file","path":"/work/b.md","content":"beta"}',
         '{"action":"final","message":"Готово: /work/a.md, /work/b.md"}',
         '{"action":"final","message":"Готово: /work/a.md, /work/b.md"}',
@@ -1830,7 +1835,12 @@ def main() -> int:
         and (step.get("result") or {}).get("ok") is True
         for step in artifact_creation_payload.get("steps", [])
     )
-    if not artifact_creation_rejections or not artifact_creation_wrote_missing:
+    artifact_creation_rejected_python = any(
+        step.get("action", {}).get("action") == "python"
+        and (step.get("result") or {}).get("error") == "artifact creation required by supervisor"
+        for step in artifact_creation_payload.get("steps", [])
+    )
+    if not artifact_creation_rejections or not artifact_creation_wrote_missing or not artifact_creation_rejected_python:
         raise AssertionError(
             f"artifact creation required guard failed: code={artifact_creation_code}, payload={artifact_creation_payload}"
         )
