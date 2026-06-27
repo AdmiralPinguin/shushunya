@@ -4,9 +4,11 @@ import argparse
 import importlib
 import json
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import unquote, urlparse
 
 
 WorkerRun = Callable[[dict[str, Any], Path], dict[str, Any]]
@@ -58,6 +60,8 @@ def make_handler(
     worker_metadata.setdefault("name", worker_name)
     worker_metadata.setdefault("capabilities", [])
     worker_metadata.setdefault("api_contract", "EyeOfTerror/contracts/worker_api.md")
+    tasks: dict[str, dict[str, Any]] = {}
+    tasks_lock = threading.RLock()
 
     def service_manifest() -> dict[str, Any]:
         return {
@@ -79,27 +83,68 @@ def make_handler(
             response(self, 200, {"ok": True, "worker": worker_name})
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-            if self.path == "/health":
+            parsed = urlparse(self.path)
+            if parsed.path == "/health":
                 response(self, 200, service_manifest())
                 return
-            if self.path == "/capabilities":
+            if parsed.path == "/capabilities":
                 response(self, 200, service_manifest())
+                return
+            parts = [part for part in parsed.path.split("/") if part]
+            if len(parts) == 2 and parts[0] == "tasks":
+                task_id = unquote(parts[1])
+                with tasks_lock:
+                    task = dict(tasks.get(task_id, {}))
+                if not task:
+                    response(self, 404, {"ok": False, "worker": worker_name, "task_id": task_id, "error": "task not found"})
+                    return
+                response(self, 200, {"ok": True, "worker": worker_name, "task": task})
                 return
             response(self, 404, {"ok": False, "error": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
-            if self.path != "/run":
+            parsed = urlparse(self.path)
+            parts = [part for part in parsed.path.split("/") if part]
+            if len(parts) == 3 and parts[0] == "tasks" and parts[2] == "cancel":
+                task_id = unquote(parts[1])
+                with tasks_lock:
+                    task = tasks.setdefault(task_id, {"task_id": task_id, "worker": worker_name, "status": "unknown"})
+                    task["cancel_requested"] = True
+                    task["status"] = "cancelling" if task.get("status") == "running" else "cancelled"
+                response(self, 200, {"ok": True, "worker": worker_name, "task": dict(task)})
+                return
+            if parsed.path != "/run":
                 response(self, 404, {"ok": False, "error": "not found"})
                 return
+            task_id = ""
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
                 if not isinstance(payload, dict):
                     raise ValueError("request body must be a JSON object")
                 request = payload.get("request") if isinstance(payload.get("request"), dict) else payload
+                task_id = str(request.get("task_id") or payload.get("task_id") or "")
+                if task_id:
+                    with tasks_lock:
+                        task = tasks.setdefault(task_id, {"task_id": task_id, "worker": worker_name})
+                        if task.get("cancel_requested"):
+                            task["status"] = "cancelled"
+                            response(self, 409, {"ok": False, "worker": worker_name, "task_id": task_id, "status": "cancelled", "error": "task cancelled before start"})
+                            return
+                        task["status"] = "running"
                 result = run_worker(request, workspace_root)
+                if task_id:
+                    with tasks_lock:
+                        task = tasks.setdefault(task_id, {"task_id": task_id, "worker": worker_name})
+                        task["status"] = str(result.get("status") or ("completed" if result.get("ok") else "failed"))
+                        task["result"] = result
                 response(self, 200 if result.get("ok") else 400, result)
             except Exception as exc:  # noqa: BLE001 - server boundary converts exceptions to JSON.
+                if task_id:
+                    with tasks_lock:
+                        task = tasks.setdefault(task_id, {"task_id": task_id, "worker": worker_name})
+                        task["status"] = "failed"
+                        task["error"] = str(exc)
                 response(self, 500, {"ok": False, "worker": worker_name, "error": str(exc)})
 
     return WorkerHandler

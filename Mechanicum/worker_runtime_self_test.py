@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -49,6 +50,30 @@ def main() -> int:
             )
             if not result.get("ok"):
                 raise AssertionError(f"bad run response: {result}")
+            task = request_json(base + "/tasks/runtime-test")
+            if not task.get("ok") or task["task"].get("status") != "completed":
+                raise AssertionError(f"bad task status response: {task}")
+            cancelled = request_json(base + "/tasks/cancel-before-start/cancel", {})
+            if not cancelled.get("ok") or not cancelled["task"].get("cancel_requested"):
+                raise AssertionError(f"bad task cancel response: {cancelled}")
+            try:
+                request_json(
+                    base + "/run",
+                    {
+                        "request": {
+                            "task_id": "cancel-before-start",
+                            "step": {"expected_artifacts": ["/work/test/should_not_exist.json"]},
+                        }
+                    },
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                blocked = json.loads(exc.read().decode("utf-8"))
+                if blocked.get("status") != "cancelled":
+                    raise AssertionError(f"bad blocked run response: {blocked}")
+            else:
+                raise AssertionError("cancelled worker task should not start")
         finally:
             server.shutdown()
             thread.join(timeout=5)

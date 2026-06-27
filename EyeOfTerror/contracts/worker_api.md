@@ -47,6 +47,29 @@ running on the selected port before sending work.
 }
 ```
 
+## GET /tasks/{task_id} Response
+
+```json
+{
+  "ok": true,
+  "worker": "Lexmechanic",
+  "task": {
+    "task_id": "stable-task-id",
+    "worker": "Lexmechanic",
+    "status": "completed",
+    "cancel_requested": false,
+    "result": {}
+  }
+}
+```
+
+## POST /tasks/{task_id}/cancel
+
+Cancellation is cooperative. A worker runtime must record the cancellation flag
+and must not start a task that was already cancelled. A worker that is already
+inside a long model call or external process may only stop after that call
+returns unless the worker implements a stronger interruption mechanism.
+
 ## Response Shape
 
 ```json
