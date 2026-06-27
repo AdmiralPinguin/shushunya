@@ -1539,9 +1539,22 @@ def task_requires_cli_verification(task: str) -> bool:
 
 def cli_modules_from_task(task: str) -> list[str]:
     modules: list[str] = []
+    invalid_modules = {
+        "and",
+        "or",
+        "the",
+        "a",
+        "an",
+        "cli",
+        "json",
+        "input",
+        "jobs",
+        "fallback",
+        "pytest",
+    }
     for match in re.finditer(r"\bpython3?\s+-m\s+([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)", task or ""):
         module = match.group(1)
-        if module != "pytest":
+        if module not in invalid_modules:
             modules.append(module)
     return list(dict.fromkeys(modules))
 
@@ -1586,6 +1599,15 @@ def cli_modules_from_workspace(workspace: str, limit: int = 20) -> list[str]:
                 modules.append(module)
                 if len(modules) >= limit:
                     return list(dict.fromkeys(modules))
+    return list(dict.fromkeys(modules))
+
+
+def cli_modules_from_text_paths(text: str, workspace: str = "") -> list[str]:
+    modules: list[str] = []
+    for match in re.finditer(r"(/[^\s\"']+/(?:cli|main|__main__)\.py)\b", text or ""):
+        module = cli_module_from_path(match.group(1), workspace)
+        if module:
+            modules.append(module)
     return list(dict.fromkeys(modules))
 
 
@@ -4240,6 +4262,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     required_artifact_paths = set(required_artifact_path_list)
     explicit_workspace = explicit_workspace_from_task(original_task)
     expected_cli_modules: set[str] = set(cli_modules_from_task(original_task))
+    expected_cli_modules.update(cli_modules_from_text_paths(original_task, explicit_workspace))
     if swe_requires_cli_verification and explicit_workspace:
         expected_cli_modules.update(cli_modules_from_workspace(explicit_workspace))
     data_source_path_list = data_source_paths_from_task(original_task, explicit_workspace, required_artifact_path_list)
@@ -5781,6 +5804,14 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 if content:
                     last_read_file_excerpts[read_path] = content[:4000]
         if action_type == "list_files" and isinstance(result, dict) and result.get("ok") is True:
+            for item in result.get("items", []) if isinstance(result.get("items"), list) else []:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") not in {None, "file"}:
+                    continue
+                cli_module = cli_module_from_path(str(item.get("path") or ""), explicit_workspace)
+                if cli_module:
+                    expected_cli_modules.add(cli_module)
             candidates = source_candidates_from_listing(result)
             if candidates:
                 last_source_candidates = candidates

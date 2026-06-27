@@ -652,9 +652,17 @@ def main() -> int:
     cli_task = "Исправь CLI и проверь python3 -m package.cli data.csv."
     if agent_runner.cli_modules_from_task(cli_task) != ["package.cli"]:
         raise AssertionError("CLI module extractor missed requested python -m entrypoint")
+    if agent_runner.cli_modules_from_task("bad resume tried python3 -m and input.json"):
+        raise AssertionError("CLI module extractor accepted resume stopword as module")
     discovered_cli = agent_runner.cli_module_from_path("/work/project/scheduler/cli.py", "/work/project")
     if discovered_cli != "scheduler.cli":
         raise AssertionError(f"CLI module path detector missed scheduler/cli.py: {discovered_cli}")
+    text_cli = agent_runner.cli_modules_from_text_paths(
+        '{"path": "/work/project/scheduler/cli.py", "type": "file"}',
+        "/work/project",
+    )
+    if text_cli != ["scheduler.cli"]:
+        raise AssertionError(f"CLI text path detector missed list_files path: {text_cli}")
     with tempfile.TemporaryDirectory() as tmp:
         package_dir = Path(tmp) / "scheduler"
         package_dir.mkdir()
