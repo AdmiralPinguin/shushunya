@@ -37,6 +37,7 @@ PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.warmaster_gateway
 Gateway endpoints:
 
 - `GET /health`
+- `GET /capabilities`
 - `GET /governors`
 - `GET /workers`
 - `GET /workers?health=1`

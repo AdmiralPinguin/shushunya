@@ -204,6 +204,50 @@ def worker_registry_snapshot(include_health: bool = False, host: str = "127.0.0.
     return workers
 
 
+def gateway_capabilities() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "gateway": "WarmasterGateway",
+        "api_version": 1,
+        "capabilities": [
+            "task_routing",
+            "run_preparation",
+            "run_listing",
+            "ledger_read",
+            "artifact_listing",
+            "artifact_text_read",
+            "local_execution",
+            "http_worker_execution",
+            "background_execution",
+            "cooperative_cancellation",
+            "worker_cancel_fanout",
+            "stale_run_recovery",
+            "governor_registry",
+            "worker_registry",
+            "worker_health_snapshot",
+        ],
+        "endpoints": [
+            "GET /health",
+            "GET /capabilities",
+            "GET /governors",
+            "GET /workers",
+            "GET /workers?health=1",
+            "POST /task",
+            "GET /runs",
+            "GET /runs/{task_id}",
+            "GET /runs/{task_id}/ledger",
+            "GET /runs/{task_id}/artifacts",
+            "GET /runs/{task_id}/artifact_text?path=/work/...",
+            "POST /runs/{task_id}/execute_local",
+            "POST /runs/{task_id}/execute_http",
+            "POST /runs/{task_id}/start_local",
+            "POST /runs/{task_id}/start_http",
+            "POST /runs/{task_id}/cancel",
+            "POST /recover_stale",
+        ],
+    }
+
+
 def cancel_http_worker_tasks(run_dir: Path, host: str = "127.0.0.1", timeout_sec: float = 1.0) -> list[dict[str, Any]]:
     dispatch_dir = run_dir / "dispatch"
     if not dispatch_dir.exists():
@@ -272,6 +316,9 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
             parsed = urlparse(self.path)
             if parsed.path == "/health":
                 response(self, 200, {"ok": True, "gateway": "WarmasterGateway"})
+                return
+            if parsed.path == "/capabilities":
+                response(self, 200, gateway_capabilities())
                 return
             if parsed.path == "/governors":
                 response(self, 200, {"ok": True, "governors": [governor.to_dict() for governor in governor_refs()]})
