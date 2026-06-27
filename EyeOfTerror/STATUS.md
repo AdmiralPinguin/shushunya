@@ -21,6 +21,7 @@
 - Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
 - Warmaster Gateway can request cooperative cancellation through the task ledger; executors stop before the next worker step.
 - HTTP execution preflights all worker `/health` endpoints before running steps.
+- Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.
 
 ## Main Check
 
@@ -43,7 +44,7 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `NoosphericExtractor` still uses rule-based event playbooks; Skalathrax rules now live in data, not Python code.
 - `AuspexBrowser` performs guarded HTTP text fetches; it does not yet render JavaScript pages or screenshots.
 - The pipeline records inaccessible primary books as gaps instead of solving book acquisition.
-- Warmaster Gateway background execution is in-process only; durable job recovery across process restarts is not implemented yet.
+- Warmaster Gateway background execution is in-process only; restart recovery marks stale jobs interrupted but does not resume them.
 
 ## Next Good Steps
 

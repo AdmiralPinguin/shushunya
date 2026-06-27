@@ -81,6 +81,26 @@ def list_runs(run_root: Path) -> list[dict[str, Any]]:
     return sorted(runs, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
 
 
+def recover_stale_runs(run_root: Path) -> list[dict[str, Any]]:
+    recovered: list[dict[str, Any]] = []
+    if not run_root.exists():
+        return recovered
+    with ACTIVE_RUNS_LOCK:
+        active = set(ACTIVE_RUNS)
+    for run_dir in run_root.iterdir():
+        if not run_dir.is_dir() or run_dir.name in active:
+            continue
+        ledger_path = run_dir / "task_ledger.json"
+        if not ledger_path.exists():
+            continue
+        ledger = TaskLedger.load(ledger_path)
+        if ledger.data.get("status") in {"running", "cancelling"}:
+            ledger.set_status("interrupted")
+            ledger.record_event("recovered_stale_run", {"reason": "gateway process has no active worker thread"})
+            recovered.append(run_summary(run_dir))
+    return recovered
+
+
 def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
     result = ledger.get("result", {}) if isinstance(ledger.get("result"), dict) else {}
     workspace_root = str(result.get("workspace_root") or "")
@@ -217,6 +237,10 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     task_id = str(payload.get("task_id") or "").strip() or None
                     prepared = prepare_task(message, task_id, run_root)
                     response(self, 200 if prepared.get("ok") else 400, prepared)
+                    return
+                if self.path == "/recover_stale":
+                    recovered = recover_stale_runs(run_root)
+                    response(self, 200, {"ok": True, "recovered": recovered})
                     return
                 parts = [part for part in self.path.split("?")[0].split("/") if part]
                 if len(parts) == 3 and parts[0] == "runs" and parts[2] == "cancel":

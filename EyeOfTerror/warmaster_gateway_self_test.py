@@ -11,6 +11,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from eye_of_terror.warmaster_gateway import make_handler
+from eye_of_terror.ledger import TaskLedger
 
 
 def request_json(url: str, payload: dict | None = None, timeout: int = 5) -> dict:
@@ -121,6 +122,13 @@ def main() -> int:
                     raise AssertionError(f"bad cancelled execution response: {cancelled_execution}")
             else:
                 raise AssertionError("cancelled run should not execute successfully")
+            stale_dir = run_root / "stale-test"
+            stale_dir.mkdir(parents=True, exist_ok=True)
+            stale = TaskLedger.create(stale_dir / "task_ledger.json", "stale-test", "goal", "IskandarKhayon")
+            stale.set_status("running")
+            recovered = request_json(base + "/recover_stale", {}, timeout=10)
+            if not recovered.get("ok") or recovered["recovered"][0].get("status") != "interrupted":
+                raise AssertionError(f"bad stale recovery: {recovered}")
         finally:
             server.shutdown()
             thread.join(timeout=5)

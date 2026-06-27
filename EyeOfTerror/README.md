@@ -48,6 +48,7 @@ Gateway endpoints:
 - `POST /runs/<task_id>/start_local`
 - `POST /runs/<task_id>/start_http`
 - `POST /runs/<task_id>/cancel`
+- `POST /recover_stale`
 
 ## Iskandar Service
 
