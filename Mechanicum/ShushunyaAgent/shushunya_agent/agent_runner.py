@@ -1423,9 +1423,17 @@ def required_min_chars_by_path_from_task(task: str, paths: list[str]) -> dict[st
             number = int(match.group("number"))
         except (TypeError, ValueError):
             continue
-        start = max(0, match.start() - 500)
-        end = min(len(text), match.end() + 500)
-        window = lowered[start:end]
+        # Character-count requirements often appear in dense checklist text where
+        # several artifacts are mentioned in adjacent clauses. Keep association
+        # inside the current semicolon/newline clause so a story length like
+        # "story.md ... 12000 symbols; report.md contains sections" does not
+        # accidentally become a report length requirement too.
+        clause_start_candidates = [text.rfind(sep, 0, match.start()) for sep in (";", "\n")]
+        clause_start = max(clause_start_candidates)
+        clause_start = 0 if clause_start < 0 else clause_start + 1
+        clause_end_candidates = [idx for idx in (text.find(sep, match.end()) for sep in (";", "\n")) if idx >= 0]
+        clause_end = min(clause_end_candidates) if clause_end_candidates else len(text)
+        window = lowered[clause_start:clause_end]
         for path in paths:
             path_lower = path.lower()
             basename = posixpath.basename(path_lower)
