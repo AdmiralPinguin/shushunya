@@ -107,6 +107,21 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     if not run_dir.exists():
                         response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                         return
+                    ledger_path = run_dir / "task_ledger.json"
+                    force = bool(payload.get("force"))
+                    if ledger_path.exists() and not force:
+                        ledger = TaskLedger.load(ledger_path).to_dict()
+                        if ledger.get("status") == "completed":
+                            response(
+                                self,
+                                409,
+                                {
+                                    "ok": False,
+                                    "error": "run already completed; pass force=true to rerun",
+                                    "ledger": ledger,
+                                },
+                            )
+                            return
                     workspace_root = Path(str(payload.get("workspace_root") or run_dir / "work"))
                     timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
                     summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)

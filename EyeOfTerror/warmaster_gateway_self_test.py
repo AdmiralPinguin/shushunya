@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -51,6 +52,16 @@ def main() -> int:
             event_types = [event.get("type") for event in ledger["ledger"].get("events", [])]
             if event_types.count("task_created") != 1:
                 raise AssertionError(f"ledger should preserve original task_created event: {ledger}")
+            try:
+                request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                blocked = json.loads(exc.read().decode("utf-8"))
+                if "already completed" not in blocked.get("error", ""):
+                    raise AssertionError(f"bad rerun block response: {blocked}")
+            else:
+                raise AssertionError("completed run should not execute again without force=true")
         finally:
             server.shutdown()
             thread.join(timeout=5)
