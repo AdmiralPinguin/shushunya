@@ -28,3 +28,21 @@ The Warmaster Gateway should only do top-level routing:
 
 The gateway should not micromanage individual worker steps.
 
+## Local Prototype Run
+
+Build an Iskandar run package:
+
+```bash
+PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.inner_circle.iskandar \
+  'Собери все известное о событиях Скалатракса и сделай реконструкцию.' \
+  --task-id test-skalathrax \
+  --run-dir runtime/iskandar-test
+```
+
+Execute registered local prototype workers:
+
+```bash
+PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.local_executor \
+  runtime/iskandar-test \
+  --workspace-root runtime/eye-local-work
+```
