@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .inner_circle.iskandar import plan_lore_reconstruction
 from .http_executor import execute_run as execute_http_run
-from .governors import governor_by_name
+from .governors import governor_by_name, governor_refs
 from .ledger import TaskLedger
 from .local_executor import execute_run as execute_local_run
 from .pipeline import write_pipeline_run
@@ -196,6 +196,9 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
             parsed = urlparse(self.path)
             if parsed.path == "/health":
                 response(self, 200, {"ok": True, "gateway": "WarmasterGateway"})
+                return
+            if parsed.path == "/governors":
+                response(self, 200, {"ok": True, "governors": [governor.to_dict() for governor in governor_refs()]})
                 return
             parts = [part for part in parsed.path.split("/") if part]
             if parts == ["runs"]:

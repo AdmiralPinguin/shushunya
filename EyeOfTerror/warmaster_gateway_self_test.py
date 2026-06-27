@@ -41,6 +41,9 @@ def main() -> int:
             health = request_json(base + "/health")
             if not health.get("ok"):
                 raise AssertionError(f"bad health: {health}")
+            governors = request_json(base + "/governors")
+            if not governors.get("ok") or not any(item.get("name") == "IskandarKhayon" for item in governors.get("governors", [])):
+                raise AssertionError(f"bad governors response: {governors}")
             try:
                 request_json(base + "/task", {"message": "почини python приложение", "task_id": "unsupported-code"})
             except urllib.error.HTTPError as exc:
