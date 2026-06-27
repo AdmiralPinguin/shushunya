@@ -1,0 +1,101 @@
+{
+  "match_terms": ["skalathrax", "скалатрак", "Lexicanum: Battle of Skalathrax"],
+  "events": [
+    {
+      "event_id": "ec_claim_system",
+      "summary": "Emperor's Children discovered and claimed Skalathrax as a refuge/sanctuary before the World Eaters arrived.",
+      "phase": "prelude",
+      "confidence": "high",
+      "source_refs": ["Lexicanum: Battle of Skalathrax"],
+      "evidence_markers": ["first discovered by the Emperor's Children", "laid claim"]
+    },
+    {
+      "event_id": "world_eaters_internal_dispute",
+      "summary": "World Eaters leaders were split between immediate attack, withdrawal, and negotiation before Kharn pushed events toward violence.",
+      "phase": "prelude",
+      "confidence": "medium",
+      "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
+      "evidence_markers": ["Goghur", "Argus Brond", "Solax"]
+    },
+    {
+      "event_id": "world_eaters_arrival",
+      "summary": "A large World Eaters fleet entered the system, creating a direct territorial conflict with Emperor's Children.",
+      "phase": "arrival",
+      "confidence": "high",
+      "source_refs": ["Lexicanum: Battle of Skalathrax"],
+      "evidence_markers": ["large World Eaters fleet also arrived"]
+    },
+    {
+      "event_id": "anteus_hedonarch_presence",
+      "summary": "Tiberius Angellus Anteus and the Hedonarch are associated with the Emperor's Children side of the parley account.",
+      "phase": "parley",
+      "confidence": "medium",
+      "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
+      "evidence_markers": ["Tiberius Angellus Anteus", "Hedonarch"]
+    },
+    {
+      "event_id": "moon_parley",
+      "summary": "Kharn arranged or joined a parley on Skalathrax's moon with Emperor's Children representatives.",
+      "phase": "parley",
+      "confidence": "medium-high",
+      "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
+      "evidence_markers": ["parlay on a moon of Skalathrax"]
+    },
+    {
+      "event_id": "dreagher_shoots_anteus",
+      "summary": "Dreagher's shooting of Anteus is treated as a key trigger that collapses the parley into bloodshed.",
+      "phase": "parley_collapse",
+      "confidence": "medium-high",
+      "source_refs": ["Lexicanum: Dreagher", "Kharn: Eater of Worlds"],
+      "evidence_markers": ["Dreagher", "Anteus", "open fire"]
+    },
+    {
+      "event_id": "golden_absolute",
+      "summary": "Kharn's group is linked to the capture or redirection of the Emperor's Children vessel Golden Absolute during the escalation.",
+      "phase": "escalation",
+      "confidence": "medium",
+      "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
+      "evidence_markers": ["Golden Absolute"]
+    },
+    {
+      "event_id": "planetary_battle",
+      "summary": "World Eaters attacked across Skalathrax and Emperor's Children resisted, including Lucius-related forces in the wider account.",
+      "phase": "battle",
+      "confidence": "medium-high",
+      "source_refs": ["Lexicanum: Battle of Skalathrax", "Lucius: The Faultless Blade"],
+      "evidence_markers": ["fell upon Skalathrax", "Lucius"]
+    },
+    {
+      "event_id": "cold_night_shelters",
+      "summary": "The deadly cold of Skalathrax's night forced combatants to seek shelter, interrupting open battle.",
+      "phase": "turning_point",
+      "confidence": "high",
+      "source_refs": ["Lexicanum: Battle of Skalathrax", "Warhammer 40k Fandom: Battle of Skalathrax"],
+      "evidence_markers": ["extremely cold night", "seek shelter"]
+    },
+    {
+      "event_id": "fratricide_spreads",
+      "summary": "Kharn's acts turned the battle into internal slaughter and encouraged World Eaters to kill their own brothers.",
+      "phase": "betrayal",
+      "confidence": "medium-high",
+      "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
+      "evidence_markers": ["turned against their comrades"]
+    },
+    {
+      "event_id": "kharn_burns_shelters",
+      "summary": "Kharn used fire/flamer imagery to destroy shelters and killed both enemies and World Eaters sheltering from the cold.",
+      "phase": "betrayal",
+      "confidence": "high",
+      "source_refs": ["Lexicanum: Battle of Skalathrax", "Kharn: Eater of Worlds"],
+      "evidence_markers": ["flamer", "burning his fellow"]
+    },
+    {
+      "event_id": "legion_fractures",
+      "summary": "After Skalathrax the World Eaters no longer functioned as a unified legion and fractured into warbands.",
+      "phase": "aftermath_boundary",
+      "confidence": "high",
+      "source_refs": ["__ALL_SOURCE_TITLES__"],
+      "evidence_markers": ["Legion shattered", "unified Legion"]
+    }
+  ]
+}

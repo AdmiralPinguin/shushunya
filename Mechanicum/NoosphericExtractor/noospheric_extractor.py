@@ -5,6 +5,19 @@ from pathlib import Path
 from typing import Any
 
 
+PLAYBOOK_DIR = Path(__file__).resolve().parent / "playbooks"
+
+
+def load_playbook(name: str) -> dict[str, Any]:
+    payload = json.loads((PLAYBOOK_DIR / name).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"playbook must be an object: {name}")
+    return payload
+
+
+EVENT_PLAYBOOKS = [load_playbook("skalathrax_events.json")]
+
+
 def sandbox_path(workspace_root: Path, path: str) -> Path:
     if not path.startswith("/work/"):
         raise ValueError(f"unsupported sandbox path: {path}")
@@ -26,18 +39,10 @@ def source_snapshots_path_for_output(output_path: str) -> str:
 
 
 EVENT_EVIDENCE_MARKERS = {
-    "ec_claim_system": ["first discovered by the Emperor's Children", "laid claim"],
-    "world_eaters_arrival": ["large World Eaters fleet also arrived"],
-    "world_eaters_internal_dispute": ["Goghur", "Argus Brond", "Solax"],
-    "moon_parley": ["parlay on a moon of Skalathrax"],
-    "anteus_hedonarch_presence": ["Tiberius Angellus Anteus", "Hedonarch"],
-    "dreagher_shoots_anteus": ["Dreagher", "Anteus", "open fire"],
-    "golden_absolute": ["Golden Absolute"],
-    "planetary_battle": ["fell upon Skalathrax", "Lucius"],
-    "cold_night_shelters": ["extremely cold night", "seek shelter"],
-    "kharn_burns_shelters": ["flamer", "burning his fellow"],
-    "fratricide_spreads": ["turned against their comrades"],
-    "legion_fractures": ["Legion shattered", "unified Legion"],
+    str(event.get("event_id")): [str(marker) for marker in event.get("evidence_markers", [])]
+    for playbook in EVENT_PLAYBOOKS
+    for event in playbook.get("events", [])
+    if isinstance(event, dict) and event.get("event_id")
 }
 
 
@@ -83,94 +88,25 @@ def snapshot_gaps(snapshots: dict[str, Any]) -> list[str]:
     return gaps
 
 
-def skalathrax_events(source_titles: set[str]) -> list[dict[str, Any]]:
-    source_refs = sorted(source_titles)
-    return [
-        {
-            "event_id": "ec_claim_system",
-            "summary": "Emperor's Children discovered and claimed Skalathrax as a refuge/sanctuary before the World Eaters arrived.",
-            "phase": "prelude",
-            "confidence": "high",
-            "source_refs": ["Lexicanum: Battle of Skalathrax"],
-        },
-        {
-            "event_id": "world_eaters_arrival",
-            "summary": "A large World Eaters fleet entered the system, creating a direct territorial conflict with Emperor's Children.",
-            "phase": "arrival",
-            "confidence": "high",
-            "source_refs": ["Lexicanum: Battle of Skalathrax"],
-        },
-        {
-            "event_id": "world_eaters_internal_dispute",
-            "summary": "World Eaters leaders were split between immediate attack, withdrawal, and negotiation before Kharn pushed events toward violence.",
-            "phase": "prelude",
-            "confidence": "medium",
-            "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
-        },
-        {
-            "event_id": "moon_parley",
-            "summary": "Kharn arranged or joined a parley on Skalathrax's moon with Emperor's Children representatives.",
-            "phase": "parley",
-            "confidence": "medium-high",
-            "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
-        },
-        {
-            "event_id": "anteus_hedonarch_presence",
-            "summary": "Tiberius Angellus Anteus and the Hedonarch are associated with the Emperor's Children side of the parley account.",
-            "phase": "parley",
-            "confidence": "medium",
-            "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
-        },
-        {
-            "event_id": "dreagher_shoots_anteus",
-            "summary": "Dreagher's shooting of Anteus is treated as a key trigger that collapses the parley into bloodshed.",
-            "phase": "parley_collapse",
-            "confidence": "medium-high",
-            "source_refs": ["Lexicanum: Dreagher", "Kharn: Eater of Worlds"],
-        },
-        {
-            "event_id": "golden_absolute",
-            "summary": "Kharn's group is linked to the capture or redirection of the Emperor's Children vessel Golden Absolute during the escalation.",
-            "phase": "escalation",
-            "confidence": "medium",
-            "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
-        },
-        {
-            "event_id": "planetary_battle",
-            "summary": "World Eaters attacked across Skalathrax and Emperor's Children resisted, including Lucius-related forces in the wider account.",
-            "phase": "battle",
-            "confidence": "medium-high",
-            "source_refs": ["Lexicanum: Battle of Skalathrax", "Lucius: The Faultless Blade"],
-        },
-        {
-            "event_id": "cold_night_shelters",
-            "summary": "The deadly cold of Skalathrax's night forced combatants to seek shelter, interrupting open battle.",
-            "phase": "turning_point",
-            "confidence": "high",
-            "source_refs": ["Lexicanum: Battle of Skalathrax", "Warhammer 40k Fandom: Battle of Skalathrax"],
-        },
-        {
-            "event_id": "kharn_burns_shelters",
-            "summary": "Kharn used fire/flamer imagery to destroy shelters and killed both enemies and World Eaters sheltering from the cold.",
-            "phase": "betrayal",
-            "confidence": "high",
-            "source_refs": ["Lexicanum: Battle of Skalathrax", "Kharn: Eater of Worlds"],
-        },
-        {
-            "event_id": "fratricide_spreads",
-            "summary": "Kharn's acts turned the battle into internal slaughter and encouraged World Eaters to kill their own brothers.",
-            "phase": "betrayal",
-            "confidence": "medium-high",
-            "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
-        },
-        {
-            "event_id": "legion_fractures",
-            "summary": "After Skalathrax the World Eaters no longer functioned as a unified legion and fractured into warbands.",
-            "phase": "aftermath_boundary",
-            "confidence": "high",
-            "source_refs": source_refs,
-        },
-    ]
+def playbook_matches(playbook: dict[str, Any], topic: str, source_titles: set[str]) -> bool:
+    haystack = " ".join([topic.lower(), *(title.lower() for title in source_titles)])
+    return any(str(term).lower() in haystack for term in playbook.get("match_terms", []))
+
+
+def events_from_playbook(playbook: dict[str, Any], source_titles: set[str]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for raw_event in playbook.get("events", []):
+        if not isinstance(raw_event, dict):
+            continue
+        event = {
+            key: value
+            for key, value in raw_event.items()
+            if key in {"event_id", "summary", "phase", "confidence", "source_refs"}
+        }
+        if event.get("source_refs") == ["__ALL_SOURCE_TITLES__"]:
+            event["source_refs"] = sorted(source_titles)
+        events.append(event)
+    return events
 
 
 def extract_events(source_map: dict[str, Any], source_snapshots: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -181,10 +117,10 @@ def extract_events(source_map: dict[str, Any], source_snapshots: dict[str, Any] 
         for item in source_map.get("sources", [])
         if isinstance(item, dict) and item.get("title")
     }
-    if "skalathrax" in topic.lower() or "скалатрак" in topic.lower() or "Lexicanum: Battle of Skalathrax" in source_titles:
-        events = skalathrax_events(source_titles)
-    else:
-        events = []
+    events: list[dict[str, Any]] = []
+    for playbook in EVENT_PLAYBOOKS:
+        if playbook_matches(playbook, topic, source_titles):
+            events.extend(events_from_playbook(playbook, source_titles))
     for event in events:
         if isinstance(event, dict):
             event["evidence_snapshots"] = snapshot_evidence(str(event.get("event_id") or ""), source_snapshots)
