@@ -47,6 +47,9 @@ def main() -> int:
             workers = request_json(base + "/workers")
             if not workers.get("ok") or not any(item.get("name") == "Lexmechanic" for item in workers.get("workers", [])):
                 raise AssertionError(f"bad workers response: {workers}")
+            worker_health = request_json(base + "/workers?health=1")
+            if not worker_health.get("health_checked") or not all("runtime" in item for item in worker_health.get("workers", [])):
+                raise AssertionError(f"bad worker health response: {worker_health}")
             try:
                 request_json(base + "/task", {"message": "почини python приложение", "task_id": "unsupported-code"})
             except urllib.error.HTTPError as exc:

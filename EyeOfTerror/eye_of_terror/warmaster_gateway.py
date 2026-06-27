@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import threading
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -162,6 +164,26 @@ def artifact_text(ledger: dict[str, Any], artifact_path: str, max_bytes: int = 5
     }
 
 
+def fetch_worker_health(host: str, port: int, timeout_sec: float = 1.0) -> dict[str, Any]:
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=timeout_sec) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            return {"reachable": False, "error": "health response is not a JSON object"}
+        return {"reachable": bool(payload.get("ok")), "health": payload}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return {"reachable": False, "error": str(exc)}
+
+
+def worker_registry_snapshot(include_health: bool = False, host: str = "127.0.0.1") -> list[dict[str, Any]]:
+    workers = [worker.to_dict() for worker in worker_refs()]
+    if not include_health:
+        return workers
+    for worker in workers:
+        worker["runtime"] = fetch_worker_health(host, int(worker["port"]))
+    return workers
+
+
 def start_background(task_id: str, target: Any) -> bool:
     with ACTIVE_RUNS_LOCK:
         if task_id in ACTIVE_RUNS:
@@ -202,7 +224,17 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 response(self, 200, {"ok": True, "governors": [governor.to_dict() for governor in governor_refs()]})
                 return
             if parsed.path == "/workers":
-                response(self, 200, {"ok": True, "workers": [worker.to_dict() for worker in worker_refs()]})
+                query = parse_qs(parsed.query)
+                include_health = query.get("health", ["0"])[0] in {"1", "true", "yes"}
+                response(
+                    self,
+                    200,
+                    {
+                        "ok": True,
+                        "health_checked": include_health,
+                        "workers": worker_registry_snapshot(include_health=include_health),
+                    },
+                )
                 return
             parts = [part for part in parsed.path.split("/") if part]
             if parts == ["runs"]:

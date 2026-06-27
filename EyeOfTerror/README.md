@@ -39,6 +39,7 @@ Gateway endpoints:
 - `GET /health`
 - `GET /governors`
 - `GET /workers`
+- `GET /workers?health=1`
 - `POST /task`
 - `GET /runs`
 - `GET /runs/<task_id>`
