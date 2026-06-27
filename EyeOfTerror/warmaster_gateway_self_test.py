@@ -10,7 +10,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from eye_of_terror.warmaster_gateway import make_handler
+from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler
 from eye_of_terror.ledger import TaskLedger
 
 
@@ -61,6 +61,12 @@ def make_cancel_handler(calls: list[str]) -> type[BaseHTTPRequestHandler]:
 def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir) / "runs"
+        bad_dispatch = Path(temp_dir) / "bad-dispatch" / "dispatch"
+        bad_dispatch.mkdir(parents=True, exist_ok=True)
+        (bad_dispatch / "broken.json").write_text("{", encoding="utf-8")
+        bad_cancel = cancel_http_worker_tasks(bad_dispatch.parent)
+        if not bad_cancel or bad_cancel[0].get("ok"):
+            raise AssertionError(f"bad dispatch cancel fan-out should report failure: {bad_cancel}")
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(run_root))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()

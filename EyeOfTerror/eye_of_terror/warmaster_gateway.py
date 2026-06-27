@@ -210,8 +210,13 @@ def cancel_http_worker_tasks(run_dir: Path, host: str = "127.0.0.1", timeout_sec
         return []
     results: list[dict[str, Any]] = []
     for dispatch_path in sorted(dispatch_dir.glob("*.json")):
-        packet = json.loads(dispatch_path.read_text(encoding="utf-8"))
+        try:
+            packet = json.loads(dispatch_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            results.append({"dispatch": str(dispatch_path), "ok": False, "error": str(exc)})
+            continue
         if not isinstance(packet, dict):
+            results.append({"dispatch": str(dispatch_path), "ok": False, "error": "dispatch packet is not an object"})
             continue
         request_payload = packet.get("request") if isinstance(packet.get("request"), dict) else {}
         task_id = str(request_payload.get("task_id") or packet.get("task_id") or "")
