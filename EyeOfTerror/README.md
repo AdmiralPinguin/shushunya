@@ -46,3 +46,9 @@ PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.local_executor \
   runtime/iskandar-test \
   --workspace-root runtime/eye-local-work
 ```
+
+Execute through already running worker services on their dispatch ports:
+
+```bash
+PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.http_executor runtime/iskandar-test
+```
