@@ -1030,8 +1030,8 @@ def looks_like_swe_task(task: str) -> bool:
     return any(marker in lowered for marker in SWE_WEAK_REPAIR_MARKERS) and bool(SWE_FILE_EXTENSION_RE.search(lowered))
 
 
-def task_with_execution_profile(task: str, config: AgentConfig) -> str:
-    if not looks_like_swe_task(task):
+def task_with_execution_profile(task: str, config: AgentConfig, classifier_text: str | None = None) -> str:
+    if not looks_like_swe_task(classifier_text if classifier_text is not None else task):
         return task
     shell_rule = (
         "Prefer shell for repo inspection and verification commands."
@@ -1490,6 +1490,29 @@ def resume_context_inspected_data_sources(task: str, data_paths: list[str]) -> l
         if path in data_path_set and result.get("ok") is True and isinstance(result.get("content"), str):
             inspected.add(path)
     return [path for path in data_paths if path in inspected]
+
+
+def active_task_without_resume_context(task: str) -> str:
+    text = task or ""
+    markers = (
+        "\n\nResume context from previous agent task journal",
+        "\n\nAuthoritative resume context:",
+        "\n\nAuthoritative task snapshot:",
+    )
+    cut = len(text)
+    for marker in markers:
+        index = text.find(marker)
+        if index >= 0:
+            cut = min(cut, index)
+    return text[:cut].strip() or text
+
+
+def task_text_for_runtime_classification(task: str) -> str:
+    active = active_task_without_resume_context(task)
+    lowered = active.lower()
+    if "той же задачи по task journal" in lowered or "исходную цель бери из start-событий" in lowered:
+        return task
+    return active
 
 
 def action_writes_required_artifact(action: dict[str, Any], required_paths: set[str]) -> bool:
@@ -4161,10 +4184,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         config.task_id = safe_task_id()
     run_started = time.time()
     original_task = task
+    classification_task_text = task_text_for_runtime_classification(original_task)
     execution_plan, planner_meta = build_execution_plan(original_task, config)
     task = task_with_execution_plan(original_task, execution_plan)
-    swe_task = looks_like_swe_task(task)
-    task = task_with_execution_profile(task, config)
+    swe_task = looks_like_swe_task(classification_task_text)
+    task = task_with_execution_profile(task, config, classification_task_text)
     system_prompt = SYSTEM_PROMPT
     if config.technical_output:
         system_prompt += (
@@ -4183,8 +4207,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     failed_verification_paths: set[str] = set()
     swe_diagnostic_seen = resume_context_has_swe_diagnostic(original_task)
     swe_test_diagnostic_seen = resume_context_has_test_diagnostic(original_task)
-    swe_requires_test_diagnostic = task_requires_test_diagnostic(original_task)
-    swe_requires_cli_verification = task_requires_cli_verification(original_task)
+    swe_requires_test_diagnostic = swe_task and task_requires_test_diagnostic(classification_task_text)
+    swe_requires_cli_verification = swe_task and task_requires_cli_verification(classification_task_text)
     swe_resume_requires_cli_verification = (
         swe_requires_cli_verification
         and ("resume context" in original_task.lower() or "authoritative task snapshot" in original_task.lower())
@@ -4202,8 +4226,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     required_artifact_path_list = list(dict.fromkeys([*parsed_required_artifacts, *restored_required_artifacts]))[:20]
     required_artifact_paths = set(required_artifact_path_list)
     explicit_workspace = explicit_workspace_from_task(original_task)
-    expected_cli_modules: set[str] = set(cli_modules_from_task(original_task))
-    expected_cli_modules.update(cli_modules_from_text_paths(original_task, explicit_workspace))
+    expected_cli_modules: set[str] = set(cli_modules_from_task(classification_task_text))
+    expected_cli_modules.update(cli_modules_from_text_paths(classification_task_text, explicit_workspace))
     expected_cli_input_paths: set[str] = set()
     if swe_requires_cli_verification and explicit_workspace:
         expected_cli_modules.update(cli_modules_from_workspace(explicit_workspace))

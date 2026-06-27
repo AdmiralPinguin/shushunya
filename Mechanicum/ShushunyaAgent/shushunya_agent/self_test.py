@@ -642,6 +642,41 @@ def main() -> int:
         raise AssertionError("SWE task detector ignored explicit non-code task marker")
     if agent_runner.looks_like_swe_task("Короткий smoke-test UI сообщений: создай /work/ui-display-smoke/report.md"):
         raise AssertionError("SWE task detector treated a smoke/artifact task as code repair")
+    contaminated_resume_task = (
+        "Собери лор-источники и напиши отчет"
+        "\n\nResume context from previous agent task journal old-swe:\n"
+        '[{"type":"action","action":{"action":"shell","cmd":"python3 -m scheduler.cli jobs.json"}},'
+        '{"type":"tool_result","action":"read_file","result":{"ok":true,"path":"/work/app.py","content":"print(1)"}}]'
+    )
+    if "scheduler.cli" in agent_runner.active_task_without_resume_context(contaminated_resume_task):
+        raise AssertionError("active task text did not strip resume context")
+    contaminated_resume_stdout = io.StringIO()
+    contaminated_resume_config = AgentConfig(
+        task_id=safe_task_id("self-test-contaminated-resume-non-swe"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    with mock.patch.object(
+        agent_runner,
+        "chat",
+        side_effect=[
+            '{"action":"web_search","query":"Skalathrax lore","limit":1}',
+            '{"action":"final","message":"done"}',
+        ],
+    ), mock.patch.object(agent_runner, "web_search", return_value={"ok": True, "results": []}), \
+            contextlib.redirect_stdout(contaminated_resume_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        contaminated_resume_code = run_agent(contaminated_resume_task, contaminated_resume_config)
+    contaminated_resume_payload = json.loads(contaminated_resume_stdout.getvalue())
+    contaminated_resume_errors = [
+        (step.get("result") or {}).get("error")
+        for step in contaminated_resume_payload.get("steps", [])
+        if isinstance(step.get("result"), dict)
+    ]
+    if contaminated_resume_code != 0 or "swe cli verification required by supervisor" in contaminated_resume_errors:
+        raise AssertionError(f"contaminated resume enabled SWE CLI gate: code={contaminated_resume_code}, payload={contaminated_resume_payload}")
     if agent_runner.action_is_cli_verification("shell", {"cmd": "python3 -m pytest -q"}):
         raise AssertionError("pytest command must not count as CLI verification")
     if not agent_runner.action_is_cli_verification(
