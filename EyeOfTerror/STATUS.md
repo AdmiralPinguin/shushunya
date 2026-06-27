@@ -26,8 +26,13 @@
   `Mechanicum/*/worker.json` metadata.
 - Warmaster Gateway exposes `GET /state` as a client bootstrap snapshot with
   capabilities, governors, workers, and recent runs.
+- Warmaster Gateway exposes `GET /doctor` for registry and manifest diagnostics.
 - Warmaster Gateway exposes focused run inspection endpoints for contract,
   dispatch packets, and ledger event history.
+- Task ledgers, run packages, and executor reports are written atomically to
+  avoid partial JSON reads during background execution.
+- Warmaster run listing/state endpoints tolerate corrupt ledger files and report
+  those runs as `corrupt` instead of dropping the whole API response.
 - Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
 - Warmaster Gateway can request cooperative cancellation through the task ledger,
   and best-effort forwards cancellation to HTTP worker task endpoints from the
