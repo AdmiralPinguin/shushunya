@@ -5,6 +5,7 @@ import importlib
 import json
 import sys
 import threading
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -12,6 +13,10 @@ from urllib.parse import unquote, urlparse
 
 
 WorkerRun = Callable[[dict[str, Any], Path], dict[str, Any]]
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def load_worker(module_path: Path, module_name: str) -> WorkerRun:
@@ -63,6 +68,11 @@ def make_handler(
     tasks: dict[str, dict[str, Any]] = {}
     tasks_lock = threading.RLock()
 
+    def ensure_task(task_id: str) -> dict[str, Any]:
+        task = tasks.setdefault(task_id, {"task_id": task_id, "worker": worker_name, "created_at": now_iso()})
+        task["updated_at"] = now_iso()
+        return task
+
     def service_manifest() -> dict[str, Any]:
         return {
             "ok": True,
@@ -108,8 +118,9 @@ def make_handler(
             if len(parts) == 3 and parts[0] == "tasks" and parts[2] == "cancel":
                 task_id = unquote(parts[1])
                 with tasks_lock:
-                    task = tasks.setdefault(task_id, {"task_id": task_id, "worker": worker_name, "status": "unknown"})
+                    task = ensure_task(task_id)
                     task["cancel_requested"] = True
+                    task["cancel_reason"] = "requested through worker API"
                     task["status"] = "cancelling" if task.get("status") == "running" else "cancelled"
                 response(self, 200, {"ok": True, "worker": worker_name, "task": dict(task)})
                 return
@@ -126,23 +137,24 @@ def make_handler(
                 task_id = str(request.get("task_id") or payload.get("task_id") or "")
                 if task_id:
                     with tasks_lock:
-                        task = tasks.setdefault(task_id, {"task_id": task_id, "worker": worker_name})
+                        task = ensure_task(task_id)
                         if task.get("cancel_requested"):
                             task["status"] = "cancelled"
+                            task["updated_at"] = now_iso()
                             response(self, 409, {"ok": False, "worker": worker_name, "task_id": task_id, "status": "cancelled", "error": "task cancelled before start"})
                             return
                         task["status"] = "running"
                 result = run_worker(request, workspace_root)
                 if task_id:
                     with tasks_lock:
-                        task = tasks.setdefault(task_id, {"task_id": task_id, "worker": worker_name})
+                        task = ensure_task(task_id)
                         task["status"] = str(result.get("status") or ("completed" if result.get("ok") else "failed"))
                         task["result"] = result
                 response(self, 200 if result.get("ok") else 400, result)
             except Exception as exc:  # noqa: BLE001 - server boundary converts exceptions to JSON.
                 if task_id:
                     with tasks_lock:
-                        task = tasks.setdefault(task_id, {"task_id": task_id, "worker": worker_name})
+                        task = ensure_task(task_id)
                         task["status"] = "failed"
                         task["error"] = str(exc)
                 response(self, 500, {"ok": False, "worker": worker_name, "error": str(exc)})

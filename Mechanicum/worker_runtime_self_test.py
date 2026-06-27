@@ -51,10 +51,10 @@ def main() -> int:
             if not result.get("ok"):
                 raise AssertionError(f"bad run response: {result}")
             task = request_json(base + "/tasks/runtime-test")
-            if not task.get("ok") or task["task"].get("status") != "completed":
+            if not task.get("ok") or task["task"].get("status") != "completed" or not task["task"].get("created_at") or not task["task"].get("updated_at"):
                 raise AssertionError(f"bad task status response: {task}")
             cancelled = request_json(base + "/tasks/cancel-before-start/cancel", {})
-            if not cancelled.get("ok") or not cancelled["task"].get("cancel_requested"):
+            if not cancelled.get("ok") or not cancelled["task"].get("cancel_requested") or not cancelled["task"].get("cancel_reason"):
                 raise AssertionError(f"bad task cancel response: {cancelled}")
             try:
                 request_json(
