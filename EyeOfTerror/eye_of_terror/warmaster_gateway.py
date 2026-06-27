@@ -58,6 +58,30 @@ def prepare_task(message: str, task_id: str | None, run_root: Path) -> dict[str,
     }
 
 
+def run_summary(run_dir: Path) -> dict[str, Any]:
+    status_path = run_dir / "status.json"
+    ledger_path = run_dir / "task_ledger.json"
+    status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
+    ledger = TaskLedger.load(ledger_path).to_dict() if ledger_path.exists() else {}
+    return {
+        "task_id": ledger.get("task_id") or status.get("task_id") or run_dir.name,
+        "run_dir": str(run_dir),
+        "status": ledger.get("status") or status.get("status") or "unknown",
+        "goal": ledger.get("goal") or "",
+        "governor": ledger.get("governor") or status.get("governor") or "",
+        "created_at": ledger.get("created_at") or "",
+        "updated_at": ledger.get("updated_at") or "",
+        "result": ledger.get("result", {}),
+    }
+
+
+def list_runs(run_root: Path) -> list[dict[str, Any]]:
+    if not run_root.exists():
+        return []
+    runs = [run_summary(path) for path in run_root.iterdir() if path.is_dir()]
+    return sorted(runs, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+
+
 def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
     class WarmasterHandler(BaseHTTPRequestHandler):
         server_version = "WarmasterGateway/0.1"
@@ -70,6 +94,9 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 response(self, 200, {"ok": True, "gateway": "WarmasterGateway"})
                 return
             parts = [part for part in self.path.split("?")[0].split("/") if part]
+            if parts == ["runs"]:
+                response(self, 200, {"ok": True, "runs": list_runs(run_root)})
+                return
             if len(parts) in {2, 3} and parts[0] == "runs":
                 task_id = parts[1]
                 run_dir = run_root / task_id

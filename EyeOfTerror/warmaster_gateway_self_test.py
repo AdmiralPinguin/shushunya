@@ -43,6 +43,9 @@ def main() -> int:
             run_status = request_json(base + "/runs/warmaster-test")
             if not run_status.get("ok") or run_status.get("task_id") != "warmaster-test" or not run_status.get("ledger"):
                 raise AssertionError(f"bad run status: {run_status}")
+            run_list = request_json(base + "/runs")
+            if not run_list.get("ok") or not any(item.get("task_id") == "warmaster-test" for item in run_list.get("runs", [])):
+                raise AssertionError(f"bad run list: {run_list}")
             executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
             if not executed.get("ok"):
                 raise AssertionError(f"bad local execution: {executed}")

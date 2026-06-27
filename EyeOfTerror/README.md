@@ -38,6 +38,7 @@ Gateway endpoints:
 
 - `GET /health`
 - `POST /task`
+- `GET /runs`
 - `GET /runs/<task_id>`
 - `GET /runs/<task_id>/ledger`
 - `POST /runs/<task_id>/execute_local`
