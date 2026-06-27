@@ -679,7 +679,7 @@ def main() -> int:
     nested_cli_failure_result = {
         "ok": True,
         "returncode": 0,
-        "stdout": "STDERR: Traceback ...\nRETURN_CODE: 1\nCLI_FAILED: True\n",
+        "stdout": "STDERR: Traceback ...\nRETURN_CODE: 1\nCLI_FAILED: True\nCLI_JSON_VALID: False\n",
         "stderr": "",
     }
     if not agent_runner.python_result_printed_nested_cli_failure(nested_cli_failure_result):

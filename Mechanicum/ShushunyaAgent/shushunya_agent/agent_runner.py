@@ -1723,11 +1723,15 @@ def python_result_printed_nested_cli_failure(result: dict[str, Any]) -> bool:
         for marker in (
             "cli_failed: true",
             "json_valid: false",
+            "cli_json_valid: false",
             "failure: output is not valid json",
+            "cli output is not valid json",
+            "info: stdout is empty",
             "return_code: 1",
             "return_code=1",
             "returncode: 1",
             "return code: 1",
+            "can't open file",
             "jsondecodeerror",
         )
     )
@@ -5313,7 +5317,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     swe_task
                     and explicit_workspace
                     and isinstance(result, dict)
-                    and result.get("ok") is False
+                    and (result.get("ok") is False or result.get("ok") is True)
                     and "pytest" in str(action.get("code") or "").lower()
                     and pytest_unavailable_output(combined_python_output)
                 ):
