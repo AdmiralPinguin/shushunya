@@ -1857,6 +1857,50 @@ def main() -> int:
         )
     print("[ok] artifact creation required guard")
 
+    first_artifact_creation_stdout = io.StringIO()
+    first_artifact_creation_config = AgentConfig(
+        task_id=safe_task_id("self-test-first-artifact-creation-required"),
+        json_output=True,
+        max_steps=12,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    first_artifact_creation_actions = [
+        *[
+            json.dumps({"action": "web_search", "query": f"research query {index}", "limit": 3})
+            for index in range(8)
+        ],
+        '{"action":"read_file","path":"/work/saved_source.txt","max_bytes":1000}',
+        '{"action":"write_file","path":"/work/a.md","content":"first draft from gathered context"}',
+        '{"action":"final","message":"Готово: /work/a.md"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=first_artifact_creation_actions), \
+            mock.patch.object(agent_runner, "web_search", return_value={"ok": True, "results": [{"title": "source"}]}), \
+            mock.patch.object(agent_runner, "file_tool", side_effect=fake_artifact_creation_file_tool), \
+            contextlib.redirect_stdout(first_artifact_creation_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        first_artifact_creation_code = run_agent(
+            "Исследуй тему и создай обязательные артефакты: /work/a.md",
+            first_artifact_creation_config,
+        )
+    first_artifact_creation_payload = json.loads(first_artifact_creation_stdout.getvalue())
+    first_artifact_creation_rejections = [
+        step for step in first_artifact_creation_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "first artifact creation required by supervisor"
+    ]
+    first_artifact_creation_wrote = any(
+        step.get("action", {}).get("action") == "write_file"
+        and step.get("action", {}).get("path") == "/work/a.md"
+        and (step.get("result") or {}).get("ok") is True
+        for step in first_artifact_creation_payload.get("steps", [])
+    )
+    if not first_artifact_creation_rejections or not first_artifact_creation_wrote:
+        raise AssertionError(
+            "first artifact creation guard failed: "
+            f"code={first_artifact_creation_code}, payload={first_artifact_creation_payload}"
+        )
+    print("[ok] first artifact creation required guard")
+
     inspection_stall_stdout = io.StringIO()
     inspection_stall_config = AgentConfig(
         task_id=safe_task_id("self-test-inspection-stall"),

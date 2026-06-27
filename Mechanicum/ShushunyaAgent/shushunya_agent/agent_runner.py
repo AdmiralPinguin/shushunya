@@ -1257,6 +1257,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "data source reread rejected by supervisor",
     "web_fetch failed url rejected by supervisor",
     "invalid JSON write rejected by supervisor",
+    "first artifact creation required by supervisor",
     "artifact creation required by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
@@ -4352,6 +4353,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     data_source_path_list = data_source_paths_from_task(original_task, explicit_workspace, required_artifact_path_list)
     data_source_paths = set(data_source_path_list)
     inspected_data_source_paths: set[str] = set(resume_context_inspected_data_sources(original_task, data_source_path_list))
+    required_artifactless_inspection_actions = 0
     last_pytest_passing_tests, last_pytest_failing_tests = latest_pytest_sets_from_text(original_task)
     code_mutated_since_last_pytest = False
     pytest_unavailable_seen = False
@@ -5030,6 +5032,31 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "instruction": (
                         "This directory was already created or checked. Treat the previous mkdir ok=true as complete. "
                         "Do not create the same directory again; write the required files, run verification, or return final if done."
+                    ),
+                }
+            elif (
+                not swe_task
+                and required_artifact_paths
+                and step >= 8
+                and not (set(successful_write_file_paths) & required_artifact_paths)
+                and required_artifact_paths.isdisjoint(verified_text_paths)
+                and required_artifactless_inspection_actions >= max(3, INSPECTION_STALL_LIMIT)
+                and (
+                    action_type in INSPECTION_ACTIONS
+                    or (action_type == "shell" and looks_like_inspection_shell(str(action.get("cmd", ""))))
+                    or action_looks_like_python_inspection(action_type, action)
+                )
+            ):
+                result = {
+                    "ok": False,
+                    "error": "first artifact creation required by supervisor",
+                    "missing_required_artifacts": sorted(required_artifact_paths)[:10],
+                    "inspection_actions_before_first_artifact": required_artifactless_inspection_actions,
+                    "instruction": (
+                        "Enough research/inspection has already run and no required artifact has been created yet. "
+                        "Do not keep searching or refetching before producing a first draft artifact. "
+                        "Use write_file, write_files, append_file, or python to create one missing_required_artifact next "
+                        "from the gathered search/fetch/read context. You can continue research and refine after the first artifact exists."
                     ),
                 }
             elif (
@@ -5771,6 +5798,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             verified_text_paths.discard(path)
             failed_verification_paths.discard(path)
             stale_replace_failures_by_path.pop(path, None)
+            if path in required_artifact_paths:
+                required_artifactless_inspection_actions = 0
         if swe_task and python_written_code_paths:
             for path in python_written_code_paths:
                 verified_text_paths.discard(path)
@@ -5933,6 +5962,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 successful_write_file_paths[path] = successful_write_file_paths.get(path, 0) + 1
                 content_bytes = len(str(action.get("content") or "").encode("utf-8"))
                 successful_write_file_max_bytes[path] = max(successful_write_file_max_bytes.get(path, 0), content_bytes)
+                if path in required_artifact_paths:
+                    required_artifactless_inspection_actions = 0
         if action_type == "write_files" and isinstance(result, dict) and result.get("ok") is True:
             result_items = result.get("results") if isinstance(result.get("results"), list) else []
             action_items = action.get("files") if isinstance(action.get("files"), list) else []
@@ -5945,6 +5976,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 if index < len(action_items) and isinstance(action_items[index], dict):
                     content = str(action_items[index].get("content") or "")
                 successful_write_file_max_bytes[path] = max(successful_write_file_max_bytes.get(path, 0), len(content.encode("utf-8")))
+                if path in required_artifact_paths:
+                    required_artifactless_inspection_actions = 0
         if action_type == "read_file" and isinstance(result, dict) and result.get("ok") is True:
             read_path = str(action.get("path") or result.get("path") or "")
             if read_path:
@@ -6028,6 +6061,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 inspection_actions_since_progress = 0
             elif action_type in INSPECTION_ACTIONS or python_inspection_action:
                 inspection_actions_since_progress += 1
+            if required_artifact_paths and not (set(successful_write_file_paths) & required_artifact_paths):
+                if action_type in INSPECTION_ACTIONS or python_inspection_action:
+                    required_artifactless_inspection_actions += 1
+            elif set(successful_write_file_paths) & required_artifact_paths:
+                required_artifactless_inspection_actions = 0
             if pending_failing_tests and (action_type in INSPECTION_ACTIONS or (action_type == "shell" and looks_like_inspection_shell(str(action.get("cmd", ""))))):
                 pending_failing_test_inspections += 1
                 if action_type == "read_file":
