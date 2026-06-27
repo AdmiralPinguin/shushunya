@@ -23,6 +23,7 @@
 - HTTP execution preflights all worker `/health` endpoints before running steps.
 - Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.
 - Inner Circle governors are tracked in `EyeOfTerror/registry/governors.json`; code/image governors are explicit planned entries.
+- `CogitatorCodewrightGovernor` now has planned scope documentation but remains inactive.
 
 ## Main Check
 
