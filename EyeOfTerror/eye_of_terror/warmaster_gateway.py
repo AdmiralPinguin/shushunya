@@ -150,6 +150,36 @@ def run_dispatch_packets(run_dir: Path) -> dict[str, Any]:
     return {"ok": True, "dispatch": packets}
 
 
+def run_worker_tasks(run_dir: Path, include_health: bool = False, host: str = "127.0.0.1") -> dict[str, Any]:
+    dispatch_payload = run_dispatch_packets(run_dir)
+    if not dispatch_payload.get("ok"):
+        return dispatch_payload
+    tasks: list[dict[str, Any]] = []
+    for item in dispatch_payload.get("dispatch", []):
+        packet = item.get("packet") if isinstance(item, dict) else {}
+        if not isinstance(packet, dict):
+            continue
+        request_payload = packet.get("request") if isinstance(packet.get("request"), dict) else {}
+        task_id = str(request_payload.get("task_id") or packet.get("task_id") or "")
+        worker = str(packet.get("worker") or "")
+        port = int(packet.get("port") or 0)
+        task: dict[str, Any] = {
+            "step_id": str(packet.get("step_id") or ""),
+            "worker": worker,
+            "port": port,
+            "task_id": task_id,
+        }
+        if include_health and task_id and port:
+            try:
+                with urllib.request.urlopen(f"http://{host}:{port}/tasks/{quote(task_id, safe='')}", timeout=1.0) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                task["runtime"] = payload if isinstance(payload, dict) else {"ok": False, "error": "task response is not a JSON object"}
+            except Exception as exc:  # noqa: BLE001 - worker task lookup is best-effort.
+                task["runtime"] = {"ok": False, "error": str(exc)}
+        tasks.append(task)
+    return {"ok": True, "worker_tasks": tasks}
+
+
 def run_events(run_dir: Path, limit: int | None = None) -> dict[str, Any]:
     ledger_path = run_dir / "task_ledger.json"
     ledger, ledger_error = load_ledger_dict(ledger_path)
@@ -305,6 +335,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "artifact_text_read",
             "run_contract_read",
             "run_dispatch_read",
+            "run_worker_task_read",
             "run_events_read",
             "local_execution",
             "http_worker_execution",
@@ -334,6 +365,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/ledger",
             "GET /runs/{task_id}/contract",
             "GET /runs/{task_id}/dispatch",
+            "GET /runs/{task_id}/worker_tasks",
             "GET /runs/{task_id}/events",
             "GET /runs/{task_id}/artifacts",
             "GET /runs/{task_id}/artifact_text?path=/work/...",
@@ -498,6 +530,13 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 if len(parts) == 3 and parts[2] == "dispatch":
                     payload = run_dispatch_packets(run_dir)
+                    response(self, 200 if payload.get("ok") else 404, payload)
+                    return
+                if len(parts) == 3 and parts[2] == "worker_tasks":
+                    query = parse_qs(parsed.query)
+                    include_live = query.get("live", ["0"])[0] in {"1", "true", "yes"}
+                    host = query.get("host", ["127.0.0.1"])[0]
+                    payload = run_worker_tasks(run_dir, include_health=include_live, host=host)
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 if len(parts) == 3 and parts[2] == "events":
