@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -29,6 +30,7 @@ def load_playbook(name: str) -> dict[str, Any]:
 
 
 SOURCE_PLAYBOOKS = [load_playbook("skalathrax_sources.json")]
+LIVE_DISCOVERY_ENABLED = os.environ.get("LEXMECHANIC_LIVE_DISCOVERY", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def sandbox_path(workspace_root: Path, path: str) -> Path:
@@ -141,7 +143,11 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
     }
 
 
-def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None = default_search) -> dict[str, Any]:
+def configured_searcher() -> SearchFn | None:
+    return default_search if LIVE_DISCOVERY_ENABLED else None
+
+
+def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None | bool = None) -> dict[str, Any]:
     contract = request.get("contract")
     step = request.get("step")
     if not isinstance(contract, dict):
@@ -152,7 +158,10 @@ def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None
     if not isinstance(expected_artifacts, list) or not expected_artifacts:
         return {"ok": False, "worker": "Lexmechanic", "error": "step.expected_artifacts is empty"}
     output_path = str(expected_artifacts[0])
-    source_map = source_map_for_contract(contract, searcher)
+    selected_searcher = configured_searcher() if searcher is None else searcher
+    if selected_searcher is False:
+        selected_searcher = None
+    source_map = source_map_for_contract(contract, selected_searcher)
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(source_map, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

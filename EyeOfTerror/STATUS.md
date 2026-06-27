@@ -25,6 +25,12 @@ EyeOfTerror/check-eye-mechanicum.sh
 This runs contract tests, worker self-tests, local executor tests, service tests,
 and the end-to-end HTTP worker pipeline.
 
+Optional live discovery smoke:
+
+```bash
+PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicum/Lexmechanic/live_discovery_smoke.py
+```
+
 ## Current Limits
 
 - `Lexmechanic` uses source playbooks plus live discovery results; discovered URLs are recorded but not trusted until classified.

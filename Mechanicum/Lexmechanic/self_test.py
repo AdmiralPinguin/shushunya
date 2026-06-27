@@ -43,7 +43,7 @@ def main() -> int:
         },
     }
     with tempfile.TemporaryDirectory() as temp_dir:
-        result = run(request, Path(temp_dir), searcher=None)
+        result = run(request, Path(temp_dir), searcher=False)
         if not result.get("ok"):
             raise AssertionError(f"Lexmechanic failed: {result}")
         output = Path(temp_dir) / "skalathrax" / "source_map.json"
