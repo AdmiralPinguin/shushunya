@@ -62,6 +62,9 @@ def main() -> int:
                     raise AssertionError(f"bad rerun block response: {blocked}")
             else:
                 raise AssertionError("completed run should not execute again without force=true")
+            forced = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30, "force": True}, timeout=60)
+            if not forced.get("ok"):
+                raise AssertionError(f"forced rerun failed: {forced}")
         finally:
             server.shutdown()
             thread.join(timeout=5)
