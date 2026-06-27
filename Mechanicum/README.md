@@ -30,3 +30,20 @@ worker while new workers are introduced behind the common Worker API.
 Extract capabilities gradually only after the worker contract and governor
 state machine are stable.
 
+## Standard Worker Runtime
+
+Prototype workers can be served through the shared runtime:
+
+```bash
+python3 Mechanicum/worker_runtime.py \
+  --worker Lexmechanic \
+  --module-path Mechanicum/Lexmechanic \
+  --module lexmechanic \
+  --port 7002 \
+  --workspace-root runtime/mechanicum-work
+```
+
+The runtime exposes:
+
+- `GET /health`
+- `POST /run` with either a dispatch packet or raw worker request JSON
