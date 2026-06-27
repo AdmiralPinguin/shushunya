@@ -638,6 +638,8 @@ def main() -> int:
         raise AssertionError("SWE task detector treated JSON/data artifact repair as code repair")
     if agent_runner.looks_like_swe_task("Собери лор из кодексов Warhammer и напиши отчет"):
         raise AssertionError("SWE task detector treated codex lore wording as code repair")
+    if agent_runner.looks_like_swe_task("Это не задача про программный код; собери источники и напиши отчет"):
+        raise AssertionError("SWE task detector ignored explicit non-code task marker")
     if agent_runner.looks_like_swe_task("Короткий smoke-test UI сообщений: создай /work/ui-display-smoke/report.md"):
         raise AssertionError("SWE task detector treated a smoke/artifact task as code repair")
     if agent_runner.action_is_cli_verification("shell", {"cmd": "python3 -m pytest -q"}):

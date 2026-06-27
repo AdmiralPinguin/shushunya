@@ -1006,11 +1006,22 @@ SWE_TASK_MARKERS = (
 )
 SWE_WORD_MARKERS = ("код", "code", "bug", "git")
 SWE_WEAK_REPAIR_MARKERS = ("исправь", "fix", "ошибк")
+NON_SWE_TASK_MARKERS = (
+    "не задача про программный код",
+    "не кодовая задача",
+    "не задача про код",
+    "not a code task",
+    "not a coding task",
+)
 SWE_FILE_EXTENSION_RE = re.compile(r"\.(?:py|js|ts|kt|java)(?:\b|$)")
 
 
 def looks_like_swe_task(task: str) -> bool:
     lowered = task.lower()
+    if any(marker in lowered for marker in NON_SWE_TASK_MARKERS) and not bool(SWE_FILE_EXTENSION_RE.search(lowered)):
+        strong_override_markers = ("pytest", "traceback", "stack trace")
+        if not any(marker in lowered for marker in strong_override_markers):
+            return False
     if any(marker in lowered for marker in SWE_TASK_MARKERS) or bool(SWE_FILE_EXTENSION_RE.search(lowered)):
         return True
     for marker in SWE_WORD_MARKERS:
