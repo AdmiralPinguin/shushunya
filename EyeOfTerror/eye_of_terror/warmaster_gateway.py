@@ -84,6 +84,30 @@ def load_ledger_dict(ledger_path: Path) -> tuple[dict[str, Any], str]:
         return {}, str(exc)
 
 
+def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]:
+    planned_steps = status.get("steps", [])
+    ledger_steps = ledger.get("steps", [])
+    if not isinstance(planned_steps, list):
+        planned_steps = []
+    if not isinstance(ledger_steps, list):
+        ledger_steps = []
+    by_status: dict[str, int] = {}
+    for step in ledger_steps:
+        if not isinstance(step, dict):
+            continue
+        step_status = str(step.get("status") or "unknown")
+        by_status[step_status] = by_status.get(step_status, 0) + 1
+    completed = by_status.get("completed", 0) + by_status.get("ready", 0)
+    failed = by_status.get("failed", 0)
+    return {
+        "planned_steps": len(planned_steps),
+        "recorded_steps": len(ledger_steps),
+        "completed_steps": completed,
+        "failed_steps": failed,
+        "by_status": by_status,
+    }
+
+
 def run_summary(run_dir: Path) -> dict[str, Any]:
     status_path = run_dir / "status.json"
     ledger_path = run_dir / "task_ledger.json"
@@ -103,6 +127,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "created_at": ledger.get("created_at") or "",
         "updated_at": ledger.get("updated_at") or "",
         "result": ledger.get("result", {}),
+        "progress": run_progress(status, ledger),
     }
     if ledger_error and ledger_path.exists():
         summary["ledger_error"] = ledger_error

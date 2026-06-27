@@ -163,7 +163,7 @@ def main() -> int:
             if (
                 not run_list.get("ok")
                 or run_list.get("run_summary", {}).get("total", 0) < 1
-                or not any(item.get("task_id") == "warmaster-test" for item in run_list.get("runs", []))
+                or not any(item.get("task_id") == "warmaster-test" and item.get("progress", {}).get("planned_steps") == 7 for item in run_list.get("runs", []))
             ):
                 raise AssertionError(f"bad run list: {run_list}")
             executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
