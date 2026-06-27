@@ -1245,6 +1245,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "data source inspection required by supervisor",
     "data source reread rejected by supervisor",
     "web_fetch failed url rejected by supervisor",
+    "invalid JSON write rejected by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
     "append_file to JSON rejected by supervisor",
@@ -1490,6 +1491,42 @@ def action_writes_required_artifact(action: dict[str, Any], required_paths: set[
     if action_type == "python":
         return any(action_references_path_text(action, path) for path in required_paths)
     return False
+
+
+def invalid_json_write_error(action_type: str, action: dict[str, Any]) -> dict[str, Any] | None:
+    candidates: list[tuple[int | None, str, str]] = []
+    if action_type == "write_file":
+        candidates.append((None, str(action.get("path") or ""), str(action.get("content") or "")))
+    elif action_type == "write_files":
+        files = action.get("files") if isinstance(action.get("files"), list) else []
+        for index, item in enumerate(files):
+            if isinstance(item, dict):
+                candidates.append((index, str(item.get("path") or ""), str(item.get("content") or "")))
+    else:
+        return None
+    for index, path, content in candidates:
+        if not path.strip().lower().endswith(".json"):
+            continue
+        try:
+            json.loads(content)
+        except json.JSONDecodeError as exc:
+            result: dict[str, Any] = {
+                "ok": False,
+                "error": "invalid JSON write rejected by supervisor",
+                "path": path,
+                "line": exc.lineno,
+                "column": exc.colno,
+                "message": exc.msg,
+                "instruction": (
+                    "The target path ends with .json, so content must be one complete valid JSON document. "
+                    "Do not wrap JSON in Markdown fences or leave trailing backticks/text. Rewrite the complete file "
+                    "with valid JSON, or use python json.dump to generate it."
+                ),
+            }
+            if index is not None:
+                result["index"] = index
+            return result
+    return None
 
 
 def explicit_workspace_from_task(task: str) -> str:
@@ -5234,6 +5271,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "Do not verify it again. Verify remaining required artifacts or return final."
                     ),
                 }
+            elif action_type in {"write_file", "write_files"} and (
+                json_write_error := invalid_json_write_error(action_type, action)
+            ):
+                result = json_write_error
             elif (
                 action_type == "write_file"
                 and successful_write_file_paths.get(str(action.get("path") or ""), 0) >= max(1, REPEATED_WRITE_FILE_PATH_LIMIT)

@@ -1623,6 +1623,34 @@ def main() -> int:
         raise AssertionError(f"append_file JSON guard failed: code={json_append_code}, payload={json_append_payload}")
     print("[ok] append_file JSON guard")
 
+    invalid_json_write_stdout = io.StringIO()
+    invalid_json_write_config = AgentConfig(
+        task_id=safe_task_id("self-test-invalid-json-write-guard"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    invalid_json_write_actions = [
+        '{"action":"write_file","path":"/work/bad.json","content":"{\\"ok\\": true}`"}',
+        '{"action":"write_files","files":[{"path":"/work/good.txt","content":"ok"},{"path":"/work/bad-batch.json","content":"{\\"ok\\": true}`"}]}',
+        '{"action":"write_file","path":"/work/good.json","content":"{\\"ok\\": true}"}',
+        '{"action":"final","message":"done"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=invalid_json_write_actions), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/good.json"}), \
+            contextlib.redirect_stdout(invalid_json_write_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        invalid_json_write_code = run_agent("json artifacts must be valid", invalid_json_write_config)
+    invalid_json_write_payload = json.loads(invalid_json_write_stdout.getvalue())
+    invalid_json_write_rejections = [
+        step for step in invalid_json_write_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "invalid JSON write rejected by supervisor"
+    ]
+    if invalid_json_write_code != 0 or len(invalid_json_write_rejections) < 2:
+        raise AssertionError(f"invalid JSON write guard failed: code={invalid_json_write_code}, payload={invalid_json_write_payload}")
+    print("[ok] invalid JSON write guard")
+
     verified_mutation_stdout = io.StringIO()
     verified_mutation_config = AgentConfig(
         task_id=safe_task_id("self-test-verified-mutation-guard"),
