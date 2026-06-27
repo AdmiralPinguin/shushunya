@@ -23,6 +23,8 @@ def main() -> int:
         manifest = work_dir / "skalathrax" / "final_manifest.json"
         if not manifest.exists():
             raise AssertionError("final manifest was not written")
+        if not (run_dir / "task_ledger.json").exists():
+            raise AssertionError("task ledger was not written")
     print("[ok] local executor")
     return 0
 

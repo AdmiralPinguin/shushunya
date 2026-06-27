@@ -68,6 +68,8 @@ def main() -> int:
                 raise AssertionError(summary)
             if not (work / "test" / "direct_event_notes.json").exists():
                 raise AssertionError("HTTP executor did not write worker artifact")
+            if not (run_dir / "task_ledger.json").exists():
+                raise AssertionError("HTTP executor did not write task ledger")
         finally:
             server.shutdown()
             thread.join(timeout=5)

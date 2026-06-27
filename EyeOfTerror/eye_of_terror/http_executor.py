@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .local_executor import ordered_dispatch_paths
+from .ledger import TaskLedger
 
 
 @dataclass
@@ -69,10 +70,25 @@ def run_step(dispatch_path: Path, host: str, timeout_sec: int) -> HttpStepResult
 
 
 def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800) -> dict[str, Any]:
+    contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
+    ledger = TaskLedger.create(
+        run_dir / "task_ledger.json",
+        str(contract.get("task_id") or run_dir.name),
+        str(contract.get("goal") or ""),
+        str(contract.get("assigned_governor") or ""),
+    )
+    ledger.set_status("running")
     results: list[HttpStepResult] = []
     for dispatch_path in ordered_dispatch_paths(run_dir):
         result = run_step(dispatch_path, host, timeout_sec)
         results.append(result)
+        ledger.record_step(
+            result.step_id,
+            result.worker,
+            str(result.payload.get("status") or ("completed" if result.ok else "failed")),
+            [str(item) for item in result.payload.get("artifacts", [])] if isinstance(result.payload.get("artifacts"), list) else [],
+            str(result.payload.get("summary") or result.payload.get("error") or result.error),
+        )
         if not result.ok:
             break
     summary = {
@@ -83,6 +99,7 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800)
     }
     report_path = run_dir / "http_execution_report.json"
     report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    ledger.set_status("completed" if summary["ok"] else "failed")
     return summary
 
 

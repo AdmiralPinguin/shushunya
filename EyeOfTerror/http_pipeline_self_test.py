@@ -71,6 +71,9 @@ def main() -> int:
             manifest = read_json(work_dir / "skalathrax" / "final_manifest.json")
             if manifest.get("status") != "ready":
                 raise AssertionError(f"final manifest is not ready: {manifest}")
+            ledger = read_json(run_dir / "task_ledger.json")
+            if ledger.get("status") != "completed" or len(ledger.get("steps", [])) != len(workers):
+                raise AssertionError(f"bad task ledger: {ledger}")
         finally:
             for server in servers:
                 server.shutdown()

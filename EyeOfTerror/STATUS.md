@@ -15,6 +15,7 @@
 - Workers can run as HTTP services through `Mechanicum/worker_runtime.py`.
 - EyeOfTerror can execute dispatch packets through HTTP services with `eye_of_terror.http_executor`.
 - The end-to-end HTTP pipeline test reaches a `ready` final manifest for the Skalathrax test task.
+- Local and HTTP executors write `task_ledger.json` with task status, step status, artifacts, and event history.
 
 ## Main Check
 
@@ -43,5 +44,5 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 
 - Add richer ranking and source-type classification for live discovery results.
 - Add more playbooks only when they are task-class patterns, not one-off hacks.
-- Add a persistent task ledger for governor runs and worker artifacts.
+- Expose task ledger state through the future Warmaster Gateway.
 - Add Warmaster Gateway only after the Iskandar/Mechanicum boundary remains stable.
