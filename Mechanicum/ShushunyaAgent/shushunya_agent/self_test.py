@@ -54,6 +54,7 @@ from .agent_runner import (
     looks_like_oversized_inline_file_action,
     extract_sandbox_paths_from_text,
     required_artifact_paths_from_task,
+    required_min_chars_by_path_from_task,
     validate_final_artifacts,
 )
 
@@ -1916,6 +1917,58 @@ def main() -> int:
     if verify_calls != 3:
         raise AssertionError(f"verify after append should not be blocked by repeat guard: calls={verify_calls}, payload={verify_after_append_payload}")
     print("[ok] verify repeat reset after file mutation")
+
+    min_chars_requirement = required_min_chars_by_path_from_task(
+        "Создай обязательный артефакт /work/story.md минимум 1200 символов",
+        ["/work/story.md"],
+    )
+    if min_chars_requirement.get("/work/story.md") != 1200:
+        raise AssertionError(f"required min chars extraction failed: {min_chars_requirement}")
+    min_chars_stdout = io.StringIO()
+    min_chars_config = AgentConfig(
+        task_id=safe_task_id("self-test-required-min-chars"),
+        json_output=True,
+        max_steps=8,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    min_chars_actions = [
+        '{"action":"write_file","path":"/work/story.md","content":"short"}',
+        '{"action":"append_file","path":"/work/story.md","content":"more"}',
+        '{"action":"final","message":"Готово: /work/story.md"}',
+        '{"action":"final","message":"Готово: /work/story.md"}',
+    ]
+    min_chars_verify_calls = 0
+
+    def fake_min_chars_verify(config_arg, action):
+        nonlocal min_chars_verify_calls
+        min_chars_verify_calls += 1
+        if min_chars_verify_calls == 1:
+            return {"ok": True, "path": action.get("path"), "size": 2400, "chars": 900, "failures": []}
+        return {"ok": True, "path": action.get("path"), "size": 3000, "chars": 1300, "failures": []}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=min_chars_actions), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/story.md"}), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_min_chars_verify), \
+            contextlib.redirect_stdout(min_chars_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        min_chars_code = run_agent(
+            "Создай обязательный артефакт /work/story.md минимум 1200 символов",
+            min_chars_config,
+        )
+    min_chars_payload = json.loads(min_chars_stdout.getvalue())
+    min_chars_failures = [
+        step for step in min_chars_payload.get("steps", [])
+        if any(failure.get("check") == "task_min_chars" for failure in (step.get("result") or {}).get("failures", []))
+    ]
+    min_chars_append_ok = any(
+        step.get("action", {}).get("action") == "append_file"
+        and (step.get("result") or {}).get("ok") is True
+        for step in min_chars_payload.get("steps", [])
+    )
+    if not min_chars_failures or not min_chars_append_ok:
+        raise AssertionError(f"required min chars verify guard failed: code={min_chars_code}, payload={min_chars_payload}")
+    print("[ok] required min chars verify guard")
 
     repeated_verify_stdout = io.StringIO()
     repeated_verify_config = AgentConfig(

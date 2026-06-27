@@ -1408,6 +1408,38 @@ def required_artifact_paths_from_task(task: str) -> list[str]:
     return required[:20]
 
 
+MIN_CHARS_REQUIREMENT_RE = re.compile(
+    r"(?P<number>\d{3,})\s*(?:символ|симв\.|знак|characters?|chars?)",
+    re.IGNORECASE,
+)
+
+
+def required_min_chars_by_path_from_task(task: str, paths: list[str]) -> dict[str, int]:
+    text = task or ""
+    lowered = text.lower()
+    requirements: dict[str, int] = {}
+    for match in MIN_CHARS_REQUIREMENT_RE.finditer(text):
+        try:
+            number = int(match.group("number"))
+        except (TypeError, ValueError):
+            continue
+        start = max(0, match.start() - 500)
+        end = min(len(text), match.end() + 500)
+        window = lowered[start:end]
+        for path in paths:
+            path_lower = path.lower()
+            basename = posixpath.basename(path_lower)
+            stem = basename.rsplit(".", 1)[0]
+            tokens = {path_lower, basename, stem}
+            if "story" in stem:
+                tokens.update({"story", "рассказ"})
+            if "report" in stem:
+                tokens.update({"report", "отчет", "отчёт"})
+            if any(token and token in window for token in tokens):
+                requirements[path] = max(requirements.get(path, 0), number)
+    return requirements
+
+
 def data_source_paths_from_task(task: str, workspace: str, required_paths: list[str]) -> list[str]:
     if not workspace:
         return []
@@ -4273,6 +4305,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     parsed_required_artifacts = [] if restored_required_artifacts else required_artifact_paths_from_task(original_task)
     required_artifact_path_list = list(dict.fromkeys([*parsed_required_artifacts, *restored_required_artifacts]))[:20]
     required_artifact_paths = set(required_artifact_path_list)
+    required_min_chars_by_path = required_min_chars_by_path_from_task(original_task, required_artifact_path_list)
     explicit_workspace = explicit_workspace_from_task(original_task)
     expected_cli_modules: set[str] = set(cli_modules_from_task(classification_task_text))
     expected_cli_modules.update(cli_modules_from_text_paths(classification_task_text, explicit_workspace))
@@ -5786,8 +5819,23 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             verified_text_paths.discard(str(action.get("output_fb2") or ""))
         elif action_type == "verify_text_file" and isinstance(result, dict) and result.get("ok") and result.get("path"):
             path = str(result.get("path"))
-            verified_text_paths.add(path)
-            failed_verification_paths.discard(path)
+            required_min_chars = int(required_min_chars_by_path.get(path) or 0)
+            actual_chars = int(result.get("chars") or 0)
+            if required_min_chars and actual_chars < required_min_chars:
+                result = dict(result)
+                result["ok"] = False
+                failures = list(result.get("failures") or [])
+                failures.append({"check": "task_min_chars", "expected": required_min_chars, "actual": actual_chars})
+                result["failures"] = failures
+                result["supervisor_instruction"] = (
+                    f"The task requires at least {required_min_chars} characters for this artifact, "
+                    f"but verify_text_file saw {actual_chars}. Append enough content, then rerun verify_text_file "
+                    f"with min_chars={required_min_chars}; do not rely on min_bytes for character-count requirements."
+                )
+                failed_verification_paths.add(path)
+            else:
+                verified_text_paths.add(path)
+                failed_verification_paths.discard(path)
         elif (
             action_type == "verify_text_file"
             and isinstance(result, dict)
