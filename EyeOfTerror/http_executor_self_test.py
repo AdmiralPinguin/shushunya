@@ -70,8 +70,16 @@ def main() -> int:
                 raise AssertionError("HTTP executor did not write worker artifact")
             if not (run_dir / "task_ledger.json").exists():
                 raise AssertionError("HTTP executor did not write task ledger")
-        finally:
             server.shutdown()
+            thread.join(timeout=5)
+            summary = execute_run(run_dir, timeout_sec=1)
+            if summary.get("ok") or not summary.get("preflight_failures"):
+                raise AssertionError(f"expected preflight failure: {summary}")
+        finally:
+            try:
+                server.shutdown()
+            except Exception:
+                pass
             thread.join(timeout=5)
     print("[ok] http executor")
     return 0

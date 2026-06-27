@@ -48,6 +48,30 @@ def post_json(url: str, payload: dict[str, Any], timeout_sec: int) -> dict[str, 
     return decoded
 
 
+def get_json(url: str, timeout_sec: int) -> dict[str, Any]:
+    request = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+        decoded = json.loads(response.read().decode("utf-8"))
+    if not isinstance(decoded, dict):
+        raise ValueError("HTTP worker response must be a JSON object")
+    return decoded
+
+
+def preflight_workers(run_dir: Path, host: str, timeout_sec: int) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    for dispatch_path in ordered_dispatch_paths(run_dir):
+        packet = load_json(dispatch_path)
+        worker = str(packet.get("worker") or "")
+        port = int(packet.get("port") or 0)
+        try:
+            payload = get_json(f"http://{host}:{port}/health", min(timeout_sec, 10))
+            if not payload.get("ok"):
+                failures.append({"worker": worker, "port": port, "error": str(payload.get("error") or "health returned ok=false")})
+        except Exception as exc:  # noqa: BLE001 - preflight should report all unavailable workers.
+            failures.append({"worker": worker, "port": port, "error": str(exc)})
+    return failures
+
+
 def run_step(dispatch_path: Path, host: str, timeout_sec: int) -> HttpStepResult:
     packet = load_json(dispatch_path)
     step_id = str(packet.get("step_id") or dispatch_path.stem)
@@ -83,6 +107,19 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800)
         )
     )
     ledger.set_status("running")
+    preflight_failures = preflight_workers(run_dir, host, timeout_sec)
+    if preflight_failures:
+        summary = {
+            "ok": False,
+            "run_dir": str(run_dir),
+            "host": host,
+            "steps": [],
+            "preflight_failures": preflight_failures,
+        }
+        (run_dir / "http_execution_report.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        ledger.set_result({"ok": False, "final_step": "", "artifacts": [], "status": "preflight_failed", "summary": "Worker preflight failed."})
+        ledger.set_status("failed")
+        return summary
     results: list[HttpStepResult] = []
     for dispatch_path in ordered_dispatch_paths(run_dir):
         result = run_step(dispatch_path, host, timeout_sec)
