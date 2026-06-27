@@ -13,15 +13,26 @@
   - `FabricatorFinalis`
 - Workers can run as local subprocesses through `eye_of_terror.local_executor`.
 - Workers can run as HTTP services through `Mechanicum/worker_runtime.py`.
+- Worker services expose `GET /health`, `GET /capabilities`, `POST /run`,
+  `GET /tasks/{task_id}`, and `POST /tasks/{task_id}/cancel` through the shared
+  runtime.
 - EyeOfTerror can execute dispatch packets through HTTP services with `eye_of_terror.http_executor`.
 - The end-to-end HTTP pipeline test reaches a `ready` final manifest for the Skalathrax test task.
 - Local and HTTP executors write `task_ledger.json` with task status, step status, artifacts, and event history.
 - Warmaster Gateway can prepare Iskandar run packages, expose run status, execute local dev pipelines, and execute HTTP worker-service pipelines.
 - Warmaster Gateway can start local/HTTP execution in a background thread and expose progress through the ledger.
+- Warmaster Gateway exposes `GET /governors`, `GET /workers`, and
+  `GET /workers?health=1`; worker listings are enriched with available
+  `Mechanicum/*/worker.json` metadata.
 - Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
-- Warmaster Gateway can request cooperative cancellation through the task ledger; executors stop before the next worker step.
-- HTTP execution preflights all worker `/health` endpoints before running steps.
+- Warmaster Gateway can request cooperative cancellation through the task ledger,
+  and best-effort forwards cancellation to HTTP worker task endpoints from the
+  run dispatch package.
+- HTTP execution preflights all worker `/health` endpoints before running steps
+  and rejects worker identity mismatches before dispatch.
 - Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.
+- Mechanicum worker manifests are validated for required metadata, stable ports,
+  API contract, and service-registry consistency.
 - Inner Circle governors are tracked in `EyeOfTerror/registry/governors.json`; code/image governors are explicit planned entries.
 - `CogitatorCodewrightGovernor` now has planned scope documentation but remains inactive.
 - `ForgeMasterGovernor` now has planned scope documentation but remains inactive.
@@ -48,10 +59,14 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `AuspexBrowser` performs guarded HTTP text fetches; it does not yet render JavaScript pages or screenshots.
 - The pipeline records inaccessible primary books as gaps instead of solving book acquisition.
 - Warmaster Gateway background execution is in-process only; restart recovery marks stale jobs interrupted but does not resume them.
+- Cancellation is still cooperative. It prevents future worker starts and marks
+  worker task state, but it does not forcibly interrupt a worker already blocked
+  inside a model call or external process.
 
 ## Next Good Steps
 
 - Add richer ranking and source-type classification for live discovery results.
 - Add more playbooks only when they are task-class patterns, not one-off hacks.
-- Add durable background execution recovery and hard cancellation for already-running worker calls.
+- Add durable background execution recovery and stronger interruption for
+  already-running worker calls where the underlying worker supports it.
 - Add code and image governors instead of routing unsupported task classes to Iskandar.
