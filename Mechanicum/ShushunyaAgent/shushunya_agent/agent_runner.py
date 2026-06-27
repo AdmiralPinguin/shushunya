@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import Request, build_opener, urlopen
@@ -1537,8 +1537,58 @@ def task_requires_cli_verification(task: str) -> bool:
     )
 
 
-def action_is_cli_verification(action_type: str, action: dict[str, Any]) -> bool:
+def cli_modules_from_task(task: str) -> list[str]:
+    modules: list[str] = []
+    for match in re.finditer(r"\bpython3?\s+-m\s+([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)", task or ""):
+        module = match.group(1)
+        if module != "pytest":
+            modules.append(module)
+    return list(dict.fromkeys(modules))
+
+
+def cli_module_from_path(path: str, workspace: str = "") -> str:
+    normalized = posixpath.normpath(path or "")
+    workspace_norm = posixpath.normpath(workspace or "")
+    if not normalized.endswith(".py"):
+        return ""
+    relative = normalized
+    if workspace_norm and normalized.startswith(workspace_norm + "/"):
+        relative = normalized[len(workspace_norm) + 1 :]
+    parts = relative[:-3].split("/")
+    if not parts:
+        return ""
+    if parts[-1] == "__main__":
+        parts = parts[:-1]
+    elif parts[-1] not in {"cli", "main"}:
+        return ""
+    if not parts or not all(re.match(r"^[A-Za-z_]\w*$", part) for part in parts):
+        return ""
+    return ".".join(parts)
+
+
+def action_invokes_cli_module(action_type: str, action: dict[str, Any], module: str) -> bool:
+    cmd = str(action.get("cmd") or "")
+    code = str(action.get("code") or "")
+    text = f"{cmd}\n{code}"
+    escaped = re.escape(module)
+    patterns = (
+        rf"\bpython3?\s+-m\s+{escaped}\b",
+        rf"['\"]-m['\"]\s*,\s*['\"]{escaped}['\"]",
+        rf"runpy\.run_module\(\s*['\"]{escaped}['\"]",
+    )
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
+def action_is_cli_verification(
+    action_type: str,
+    action: dict[str, Any],
+    task: str = "",
+    expected_modules: Iterable[str] | None = None,
+) -> bool:
     if action_type not in {"shell", "python"}:
+        return False
+    required_modules = list(dict.fromkeys([*cli_modules_from_task(task), *(expected_modules or [])]))
+    if required_modules and not any(action_invokes_cli_module(action_type, action, module) for module in required_modules):
         return False
     cmd = str(action.get("cmd") or "").lower()
     code = str(action.get("code") or "").lower()
@@ -4166,6 +4216,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     required_artifact_path_list = list(dict.fromkeys([*parsed_required_artifacts, *restored_required_artifacts]))[:20]
     required_artifact_paths = set(required_artifact_path_list)
     explicit_workspace = explicit_workspace_from_task(original_task)
+    expected_cli_modules: set[str] = set(cli_modules_from_task(original_task))
     data_source_path_list = data_source_paths_from_task(original_task, explicit_workspace, required_artifact_path_list)
     data_source_paths = set(data_source_path_list)
     inspected_data_source_paths: set[str] = set(resume_context_inspected_data_sources(original_task, data_source_path_list))
@@ -5146,7 +5197,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and (swe_verified_after_edit or swe_resume_requires_cli_verification)
                 and (last_cli_required_swe_edit_path or swe_resume_requires_cli_verification)
                 and not swe_cli_verification_attempted_after_edit
-                and not action_is_cli_verification(action_type, action)
+                and not action_is_cli_verification(action_type, action, original_task, expected_cli_modules)
             ):
                 result = {
                     "ok": False,
@@ -5164,7 +5215,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and swe_task
                 and explicit_workspace
                 and looks_like_inline_python_shell(str(action.get("cmd", "")))
-                and not action_is_cli_verification(action_type, action)
+                and not action_is_cli_verification(action_type, action, original_task, expected_cli_modules)
             ):
                 suggested_action = {
                     "action": "python",
@@ -5414,7 +5465,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             )
         if (
             swe_task
-            and action_is_cli_verification(action_type, action)
+            and action_is_cli_verification(action_type, action, original_task, expected_cli_modules)
             and isinstance(result, dict)
             and result.get("ok") is True
             and python_result_printed_nested_cli_failure(result)
@@ -5595,14 +5646,14 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if (
             swe_task
             and swe_requires_cli_verification
-            and action_is_cli_verification(action_type, action)
+            and action_is_cli_verification(action_type, action, original_task, expected_cli_modules)
             and not supervisor_rejection
         ):
             swe_cli_verification_attempted_after_edit = True
         if (
             swe_task
             and swe_requires_cli_verification
-            and action_is_cli_verification(action_type, action)
+            and action_is_cli_verification(action_type, action, original_task, expected_cli_modules)
             and isinstance(result, dict)
             and result.get("ok") is True
         ):
@@ -5696,6 +5747,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             read_path = str(action.get("path") or result.get("path") or "")
             if read_path:
                 read_file_paths_since_code_mutation.add(read_path)
+                cli_module = cli_module_from_path(read_path, explicit_workspace)
+                if cli_module:
+                    expected_cli_modules.add(cli_module)
                 content = str(result.get("content") or "")
                 if content:
                     last_read_file_excerpts[read_path] = content[:4000]

@@ -649,6 +649,51 @@ def main() -> int:
         {"code": "import subprocess,json\nr=subprocess.run(['python3','-m','scheduler.cli','jobs.csv'], capture_output=True, text=True)\njson.loads(r.stdout)\nassert r.returncode == 0"},
     ):
         raise AssertionError("subprocess CLI JSON check was not recognized")
+    cli_task = "Исправь CLI и проверь python3 -m package.cli data.csv."
+    if agent_runner.cli_modules_from_task(cli_task) != ["package.cli"]:
+        raise AssertionError("CLI module extractor missed requested python -m entrypoint")
+    discovered_cli = agent_runner.cli_module_from_path("/work/project/scheduler/cli.py", "/work/project")
+    if discovered_cli != "scheduler.cli":
+        raise AssertionError(f"CLI module path detector missed scheduler/cli.py: {discovered_cli}")
+    if agent_runner.action_is_cli_verification(
+        "python",
+        {
+            "code": (
+                "import json\n"
+                "from package.core import build\n"
+                "payload=json.dumps(build([]), default=str)\n"
+                "json.loads(payload)"
+            )
+        },
+        cli_task,
+    ):
+        raise AssertionError("ad-hoc core JSON serialization must not satisfy requested CLI verification")
+    if agent_runner.action_is_cli_verification(
+        "shell",
+        {"cmd": "python3 -m other.cli data.csv | python3 -c \"import sys,json; json.load(sys.stdin)\""},
+        cli_task,
+    ):
+        raise AssertionError("wrong python -m module must not satisfy requested CLI verification")
+    if agent_runner.action_is_cli_verification(
+        "shell",
+        {"cmd": "python3 scheduler/core.py"},
+        "",
+        {"scheduler.cli"},
+    ):
+        raise AssertionError("running an internal source file must not satisfy discovered CLI verification")
+    if agent_runner.action_is_cli_verification(
+        "python",
+        {"code": "import scheduler.core as core\nprint(dir(core))"},
+        "",
+        {"scheduler.cli"},
+    ):
+        raise AssertionError("inspecting an internal module must not satisfy discovered CLI verification")
+    if not agent_runner.action_is_cli_verification(
+        "shell",
+        {"cmd": "python3 -m package.cli data.csv | python3 -c \"import sys,json; json.load(sys.stdin)\""},
+        cli_task,
+    ):
+        raise AssertionError("requested python -m CLI JSON check was not recognized")
     if agent_runner.action_is_cli_verification(
         "python",
         {"code": "with open('scheduler/cli.py', 'r') as f:\n    print(f.read())"},
