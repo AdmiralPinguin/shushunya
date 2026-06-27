@@ -57,6 +57,8 @@ RUN_METRICS: dict[str, Any] = {
     "runs_completed": 0,
     "runs_failed": 0,
     "runs_cancelled": 0,
+    "runs_runtime_limited": 0,
+    "runs_max_steps": 0,
     "json_parse_errors": 0,
     "json_repairs": 0,
     "json_repair_failures": 0,
@@ -218,14 +220,34 @@ def record_run_started() -> None:
         RUN_METRICS["runs_started"] = int(RUN_METRICS.get("runs_started", 0)) + 1
 
 
-def record_run_finished(code: int) -> None:
+def finish_reason_from_result(code: int, result: dict[str, Any] | None = None) -> str:
+    result = result or {}
+    if code == 0:
+        return "completed"
+    if result.get("cancelled") is True:
+        return "cancelled"
+    stop_reason = str(result.get("stop_reason") or "")
+    message = str(result.get("message") or "").lower()
+    if stop_reason == "runtime_limit" or "лимита времени" in message:
+        return "runtime_limit"
+    if stop_reason == "max_steps" or "лимита шагов" in message:
+        return "max_steps"
+    return "failed"
+
+
+def record_run_finished(code: int, result: dict[str, Any] | None = None) -> None:
+    reason = finish_reason_from_result(code, result)
     with STATE_LOCK:
-        if code == 0:
+        if reason == "completed":
             RUN_METRICS["runs_completed"] = int(RUN_METRICS.get("runs_completed", 0)) + 1
         else:
             RUN_METRICS["runs_failed"] = int(RUN_METRICS.get("runs_failed", 0)) + 1
-        if code == 2:
+        if reason == "cancelled":
             RUN_METRICS["runs_cancelled"] = int(RUN_METRICS.get("runs_cancelled", 0)) + 1
+        elif reason == "runtime_limit":
+            RUN_METRICS["runs_runtime_limited"] = int(RUN_METRICS.get("runs_runtime_limited", 0)) + 1
+        elif reason == "max_steps":
+            RUN_METRICS["runs_max_steps"] = int(RUN_METRICS.get("runs_max_steps", 0)) + 1
 
 
 def collect_agent_event(event: dict[str, Any]) -> None:
@@ -690,7 +712,7 @@ def mark_run_started(config: AgentConfig, *, reset_events: bool = True, consume_
     record_run_started()
 
 
-def mark_run_finished(config: AgentConfig, code: int) -> None:
+def mark_run_finished(config: AgentConfig, code: int, result: dict[str, Any] | None = None) -> None:
     with STATE_LOCK:
         started_at = float(RUN_STATE["current_task_started_at"] or 0.0)
         finished_at = time.time()
@@ -702,7 +724,7 @@ def mark_run_finished(config: AgentConfig, code: int) -> None:
         RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
         RUN_STATE["current_task_id"] = ""
         RUN_STATE["current_task_started_at"] = 0.0
-    record_run_finished(code)
+    record_run_finished(code, result)
     clear_task_cancelled(config.task_id)
 
 
@@ -726,7 +748,7 @@ def run_agent_once_locked(
                 code = run_agent(task, config, event_sink=event_sink)
         finally:
             fcntl.flock(lock_fh, fcntl.LOCK_UN)
-            mark_run_finished(config, code)
+            mark_run_finished(config, code, result_from_stdout(code, stdout.getvalue(), stderr.getvalue(), {}))
     return code, stdout.getvalue(), stderr.getvalue()
 
 
@@ -1212,7 +1234,7 @@ class AgentHandler(BaseHTTPRequestHandler):
                             RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
                             RUN_STATE["current_task_id"] = ""
                             RUN_STATE["current_task_started_at"] = 0.0
-                        record_run_finished(code)
+                        record_run_finished(code, result_from_stdout(code, stdout.getvalue(), stderr.getvalue(), payload))
                         clear_task_cancelled(config.task_id)
 
             if code != 0:

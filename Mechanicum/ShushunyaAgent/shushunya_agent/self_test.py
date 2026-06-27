@@ -1171,14 +1171,20 @@ def main() -> int:
         server.collect_agent_event({"type": "warning", "code": "validation_error"})
         server.collect_agent_event({"type": "tool_result", "action": "web_search", "ok": True, "source": "searxng"})
         server.collect_agent_event({"type": "tool_result", "action": "python", "ok": False, "timeout": True})
-        server.record_run_finished(2)
+        server.record_run_finished(2, {"cancelled": True})
+        server.record_run_finished(2, {"stop_reason": "runtime_limit"})
+        server.record_run_finished(2, {"stop_reason": "max_steps"})
         metrics = server.runtime_state().get("metrics") or {}
         if metrics.get("runs_started") != old_metrics.get("runs_started", 0) + 1:
             raise AssertionError(f"run start metric failed: {metrics}")
-        if metrics.get("runs_failed") != old_metrics.get("runs_failed", 0) + 1:
+        if metrics.get("runs_failed") != old_metrics.get("runs_failed", 0) + 3:
             raise AssertionError(f"run failure metric failed: {metrics}")
         if metrics.get("runs_cancelled") != old_metrics.get("runs_cancelled", 0) + 1:
             raise AssertionError(f"cancel metric failed: {metrics}")
+        if metrics.get("runs_runtime_limited") != old_metrics.get("runs_runtime_limited", 0) + 1:
+            raise AssertionError(f"runtime limit metric failed: {metrics}")
+        if metrics.get("runs_max_steps") != old_metrics.get("runs_max_steps", 0) + 1:
+            raise AssertionError(f"max steps metric failed: {metrics}")
         if metrics.get("json_parse_errors") != old_metrics.get("json_parse_errors", 0) + 1:
             raise AssertionError(f"json parse metric failed: {metrics}")
         if metrics.get("json_repairs") != old_metrics.get("json_repairs", 0) + 1:

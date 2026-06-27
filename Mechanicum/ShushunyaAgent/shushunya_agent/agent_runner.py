@@ -4375,10 +4375,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 f"Агент достиг лимита времени ({config.max_runtime_sec}s). "
                 f"Задачу можно продолжить с resume_task_id={config.task_id}; последние действия сохранены в task journal."
             )
-            emit(event_sink, {"type": "final", "ok": False, "continuable": True, "resume_task_id": config.task_id, "message": message, "duration_sec": duration_sec})
-            write_task_journal(config, "final", {"ok": False, "continuable": True, "resume_task_id": config.task_id, "message": message, "duration_sec": duration_sec})
+            final_payload = {"ok": False, "continuable": True, "resume_task_id": config.task_id, "message": message, "duration_sec": duration_sec, "stop_reason": "runtime_limit"}
+            emit(event_sink, {"type": "final", **final_payload})
+            write_task_journal(config, "final", final_payload)
             if config.json_output:
-                print(json.dumps({"ok": False, "continuable": True, "resume_task_id": config.task_id, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
+                print(json.dumps({**final_payload, "task_id": config.task_id, "steps": trace}, ensure_ascii=False, indent=2))
             else:
                 print(message, file=sys.stderr)
             return 2
@@ -6042,10 +6043,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         f"Задачу можно продолжить с resume_task_id={config.task_id}; последние действия сохранены в task journal."
     )
     duration_sec = round(time.time() - run_started, 3)
-    emit(event_sink, {"type": "final", "ok": False, "continuable": True, "resume_task_id": config.task_id, "message": message, "duration_sec": duration_sec})
-    write_task_journal(config, "final", {"ok": False, "continuable": True, "resume_task_id": config.task_id, "message": message, "duration_sec": duration_sec})
+    final_payload = {"ok": False, "continuable": True, "resume_task_id": config.task_id, "message": message, "duration_sec": duration_sec, "stop_reason": "max_steps"}
+    emit(event_sink, {"type": "final", **final_payload})
+    write_task_journal(config, "final", final_payload)
     if config.json_output:
-        print(json.dumps({"ok": False, "continuable": True, "resume_task_id": config.task_id, "task_id": config.task_id, "message": message, "duration_sec": duration_sec, "steps": trace}, ensure_ascii=False, indent=2))
+        print(json.dumps({**final_payload, "task_id": config.task_id, "steps": trace}, ensure_ascii=False, indent=2))
     else:
         print(message, file=sys.stderr)
     return 2
