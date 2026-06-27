@@ -441,6 +441,11 @@ sudo CONFIRM=1 ./scripts/setup-apparmor.sh
 ## Tools
 
 The supported action contract is documented in `TOOLS.md` and
-`tool_schema.json`.
+`tool_schema.json`. The JSON schema is normalized from runtime validation
+with:
+
+```bash
+PYTHONPATH=. python3 -m shushunya_agent.tool_contract tool_schema.json --write
+```
 
 Current verified runtime state is documented in `STATUS.md`.

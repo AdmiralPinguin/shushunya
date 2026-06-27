@@ -23,6 +23,7 @@ from .task_journal import (
     recent_task_summaries,
     write_task_journal,
 )
+from .tool_contract import build_tool_schema
 from .utils import compact_json_value
 
 
@@ -939,7 +940,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             return
         if parsed_path.path == "/tools":
             schema_path = ROOT / "tool_schema.json"
-            write_json(self, 200, json.loads(schema_path.read_text(encoding="utf-8")))
+            write_json(self, 200, build_tool_schema(json.loads(schema_path.read_text(encoding="utf-8"))))
             return
         if parsed_path.path == "/state":
             if not authorized(self):

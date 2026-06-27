@@ -17,6 +17,7 @@ from . import agent_runner
 from . import server
 from . import task_journal
 from . import task_watchdog
+from . import tool_contract
 from . import web_tools
 from .agent_runner import (
     AgentConfig,
@@ -75,7 +76,8 @@ def main() -> int:
     print("[ok] self-test journal isolation")
 
     schema_path = Path(__file__).resolve().parents[1] / "tool_schema.json"
-    schema_actions = set(json.loads(schema_path.read_text(encoding="utf-8")).get("actions", {}))
+    tool_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    schema_actions = set(tool_schema.get("actions", {}))
     runtime_actions = set(agent_runner.REQUIRED_FIELDS) | agent_runner.FILE_ACTIONS | {
         "sandbox_status",
         "archive_status",
@@ -85,7 +87,11 @@ def main() -> int:
     }
     if schema_actions != runtime_actions:
         raise AssertionError(f"tool schema/runtime mismatch: missing={sorted(runtime_actions - schema_actions)}, extra={sorted(schema_actions - runtime_actions)}")
-    print("[ok] tool schema matches runtime actions")
+    generated_schema = tool_contract.build_tool_schema(tool_schema)
+    if tool_schema != generated_schema:
+        mismatches = tool_contract.schema_contract_mismatches(tool_schema)
+        raise AssertionError(f"tool schema/runtime contract mismatch: {mismatches[:10]}")
+    print("[ok] tool schema matches runtime contract")
     if '"limit":100' not in agent_runner.SYSTEM_PROMPT or "is_binary=true" not in agent_runner.SYSTEM_PROMPT:
         raise AssertionError("system prompt missing file pagination or binary web_fetch guidance")
     if "Текущая user task всегда главнее Archive memory" not in agent_runner.SYSTEM_PROMPT:
