@@ -121,6 +121,7 @@ def main() -> int:
                 or not any(item.get("task_id") == "warmaster-test" for item in state.get("runs", []))
                 or not any(item.get("name") == "Lexmechanic" for item in state.get("workers", []))
                 or "state_snapshot" not in state.get("capabilities", {}).get("capabilities", [])
+                or state.get("run_summary", {}).get("total") != 1
             ):
                 raise AssertionError(f"bad gateway state: {state}")
             run_dir = Path(task["run_dir"])
@@ -139,7 +140,11 @@ def main() -> int:
             if not events.get("ok") or len(events.get("events", [])) != 1:
                 raise AssertionError(f"bad run events: {events}")
             run_list = request_json(base + "/runs")
-            if not run_list.get("ok") or not any(item.get("task_id") == "warmaster-test" for item in run_list.get("runs", [])):
+            if (
+                not run_list.get("ok")
+                or run_list.get("run_summary", {}).get("total", 0) < 1
+                or not any(item.get("task_id") == "warmaster-test" for item in run_list.get("runs", []))
+            ):
                 raise AssertionError(f"bad run list: {run_list}")
             executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
             if not executed.get("ok"):

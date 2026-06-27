@@ -91,6 +91,15 @@ def list_runs(run_root: Path) -> list[dict[str, Any]]:
     return sorted(runs, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
 
 
+def run_status_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    by_status: dict[str, int] = {}
+    for run in runs:
+        status = str(run.get("status") or "unknown")
+        by_status[status] = by_status.get(status, 0) + 1
+    active = sum(by_status.get(status, 0) for status in ("running", "cancelling", "queued"))
+    return {"total": len(runs), "active": active, "by_status": by_status}
+
+
 def run_contract(run_dir: Path) -> dict[str, Any]:
     contract_path = run_dir / "contract.json"
     if not contract_path.exists():
@@ -261,6 +270,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "task_routing",
             "run_preparation",
             "run_listing",
+            "run_status_summary",
             "ledger_read",
             "artifact_listing",
             "artifact_text_read",
@@ -307,13 +317,15 @@ def gateway_capabilities() -> dict[str, Any]:
 
 
 def gateway_state(run_root: Path, run_limit: int = 20) -> dict[str, Any]:
-    runs = list_runs(run_root)[: max(0, run_limit)]
+    all_runs = list_runs(run_root)
+    runs = all_runs[: max(0, run_limit)]
     return {
         "ok": True,
         "gateway": "WarmasterGateway",
         "capabilities": gateway_capabilities(),
         "governors": governor_registry_snapshot(),
         "workers": worker_registry_snapshot(),
+        "run_summary": run_status_summary(all_runs),
         "runs": runs,
     }
 
@@ -424,7 +436,8 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 return
             parts = [part for part in parsed.path.split("/") if part]
             if parts == ["runs"]:
-                response(self, 200, {"ok": True, "runs": list_runs(run_root)})
+                runs = list_runs(run_root)
+                response(self, 200, {"ok": True, "run_summary": run_status_summary(runs), "runs": runs})
                 return
             if len(parts) in {2, 3} and parts[0] == "runs":
                 task_id = parts[1]
