@@ -99,6 +99,9 @@ def main() -> int:
         missing = [name for name in expected_files if not (Path(temp_dir) / name).exists()]
         if missing:
             raise AssertionError(f"pipeline run did not write expected files: {missing}")
+        leftovers = list(Path(temp_dir).glob("**/*.tmp"))
+        if leftovers:
+            raise AssertionError(f"pipeline run left atomic temp files: {leftovers}")
     print("[ok] Iskandar pipeline run package")
     return 0
 

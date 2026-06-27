@@ -9,6 +9,13 @@ from .contracts import TaskContract
 from .registry import worker_by_name
 
 
+def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp_path.replace(path)
+
+
 @dataclass
 class DispatchPacket:
     task_id: str
@@ -95,14 +102,13 @@ def write_pipeline_run(contract: TaskContract, run_dir: Path) -> dict[str, Any]:
     packets = build_dispatch_packets(contract)
     contract_path = run_dir / "contract.json"
     status_path = run_dir / "status.json"
-    contract_path.write_text(json.dumps(contract.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_json_atomic(contract_path, contract.to_dict())
     for packet in packets:
         packet_path = dispatch_dir / f"{packet.step_id}.json"
-        packet_path.write_text(json.dumps(packet.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        write_json_atomic(packet_path, packet.to_dict())
     status = pipeline_status(contract, packets)
     status["run_dir"] = str(run_dir)
     status["contract_path"] = str(contract_path)
     status["dispatch_dir"] = str(dispatch_dir)
-    status_path.write_text(json.dumps(status, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_json_atomic(status_path, status)
     return status
-
