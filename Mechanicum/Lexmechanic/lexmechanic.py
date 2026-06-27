@@ -5,116 +5,97 @@ from pathlib import Path
 from typing import Any
 
 
+PLAYBOOK_DIR = Path(__file__).resolve().parent / "playbooks"
+
+
+def load_playbook(name: str) -> dict[str, Any]:
+    payload = json.loads((PLAYBOOK_DIR / name).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"source playbook must be an object: {name}")
+    return payload
+
+
+SOURCE_PLAYBOOKS = [load_playbook("skalathrax_sources.json")]
+
+
 def sandbox_path(workspace_root: Path, path: str) -> Path:
     if not path.startswith("/work/"):
         raise ValueError(f"unsupported sandbox path: {path}")
     return workspace_root / path.removeprefix("/work/")
 
 
-def known_lore_sources(goal: str) -> list[dict[str, Any]]:
+def matching_playbooks(goal: str) -> list[dict[str, Any]]:
     lowered = goal.lower()
-    if "skalathrax" not in lowered and "скалатрак" not in lowered:
-        return []
+    matches = []
+    for playbook in SOURCE_PLAYBOOKS:
+        terms = [str(term).lower() for term in playbook.get("match_terms", [])]
+        if any(term in lowered for term in terms):
+            matches.append(playbook)
+    return matches
+
+
+def dedupe_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for source in sources:
+        key = (str(source.get("title") or ""), str(source.get("url") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(source)
+    return result
+
+
+def generic_search_queries(goal: str) -> list[str]:
     return [
-        {
-            "title": "Lexicanum: Battle of Skalathrax",
-            "type": "wiki",
-            "language": "en",
-            "url": "https://wh40k.lexicanum.com/wiki/Battle_of_Skalathrax",
-            "reliability": "medium-high",
-            "direct_event_detail_level": "high",
-            "source_class": "secondary_wiki",
-            "expected_use": "baseline chronology and named participants",
-        },
-        {
-            "title": "Lexicanum: Dreagher",
-            "type": "wiki",
-            "language": "en",
-            "url": "https://wh40k.lexicanum.com/wiki/Dreagher",
-            "reliability": "medium-high",
-            "direct_event_detail_level": "medium",
-            "source_class": "secondary_wiki",
-            "expected_use": "parley trigger and World Eaters command context",
-        },
-        {
-            "title": "Kharn: Eater of Worlds",
-            "type": "novel",
-            "language": "en",
-            "url": "",
-            "reliability": "high",
-            "direct_event_detail_level": "high",
-            "source_class": "official_primary_narrative",
-            "expected_use": "direct narrative around Kharn, Dreagher, parley, Golden Absolute, and the battle",
-        },
-        {
-            "title": "Lucius: The Faultless Blade",
-            "type": "novel",
-            "language": "en",
-            "url": "",
-            "reliability": "high",
-            "direct_event_detail_level": "medium",
-            "source_class": "official_primary_narrative",
-            "expected_use": "Emperor's Children and Lucius-side references",
-        },
-        {
-            "title": "The Weakness of Others",
-            "type": "short_story",
-            "language": "en",
-            "url": "",
-            "reliability": "high",
-            "direct_event_detail_level": "medium",
-            "source_class": "official_primary_narrative",
-            "expected_use": "supplementary character/event details",
-        },
-        {
-            "title": "White Dwarf 477",
-            "type": "magazine",
-            "language": "en",
-            "url": "https://www.warhammer-community.com/en-gb/articles/JUPjBJqs/white-dwarf-477-preview-the-world-eaters-kill-maim-and-burn-with-brutal-new-rules/",
-            "reliability": "high",
-            "direct_event_detail_level": "medium",
-            "source_class": "official_secondary",
-            "expected_use": "official rules/lore context for World Eaters and Skalathrax references",
-        },
-        {
-            "title": "Warhammer 40k Fandom: Battle of Skalathrax",
-            "type": "wiki",
-            "language": "en",
-            "url": "https://warhammer40k.fandom.com/wiki/Battle_of_Skalathrax",
-            "reliability": "medium",
-            "direct_event_detail_level": "medium",
-            "source_class": "secondary_wiki",
-            "expected_use": "cross-check public summary; automated fetch may fail with 403",
-        },
+        f"{goal} primary source",
+        f"{goal} official source",
+        f"{goal} wiki",
+        f"{goal} chronology",
     ]
 
 
 def source_map_for_contract(contract: dict[str, Any]) -> dict[str, Any]:
     goal = str(contract.get("goal") or "")
-    sources = known_lore_sources(goal)
-    search_queries = [
-        f"{goal} primary source",
-        f"{goal} Lexicanum",
-        f"{goal} official source",
-    ]
-    if "skalathrax" in goal.lower() or "скалатрак" in goal.lower():
-        search_queries = [
-            "Battle of Skalathrax Kharn Eater of Worlds Dreagher Golden Absolute",
-            "Battle of Skalathrax Emperor's Children World Eaters parley moon",
-            "Skalathrax Lucius Faultless Blade Weakness of Others White Dwarf 477",
+    playbooks = matching_playbooks(goal)
+    sources = dedupe_sources(
+        [
+            source
+            for playbook in playbooks
+            for source in playbook.get("sources", [])
+            if isinstance(source, dict)
         ]
+    )
+    search_queries = [
+        str(query)
+        for playbook in playbooks
+        for query in playbook.get("search_queries", [])
+        if query
+    ] or generic_search_queries(goal)
+    coverage_gaps = [
+        str(gap)
+        for playbook in playbooks
+        for gap in playbook.get("coverage_gaps", [])
+        if gap
+    ]
+    if not playbooks:
+        coverage_gaps.append("No source playbook matched this task; live source discovery is required.")
+    quality_notes = [
+        str(note)
+        for playbook in playbooks
+        for note in playbook.get("quality_notes", [])
+        if note
+    ] or [
+        "A pass requires at least one reliable primary or official source candidate.",
+        "Secondary summaries can guide discovery but must not become sole evidence.",
+    ]
     return {
         "topic": goal,
         "sources": sources,
         "search_queries": search_queries,
-        "coverage_gaps": [
-            "Full official book text may be unavailable to automated workers.",
-            "Wiki summaries must be treated as secondary sources, not final authority.",
-        ],
-        "quality_notes": [
-            "A pass requires at least one official narrative source candidate and one independent secondary summary.",
-            "Community snippets may suggest leads but should not be used as sole evidence for direct events.",
-        ],
+        "matched_playbooks": [str(playbook.get("name") or playbook.get("match_terms", ["unknown"])[0]) for playbook in playbooks],
+        "coverage_gaps": coverage_gaps,
+        "quality_notes": quality_notes,
     }
 
 

@@ -27,7 +27,7 @@ and the end-to-end HTTP worker pipeline.
 
 ## Current Limits
 
-- `Lexmechanic` still uses a prototype source map for Skalathrax instead of a general live search strategy.
+- `Lexmechanic` uses source playbooks plus a generic fallback; live source discovery is not implemented yet.
 - `NoosphericExtractor` still uses rule-based event playbooks; Skalathrax rules now live in data, not Python code.
 - `AuspexBrowser` performs guarded HTTP text fetches; it does not yet render JavaScript pages or screenshots.
 - The pipeline records inaccessible primary books as gaps instead of solving book acquisition.

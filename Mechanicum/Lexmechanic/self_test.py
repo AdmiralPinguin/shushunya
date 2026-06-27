@@ -30,8 +30,23 @@ def main() -> int:
         required = {"Lexicanum: Battle of Skalathrax", "Kharn: Eater of Worlds"}
         if not required.issubset(titles):
             raise AssertionError(f"source map lacks required source candidates: {titles}")
+        if data.get("matched_playbooks") != ["skalathrax_sources"]:
+            raise AssertionError(f"wrong matched playbooks: {data.get('matched_playbooks')}")
         if not data.get("coverage_gaps"):
             raise AssertionError("source map must include coverage gaps")
+        generic_request = {
+            "task_id": "test-generic:source_discovery",
+            "contract": {"goal": "Собери историю неизвестной битвы."},
+            "step": {"expected_artifacts": ["/work/generic/source_map.json"]},
+        }
+        generic_result = run(generic_request, Path(temp_dir))
+        if not generic_result.get("ok"):
+            raise AssertionError(f"Lexmechanic generic fallback failed: {generic_result}")
+        generic = json.loads((Path(temp_dir) / "generic" / "source_map.json").read_text(encoding="utf-8"))
+        if generic.get("sources") != []:
+            raise AssertionError(f"generic fallback should not invent sources: {generic['sources']}")
+        if not any("live source discovery" in gap for gap in generic.get("coverage_gaps", [])):
+            raise AssertionError(f"generic fallback should demand live discovery: {generic}")
     print("[ok] Lexmechanic source map")
     return 0
 
