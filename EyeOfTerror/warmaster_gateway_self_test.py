@@ -121,6 +121,12 @@ def main() -> int:
             run_status = request_json(base + "/runs/warmaster-test")
             if not run_status.get("ok") or run_status.get("task_id") != "warmaster-test" or not run_status.get("ledger"):
                 raise AssertionError(f"bad run status: {run_status}")
+            contract = request_json(base + "/runs/warmaster-test/contract")
+            if not contract.get("ok") or contract["contract"].get("task_id") != "warmaster-test":
+                raise AssertionError(f"bad run contract: {contract}")
+            dispatch = request_json(base + "/runs/warmaster-test/dispatch")
+            if not dispatch.get("ok") or not any(item.get("packet", {}).get("worker") == "Lexmechanic" for item in dispatch.get("dispatch", [])):
+                raise AssertionError(f"bad run dispatch: {dispatch}")
             run_list = request_json(base + "/runs")
             if not run_list.get("ok") or not any(item.get("task_id") == "warmaster-test" for item in run_list.get("runs", [])):
                 raise AssertionError(f"bad run list: {run_list}")

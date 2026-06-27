@@ -91,6 +91,31 @@ def list_runs(run_root: Path) -> list[dict[str, Any]]:
     return sorted(runs, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
 
 
+def run_contract(run_dir: Path) -> dict[str, Any]:
+    contract_path = run_dir / "contract.json"
+    if not contract_path.exists():
+        return {"ok": False, "error": "contract not found"}
+    payload = json.loads(contract_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return {"ok": False, "error": "contract is not a JSON object"}
+    return {"ok": True, "contract": payload}
+
+
+def run_dispatch_packets(run_dir: Path) -> dict[str, Any]:
+    dispatch_dir = run_dir / "dispatch"
+    if not dispatch_dir.exists():
+        return {"ok": False, "error": "dispatch directory not found"}
+    packets: list[dict[str, Any]] = []
+    for dispatch_path in sorted(dispatch_dir.glob("*.json")):
+        try:
+            packet = json.loads(dispatch_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            packets.append({"path": str(dispatch_path), "ok": False, "error": str(exc)})
+            continue
+        packets.append({"path": str(dispatch_path), "ok": isinstance(packet, dict), "packet": packet})
+    return {"ok": True, "dispatch": packets}
+
+
 def recover_stale_runs(run_root: Path) -> list[dict[str, Any]]:
     recovered: list[dict[str, Any]] = []
     if not run_root.exists():
@@ -226,6 +251,8 @@ def gateway_capabilities() -> dict[str, Any]:
             "ledger_read",
             "artifact_listing",
             "artifact_text_read",
+            "run_contract_read",
+            "run_dispatch_read",
             "local_execution",
             "http_worker_execution",
             "background_execution",
@@ -248,6 +275,8 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs",
             "GET /runs/{task_id}",
             "GET /runs/{task_id}/ledger",
+            "GET /runs/{task_id}/contract",
+            "GET /runs/{task_id}/dispatch",
             "GET /runs/{task_id}/artifacts",
             "GET /runs/{task_id}/artifact_text?path=/work/...",
             "POST /runs/{task_id}/execute_local",
@@ -375,6 +404,14 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
                         return
                     response(self, 200, {"ok": True, "ledger": TaskLedger.load(ledger_path).to_dict()})
+                    return
+                if len(parts) == 3 and parts[2] == "contract":
+                    payload = run_contract(run_dir)
+                    response(self, 200 if payload.get("ok") else 404, payload)
+                    return
+                if len(parts) == 3 and parts[2] == "dispatch":
+                    payload = run_dispatch_packets(run_dir)
+                    response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 if len(parts) == 3 and parts[2] == "artifacts":
                     if not ledger_path.exists():
