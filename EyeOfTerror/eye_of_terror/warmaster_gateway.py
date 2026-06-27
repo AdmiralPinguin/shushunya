@@ -175,8 +175,28 @@ def fetch_worker_health(host: str, port: int, timeout_sec: float = 1.0) -> dict[
         return {"reachable": False, "error": str(exc)}
 
 
+def enrich_worker_metadata(worker: dict[str, Any]) -> dict[str, Any]:
+    worker_path = REPO_ROOT / str(worker.get("path") or "") / "worker.json"
+    if not worker_path.exists():
+        return {**worker, "metadata_available": False}
+    try:
+        metadata = json.loads(worker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {**worker, "metadata_available": False, "metadata_error": str(exc)}
+    if not isinstance(metadata, dict):
+        return {**worker, "metadata_available": False, "metadata_error": "worker metadata is not an object"}
+    return {
+        **worker,
+        "metadata_available": True,
+        "status": metadata.get("status", ""),
+        "capabilities": metadata.get("capabilities", []),
+        "api_contract": metadata.get("api_contract", ""),
+        "metadata": metadata,
+    }
+
+
 def worker_registry_snapshot(include_health: bool = False, host: str = "127.0.0.1") -> list[dict[str, Any]]:
-    workers = [worker.to_dict() for worker in worker_refs()]
+    workers = [enrich_worker_metadata(worker.to_dict()) for worker in worker_refs()]
     if not include_health:
         return workers
     for worker in workers:

@@ -53,6 +53,10 @@ Gateway endpoints:
 - `POST /runs/<task_id>/cancel`
 - `POST /recover_stale`
 
+`GET /workers` returns the static port registry enriched with available
+`Mechanicum/*/worker.json` metadata. Add `?health=1` to include a live
+best-effort `/health` snapshot for each worker service.
+
 ## Iskandar Service
 
 Run the first Inner Circle governor:
