@@ -24,6 +24,10 @@
 - Warmaster Gateway exposes `GET /governors`, `GET /workers`, and
   `GET /workers?health=1`; worker listings are enriched with available
   `Mechanicum/*/worker.json` metadata.
+- Warmaster Gateway exposes `GET /state` as a client bootstrap snapshot with
+  capabilities, governors, workers, and recent runs.
+- Warmaster Gateway exposes focused run inspection endpoints for contract,
+  dispatch packets, and ledger event history.
 - Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
 - Warmaster Gateway can request cooperative cancellation through the task ledger,
   and best-effort forwards cancellation to HTTP worker task endpoints from the
@@ -59,6 +63,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `AuspexBrowser` performs guarded HTTP text fetches; it does not yet render JavaScript pages or screenshots.
 - The pipeline records inaccessible primary books as gaps instead of solving book acquisition.
 - Warmaster Gateway background execution is in-process only; restart recovery marks stale jobs interrupted but does not resume them.
+- `GET /state` is a snapshot endpoint, not a live event stream; clients still
+  need polling or a future push channel for real-time updates.
 - Cancellation is still cooperative. It prevents future worker starts and marks
   worker task state, but it does not forcibly interrupt a worker already blocked
   inside a model call or external process.
