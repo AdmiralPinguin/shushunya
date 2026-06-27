@@ -1,0 +1,1 @@
+"""FabricatorFinalis worker prototype."""

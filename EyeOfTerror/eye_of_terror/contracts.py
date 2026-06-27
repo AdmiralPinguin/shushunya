@@ -76,6 +76,7 @@ def lore_required_artifacts(slug: str) -> list[str]:
         f"{base}/reconstruction_ru.md",
         f"{base}/coverage_report.md",
         f"{base}/critic_report.json",
+        f"{base}/final_manifest.json",
     ]
 
 
@@ -121,7 +122,7 @@ def lore_worker_plan(slug: str) -> list[WorkerPlanStep]:
             worker="FabricatorFinalis",
             purpose="Package final artifacts only after critic approval or explicit blockers.",
             depends_on=["critic_review"],
-            expected_artifacts=[],
+            expected_artifacts=[f"{base}/final_manifest.json"],
         ),
     ]
 
@@ -156,4 +157,3 @@ def build_lore_reconstruction_contract(user_task: str, task_id: str | None = Non
         ],
         worker_plan=lore_worker_plan(slug),
     )
-

@@ -2,8 +2,7 @@
   "name": "FabricatorFinalis",
   "port": 7007,
   "role": "finalizer, packager, telegram sender",
-  "status": "planned",
+  "status": "prototype",
   "capabilities": ["fb2", "markdown_bundle", "telegram_send_document"],
   "api_contract": "EyeOfTerror/contracts/worker_api.md"
 }
-
