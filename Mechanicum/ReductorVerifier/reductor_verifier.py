@@ -109,6 +109,8 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
         warnings.append({"severity": "warning", "message": "No official primary narrative source candidate is listed."})
     if "secondary_wiki" not in source_classes:
         warnings.append({"severity": "warning", "message": "No secondary wiki/source summary is listed for cross-checking."})
+    if source_map.get("discovery_status") == "needs_live_discovery":
+        findings.append({"severity": "blocker", "message": "Source discovery did not find concrete sources."})
     if "## Gaps" not in coverage or "Что еще надо проверить" not in reconstruction:
         findings.append({"severity": "blocker", "message": "Draft package does not expose coverage gaps clearly."})
 

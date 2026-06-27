@@ -30,6 +30,7 @@ def main() -> int:
             base / "source_map.json",
             {
                 "topic": "Skalathrax",
+                "discovery_status": "playbook_matched",
                 "sources": [
                     {"title": "Kharn: Eater of Worlds", "source_class": "official_primary_narrative", "reliability": "high"}
                 ],
@@ -95,7 +96,7 @@ def main() -> int:
         for needle in required:
             if needle not in reconstruction:
                 raise AssertionError(f"missing reconstruction text: {needle}")
-        if "Sources mapped: 1" not in coverage or "moon_parley" not in coverage:
+        if "Discovery status: playbook_matched" not in coverage or "Sources mapped: 1" not in coverage or "moon_parley" not in coverage:
             raise AssertionError("coverage report is incomplete")
         if "evidence=Kharn: Eater of Worlds: parley" not in coverage:
             raise AssertionError("coverage report should include event evidence")

@@ -138,6 +138,7 @@ def build_coverage_report(
     lines = [
         "# Coverage Report",
         "",
+        f"- Discovery status: {source_map.get('discovery_status', 'unknown')}",
         f"- Sources mapped: {len(sources)}",
         f"- Source URLs fetched: {sum(1 for item in snapshots if item.get('ok'))}",
         f"- Source URL failures: {sum(1 for item in snapshots if not item.get('ok'))}",

@@ -28,6 +28,7 @@ def main() -> int:
         write_json(
             base / "source_map.json",
             {
+                "discovery_status": "playbook_matched",
                 "sources": [
                     {"title": "Kharn: Eater of Worlds", "source_class": "official_primary_narrative"},
                     {"title": "Lexicanum: Battle of Skalathrax", "source_class": "secondary_wiki"},

@@ -32,6 +32,8 @@ def main() -> int:
             raise AssertionError(f"source map lacks required source candidates: {titles}")
         if data.get("matched_playbooks") != ["skalathrax_sources"]:
             raise AssertionError(f"wrong matched playbooks: {data.get('matched_playbooks')}")
+        if data.get("discovery_status") != "playbook_matched":
+            raise AssertionError(f"wrong discovery status: {data.get('discovery_status')}")
         if not data.get("coverage_gaps"):
             raise AssertionError("source map must include coverage gaps")
         generic_request = {
@@ -45,6 +47,8 @@ def main() -> int:
         generic = json.loads((Path(temp_dir) / "generic" / "source_map.json").read_text(encoding="utf-8"))
         if generic.get("sources") != []:
             raise AssertionError(f"generic fallback should not invent sources: {generic['sources']}")
+        if generic.get("discovery_status") != "needs_live_discovery":
+            raise AssertionError(f"generic fallback should request live discovery: {generic}")
         if not any("live source discovery" in gap for gap in generic.get("coverage_gaps", [])):
             raise AssertionError(f"generic fallback should demand live discovery: {generic}")
     print("[ok] Lexmechanic source map")

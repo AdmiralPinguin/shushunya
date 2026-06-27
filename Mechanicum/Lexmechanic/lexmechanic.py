@@ -80,6 +80,7 @@ def source_map_for_contract(contract: dict[str, Any]) -> dict[str, Any]:
     ]
     if not playbooks:
         coverage_gaps.append("No source playbook matched this task; live source discovery is required.")
+    discovery_status = "playbook_matched" if playbooks else "needs_live_discovery"
     quality_notes = [
         str(note)
         for playbook in playbooks
@@ -93,6 +94,7 @@ def source_map_for_contract(contract: dict[str, Any]) -> dict[str, Any]:
         "topic": goal,
         "sources": sources,
         "search_queries": search_queries,
+        "discovery_status": discovery_status,
         "matched_playbooks": [str(playbook.get("name") or playbook.get("match_terms", ["unknown"])[0]) for playbook in playbooks],
         "coverage_gaps": coverage_gaps,
         "quality_notes": quality_notes,
