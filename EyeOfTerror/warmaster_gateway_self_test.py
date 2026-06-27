@@ -128,6 +128,19 @@ def main() -> int:
             )
             if not task.get("ok") or task.get("governor") != "IskandarKhayon":
                 raise AssertionError(f"bad task response: {task}")
+            try:
+                request_json(
+                    base + "/task",
+                    {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                duplicate = json.loads(exc.read().decode("utf-8"))
+                if duplicate.get("error_code") != "task_exists":
+                    raise AssertionError(f"bad duplicate task response: {duplicate}")
+            else:
+                raise AssertionError("duplicate task_id should not overwrite an existing run")
             state = request_json(base + "/state?run_limit=5")
             if (
                 not state.get("ok")

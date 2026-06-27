@@ -63,6 +63,15 @@ def prepare_task(message: str, task_id: str | None, run_root: Path) -> dict[str,
         return {"ok": False, "gateway": "WarmasterGateway", "error": f"governor is not active: {governor}", "kind": route.kind}
     plan = plan_lore_reconstruction(message, task_id=task_id)
     run_dir = run_root / plan.contract.task_id
+    if run_dir.exists():
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "task_id already exists",
+            "error_code": "task_exists",
+            "task_id": plan.contract.task_id,
+            "run_dir": str(run_dir),
+        }
     status = write_pipeline_run(plan.contract, run_dir)
     TaskLedger.create(run_dir / "task_ledger.json", plan.contract.task_id, plan.contract.goal, governor)
     return {
@@ -618,7 +627,7 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         return
                     task_id = str(payload.get("task_id") or "").strip() or None
                     prepared = prepare_task(message, task_id, run_root)
-                    response(self, 200 if prepared.get("ok") else 400, prepared)
+                    response(self, 409 if prepared.get("error_code") == "task_exists" else (200 if prepared.get("ok") else 400), prepared)
                     return
                 if self.path == "/recover_stale":
                     recovered = recover_stale_runs(run_root)
