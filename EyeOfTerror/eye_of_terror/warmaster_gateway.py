@@ -8,7 +8,11 @@ from typing import Any
 
 from .inner_circle.iskandar import plan_lore_reconstruction
 from .ledger import TaskLedger
+from .local_executor import execute_run as execute_local_run
 from .pipeline import write_pipeline_run
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -94,6 +98,18 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         return
                     task_id = str(payload.get("task_id") or "").strip() or None
                     response(self, 200, prepare_task(message, task_id, run_root))
+                    return
+                parts = [part for part in self.path.split("?")[0].split("/") if part]
+                if len(parts) == 3 and parts[0] == "runs" and parts[2] == "execute_local":
+                    task_id = parts[1]
+                    run_dir = run_root / task_id
+                    if not run_dir.exists():
+                        response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
+                        return
+                    workspace_root = Path(str(payload.get("workspace_root") or run_dir / "work"))
+                    timeout_sec = int(payload.get("timeout_sec") or 1800)
+                    summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
+                    response(self, 200 if summary.get("ok") else 500, {"ok": bool(summary.get("ok")), "summary": summary})
                     return
                 response(self, 404, {"ok": False, "error": "not found"})
             except Exception as exc:  # noqa: BLE001 - gateway boundary records routing failures.

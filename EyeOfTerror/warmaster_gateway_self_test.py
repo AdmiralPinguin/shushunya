@@ -42,6 +42,12 @@ def main() -> int:
             run_status = request_json(base + "/runs/warmaster-test")
             if not run_status.get("ok") or run_status.get("task_id") != "warmaster-test":
                 raise AssertionError(f"bad run status: {run_status}")
+            executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30})
+            if not executed.get("ok"):
+                raise AssertionError(f"bad local execution: {executed}")
+            ledger = request_json(base + "/runs/warmaster-test/ledger")
+            if not ledger.get("ok") or ledger["ledger"].get("status") != "completed":
+                raise AssertionError(f"bad ledger after execution: {ledger}")
         finally:
             server.shutdown()
             thread.join(timeout=5)
