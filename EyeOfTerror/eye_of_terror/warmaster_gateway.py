@@ -107,7 +107,7 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                         return
                     workspace_root = Path(str(payload.get("workspace_root") or run_dir / "work"))
-                    timeout_sec = int(payload.get("timeout_sec") or 1800)
+                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
                     summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
                     response(self, 200 if summary.get("ok") else 500, {"ok": bool(summary.get("ok")), "summary": summary})
                     return

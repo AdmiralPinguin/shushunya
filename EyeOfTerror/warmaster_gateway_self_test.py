@@ -11,11 +11,11 @@ from pathlib import Path
 from eye_of_terror.warmaster_gateway import make_handler
 
 
-def request_json(url: str, payload: dict | None = None) -> dict:
+def request_json(url: str, payload: dict | None = None, timeout: int = 5) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     method = "POST" if data else "GET"
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
-    with urllib.request.urlopen(req, timeout=5) as response:
+    with urllib.request.urlopen(req, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -42,7 +42,7 @@ def main() -> int:
             run_status = request_json(base + "/runs/warmaster-test")
             if not run_status.get("ok") or run_status.get("task_id") != "warmaster-test":
                 raise AssertionError(f"bad run status: {run_status}")
-            executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30})
+            executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
             if not executed.get("ok"):
                 raise AssertionError(f"bad local execution: {executed}")
             ledger = request_json(base + "/runs/warmaster-test/ledger")
