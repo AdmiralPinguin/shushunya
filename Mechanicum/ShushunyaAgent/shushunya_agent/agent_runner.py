@@ -1686,6 +1686,29 @@ def python_action_written_code_paths(action_type: str, action: dict[str, Any]) -
     return list(dict.fromkeys(paths))
 
 
+def python_action_written_text_paths(action_type: str, action: dict[str, Any]) -> list[str]:
+    if action_type != "python":
+        return []
+    code = str(action.get("code") or "")
+    cwd = str(action.get("cwd") or action.get("workdir") or "").strip()
+    extensions = "|".join(re.escape(ext.lstrip(".")) for ext in TEXT_VERIFICATION_EXTENSIONS)
+    paths: list[str] = []
+    patterns = (
+        rf"open\(\s*['\"]([^'\"]+\.({extensions}))['\"]\s*,\s*['\"][^'\"]*[wa]",
+        rf"Path\(\s*['\"]([^'\"]+\.({extensions}))['\"]\s*\)\.write_text\(",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, code, flags=re.IGNORECASE):
+            raw_path = match.group(1)
+            if raw_path.startswith("/"):
+                paths.append(posixpath.normpath(raw_path))
+            elif cwd:
+                paths.append(posixpath.normpath(posixpath.join(cwd, raw_path)))
+            else:
+                paths.append(raw_path)
+    return list(dict.fromkeys(paths))
+
+
 def swe_edit_candidate_text(action_type: str, action: dict[str, Any]) -> str:
     if action_type == "write_file":
         return str(action.get("content") or "")
@@ -5743,6 +5766,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 read_file_paths_since_code_mutation = set()
             pending_failing_test_inspections = 0
         python_written_code_paths = python_action_written_code_paths(action_type, action) if isinstance(result, dict) and result.get("ok") is True else []
+        python_written_text_paths = python_action_written_text_paths(action_type, action) if isinstance(result, dict) and result.get("ok") is True else []
+        for path in python_written_text_paths:
+            verified_text_paths.discard(path)
+            failed_verification_paths.discard(path)
+            stale_replace_failures_by_path.pop(path, None)
         if swe_task and python_written_code_paths:
             for path in python_written_code_paths:
                 verified_text_paths.discard(path)

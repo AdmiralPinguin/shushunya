@@ -2011,6 +2011,45 @@ def main() -> int:
         raise AssertionError(f"repeated verified text guard failed: code={repeated_verify_code}, payload={repeated_verify_payload}")
     print("[ok] repeated verified text guard")
 
+    python_text_mutation_stdout = io.StringIO()
+    python_text_mutation_config = AgentConfig(
+        task_id=safe_task_id("self-test-python-text-mutation-unlocks-verify"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    python_text_mutation_actions = [
+        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["done"]}',
+        '{"action":"python","cwd":"/work","code":"from pathlib import Path\\nPath(\\"/work/report.md\\").write_text(\\"changed\\", encoding=\\"utf-8\\")"}',
+        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["changed"]}',
+        '{"action":"final","message":"done"}',
+    ]
+    python_text_verify_calls = 0
+
+    def fake_python_text_verify(config_arg, action):
+        nonlocal python_text_verify_calls
+        python_text_verify_calls += 1
+        return {"ok": True, "path": action.get("path"), "failures": []}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=python_text_mutation_actions), \
+            mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_python_text_verify), \
+            mock.patch.object(agent_runner, "python_tool", return_value={"ok": True, "returncode": 0}), \
+            contextlib.redirect_stdout(python_text_mutation_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        python_text_mutation_code = run_agent("python writes verified text artifact", python_text_mutation_config)
+    python_text_mutation_payload = json.loads(python_text_mutation_stdout.getvalue())
+    python_text_rejections = [
+        step for step in python_text_mutation_payload.get("steps", [])
+        if (step.get("result") or {}).get("error") == "repeated verified text verification rejected by supervisor"
+    ]
+    if python_text_mutation_code != 0 or python_text_verify_calls != 2 or python_text_rejections:
+        raise AssertionError(
+            "python text mutation should unlock fresh verification: "
+            f"code={python_text_mutation_code}, calls={python_text_verify_calls}, payload={python_text_mutation_payload}"
+        )
+    print("[ok] python text mutation unlocks verification")
+
     repeated_verify_rewrite_stdout = io.StringIO()
     repeated_verify_rewrite_config = AgentConfig(
         task_id=safe_task_id("self-test-repeated-verify-does-not-unlock-rewrite"),
