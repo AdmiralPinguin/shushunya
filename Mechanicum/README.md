@@ -35,12 +35,7 @@ state machine are stable.
 Prototype workers can be served through the shared runtime:
 
 ```bash
-python3 Mechanicum/worker_runtime.py \
-  --worker Lexmechanic \
-  --module-path Mechanicum/Lexmechanic \
-  --module lexmechanic \
-  --port 7002 \
-  --workspace-root runtime/mechanicum-work
+python3 Mechanicum/start_worker.py Lexmechanic --workspace-root runtime/mechanicum-work
 ```
 
 The runtime exposes:

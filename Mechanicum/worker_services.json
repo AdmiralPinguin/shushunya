@@ -1,0 +1,37 @@
+{
+  "Lexmechanic": {
+    "port": 7002,
+    "module_path": "Mechanicum/Lexmechanic",
+    "module": "lexmechanic"
+  },
+  "AuspexBrowser": {
+    "port": 7009,
+    "module_path": "Mechanicum/AuspexBrowser",
+    "module": "auspex_browser"
+  },
+  "NoosphericExtractor": {
+    "port": 7003,
+    "module_path": "Mechanicum/NoosphericExtractor",
+    "module": "noospheric_extractor"
+  },
+  "Chronologis": {
+    "port": 7004,
+    "module_path": "Mechanicum/Chronologis",
+    "module": "chronologis"
+  },
+  "ScriptoriumDaemon": {
+    "port": 7005,
+    "module_path": "Mechanicum/ScriptoriumDaemon",
+    "module": "scriptorium_daemon"
+  },
+  "ReductorVerifier": {
+    "port": 7006,
+    "module_path": "Mechanicum/ReductorVerifier",
+    "module": "reductor_verifier"
+  },
+  "FabricatorFinalis": {
+    "port": 7007,
+    "module_path": "Mechanicum/FabricatorFinalis",
+    "module": "fabricator_finalis"
+  }
+}
