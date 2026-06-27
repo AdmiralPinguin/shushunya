@@ -9,6 +9,7 @@ HTTP contract, even if their internal implementations differ.
 GET  /health
 GET  /capabilities
 POST /run
+GET  /tasks
 GET  /tasks/{task_id}
 POST /tasks/{task_id}/cancel
 ```

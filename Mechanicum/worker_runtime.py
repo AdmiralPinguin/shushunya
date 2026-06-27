@@ -101,6 +101,11 @@ def make_handler(
                 response(self, 200, service_manifest())
                 return
             parts = [part for part in parsed.path.split("/") if part]
+            if parts == ["tasks"]:
+                with tasks_lock:
+                    task_list = sorted((dict(task) for task in tasks.values()), key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+                response(self, 200, {"ok": True, "worker": worker_name, "tasks": task_list})
+                return
             if len(parts) == 2 and parts[0] == "tasks":
                 task_id = unquote(parts[1])
                 with tasks_lock:
