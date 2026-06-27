@@ -22,6 +22,12 @@ def request_json(url: str, payload: dict | None = None, timeout: int = 5) -> dic
         return json.loads(response.read().decode("utf-8"))
 
 
+def request_options(url: str) -> int:
+    req = urllib.request.Request(url, method="OPTIONS")
+    with urllib.request.urlopen(req, timeout=5) as response:
+        return response.status
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir) / "runs"
@@ -30,6 +36,8 @@ def main() -> int:
         thread.start()
         try:
             base = f"http://127.0.0.1:{server.server_port}"
+            if request_options(base + "/task") != 204:
+                raise AssertionError("OPTIONS did not return 204")
             health = request_json(base + "/health")
             if not health.get("ok"):
                 raise AssertionError(f"bad health: {health}")
