@@ -18,6 +18,7 @@
 - Local and HTTP executors write `task_ledger.json` with task status, step status, artifacts, and event history.
 - Warmaster Gateway can prepare Iskandar run packages, expose run status, execute local dev pipelines, and execute HTTP worker-service pipelines.
 - Warmaster Gateway can start local/HTTP execution in a background thread and expose progress through the ledger.
+- Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
 - HTTP execution preflights all worker `/health` endpoints before running steps.
 
 ## Main Check
@@ -48,3 +49,4 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - Add richer ranking and source-type classification for live discovery results.
 - Add more playbooks only when they are task-class patterns, not one-off hacks.
 - Add durable background execution recovery and cancellation through Warmaster Gateway.
+- Add code and image governors instead of routing unsupported task classes to Iskandar.

@@ -32,6 +32,16 @@ def main() -> int:
             health = request_json(base + "/health")
             if not health.get("ok"):
                 raise AssertionError(f"bad health: {health}")
+            try:
+                request_json(base + "/task", {"message": "почини python приложение", "task_id": "unsupported-code"})
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                rejected = json.loads(exc.read().decode("utf-8"))
+                if rejected.get("kind") != "code":
+                    raise AssertionError(f"bad unsupported route response: {rejected}")
+            else:
+                raise AssertionError("unsupported code task should be rejected until a code governor exists")
             task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},

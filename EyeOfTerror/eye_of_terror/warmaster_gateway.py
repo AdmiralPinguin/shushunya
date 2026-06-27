@@ -13,6 +13,7 @@ from .http_executor import execute_run as execute_http_run
 from .ledger import TaskLedger
 from .local_executor import execute_run as execute_local_run
 from .pipeline import write_pipeline_run
+from .routing import route_message
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -37,17 +38,11 @@ def read_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     return payload
 
 
-def route_task(message: str) -> str:
-    lowered = message.lower()
-    if any(term in lowered for term in ("скалатрак", "skalathrax", "лор", "lore", "источник", "source")):
-        return "IskandarKhayon"
-    return "IskandarKhayon"
-
-
 def prepare_task(message: str, task_id: str | None, run_root: Path) -> dict[str, Any]:
-    governor = route_task(message)
-    if governor != "IskandarKhayon":
-        raise ValueError(f"unsupported governor route: {governor}")
+    route = route_message(message)
+    if not route.ok:
+        return {"ok": False, "gateway": "WarmasterGateway", "error": route.reason, "kind": route.kind}
+    governor = route.governor
     plan = plan_lore_reconstruction(message, task_id=task_id)
     run_dir = run_root / plan.contract.task_id
     status = write_pipeline_run(plan.contract, run_dir)
@@ -220,7 +215,8 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         response(self, 400, {"ok": False, "error": "message is required"})
                         return
                     task_id = str(payload.get("task_id") or "").strip() or None
-                    response(self, 200, prepare_task(message, task_id, run_root))
+                    prepared = prepare_task(message, task_id, run_root)
+                    response(self, 200 if prepared.get("ok") else 400, prepared)
                     return
                 parts = [part for part in self.path.split("?")[0].split("/") if part]
                 if len(parts) == 3 and parts[0] == "runs" and parts[2] in {"execute_local", "execute_http", "start_local", "start_http"}:
