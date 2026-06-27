@@ -54,6 +54,15 @@ class TaskLedger:
         self.data["status"] = status
         self.record_event("status_changed", {"status": status})
 
+    def request_cancel(self, reason: str = "") -> None:
+        self.data["cancel_requested"] = True
+        self.data["cancel_reason"] = reason
+        self.data["status"] = "cancelling"
+        self.record_event("cancel_requested", {"reason": reason})
+
+    def cancel_requested(self) -> bool:
+        return bool(self.data.get("cancel_requested"))
+
     def set_result(self, result: dict[str, Any]) -> None:
         self.data["result"] = result
         self.record_event("result_recorded", result)

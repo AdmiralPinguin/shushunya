@@ -219,6 +219,17 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     response(self, 200 if prepared.get("ok") else 400, prepared)
                     return
                 parts = [part for part in self.path.split("?")[0].split("/") if part]
+                if len(parts) == 3 and parts[0] == "runs" and parts[2] == "cancel":
+                    task_id = parts[1]
+                    ledger_path = run_root / task_id / "task_ledger.json"
+                    if not ledger_path.exists():
+                        response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
+                        return
+                    reason = str(payload.get("reason") or "").strip()
+                    ledger = TaskLedger.load(ledger_path)
+                    ledger.request_cancel(reason)
+                    response(self, 200, {"ok": True, "task_id": task_id, "status": "cancelling", "ledger": ledger.to_dict()})
+                    return
                 if len(parts) == 3 and parts[0] == "runs" and parts[2] in {"execute_local", "execute_http", "start_local", "start_http"}:
                     task_id = parts[1]
                     run_dir = run_root / task_id

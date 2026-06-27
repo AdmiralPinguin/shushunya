@@ -102,6 +102,25 @@ def main() -> int:
                 time.sleep(0.2)
             else:
                 raise AssertionError(f"background run did not complete: {background_ledger}")
+            cancel_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-cancel-test"},
+            )
+            if not cancel_task.get("ok"):
+                raise AssertionError(f"bad cancel task response: {cancel_task}")
+            cancelled = request_json(base + "/runs/warmaster-cancel-test/cancel", {"reason": "test"})
+            if not cancelled.get("ok") or not cancelled["ledger"].get("cancel_requested"):
+                raise AssertionError(f"bad cancel response: {cancelled}")
+            try:
+                request_json(base + "/runs/warmaster-cancel-test/execute_local", {"timeout_sec": 30}, timeout=60)
+            except urllib.error.HTTPError as exc:
+                if exc.code != 500:
+                    raise
+                cancelled_execution = json.loads(exc.read().decode("utf-8"))
+                if not cancelled_execution.get("summary", {}).get("cancelled"):
+                    raise AssertionError(f"bad cancelled execution response: {cancelled_execution}")
+            else:
+                raise AssertionError("cancelled run should not execute successfully")
         finally:
             server.shutdown()
             thread.join(timeout=5)

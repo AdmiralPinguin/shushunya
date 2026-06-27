@@ -115,6 +115,9 @@ def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_se
     ledger.set_status("running")
     results: list[StepResult] = []
     for dispatch_path in ordered_dispatch_paths(run_dir):
+        ledger = TaskLedger.load(ledger_path)
+        if ledger.cancel_requested():
+            break
         result = run_step(repo_root, dispatch_path, workspace_root, timeout_sec)
         results.append(result)
         ledger.record_step(
@@ -126,11 +129,13 @@ def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_se
         )
         if not result.ok:
             break
+    cancelled = TaskLedger.load(ledger_path).cancel_requested()
     summary = {
-        "ok": bool(results) and all(item.ok for item in results),
+        "ok": bool(results) and all(item.ok for item in results) and not cancelled,
         "run_dir": str(run_dir),
         "workspace_root": str(workspace_root),
         "steps": [item.to_dict() for item in results],
+        "cancelled": cancelled,
     }
     report_path = run_dir / "execution_report.json"
     report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -142,11 +147,11 @@ def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_se
                 "final_step": results[-1].step_id if results else "",
                 "artifacts": final_payload.get("artifacts", []),
                 "workspace_root": str(workspace_root),
-                "status": final_payload.get("status", ""),
-                "summary": final_payload.get("summary", ""),
+                "status": "cancelled" if cancelled else final_payload.get("status", ""),
+                "summary": "Execution cancelled before next step." if cancelled else final_payload.get("summary", ""),
             }
         )
-    ledger.set_status("completed" if summary["ok"] else "failed")
+    ledger.set_status("completed" if summary["ok"] else ("cancelled" if cancelled else "failed"))
     return summary
 
 

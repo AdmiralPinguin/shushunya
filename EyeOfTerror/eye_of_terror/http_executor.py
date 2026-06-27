@@ -107,6 +107,12 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800,
         )
     )
     ledger.set_status("running")
+    if ledger.cancel_requested():
+        summary = {"ok": False, "run_dir": str(run_dir), "host": host, "steps": [], "cancelled": True}
+        (run_dir / "http_execution_report.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        ledger.set_result({"ok": False, "final_step": "", "artifacts": [], "status": "cancelled", "summary": "Execution cancelled before start."})
+        ledger.set_status("cancelled")
+        return summary
     preflight_failures = preflight_workers(run_dir, host, timeout_sec)
     if preflight_failures:
         summary = {
@@ -122,6 +128,9 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800,
         return summary
     results: list[HttpStepResult] = []
     for dispatch_path in ordered_dispatch_paths(run_dir):
+        ledger = TaskLedger.load(ledger_path)
+        if ledger.cancel_requested():
+            break
         result = run_step(dispatch_path, host, timeout_sec)
         results.append(result)
         ledger.record_step(
@@ -133,11 +142,13 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800,
         )
         if not result.ok:
             break
+    cancelled = TaskLedger.load(ledger_path).cancel_requested()
     summary = {
-        "ok": bool(results) and all(item.ok for item in results),
+        "ok": bool(results) and all(item.ok for item in results) and not cancelled,
         "run_dir": str(run_dir),
         "host": host,
         "steps": [item.to_dict() for item in results],
+        "cancelled": cancelled,
     }
     report_path = run_dir / "http_execution_report.json"
     report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -149,11 +160,11 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800,
                 "final_step": results[-1].step_id if results else "",
                 "artifacts": final_payload.get("artifacts", []),
                 "workspace_root": str(workspace_root) if workspace_root is not None else "",
-                "status": final_payload.get("status", ""),
-                "summary": final_payload.get("summary", ""),
+                "status": "cancelled" if cancelled else final_payload.get("status", ""),
+                "summary": "Execution cancelled before next step." if cancelled else final_payload.get("summary", ""),
             }
         )
-    ledger.set_status("completed" if summary["ok"] else "failed")
+    ledger.set_status("completed" if summary["ok"] else ("cancelled" if cancelled else "failed"))
     return summary
 
 
