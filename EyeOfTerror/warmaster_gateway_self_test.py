@@ -53,6 +53,9 @@ def main() -> int:
             ledger = request_json(base + "/runs/warmaster-test/ledger")
             if not ledger.get("ok") or ledger["ledger"].get("status") != "completed":
                 raise AssertionError(f"bad ledger after execution: {ledger}")
+            artifacts = request_json(base + "/runs/warmaster-test/artifacts")
+            if not artifacts.get("ok") or not artifacts.get("artifacts") or not artifacts["artifacts"][0].get("exists"):
+                raise AssertionError(f"bad artifacts response: {artifacts}")
             event_types = [event.get("type") for event in ledger["ledger"].get("events", [])]
             if event_types.count("task_created") != 1:
                 raise AssertionError(f"ledger should preserve original task_created event: {ledger}")

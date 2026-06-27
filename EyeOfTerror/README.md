@@ -41,6 +41,7 @@ Gateway endpoints:
 - `GET /runs`
 - `GET /runs/<task_id>`
 - `GET /runs/<task_id>/ledger`
+- `GET /runs/<task_id>/artifacts`
 - `POST /runs/<task_id>/execute_local`
 - `POST /runs/<task_id>/execute_http`
 - `POST /runs/<task_id>/start_local`

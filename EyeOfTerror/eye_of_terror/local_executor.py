@@ -141,6 +141,7 @@ def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_se
                 "ok": summary["ok"],
                 "final_step": results[-1].step_id if results else "",
                 "artifacts": final_payload.get("artifacts", []),
+                "workspace_root": str(workspace_root),
                 "status": final_payload.get("status", ""),
                 "summary": final_payload.get("summary", ""),
             }

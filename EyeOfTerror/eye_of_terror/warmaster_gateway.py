@@ -85,6 +85,28 @@ def list_runs(run_root: Path) -> list[dict[str, Any]]:
     return sorted(runs, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
 
 
+def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
+    result = ledger.get("result", {}) if isinstance(ledger.get("result"), dict) else {}
+    workspace_root = str(result.get("workspace_root") or "")
+    artifacts = result.get("artifacts", [])
+    if not isinstance(artifacts, list):
+        artifacts = []
+    items: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        sandbox_path = str(artifact)
+        item: dict[str, Any] = {"path": sandbox_path}
+        if workspace_root and sandbox_path.startswith("/work/"):
+            host_path = Path(workspace_root) / sandbox_path.removeprefix("/work/")
+            item["host_path"] = str(host_path)
+            item["exists"] = host_path.exists()
+            item["bytes"] = host_path.stat().st_size if host_path.exists() else 0
+        else:
+            item["exists"] = False
+            item["bytes"] = 0
+        items.append(item)
+    return {"workspace_root": workspace_root, "artifacts": items}
+
+
 def start_background(task_id: str, target: Any) -> bool:
     with ACTIVE_RUNS_LOCK:
         if task_id in ACTIVE_RUNS:
@@ -131,6 +153,12 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         return
                     response(self, 200, {"ok": True, "ledger": TaskLedger.load(ledger_path).to_dict()})
                     return
+                if len(parts) == 3 and parts[2] == "artifacts":
+                    if not ledger_path.exists():
+                        response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
+                        return
+                    response(self, 200, {"ok": True, "task_id": task_id, **artifact_status(TaskLedger.load(ledger_path).to_dict())})
+                    return
                 status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
                 ledger = TaskLedger.load(ledger_path).to_dict() if ledger_path.exists() else {}
                 response(self, 200, {"ok": True, "task_id": task_id, "run_dir": str(run_dir), "status": status, "ledger": ledger})
@@ -176,7 +204,8 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         executor = lambda: execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
                     else:
                         host = str(payload.get("host") or "127.0.0.1")
-                        executor = lambda: execute_http_run(run_dir, host=host, timeout_sec=timeout_sec)
+                        http_workspace_root = Path(str(payload["workspace_root"])) if "workspace_root" in payload else None
+                        executor = lambda: execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root)
                     if parts[2].startswith("start_"):
                         started = start_background(task_id, executor)
                         if not started:
@@ -188,7 +217,8 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
                     else:
                         host = str(payload.get("host") or "127.0.0.1")
-                        summary = execute_http_run(run_dir, host=host, timeout_sec=timeout_sec)
+                        http_workspace_root = Path(str(payload["workspace_root"])) if "workspace_root" in payload else None
+                        summary = execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root)
                     response(self, 200 if summary.get("ok") else 500, {"ok": bool(summary.get("ok")), "summary": summary})
                     return
                 response(self, 404, {"ok": False, "error": "not found"})

@@ -93,7 +93,7 @@ def run_step(dispatch_path: Path, host: str, timeout_sec: int) -> HttpStepResult
         return HttpStepResult(step_id, worker, port, False, {"ok": False, "error": str(exc)}, str(exc))
 
 
-def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800) -> dict[str, Any]:
+def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800, workspace_root: Path | None = None) -> dict[str, Any]:
     contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
     ledger_path = run_dir / "task_ledger.json"
     ledger = (
@@ -148,6 +148,7 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800)
                 "ok": summary["ok"],
                 "final_step": results[-1].step_id if results else "",
                 "artifacts": final_payload.get("artifacts", []),
+                "workspace_root": str(workspace_root) if workspace_root is not None else "",
                 "status": final_payload.get("status", ""),
                 "summary": final_payload.get("summary", ""),
             }
