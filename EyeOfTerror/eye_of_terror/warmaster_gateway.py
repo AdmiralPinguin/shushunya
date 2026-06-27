@@ -277,10 +277,12 @@ def gateway_capabilities() -> dict[str, Any]:
             "governor_health_snapshot",
             "worker_registry",
             "worker_health_snapshot",
+            "state_snapshot",
         ],
         "endpoints": [
             "GET /health",
             "GET /capabilities",
+            "GET /state",
             "GET /governors",
             "GET /governors?health=1",
             "GET /workers",
@@ -301,6 +303,18 @@ def gateway_capabilities() -> dict[str, Any]:
             "POST /runs/{task_id}/cancel",
             "POST /recover_stale",
         ],
+    }
+
+
+def gateway_state(run_root: Path, run_limit: int = 20) -> dict[str, Any]:
+    runs = list_runs(run_root)[: max(0, run_limit)]
+    return {
+        "ok": True,
+        "gateway": "WarmasterGateway",
+        "capabilities": gateway_capabilities(),
+        "governors": governor_registry_snapshot(),
+        "workers": worker_registry_snapshot(),
+        "runs": runs,
     }
 
 
@@ -375,6 +389,12 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/capabilities":
                 response(self, 200, gateway_capabilities())
+                return
+            if parsed.path == "/state":
+                query = parse_qs(parsed.query)
+                raw_limit = query.get("run_limit", ["20"])[0]
+                run_limit = int(raw_limit) if raw_limit.isdigit() else 20
+                response(self, 200, gateway_state(run_root, run_limit=run_limit))
                 return
             if parsed.path == "/governors":
                 query = parse_qs(parsed.query)

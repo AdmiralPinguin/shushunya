@@ -115,6 +115,14 @@ def main() -> int:
             )
             if not task.get("ok") or task.get("governor") != "IskandarKhayon":
                 raise AssertionError(f"bad task response: {task}")
+            state = request_json(base + "/state?run_limit=5")
+            if (
+                not state.get("ok")
+                or not any(item.get("task_id") == "warmaster-test" for item in state.get("runs", []))
+                or not any(item.get("name") == "Lexmechanic" for item in state.get("workers", []))
+                or "state_snapshot" not in state.get("capabilities", {}).get("capabilities", [])
+            ):
+                raise AssertionError(f"bad gateway state: {state}")
             run_dir = Path(task["run_dir"])
             if not (run_dir / "dispatch" / "source_discovery.json").exists():
                 raise AssertionError(f"gateway did not prepare run package: {task}")

@@ -38,6 +38,7 @@ Gateway endpoints:
 
 - `GET /health`
 - `GET /capabilities`
+- `GET /state`
 - `GET /governors`
 - `GET /governors?health=1`
 - `GET /workers`
