@@ -9,6 +9,7 @@ from typing import Any
 
 from .local_executor import ordered_dispatch_paths
 from .ledger import TaskLedger
+from .pipeline import write_json_atomic
 
 
 @dataclass
@@ -119,7 +120,7 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800,
     ledger.set_status("running")
     if ledger.cancel_requested():
         summary = {"ok": False, "run_dir": str(run_dir), "host": host, "steps": [], "cancelled": True}
-        (run_dir / "http_execution_report.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        write_json_atomic(run_dir / "http_execution_report.json", summary)
         ledger.set_result({"ok": False, "final_step": "", "artifacts": [], "status": "cancelled", "summary": "Execution cancelled before start."})
         ledger.set_status("cancelled")
         return summary
@@ -132,7 +133,7 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800,
             "steps": [],
             "preflight_failures": preflight_failures,
         }
-        (run_dir / "http_execution_report.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        write_json_atomic(run_dir / "http_execution_report.json", summary)
         ledger.set_result({"ok": False, "final_step": "", "artifacts": [], "status": "preflight_failed", "summary": "Worker preflight failed."})
         ledger.set_status("failed")
         return summary
@@ -161,7 +162,7 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800,
         "cancelled": cancelled,
     }
     report_path = run_dir / "http_execution_report.json"
-    report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_json_atomic(report_path, summary)
     final_payload = results[-1].payload if results else {}
     if isinstance(final_payload, dict):
         ledger.set_result(

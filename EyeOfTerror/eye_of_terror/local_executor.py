@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .ledger import TaskLedger
+from .pipeline import write_json_atomic
 
 
 WORKER_COMMANDS = {
@@ -138,7 +139,7 @@ def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_se
         "cancelled": cancelled,
     }
     report_path = run_dir / "execution_report.json"
-    report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_json_atomic(report_path, summary)
     final_payload = results[-1].payload if results else {}
     if isinstance(final_payload, dict):
         ledger.set_result(
