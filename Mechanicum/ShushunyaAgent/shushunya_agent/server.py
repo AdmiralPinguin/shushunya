@@ -783,9 +783,10 @@ def auto_continue_cycle_limit(payload: dict[str, Any]) -> int:
 def continuation_task(base_task: str, task_id: str, cycle: int, previous_result: dict[str, Any] | None = None) -> str:
     previous_message = str((previous_result or {}).get("message") or "").lower()
     repeated_mode = any(token in previous_message for token in ("повторяющихся действий", "repeated", "without progress"))
-    repeated_instruction = ""
+    json_parse_mode = any(token in previous_message for token in ("невалидный json", "invalid json", "json_parse_stall"))
+    recovery_instruction = ""
     if repeated_mode:
-        repeated_instruction = (
+        recovery_instruction += (
             "\n\nПредыдущий цикл остановился из-за повторяющихся действий без прогресса. "
             "До первого продуктивного действия запрещены inspection-действия: list_files, find_files, search_text, "
             "read_file, file_info, web_search, web_fetch, web_links. "
@@ -793,6 +794,13 @@ def continuation_task(base_task: str, task_id: str, cycle: int, previous_result:
             "web_extract_to_file, bundle_text_files, verify_text_file, telegram_send_document или final. "
             "Если задача зависит от входных data files, используй только факты из сохраненных read_file tool_result в resume context "
             "или python, который открывает и парсит реальные файлы из рабочего каталога. Не выдумывай строки, даты, сообщения или числа."
+        )
+    if json_parse_mode:
+        recovery_instruction += (
+            "\n\nПредыдущий цикл остановился из-за невалидного JSON при большом inline content/code. "
+            "Не генерируй большой write_file/python JSON одним ответом. Следующие действия должны быть короткими и валидными: "
+            "write_file только для небольшого заголовка/начала файла, затем append_file чанками до 1500 символов, "
+            "или короткий python-код без большого встроенного текста. Не вставляй длинный рассказ, HTML, книгу или большой код в одно JSON-поле."
         )
     return (
         "Продолжи выполнение той же задачи по task journal. "
@@ -802,7 +810,7 @@ def continuation_task(base_task: str, task_id: str, cycle: int, previous_result:
         "используй последние action/tool_result/final/error как источник текущего состояния.\n\n"
         f"Continuation cycle: {cycle}\n"
         f"Resume task id: {task_id}"
-        + repeated_instruction
+        + recovery_instruction
     )
 
 

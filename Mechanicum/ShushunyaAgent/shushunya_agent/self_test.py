@@ -1206,6 +1206,16 @@ def main() -> int:
         raise AssertionError(f"repeated continuation task did not force productive mode: {repeated_continuation}")
     print("[ok] auto-continue repeated action prompt")
 
+    json_parse_continuation = server.continuation_task(
+        "base",
+        "self-test-json-parse",
+        1,
+        {"message": "Агент остановлен супервизором: модель несколько раз вернула невалидный JSON."},
+    )
+    if "append_file чанками" not in json_parse_continuation or "до 1500 символов" not in json_parse_continuation:
+        raise AssertionError(f"json parse continuation task did not force chunked writes: {json_parse_continuation}")
+    print("[ok] auto-continue json parse prompt")
+
     loop_calls: list[tuple[str, dict]] = []
 
     def fake_auto_continue_loop(task: str, run_config: AgentConfig, event_sink=None, **kwargs):
