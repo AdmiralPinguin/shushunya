@@ -780,10 +780,26 @@ def auto_continue_cycle_limit(payload: dict[str, Any]) -> int:
     return int_field(payload, "auto_continue_max_cycles", AUTO_CONTINUE_MAX_CYCLES, 0, 10)
 
 
+def result_has_verified_artifact_mutation_rejection(result: dict[str, Any] | None) -> bool:
+    steps = (result or {}).get("steps")
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        step_result = step.get("result")
+        if not isinstance(step_result, dict):
+            continue
+        if str(step_result.get("error") or "") == "verified text artifact mutation rejected by supervisor":
+            return True
+    return False
+
+
 def continuation_task(base_task: str, task_id: str, cycle: int, previous_result: dict[str, Any] | None = None) -> str:
     previous_message = str((previous_result or {}).get("message") or "").lower()
     repeated_mode = any(token in previous_message for token in ("повторяющихся действий", "repeated", "without progress"))
     json_parse_mode = any(token in previous_message for token in ("невалидный json", "invalid json", "json_parse_stall"))
+    verified_mutation_mode = result_has_verified_artifact_mutation_rejection(previous_result)
     recovery_instruction = ""
     if repeated_mode:
         recovery_instruction += (
@@ -794,6 +810,14 @@ def continuation_task(base_task: str, task_id: str, cycle: int, previous_result:
             "web_extract_to_file, bundle_text_files, verify_text_file, telegram_send_document или final. "
             "Если задача зависит от входных data files, используй только факты из сохраненных read_file tool_result в resume context "
             "или python, который открывает и парсит реальные файлы из рабочего каталога. Не выдумывай строки, даты, сообщения или числа."
+        )
+    if verified_mutation_mode:
+        recovery_instruction += (
+            "\n\nПоследняя ошибка была попыткой изменить текстовый артефакт, который уже прошел verify_text_file. "
+            "Это означает, что этот файл уже готов. Не вызывай write_file, append_file, replace_in_file или bundle_text_files "
+            "для уже проверенных артефактов. Если resume context показывает, что все обязательные артефакты уже созданы и проверки "
+            "последних недостающих артефактов прошли без failures, следующим действием должен быть final. "
+            "Если остались непроверенные обязательные артефакты, разрешено только проверить их, а не переписывать готовые файлы."
         )
     if json_parse_mode:
         recovery_instruction += (

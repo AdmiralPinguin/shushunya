@@ -1207,6 +1207,28 @@ def main() -> int:
         raise AssertionError(f"repeated continuation task did not force productive mode: {repeated_continuation}")
     print("[ok] auto-continue repeated action prompt")
 
+    verified_mutation_continuation = server.continuation_task(
+        "base",
+        "self-test-verified-mutation-continuation",
+        1,
+        {
+            "message": "Агент остановлен супервизором: обнаружен цикл повторяющихся действий без прогресса.",
+            "steps": [
+                {
+                    "result": {
+                        "error": "verified text artifact mutation rejected by supervisor",
+                        "path": "/work/report.md",
+                    }
+                }
+            ],
+        },
+    )
+    if "уже прошел verify_text_file" not in verified_mutation_continuation or "следующим действием должен быть final" not in verified_mutation_continuation:
+        raise AssertionError(
+            f"verified mutation continuation did not force final-ready behavior: {verified_mutation_continuation}"
+        )
+    print("[ok] auto-continue verified artifact mutation prompt")
+
     json_parse_continuation = server.continuation_task(
         "base",
         "self-test-json-parse",
