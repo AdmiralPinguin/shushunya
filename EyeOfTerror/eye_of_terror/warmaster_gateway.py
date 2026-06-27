@@ -14,6 +14,7 @@ from .governors import governor_by_name, governor_refs
 from .ledger import TaskLedger
 from .local_executor import execute_run as execute_local_run
 from .pipeline import write_pipeline_run
+from .registry import worker_refs
 from .routing import route_message
 
 
@@ -199,6 +200,9 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/governors":
                 response(self, 200, {"ok": True, "governors": [governor.to_dict() for governor in governor_refs()]})
+                return
+            if parsed.path == "/workers":
+                response(self, 200, {"ok": True, "workers": [worker.to_dict() for worker in worker_refs()]})
                 return
             parts = [part for part in parsed.path.split("/") if part]
             if parts == ["runs"]:
