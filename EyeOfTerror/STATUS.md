@@ -131,6 +131,8 @@
 - Warmaster artifact text reads support bounded previews through `max_bytes`.
 - Warmaster artifact listings expand final manifest package files for client
   display and artifact fetching.
+- Final manifest artifact listings include compact manifest summaries with
+  critic metrics, warnings, blockers, and revision focus for client display.
 - Task ledgers, run packages, and executor reports are written atomically to
   avoid partial JSON reads during background execution.
 - Task ledger saves merge concurrent event/step/cancel updates from stale

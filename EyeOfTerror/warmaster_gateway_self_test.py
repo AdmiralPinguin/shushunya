@@ -631,6 +631,12 @@ def main() -> int:
             artifact_paths = {item.get("path") for item in artifacts.get("artifacts", [])}
             if "/work/skalathrax/reconstruction_ru.md" not in artifact_paths:
                 raise AssertionError(f"artifacts response did not expand final manifest package: {artifacts}")
+            final_manifest_item = next((item for item in artifacts.get("artifacts", []) if item.get("path") == "/work/skalathrax/final_manifest.json"), {})
+            if (
+                final_manifest_item.get("manifest_summary", {}).get("status") != "ready"
+                or "critic_metrics" not in final_manifest_item.get("manifest_summary", {})
+            ):
+                raise AssertionError(f"artifacts response did not expose final manifest summary: {artifacts}")
             completed_snapshot = request_json(base + "/runs/warmaster-test/snapshot?events_after=0&event_limit=3")
             if (
                 not completed_snapshot.get("ok")

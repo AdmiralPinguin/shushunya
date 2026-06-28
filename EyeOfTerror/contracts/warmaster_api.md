@@ -175,7 +175,9 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
 for each event.
 - `/runs/{task_id}/artifacts` for result artifact metadata. If the final result
   is a `final_manifest.json`, the response should also expand manifest `files`
-  so clients can list and fetch the whole final package.
+  so clients can list and fetch the whole final package. The final manifest
+  artifact item includes `manifest_summary` with status, critic status, critic
+  metrics, revision focus, warnings, and blockers.
 - `/runs/{task_id}/contract` and `/runs/{task_id}/dispatch` for orchestration
   debugging.
 - `/runs/{task_id}/worker_tasks?live=1` when worker services are running and

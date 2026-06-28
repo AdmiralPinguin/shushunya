@@ -1124,12 +1124,14 @@ def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def append_artifact(sandbox_path: str, source: str) -> None:
+    def append_artifact(sandbox_path: str, source: str, extra: dict[str, Any] | None = None) -> None:
         if sandbox_path in seen:
             return
         seen.add(sandbox_path)
         item = sandbox_artifact_file_status(workspace_root, sandbox_path)
         item["source"] = source
+        if extra:
+            item.update(extra)
         items.append(item)
 
     for artifact in artifacts:
@@ -1142,6 +1144,19 @@ def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
                     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
                     manifest = {}
+                if isinstance(manifest, dict):
+                    for item in items:
+                        if item.get("path") == sandbox_path:
+                            item["manifest_summary"] = {
+                                "status": manifest.get("status", ""),
+                                "approved": bool(manifest.get("approved")),
+                                "critic_status": manifest.get("critic_status", ""),
+                                "critic_metrics": manifest.get("critic_metrics", {}),
+                                "revision_focus": manifest.get("revision_focus", {}),
+                                "warnings": manifest.get("warnings", []),
+                                "blockers": manifest.get("blockers", []),
+                            }
+                            break
                 files = manifest.get("files") if isinstance(manifest, dict) else []
                 for file_item in files if isinstance(files, list) else []:
                     if isinstance(file_item, dict):
