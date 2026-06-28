@@ -4769,6 +4769,49 @@ def main() -> int:
         raise AssertionError(f"Failed CLI repair should allow reading traceback source: {swe_failed_cli_repair_payload}")
     print("[ok] SWE failed CLI traceback narrows repair source")
 
+    swe_resume_failed_cli_edit_stdout = io.StringIO()
+    swe_resume_failed_cli_edit_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-resume-failed-cli-allows-source-edit"),
+        json_output=True,
+        max_steps=1,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    resume_failed_cli_edit_task = (
+        "Продолжи выполнение той же задачи по task journal.\n\n"
+        "Resume context from previous agent task journal:\n"
+        "[{\"type\":\"start\",\"task\":\"Исправь Python-проект. CLI должен печатать валидный JSON; "
+        "проверь python3 -m package.cli data.csv.\\n\\nРабочий каталог для этой задачи: /work/project\"},"
+        "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":true,"
+        "\"passing_tests\":[\"tests/test_core.py::test_core\"],\"failing_tests\":[]}},"
+        "{\"type\":\"action\",\"action\":{\"action\":\"shell\",\"cmd\":\"cd /work/project && python3 -m package.cli /work/project/data.csv | python3 -c 'import sys,json; json.load(sys.stdin)'\"}},"
+        "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":false,"
+        "\"candidate_source_paths\":[\"/work/project/package/cli.py\"],"
+        "\"supervisor_instruction\":\"The CLI verification command executed and failed with a traceback.\"}},"
+        "{\"type\":\"tool_result\",\"action\":\"list_files\",\"result\":{\"ok\":false,"
+        "\"error\":\"swe failed cli repair source required by supervisor\","
+        "\"candidate_source_paths\":[\"/work/project/package/cli.py\"]}}]"
+    )
+    with mock.patch.object(agent_runner, "chat", return_value=(
+            '{"action":"replace_in_file","path":"/work/project/package/cli.py",'
+            '"old":"json.dumps(payload)","new":"json.dumps(payload, default=str)"}'
+    )), mock.patch.object(agent_runner, "file_tool", return_value={
+            "ok": True,
+            "path": "/work/project/package/cli.py",
+            "replaced": 1,
+    }) as mocked_resume_failed_cli_edit_file, \
+            contextlib.redirect_stdout(swe_resume_failed_cli_edit_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(resume_failed_cli_edit_task, swe_resume_failed_cli_edit_config)
+    swe_resume_failed_cli_edit_payload = json.loads(swe_resume_failed_cli_edit_stdout.getvalue())
+    resume_failed_cli_edit_results = [step.get("result") or {} for step in swe_resume_failed_cli_edit_payload.get("steps", [])]
+    if not mocked_resume_failed_cli_edit_file.called:
+        raise AssertionError(f"Resume failed CLI source edit should reach file_tool: {swe_resume_failed_cli_edit_payload}")
+    if any(result.get("error") == "swe cli verification required by supervisor" for result in resume_failed_cli_edit_results):
+        raise AssertionError(f"Resume failed CLI source edit should not be blocked by CLI gate: {swe_resume_failed_cli_edit_payload}")
+    print("[ok] SWE resume failed CLI allows source edit")
+
     swe_cli_input_discovery_stdout = io.StringIO()
     swe_cli_input_discovery_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-cli-input-discovery-after-tests"),

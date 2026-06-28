@@ -48,6 +48,7 @@ from .verification_contract import (
     cli_input_path_from_listing_item,
     cli_input_paths_from_listing_text,
     cli_input_paths_from_task,
+    cli_input_paths_from_text_paths,
     cli_module_from_path,
     cli_modules_from_listing_text,
     cli_modules_from_task,
@@ -2198,6 +2199,21 @@ def enrich_failed_cli_verification_result(result: dict[str, Any]) -> dict[str, A
     else:
         enriched["supervisor_instruction"] = cli_instruction
     return enriched
+
+
+def failed_cli_source_candidates_from_text(text: str) -> list[str]:
+    lowered = (text or "").lower()
+    if (
+        "swe failed cli repair source required" not in lowered
+        and "the cli verification command executed and failed" not in lowered
+    ):
+        return []
+    candidates = [
+        path
+        for path in extract_sandbox_paths_from_text(text)
+        if path.endswith(SWE_SOURCE_SUFFIXES) and not path_looks_like_test_file(path)
+    ]
+    return list(dict.fromkeys(candidates))[:10]
 
 
 def pytest_result_sets(result: dict[str, Any]) -> tuple[set[str], set[str]]:
@@ -4570,7 +4586,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     expected_cli_modules.update(cli_modules_from_text_paths(classification_task_text, explicit_workspace))
     expected_cli_modules.update(cli_modules_from_listing_text(classification_task_text, explicit_workspace))
     expected_cli_input_paths: set[str] = set(cli_input_paths_from_task(classification_task_text, explicit_workspace))
+    expected_cli_input_paths.update(cli_input_paths_from_text_paths(original_task, explicit_workspace))
     expected_cli_input_paths.update(cli_input_paths_from_listing_text(classification_task_text, explicit_workspace))
+    expected_cli_input_paths.update(cli_input_paths_from_listing_text(original_task, explicit_workspace))
     if swe_requires_cli_verification and explicit_workspace:
         expected_cli_modules.update(cli_modules_from_workspace(explicit_workspace))
     data_source_path_list = data_source_paths_from_task(original_task, explicit_workspace, required_artifact_path_list)
@@ -4598,7 +4616,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     swe_verified_after_edit = False
     swe_cli_verified_after_edit = False
     swe_cli_verification_attempted_after_edit = False
-    pending_failed_cli_source_candidates: list[str] = []
+    pending_failed_cli_source_candidates: list[str] = failed_cli_source_candidates_from_text(original_task)
     swe_syntax_error_cycles = 0
     last_swe_syntax_error = ""
     last_required_artifact_hint = ""
@@ -5643,6 +5661,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and (last_cli_required_swe_edit_path or swe_resume_requires_cli_verification)
                 and not swe_cli_verification_attempted_after_edit
                 and not action_can_discover_cli_contract(action_type, action, explicit_workspace)
+                and not (
+                    pending_failed_cli_source_candidates
+                    and action_type in SWE_EDIT_ACTIONS
+                    and str(action.get("path") or "") in set(pending_failed_cli_source_candidates)
+                )
                 and not action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
             ):
                 suggested_action = suggested_cli_verification_action(

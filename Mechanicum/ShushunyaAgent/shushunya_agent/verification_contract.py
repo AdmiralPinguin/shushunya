@@ -162,6 +162,17 @@ def cli_input_paths_from_listing_text(text: str, workspace: str = "") -> list[st
     return list(dict.fromkeys(paths))
 
 
+def cli_input_paths_from_text_paths(text: str, workspace: str = "") -> list[str]:
+    paths = cli_input_paths_from_task(text, workspace)
+    extension_pattern = "|".join(re.escape(ext.lstrip(".")) for ext in sorted(CLI_INPUT_EXTENSIONS))
+    for match in re.finditer(rf"(/[^\s\"'<>]+\.({extension_pattern}))\b", text or "", flags=re.IGNORECASE):
+        raw_path = match.group(1).rstrip(".,;:!?)]}»”")
+        detected = cli_input_path_from_listing_item({"path": raw_path, "type": "file"})
+        if detected:
+            paths.append(detected)
+    return list(dict.fromkeys(paths))
+
+
 def action_uses_cli_input_path(action: dict[str, Any], input_paths: Iterable[str]) -> bool:
     cmd = str(action.get("cmd") or "")
     code = str(action.get("code") or "")
