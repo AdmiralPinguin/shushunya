@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from pathlib import Path
 
@@ -17,6 +18,19 @@ from eye_of_terror.contracts import (
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
 from eye_of_terror.pipeline import build_dispatch_packets, write_pipeline_run
 from eye_of_terror.registry import worker_refs
+
+
+def documented_iskandar_pipeline() -> list[str]:
+    readme = Path(__file__).resolve().parent / "InnerCircle" / "IskandarKhayon" / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    match = re.search(r"## Default Worker Pipeline\s+```text\n(?P<body>.*?)\n```", text, flags=re.S)
+    if not match:
+        raise AssertionError("Iskandar README missing Default Worker Pipeline block")
+    return [
+        line.replace("->", "").strip()
+        for line in match.group("body").splitlines()
+        if line.replace("->", "").strip()
+    ]
 
 
 def main() -> int:
@@ -119,6 +133,8 @@ def main() -> int:
     ]
     if step_workers != expected_order:
         raise AssertionError(f"wrong Iskandar worker order: {step_workers}")
+    if documented_iskandar_pipeline() != expected_order:
+        raise AssertionError(f"Iskandar README worker pipeline is out of sync: {documented_iskandar_pipeline()}")
     print("[ok] lore reconstruction contract")
 
     plan = plan_lore_reconstruction(task, task_id="test-skalathrax").to_dict()

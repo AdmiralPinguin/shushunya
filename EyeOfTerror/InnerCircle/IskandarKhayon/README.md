@@ -26,6 +26,7 @@ against the worker registry before execution.
 
 ```text
 Lexmechanic
+  -> AuspexBrowser
   -> NoosphericExtractor
   -> Chronologis
   -> ScriptoriumDaemon
