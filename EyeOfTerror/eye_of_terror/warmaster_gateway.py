@@ -3841,6 +3841,20 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                                 step_ids=restricted_step_ids,
                             )
                         record_run_preflight_event(run_dir, preflight)
+                        post_summary = run_summary(run_dir)
+                        post_view = orchestration_view_fields(post_summary, task_id=task_id)
+                        preflight_actions = preflight.get("actions") if isinstance(preflight.get("actions"), dict) else {}
+                        next_action = preflight_actions.get("next_action") if isinstance(preflight_actions.get("next_action"), dict) else post_view.get("next_action", {})
+                        preflight = {
+                            **preflight,
+                            "run_summary": post_summary,
+                            "phase": post_view.get("phase", ""),
+                            "status": post_view.get("status", ""),
+                            "decision": post_view.get("decision", {}),
+                            "display": post_view.get("display", {}),
+                            "next_action": next_action,
+                            "client_action": executable_client_action(task_id, next_action),
+                        }
                         response(self, 200 if preflight.get("ok") else 409, preflight)
                         return
                     if parts[2] in {"execute_local", "start_local", "execute_revision_local", "start_revision_local", "resume_local", "start_resume_local"}:

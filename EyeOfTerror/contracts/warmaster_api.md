@@ -408,7 +408,9 @@ failure. Successful run preflight still respects the current run-summary action
 gates, so completed, interrupted, active, or revision-required runs return the
 same force, resume, poll, or revision recommendation instead of an unsafe plain
 start. Each run preflight records a compact `run_preflight_recorded` ledger
-event with mode, selected steps, result, and failure counts.
+event with mode, selected steps, result, and failure counts. Run preflight
+responses include the current `run_summary`, `phase`, `decision`, `display`,
+top-level `next_action`, and executable `client_action`.
 Direct background start endpoints such as `POST /runs/{task_id}/start_local`,
 `POST /runs/{task_id}/start_http`, `POST /runs/{task_id}/start_revision_*`, and
 `POST /runs/{task_id}/start_resume_*` return a polling `next_action` and

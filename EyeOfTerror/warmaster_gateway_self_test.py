@@ -901,6 +901,10 @@ def main() -> int:
                 or run_preflight.get("actions", {}).get("can_start_run") is not True
                 or run_preflight.get("actions", {}).get("next_action", {}).get("kind") != "start_run"
                 or run_preflight.get("actions", {}).get("next_action", {}).get("endpoint") != "POST /runs/{task_id}/start_local"
+                or run_preflight.get("phase") != "ready_to_start"
+                or not run_preflight.get("decision", {}).get("can_start")
+                or run_preflight.get("display", {}).get("headline") != "Run is ready to start"
+                or run_preflight.get("client_action", {}).get("path") != "/runs/warmaster-test/start_local"
             ):
                 raise AssertionError(f"bad local run preflight: {run_preflight}")
             completed_preflight_task = request_json(
@@ -920,6 +924,8 @@ def main() -> int:
                 or completed_next_action.get("kind") != "rerun_requires_force"
                 or completed_next_action.get("endpoint") != "POST /runs/{task_id}/start_local"
                 or completed_next_action.get("body", {}).get("force") is not True
+                or completed_preflight.get("client_action", {}).get("path") != "/runs/warmaster-completed-preflight-test/start_local"
+                or completed_preflight.get("client_action", {}).get("body", {}).get("force") is not True
             ):
                 raise AssertionError(f"completed run preflight should preserve run-status action gates: {completed_preflight}")
             missing_oversight_task = request_json(
