@@ -958,12 +958,36 @@ def run_status_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return {"total": len(runs), "active": active, "by_status": by_status}
 
 
+def executable_client_action(task_id: str, action: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(action, dict) or not action:
+        return {}
+    method = str(action.get("method") or "").upper()
+    endpoint = str(action.get("endpoint") or "")
+    endpoint_method = ""
+    path = endpoint
+    if " " in endpoint:
+        endpoint_method, path = endpoint.split(" ", 1)
+        endpoint_method = endpoint_method.upper()
+    method = method or endpoint_method
+    if "{task_id}" in path:
+        path = path.replace("{task_id}", quote(task_id, safe=""))
+    body = action.get("body") if isinstance(action.get("body"), dict) else {}
+    return {
+        "kind": str(action.get("kind") or ""),
+        "method": method,
+        "path": path,
+        "body": body,
+        "reason": str(action.get("reason") or ""),
+    }
+
+
 def orchestration_view_fields(
     summary: dict[str, Any],
     active: bool = False,
     event_cursor_next: int = 0,
     final_payload: dict[str, Any] | None = None,
     final_max_bytes: int | None = None,
+    task_id: str = "",
 ) -> dict[str, Any]:
     actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
     next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
@@ -1004,6 +1028,7 @@ def orchestration_view_fields(
         "recommended_endpoint": str(next_action.get("endpoint") or ""),
     }
     snapshot = {"summary": summary, "active": active}
+    resolved_task_id = task_id or str(summary.get("task_id") or "")
     return {
         "status": status,
         "phase": phase,
@@ -1011,13 +1036,15 @@ def orchestration_view_fields(
         "decision": decision,
         "display": orchestration_display(phase, status, snapshot, next_action, final_payload),
         "next_action": next_action,
+        "client_action": executable_client_action(resolved_task_id, next_action),
     }
 
 
 def run_orchestration_card(run: dict[str, Any], active: bool = False) -> dict[str, Any]:
-    view = orchestration_view_fields(run, active=active, event_cursor_next=0)
+    task_id = str(run.get("task_id") or "")
+    view = orchestration_view_fields(run, active=active, event_cursor_next=0, task_id=task_id)
     return {
-        "task_id": str(run.get("task_id") or ""),
+        "task_id": task_id,
         "status": view["status"],
         "phase": view["phase"],
         "active": view["active"],
@@ -1028,6 +1055,7 @@ def run_orchestration_card(run: dict[str, Any], active: bool = False) -> dict[st
         "decision": view["decision"],
         "display": view["display"],
         "next_action": view["next_action"],
+        "client_action": view["client_action"],
     }
 
 
@@ -1870,6 +1898,7 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
         event_cursor_next=int(snapshot.get("event_cursor", {}).get("next", 0)),
         final_payload=final_payload,
         final_max_bytes=max_bytes,
+        task_id=run_dir.name,
     )
     return {
         "ok": True,
@@ -1883,6 +1912,7 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
         "snapshot": snapshot,
         "final": final_payload,
         "next_action": view["next_action"],
+        "client_action": view["client_action"],
     }
 
 
@@ -2227,6 +2257,7 @@ def orchestrate_run_task(
                     "display": state.get("display", {}) if isinstance(state, dict) else {},
                     "display_events": state.get("display_events", []) if isinstance(state, dict) else [],
                     "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else state.get("next_action", {}),
+                    "client_action": state.get("client_action", {}) if isinstance(state, dict) else {},
                 }
             return {
                 "ok": True,
@@ -2241,6 +2272,7 @@ def orchestrate_run_task(
                 "display": state.get("display", {}) if isinstance(state, dict) else {},
                 "display_events": state.get("display_events", []) if isinstance(state, dict) else [],
                 "next_action": state.get("next_action", {}) if isinstance(state, dict) else {},
+                "client_action": state.get("client_action", {}) if isinstance(state, dict) else {},
             }
         return {
             "ok": False,
@@ -2263,6 +2295,7 @@ def orchestrate_run_task(
             "decision": state.get("decision", {}),
             "display": state.get("display", {}),
             "display_events": state.get("display_events", []),
+            "client_action": state.get("client_action", {}),
         }
     started = orchestrate_start_run(
         run_root,
@@ -2295,6 +2328,7 @@ def orchestrate_run_task(
         "display": state.get("display", {}) if isinstance(state, dict) else {},
         "display_events": state.get("display_events", []) if isinstance(state, dict) else [],
         "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else {},
+        "client_action": state.get("client_action", {}) if isinstance(state, dict) else {},
     }
 
 

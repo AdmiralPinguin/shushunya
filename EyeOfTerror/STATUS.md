@@ -92,6 +92,8 @@
   and mobile status rendering.
 - Orchestration and one-shot chat responses expose top-level `display_events`
   so task detail screens can render recent history without traversing snapshots.
+- Orchestration responses and cards expose executable `client_action`
+  method/path/body fields with `task_id` already resolved from `next_action`.
 - Task preflight contract summaries expose planned worker steps, dependency
   edges, and expected artifacts.
 - Task preflight exposes compact governor oversight summaries and validation so

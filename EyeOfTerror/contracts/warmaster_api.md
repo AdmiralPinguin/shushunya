@@ -191,6 +191,8 @@ compact chat/UI fields such as `headline`, `detail`, `severity`, progress
 counts, next step/worker, and final deliverable path so clients do not need to
 parse the full run summary for common status rendering. The response also
 copies bounded `display_events` to the top level for task-detail history views.
+`client_action` contains an executable method/path/body form of `next_action`
+with `{task_id}` already resolved for simple clients.
 
 ```json
 {

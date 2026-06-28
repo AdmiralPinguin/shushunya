@@ -722,6 +722,7 @@ def main() -> int:
                 or orchestrated_state.get("display", {}).get("headline") != "Run is ready to start"
                 or orchestrated_state.get("display", {}).get("progress", {}).get("planned_steps") != 7
                 or orchestrated_state.get("next_action", {}).get("kind") != "start"
+                or orchestrated_state.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/start_http"
                 or orchestrated_state.get("snapshot", {}).get("summary", {}).get("task_id") != "warmaster-orchestrate-test"
             ):
                 raise AssertionError(f"orchestration state did not expose ready-to-start decision: {orchestrated_state}")
@@ -759,6 +760,7 @@ def main() -> int:
                 or "headline" not in orchestrated_run.get("display", {})
                 or not isinstance(orchestrated_run.get("decision"), dict)
                 or not isinstance(orchestrated_run.get("display_events"), list)
+                or "{task_id}" in str(orchestrated_run.get("client_action", {}).get("path") or "")
             ):
                 raise AssertionError(f"one-shot orchestration did not prepare and start a run: {orchestrated_run}")
             orchestrated_run_events = request_json(base + "/runs/warmaster-orchestrate-run-test/events")
@@ -1309,6 +1311,7 @@ def main() -> int:
                 or not completed_orchestration.get("display_events")
                 or completed_orchestration.get("final", {}).get("summary", {}).get("status") != "ready"
                 or completed_orchestration.get("next_action", {}).get("kind") != "inspect_final"
+                or completed_orchestration.get("client_action", {}).get("path") != "/runs/warmaster-test/final"
                 or completed_orchestration.get("snapshot", {}).get("summary", {}).get("status") != "completed"
             ):
                 raise AssertionError(f"completed orchestration state did not expose final package: {completed_orchestration}")
@@ -1318,6 +1321,7 @@ def main() -> int:
                 completed_card.get("phase") != completed_orchestration.get("phase")
                 or completed_card.get("decision", {}).get("recommended_kind") != completed_orchestration.get("decision", {}).get("recommended_kind")
                 or completed_card.get("display", {}).get("headline") != completed_orchestration.get("display", {}).get("headline")
+                or completed_card.get("client_action", {}).get("path") != "/runs/warmaster-test/final"
             ):
                 raise AssertionError(f"run card diverged from orchestration state: card={completed_card}, state={completed_orchestration}")
             completed_global_events = request_json(base + "/events?limit=200")
