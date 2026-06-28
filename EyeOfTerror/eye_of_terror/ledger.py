@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,7 +37,16 @@ class TaskLedger:
 
     @classmethod
     def load(cls, path: Path) -> "TaskLedger":
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        last_error: json.JSONDecodeError | None = None
+        for _ in range(3):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                break
+            except json.JSONDecodeError as exc:
+                last_error = exc
+                time.sleep(0.02)
+        else:
+            raise last_error or ValueError(f"ledger could not be decoded: {path}")
         if not isinstance(payload, dict):
             raise ValueError(f"ledger must be a JSON object: {path}")
         return cls(path=path, data=payload)

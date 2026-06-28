@@ -27,6 +27,14 @@ def main() -> int:
             raise AssertionError(data)
         if len(data["events"]) < 3:
             raise AssertionError("ledger did not record events")
+        corrupt_path = Path(temp_dir) / "corrupt.json"
+        corrupt_path.write_text("{", encoding="utf-8")
+        try:
+            TaskLedger.load(corrupt_path)
+        except Exception:
+            pass
+        else:
+            raise AssertionError("corrupt ledger should not load")
     print("[ok] task ledger")
     return 0
 
