@@ -1698,6 +1698,57 @@ def main() -> int:
         raise AssertionError(f"growing repeated write_file should be allowed: code={growing_rewrite_code}, payload={growing_rewrite_payload}")
     print("[ok] growing write_file draft rewrite allowed")
 
+    swe_rewrite_after_failure_stdout = io.StringIO()
+    swe_rewrite_after_failure_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-rewrite-after-failure"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    failing_fallback_payload = {
+        "test_files": ["tests/test_core.py"],
+        "results": [{"ok": False, "file": "tests/test_core.py", "test": "test_core"}],
+        "failures": [{"file": "tests/test_core.py", "test": "test_core", "traceback": "AssertionError"}],
+        "source_hints": ["/work/project/core.py"],
+    }
+
+    def fake_swe_rewrite_python(_config: AgentConfig, _action: dict) -> dict:
+        return {"ok": False, "returncode": 1, "stdout": json.dumps(failing_fallback_payload), "stderr": ""}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"read_file","path":"/work/project/core.py","max_bytes":20000,"offset":0}',
+            '{"action":"write_file","path":"/work/project/core.py","content":"def f():\\n    return 1\\n# long explanatory broken draft"}',
+            '{"action":"write_file","path":"/work/project/core.py","content":"def f():\\n    return 2\\n"}',
+            '{"action":"final","message":"not done"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", side_effect=fake_swe_rewrite_python), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/project/core.py"}) as mocked_swe_rewrite_file, \
+            contextlib.redirect_stdout(swe_rewrite_after_failure_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(
+            "Исправь Python-проект и запусти pytest.\n\nРабочий каталог для этой задачи: /work/project",
+            swe_rewrite_after_failure_config,
+        )
+    swe_rewrite_after_failure_payload = json.loads(swe_rewrite_after_failure_stdout.getvalue())
+    swe_rewrite_errors = [
+        (step.get("result") or {}).get("error")
+        for step in swe_rewrite_after_failure_payload.get("steps", [])
+    ]
+    write_calls = [
+        call for call in mocked_swe_rewrite_file.call_args_list
+        if len(call.args) > 1 and (call.args[1] or {}).get("action") == "write_file"
+    ]
+    if len(write_calls) < 2 or "repeated write_file path rejected by supervisor" in swe_rewrite_errors:
+        raise AssertionError(f"SWE source rewrite after failing tests should be allowed: {swe_rewrite_after_failure_payload}")
+    print("[ok] SWE rewrite after failing tests allowed")
+
     json_append_stdout = io.StringIO()
     json_append_config = AgentConfig(
         task_id=safe_task_id("self-test-json-append-guard"),

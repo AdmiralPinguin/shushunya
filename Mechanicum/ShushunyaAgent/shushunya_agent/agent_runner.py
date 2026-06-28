@@ -5628,6 +5628,11 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and len(str(action.get("content") or "").encode("utf-8"))
                 <= successful_write_file_max_bytes.get(str(action.get("path") or ""), 0)
                 and str(action.get("path") or "") not in failed_verification_paths
+                and not (
+                    swe_task
+                    and pending_failing_tests
+                    and str(action.get("path") or "") in set(last_source_candidates)
+                )
             ):
                 result = {
                     "ok": False,
