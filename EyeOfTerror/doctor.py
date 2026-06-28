@@ -29,6 +29,8 @@ def require(condition: bool, message: str, errors: list[str]) -> None:
 def check_governors(errors: list[str]) -> None:
     require((REPO_ROOT / GOVERNOR_CONTRACT).exists(), f"governor API contract missing: {GOVERNOR_CONTRACT}", errors)
     registry = load_json(REPO_ROOT / "EyeOfTerror" / "registry" / "governors.json")
+    port_registry = load_json(REPO_ROOT / "EyeOfTerror" / "registry" / "ports.json").get("eye_of_terror", {})
+    governor_ports: dict[int, str] = {}
     seen_ports: dict[int, str] = {}
     for name, item in registry.items():
         require(isinstance(item, dict), f"governor entry is not an object: {name}", errors)
@@ -42,8 +44,18 @@ def check_governors(errors: list[str]) -> None:
         require(isinstance(task_kinds, list) and all(isinstance(kind, str) and kind for kind in task_kinds), f"governor {name} has invalid task_kinds", errors)
         owner = seen_ports.setdefault(port, name)
         require(owner == name, f"governor port collision on {port}: {owner} and {name}", errors)
+        governor_ports[port] = name
         if status == "active":
             require(bool(item.get("service")), f"active governor {name} must declare service", errors)
+    if isinstance(port_registry, dict):
+        for raw_port, item in port_registry.items():
+            if not isinstance(item, dict):
+                continue
+            port = int(raw_port)
+            name = str(item.get("name") or "")
+            if port == 7000:
+                continue
+            require(governor_ports.get(port) == name, f"governor port registry mismatch on {port}: {name}", errors)
 
 
 def check_port_registry(errors: list[str]) -> None:
