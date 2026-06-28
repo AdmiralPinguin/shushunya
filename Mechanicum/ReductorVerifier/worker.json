@@ -3,6 +3,6 @@
   "port": 7006,
   "role": "critic and verifier",
   "status": "prototype",
-  "capabilities": ["contract_review", "source_coverage_review", "hallucination_risk"],
+  "capabilities": ["contract_review", "source_coverage_review", "hallucination_risk", "evidence_lead_risk_reporting"],
   "api_contract": "EyeOfTerror/contracts/worker_api.md"
 }

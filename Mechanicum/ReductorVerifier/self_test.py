@@ -54,7 +54,14 @@ def main() -> int:
                 "gaps": ["gap"],
             },
         )
-        write_json(base / "timeline.json", {"timeline": [{"event_id": item} for item in events], "gaps": ["gap"]})
+        write_json(
+            base / "timeline.json",
+            {
+                "timeline": [{"event_id": item} for item in events],
+                "summary": {"generic_evidence_leads": 1, "low_confidence_events": 1},
+                "gaps": ["gap"],
+            },
+        )
         write(
             base / "reconstruction_ru.md",
             "На луне Скалатракса были переговоры. Дреагер стреляет в Антея. Golden Absolute. "
@@ -71,6 +78,8 @@ def main() -> int:
             raise AssertionError(f"expected approved with warnings: {report}")
         if not report.get("revision_focus", {}).get("present"):
             raise AssertionError(f"expected verifier to record revision focus: {report}")
+        if report.get("metrics", {}).get("generic_evidence_leads") != 1 or "generic low-confidence evidence lead" not in json.dumps(report):
+            raise AssertionError(f"expected verifier to warn about generic evidence leads: {report}")
         write_json(base / "timeline.json", {"timeline": [{"event_id": "moon_parley"}], "gaps": []})
         result = run(request, root)
         if not result.get("ok"):

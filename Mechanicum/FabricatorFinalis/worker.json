@@ -3,6 +3,6 @@
   "port": 7007,
   "role": "finalizer, packager, telegram sender",
   "status": "prototype",
-  "capabilities": ["fb2", "markdown_bundle", "telegram_send_document"],
+  "capabilities": ["fb2", "markdown_bundle", "telegram_send_document", "critic_metric_manifest"],
   "api_contract": "EyeOfTerror/contracts/worker_api.md"
 }

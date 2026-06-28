@@ -204,6 +204,16 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
                 "message": "Worker package still depends on unverified or inaccessible primary wording.",
             }
         )
+    timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), dict) else {}
+    generic_evidence_leads = int(timeline_summary.get("generic_evidence_leads") or 0)
+    low_confidence_events = int(timeline_summary.get("low_confidence_events") or 0)
+    if generic_evidence_leads:
+        warnings.append(
+            {
+                "severity": "warning",
+                "message": f"Timeline includes {generic_evidence_leads} generic low-confidence evidence lead(s).",
+            }
+        )
 
     status = "passed_with_warnings" if not findings else "needs_revision"
     return {
@@ -219,6 +229,8 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
             "sources": len(source_map.get("sources", [])),
             "direct_event_notes": len(notes.get("events", [])),
             "timeline_events": len(timeline_event_ids),
+            "generic_evidence_leads": generic_evidence_leads,
+            "low_confidence_events": low_confidence_events,
             "draft_chars": len(reconstruction),
         },
     }

@@ -34,6 +34,7 @@ def main() -> int:
                 {
                     "approved": True,
                     "status": "passed_with_warnings",
+                    "metrics": {"generic_evidence_leads": 1, "low_confidence_events": 1},
                     "revision_focus": {"present": True, "coverage_items": ["Source step: critic_review"]},
                 }
             ),
@@ -50,6 +51,8 @@ def main() -> int:
             raise AssertionError(f"ready manifest should not require revision: {manifest}")
         if not manifest.get("revision_focus", {}).get("present"):
             raise AssertionError(f"ready manifest should carry revision focus: {manifest}")
+        if manifest.get("critic_metrics", {}).get("generic_evidence_leads") != 1:
+            raise AssertionError(f"ready manifest should carry critic metrics: {manifest}")
         (base / "timeline.json").unlink()
         write(
             base / "critic_report.json",
