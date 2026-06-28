@@ -26,6 +26,7 @@ GET  /events?limit=20
 GET  /events?after=0
 POST /task_preflight
 POST /orchestrate
+POST /orchestrate_start
 POST /task
 GET  /runs
 GET  /runs?limit=20
@@ -157,6 +158,12 @@ run preflight event, and returns a `trace` plus the next safe action. It does
 not start worker execution; successful responses end at `phase=ready_to_start`
 with a `start_*` recommendation in `next_action`.
 
+`POST /orchestrate_start` starts an existing prepared run in the background only
+when Warmaster run-summary action gates allow it. It chooses normal start,
+resume, or required revision execution from `summary.actions`, records the
+background-start event, and returns an immediate `snapshot` plus a polling
+`next_action`. Completed runs are not rerun unless `force=true` is explicit.
+
 ```json
 {
   "message": "User task text",
@@ -165,6 +172,16 @@ with a `start_*` recommendation in `next_action`.
   "governor_host": "optional-loopback-host",
   "run_mode": "local|http",
   "include_brigade_health": true
+}
+```
+
+```json
+{
+  "task_id": "existing-run-id",
+  "run_mode": "local|http",
+  "host": "127.0.0.1",
+  "timeout_sec": 1800,
+  "force": false
 }
 ```
 

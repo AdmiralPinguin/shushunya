@@ -2429,6 +2429,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "task_routing",
             "task_preflight",
             "task_prepare_orchestration",
+            "run_start_orchestration",
             "run_preparation",
             "run_listing",
             "run_status_summary",
@@ -2488,6 +2489,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /events?after=0",
             "POST /task_preflight",
             "POST /orchestrate",
+            "POST /orchestrate_start",
             "POST /task",
             "GET /runs",
             "GET /runs?limit=20",
@@ -2538,6 +2540,7 @@ def gateway_actions() -> dict[str, Any]:
     return {
         "can_preflight_task": True,
         "can_orchestrate_prepare": True,
+        "can_orchestrate_start": True,
         "can_preflight_runs": True,
         "can_create_task": True,
         "can_start_runs": True,
@@ -2550,7 +2553,7 @@ def gateway_actions() -> dict[str, Any]:
         "can_cancel_runs": True,
         "can_check_brigade_readiness": True,
         "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
-        "prepare_task_flow": ["POST /orchestrate", "follow next_action to start or inspect"],
+        "prepare_task_flow": ["POST /orchestrate", "POST /orchestrate_start", "GET /runs/{task_id}/snapshot?events_after=0"],
         "polling": ["GET /events?after=0", "GET /runs/{task_id}/snapshot?events_after=0"],
         "maintenance": ["GET /recovery", "POST /recovery/start_resume_local", "POST /recovery/start_resume_http", "POST /recover_stale"],
         "run_inspection": [
@@ -2636,6 +2639,98 @@ def start_background(task_id: str, target: Any) -> bool:
 
     threading.Thread(target=wrapped, daemon=True).start()
     return True
+
+
+def orchestrate_start_run(
+    run_root: Path,
+    task_id: str,
+    run_mode: str = "http",
+    host: str = "127.0.0.1",
+    timeout_sec: int = 1800,
+    force: bool = False,
+) -> dict[str, Any]:
+    if run_mode not in {"local", "http"}:
+        raise ValueError("run_mode must be local or http")
+    host = validate_service_host(host)
+    timeout_sec = max(1, min(int(timeout_sec), 7200))
+    run_dir = run_root / task_id
+    if not run_dir.exists():
+        return {"ok": False, "phase": "missing_run", "task_id": task_id, "error": "run not found"}
+    summary = run_summary(run_dir)
+    actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
+    next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+    execution_mode = "full"
+    step_ids: list[str] | None = None
+    if actions.get("can_start"):
+        operation = "start"
+    elif actions.get("can_resume"):
+        operation = "resume"
+        execution_mode = "resume"
+        step_ids = resume_step_ids_from_run(run_dir)
+    elif actions.get("can_start_revision"):
+        operation = "revision"
+        execution_mode = "revision"
+        step_ids = revision_step_ids_from_run(run_dir)
+    elif force and actions.get("force_required_for_rerun"):
+        operation = "force_rerun"
+    else:
+        return {
+            "ok": False,
+            "phase": "not_startable",
+            "task_id": task_id,
+            "summary": summary,
+            "next_action": next_action,
+            "snapshot": run_snapshot(run_dir, event_limit=5, events_after=0),
+        }
+
+    workspace_root = resolve_run_child_path(run_dir, "", "work")
+    if run_mode == "local":
+        executor = lambda: execute_local_run(
+            REPO_ROOT,
+            run_dir,
+            workspace_root,
+            timeout_sec=timeout_sec,
+            step_ids=step_ids,
+            execution_mode=execution_mode,
+        )
+    else:
+        executor = lambda: execute_http_run(
+            run_dir,
+            host=host,
+            timeout_sec=timeout_sec,
+            workspace_root=None,
+            step_ids=step_ids,
+            execution_mode=execution_mode,
+        )
+    ledger_path = run_dir / "task_ledger.json"
+    if ledger_path.exists():
+        ledger = TaskLedger.load(ledger_path)
+        if operation == "resume":
+            ledger.record_event("resume_execution_requested", {"mode": f"orchestrate_start_{run_mode}", "step_ids": step_ids or []})
+        event_payload: dict[str, Any] = {"mode": f"orchestrate_start_{run_mode}", "operation": operation}
+        if step_ids:
+            event_payload["step_ids"] = step_ids
+        if force:
+            event_payload["force"] = True
+        ledger.record_event("background_start_requested", event_payload)
+    if not start_background(task_id, executor):
+        return {
+            "ok": False,
+            "phase": "already_active",
+            "task_id": task_id,
+            "error": "run already active",
+            "snapshot": run_snapshot(run_dir, event_limit=5, events_after=0),
+        }
+    return {
+        "ok": True,
+        "phase": "started",
+        "task_id": task_id,
+        "run_mode": run_mode,
+        "operation": operation,
+        "step_ids": step_ids or [],
+        "next_action": {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "run started in background"},
+        "snapshot": run_snapshot(run_dir, event_limit=5, events_after=0),
+    }
 
 
 def start_recoverable_runs(run_root: Path, mode: str, host: str = "127.0.0.1", timeout_sec: int = 1800) -> dict[str, Any]:
@@ -2977,6 +3072,27 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         include_brigade_health=include_brigade_health,
                     )
                     response(self, 200 if prepared.get("ok") else 409, prepared)
+                    return
+                if self.path == "/orchestrate_start":
+                    task_id = str(payload.get("task_id") or "").strip()
+                    if not task_id:
+                        response(self, 400, {"ok": False, "error": "task_id is required"})
+                        return
+                    if not valid_task_id(task_id):
+                        response(self, 400, {"ok": False, "error": "invalid task_id", "task_id": task_id})
+                        return
+                    run_mode = str(payload.get("run_mode") or "http").strip() or "http"
+                    host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
+                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
+                    started = orchestrate_start_run(
+                        run_root,
+                        task_id,
+                        run_mode=run_mode,
+                        host=host,
+                        timeout_sec=timeout_sec,
+                        force=bool(payload.get("force")),
+                    )
+                    response(self, 202 if started.get("ok") else 409, started)
                     return
                 if self.path == "/task":
                     message = str(payload.get("message") or payload.get("task") or "").strip()

@@ -713,6 +713,21 @@ def main() -> int:
                 or not any(item.get("type") == "run_preflight_recorded" for item in orchestrated_ledger.get("events", []))
             ):
                 raise AssertionError(f"prepare orchestration did not stop at a start recommendation: {orchestrated}")
+            orchestrated_start = request_json(
+                base + "/orchestrate_start",
+                {"task_id": "warmaster-orchestrate-test", "run_mode": "local", "timeout_sec": 30},
+            )
+            if (
+                not orchestrated_start.get("ok")
+                or orchestrated_start.get("phase") != "started"
+                or orchestrated_start.get("operation") != "start"
+                or orchestrated_start.get("next_action", {}).get("kind") != "poll"
+                or orchestrated_start.get("snapshot", {}).get("task_id") != "warmaster-orchestrate-test"
+            ):
+                raise AssertionError(f"orchestrated start did not return a polling snapshot: {orchestrated_start}")
+            orchestrated_start_events = request_json(base + "/runs/warmaster-orchestrate-test/events")
+            if not any(item.get("type") == "background_start_requested" for item in orchestrated_start_events.get("events", [])):
+                raise AssertionError(f"orchestrated start did not record background start: {orchestrated_start_events}")
             task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},

@@ -69,6 +69,9 @@
 - Warmaster Gateway exposes prepare-only `POST /orchestrate` for chat clients:
   task preflight, task creation, run preflight, trace, and next start/inspect
   action without launching long worker execution.
+- Warmaster Gateway exposes `POST /orchestrate_start` to safely start prepared
+  runs in the background through run-summary action gates and return an
+  immediate polling snapshot.
 - Task preflight contract summaries expose planned worker steps, dependency
   edges, and expected artifacts.
 - Task preflight exposes compact governor oversight summaries and validation so
