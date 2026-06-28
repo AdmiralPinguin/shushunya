@@ -405,6 +405,16 @@ def main() -> int:
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("status") != "pending"
             ):
                 raise AssertionError(f"bad run summary: {run_summary}")
+            fact_step = next(
+                (
+                    item
+                    for item in run_summary.get("summary", {}).get("progress", {}).get("step_states", [])
+                    if item.get("step_id") == "fact_extraction"
+                ),
+                {},
+            )
+            if fact_step.get("input_artifacts") != ["/work/skalathrax/source_snapshots.json"]:
+                raise AssertionError(f"run summary did not expose step input artifacts: {run_summary}")
             source_step = request_json(base + "/runs/warmaster-test/steps/source_discovery")
             if (
                 not source_step.get("ok")

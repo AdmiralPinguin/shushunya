@@ -157,8 +157,9 @@ Run summaries also include ordered progress hints:
 the run package and ledger records, so clients can display restart/resume
 position, worker ownership, expected artifacts, produced artifacts, and per-step
 summaries without parsing dispatch packets. Step states include
-`expected_artifact_status` and `artifact_status` entries with `exists`, `bytes`,
-and `host_path` when a run workspace is known.
+`input_artifacts`, `expected_artifacts`, and produced `artifacts`; each artifact
+set also has status entries with `exists`, `bytes`, and `host_path` when a run
+workspace is known.
 
 ## Cancellation
 

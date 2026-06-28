@@ -29,6 +29,7 @@
 - Warmaster Gateway exposes `POST /task_preflight` for routing, governor,
   contract, and worker checks without creating run history.
 - Task preflight returns a compact contract summary with planned worker steps.
+- Run progress exposes per-step input, expected, and produced artifact statuses.
 - Warmaster Gateway can prepare tasks through the local governor path or through
   the active governor's HTTP service.
 - Warmaster rejects HTTP-governor task preparation when reachable governor

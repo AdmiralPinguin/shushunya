@@ -422,6 +422,7 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
             continue
         recorded = ledger_by_step.get(step_id, {})
         recorded_status = str(recorded.get("status") or "")
+        input_artifacts = planned.get("input_artifacts") if isinstance(planned.get("input_artifacts"), list) else []
         expected_artifacts = planned.get("expected_artifacts") if isinstance(planned.get("expected_artifacts"), list) else []
         artifacts = recorded.get("artifacts") if isinstance(recorded.get("artifacts"), list) else []
         step_states.append(
@@ -430,6 +431,8 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
                 "worker": str(planned.get("worker") or recorded.get("worker") or ""),
                 "status": recorded_status or "pending",
                 "depends_on": planned.get("depends_on") if isinstance(planned.get("depends_on"), list) else [],
+                "input_artifacts": input_artifacts,
+                "input_artifact_status": [sandbox_artifact_file_status(workspace_root, str(path)) for path in input_artifacts],
                 "expected_artifacts": expected_artifacts,
                 "expected_artifact_status": [sandbox_artifact_file_status(workspace_root, str(path)) for path in expected_artifacts],
                 "artifacts": artifacts,
@@ -643,6 +646,8 @@ def run_step_artifacts(run_dir: Path, step_id: str) -> dict[str, Any]:
         "step_id": step_id,
         "worker": step.get("worker", ""),
         "status": step.get("status", ""),
+        "input_artifacts": step.get("input_artifacts", []),
+        "input_artifact_status": step.get("input_artifact_status", []),
         "expected_artifacts": step.get("expected_artifacts", []),
         "expected_artifact_status": step.get("expected_artifact_status", []),
         "artifacts": step.get("artifacts", []),
