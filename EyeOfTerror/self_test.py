@@ -5,13 +5,34 @@ import json
 import tempfile
 from pathlib import Path
 
-from eye_of_terror.contracts import build_lore_reconstruction_contract, validate_task_contract_payload
+from eye_of_terror.contracts import (
+    TASK_CONTRACT_FIELDS,
+    TASK_CONTRACT_REQUIRED_FIELDS,
+    TASK_KINDS,
+    WORKER_STEP_FIELDS,
+    WORKER_STEP_REQUIRED_FIELDS,
+    build_lore_reconstruction_contract,
+    validate_task_contract_payload,
+)
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
 from eye_of_terror.pipeline import build_dispatch_packets, write_pipeline_run
 from eye_of_terror.registry import worker_refs
 
 
 def main() -> int:
+    schema = json.loads((Path(__file__).resolve().parent / "contracts" / "task_contract.schema.json").read_text(encoding="utf-8"))
+    schema_required = set(schema.get("required", []))
+    schema_fields = set(schema.get("properties", {}))
+    schema_kinds = set(schema.get("properties", {}).get("kind", {}).get("enum", []))
+    step_schema = schema.get("properties", {}).get("worker_plan", {}).get("items", {})
+    step_required = set(step_schema.get("required", []))
+    step_fields = set(step_schema.get("properties", {}))
+    if schema_required != TASK_CONTRACT_REQUIRED_FIELDS or schema_fields != TASK_CONTRACT_FIELDS or schema_kinds != TASK_KINDS:
+        raise AssertionError("task contract schema and runtime validator constants disagree")
+    if step_required != WORKER_STEP_REQUIRED_FIELDS or step_fields != WORKER_STEP_FIELDS:
+        raise AssertionError("worker step schema and runtime validator constants disagree")
+    print("[ok] task contract schema")
+
     workers = worker_refs()
     ports = [worker.port for worker in workers]
     if ports != sorted(ports) or min(ports) != 7001:
