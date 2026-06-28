@@ -413,6 +413,10 @@ Direct background start endpoints such as `POST /runs/{task_id}/start_local`,
 `POST /runs/{task_id}/start_http`, `POST /runs/{task_id}/start_revision_*`, and
 `POST /runs/{task_id}/start_resume_*` return a polling `next_action` and
 executable `client_action` when a run starts or is already active.
+Synchronous execution endpoints such as `POST /runs/{task_id}/execute_local`,
+`POST /runs/{task_id}/execute_http`, `POST /runs/{task_id}/resume_*`, and
+`POST /runs/{task_id}/execute_revision_*` include the post-execution
+`run_summary`, `next_action`, and executable `client_action`.
 
 Local and HTTP executors must convert malformed dispatch packets into
 structured failed or preflight-failed run results instead of crashing before the

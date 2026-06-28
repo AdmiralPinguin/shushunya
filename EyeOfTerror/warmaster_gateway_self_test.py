@@ -1218,7 +1218,12 @@ def main() -> int:
                 {"step_ids": ["source_discovery"], "timeout_sec": 30},
                 timeout=60,
             )
-            if not restricted.get("ok") or not restricted.get("summary", {}).get("partial_execution"):
+            if (
+                not restricted.get("ok")
+                or not restricted.get("summary", {}).get("partial_execution")
+                or restricted.get("next_action", {}).get("kind") != "resume"
+                or restricted.get("client_action", {}).get("path") != "/runs/warmaster-restricted-test/start_resume_http"
+            ):
                 raise AssertionError(f"restricted execution did not report partial success: {restricted}")
             restricted_ledger = request_json(base + "/runs/warmaster-restricted-test/ledger")
             if restricted_ledger.get("ledger", {}).get("status") != "interrupted":
@@ -1230,10 +1235,18 @@ def main() -> int:
             if not restricted_pending or restricted_pending[0] != "source_acquisition" or "source_discovery" in restricted_pending:
                 raise AssertionError(f"restricted execution did not expose resumable pending steps: {restricted_pending}")
             restricted_resumed = request_json(base + "/runs/warmaster-restricted-test/resume_local", {"timeout_sec": 30}, timeout=60)
-            if not restricted_resumed.get("ok"):
+            if (
+                not restricted_resumed.get("ok")
+                or restricted_resumed.get("next_action", {}).get("kind") != "resume"
+                or restricted_resumed.get("client_action", {}).get("path") != "/runs/warmaster-restricted-test/start_resume_http"
+            ):
                 raise AssertionError(f"restricted run did not resume cleanly: {restricted_resumed}")
             executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
-            if not executed.get("ok"):
+            if (
+                not executed.get("ok")
+                or executed.get("next_action", {}).get("kind") != "inspect_final"
+                or executed.get("client_action", {}).get("path") != "/runs/warmaster-test/final"
+            ):
                 raise AssertionError(f"bad local execution: {executed}")
             ledger = request_json(base + "/runs/warmaster-test/ledger")
             if not ledger.get("ok") or ledger["ledger"].get("status") != "completed":
@@ -1410,7 +1423,11 @@ def main() -> int:
             ):
                 raise AssertionError(f"interrupted run did not expose orchestration resume decision: {resume_orchestration}")
             resumed = request_json(base + "/runs/warmaster-resume-test/resume_local", {"timeout_sec": 30}, timeout=60)
-            if not resumed.get("ok"):
+            if (
+                not resumed.get("ok")
+                or resumed.get("next_action", {}).get("kind") != "inspect_final"
+                or resumed.get("client_action", {}).get("path") != "/runs/warmaster-resume-test/final"
+            ):
                 raise AssertionError(f"resume execution failed: {resumed}")
             resumed_ledger = request_json(base + "/runs/warmaster-resume-test/ledger")
             resumed_events = [event.get("type") for event in resumed_ledger.get("ledger", {}).get("events", [])]

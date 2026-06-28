@@ -3892,7 +3892,19 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
                         http_workspace_root = workspace_root if "workspace_root" in payload else None
                         summary = execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root, step_ids=restricted_step_ids, execution_mode=execution_mode)
-                    response(self, 200 if summary.get("ok") else 500, {"ok": bool(summary.get("ok")), "summary": summary})
+                    post_summary = run_summary(run_dir)
+                    post_view = orchestration_view_fields(post_summary, task_id=task_id)
+                    response(
+                        self,
+                        200 if summary.get("ok") else 500,
+                        {
+                            "ok": bool(summary.get("ok")),
+                            "summary": summary,
+                            "run_summary": post_summary,
+                            "next_action": post_view.get("next_action", {}),
+                            "client_action": post_view.get("client_action", {}),
+                        },
+                    )
                     return
                 response(self, 404, {"ok": False, "error": "not found"})
             except ValueError as exc:
