@@ -1752,6 +1752,7 @@ def all_run_events(run_root: Path, limit: int | None = None, after: int | None =
                     "at": str(event.get("at") or ""),
                     "type": str(event.get("type") or ""),
                     "run_next_action": next_action,
+                    "run_client_action": executable_client_action(task_id, next_action),
                     "run_final_manifest_summary": manifest_summary,
                     "display": event_display(event, task_id=task_id),
                     "payload": event.get("payload") if isinstance(event.get("payload"), dict) else {},

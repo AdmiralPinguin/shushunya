@@ -813,6 +813,7 @@ def main() -> int:
                 or warmaster_event.get("governor") != "IskandarKhayon"
                 or not warmaster_event.get("run_updated_at")
                 or warmaster_event.get("display", {}).get("headline") != "Task created"
+                or warmaster_event.get("run_client_action", {}).get("path") != "/runs/warmaster-test/start_http"
                 or not any(item.get("task_id") == "warmaster-test" and item.get("headline") == "Task created" for item in global_events.get("display_events", []))
                 or not all("global_index" in item for item in global_events.get("events", []))
             ):
