@@ -23,6 +23,15 @@ EVENT_TEXT_MARKERS = {
     "fratricide_spreads": ["Пожиратели Миров стали", "резать друг друга"],
 }
 
+ARTIFACT_REWORK_TARGETS = {
+    "source_map.json": ("source_discovery", "Lexmechanic"),
+    "source_snapshots.json": ("source_acquisition", "AuspexBrowser"),
+    "direct_event_notes.json": ("fact_extraction", "NoosphericExtractor"),
+    "timeline.json": ("timeline", "Chronologis"),
+    "reconstruction_ru.md": ("draft_reconstruction", "ScriptoriumDaemon"),
+    "coverage_report.md": ("draft_reconstruction", "ScriptoriumDaemon"),
+}
+
 
 def sandbox_path(workspace_root: Path, path: str) -> Path:
     if not path.startswith("/work/"):
@@ -57,6 +66,52 @@ def text_contains_markers(text: str, markers: list[str]) -> bool:
     return all(marker.lower() in lowered for marker in markers)
 
 
+def add_revision_step(steps: list[dict[str, str]], step_id: str, worker: str, reason: str, source: str) -> None:
+    candidate = {
+        "step_id": step_id,
+        "worker": worker,
+        "reason": reason,
+        "source": source,
+        "priority": "blocker",
+    }
+    key = (candidate["step_id"], candidate["worker"], candidate["reason"])
+    existing = {(item.get("step_id"), item.get("worker"), item.get("reason")) for item in steps}
+    if key not in existing:
+        steps.append(candidate)
+
+
+def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifacts: list[str]) -> dict[str, Any]:
+    steps: list[dict[str, str]] = []
+    for artifact in missing_artifacts:
+        filename = artifact.rsplit("/", 1)[-1]
+        target = ARTIFACT_REWORK_TARGETS.get(filename)
+        if target:
+            step_id, worker = target
+            add_revision_step(steps, step_id, worker, f"Missing artifact: {artifact}", "missing_artifacts")
+    for finding in findings:
+        message = str(finding.get("message") or "")
+        lowered = message.lower()
+        if "missing required direct event in timeline" in lowered:
+            add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
+            add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
+        elif "draft does not visibly cover" in lowered or "coverage gaps clearly" in lowered:
+            add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
+        elif "lacks fetched source evidence" in lowered:
+            add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+            add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
+            add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
+        elif "source discovery did not find" in lowered:
+            add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
+            add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+        else:
+            add_revision_step(steps, "critic_review", "ReductorVerifier", message, "critic_finding")
+    return {
+        "required": bool(steps),
+        "steps": steps,
+    }
+
+
 def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
     reconstruction_path = sibling_artifact(critic_path, "reconstruction_ru.md")
     coverage_path = sibling_artifact(critic_path, "coverage_report.md")
@@ -67,12 +122,14 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
     required_paths = [reconstruction_path, coverage_path, source_path, source_snapshots_path, notes_path, timeline_path]
     missing_artifacts = [path for path in required_paths if not artifact_exists(workspace_root, path)]
     if missing_artifacts:
+        findings = [{"severity": "blocker", "message": f"Missing artifact: {path}"} for path in missing_artifacts]
         return {
             "status": "failed",
             "approved": False,
             "missing_artifacts": missing_artifacts,
-            "findings": [{"severity": "blocker", "message": f"Missing artifact: {path}"} for path in missing_artifacts],
+            "findings": findings,
             "warnings": [],
+            "revision_plan": revision_plan_from_findings(findings, missing_artifacts),
         }
 
     source_map = load_json(workspace_root, source_path)
@@ -132,6 +189,7 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
         "required_direct_events": sorted(REQUIRED_DIRECT_EVENT_IDS),
         "findings": findings,
         "warnings": warnings,
+        "revision_plan": revision_plan_from_findings(findings, []),
         "metrics": {
             "sources": len(source_map.get("sources", [])),
             "direct_event_notes": len(notes.get("events", [])),
@@ -164,6 +222,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         "summary": f"Review finished with {len(report['findings'])} findings and {len(report['warnings'])} warnings.",
         "artifacts": [critic_path],
         "gaps": [item["message"] for item in report["findings"]],
+        "revision_plan": report.get("revision_plan", {}),
         "confidence": "medium",
     }
 

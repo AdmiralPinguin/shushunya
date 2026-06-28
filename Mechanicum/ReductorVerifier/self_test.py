@@ -75,6 +75,10 @@ def main() -> int:
         report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
         if report["approved"] or report["status"] != "needs_revision":
             raise AssertionError(f"expected missing events to fail: {report}")
+        revision_steps = report.get("revision_plan", {}).get("steps", [])
+        revision_workers = {step.get("worker") for step in revision_steps}
+        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
+            raise AssertionError(f"missing event review did not produce a worker rework plan: {report}")
         write_json(base / "timeline.json", {"timeline": [{"event_id": item} for item in events], "gaps": []})
         write_json(base / "direct_event_notes.json", {"events": [{"event_id": item} for item in events], "gaps": []})
         result = run(request, root)
@@ -83,6 +87,10 @@ def main() -> int:
         report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
         if report["approved"] or "lacks fetched source evidence" not in json.dumps(report):
             raise AssertionError(f"expected missing evidence to fail: {report}")
+        revision_steps = report.get("revision_plan", {}).get("steps", [])
+        revision_workers = {step.get("worker") for step in revision_steps}
+        if not {"AuspexBrowser", "NoosphericExtractor", "ScriptoriumDaemon"}.issubset(revision_workers):
+            raise AssertionError(f"missing evidence review did not produce source rework plan: {report}")
     print("[ok] ReductorVerifier review")
     return 0
 

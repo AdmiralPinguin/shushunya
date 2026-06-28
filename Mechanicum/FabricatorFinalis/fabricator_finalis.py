@@ -15,6 +15,16 @@ PACKAGE_FILES = [
     "critic_report.json",
 ]
 
+ARTIFACT_REWORK_TARGETS = {
+    "source_map.json": ("source_discovery", "Lexmechanic"),
+    "source_snapshots.json": ("source_acquisition", "AuspexBrowser"),
+    "direct_event_notes.json": ("fact_extraction", "NoosphericExtractor"),
+    "timeline.json": ("timeline", "Chronologis"),
+    "reconstruction_ru.md": ("draft_reconstruction", "ScriptoriumDaemon"),
+    "coverage_report.md": ("draft_reconstruction", "ScriptoriumDaemon"),
+    "critic_report.json": ("critic_review", "ReductorVerifier"),
+}
+
 
 def sandbox_path(workspace_root: Path, path: str) -> Path:
     if not path.startswith("/work/"):
@@ -34,6 +44,51 @@ def load_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"artifact must be an object: {path}")
     return payload
+
+
+def missing_artifact_revision_steps(missing: list[str]) -> list[dict[str, str]]:
+    steps: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for artifact in missing:
+        filename = artifact.rsplit("/", 1)[-1]
+        target = ARTIFACT_REWORK_TARGETS.get(filename)
+        if not target:
+            continue
+        step_id, worker = target
+        reason = f"Missing package file: {artifact}"
+        key = (step_id, worker, reason)
+        if key in seen:
+            continue
+        seen.add(key)
+        steps.append(
+            {
+                "step_id": step_id,
+                "worker": worker,
+                "reason": reason,
+                "source": "missing_package_file",
+                "priority": "blocker",
+            }
+        )
+    return steps
+
+
+def merge_revision_plan(critic: dict[str, Any], missing: list[str]) -> dict[str, Any]:
+    steps: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    critic_plan = critic.get("revision_plan") if isinstance(critic.get("revision_plan"), dict) else {}
+    for item in critic_plan.get("steps", []) if isinstance(critic_plan.get("steps"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        marker = json.dumps(item, sort_keys=True, ensure_ascii=False)
+        if marker not in seen:
+            steps.append(item)
+            seen.add(marker)
+    for item in missing_artifact_revision_steps(missing):
+        marker = json.dumps(item, sort_keys=True, ensure_ascii=False)
+        if marker not in seen:
+            steps.append(item)
+            seen.add(marker)
+    return {"required": bool(steps), "steps": steps}
 
 
 def build_manifest(workspace_root: Path, manifest_path: str) -> dict[str, Any]:
@@ -56,6 +111,7 @@ def build_manifest(workspace_root: Path, manifest_path: str) -> dict[str, Any]:
     critic = load_json(critic_path) if critic_path.exists() else {}
     approved = bool(critic.get("approved"))
     status = "ready" if approved and not missing else "blocked"
+    revision_plan = merge_revision_plan(critic, missing)
     return {
         "status": status,
         "approved": approved,
@@ -65,6 +121,7 @@ def build_manifest(workspace_root: Path, manifest_path: str) -> dict[str, Any]:
         "critic_status": critic.get("status", "missing"),
         "warnings": critic.get("warnings", []),
         "blockers": critic.get("findings", []) + [{"severity": "blocker", "message": f"Missing package file: {path}"} for path in missing],
+        "revision_plan": revision_plan,
     }
 
 
@@ -91,6 +148,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         "summary": f"Final manifest written: {manifest['status']}.",
         "artifacts": [manifest_path],
         "gaps": [item["message"] for item in manifest["blockers"]],
+        "revision_plan": manifest.get("revision_plan", {}),
         "confidence": "medium",
     }
 
