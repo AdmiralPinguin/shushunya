@@ -2265,6 +2265,30 @@ def text_looks_like_source_replacement(text: str) -> bool:
     )
 
 
+def suggested_json_dumps_default_str_action(path: str, content: str) -> dict[str, Any] | None:
+    marker = "json.dumps("
+    start = content.find(marker)
+    while start >= 0:
+        inner_start = start + len(marker)
+        depth = 1
+        index = inner_start
+        while index < len(content) and depth:
+            char = content[index]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            index += 1
+        if depth == 0:
+            close_index = index - 1
+            inner = content[inner_start:close_index]
+            if "default=" not in inner:
+                fixed = content[:close_index] + ", default=str" + content[close_index:]
+                return {"action": "write_file", "path": path, "content": fixed}
+        start = content.find(marker, start + len(marker))
+    return None
+
+
 def pytest_result_sets(result: dict[str, Any]) -> tuple[set[str], set[str]]:
     passing = {
         str(item)
@@ -4669,6 +4693,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     pending_failed_cli_read_paths: set[str] = set(
         failed_cli_read_source_candidates_from_text(original_task, pending_failed_cli_source_candidates)
     )
+    pending_failed_cli_json_serialization = "not json serializable" in original_task.lower()
     swe_syntax_error_cycles = 0
     last_swe_syntax_error = ""
     last_required_artifact_hint = ""
@@ -5053,6 +5078,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "path": suggested_path,
                     "content": str(action.get("code") or ""),
                 }
+            elif pending_failed_cli_json_serialization:
+                for suggested_path in sorted(pending_failed_cli_read_paths):
+                    excerpt = last_read_file_excerpts.get(suggested_path, "")
+                    suggested_action = suggested_json_dumps_default_str_action(suggested_path, excerpt)
+                    if suggested_action:
+                        break
             forced_supervisor_result = {
                 "ok": False,
                 "error": "swe failed cli repair source required by supervisor",
@@ -6284,6 +6315,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             swe_cli_verification_attempted_after_edit = False
             pending_failed_cli_source_candidates = []
             pending_failed_cli_read_paths = set()
+            pending_failed_cli_json_serialization = False
             if swe_task and action_type in SWE_EDIT_ACTIONS:
                 last_successful_swe_edit_path = path
                 if swe_requires_cli_verification:
@@ -6309,6 +6341,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             swe_cli_verification_attempted_after_edit = False
             pending_failed_cli_source_candidates = []
             pending_failed_cli_read_paths = set()
+            pending_failed_cli_json_serialization = False
             last_successful_swe_edit_path = python_written_code_paths[0]
             if swe_requires_cli_verification:
                 last_cli_required_swe_edit_path = python_written_code_paths[0]
@@ -6368,6 +6401,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 ]
                 if cli_source_candidates:
                     pending_failed_cli_source_candidates = list(dict.fromkeys(cli_source_candidates))[:10]
+                combined_cli_output = f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}".lower()
+                if "not json serializable" in combined_cli_output:
+                    pending_failed_cli_json_serialization = True
         if (
             swe_task
             and swe_requires_cli_verification
@@ -6377,6 +6413,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         ):
             swe_cli_verified_after_edit = True
             pending_failed_cli_source_candidates = []
+            pending_failed_cli_json_serialization = False
         if (
             swe_task
             and pending_failing_tests
@@ -6406,10 +6443,22 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             pending_failed_cli_read_paths.add(read_path)
             result = dict(result)
             result["candidate_source_paths"] = pending_failed_cli_source_candidates[:10]
+            suggested_action = None
+            content = str(result.get("content") or "")
+            if pending_failed_cli_json_serialization and content and not result.get("truncated"):
+                suggested_action = suggested_json_dumps_default_str_action(read_path, content)
+            if suggested_action:
+                result["suggested_action"] = suggested_action
             result["supervisor_instruction"] = (
                 "This read_file loaded a likely source file for the failed CLI verification. "
                 "Do not inspect more files before the fix. Make a narrow edit to this file, then rerun the CLI "
                 "verification with JSON validation."
+                + (
+                    " The previous CLI failure was a JSON serialization error; suggested_action applies a minimal "
+                    "json.dumps(..., default=str) repair."
+                    if suggested_action
+                    else ""
+                )
             )
         elif action_type == "bundle_text_files" and isinstance(result, dict) and result.get("ok") is True:
             verified_text_paths.discard(str(action.get("output_txt") or ""))

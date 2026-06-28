@@ -4860,6 +4860,13 @@ def main() -> int:
         for result in read_then_list_results
     ):
         raise AssertionError(f"After reading failed CLI source, further discovery should require edit: {swe_failed_cli_read_then_list_payload}")
+    if not any(
+        (result.get("suggested_action") or {}).get("action") == "write_file"
+        and (result.get("suggested_action") or {}).get("path") == "/work/project/package/cli.py"
+        and "default=str" in str((result.get("suggested_action") or {}).get("content") or "")
+        for result in read_then_list_results
+    ):
+        raise AssertionError(f"Failed CLI JSON serialization read should suggest default=str write_file: {swe_failed_cli_read_then_list_payload}")
     print("[ok] SWE failed CLI source read requires edit next")
 
     swe_failed_cli_python_pseudo_edit_stdout = io.StringIO()
