@@ -273,7 +273,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   low-confidence metadata through timeline and coverage artifacts.
 - `ReductorVerifier` and `FabricatorFinalis` carry evidence-lead risk metrics
   into critic reports and final manifests.
-- `AuspexBrowser` performs guarded HTTP text fetches; it does not yet render JavaScript pages or screenshots.
+- `AuspexBrowser` performs guarded HTTP text fetches and marks low-text
+  scripted HTML with `render_required`; it does not yet render JavaScript pages
+  or screenshots.
 - The pipeline records inaccessible primary books as gaps instead of solving book acquisition.
 - Warmaster Gateway background execution is in-process only; restart recovery
   marks stale jobs interrupted, and operators can bulk-start recoverable runs

@@ -52,6 +52,8 @@ def compact_snapshot(source: dict[str, Any], result: dict[str, Any]) -> dict[str
         "truncated": bool(result.get("truncated")),
         "bytes_read": result.get("bytes_read", 0),
         "text_excerpt": text[:6000],
+        "render_required": bool(result.get("render_required")),
+        "render_reason": result.get("render_reason", ""),
         "error": result.get("error", ""),
     }
 
@@ -80,6 +82,7 @@ def collect_snapshots(source_map: dict[str, Any], fetcher: FetchFn = default_fet
             "sources_without_url": len(skipped),
             "fetched_ok": sum(1 for item in snapshots if item.get("ok")),
             "failed": sum(1 for item in snapshots if not item.get("ok")),
+            "render_required": sum(1 for item in snapshots if item.get("render_required")),
         },
     }
 

@@ -28,13 +28,17 @@ def main() -> int:
             "bytes_read": 19,
             "truncated": False,
             "is_binary": False,
+            "render_required": True,
+            "render_reason": "low extracted text with SPA/runtime markers",
         }
 
     snapshots = collect_snapshots(source_map, fake_fetch)
-    if snapshots["summary"] != {"sources_with_url": 1, "sources_without_url": 1, "fetched_ok": 1, "failed": 0}:
+    if snapshots["summary"] != {"sources_with_url": 1, "sources_without_url": 1, "fetched_ok": 1, "failed": 0, "render_required": 1}:
         raise AssertionError(f"snapshot summary is wrong: {snapshots['summary']}")
     if snapshots["snapshots"][0]["text_excerpt"] != "Fetched source text":
         raise AssertionError("text excerpt missing")
+    if snapshots["snapshots"][0].get("render_required") is not True:
+        raise AssertionError("render_required flag missing from snapshot")
 
     request = {
         "task_id": "test:source_acquisition",

@@ -531,6 +531,13 @@ def main() -> int:
     if decoded_text != "привет" or decoded_encoding != "utf-8":
         raise AssertionError(f"web_fetch charset fallback failed: text={decoded_text}, encoding={decoded_encoding}")
     print("[ok] web_fetch charset fallback")
+    render_reason = web_tools.html_render_hint(
+        '<html><body><div id="root"></div><script>a()</script><script>b()</script><script>c()</script></body></html>',
+        "",
+    )
+    if not render_reason:
+        raise AssertionError("web_fetch render hint missed low-text scripted HTML")
+    print("[ok] web_fetch render-required hint")
 
     old_provider_env = web_tools.SEARCH_PROVIDERS
     old_brave_key = web_tools.BRAVE_SEARCH_API_KEY

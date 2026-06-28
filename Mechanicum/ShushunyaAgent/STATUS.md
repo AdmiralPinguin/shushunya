@@ -120,6 +120,8 @@ Last verified: 2026-06-28 20:21 KST.
 - `web_fetch` detects binary responses and returns metadata without decoded
   binary text.
 - `web_fetch` falls back to UTF-8 when a response declares an unknown charset.
+- `web_fetch` marks low-text scripted HTML with `render_required` so callers do
+  not treat JavaScript-render gaps as empty evidence.
 - Web URL validation rejects credential-bearing URLs and SearXNG scheme
   mismatches.
 - Invalid or non-object JSON request bodies return `400`; oversized request

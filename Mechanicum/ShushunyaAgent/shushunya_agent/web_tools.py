@@ -186,6 +186,29 @@ class WebTextExtractor(HTMLParser):
         return title, " ".join(text.split())
 
 
+def html_render_hint(raw_html: str, extracted_text: str) -> str:
+    sample = raw_html[:100000].lower()
+    text_len = len(" ".join(extracted_text.split()))
+    script_count = sample.count("<script")
+    spa_markers = (
+        'id="app"',
+        "id='app'",
+        'id="root"',
+        "id='root'",
+        "__next",
+        "__nuxt",
+        "webpack",
+        "vite",
+        "window.__",
+        "data-reactroot",
+    )
+    if text_len < 300 and script_count >= 3:
+        return "low extracted text with multiple script tags"
+    if text_len < 800 and any(marker in sample for marker in spa_markers):
+        return "low extracted text with SPA/runtime markers"
+    return ""
+
+
 class DuckDuckGoParser(HTMLParser):
     def __init__(self, limit: int) -> None:
         super().__init__()
@@ -407,10 +430,14 @@ def web_fetch(config: WebConfig, url: str, max_bytes: int | None = None) -> dict
             except json.JSONDecodeError:
                 pass
         if "html" in content_type.lower() or "<html" in text[:500].lower():
+            raw_html = text
             parser = WebTextExtractor()
-            parser.feed(text)
+            parser.feed(raw_html)
             title, text = parser.result()
-        return {
+            render_reason = html_render_hint(raw_html, text)
+        else:
+            render_reason = ""
+        payload = {
             "ok": True,
             "url": final_url,
             "status": getattr(response, "status", 200),
@@ -422,6 +449,10 @@ def web_fetch(config: WebConfig, url: str, max_bytes: int | None = None) -> dict
             "is_binary": False,
             "text": truncate(text.strip(), config.max_tool_output_chars),
         }
+        if render_reason:
+            payload["render_required"] = True
+            payload["render_reason"] = render_reason
+        return payload
 
 
 def web_search(config: WebConfig, query: str, limit: int | None = None) -> dict[str, Any]:
