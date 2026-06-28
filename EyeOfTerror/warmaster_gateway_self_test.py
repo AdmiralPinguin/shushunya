@@ -248,6 +248,7 @@ def main() -> int:
                 or run_summary.get("summary", {}).get("task_id") != "warmaster-test"
                 or run_summary.get("summary", {}).get("revision_plan", {}).get("required")
                 or not run_summary.get("summary", {}).get("actions", {}).get("can_start")
+                or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "source_discovery"
             ):
                 raise AssertionError(f"bad run summary: {run_summary}")
             snapshot = request_json(base + "/runs/warmaster-test/snapshot?events_after=0&event_limit=1")
@@ -321,6 +322,7 @@ def main() -> int:
                 or completed_snapshot.get("revision_plan", {}).get("required")
                 or not completed_snapshot.get("summary", {}).get("actions", {}).get("force_required_for_rerun")
                 or completed_snapshot.get("summary", {}).get("actions", {}).get("can_start")
+                or completed_snapshot.get("summary", {}).get("progress", {}).get("pending_step_ids")
             ):
                 raise AssertionError(f"bad completed run snapshot: {completed_snapshot}")
             artifact_path = artifacts["artifacts"][0]["path"]

@@ -164,19 +164,49 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
     if not isinstance(ledger_steps, list):
         ledger_steps = []
     by_status: dict[str, int] = {}
+    ledger_by_step: dict[str, dict[str, Any]] = {}
     for step in ledger_steps:
         if not isinstance(step, dict):
             continue
+        step_id = str(step.get("step_id") or "")
+        if step_id:
+            ledger_by_step[step_id] = step
         step_status = str(step.get("status") or "unknown")
         by_status[step_status] = by_status.get(step_status, 0) + 1
     completed = by_status.get("completed", 0) + by_status.get("ready", 0)
     failed = by_status.get("failed", 0)
+    planned_step_ids = [
+        str(step.get("step_id") or "")
+        for step in planned_steps
+        if isinstance(step, dict) and step.get("step_id")
+    ]
+    completed_statuses = {"completed", "ready", "passed_with_warnings"}
+    completed_step_ids = [
+        step_id
+        for step_id in planned_step_ids
+        if str(ledger_by_step.get(step_id, {}).get("status") or "") in completed_statuses
+    ]
+    failed_step_ids = [
+        step_id
+        for step_id in planned_step_ids
+        if str(ledger_by_step.get(step_id, {}).get("status") or "") in {"failed", "blocked", "needs_revision", "preflight_failed"}
+    ]
+    pending_step_ids = [
+        step_id
+        for step_id in planned_step_ids
+        if step_id not in completed_step_ids and step_id not in failed_step_ids
+    ]
     return {
         "planned_steps": len(planned_steps),
         "recorded_steps": len(ledger_steps),
         "completed_steps": completed,
         "failed_steps": failed,
         "by_status": by_status,
+        "planned_step_ids": planned_step_ids,
+        "completed_step_ids": completed_step_ids,
+        "failed_step_ids": failed_step_ids,
+        "pending_step_ids": pending_step_ids,
+        "next_step_id": pending_step_ids[0] if pending_step_ids else "",
     }
 
 

@@ -94,6 +94,12 @@ Run summaries include an `actions` object with client-facing booleans:
 `force_required_for_rerun`. Clients should use these hints for button state
 instead of duplicating Warmaster status rules.
 
+Run summaries also include ordered progress hints:
+`planned_step_ids`, `completed_step_ids`, `failed_step_ids`,
+`pending_step_ids`, and `next_step_id`. These are derived from the run package
+and ledger records, so clients can display restart/resume position without
+parsing dispatch packets.
+
 ## Cancellation
 
 `POST /runs/{task_id}/cancel` marks the Warmaster ledger as cancelling and
