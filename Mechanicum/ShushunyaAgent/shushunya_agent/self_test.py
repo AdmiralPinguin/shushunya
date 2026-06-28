@@ -1241,6 +1241,7 @@ def main() -> int:
             return 2, json.dumps({"ok": False, "continuable": True, "message": "limit"}), ""
         return 0, json.dumps({"ok": True, "message": "done"}), ""
 
+    auto_metrics_before = json.loads(json.dumps(server.RUN_METRICS))
     with mock.patch.object(server, "run_agent_once_locked", side_effect=fake_auto_continue_success):
         code, _stdout, _stderr, result = server.run_agent_with_auto_continue(
             "auto continue self-test",
@@ -1251,6 +1252,13 @@ def main() -> int:
         raise AssertionError(f"auto-continue did not reach final success: code={code}, result={result}, calls={len(auto_continue_calls)}")
     if result.get("auto_continue", {}).get("cycles_used") != 2:
         raise AssertionError(f"auto-continue cycle metadata is wrong: {result}")
+    auto_metrics_after = server.runtime_state().get("metrics") or {}
+    if auto_metrics_after.get("runs_started") != auto_metrics_before.get("runs_started", 0) + 1:
+        raise AssertionError(f"auto-continue should count one logical started run: {auto_metrics_after}")
+    if auto_metrics_after.get("runs_completed") != auto_metrics_before.get("runs_completed", 0) + 1:
+        raise AssertionError(f"auto-continue should count one logical completed run: {auto_metrics_after}")
+    if auto_metrics_after.get("runs_failed") != auto_metrics_before.get("runs_failed", 0):
+        raise AssertionError(f"auto-continue internal checkpoints should not count as failed runs: {auto_metrics_after}")
     print("[ok] auto-continue reaches final success")
 
     repeated_continuation = server.continuation_task(

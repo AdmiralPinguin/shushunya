@@ -97,6 +97,8 @@ Last verified: 2026-06-28 20:21 KST.
 - `GET /state` includes process-local quality counters for runs, steps, JSON
   repair, validation rejects, tool failures, timeouts, cancels, and web search
   sources.
+- Auto-continue resume cycles count as one logical run in `/state` metrics
+  instead of inflating started/failed counters for internal continuable stops.
 - `wait_for_slot=false` can fail fast with `409 agent busy` instead of waiting
   behind another active or queued run.
 - Waiting runs are bounded by `SHUSHUNYA_AGENT_MAX_QUEUE`; overflow returns

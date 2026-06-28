@@ -701,7 +701,13 @@ def task_snapshot(task_id: str, limit: int = 120) -> dict[str, Any]:
     }
 
 
-def mark_run_started(config: AgentConfig, *, reset_events: bool = True, consume_queue: bool = True) -> None:
+def mark_run_started(
+    config: AgentConfig,
+    *,
+    reset_events: bool = True,
+    consume_queue: bool = True,
+    count_metrics: bool = True,
+) -> None:
     with STATE_LOCK:
         if consume_queue:
             RUN_STATE["queued"] = max(0, int(RUN_STATE["queued"]) - 1)
@@ -710,21 +716,45 @@ def mark_run_started(config: AgentConfig, *, reset_events: bool = True, consume_
         RUN_STATE["current_task_started_at"] = time.time()
         if reset_events:
             RUN_EVENTS[config.task_id] = []
-    record_run_started()
+    if count_metrics:
+        record_run_started()
 
 
-def mark_run_finished(config: AgentConfig, code: int, result: dict[str, Any] | None = None) -> None:
+def mark_run_finished(
+    config: AgentConfig,
+    code: int,
+    result: dict[str, Any] | None = None,
+    *,
+    count_metrics: bool = True,
+    record_completion: bool = True,
+    clear_cancel: bool = True,
+) -> None:
     with STATE_LOCK:
         started_at = float(RUN_STATE["current_task_started_at"] or 0.0)
         finished_at = time.time()
         RUN_STATE["busy"] = False
+        if record_completion:
+            RUN_STATE["completed"] = int(RUN_STATE["completed"]) + 1
+            RUN_STATE["last_task_id"] = config.task_id
+            RUN_STATE["last_exit_code"] = code
+            RUN_STATE["last_finished_at"] = finished_at
+            RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
+        RUN_STATE["current_task_id"] = ""
+        RUN_STATE["current_task_started_at"] = 0.0
+    if count_metrics:
+        record_run_finished(code, result)
+    if clear_cancel:
+        clear_task_cancelled(config.task_id)
+
+
+def record_logical_run_finished(config: AgentConfig, code: int, result: dict[str, Any], started_at: float) -> None:
+    finished_at = time.time()
+    with STATE_LOCK:
         RUN_STATE["completed"] = int(RUN_STATE["completed"]) + 1
         RUN_STATE["last_task_id"] = config.task_id
         RUN_STATE["last_exit_code"] = code
         RUN_STATE["last_finished_at"] = finished_at
-        RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3) if started_at else 0.0
-        RUN_STATE["current_task_id"] = ""
-        RUN_STATE["current_task_started_at"] = 0.0
+        RUN_STATE["last_duration_sec"] = round(finished_at - started_at, 3)
     record_run_finished(code, result)
     clear_task_cancelled(config.task_id)
 
@@ -736,11 +766,14 @@ def run_agent_once_locked(
     *,
     reset_events: bool = True,
     consume_queue: bool = True,
+    count_metrics: bool = True,
+    record_completion: bool = True,
+    clear_cancel: bool = True,
 ) -> tuple[int, str, str]:
     stdout = io.StringIO()
     stderr = io.StringIO()
     code = 1
-    mark_run_started(config, reset_events=reset_events, consume_queue=consume_queue)
+    mark_run_started(config, reset_events=reset_events, consume_queue=consume_queue, count_metrics=count_metrics)
     RUN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     with RUN_LOCK_FILE.open("w", encoding="utf-8") as lock_fh:
         fcntl.flock(lock_fh, fcntl.LOCK_EX)
@@ -749,7 +782,14 @@ def run_agent_once_locked(
                 code = run_agent(task, config, event_sink=event_sink)
         finally:
             fcntl.flock(lock_fh, fcntl.LOCK_UN)
-            mark_run_finished(config, code, result_from_stdout(code, stdout.getvalue(), stderr.getvalue(), {}))
+            mark_run_finished(
+                config,
+                code,
+                result_from_stdout(code, stdout.getvalue(), stderr.getvalue(), {}),
+                count_metrics=count_metrics,
+                record_completion=record_completion,
+                clear_cancel=clear_cancel,
+            )
     return code, stdout.getvalue(), stderr.getvalue()
 
 
@@ -959,8 +999,11 @@ def run_agent_with_auto_continue(
     final_code = 1
     stop_reason = ""
     cycles_used = 0
+    count_logical_run = enabled
 
     with RUN_LOCK:
+        if count_logical_run:
+            record_run_started()
         for cycle in range(max_cycles + 1):
             if cycle > 0:
                 cycles_used = cycle
@@ -993,6 +1036,9 @@ def run_agent_with_auto_continue(
                 event_sink=cycle_event_sink,
                 reset_events=(cycle == 0),
                 consume_queue=(cycle == 0),
+                count_metrics=not count_logical_run,
+                record_completion=not count_logical_run,
+                clear_cancel=not count_logical_run,
             )
             stdout_chunks.append(stdout_text)
             stderr_chunks.append(stderr_text)
@@ -1032,6 +1078,8 @@ def run_agent_with_auto_continue(
                 str(final_result.get("message") or "agent stopped at a continuable checkpoint")
                 + f" Server auto-continue stopped: {stop_reason}."
             )
+    if count_logical_run:
+        record_logical_run_finished(config, final_code, final_result, start_time)
     return final_code, "".join(stdout_chunks), "".join(stderr_chunks), final_result
 
 
