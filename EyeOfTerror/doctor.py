@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import argparse
+import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +51,10 @@ def check_governors(errors: list[str]) -> int:
         require(owner == name, f"governor port collision on {port}: {owner} and {name}", errors)
         governor_ports[port] = name
         if status == "active":
-            require(bool(item.get("service")), f"active governor {name} must declare service", errors)
+            service = str(item.get("service") or "")
+            require(bool(service), f"active governor {name} must declare service", errors)
+            if service:
+                require(importlib.util.find_spec(service) is not None, f"active governor {name} service is not importable: {service}", errors)
     if isinstance(port_registry, dict):
         for raw_port, item in port_registry.items():
             if not isinstance(item, dict):
