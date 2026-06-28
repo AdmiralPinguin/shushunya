@@ -40,6 +40,8 @@
   `required_workers` are missing from the Mechanicum registry.
 - Warmaster rejects produced task contracts whose `worker_plan` references
   workers absent from the Mechanicum registry.
+- Task contract runtime validation rejects non-string non-goals, completion
+  criteria, and quality gates.
 - Warmaster Gateway can default new task planning to local or HTTP governor
   transport through startup flags, with per-request override.
 - `EyeOfTerror/start_brigade.py` can start the current service-separated

@@ -65,6 +65,10 @@ def main() -> int:
     broken_payload["worker_plan"][0]["depends_on"] = ["missing-step"]
     if not validate_task_contract_payload(broken_payload):
         raise AssertionError("broken lore contract should fail validation")
+    broken_text_list = json.loads(json.dumps(payload))
+    broken_text_list["quality_gates"] = ["source_map_created", 7]
+    if not any("quality_gates[1]" in error for error in validate_task_contract_payload(broken_text_list)):
+        raise AssertionError("task contract validator should reject non-string quality gates")
     if "/work/skalathrax/source_map.json" not in payload["required_artifacts"]:
         raise AssertionError(f"skalathrax artifacts not derived: {payload['required_artifacts']}")
     if "/work/skalathrax/source_snapshots.json" not in payload["required_artifacts"]:

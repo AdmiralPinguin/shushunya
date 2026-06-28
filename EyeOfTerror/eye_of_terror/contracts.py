@@ -205,6 +205,12 @@ def validate_task_contract_payload(payload: dict[str, Any]) -> list[str]:
     for field_name in ("non_goals", "required_artifacts", "completion_criteria", "quality_gates", "worker_plan"):
         if field_name in payload and not isinstance(payload[field_name], list):
             errors.append(f"{field_name} must be a list")
+    for field_name in ("non_goals", "completion_criteria", "quality_gates"):
+        values = payload.get(field_name, [])
+        if isinstance(values, list):
+            for index, item in enumerate(values):
+                if not isinstance(item, str) or not item:
+                    errors.append(f"{field_name}[{index}] must be a non-empty string")
     if not payload.get("completion_criteria"):
         errors.append("completion_criteria must not be empty")
     required_artifacts = payload.get("required_artifacts", [])
