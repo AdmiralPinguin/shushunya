@@ -344,16 +344,28 @@ def preflight_task(message: str, task_id: str | None, run_root: Path, governor_t
         except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
             return {"ok": False, "gateway": "WarmasterGateway", "error": f"governor service unavailable: {exc}", "error_code": "governor_service_unavailable", "governor": governor_ref.name}
         contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else {}
+        oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else {}
     else:
         plan = plan_lore_reconstruction(message, task_id=task_id)
-        contract = plan.contract.to_dict()
+        plan_payload = plan.to_dict()
+        contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else plan.contract.to_dict()
+        oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else {}
     resolved_task_id = str(contract.get("task_id") or "").strip()
     run_dir = run_root / resolved_task_id if resolved_task_id else run_root / "_invalid"
     if resolved_task_id and run_dir.exists():
         return {"ok": False, "gateway": "WarmasterGateway", "error": "task_id already exists", "error_code": "task_exists", "task_id": resolved_task_id, "run_dir": str(run_dir)}
     validation_errors = validate_task_contract_payload(contract)
     missing_workers = [] if validation_errors else missing_contract_workers(contract)
-    ok = not validation_errors and not missing_workers
+    oversight_errors: list[str] = []
+    if not oversight and not validation_errors:
+        oversight_errors.append("governor plan did not include oversight")
+    elif oversight and not validation_errors:
+        status_stub = {"steps": contract_summary(contract).get("steps", [])}
+        oversight_errors = validate_oversight_payload(contract, oversight, status_stub)
+    ok = not validation_errors and not missing_workers and not oversight_errors
+    error_code = ""
+    if not ok:
+        error_code = "contract_workers_missing" if missing_workers else ("invalid_oversight" if oversight_errors else "invalid_task_contract")
     return {
         "ok": ok,
         "gateway": "WarmasterGateway",
@@ -362,10 +374,12 @@ def preflight_task(message: str, task_id: str | None, run_root: Path, governor_t
         "task_id": resolved_task_id,
         "route": {"kind": route.kind, "governor": route.governor},
         "contract_summary": contract_summary(contract),
+        "oversight_summary": compact_oversight_summary(oversight) if oversight else {},
+        "oversight_validation": {"ok": not oversight_errors, "errors": oversight_errors},
         "validation": {"ok": not validation_errors, "errors": validation_errors},
         "missing_workers": missing_workers,
         "would_create_run_dir": str(run_dir) if resolved_task_id else "",
-        "error_code": "" if ok else ("contract_workers_missing" if missing_workers else "invalid_task_contract"),
+        "error_code": error_code,
     }
 
 
@@ -803,13 +817,8 @@ def run_oversight_validation_errors(run_dir: Path, status: dict[str, Any]) -> li
     return validate_oversight_against_run(run_dir, oversight, status)
 
 
-def validate_oversight_against_run(run_dir: Path, oversight: dict[str, Any], status: dict[str, Any]) -> list[str]:
+def validate_oversight_payload(contract: dict[str, Any], oversight: dict[str, Any], status: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    contract_payload = run_contract(run_dir)
-    contract = contract_payload.get("contract") if isinstance(contract_payload.get("contract"), dict) else {}
-    if not contract_payload.get("ok"):
-        errors.append(str(contract_payload.get("error") or "contract unavailable"))
-        return errors
     governor = str(oversight.get("governor") or "")
     if governor != str(contract.get("assigned_governor") or ""):
         errors.append("oversight governor does not match contract assigned_governor")
@@ -845,6 +854,14 @@ def validate_oversight_against_run(run_dir: Path, oversight: dict[str, Any], sta
             if str(to_step) not in steps_by_id:
                 errors.append(f"oversight handoffs[{index}].to_steps references unknown step: {to_step}")
     return errors
+
+
+def validate_oversight_against_run(run_dir: Path, oversight: dict[str, Any], status: dict[str, Any]) -> list[str]:
+    contract_payload = run_contract(run_dir)
+    contract = contract_payload.get("contract") if isinstance(contract_payload.get("contract"), dict) else {}
+    if not contract_payload.get("ok"):
+        return [str(contract_payload.get("error") or "contract unavailable")]
+    return validate_oversight_payload(contract, oversight, status)
 
 
 def run_dispatch_packets(run_dir: Path) -> dict[str, Any]:

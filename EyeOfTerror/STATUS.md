@@ -54,6 +54,8 @@
   contract, and worker checks without creating run history.
 - Task preflight contract summaries expose planned worker steps, dependency
   edges, and expected artifacts.
+- Task preflight exposes compact governor oversight summaries and validation so
+  clients can inspect final review expectations before creating run history.
 - Run progress exposes per-step input, expected, and produced artifact statuses.
 - Run progress exposes dependency readiness through ready, blocked, and
   dependency-status step hints for higher-level governors.

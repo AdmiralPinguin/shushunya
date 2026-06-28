@@ -409,6 +409,8 @@ def main() -> int:
                 or preflight_steps[1].get("depends_on") != ["source_discovery"]
                 or preflight_steps[1].get("expected_artifacts") != ["/work/skalathrax/source_snapshots.json"]
                 or preflight_steps[1].get("expected_artifact_count") != 1
+                or preflight.get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
+                or not preflight.get("oversight_validation", {}).get("ok")
             ):
                 raise AssertionError(f"task preflight should not create a run: {preflight}")
             task = request_json(
