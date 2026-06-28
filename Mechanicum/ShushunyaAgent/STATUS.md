@@ -74,6 +74,8 @@ Last verified: 2026-06-28 20:21 KST.
 - Runtime action schema validation rejects unsupported actions, unknown fields,
   bad field types, enum mismatches, unsafe absolute sandbox paths, and
   out-of-range numeric limits before dispatch.
+- Tool schema self-test verifies not only action names and fields, but also
+  schema-declared field type/enum constraints against runtime validation.
 - Shared truncation/JSON compaction helpers and task journal code live outside
   the runner module while preserving the public runner imports used by the API.
 - Web fetch/search providers and URL safety checks live in a dedicated web tools

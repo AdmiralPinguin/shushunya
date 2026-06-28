@@ -93,6 +93,61 @@ def main() -> int:
     if tool_schema != generated_schema:
         mismatches = tool_contract.schema_contract_mismatches(tool_schema)
         raise AssertionError(f"tool schema/runtime contract mismatch: {mismatches[:10]}")
+    def schema_sample_value(action_type: str, field: str, descriptor):
+        if field == "action":
+            return action_type
+        if field == "files":
+            return [{"path": "/work/schema_contract.txt", "content": "ok"}]
+        if isinstance(descriptor, list):
+            return descriptor[0]
+        descriptor_text = str(descriptor)
+        if "boolean" in descriptor_text:
+            return True
+        if "integer" in descriptor_text:
+            return 1024 if field in {"max_bytes", "max_chars", "max_hash_bytes", "max_bytes_per_file"} else 1
+        if field in {"url", "start_url", "end_url"} or "public_http_url" in descriptor_text:
+            return "https://example.com/page"
+        if field in {"cwd", "workdir"}:
+            return "/work"
+        if "sandbox_path" in descriptor_text or field in {"path", "output_txt", "output_fb2", "path_template"}:
+            return "/work/schema_contract.txt"
+        return "value"
+
+    def schema_invalid_value(field: str, descriptor):
+        if isinstance(descriptor, list):
+            return "__invalid_enum_value__"
+        descriptor_text = str(descriptor)
+        if "boolean" in descriptor_text:
+            return "not-bool"
+        if "integer" in descriptor_text:
+            return "not-int"
+        if "string or string array" in descriptor_text:
+            return 123
+        if "array" in descriptor_text or field == "files":
+            return "not-array"
+        return 123
+
+    for action_type, action_contract in tool_schema.get("actions", {}).items():
+        properties = action_contract.get("properties") or {}
+        required = set(action_contract.get("required") or [])
+        base_action = {
+            field: schema_sample_value(action_type, field, properties.get(field))
+            for field in required
+            if field in properties
+        }
+        base_result = agent_runner.validate_action(base_action)
+        if not base_result.get("ok"):
+            raise AssertionError(f"schema-generated valid action was rejected: action={base_action}, result={base_result}")
+        for field, descriptor in properties.items():
+            if field == "action":
+                continue
+            invalid_action = dict(base_action)
+            invalid_action[field] = schema_invalid_value(field, descriptor)
+            invalid_result = agent_runner.validate_action(invalid_action)
+            if invalid_result.get("ok") is not False:
+                raise AssertionError(
+                    f"schema field constraint was not enforced: action={action_type}, field={field}, value={invalid_action[field]}"
+                )
     print("[ok] tool schema matches runtime contract")
     if '"limit":100' not in agent_runner.SYSTEM_PROMPT or "is_binary=true" not in agent_runner.SYSTEM_PROMPT:
         raise AssertionError("system prompt missing file pagination or binary web_fetch guidance")
