@@ -2052,11 +2052,31 @@ def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
         for item in payload.get("source_hints", [])
         if isinstance(item, str) and item
     ] if isinstance(payload, dict) else []
+    missing_symbols: list[str] = []
+    failures = payload.get("failures", []) if isinstance(payload, dict) else []
+    if isinstance(failures, list):
+        for item in failures:
+            if not isinstance(item, dict):
+                continue
+            traceback_text = str(item.get("traceback") or "")
+            for match in re.finditer(r"NameError: name ['\"]([^'\"]+)['\"] is not defined", traceback_text):
+                symbol = match.group(1)
+                if symbol not in missing_symbols:
+                    missing_symbols.append(symbol)
     enriched["passing_tests"] = passing[:20]
     enriched["failing_tests"] = failing[:20]
     if source_hints:
         enriched["candidate_source_paths"] = source_hints[:20]
+    if missing_symbols:
+        enriched["missing_symbols"] = missing_symbols[:10]
     if failing:
+        missing_symbol_instruction = (
+            " The failure includes missing_symbols="
+            + json.dumps(missing_symbols[:10], ensure_ascii=False)
+            + ". Before changing unrelated logic, define or import the missing symbol in the edited source file, then rerun the full test/fallback set."
+            if missing_symbols
+            else ""
+        )
         enriched["supervisor_instruction"] = (
             "The pytest fallback ran existing tests and some failed. Do not ignore these failures or verify only a subset. "
             "Preserve behavior covered by passing tests and make the narrowest code change that makes every failing test pass. "
@@ -2066,6 +2086,7 @@ def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
                 else ""
             )
             + "Run pytest/fallback again after the edit and final only when all tests pass."
+            + missing_symbol_instruction
         )
     elif passing:
         enriched["supervisor_instruction"] = "The pytest fallback ran existing tests and all discovered tests passed."

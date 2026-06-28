@@ -3739,16 +3739,18 @@ def main() -> int:
         "ok": False,
         "stdout": json.dumps({
             "results": [{"ok": False, "file": "tests/test_textkit.py", "test": "test_slugify_lowercase"}],
-            "failures": [{"test": "test_slugify_lowercase"}],
+            "failures": [{"test": "test_slugify_lowercase", "traceback": "NameError: name 'timedelta' is not defined"}],
             "source_hints": ["/work/project/textkit/normalize.py"],
         }),
     })
     if (
         enriched_source_hints.get("candidate_source_paths") != ["/work/project/textkit/normalize.py"]
         or "candidate_source_paths" not in str(enriched_source_hints.get("supervisor_instruction") or "")
+        or enriched_source_hints.get("missing_symbols") != ["timedelta"]
+        or "missing_symbols" not in str(enriched_source_hints.get("supervisor_instruction") or "")
     ):
         raise AssertionError(f"pytest fallback source hints missing from model result: {enriched_source_hints}")
-    print("[ok] pytest fallback includes source hints")
+    print("[ok] pytest fallback includes source hints and missing symbols")
 
     compacted_fallback_result = agent_runner.result_for_model("shell", {
         "ok": False,
