@@ -56,6 +56,7 @@ Clients should use:
 
 - `GET /state` after startup or reconnect.
 - `GET /brigade_plan` for expected service topology diagnostics.
+- `GET /brigade_health` for expected topology plus best-effort service health.
 - `GET /runs/{task_id}/snapshot?events_after=N` for per-run polling.
 - `POST /runs/{task_id}/cancel` for cancellation.
 - `GET /doctor` for admin diagnostics.

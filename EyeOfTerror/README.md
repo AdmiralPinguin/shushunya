@@ -121,6 +121,8 @@ services by default.
 `GET /brigade_plan` and `GET /state` expose the expected service-separated
 brigade topology, including Warmaster, Iskandar, and registered Mechanicum
 workers.
+`GET /brigade_health` combines that topology with best-effort service health
+checks.
 
 Start the current service-separated brigade with:
 

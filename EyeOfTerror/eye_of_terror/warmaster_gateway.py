@@ -755,6 +755,32 @@ def brigade_plan_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
     )
 
 
+def brigade_health_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
+    host = validate_service_host(host)
+    plan = brigade_plan_snapshot(host=host)
+    governors = governor_registry_snapshot(include_health=True, host=host)
+    workers = worker_registry_snapshot(include_health=True, host=host)
+    reachable_governors = sum(1 for item in governors if item.get("runtime", {}).get("reachable"))
+    reachable_workers = sum(1 for item in workers if item.get("runtime", {}).get("reachable"))
+    return {
+        "ok": True,
+        "gateway": "WarmasterGateway",
+        "host": host,
+        "plan": plan,
+        "services": {
+            "warmaster_gateway": {"name": "WarmasterGateway", "host": host, "port": 7000, "reachable": True},
+            "governors": governors,
+            "workers": workers,
+        },
+        "summary": {
+            "governors_total": len(governors),
+            "governors_reachable": reachable_governors,
+            "workers_total": len(workers),
+            "workers_reachable": reachable_workers,
+        },
+    }
+
+
 def gateway_capabilities() -> dict[str, Any]:
     return {
         "ok": True,
@@ -786,6 +812,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "worker_registry",
             "worker_health_snapshot",
             "brigade_plan_snapshot",
+            "brigade_health_snapshot",
             "state_snapshot",
             "process_active_run_snapshot",
             "run_action_hints",
@@ -799,6 +826,8 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /doctor",
             "GET /brigade_plan",
             "GET /brigade_plan?host=127.0.0.1",
+            "GET /brigade_health",
+            "GET /brigade_health?host=127.0.0.1",
             "GET /governors",
             "GET /governors?health=1",
             "GET /workers",
@@ -947,6 +976,16 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 host = query.get("host", ["127.0.0.1"])[0]
                 try:
                     payload = brigade_plan_snapshot(host=host)
+                except ValueError as exc:
+                    response(self, 400, {"ok": False, "error": str(exc)})
+                    return
+                response(self, 200, payload)
+                return
+            if parsed.path == "/brigade_health":
+                query = parse_qs(parsed.query)
+                host = query.get("host", ["127.0.0.1"])[0]
+                try:
+                    payload = brigade_health_snapshot(host=host)
                 except ValueError as exc:
                     response(self, 400, {"ok": False, "error": str(exc)})
                     return

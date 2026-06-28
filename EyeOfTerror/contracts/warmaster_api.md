@@ -13,6 +13,8 @@ GET  /state
 GET  /doctor
 GET  /brigade_plan
 GET  /brigade_plan?host=127.0.0.1
+GET  /brigade_health
+GET  /brigade_health?host=127.0.0.1
 GET  /governors
 GET  /governors?health=1
 GET  /workers
@@ -70,6 +72,9 @@ service-separated brigade startup plan.
 
 `GET /brigade_plan` returns the same expected service topology without run
 history. The optional `host` query parameter must be loopback.
+
+`GET /brigade_health` combines that topology with best-effort health checks for
+governors and workers.
 
 ## Task Creation
 

@@ -38,6 +38,8 @@
   capabilities, governors, workers, and recent runs.
 - Warmaster Gateway exposes the expected service-separated brigade topology
   through `GET /brigade_plan` and embeds it in `GET /state`.
+- Warmaster Gateway exposes `GET /brigade_health` for combined expected
+  topology and best-effort governor/worker health.
 - Warmaster Gateway exposes `GET /doctor` for registry and manifest diagnostics.
 - Warmaster Gateway exposes focused run inspection endpoints for contract,
   dispatch packets, and ledger event history.
