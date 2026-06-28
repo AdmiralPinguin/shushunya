@@ -41,6 +41,24 @@ def main() -> int:
             capabilities = request_json(base + "/capabilities")
             if capabilities.get("worker") != "NoosphericExtractor" or not isinstance(capabilities.get("capabilities"), list):
                 raise AssertionError(f"bad capabilities response: {capabilities}")
+            try:
+                request_json(
+                    base + "/run",
+                    {
+                        "request": {
+                            "input_artifacts": ["/work/test/source_map.json"],
+                            "step": {"expected_artifacts": ["/work/test/should_not_exist.json"]},
+                        }
+                    },
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                missing_task_id = json.loads(exc.read().decode("utf-8"))
+                if missing_task_id.get("error") != "task_id is required":
+                    raise AssertionError(f"bad missing task_id response: {missing_task_id}")
+            else:
+                raise AssertionError("worker runtime should reject /run without task_id")
             result = request_json(
                 base + "/run",
                 {

@@ -181,6 +181,9 @@ def make_handler(
                     raise ValueError("request body must be a JSON object")
                 request = payload.get("request") if isinstance(payload.get("request"), dict) else payload
                 task_id = str(request.get("task_id") or payload.get("task_id") or "")
+                if not task_id:
+                    response(self, 400, {"ok": False, "worker": worker_name, "status": "failed", "error": "task_id is required"})
+                    return
                 packet_worker = str(payload.get("worker") or "").strip()
                 if packet_worker and packet_worker != worker_name:
                     result = {

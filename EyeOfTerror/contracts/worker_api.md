@@ -60,6 +60,9 @@ contract says a missing input is an explicit blocker. The shared Mechanicum
 runtime and local EyeOfTerror executor reject missing or non-`/work/` input
 artifacts before calling the worker implementation.
 
+`task_id` is required. Worker runtimes must reject `/run` requests without it so
+orchestrators can poll, cancel, and audit every worker step through `/tasks`.
+
 `revision_context` is optional. Orchestrators set it only when rerunning a
 worker from a failed or blocked run's `revision_plan`. Workers should treat it
 as focused correction context, not as user input, and should still validate all

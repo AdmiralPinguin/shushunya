@@ -34,6 +34,8 @@
 - Worker services expose `GET /health`, `GET /capabilities`, `POST /run`,
   `GET /tasks`, `GET /tasks/{task_id}`, and
   `POST /tasks/{task_id}/cancel` through the shared runtime.
+- The shared worker runtime rejects `/run` requests without `task_id` so every
+  worker step remains pollable and cancellable.
 - The shared worker runtime rejects dispatch packets addressed to a different
   worker before calling worker code.
 - The shared worker runtime and local executor reject missing or invalid
