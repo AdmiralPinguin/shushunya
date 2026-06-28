@@ -110,6 +110,10 @@ def write_pipeline_run(contract: TaskContract, run_dir: Path, oversight: dict[st
     dispatch_dir = run_dir / "dispatch"
     dispatch_dir.mkdir(parents=True, exist_ok=True)
     packets = build_dispatch_packets(contract)
+    current_packet_names = {f"{packet.step_id}.json" for packet in packets}
+    for stale_packet in dispatch_dir.glob("*.json"):
+        if stale_packet.name not in current_packet_names:
+            stale_packet.unlink()
     contract_path = run_dir / "contract.json"
     oversight_path = run_dir / "oversight.json"
     status_path = run_dir / "status.json"

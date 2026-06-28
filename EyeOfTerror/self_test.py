@@ -174,6 +174,9 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as temp_dir:
         oversight = plan_lore_reconstruction(task, task_id="test-skalathrax").to_dict()["oversight"]
+        stale_dispatch = Path(temp_dir) / "dispatch" / "stale_step.json"
+        stale_dispatch.parent.mkdir(parents=True, exist_ok=True)
+        stale_dispatch.write_text("{}", encoding="utf-8")
         status = write_pipeline_run(contract, Path(temp_dir), oversight=oversight)
         if not status["ok"]:
             raise AssertionError(f"pipeline status failed: {status}")
@@ -194,6 +197,8 @@ def main() -> int:
         missing = [name for name in expected_files if not (Path(temp_dir) / name).exists()]
         if missing:
             raise AssertionError(f"pipeline run did not write expected files: {missing}")
+        if stale_dispatch.exists():
+            raise AssertionError(f"pipeline run left stale dispatch packet: {stale_dispatch}")
         leftovers = list(Path(temp_dir).glob("**/*.tmp"))
         if leftovers:
             raise AssertionError(f"pipeline run left atomic temp files: {leftovers}")

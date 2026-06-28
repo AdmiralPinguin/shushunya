@@ -46,6 +46,8 @@
 - Warmaster Gateway can prepare Iskandar run packages, expose run status, execute local dev pipelines, and execute HTTP worker-service pipelines.
 - Warmaster Gateway can preflight existing run packages before local or HTTP
   execution without starting workers.
+- Pipeline run package writing removes obsolete dispatch packets before writing
+  the current governor plan.
 - Run preflight rejects missing, corrupt, or contract-inconsistent governor
   oversight before execution.
 - Warmaster capabilities advertise run execution preflight support.
