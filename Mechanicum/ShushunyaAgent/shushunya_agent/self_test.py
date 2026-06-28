@@ -4594,6 +4594,57 @@ def main() -> int:
         raise AssertionError(f"SWE CLI verification should run after rejected final: {swe_cli_requires_verify_payload}")
     print("[ok] SWE final requires CLI verification after edit")
 
+    swe_cli_input_discovery_stdout = io.StringIO()
+    swe_cli_input_discovery_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-cli-input-discovery-after-tests"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+
+    def fake_cli_input_discovery_file(_config: AgentConfig, action: dict) -> dict:
+        if action.get("action") == "list_files":
+            return {
+                "ok": True,
+                "items": [
+                    {"path": "/work/project/jobs.csv", "type": "file"},
+                    {"path": "/work/project/package/cli.py", "type": "file"},
+                ],
+            }
+        return {"ok": True, "path": str(action.get("path") or "/work/project/core.py")}
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"write_file","path":"/work/project/core.py","content":"print(1)"}',
+            '{"action":"shell","cmd":"cd /work/project && python3 -m pytest -q","timeout":60}',
+            '{"action":"list_files","path":"/work/project","max_depth":3,"limit":100,"offset":0}',
+            '{"action":"final","message":"still needs cli"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "/usr/bin/python3: No module named pytest\n",
+    }), mock.patch.object(agent_runner, "python_tool", return_value={
+            "ok": True,
+            "passing_tests": ["tests/test_core.py::test_core"],
+            "failing_tests": [],
+    }), mock.patch.object(agent_runner, "file_tool", side_effect=fake_cli_input_discovery_file) as mocked_cli_input_file, \
+            contextlib.redirect_stdout(swe_cli_input_discovery_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(
+            "Исправь Python-проект. CLI должен печатать валидный JSON; проверь python3 -m package.cli.\n\n"
+            "Рабочий каталог для этой задачи: /work/project",
+            swe_cli_input_discovery_config,
+        )
+    swe_cli_input_discovery_payload = json.loads(swe_cli_input_discovery_stdout.getvalue())
+    cli_input_discovery_results = [step.get("result") or {} for step in swe_cli_input_discovery_payload.get("steps", [])]
+    if not any((call.args[1] if len(call.args) > 1 else {}).get("action") == "list_files" for call in mocked_cli_input_file.call_args_list):
+        raise AssertionError(f"SWE CLI input discovery list_files did not run: {swe_cli_input_discovery_payload}")
+    if any(result.get("error") == "swe cli verification required by supervisor" for result in cli_input_discovery_results):
+        raise AssertionError(f"SWE CLI input discovery was blocked before input contract existed: {swe_cli_input_discovery_payload}")
+    print("[ok] SWE CLI input discovery after tests")
+
     swe_resume_cli_stdout = io.StringIO()
     swe_resume_cli_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-resume-cli-requires-verify"),

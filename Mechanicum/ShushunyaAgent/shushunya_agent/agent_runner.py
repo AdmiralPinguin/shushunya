@@ -5510,6 +5510,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and (swe_verified_after_edit or swe_resume_requires_cli_verification)
                 and (last_cli_required_swe_edit_path or swe_resume_requires_cli_verification)
                 and (expected_cli_modules or expected_cli_input_paths)
+                and not (expected_cli_modules and not expected_cli_input_paths and action_type in {"list_files", "find_files"})
                 and not swe_cli_verification_attempted_after_edit
                 and not action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
             ):
@@ -5521,11 +5522,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "expected_cli_input_paths": sorted(expected_cli_input_paths),
                     "instruction": (
                         "The code already passed the unit-test/fallback verification after the last edit, but the user task "
-                        "also requires CLI/command-interface behavior. Do not inspect files or run marker checks before the "
-                        "first CLI verification. Run the requested CLI command or an equivalent action that invokes the "
+                        "also requires CLI/command-interface behavior. Run the requested CLI command or an equivalent action that invokes the "
                         "entrypoint/subprocess and validates stdout/JSON output. If expected_cli_modules is non-empty, "
                         "invoke one of those modules with python -m and the real input file from the workspace. If "
-                        "expected_cli_input_paths is non-empty, use one of those existing files instead of generating a dummy input."
+                        "expected_cli_input_paths is non-empty, use one of those existing files instead of generating a dummy input. "
+                        "If expected_cli_modules is known but expected_cli_input_paths is empty and the CLI needs a file, "
+                        "use list_files/find_files once to discover real workspace input files, then run the CLI verification."
                     ),
                 }
             elif (
