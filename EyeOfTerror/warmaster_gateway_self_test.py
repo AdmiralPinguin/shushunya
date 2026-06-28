@@ -105,6 +105,38 @@ def main() -> int:
                 raise AssertionError(f"Warmaster accepted an invalid task contract: {bad_contract}")
         finally:
             warmaster_gateway.plan_lore_reconstruction = original_planner
+        try:
+            class MissingWorkerContract:
+                task_id = "missing-worker-contract"
+                goal = "missing worker"
+
+                def to_dict(self) -> dict:
+                    return {
+                        "version": 1,
+                        "task_id": self.task_id,
+                        "kind": "research",
+                        "goal": self.goal,
+                        "assigned_governor": "IskandarKhayon",
+                        "completion_criteria": ["done"],
+                        "worker_plan": [
+                            {
+                                "step_id": "missing",
+                                "worker": "MissingMechanicum",
+                                "purpose": "prove worker plan preflight",
+                            }
+                        ],
+                    }
+
+            warmaster_gateway.plan_lore_reconstruction = lambda _message, task_id=None: type("MissingWorkerPlan", (), {"contract": MissingWorkerContract()})()
+            missing_worker_contract = warmaster_gateway.prepare_task(
+                "Собери все известное о событиях Скалатракса.",
+                "missing-worker-contract",
+                run_root,
+            )
+            if missing_worker_contract.get("error_code") != "contract_workers_missing" or (run_root / "missing-worker-contract").exists():
+                raise AssertionError(f"Warmaster accepted a contract with a missing worker: {missing_worker_contract}")
+        finally:
+            warmaster_gateway.plan_lore_reconstruction = original_planner
         bad_dispatch = Path(temp_dir) / "bad-dispatch" / "dispatch"
         bad_dispatch.mkdir(parents=True, exist_ok=True)
         (bad_dispatch / "broken.json").write_text("{", encoding="utf-8")

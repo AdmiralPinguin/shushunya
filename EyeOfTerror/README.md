@@ -118,6 +118,8 @@ service on its registry port, keeping the planning boundary compatible with
 future Inner Circle services.
 Before preparing an HTTP-governor run, Warmaster checks reachable governor
 `required_workers` against the Mechanicum registry.
+Warmaster also rejects any produced task contract whose `worker_plan` references
+workers absent from the Mechanicum registry.
 
 Warmaster Gateway can also be started with `--governor-transport http` and
 `--governor-host 127.0.0.1` so ordinary client task submissions use governor

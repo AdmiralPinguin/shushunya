@@ -110,6 +110,10 @@ For HTTP governor planning, Warmaster reads reachable governor capabilities and
 rejects the task with `error_code=governor_workers_missing` when
 `required_workers` are absent from the Mechanicum registry.
 
+For every planning path, Warmaster rejects a produced task contract with
+`error_code=contract_workers_missing` when `worker_plan` references workers that
+are absent from the Mechanicum registry.
+
 ## Run Inspection
 
 Clients should use:

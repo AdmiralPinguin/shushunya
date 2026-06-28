@@ -158,6 +158,17 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "task_id": service_task_id,
             "validation": {"ok": False, "errors": validation_errors},
         }
+    missing_workers = missing_contract_workers(contract)
+    if missing_workers:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "governor task contract references missing Mechanicum workers",
+            "error_code": "contract_workers_missing",
+            "task_id": service_task_id,
+            "governor": governor.name,
+            "missing_workers": missing_workers,
+        }
     run_dir = run_root / service_task_id
     if run_dir.exists():
         return {
@@ -241,6 +252,18 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "error_code": "invalid_task_contract",
             "task_id": plan.contract.task_id,
             "validation": {"ok": False, "errors": validation_errors},
+        }
+    contract_payload = plan.contract.to_dict()
+    missing_workers = missing_contract_workers(contract_payload)
+    if missing_workers:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "governor task contract references missing Mechanicum workers",
+            "error_code": "contract_workers_missing",
+            "task_id": plan.contract.task_id,
+            "governor": governor,
+            "missing_workers": missing_workers,
         }
     status = write_pipeline_run(plan.contract, run_dir)
     TaskLedger.create(run_dir / "task_ledger.json", plan.contract.task_id, plan.contract.goal, governor)
@@ -737,6 +760,18 @@ def fetch_service_capabilities(host: str, port: int, timeout_sec: float = 1.0) -
 def required_workers_from_capabilities(payload: dict[str, Any]) -> list[str]:
     raw_required = payload.get("required_workers") if isinstance(payload.get("required_workers"), list) else []
     return [str(worker) for worker in raw_required if str(worker)]
+
+
+def missing_contract_workers(contract: dict[str, Any]) -> list[str]:
+    available_workers = {worker.name for worker in worker_refs()}
+    worker_plan = contract.get("worker_plan") if isinstance(contract.get("worker_plan"), list) else []
+    required = []
+    for step in worker_plan:
+        if isinstance(step, dict):
+            worker = str(step.get("worker") or "")
+            if worker and worker not in required:
+                required.append(worker)
+    return [worker for worker in required if worker not in available_workers]
 
 
 def enrich_worker_metadata(worker: dict[str, Any]) -> dict[str, Any]:
