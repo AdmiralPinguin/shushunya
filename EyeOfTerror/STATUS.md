@@ -241,6 +241,8 @@
   malformed interrupted ledgers that need inspection.
 - Warmaster exposes bulk recovery start endpoints that resume valid
   interrupted runs while reporting malformed run packages per item.
+- Bulk recovery start results expose per-run `next_action` and executable
+  `client_action` fields for started, already-active, and skipped runs.
 - Warmaster Gateway supports cursor-based ledger event polling with
   `/runs/{task_id}/events?after=N`.
 - Warmaster Gateway exposes aggregate cursor-based run event polling through

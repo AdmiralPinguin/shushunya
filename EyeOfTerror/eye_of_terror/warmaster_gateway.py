@@ -3232,6 +3232,8 @@ def start_recoverable_runs(run_root: Path, mode: str, host: str = "127.0.0.1", t
     candidates = recovery_summary(all_runs).get("candidates", [])
     results: list[dict[str, Any]] = []
     started_count = 0
+    poll_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "run started in background"}
+    inspect_action = {"kind": "inspect_package", "method": "GET", "endpoint": "GET /runs/{task_id}/package", "body": {}, "reason": "run could not be resumed automatically"}
     for candidate in candidates:
         task_id = str(candidate.get("task_id") or "")
         if not task_id:
@@ -3264,12 +3266,39 @@ def start_recoverable_runs(run_root: Path, mode: str, host: str = "127.0.0.1", t
                     execution_mode="resume",
                 )
             if not start_background(task_id, executor):
-                results.append({"task_id": task_id, "ok": False, "status": "already_active"})
+                already_active_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "run is already active"}
+                results.append(
+                    {
+                        "task_id": task_id,
+                        "ok": False,
+                        "status": "already_active",
+                        "next_action": already_active_action,
+                        "client_action": executable_client_action(task_id, already_active_action),
+                    }
+                )
                 continue
             started_count += 1
-            results.append({"task_id": task_id, "ok": True, "status": "started", "step_ids": step_ids})
+            results.append(
+                {
+                    "task_id": task_id,
+                    "ok": True,
+                    "status": "started",
+                    "step_ids": step_ids,
+                    "next_action": poll_action,
+                    "client_action": executable_client_action(task_id, poll_action),
+                }
+            )
         except Exception as exc:  # noqa: BLE001 - one malformed recoverable run must not block the queue.
-            results.append({"task_id": task_id, "ok": False, "status": "skipped", "error": str(exc)})
+            results.append(
+                {
+                    "task_id": task_id,
+                    "ok": False,
+                    "status": "skipped",
+                    "error": str(exc),
+                    "next_action": inspect_action,
+                    "client_action": executable_client_action(task_id, inspect_action),
+                }
+            )
     return {
         "ok": True,
         "mode": mode,

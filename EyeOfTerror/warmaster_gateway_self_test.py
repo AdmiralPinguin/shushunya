@@ -1726,6 +1726,16 @@ def main() -> int:
                 bulk_started.get("started", 0) < 1
                 or not any(item.get("task_id") == "warmaster-bulk-recovery-test" and item.get("ok") for item in bulk_started.get("results", []))
                 or not any(item.get("task_id") == "stale-test" and not item.get("ok") for item in bulk_started.get("results", []))
+                or not any(
+                    item.get("task_id") == "warmaster-bulk-recovery-test"
+                    and item.get("client_action", {}).get("path") == "/runs/warmaster-bulk-recovery-test/snapshot"
+                    for item in bulk_started.get("results", [])
+                )
+                or not any(
+                    item.get("task_id") == "stale-test"
+                    and item.get("client_action", {}).get("path") == "/runs/stale-test/package"
+                    for item in bulk_started.get("results", [])
+                )
             ):
                 raise AssertionError(f"bulk recovery did not start valid runs and skip malformed runs: {bulk_started}")
             for _ in range(60):

@@ -105,7 +105,9 @@ Operators can call `POST /recovery/start_resume_local` or
 `POST /recovery/start_resume_http` to start all currently recoverable
 interrupted runs in the background. The response is per-run: a malformed or
 incomplete run package must be reported as skipped instead of blocking other
-recoverable runs.
+recoverable runs. Each per-run result carries `next_action` and executable
+`client_action` for polling started runs, polling already-active runs, or
+inspecting skipped run packages.
 Use `GET /state?health=1` for an admin/bootstrap snapshot that also includes
 best-effort `brigade_health`; plain `/state` stays lightweight for polling.
 
