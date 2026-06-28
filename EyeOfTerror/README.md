@@ -105,8 +105,8 @@ only the requested rework steps, then `critic_review` and `finalize`. Revision
 reruns pass focused `revision_context` into the selected worker request; writer,
 critic, and finalizer artifacts preserve that focus as `revision_focus`.
 
-Resume endpoints rerun an `interrupted` package through local or HTTP execution
-and reject non-interrupted runs.
+Resume endpoints run only the pending steps of an `interrupted` package through
+local or HTTP execution and reject non-interrupted runs.
 
 `GET /runs/<task_id>/worker_tasks` maps a Warmaster run to the task ids sent to
 Mechanicum workers. Add `?live=1` for a best-effort lookup against worker

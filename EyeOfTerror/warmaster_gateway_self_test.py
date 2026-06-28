@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import eye_of_terror.warmaster_gateway as warmaster_gateway
-from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, resolve_run_child_path, revision_step_ids_from_run, valid_task_id, validate_service_host
+from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
 
 
@@ -370,6 +370,19 @@ def main() -> int:
             resumed_events = [event.get("type") for event in resumed_ledger.get("ledger", {}).get("events", [])]
             if "resume_execution_requested" not in resumed_events or resumed_ledger.get("ledger", {}).get("status") != "completed":
                 raise AssertionError(f"resume execution was not recorded: {resumed_ledger}")
+            partial_resume = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-partial-resume-test"},
+            )
+            if not partial_resume.get("ok"):
+                raise AssertionError(f"bad partial resume task response: {partial_resume}")
+            partial_run_dir = Path(partial_resume["run_dir"])
+            partial_ledger = TaskLedger.load(partial_run_dir / "task_ledger.json")
+            partial_ledger.record_step("source_discovery", "Lexmechanic", "completed", ["/work/skalathrax/source_map.json"], "done")
+            partial_ledger.set_status("interrupted")
+            partial_steps = resume_step_ids_from_run(partial_run_dir)
+            if partial_steps[:2] != ["source_acquisition", "fact_extraction"] or "source_discovery" in partial_steps:
+                raise AssertionError(f"partial resume did not skip completed steps: {partial_steps}")
             ledger_path = run_dir / "task_ledger.json"
             ledger_payload = json.loads(ledger_path.read_text(encoding="utf-8"))
             ledger_payload.setdefault("result", {})["revision_plan"] = {

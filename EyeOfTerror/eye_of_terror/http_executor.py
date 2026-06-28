@@ -125,6 +125,7 @@ def execute_run(
     timeout_sec: int = 1800,
     workspace_root: Path | None = None,
     step_ids: list[str] | None = None,
+    execution_mode: str = "full",
 ) -> dict[str, Any]:
     contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
     ledger_path = run_dir / "task_ledger.json"
@@ -141,7 +142,8 @@ def execute_run(
     ledger.set_status("running")
     revision_contexts = revision_contexts_from_result(ledger.data.get("result", {}) if isinstance(ledger.data.get("result"), dict) else {})
     if step_ids:
-        ledger.record_event("revision_execution_started", {"step_ids": step_ids, "mode": "http"})
+        event_type = f"{execution_mode}_execution_started" if execution_mode in {"revision", "resume"} else "restricted_execution_started"
+        ledger.record_event(event_type, {"step_ids": step_ids, "mode": "http"})
     if ledger.cancel_requested():
         summary = {"ok": False, "run_dir": str(run_dir), "host": host, "steps": [], "cancelled": True}
         write_json_atomic(run_dir / "http_execution_report.json", summary)
@@ -189,7 +191,11 @@ def execute_run(
     }
     if step_ids:
         summary["step_ids"] = step_ids
-        summary["revision_execution"] = True
+        summary["execution_mode"] = execution_mode
+        if execution_mode == "revision":
+            summary["revision_execution"] = True
+        if execution_mode == "resume":
+            summary["resume_execution"] = True
     if isinstance(final_payload, dict) and isinstance(final_payload.get("revision_plan"), dict):
         summary["revision_plan"] = final_payload["revision_plan"]
     report_path = run_dir / "http_execution_report.json"
@@ -219,7 +225,7 @@ def main() -> int:
     parser.add_argument("--timeout-sec", type=int, default=1800)
     parser.add_argument("--step-id", action="append", default=[], help="Restrict execution to one or more dispatch step ids")
     args = parser.parse_args()
-    summary = execute_run(Path(args.run_dir), args.host, args.timeout_sec, step_ids=args.step_id or None)
+    summary = execute_run(Path(args.run_dir), args.host, args.timeout_sec, step_ids=args.step_id or None, execution_mode="restricted" if args.step_id else "full")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary.get("ok") else 1
 
