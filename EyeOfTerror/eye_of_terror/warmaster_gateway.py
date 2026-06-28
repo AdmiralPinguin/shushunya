@@ -269,6 +269,17 @@ def route_failure_payload(route: Any) -> dict[str, Any]:
         "kind": route.kind,
         "governor": route.governor,
         "route": {"kind": route.kind, "governor": route.governor, "ok": route.ok, "reason": route.reason},
+        "actions": {
+            "can_create_task": False,
+            "can_check_brigade_readiness": True,
+            "next_action": {
+                "kind": "inspect_capabilities",
+                "method": "GET",
+                "endpoint": "GET /capabilities",
+                "body": {},
+                "reason": "no active governor can accept this task",
+            },
+        },
     }
 
 

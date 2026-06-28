@@ -589,7 +589,12 @@ def main() -> int:
                 if exc.code != 400:
                     raise
                 rejected_preflight = json.loads(exc.read().decode("utf-8"))
-                if rejected_preflight.get("error_code") != "governor_inactive" or rejected_preflight.get("governor") != "ForgeMasterGovernor":
+                if (
+                    rejected_preflight.get("error_code") != "governor_inactive"
+                    or rejected_preflight.get("governor") != "ForgeMasterGovernor"
+                    or rejected_preflight.get("actions", {}).get("can_create_task")
+                    or rejected_preflight.get("actions", {}).get("next_action", {}).get("kind") != "inspect_capabilities"
+                ):
                     raise AssertionError(f"bad unsupported preflight route response: {rejected_preflight}")
             else:
                 raise AssertionError("unsupported image preflight should be rejected until an image governor exists")

@@ -73,6 +73,8 @@
 - Task preflight responses expose `actions.can_create_task` and
   `actions.next_action` so chat clients can continue without hardcoded flow
   rules.
+- Task routing failures also expose action hints that direct clients toward
+  gateway capability inspection instead of attempting run creation.
 - Governor API contract checks document the active Iskandar required worker
   chain exposed through `/capabilities`.
 - Iskandar `/plan` resolves worker metadata and reports planned workers as
