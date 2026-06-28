@@ -96,6 +96,8 @@
   method/path/body fields with `task_id` already resolved from `next_action`.
 - Recovery summaries expose executable `client_action` method/path/body fields
   for each interrupted-run candidate.
+- Recovery summaries expose compact `display` fields so clients can render
+  startable and blocked interrupted-run recovery without custom diagnostics.
 - Task preflight contract summaries expose planned worker steps, dependency
   edges, and expected artifacts.
 - Task preflight exposes compact governor oversight summaries and validation so

@@ -98,9 +98,9 @@ the service-separated brigade is runnable.
 Clients can call `GET /recovery` when they only need the recoverable interrupted
 run list without a full bootstrap snapshot. Each candidate reports
 `resume_ready`, `resume_errors`, pending step ids, and executable
-`client_action` method/path/body fields so clients can separate startable
-recovery work from malformed run packages that need inspection without
-rebuilding recovery endpoints.
+`client_action` method/path/body fields. Candidates also include compact
+`display` fields so chat/mobile clients can render startable recovery work and
+malformed run packages without rebuilding recovery diagnostics.
 Operators can call `POST /recovery/start_resume_local` or
 `POST /recovery/start_resume_http` to start all currently recoverable
 interrupted runs in the background. The response is per-run: a malformed or

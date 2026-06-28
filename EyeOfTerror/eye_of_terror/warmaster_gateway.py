@@ -1064,6 +1064,33 @@ def run_orchestration_cards(runs: list[dict[str, Any]], active_task_ids: list[st
     return [run_orchestration_card(run, active=str(run.get("task_id") or "") in active_set) for run in runs]
 
 
+def recovery_candidate_display(run: dict[str, Any], resume_ready: bool, resume_errors: list[str], pending_step_ids: list[Any]) -> dict[str, Any]:
+    progress = run.get("progress") if isinstance(run.get("progress"), dict) else {}
+    planned_steps = int(progress.get("planned_steps") or 0)
+    completed_steps = int(progress.get("completed_steps") or 0)
+    failed_steps = int(progress.get("failed_steps") or 0)
+    pending_steps = len(pending_step_ids) if pending_step_ids else int(progress.get("pending_steps") or 0)
+    if resume_ready:
+        headline = "Recovery is ready"
+        detail = f"{pending_steps} pending steps can resume"
+        severity = "info"
+    else:
+        headline = "Recovery needs inspection"
+        detail = resume_errors[0] if resume_errors else "Run package cannot be resumed automatically"
+        severity = "warning"
+    return {
+        "headline": headline,
+        "detail": detail,
+        "severity": severity,
+        "progress": {
+            "planned_steps": planned_steps,
+            "completed_steps": completed_steps,
+            "failed_steps": failed_steps,
+            "pending_steps": pending_steps,
+        },
+    }
+
+
 def recovery_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     for run in runs:
@@ -1090,6 +1117,7 @@ def recovery_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
                 "resume_errors": resume_errors,
                 "next_action": next_action,
                 "client_action": executable_client_action(task_id, next_action),
+                "display": recovery_candidate_display(run, resume_ready, resume_errors, pending_step_ids),
             }
         )
     startable = [candidate for candidate in candidates if candidate.get("resume_ready")]

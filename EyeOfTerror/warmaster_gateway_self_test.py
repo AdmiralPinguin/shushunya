@@ -1657,6 +1657,7 @@ def main() -> int:
                     item.get("task_id") == "stale-test"
                     and item.get("next_action", {}).get("kind") == "resume"
                     and item.get("client_action", {}).get("path") == "/runs/stale-test/start_resume_http"
+                    and item.get("display", {}).get("headline") == "Recovery needs inspection"
                     for item in recovery_state.get("recovery", {}).get("candidates", [])
                 )
             ):
@@ -1678,6 +1679,8 @@ def main() -> int:
                 raise AssertionError(f"recovery endpoint should diagnose malformed stale runs: {recovery_endpoint}")
             if stale_recovery.get("client_action", {}).get("path") != "/runs/stale-test/start_resume_http":
                 raise AssertionError(f"recovery endpoint did not expose executable client action: {recovery_endpoint}")
+            if stale_recovery.get("display", {}).get("severity") != "warning":
+                raise AssertionError(f"recovery endpoint did not expose blocked display state: {recovery_endpoint}")
             bulk_task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bulk-recovery-test"},
@@ -1696,6 +1699,7 @@ def main() -> int:
                 or not bulk_recovery.get("resume_ready")
                 or not bulk_recovery.get("pending_step_ids")
                 or bulk_recovery.get("client_action", {}).get("path") != "/runs/warmaster-bulk-recovery-test/start_resume_http"
+                or bulk_recovery.get("display", {}).get("headline") != "Recovery is ready"
             ):
                 raise AssertionError(f"recovery endpoint should expose startable resume packages: {recovery_with_bulk}")
             bulk_started = request_json(base + "/recovery/start_resume_local", {"timeout_sec": 30}, timeout=60)
