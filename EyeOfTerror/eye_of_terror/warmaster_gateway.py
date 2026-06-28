@@ -580,17 +580,31 @@ def recovery_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
         if run.get("status") != "interrupted" or not actions.get("can_resume"):
             continue
         next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+        resume_ready = False
+        resume_errors: list[str] = []
+        pending_step_ids = run.get("progress", {}).get("pending_step_ids", []) if isinstance(run.get("progress"), dict) else []
+        try:
+            pending_step_ids = resume_step_ids_from_run(Path(str(run.get("run_dir") or "")))
+            resume_ready = True
+        except Exception as exc:  # noqa: BLE001 - recovery listing should diagnose malformed run packages.
+            resume_errors.append(str(exc))
         candidates.append(
             {
                 "task_id": str(run.get("task_id") or ""),
                 "status": str(run.get("status") or ""),
                 "updated_at": str(run.get("updated_at") or ""),
-                "pending_step_ids": run.get("progress", {}).get("pending_step_ids", []) if isinstance(run.get("progress"), dict) else [],
+                "pending_step_ids": pending_step_ids,
+                "resume_ready": resume_ready,
+                "resume_errors": resume_errors,
                 "next_action": next_action,
             }
         )
+    startable = [candidate for candidate in candidates if candidate.get("resume_ready")]
+    blocked = [candidate for candidate in candidates if not candidate.get("resume_ready")]
     return {
         "recoverable": len(candidates),
+        "startable": len(startable),
+        "blocked": len(blocked),
         "task_ids": [candidate["task_id"] for candidate in candidates if candidate.get("task_id")],
         "candidates": candidates,
     }

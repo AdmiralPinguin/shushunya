@@ -103,6 +103,8 @@
   with resume `next_action` hints.
 - Warmaster exposes `GET /recovery` for lightweight interrupted-run recovery
   queues.
+- Recovery summaries distinguish startable interrupted run packages from
+  malformed interrupted ledgers that need inspection.
 - Warmaster exposes bulk recovery start endpoints that resume valid
   interrupted runs while reporting malformed run packages per item.
 - Warmaster Gateway supports cursor-based ledger event polling with

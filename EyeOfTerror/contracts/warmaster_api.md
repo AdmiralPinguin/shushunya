@@ -80,7 +80,9 @@ section listing interrupted runs whose action hints allow resume. `state.actions
 `capabilities.actions` expose client-facing gateway action hints, including the
 preferred task flow: preflight, create, then start.
 Clients can call `GET /recovery` when they only need the recoverable interrupted
-run list without a full bootstrap snapshot.
+run list without a full bootstrap snapshot. Each candidate reports
+`resume_ready`, `resume_errors`, and pending step ids so clients can separate
+startable recovery work from malformed run packages that need inspection.
 Operators can call `POST /recovery/start_resume_local` or
 `POST /recovery/start_resume_http` to start all currently recoverable
 interrupted runs in the background. The response is per-run: a malformed or

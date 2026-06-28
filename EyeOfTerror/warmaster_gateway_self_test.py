@@ -909,6 +909,12 @@ def main() -> int:
                 or "stale-test" not in recovery_endpoint.get("recovery", {}).get("task_ids", [])
             ):
                 raise AssertionError(f"recovery endpoint did not expose stale run: {recovery_endpoint}")
+            stale_recovery = next(
+                (item for item in recovery_endpoint.get("recovery", {}).get("candidates", []) if item.get("task_id") == "stale-test"),
+                {},
+            )
+            if stale_recovery.get("resume_ready") or not stale_recovery.get("resume_errors"):
+                raise AssertionError(f"recovery endpoint should diagnose malformed stale runs: {recovery_endpoint}")
             bulk_task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bulk-recovery-test"},
@@ -917,6 +923,17 @@ def main() -> int:
                 raise AssertionError(f"bad bulk recovery task response: {bulk_task}")
             bulk_ledger_path = Path(bulk_task["run_dir"]) / "task_ledger.json"
             TaskLedger.load(bulk_ledger_path).set_status("interrupted")
+            recovery_with_bulk = request_json(base + "/recovery")
+            bulk_recovery = next(
+                (item for item in recovery_with_bulk.get("recovery", {}).get("candidates", []) if item.get("task_id") == "warmaster-bulk-recovery-test"),
+                {},
+            )
+            if (
+                recovery_with_bulk.get("recovery", {}).get("startable", 0) < 1
+                or not bulk_recovery.get("resume_ready")
+                or not bulk_recovery.get("pending_step_ids")
+            ):
+                raise AssertionError(f"recovery endpoint should expose startable resume packages: {recovery_with_bulk}")
             bulk_started = request_json(base + "/recovery/start_resume_local", {"timeout_sec": 30}, timeout=60)
             if (
                 bulk_started.get("started", 0) < 1
