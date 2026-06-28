@@ -1601,6 +1601,41 @@ def main() -> int:
         raise AssertionError("oversized inline python guard matched a normal short python action")
     print("[ok] oversized inline python guard")
 
+    oversized_python_recovery_stdout = io.StringIO()
+    oversized_python_recovery_config = AgentConfig(
+        task_id=safe_task_id("self-test-oversized-python-recovery"),
+        json_output=True,
+        max_steps=4,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    oversized_python_replies = [
+        '{"action":"python","cwd":"/work/project","code":"' + ("import csv\\n" * 180),
+        '{"action":"list_files","path":"/work/project","max_depth":1}',
+        '{"action":"final","message":"Recovery guard checked."}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=oversized_python_replies), \
+            contextlib.redirect_stdout(oversized_python_recovery_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        oversized_python_recovery_code = run_agent(
+            "Check oversized inline python recovery.",
+            oversized_python_recovery_config,
+        )
+    oversized_python_recovery_payload = json.loads(oversized_python_recovery_stdout.getvalue())
+    oversized_python_recovery_errors = [
+        (step.get("result") or {}).get("error")
+        for step in oversized_python_recovery_payload.get("steps", [])
+    ]
+    if (
+        oversized_python_recovery_code != 0
+        or "oversized inline python recovery action rejected by supervisor" not in oversized_python_recovery_errors
+    ):
+        raise AssertionError(
+            "oversized inline python recovery did not reject inspection: "
+            f"code={oversized_python_recovery_code}, payload={oversized_python_recovery_payload}"
+        )
+    print("[ok] oversized inline python recovery rejects inspection")
+
     parse_stall_stdout = io.StringIO()
     parse_stall_config = AgentConfig(
         task_id=safe_task_id("self-test-json-parse-stall"),

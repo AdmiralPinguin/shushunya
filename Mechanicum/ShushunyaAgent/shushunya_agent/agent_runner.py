@@ -1335,6 +1335,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "stale failed-cli replace_in_file rejected by supervisor",
     "append_file to JSON rejected by supervisor",
     "verified text artifact mutation rejected by supervisor",
+    "oversized inline python recovery action rejected by supervisor",
 }
 
 
@@ -4787,6 +4788,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     swe_syntax_error_cycles = 0
     last_swe_syntax_error = ""
     last_required_artifact_hint = ""
+    pending_oversized_inline_python_recovery = False
     trace: list[dict[str, Any]] = []
     write_task_journal(
         config,
@@ -5020,6 +5022,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     messages.append({"role": "user", "content": message})
                     continue
                 if looks_like_oversized_inline_python_action(raw, exc):
+                    pending_oversized_inline_python_recovery = True
                     message = (
                         "Supervisor blocked an oversized inline python action. The model tried to put too much code or embedded "
                         "data inside one JSON code field, which is unreliable and was truncated. Do not retry a large inline "
@@ -5128,6 +5131,26 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "instruction": (
                     "replace_in_file old and new are identical, so this edit cannot change behavior or fix failing tests. "
                     "Return a real edit with different new text, use write_file for a complete corrected file, or run verification if no edit is needed."
+                ),
+            }
+        if (
+            forced_supervisor_result is None
+            and pending_oversized_inline_python_recovery
+            and (
+                action_type in INSPECTION_ACTIONS
+                or action_looks_like_python_inspection(action_type, action)
+                or (action_type == "shell" and looks_like_inspection_shell(str(action.get("cmd", ""))))
+            )
+        ):
+            forced_supervisor_result = {
+                "ok": False,
+                "error": "oversized inline python recovery action rejected by supervisor",
+                "action": action,
+                "instruction": (
+                    "The previous model response was an oversized/truncated inline python action. "
+                    "Do not recover by listing, reading, searching, or running inspection-only code. "
+                    "Return one short productive action next: a compact python action that opens/parses real files from cwd, "
+                    "a write_file/append_file script chunk, a verify_text_file action for an existing artifact, or final if complete."
                 ),
             }
         if (
@@ -6748,6 +6771,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             python_inspection_action = action_looks_like_python_inspection(action_type, action)
             if action_type in PRODUCTIVE_ACTIONS and not python_inspection_action:
                 inspection_actions_since_progress = 0
+                pending_oversized_inline_python_recovery = False
             elif action_type in INSPECTION_ACTIONS or python_inspection_action:
                 inspection_actions_since_progress += 1
             if required_artifact_paths and not (set(successful_write_file_paths) & required_artifact_paths):
