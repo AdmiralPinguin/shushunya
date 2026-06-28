@@ -44,6 +44,8 @@
   criteria, and quality gates.
 - Task contract runtime validation requires every required artifact to have one
   worker-plan producer and rejects duplicate artifact producers.
+- Task contract JSON schema mirrors runtime `/work/...` artifact path and
+  non-empty string constraints.
 - Warmaster Gateway can default new task planning to local or HTTP governor
   transport through startup flags, with per-request override.
 - `EyeOfTerror/start_brigade.py` can start the current service-separated

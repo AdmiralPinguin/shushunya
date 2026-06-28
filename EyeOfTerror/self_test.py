@@ -31,6 +31,12 @@ def main() -> int:
         raise AssertionError("task contract schema and runtime validator constants disagree")
     if step_required != WORKER_STEP_REQUIRED_FIELDS or step_fields != WORKER_STEP_FIELDS:
         raise AssertionError("worker step schema and runtime validator constants disagree")
+    if schema.get("properties", {}).get("required_artifacts", {}).get("items", {}).get("pattern") != "^/work/":
+        raise AssertionError("task contract schema should require /work required_artifacts")
+    if step_schema.get("properties", {}).get("expected_artifacts", {}).get("items", {}).get("pattern") != "^/work/":
+        raise AssertionError("task contract schema should require /work expected_artifacts")
+    if step_schema.get("properties", {}).get("worker", {}).get("minLength") != 1:
+        raise AssertionError("task contract schema should require non-empty worker names")
     print("[ok] task contract schema")
 
     workers = worker_refs()

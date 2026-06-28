@@ -14,21 +14,21 @@
     "goal": { "type": "string", "minLength": 1 },
     "non_goals": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": { "type": "string", "minLength": 1 }
     },
     "assigned_governor": { "type": "string", "minLength": 1 },
     "required_artifacts": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": { "type": "string", "pattern": "^/work/" }
     },
     "completion_criteria": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "string" }
+      "items": { "type": "string", "minLength": 1 }
     },
     "quality_gates": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": { "type": "string", "minLength": 1 }
     },
     "worker_plan": {
       "type": "array",
@@ -38,15 +38,15 @@
         "additionalProperties": false,
         "properties": {
           "step_id": { "type": "string", "minLength": 1 },
-          "worker": { "type": "string" },
-          "purpose": { "type": "string" },
+          "worker": { "type": "string", "minLength": 1 },
+          "purpose": { "type": "string", "minLength": 1 },
           "depends_on": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": { "type": "string", "minLength": 1 }
           },
           "expected_artifacts": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": { "type": "string", "pattern": "^/work/" }
           }
         }
       }
