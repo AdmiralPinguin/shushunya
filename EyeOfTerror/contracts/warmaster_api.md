@@ -17,6 +17,7 @@ GET  /workers
 GET  /workers?health=1
 POST /task
 GET  /runs
+GET  /runs?limit=20
 GET  /runs/{task_id}
 GET  /runs/{task_id}/summary
 GET  /runs/{task_id}/ledger

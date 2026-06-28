@@ -396,6 +396,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /workers?health=1",
             "POST /task",
             "GET /runs",
+            "GET /runs?limit=20",
             "GET /runs/{task_id}",
             "GET /runs/{task_id}/summary",
             "GET /runs/{task_id}/ledger",
@@ -540,8 +541,11 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 return
             parts = [part for part in parsed.path.split("/") if part]
             if parts == ["runs"]:
-                runs = list_runs(run_root)
-                response(self, 200, {"ok": True, "run_summary": run_status_summary(runs), "runs": runs})
+                query = parse_qs(parsed.query)
+                raw_limit = query.get("limit", [""])[0]
+                all_runs = list_runs(run_root)
+                runs = all_runs[: parse_limit(raw_limit, default=MAX_LIST_LIMIT)] if raw_limit else all_runs
+                response(self, 200, {"ok": True, "run_summary": run_status_summary(all_runs), "runs": runs})
                 return
             if len(parts) in {2, 3} and parts[0] == "runs":
                 task_id = parts[1]

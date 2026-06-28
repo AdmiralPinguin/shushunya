@@ -182,6 +182,9 @@ def main() -> int:
                 or not any(item.get("task_id") == "warmaster-test" and item.get("progress", {}).get("planned_steps") == 7 for item in run_list.get("runs", []))
             ):
                 raise AssertionError(f"bad run list: {run_list}")
+            limited_run_list = request_json(base + "/runs?limit=1")
+            if not limited_run_list.get("ok") or len(limited_run_list.get("runs", [])) != 1 or limited_run_list.get("run_summary", {}).get("total", 0) < 2:
+                raise AssertionError(f"bad limited run list: {limited_run_list}")
             executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
             if not executed.get("ok"):
                 raise AssertionError(f"bad local execution: {executed}")
