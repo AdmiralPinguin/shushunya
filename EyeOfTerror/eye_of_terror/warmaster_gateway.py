@@ -14,10 +14,10 @@ from urllib.parse import parse_qs, quote, urlparse
 from .contracts import validate_task_contract_payload
 from .inner_circle.iskandar import plan_lore_reconstruction
 from doctor import run_doctor
-from .http_executor import execute_run as execute_http_run
+from .http_executor import execute_run as execute_http_run, preflight_workers as preflight_http_workers
 from .governors import governor_by_name, governor_refs
 from .ledger import TaskLedger
-from .local_executor import execute_run as execute_local_run, ordered_dispatch_paths
+from .local_executor import WORKER_COMMANDS, execute_run as execute_local_run, input_artifact_errors, ordered_dispatch_paths
 from .pipeline import write_pipeline_run
 from .registry import worker_refs
 from .routing import route_message
@@ -358,6 +358,13 @@ def load_json_object(path: Path, label: str) -> tuple[dict[str, Any], str]:
     return payload, ""
 
 
+def load_json_file(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"JSON file must contain an object: {path}")
+    return payload
+
+
 def sandbox_artifact_file_status(workspace_root: str, sandbox_path: str) -> dict[str, Any]:
     item: dict[str, Any] = {"path": sandbox_path}
     if workspace_root and sandbox_path.startswith("/work/"):
@@ -652,6 +659,101 @@ def run_step_artifacts(run_dir: Path, step_id: str) -> dict[str, Any]:
         "expected_artifact_status": step.get("expected_artifact_status", []),
         "artifacts": step.get("artifacts", []),
         "artifact_status": step.get("artifact_status", []),
+    }
+
+
+def run_execution_preflight(
+    run_dir: Path,
+    mode: str,
+    workspace_root: Path | None = None,
+    host: str = "127.0.0.1",
+    timeout_sec: int = 10,
+    step_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    if mode not in {"local", "http"}:
+        raise ValueError("mode must be local or http")
+    host = validate_service_host(host)
+    status = load_json_file(run_dir / "status.json")
+    planned_steps = status.get("steps") if isinstance(status.get("steps"), list) else []
+    selected = set(step_ids or [])
+    order = [
+        str(step.get("step_id") or "")
+        for step in planned_steps
+        if isinstance(step, dict) and step.get("step_id") and (not selected or str(step.get("step_id") or "") in selected)
+    ]
+    selected_order = {step_id: index for index, step_id in enumerate(order)}
+    producer_by_artifact: dict[str, str] = {}
+    for step in planned_steps:
+        if not isinstance(step, dict):
+            continue
+        step_id = str(step.get("step_id") or "")
+        expected = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
+        for artifact in expected:
+            if isinstance(artifact, str):
+                producer_by_artifact[artifact] = step_id
+
+    dispatch_errors: list[dict[str, Any]] = []
+    input_failures: list[dict[str, Any]] = []
+    step_checks: list[dict[str, Any]] = []
+    missing_local_commands: list[dict[str, Any]] = []
+    for dispatch_path in ordered_dispatch_paths(run_dir, step_ids=step_ids):
+        try:
+            packet = load_json_file(dispatch_path)
+        except Exception as exc:  # noqa: BLE001 - preflight reports all unreadable dispatch packets.
+            dispatch_errors.append({"dispatch": str(dispatch_path), "error": str(exc)})
+            continue
+        step_id = str(packet.get("step_id") or dispatch_path.stem)
+        worker = str(packet.get("worker") or "")
+        request = packet.get("request") if isinstance(packet.get("request"), dict) else packet
+        input_artifacts = request.get("input_artifacts") if isinstance(request.get("input_artifacts"), list) else []
+        input_status: list[dict[str, Any]] = []
+        for artifact in input_artifacts:
+            artifact_text = str(artifact)
+            producer = producer_by_artifact.get(artifact_text, "")
+            produced_by_selected = producer in selected_order and selected_order[producer] < selected_order.get(step_id, -1)
+            status_item: dict[str, Any] = {
+                "path": artifact_text,
+                "producer_step_id": producer,
+                "produced_by_selected_step": produced_by_selected,
+            }
+            if produced_by_selected:
+                status_item["exists"] = None
+                status_item["source"] = "selected_dependency"
+            elif workspace_root is not None:
+                errors = input_artifact_errors({"input_artifacts": [artifact]}, workspace_root)
+                status_item.update(sandbox_artifact_file_status(str(workspace_root), artifact_text))
+                if errors:
+                    status_item["errors"] = errors
+                    input_failures.append({"step_id": step_id, "worker": worker, "path": artifact_text, "errors": errors})
+            else:
+                status_item["exists"] = None
+                status_item["source"] = "workspace_unknown"
+            input_status.append(status_item)
+        if mode == "local" and worker not in WORKER_COMMANDS:
+            missing_local_commands.append({"step_id": step_id, "worker": worker, "error": "no local command registered"})
+        step_checks.append(
+            {
+                "step_id": step_id,
+                "worker": worker,
+                "dispatch": str(dispatch_path),
+                "input_artifacts": input_artifacts,
+                "input_artifact_status": input_status,
+            }
+        )
+    worker_failures = preflight_http_workers(run_dir, host, timeout_sec, step_ids=step_ids) if mode == "http" else []
+    return {
+        "ok": not dispatch_errors and not input_failures and not missing_local_commands and not worker_failures,
+        "task_id": run_dir.name,
+        "mode": mode,
+        "run_dir": str(run_dir),
+        "host": host if mode == "http" else "",
+        "workspace_root": str(workspace_root) if workspace_root is not None else "",
+        "step_ids": order,
+        "steps": step_checks,
+        "dispatch_errors": dispatch_errors,
+        "input_failures": input_failures,
+        "missing_local_commands": missing_local_commands,
+        "worker_preflight_failures": worker_failures,
     }
 
 
@@ -1040,6 +1142,8 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/artifacts",
             "GET /runs/{task_id}/artifact_text?path=/work/...",
             "GET /runs/{task_id}/artifact_text?path=/work/...&max_bytes=1000",
+            "POST /runs/{task_id}/preflight_local",
+            "POST /runs/{task_id}/preflight_http",
             "POST /runs/{task_id}/execute_local",
             "POST /runs/{task_id}/execute_http",
             "POST /runs/{task_id}/execute_revision_local",
@@ -1415,6 +1519,8 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     )
                     return
                 execution_modes = {
+                    "preflight_local",
+                    "preflight_http",
                     "execute_local",
                     "execute_http",
                     "start_local",
@@ -1436,6 +1542,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         return
                     ledger_path = run_dir / "task_ledger.json"
                     force = bool(payload.get("force"))
+                    preflight_mode = parts[2] in {"preflight_local", "preflight_http"}
                     revision_mode = "revision" in parts[2]
                     resume_mode = "resume" in parts[2]
                     if ledger_path.exists():
@@ -1452,7 +1559,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                                 },
                             )
                             return
-                        if not force and ledger_data.get("status") == "completed" and not revision_mode:
+                        if not preflight_mode and not force and ledger_data.get("status") == "completed" and not revision_mode:
                             response(
                                 self,
                                 409,
@@ -1465,10 +1572,42 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             return
                         if resume_mode:
                             ledger.record_event("resume_execution_requested", {"mode": parts[2]})
-                    restricted_step_ids = revision_step_ids_from_run(run_dir) if revision_mode else (resume_step_ids_from_run(run_dir) if resume_mode else None)
+                    requested_preflight_steps = payload.get("step_ids") if preflight_mode and isinstance(payload.get("step_ids"), list) else []
+                    preflight_step_ids = [
+                        str(item).strip()
+                        for item in requested_preflight_steps
+                        if isinstance(item, str) and str(item).strip()
+                    ]
+                    restricted_step_ids = (
+                        preflight_step_ids
+                        if preflight_step_ids
+                        else (revision_step_ids_from_run(run_dir) if revision_mode else (resume_step_ids_from_run(run_dir) if resume_mode else None))
+                    )
                     workspace_root = resolve_run_child_path(run_dir, str(payload.get("workspace_root") or ""), "work")
                     timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
                     execution_mode = "revision" if revision_mode else ("resume" if resume_mode else "full")
+                    if parts[2] in {"preflight_local", "preflight_http"}:
+                        if parts[2] == "preflight_http":
+                            host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
+                            http_workspace_root = workspace_root if "workspace_root" in payload else None
+                            preflight = run_execution_preflight(
+                                run_dir,
+                                mode="http",
+                                workspace_root=http_workspace_root,
+                                host=host,
+                                timeout_sec=timeout_sec,
+                                step_ids=restricted_step_ids,
+                            )
+                        else:
+                            preflight = run_execution_preflight(
+                                run_dir,
+                                mode="local",
+                                workspace_root=workspace_root,
+                                timeout_sec=timeout_sec,
+                                step_ids=restricted_step_ids,
+                            )
+                        response(self, 200 if preflight.get("ok") else 409, preflight)
+                        return
                     if parts[2] in {"execute_local", "start_local", "execute_revision_local", "start_revision_local", "resume_local", "start_resume_local"}:
                         executor = lambda: execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec, step_ids=restricted_step_ids, execution_mode=execution_mode)
                     else:

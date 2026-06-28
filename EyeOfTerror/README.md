@@ -62,6 +62,8 @@ Gateway endpoints:
 - `GET /runs/<task_id>/events?after=N`
 - `GET /runs/<task_id>/artifacts`
 - `GET /runs/<task_id>/artifact_text?path=/work/...`
+- `POST /runs/<task_id>/preflight_local`
+- `POST /runs/<task_id>/preflight_http`
 - `POST /runs/<task_id>/execute_local`
 - `POST /runs/<task_id>/execute_http`
 - `POST /runs/<task_id>/execute_revision_local`

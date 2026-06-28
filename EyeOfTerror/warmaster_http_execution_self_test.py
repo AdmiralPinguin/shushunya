@@ -82,6 +82,9 @@ def main() -> int:
                 worker_threads.append(thread)
                 ports_by_worker[worker] = server.server_port
             patch_dispatch_ports(run_dir, ports_by_worker)
+            preflight = request_json(base + "/runs/warmaster-http-test/preflight_http", {"timeout_sec": 30}, timeout=60)
+            if not preflight.get("ok") or len(preflight.get("steps", [])) != len(status["steps"]):
+                raise AssertionError(f"gateway HTTP preflight failed: {preflight}")
             executed = request_json(base + "/runs/warmaster-http-test/execute_http", {"timeout_sec": 30}, timeout=60)
             if not executed.get("ok"):
                 raise AssertionError(f"gateway HTTP execution failed: {executed}")

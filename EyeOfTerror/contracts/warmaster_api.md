@@ -41,6 +41,8 @@ GET  /runs/{task_id}/events?after=0
 GET  /runs/{task_id}/artifacts
 GET  /runs/{task_id}/artifact_text?path=/work/...
 GET  /runs/{task_id}/artifact_text?path=/work/...&max_bytes=1000
+POST /runs/{task_id}/preflight_local
+POST /runs/{task_id}/preflight_http
 POST /runs/{task_id}/execute_local
 POST /runs/{task_id}/execute_http
 POST /runs/{task_id}/execute_revision_local
@@ -169,6 +171,15 @@ dispatch package. Cancellation is cooperative unless a worker implements a
 stronger interruption mechanism.
 
 ## Execution Paths
+
+`POST /runs/{task_id}/preflight_local` and
+`POST /runs/{task_id}/preflight_http` inspect an existing run package without
+executing workers. They report unreadable dispatch packets, missing local worker
+commands, HTTP worker health failures, and input artifact failures. Full-run
+preflight treats artifacts produced by earlier selected steps as satisfiable by
+the same run; restricted preflight can accept `step_ids` and then requires
+unselected dependency artifacts to already exist when a `workspace_root` is
+provided.
 
 If execution endpoints accept `workspace_root`, that path must stay inside the
 selected run directory. Relative paths are resolved below the run directory.

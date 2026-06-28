@@ -384,6 +384,19 @@ def main() -> int:
             run_dir = Path(task["run_dir"])
             if not (run_dir / "dispatch" / "source_discovery.json").exists():
                 raise AssertionError(f"gateway did not prepare run package: {task}")
+            run_preflight = request_json(base + "/runs/warmaster-test/preflight_local", {"timeout_sec": 30})
+            if not run_preflight.get("ok") or run_preflight.get("step_ids", [])[0] != "source_discovery":
+                raise AssertionError(f"bad local run preflight: {run_preflight}")
+            try:
+                request_json(base + "/runs/warmaster-test/preflight_local", {"step_ids": ["fact_extraction"], "timeout_sec": 30})
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                blocked_preflight = json.loads(exc.read().decode("utf-8"))
+                if blocked_preflight.get("ok") or not blocked_preflight.get("input_failures"):
+                    raise AssertionError(f"restricted run preflight should require existing inputs: {blocked_preflight}")
+            else:
+                raise AssertionError("restricted local run preflight should fail before dependency artifacts exist")
             try:
                 revision_step_ids_from_run(run_dir)
             except ValueError as exc:
