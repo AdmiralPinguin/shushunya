@@ -20,6 +20,17 @@ DEFAULT_WORKERS = [
 ]
 
 
+def default_workers(repo_root: Path) -> list[str]:
+    services = load_services(repo_root)
+    return [
+        name
+        for name, _service in sorted(
+            services.items(),
+            key=lambda item: (int(item[1].get("port") or 0), item[0]),
+        )
+    ]
+
+
 def build_command(repo_root: Path, worker: str, workspace_root: Path, host: str) -> list[str]:
     return [
         sys.executable,
@@ -47,12 +58,12 @@ def main() -> int:
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--workspace-root", default="runtime/mechanicum-work")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--workers", default=",".join(DEFAULT_WORKERS))
+    parser.add_argument("--workers", default="")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     repo_root = Path(args.repo_root).resolve()
     workspace_root = Path(args.workspace_root)
-    workers = [item.strip() for item in args.workers.split(",") if item.strip()]
+    workers = [item.strip() for item in args.workers.split(",") if item.strip()] if args.workers else default_workers(repo_root)
     commands = commands_for_workers(repo_root, workers, workspace_root, args.host)
     if args.dry_run:
         for command in commands:
