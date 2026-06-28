@@ -240,6 +240,9 @@
   dispatch packets, and ledger event history.
 - Warmaster exposes `GET /runs/{task_id}/package` for combined run-package
   diagnostics across contract, oversight, status, and dispatch files.
+- Run-package diagnostics include `run_summary`, `phase`, `decision`,
+  `display`, `next_action`, and executable `client_action` fields so clients
+  can render the diagnostic state and continue from the same response.
 - Warmaster action hints block start, resume, and revision actions when
   run-package diagnostics fail and point clients to package inspection.
 - Warmaster capabilities expose preferred run-inspection endpoints for clients.

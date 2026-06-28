@@ -308,7 +308,11 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
   bounded text previews. `max_bytes` limits each file preview and is clamped by
   the same artifact text maximum.
 - `/runs/{task_id}/package` for run-package diagnostics across
-  `contract.json`, `oversight.json`, `status.json`, and dispatch packets.
+  `contract.json`, `oversight.json`, `status.json`, and dispatch packets. The
+  response also includes `run_summary`, `phase`, `decision`, `display`,
+  `next_action`, and executable `client_action` fields so clients can render the
+  diagnostics and continue with the recommended run action without a separate
+  summary fetch.
 - `/runs/{task_id}/contract` and `/runs/{task_id}/dispatch` for orchestration
   debugging.
 - `/runs/{task_id}/oversight` for the immutable governor oversight plan saved

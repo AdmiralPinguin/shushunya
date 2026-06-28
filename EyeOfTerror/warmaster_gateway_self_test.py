@@ -998,7 +998,14 @@ def main() -> int:
                 if exc.code != 409:
                     raise
                 bad_package = json.loads(exc.read().decode("utf-8"))
-                if bad_package.get("ok") or not bad_package.get("validation", {}).get("errors"):
+                if (
+                    bad_package.get("ok")
+                    or not bad_package.get("validation", {}).get("errors")
+                    or bad_package.get("client_action", {}).get("path") != "/runs/warmaster-bad-oversight-test/oversight"
+                    or bad_package.get("next_action", {}).get("kind") != "inspect_oversight"
+                    or not bad_package.get("display", {}).get("headline")
+                    or not bad_package.get("run_summary", {}).get("oversight_errors")
+                ):
                     raise AssertionError(f"package diagnostics should reject bad oversight: {bad_package}")
             else:
                 raise AssertionError("package diagnostics should fail for inconsistent oversight")
@@ -1020,7 +1027,14 @@ def main() -> int:
                 if exc.code != 409:
                     raise
                 broken_package = json.loads(exc.read().decode("utf-8"))
-                if broken_package.get("ok") or not broken_package.get("validation", {}).get("errors"):
+                if (
+                    broken_package.get("ok")
+                    or not broken_package.get("validation", {}).get("errors")
+                    or broken_package.get("client_action", {}).get("path") != "/runs/warmaster-bad-package-test/package"
+                    or broken_package.get("next_action", {}).get("kind") != "inspect_package"
+                    or not broken_package.get("display", {}).get("headline")
+                    or not broken_package.get("run_summary", {}).get("package_errors")
+                ):
                     raise AssertionError(f"package diagnostics should reject corrupt dispatch: {broken_package}")
             else:
                 raise AssertionError("package diagnostics should fail for corrupt dispatch")
@@ -1160,6 +1174,11 @@ def main() -> int:
                 or package.get("contract_summary", {}).get("step_count") != 7
                 or package.get("dispatch_count") != 7
                 or not package.get("files", {}).get("oversight")
+                or package.get("phase") != "ready_to_start"
+                or package.get("next_action", {}).get("kind") != "start"
+                or package.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
+                or not package.get("display", {}).get("headline")
+                or package.get("run_summary", {}).get("task_id") != "warmaster-test"
             ):
                 raise AssertionError(f"bad run package diagnostics: {package}")
             oversight = request_json(base + "/runs/warmaster-test/oversight")

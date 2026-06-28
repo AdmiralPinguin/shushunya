@@ -1051,6 +1051,24 @@ def orchestration_view_fields(
     }
 
 
+def payload_with_run_view(payload: dict[str, Any], run_dir: Path, task_id: str = "") -> dict[str, Any]:
+    summary = run_summary(run_dir)
+    view = orchestration_view_fields(summary, task_id=task_id or run_dir.name)
+    enriched = dict(payload)
+    enriched.update(
+        {
+            "run_summary": summary,
+            "phase": view.get("phase", ""),
+            "status": view.get("status", ""),
+            "decision": view.get("decision", {}),
+            "display": view.get("display", {}),
+            "next_action": view.get("next_action", {}),
+            "client_action": view.get("client_action", {}),
+        }
+    )
+    return enriched
+
+
 def run_orchestration_card(run: dict[str, Any], active: bool = False) -> dict[str, Any]:
     task_id = str(run.get("task_id") or "")
     view = orchestration_view_fields(run, active=active, event_cursor_next=0, task_id=task_id)
@@ -3504,6 +3522,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     return
                 if len(parts) == 3 and parts[2] == "package":
                     payload = run_package_diagnostics(run_dir)
+                    payload = payload_with_run_view(payload, run_dir, task_id)
                     response(self, 200 if payload.get("ok") else 409, payload)
                     return
                 if len(parts) == 3 and parts[2] == "contract":
