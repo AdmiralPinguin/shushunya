@@ -484,6 +484,27 @@ def main() -> int:
                     raise AssertionError(f"run preflight should reject missing oversight: {missing_oversight}")
             else:
                 raise AssertionError("run preflight should fail when oversight.json is missing")
+            bad_oversight_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bad-oversight-test"},
+            )
+            bad_oversight_path = Path(bad_oversight_task["run_dir"], "oversight.json")
+            bad_oversight_payload = json.loads(bad_oversight_path.read_text(encoding="utf-8"))
+            bad_oversight_payload["final_review"]["final_artifact"] = "/work/skalathrax/not-produced.json"
+            write_json(bad_oversight_path, bad_oversight_payload)
+            try:
+                request_json(base + "/runs/warmaster-bad-oversight-test/preflight_local", {"timeout_sec": 30})
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                bad_oversight = json.loads(exc.read().decode("utf-8"))
+                if (
+                    bad_oversight.get("ok")
+                    or not any("not required by contract" in error for error in bad_oversight.get("oversight_errors", []))
+                ):
+                    raise AssertionError(f"run preflight should reject inconsistent oversight: {bad_oversight}")
+            else:
+                raise AssertionError("run preflight should fail when oversight final artifact drifts from contract")
             try:
                 request_json(base + "/runs/warmaster-test/preflight_local", {"step_ids": ["fact_extraction"], "timeout_sec": 30})
             except urllib.error.HTTPError as exc:

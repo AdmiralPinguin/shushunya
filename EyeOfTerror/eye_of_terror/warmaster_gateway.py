@@ -769,6 +769,50 @@ def run_oversight_summary(run_dir: Path) -> dict[str, Any]:
     return compact_oversight_summary(oversight) if oversight else {}
 
 
+def validate_oversight_against_run(run_dir: Path, oversight: dict[str, Any], status: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    contract_payload = run_contract(run_dir)
+    contract = contract_payload.get("contract") if isinstance(contract_payload.get("contract"), dict) else {}
+    if not contract_payload.get("ok"):
+        errors.append(str(contract_payload.get("error") or "contract unavailable"))
+        return errors
+    governor = str(oversight.get("governor") or "")
+    if governor != str(contract.get("assigned_governor") or ""):
+        errors.append("oversight governor does not match contract assigned_governor")
+    required_artifacts = set(contract.get("required_artifacts") if isinstance(contract.get("required_artifacts"), list) else [])
+    steps = status.get("steps") if isinstance(status.get("steps"), list) else []
+    steps_by_id = {str(step.get("step_id") or ""): step for step in steps if isinstance(step, dict) and step.get("step_id")}
+    final_review = oversight.get("final_review") if isinstance(oversight.get("final_review"), dict) else {}
+    for field_name in ("critic_step", "final_step"):
+        step_id = str(final_review.get(field_name) or "")
+        if not step_id:
+            errors.append(f"oversight final_review.{field_name} is required")
+        elif step_id not in steps_by_id:
+            errors.append(f"oversight final_review.{field_name} references unknown step: {step_id}")
+    final_artifact = str(final_review.get("final_artifact") or "")
+    final_step = str(final_review.get("final_step") or "")
+    final_expected = steps_by_id.get(final_step, {}).get("expected_artifacts", []) if final_step in steps_by_id else []
+    if not final_artifact:
+        errors.append("oversight final_review.final_artifact is required")
+    elif final_artifact not in required_artifacts:
+        errors.append(f"oversight final artifact is not required by contract: {final_artifact}")
+    elif final_artifact not in final_expected:
+        errors.append(f"oversight final artifact is not produced by final step: {final_artifact}")
+    handoffs = oversight.get("handoffs") if isinstance(oversight.get("handoffs"), list) else []
+    for index, handoff in enumerate(handoffs):
+        if not isinstance(handoff, dict):
+            errors.append(f"oversight handoffs[{index}] must be an object")
+            continue
+        from_step = str(handoff.get("from_step") or "")
+        if from_step not in steps_by_id:
+            errors.append(f"oversight handoffs[{index}].from_step references unknown step: {from_step}")
+        to_steps = handoff.get("to_steps") if isinstance(handoff.get("to_steps"), list) else []
+        for to_step in to_steps:
+            if str(to_step) not in steps_by_id:
+                errors.append(f"oversight handoffs[{index}].to_steps references unknown step: {to_step}")
+    return errors
+
+
 def run_dispatch_packets(run_dir: Path) -> dict[str, Any]:
     dispatch_dir = run_dir / "dispatch"
     if not dispatch_dir.exists():
@@ -998,6 +1042,9 @@ def run_execution_preflight(
     oversight_payload = run_oversight(run_dir)
     if not oversight_payload.get("ok"):
         oversight_errors.append(str(oversight_payload.get("error") or "oversight unavailable"))
+    else:
+        oversight = oversight_payload.get("oversight") if isinstance(oversight_payload.get("oversight"), dict) else {}
+        oversight_errors.extend(validate_oversight_against_run(run_dir, oversight, status))
     for dispatch_path in ordered_dispatch_paths(run_dir, step_ids=step_ids):
         try:
             packet = load_json_file(dispatch_path)
