@@ -1602,6 +1602,63 @@ def run_worker_tasks(run_dir: Path, include_health: bool = False, host: str = "1
     return {"ok": True, "worker_tasks": tasks}
 
 
+def event_display(event: dict[str, Any], task_id: str = "") -> dict[str, Any]:
+    event_type = str(event.get("type") or "")
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    severity = "info"
+    headline = event_type.replace("_", " ").strip().capitalize() or "Run event"
+    detail = ""
+    if event_type == "task_created":
+        headline = "Task created"
+        detail = f"Governor: {payload.get('governor') or 'unknown'}"
+    elif event_type == "run_preflight_recorded":
+        ok = bool(payload.get("ok"))
+        headline = "Preflight passed" if ok else "Preflight needs attention"
+        severity = "info" if ok else "warning"
+        step_ids = payload.get("step_ids") if isinstance(payload.get("step_ids"), list) else []
+        detail = f"{len(step_ids)} steps checked"
+    elif event_type == "background_start_requested":
+        headline = "Execution queued"
+        operation = str(payload.get("operation") or "")
+        mode = str(payload.get("mode") or "")
+        detail = " ".join(part for part in [operation, mode] if part)
+    elif event_type == "status_changed":
+        status = str(payload.get("status") or "")
+        headline = f"Status: {status}" if status else "Status changed"
+        if status in {"failed", "corrupt"}:
+            severity = "error"
+        elif status in {"cancelled", "interrupted", "preflight_failed"}:
+            severity = "warning"
+    elif event_type == "step_recorded":
+        step_id = str(payload.get("step_id") or "")
+        worker = str(payload.get("worker") or "")
+        status = str(payload.get("status") or "")
+        headline = f"Step {status or 'recorded'}"
+        detail = " / ".join(part for part in [step_id, worker] if part)
+        if status in {"failed", "blocked", "needs_revision", "preflight_failed"}:
+            severity = "warning"
+    elif event_type == "result_recorded":
+        ok = bool(payload.get("ok"))
+        headline = "Result recorded" if ok else "Result failed"
+        severity = "info" if ok else "error"
+        detail = str(payload.get("summary") or payload.get("status") or "")
+    elif event_type in {"cancel_requested", "resume_execution_requested"}:
+        headline = event_type.replace("_", " ").capitalize()
+        detail = str(payload.get("reason") or payload.get("mode") or "")
+    return {
+        "task_id": task_id,
+        "at": str(event.get("at") or ""),
+        "type": event_type,
+        "headline": headline,
+        "detail": detail,
+        "severity": severity,
+    }
+
+
+def display_events_for(task_id: str, events: list[Any]) -> list[dict[str, Any]]:
+    return [event_display(event, task_id=task_id) for event in events if isinstance(event, dict)]
+
+
 def run_events(run_dir: Path, limit: int | None = None, after: int | None = None) -> dict[str, Any]:
     ledger_path = run_dir / "task_ledger.json"
     ledger, ledger_error = load_ledger_dict(ledger_path)
@@ -1623,10 +1680,12 @@ def run_events(run_dir: Path, limit: int | None = None, after: int | None = None
     else:
         start = 0
     next_cursor = start + len(events)
+    task_id = str(ledger.get("task_id") or run_dir.name)
     return {
         "ok": True,
-        "task_id": ledger.get("task_id") or run_dir.name,
+        "task_id": task_id,
         "events": events,
+        "display_events": display_events_for(task_id, events),
         "cursor": {"after": start, "next": next_cursor, "total": total},
     }
 
@@ -1666,6 +1725,7 @@ def all_run_events(run_root: Path, limit: int | None = None, after: int | None =
                     "type": str(event.get("type") or ""),
                     "run_next_action": next_action,
                     "run_final_manifest_summary": manifest_summary,
+                    "display": event_display(event, task_id=task_id),
                     "payload": event.get("payload") if isinstance(event.get("payload"), dict) else {},
                 }
             )
@@ -1687,6 +1747,7 @@ def all_run_events(run_root: Path, limit: int | None = None, after: int | None =
     return {
         "ok": True,
         "events": selected,
+        "display_events": [item.get("display") for item in selected if isinstance(item.get("display"), dict)],
         "cursor": {"after": start, "next": start + len(selected), "total": total},
         "errors": errors,
     }
@@ -1704,6 +1765,7 @@ def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: in
     }
     events_payload = run_events(run_dir, limit=event_limit, after=events_after)
     payload["events"] = events_payload.get("events", [])
+    payload["display_events"] = events_payload.get("display_events", [])
     payload["event_cursor"] = events_payload.get("cursor", {"after": 0, "next": 0, "total": 0})
     payload["revision_plan"] = payload["summary"].get("revision_plan", {"required": False, "steps": []})
     payload["revision_plan_summary"] = payload["summary"].get("revision_plan_summary", {})

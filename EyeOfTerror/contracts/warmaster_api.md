@@ -265,7 +265,8 @@ Clients should use:
 - `/runs` for a run list plus aggregate status, recoverable interrupted run
   summary, and compact `orchestration_cards` for chat/mobile list rendering.
 - `/events?after=N` for a compact aggregate run-event feed when the client
-  wants one polling cursor across all runs.
+  wants one polling cursor across all runs. Responses include `display_events`
+  with compact headline/detail/severity fields for chat/mobile history views.
 - `/runs/{task_id}/summary` for lightweight polling.
 - `/runs/{task_id}/snapshot` for a compact polling view containing summary,
   process-local active state, cursor events, and artifact metadata.
@@ -277,7 +278,7 @@ Clients should use:
   artifact status scoped to one worker step.
 - `/runs/{task_id}/events` for ledger event history.
 - `/runs/{task_id}/events?after=N` for incremental client polling. Responses
-  include `cursor.after`, `cursor.next`, and `cursor.total`.
+  include `cursor.after`, `cursor.next`, `cursor.total`, and `display_events`.
 Aggregate `/events` responses include the same cursor shape plus `task_id`,
 `run_status`, `governor`, `run_updated_at`, `event_index`, `global_index`,
 `run_next_action`, and `run_final_manifest_summary` for each event.

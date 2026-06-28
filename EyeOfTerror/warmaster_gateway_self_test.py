@@ -808,6 +808,8 @@ def main() -> int:
                 or warmaster_event.get("run_status") != "created"
                 or warmaster_event.get("governor") != "IskandarKhayon"
                 or not warmaster_event.get("run_updated_at")
+                or warmaster_event.get("display", {}).get("headline") != "Task created"
+                or not any(item.get("task_id") == "warmaster-test" and item.get("headline") == "Task created" for item in global_events.get("display_events", []))
                 or not all("global_index" in item for item in global_events.get("events", []))
             ):
                 raise AssertionError(f"global run events did not expose task creation: {global_events}")
@@ -1097,6 +1099,7 @@ def main() -> int:
                 or snapshot.get("summary", {}).get("task_id") != "warmaster-test"
                 or snapshot.get("active")
                 or snapshot.get("event_cursor", {}).get("next") != 1
+                or len(snapshot.get("display_events", [])) != 1
                 or snapshot.get("revision_plan", {}).get("required")
                 or snapshot.get("summary", {}).get("oversight_summary", {}).get("final_review", {}).get("critic_step") != "critic_review"
             ):
@@ -1148,10 +1151,20 @@ def main() -> int:
             else:
                 raise AssertionError("worker task live lookup should reject non-loopback host")
             events = request_json(base + "/runs/warmaster-test/events?limit=1")
-            if not events.get("ok") or len(events.get("events", [])) != 1 or events.get("cursor", {}).get("next") != events.get("cursor", {}).get("total"):
+            if (
+                not events.get("ok")
+                or len(events.get("events", [])) != 1
+                or len(events.get("display_events", [])) != 1
+                or events.get("cursor", {}).get("next") != events.get("cursor", {}).get("total")
+            ):
                 raise AssertionError(f"bad run events: {events}")
             first_events = request_json(base + "/runs/warmaster-test/events?after=0&limit=1")
-            if not first_events.get("ok") or len(first_events.get("events", [])) != 1 or first_events.get("cursor", {}).get("next") != 1:
+            if (
+                not first_events.get("ok")
+                or len(first_events.get("events", [])) != 1
+                or first_events.get("display_events", [{}])[0].get("headline") != "Task created"
+                or first_events.get("cursor", {}).get("next") != 1
+            ):
                 raise AssertionError(f"bad cursor run events: {first_events}")
             run_list = request_json(base + "/runs")
             if (

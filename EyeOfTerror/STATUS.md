@@ -232,6 +232,8 @@
   `/runs/{task_id}/events?after=N`.
 - Warmaster Gateway exposes aggregate cursor-based run event polling through
   `/events?after=N` for clients that need one feed across runs.
+- Run and aggregate event polling responses expose `display_events` with
+  headline, detail, severity, and timestamp for chat/mobile history rendering.
 - Aggregate run events include run status, governor, run update time, per-run
   event index, and global index for client-side list updates.
 - Aggregate run events include the current `run_next_action` and
