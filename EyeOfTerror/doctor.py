@@ -26,7 +26,7 @@ def require(condition: bool, message: str, errors: list[str]) -> None:
         errors.append(message)
 
 
-def check_governors(errors: list[str]) -> None:
+def check_governors(errors: list[str]) -> int:
     require((REPO_ROOT / GOVERNOR_CONTRACT).exists(), f"governor API contract missing: {GOVERNOR_CONTRACT}", errors)
     registry = load_json(REPO_ROOT / "EyeOfTerror" / "registry" / "governors.json")
     port_registry = load_json(REPO_ROOT / "EyeOfTerror" / "registry" / "ports.json").get("eye_of_terror", {})
@@ -56,10 +56,12 @@ def check_governors(errors: list[str]) -> None:
             if port == 7000:
                 continue
             require(governor_ports.get(port) == name, f"governor port registry mismatch on {port}: {name}", errors)
+    return len(registry)
 
 
-def check_port_registry(errors: list[str]) -> None:
+def check_port_registry(errors: list[str]) -> int:
     registry = load_json(REPO_ROOT / "EyeOfTerror" / "registry" / "ports.json")
+    count = 0
     seen_ports: dict[int, str] = {}
     for section in ("eye_of_terror", "mechanicum"):
         entries = registry.get(section)
@@ -67,6 +69,7 @@ def check_port_registry(errors: list[str]) -> None:
         if not isinstance(entries, dict):
             continue
         for raw_port, item in entries.items():
+            count += 1
             port = int(raw_port)
             name = str(item.get("name") or "") if isinstance(item, dict) else ""
             path = str(item.get("path") or "") if isinstance(item, dict) else ""
@@ -75,14 +78,16 @@ def check_port_registry(errors: list[str]) -> None:
             require((REPO_ROOT / path).exists(), f"port {port} path does not exist: {path}", errors)
             owner = seen_ports.setdefault(port, name)
             require(owner == name, f"global port collision on {port}: {owner} and {name}", errors)
+    return count
 
 
-def check_worker_manifests(errors: list[str]) -> None:
+def check_worker_manifests(errors: list[str]) -> int:
     require((REPO_ROOT / WORKER_CONTRACT).exists(), f"worker API contract missing: {WORKER_CONTRACT}", errors)
     port_registry = load_json(REPO_ROOT / "EyeOfTerror" / "registry" / "ports.json").get("mechanicum", {})
     manifest_ports: dict[int, dict[str, Any]] = {}
     seen_ports: dict[int, str] = {}
-    for metadata_path in sorted((REPO_ROOT / "Mechanicum").glob("*/worker.json")):
+    metadata_paths = sorted((REPO_ROOT / "Mechanicum").glob("*/worker.json"))
+    for metadata_path in metadata_paths:
         metadata = load_json(metadata_path)
         name = str(metadata.get("name") or "")
         port = int(metadata.get("port") or 0)
@@ -107,9 +112,10 @@ def check_worker_manifests(errors: list[str]) -> None:
             manifest = manifest_ports[port]
             require(manifest["name"] == item.get("name"), f"port registry and worker manifest name mismatch on {port}", errors)
             require(manifest["path"] == item.get("path"), f"port registry and worker manifest path mismatch on {port}", errors)
+    return len(metadata_paths)
 
 
-def check_worker_services(errors: list[str]) -> None:
+def check_worker_services(errors: list[str]) -> int:
     services = load_json(REPO_ROOT / "Mechanicum" / "worker_services.json")
     for name, service in services.items():
         require(isinstance(service, dict), f"worker service entry is not an object: {name}", errors)
@@ -124,6 +130,7 @@ def check_worker_services(errors: list[str]) -> None:
             require(metadata.get("name") == name, f"worker service {name} metadata name mismatch", errors)
             require(metadata.get("port") == service.get("port"), f"worker service {name} port mismatch", errors)
             require(metadata.get("status") != "planned", f"planned worker listed as runnable service: {name}", errors)
+    return len(services)
 
 
 def run_doctor() -> dict[str, Any]:
@@ -134,9 +141,10 @@ def run_doctor() -> dict[str, Any]:
         ("worker_manifests", check_worker_manifests),
         ("worker_services", check_worker_services),
     ]
-    for _, check in checks:
-        check(errors)
-    return {"ok": not errors, "checks": [name for name, _ in checks], "errors": errors}
+    counts: dict[str, int] = {}
+    for name, check in checks:
+        counts[name] = check(errors)
+    return {"ok": not errors, "checks": [name for name, _ in checks], "counts": counts, "errors": errors}
 
 
 def main() -> int:

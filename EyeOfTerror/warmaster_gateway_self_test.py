@@ -84,7 +84,7 @@ def main() -> int:
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
                 raise AssertionError(f"bad gateway capabilities response: {capabilities}")
             doctor = request_json(base + "/doctor")
-            if not doctor.get("ok") or "worker_manifests" not in doctor.get("checks", []):
+            if not doctor.get("ok") or "worker_manifests" not in doctor.get("checks", []) or doctor.get("counts", {}).get("worker_manifests", 0) < 1:
                 raise AssertionError(f"bad doctor response: {doctor}")
             corrupt_dir = run_root / "corrupt-ledger-test"
             corrupt_dir.mkdir(parents=True, exist_ok=True)
