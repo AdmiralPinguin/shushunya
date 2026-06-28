@@ -100,6 +100,12 @@ Revision execution endpoints use the current run ledger `revision_plan` and run
 only those dispatch steps, followed by `critic_review` and `finalize`. They must
 reject runs that do not have `revision_plan.required=true`.
 
+When a revision rerun reaches the writer, the executor passes a focused
+`revision_context` from the previous `revision_plan`. Writer artifacts should
+record that context, the critic should expose whether it saw the revision focus,
+and the final manifest should carry `revision_focus` for client display and
+debugging.
+
 ## Rules
 
 - Warmaster must not do specialist worker jobs directly.

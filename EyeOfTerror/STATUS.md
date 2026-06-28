@@ -59,6 +59,9 @@
 - Warmaster Gateway can request cooperative cancellation through the task ledger,
   and best-effort forwards cancellation to HTTP worker task endpoints from the
   run dispatch package.
+- Warmaster revision execution uses `revision_plan` to rerun focused worker
+  steps, passes `revision_context` into those reruns, and preserves the observed
+  `revision_focus` through writer, critic, and final manifest artifacts.
 - HTTP execution preflights all worker `/health` endpoints before running steps
   and rejects worker identity mismatches before dispatch.
 - Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.
