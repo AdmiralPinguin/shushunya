@@ -123,6 +123,16 @@ def main() -> int:
                 def active(self) -> bool:
                     return True
 
+                def to_dict(self) -> dict:
+                    return {
+                        "name": self.name,
+                        "status": self.status,
+                        "port": self.port,
+                        "task_kinds": ["research", "lore_reconstruction"],
+                        "route_terms": ["скалатракс"],
+                        "service": "eye_of_terror.inner_circle.iskandar_service",
+                    }
+
             service_prepared = warmaster_gateway.prepare_task_via_governor_service(
                 "Собери все известное о событиях Скалатракса.",
                 "warmaster-governor-http-test",
@@ -156,6 +166,15 @@ def main() -> int:
                 gateway_server.shutdown()
                 gateway_thread.join(timeout=5)
                 warmaster_gateway.governor_by_name = original_governor_by_name
+            original_governor_refs = warmaster_gateway.governor_refs
+            warmaster_gateway.governor_refs = lambda: [ServiceGovernor()]
+            try:
+                governor_snapshot = warmaster_gateway.governor_registry_snapshot(include_health=True)
+                required_workers = governor_snapshot[0].get("runtime", {}).get("capabilities", {}).get("capabilities", {}).get("required_workers", [])
+                if "Lexmechanic" not in required_workers or "FabricatorFinalis" not in required_workers:
+                    raise AssertionError(f"governor health snapshot did not include service capabilities: {governor_snapshot}")
+            finally:
+                warmaster_gateway.governor_refs = original_governor_refs
         finally:
             iskandar_server.shutdown()
             iskandar_thread.join(timeout=5)

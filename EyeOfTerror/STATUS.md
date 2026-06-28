@@ -46,6 +46,8 @@
 - Warmaster Gateway exposes `GET /governors`, `GET /workers`, and
   `GET /workers?health=1`; worker listings are enriched with available
   `Mechanicum/*/worker.json` metadata.
+- Warmaster governor health snapshots include reachable governor service
+  capabilities, including required worker declarations.
 - Warmaster Gateway exposes `GET /state` as a client bootstrap snapshot with
   capabilities, governors, workers, and recent runs.
 - Warmaster Gateway exposes the expected service-separated brigade topology

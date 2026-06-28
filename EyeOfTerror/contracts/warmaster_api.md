@@ -79,6 +79,9 @@ history. The optional `host` query parameter must be loopback.
 `GET /brigade_health` combines that topology with best-effort health checks for
 governors and workers.
 
+`GET /governors?health=1` includes reachable governor `/capabilities` payloads
+inside each governor runtime snapshot.
+
 ## Task Creation
 
 ```json

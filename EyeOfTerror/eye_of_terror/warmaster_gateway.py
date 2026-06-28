@@ -692,15 +692,28 @@ def artifact_text(ledger: dict[str, Any], artifact_path: str, max_bytes: int = 5
     }
 
 
+def fetch_json_endpoint(url: str, timeout_sec: float = 1.0) -> dict[str, Any]:
+    with urllib.request.urlopen(url, timeout=timeout_sec) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("response is not a JSON object")
+    return payload
+
+
 def fetch_worker_health(host: str, port: int, timeout_sec: float = 1.0) -> dict[str, Any]:
     try:
-        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=timeout_sec) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        if not isinstance(payload, dict):
-            return {"reachable": False, "error": "health response is not a JSON object"}
+        payload = fetch_json_endpoint(f"http://{host}:{port}/health", timeout_sec=timeout_sec)
         return {"reachable": bool(payload.get("ok")), "health": payload}
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
         return {"reachable": False, "error": str(exc)}
+
+
+def fetch_service_capabilities(host: str, port: int, timeout_sec: float = 1.0) -> dict[str, Any]:
+    try:
+        payload = fetch_json_endpoint(f"http://{host}:{port}/capabilities", timeout_sec=timeout_sec)
+        return {"ok": bool(payload.get("ok")), "capabilities": payload}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def enrich_worker_metadata(worker: dict[str, Any]) -> dict[str, Any]:
@@ -739,6 +752,8 @@ def governor_registry_snapshot(include_health: bool = False, host: str = "127.0.
     for governor in governors:
         port = int(governor.get("port") or 0)
         governor["runtime"] = fetch_worker_health(host, port) if port else {"reachable": False, "error": "missing port"}
+        if port and governor["runtime"].get("reachable"):
+            governor["runtime"]["capabilities"] = fetch_service_capabilities(host, port)
     return governors
 
 
