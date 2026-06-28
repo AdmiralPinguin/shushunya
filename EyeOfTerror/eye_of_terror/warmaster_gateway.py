@@ -548,6 +548,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "result": result,
         "revision_plan": revision_plan,
         "revision_plan_errors": revision_plan_errors,
+        "oversight_summary": run_oversight_summary(run_dir),
         "final_manifest_summary": final_manifest_summary(result),
         "progress": run_progress(status, ledger),
         "last_preflight": last_run_preflight(ledger),
@@ -730,6 +731,42 @@ def run_oversight(run_dir: Path) -> dict[str, Any]:
     if error:
         return {"ok": False, "error": error, "error_code": "corrupt_oversight"}
     return {"ok": True, "oversight": payload}
+
+
+def compact_oversight_summary(oversight: dict[str, Any]) -> dict[str, Any]:
+    artifact_roles = oversight.get("artifact_roles") if isinstance(oversight.get("artifact_roles"), dict) else {}
+    final_review = oversight.get("final_review") if isinstance(oversight.get("final_review"), dict) else {}
+    quality_gates = oversight.get("quality_gates") if isinstance(oversight.get("quality_gates"), list) else []
+    completion_criteria = oversight.get("completion_criteria") if isinstance(oversight.get("completion_criteria"), list) else []
+    handoffs = oversight.get("handoffs") if isinstance(oversight.get("handoffs"), list) else []
+    return {
+        "kind": str(oversight.get("kind") or ""),
+        "governor": str(oversight.get("governor") or ""),
+        "quality_gate_count": len(quality_gates),
+        "completion_criteria_count": len(completion_criteria),
+        "handoff_count": len(handoffs),
+        "artifact_roles": {
+            "draft": artifact_roles.get("draft", []),
+            "critic": artifact_roles.get("critic", []),
+            "final": artifact_roles.get("final", []),
+        },
+        "final_review": {
+            "critic_step": str(final_review.get("critic_step") or ""),
+            "final_step": str(final_review.get("final_step") or ""),
+            "final_artifact": str(final_review.get("final_artifact") or ""),
+            "requires_critic_approval_or_blockers": bool(final_review.get("requires_critic_approval_or_blockers")),
+            "requires_gap_disclosure": bool(final_review.get("requires_gap_disclosure")),
+            "requires_evidence_trace": bool(final_review.get("requires_evidence_trace")),
+        },
+    }
+
+
+def run_oversight_summary(run_dir: Path) -> dict[str, Any]:
+    payload = run_oversight(run_dir)
+    if not payload.get("ok"):
+        return {}
+    oversight = payload.get("oversight") if isinstance(payload.get("oversight"), dict) else {}
+    return compact_oversight_summary(oversight) if oversight else {}
 
 
 def run_dispatch_packets(run_dir: Path) -> dict[str, Any]:

@@ -14,6 +14,9 @@
   criteria, and final review expectations.
 - Iskandar run packages persist the governor oversight plan as `oversight.json`,
   and Warmaster exposes it through `GET /runs/{task_id}/oversight`.
+- Warmaster run summaries expose compact `oversight_summary` so clients and
+  higher-level governors can inspect final review requirements without fetching
+  the full oversight document.
 - Mechanicum prototype workers cover the current lore pipeline:
   - `Lexmechanic`
   - `AuspexBrowser`

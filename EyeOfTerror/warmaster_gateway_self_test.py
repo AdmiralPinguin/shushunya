@@ -517,6 +517,8 @@ def main() -> int:
                 or not run_summary.get("summary", {}).get("actions", {}).get("can_start")
                 or run_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "start"
                 or run_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("method") != "POST"
+                or run_summary.get("summary", {}).get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
+                or run_summary.get("summary", {}).get("oversight_summary", {}).get("quality_gate_count") != 6
                 or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "source_discovery"
                 or run_summary.get("summary", {}).get("progress", {}).get("next_ready_step_id") != "source_discovery"
                 or run_summary.get("summary", {}).get("progress", {}).get("ready_step_ids") != ["source_discovery"]
@@ -553,6 +555,7 @@ def main() -> int:
                 or snapshot.get("active")
                 or snapshot.get("event_cursor", {}).get("next") != 1
                 or snapshot.get("revision_plan", {}).get("required")
+                or snapshot.get("summary", {}).get("oversight_summary", {}).get("final_review", {}).get("critic_step") != "critic_review"
             ):
                 raise AssertionError(f"bad run snapshot: {snapshot}")
             run_active = request_json(base + "/runs/warmaster-test/active")

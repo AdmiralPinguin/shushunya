@@ -215,6 +215,12 @@ valid required revisions, revision inspection for invalid revision plans,
 polling for active runs, and force-gated rerun guidance for completed runs. When
 the recommendation is a completed-run rerun, `body.force` must be true.
 
+Run summaries include `oversight_summary` when the run package has
+`oversight.json`. It is a compact view of the governor's run-specific
+supervision plan: governor, kind, artifact role highlights, quality gate count,
+completion criteria count, handoff count, and final review requirements. Use
+`/runs/{task_id}/oversight` for the full oversight object.
+
 Run summaries also expose `last_preflight` when the ledger has a recorded run
 preflight. It contains the event timestamp, mode, selected steps, result, and
 failure counters so clients do not have to parse the full event stream for the
