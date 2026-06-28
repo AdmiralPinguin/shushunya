@@ -1299,6 +1299,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "artifact creation required by supervisor",
     "shell python inline syntax loop rejected by supervisor",
     "stale replace_in_file rejected by supervisor",
+    "stale failed-cli replace_in_file rejected by supervisor",
     "append_file to JSON rejected by supervisor",
     "verified text artifact mutation rejected by supervisor",
 }
@@ -2232,6 +2233,15 @@ def python_action_looks_like_source_replacement(action: dict[str, Any]) -> bool:
     return bool(code.strip()) and (
         ("\ndef " in code and ("import " in lowered or "from " in lowered))
         or "if __name__ == " in code
+    )
+
+
+def text_looks_like_source_replacement(text: str) -> bool:
+    lowered = (text or "").lower()
+    return bool(text.strip()) and (
+        ("\ndef " in text and ("import " in lowered or "from " in lowered))
+        or "\nclass " in text
+        or "if __name__ == " in text
     )
 
 
@@ -4967,6 +4977,47 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "Return a real edit with different new text, use write_file for a complete corrected file, or run verification if no edit is needed."
                 ),
             }
+        if (
+            forced_supervisor_result is None
+            and swe_task
+            and pending_failed_cli_read_paths
+            and action_type == "replace_in_file"
+            and str(action.get("path") or "") in pending_failed_cli_read_paths
+        ):
+            replace_path = str(action.get("path") or "")
+            old_text = str(action.get("old") or "")
+            new_text = str(action.get("new") or "")
+            current_excerpt = last_read_file_excerpts.get(replace_path, "")
+            if current_excerpt and old_text not in current_excerpt:
+                suggested_action: dict[str, Any] | None = None
+                if text_looks_like_source_replacement(new_text):
+                    suggested_action = {
+                        "action": "write_file",
+                        "path": replace_path,
+                        "content": new_text,
+                    }
+                elif len(current_excerpt) <= 12000 and new_text:
+                    suggested_action = {
+                        "action": "replace_in_file",
+                        "path": replace_path,
+                        "old": current_excerpt,
+                        "new": new_text,
+                        "count": 1,
+                    }
+                    if action.get("max_file_bytes") is not None:
+                        suggested_action["max_file_bytes"] = action.get("max_file_bytes")
+                forced_supervisor_result = {
+                    "ok": False,
+                    "error": "stale failed-cli replace_in_file rejected by supervisor",
+                    "path": replace_path,
+                    "current_excerpt": current_excerpt,
+                    **({"suggested_action": suggested_action} if suggested_action else {}),
+                    "instruction": (
+                        "This replace_in_file targets a source file that was already read for a failed CLI repair, "
+                        "but its old text is not present in the current file. Do not guess old text. Use suggested_action "
+                        "when present, or build an exact replace_in_file from current_excerpt, then rerun the CLI JSON verification."
+                    ),
+                }
         if repair_source_path:
             repair_violation = ""
             repair_path = str(action.get("path") or "")

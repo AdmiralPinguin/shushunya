@@ -4894,6 +4894,59 @@ def main() -> int:
         raise AssertionError(f"Python pseudo-edit should receive write_file suggested_action: {pseudo_edit_payload}")
     print("[ok] SWE failed CLI python pseudo-edit suggests write_file")
 
+    swe_failed_cli_stale_replace_stdout = io.StringIO()
+    swe_failed_cli_stale_replace_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-failed-cli-stale-replace-suggests-exact-edit"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    stale_cli_file_calls: list[dict[str, object]] = []
+
+    def fake_stale_cli_file(_config, action):
+        stale_cli_file_calls.append(dict(action))
+        if action.get("action") == "read_file":
+            return {
+                "ok": True,
+                "path": "/work/project/package/cli.py",
+                "content": "import json\n\ndef main():\n    print(json.dumps(payload))\n",
+            }
+        raise AssertionError(f"stale failed-CLI replace should be rejected before file_tool: {action}")
+
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m package.cli /work/project/data.csv | python3 -c \\"import sys,json; json.load(sys.stdin)\\"","timeout":60}',
+            '{"action":"read_file","path":"/work/project/package/cli.py","max_bytes":20000,"offset":0}',
+            (
+                '{"action":"replace_in_file","path":"/work/project/package/cli.py",'
+                '"old":"# guessed placeholder","new":"import json\\n\\ndef main():\\n    print(json.dumps(payload, default=str))\\n","count":1}'
+            ),
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "Traceback (most recent call last):\n  File \"/work/project/package/cli.py\", line 12\nTypeError: Object of type datetime is not JSON serializable\n",
+    }), mock.patch.object(agent_runner, "file_tool", side_effect=fake_stale_cli_file), \
+            contextlib.redirect_stdout(swe_failed_cli_stale_replace_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(failed_cli_resume_task, swe_failed_cli_stale_replace_config)
+    stale_cli_replace_payload = json.loads(swe_failed_cli_stale_replace_stdout.getvalue())
+    stale_cli_replace_results = [step.get("result") or {} for step in stale_cli_replace_payload.get("steps", [])]
+    stale_cli_suggestions = [
+        result.get("suggested_action") or {}
+        for result in stale_cli_replace_results
+        if result.get("error") == "stale failed-cli replace_in_file rejected by supervisor"
+    ]
+    if len(stale_cli_file_calls) != 1 or not stale_cli_suggestions:
+        raise AssertionError(
+            "Failed CLI stale replace should be rejected with a suggestion before file_tool: "
+            f"calls={stale_cli_file_calls}, payload={stale_cli_replace_payload}"
+        )
+    if stale_cli_suggestions[0].get("action") != "write_file" or stale_cli_suggestions[0].get("path") != "/work/project/package/cli.py":
+        raise AssertionError(f"Failed CLI stale replace suggestion should rewrite the read source: {stale_cli_replace_payload}")
+    print("[ok] SWE failed CLI stale replace suggests exact edit")
+
     swe_resume_failed_cli_edit_stdout = io.StringIO()
     swe_resume_failed_cli_edit_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-resume-failed-cli-allows-source-edit"),
