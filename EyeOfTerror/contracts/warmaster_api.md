@@ -286,9 +286,11 @@ Clients should use:
   Completed run summaries include `final_manifest_summary` when the final
   artifact is available.
 - `/runs/{task_id}/steps/{step_id}` for one normalized step state from
-  `summary.progress.step_states`.
+  `summary.progress.step_states`. The response includes the standard run detail
+  client-view fields.
 - `/runs/{task_id}/steps/{step_id}/artifacts` for expected and produced
-  artifact status scoped to one worker step.
+  artifact status scoped to one worker step. The response includes the standard
+  run detail client-view fields.
 - `/runs/{task_id}/events` for ledger event history.
 - `/runs/{task_id}/events?after=N` for incremental client polling. Responses
   include `cursor.after`, `cursor.next`, `cursor.total`, `display_events`, and

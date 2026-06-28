@@ -3450,6 +3450,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                     return
                 payload = run_step_state(run_dir, parts[3])
+                payload = payload_with_run_view(payload, run_dir, task_id)
                 response(self, 200 if payload.get("ok") else 404, payload)
                 return
             if len(parts) == 5 and parts[0] == "runs" and parts[2] == "steps" and parts[4] == "artifacts":
@@ -3459,6 +3460,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                     return
                 payload = run_step_artifacts(run_dir, parts[3])
+                payload = payload_with_run_view(payload, run_dir, task_id)
                 response(self, 200 if payload.get("ok") else 404, payload)
                 return
             if len(parts) in {2, 3} and parts[0] == "runs":

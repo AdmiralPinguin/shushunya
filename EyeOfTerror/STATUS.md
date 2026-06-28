@@ -330,9 +330,10 @@
 - Warmaster run summaries expose the latest run preflight result as
   `last_preflight`.
 - Warmaster exposes `GET /runs/{task_id}/steps/{step_id}` for focused step
-  inspection.
+  inspection with standard run detail client-view fields.
 - Warmaster exposes `GET /runs/{task_id}/steps/{step_id}/artifacts` for
-  focused artifact inspection by worker step.
+  focused artifact inspection by worker step with standard run detail
+  client-view fields.
 - Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
 - Warmaster routing is driven by `route_terms` in the governor registry instead
   of hardcoded per-governor keyword lists.
