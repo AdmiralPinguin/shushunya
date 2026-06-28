@@ -62,6 +62,71 @@ def dedupe_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+def source_type(source: dict[str, Any]) -> str:
+    host = (urlparse(str(source.get("url") or "")).hostname or "").lower()
+    kind = str(source.get("type") or "").lower()
+    source_class = str(source.get("source_class") or "").lower()
+    if kind in {"novel", "codex", "campaign_book", "short_story", "book"}:
+        return "published_primary"
+    if "blacklibrary.com" in host:
+        return "official_catalog"
+    if host.endswith("warhammer-community.com") or host.endswith("warhammer.com"):
+        return "official_article"
+    if host.endswith("lexicanum.com"):
+        return "curated_wiki"
+    if host.endswith("fandom.com"):
+        return "community_wiki"
+    if "official" in source_class:
+        return "official_secondary"
+    if "wiki" in kind or "wiki" in source_class:
+        return "wiki"
+    return "unclassified"
+
+
+def ranked_source(source: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(source)
+    kind = source_type(enriched)
+    reliability = str(enriched.get("reliability") or "").lower()
+    detail = str(enriched.get("direct_event_detail_level") or "").lower()
+    class_score = {
+        "published_primary": 100,
+        "official_catalog": 78,
+        "official_article": 76,
+        "official_secondary": 72,
+        "curated_wiki": 62,
+        "wiki": 52,
+        "community_wiki": 42,
+        "unclassified": 20,
+    }.get(kind, 20)
+    reliability_score = {
+        "high": 20,
+        "medium-high": 15,
+        "medium": 10,
+        "low": -10,
+    }.get(reliability, 0)
+    detail_score = {
+        "high": 15,
+        "medium-high": 11,
+        "medium": 8,
+        "low": -5,
+    }.get(detail, 0)
+    score = class_score + reliability_score + detail_score
+    reasons = [kind]
+    if reliability:
+        reasons.append(f"reliability:{reliability}")
+    if detail:
+        reasons.append(f"event_detail:{detail}")
+    enriched["source_type"] = kind
+    enriched["source_rank"] = score
+    enriched["ranking_reasons"] = reasons
+    return enriched
+
+
+def rank_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched = [ranked_source(source) for source in sources]
+    return sorted(enriched, key=lambda source: int(source.get("source_rank") or 0), reverse=True)
+
+
 def classify_discovered_result(result: dict[str, Any]) -> dict[str, Any] | None:
     url = str(result.get("url") or "").strip()
     title = " ".join(str(result.get("title") or "").split())
@@ -80,6 +145,18 @@ def classify_discovered_result(result: dict[str, Any]) -> dict[str, Any] | None:
             "expected_use": "live-discovered chronology or named-entity lead; verify before final use",
             "discovery_method": "live_search",
         }
+    if host.endswith("warhammer40k.fandom.com") or host.endswith("fandom.com"):
+        return {
+            "title": title,
+            "type": "wiki",
+            "language": "unknown",
+            "url": url,
+            "reliability": "medium",
+            "direct_event_detail_level": "unknown",
+            "source_class": "community_wiki",
+            "expected_use": "live-discovered community summary; use only as a lead for stronger sources",
+            "discovery_method": "live_search",
+        }
     if host.endswith("warhammer-community.com"):
         return {
             "title": title,
@@ -90,6 +167,18 @@ def classify_discovered_result(result: dict[str, Any]) -> dict[str, Any] | None:
             "direct_event_detail_level": "unknown",
             "source_class": "official_secondary",
             "expected_use": "live-discovered official context; verify relevance before final use",
+            "discovery_method": "live_search",
+        }
+    if host.endswith("blacklibrary.com") or host.endswith("warhammer.com"):
+        return {
+            "title": title,
+            "type": "official_catalog",
+            "language": "unknown",
+            "url": url,
+            "reliability": "high",
+            "direct_event_detail_level": "low",
+            "source_class": "official_secondary",
+            "expected_use": "live-discovered official publication or product lead; verify narrative detail elsewhere",
             "discovery_method": "live_search",
         }
     return None
@@ -138,7 +227,7 @@ def classified_live_sources(discovery_results: list[dict[str, Any]]) -> list[dic
             candidate = classify_discovered_result(result)
             if candidate:
                 candidates.append(candidate)
-    return dedupe_sources(candidates)
+    return rank_sources(dedupe_sources(candidates))
 
 
 def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None = None) -> dict[str, Any]:
@@ -178,7 +267,7 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
     ]
     discovery_results = run_discovery_queries(search_queries, searcher)
     live_candidates = classified_live_sources(discovery_results)
-    sources = dedupe_sources(sources + live_candidates)
+    sources = rank_sources(dedupe_sources(sources + live_candidates))
     return {
         "topic": goal,
         "sources": sources,

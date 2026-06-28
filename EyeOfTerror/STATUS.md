@@ -184,6 +184,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 ## Current Limits
 
 - `Lexmechanic` uses source playbooks plus optional live discovery; allowlisted live results can become source candidates.
+- `Lexmechanic` ranks source candidates and labels live discovery results with
+  source types and ranking reasons.
 - `NoosphericExtractor` still uses rule-based event playbooks; Skalathrax rules now live in data, not Python code.
 - `AuspexBrowser` performs guarded HTTP text fetches; it does not yet render JavaScript pages or screenshots.
 - The pipeline records inaccessible primary books as gaps instead of solving book acquisition.
@@ -196,7 +198,6 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 
 ## Next Good Steps
 
-- Add richer ranking and source-type classification for live discovery results.
 - Add more playbooks only when they are task-class patterns, not one-off hacks.
 - Add durable background execution recovery and stronger interruption for
   already-running worker calls where the underlying worker supports it.

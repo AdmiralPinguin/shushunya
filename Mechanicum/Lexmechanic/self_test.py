@@ -21,13 +21,30 @@ def main() -> int:
                     "title": "Lexicanum Candidate",
                     "url": "https://wh40k.lexicanum.com/wiki/Candidate",
                     "snippet": "candidate source",
-                }
+                },
+                {
+                    "title": "Official Candidate",
+                    "url": "https://www.warhammer-community.com/en-gb/articles/candidate/",
+                    "snippet": "official source",
+                },
+                {
+                    "title": "Community Candidate",
+                    "url": "https://warhammer40k.fandom.com/wiki/Candidate",
+                    "snippet": "community source",
+                },
             ],
         }
 
     discovered = source_map_for_contract({"goal": "unknown topic"}, fake_search)
     if not discovered["sources"] or discovered["sources"][0].get("discovery_method") != "live_search":
         raise AssertionError(f"live discovery should create classified source candidates: {discovered['sources']}")
+    if discovered["sources"][0].get("source_type") != "official_article":
+        raise AssertionError(f"official live sources should rank first: {discovered['sources']}")
+    if not discovered["sources"][0].get("ranking_reasons"):
+        raise AssertionError(f"ranked live sources should explain their rank: {discovered['sources']}")
+    community = next((source for source in discovered["sources"] if source.get("source_class") == "community_wiki"), {})
+    if community.get("source_type") != "community_wiki" or community.get("source_rank", 0) >= discovered["sources"][0].get("source_rank", 0):
+        raise AssertionError(f"community wiki should be classified and ranked below official sources: {discovered['sources']}")
     if classify_discovered_result({"title": "Bad", "url": "https://example.com/nope"}) is not None:
         raise AssertionError("unknown domains must not become source candidates")
     if not discovered["discovery_results"] or discovered["discovery_results"][0]["provider"] != "fake":
@@ -71,7 +88,7 @@ def main() -> int:
         if not generic_result.get("ok"):
             raise AssertionError(f"Lexmechanic generic fallback failed: {generic_result}")
         generic = json.loads((Path(temp_dir) / "generic" / "source_map.json").read_text(encoding="utf-8"))
-        if not generic.get("sources") or generic["sources"][0].get("source_class") != "secondary_wiki":
+        if not generic.get("sources") or generic["sources"][0].get("source_type") != "official_article":
             raise AssertionError(f"generic fallback should classify live candidates: {generic['sources']}")
         if generic.get("discovery_status") != "needs_live_discovery":
             raise AssertionError(f"generic fallback should request live discovery: {generic}")
