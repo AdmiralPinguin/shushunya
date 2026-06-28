@@ -337,6 +337,12 @@ def main() -> int:
                     raise AssertionError(f"bad invalid task_id response: {invalid_task}")
             else:
                 raise AssertionError("unsafe task_id should be rejected")
+            preflight = request_json(
+                base + "/task_preflight",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-preflight-test"},
+            )
+            if not preflight.get("ok") or (run_root / "warmaster-preflight-test").exists():
+                raise AssertionError(f"task preflight should not create a run: {preflight}")
             task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},

@@ -20,6 +20,7 @@ GET  /governors
 GET  /governors?health=1
 GET  /workers
 GET  /workers?health=1
+POST /task_preflight
 POST /task
 GET  /runs
 GET  /runs?limit=20
@@ -84,6 +85,11 @@ reachable governor exposes `required_workers` from `/capabilities`.
 inside each governor runtime snapshot.
 
 ## Task Creation
+
+`POST /task_preflight` accepts the same routing fields as `POST /task`, but does
+not write a run package or ledger. It returns the selected route, governor,
+contract validation result, missing worker references, and the run directory
+that would be created.
 
 ```json
 {

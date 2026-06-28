@@ -46,6 +46,7 @@ Gateway endpoints:
 - `GET /governors?health=1`
 - `GET /workers`
 - `GET /workers?health=1`
+- `POST /task_preflight`
 - `POST /task`
 - `GET /runs`
 - `GET /runs/<task_id>`
@@ -78,6 +79,9 @@ Gateway endpoints:
 
 Client-facing gateway behavior is specified in
 `EyeOfTerror/contracts/warmaster_api.md`.
+
+`POST /task_preflight` checks routing, governor planning, contract validation,
+and worker availability without creating run history.
 
 `GET /workers` returns the static port registry enriched with available
 `Mechanicum/*/worker.json` metadata. Add `?health=1` to include a live

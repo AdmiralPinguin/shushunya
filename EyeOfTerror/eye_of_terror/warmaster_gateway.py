@@ -277,6 +277,65 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
     }
 
 
+def preflight_task(message: str, task_id: str | None, run_root: Path, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> dict[str, Any]:
+    if task_id is not None and not valid_task_id(task_id):
+        return {"ok": False, "gateway": "WarmasterGateway", "error": "invalid task_id", "error_code": "invalid_task_id", "task_id": task_id}
+    route = route_message(message)
+    if not route.ok:
+        return {"ok": False, "gateway": "WarmasterGateway", "error": route.reason, "kind": route.kind}
+    governor_ref = governor_by_name(route.governor)
+    if governor_ref is None or not governor_ref.active():
+        return {"ok": False, "gateway": "WarmasterGateway", "error": f"governor is not active: {route.governor}", "kind": route.kind}
+    if governor_transport not in {"local", "http"}:
+        return {"ok": False, "gateway": "WarmasterGateway", "error": "governor_transport must be local or http", "error_code": "invalid_governor_transport"}
+    if governor_transport == "http":
+        host = validate_service_host(governor_host)
+        port = int(governor_ref.port)
+        base = f"http://{host}:{port}"
+        capabilities = fetch_service_capabilities(host, port, timeout_sec=2.0)
+        if capabilities.get("ok"):
+            payload = capabilities.get("capabilities") if isinstance(capabilities.get("capabilities"), dict) else {}
+            required_workers = required_workers_from_capabilities(payload)
+            missing_required = [worker for worker in required_workers if worker not in {item.name for item in worker_refs()}]
+            if missing_required:
+                return {
+                    "ok": False,
+                    "gateway": "WarmasterGateway",
+                    "error": "governor required workers are missing from Mechanicum registry",
+                    "error_code": "governor_workers_missing",
+                    "governor": governor_ref.name,
+                    "required_workers": required_workers,
+                    "missing_workers": missing_required,
+                }
+        try:
+            plan_payload = post_json(base + "/plan", {"task": message, "task_id": task_id or ""})
+        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+            return {"ok": False, "gateway": "WarmasterGateway", "error": f"governor service unavailable: {exc}", "error_code": "governor_service_unavailable", "governor": governor_ref.name}
+        contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else {}
+    else:
+        plan = plan_lore_reconstruction(message, task_id=task_id)
+        contract = plan.contract.to_dict()
+    resolved_task_id = str(contract.get("task_id") or "").strip()
+    run_dir = run_root / resolved_task_id if resolved_task_id else run_root / "_invalid"
+    if resolved_task_id and run_dir.exists():
+        return {"ok": False, "gateway": "WarmasterGateway", "error": "task_id already exists", "error_code": "task_exists", "task_id": resolved_task_id, "run_dir": str(run_dir)}
+    validation_errors = validate_task_contract_payload(contract)
+    missing_workers = [] if validation_errors else missing_contract_workers(contract)
+    ok = not validation_errors and not missing_workers
+    return {
+        "ok": ok,
+        "gateway": "WarmasterGateway",
+        "governor": governor_ref.name,
+        "governor_transport": governor_transport,
+        "task_id": resolved_task_id,
+        "route": {"kind": route.kind, "governor": route.governor},
+        "validation": {"ok": not validation_errors, "errors": validation_errors},
+        "missing_workers": missing_workers,
+        "would_create_run_dir": str(run_dir) if resolved_task_id else "",
+        "error_code": "" if ok else ("contract_workers_missing" if missing_workers else "invalid_task_contract"),
+    }
+
+
 def load_ledger_dict(ledger_path: Path) -> tuple[dict[str, Any], str]:
     if not ledger_path.exists():
         return {}, "ledger not found"
@@ -886,6 +945,7 @@ def gateway_capabilities() -> dict[str, Any]:
         "api_version": 1,
         "capabilities": [
             "task_routing",
+            "task_preflight",
             "run_preparation",
             "run_listing",
             "run_status_summary",
@@ -931,6 +991,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /governors?health=1",
             "GET /workers",
             "GET /workers?health=1",
+            "POST /task_preflight",
             "POST /task",
             "GET /runs",
             "GET /runs?limit=20",
@@ -1271,6 +1332,17 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
                     prepared = prepare_task(message, task_id, run_root, governor_transport=governor_transport, governor_host=governor_host)
                     response(self, 409 if prepared.get("error_code") == "task_exists" else (200 if prepared.get("ok") else 400), prepared)
+                    return
+                if self.path == "/task_preflight":
+                    message = str(payload.get("message") or payload.get("task") or "").strip()
+                    if not message:
+                        response(self, 400, {"ok": False, "error": "message is required"})
+                        return
+                    task_id = str(payload.get("task_id") or "").strip() or None
+                    governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
+                    governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
+                    preflight = preflight_task(message, task_id, run_root, governor_transport=governor_transport, governor_host=governor_host)
+                    response(self, 409 if preflight.get("error_code") == "task_exists" else (200 if preflight.get("ok") else 400), preflight)
                     return
                 if self.path == "/recover_stale":
                     recovered = recover_stale_runs(run_root)
