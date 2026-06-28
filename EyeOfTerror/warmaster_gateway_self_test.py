@@ -855,6 +855,19 @@ def main() -> int:
             ledger = request_json(base + "/runs/warmaster-test/ledger")
             if not ledger.get("ok") or ledger["ledger"].get("status") != "completed":
                 raise AssertionError(f"bad ledger after execution: {ledger}")
+            try:
+                request_json(base + "/runs/warmaster-test/cancel", {"reason": "late cancel should not mutate terminal run"})
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                late_cancel = json.loads(exc.read().decode("utf-8"))
+                if late_cancel.get("ledger", {}).get("status") != "completed":
+                    raise AssertionError(f"late cancel should preserve completed ledger: {late_cancel}")
+            else:
+                raise AssertionError("Warmaster should reject cancellation for completed runs")
+            ledger_after_late_cancel = request_json(base + "/runs/warmaster-test/ledger")
+            if ledger_after_late_cancel.get("ledger", {}).get("status") != "completed":
+                raise AssertionError(f"late cancel rewrote completed run state: {ledger_after_late_cancel}")
             artifacts = request_json(base + "/runs/warmaster-test/artifacts")
             if not artifacts.get("ok") or not artifacts.get("artifacts") or not artifacts["artifacts"][0].get("exists"):
                 raise AssertionError(f"bad artifacts response: {artifacts}")

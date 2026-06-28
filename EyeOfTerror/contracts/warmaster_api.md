@@ -282,6 +282,8 @@ workspace is known.
 best-effort forwards cancellation to HTTP worker task endpoints from the run
 dispatch package. Cancellation is cooperative unless a worker implements a
 stronger interruption mechanism.
+Cancelling an already terminal run must return a conflict and must not rewrite
+the recorded terminal ledger status.
 
 ## Execution Paths
 

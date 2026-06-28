@@ -2386,6 +2386,18 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         return
                     reason = str(payload.get("reason") or "").strip()
                     ledger = TaskLedger.load(ledger_path)
+                    if ledger.to_dict().get("status") in {"completed", "failed", "cancelled", "corrupt"}:
+                        response(
+                            self,
+                            409,
+                            {
+                                "ok": False,
+                                "task_id": task_id,
+                                "error": "run is already terminal",
+                                "ledger": ledger.to_dict(),
+                            },
+                        )
+                        return
                     ledger.request_cancel(reason)
                     host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
                     worker_cancellations = cancel_http_worker_tasks(run_root / task_id, host=host)
