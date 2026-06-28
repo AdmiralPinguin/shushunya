@@ -209,13 +209,17 @@ and `can_start` are false; clients should use resume actions instead.
 Revision actions are false when the required `revision_plan` is structurally
 invalid or references workers that do not match the run dispatch package;
 summaries expose these diagnostics as `revision_plan_errors`.
+Start, resume, and revision actions are also false when `oversight_errors` is
+non-empty; `actions.next_action.kind=inspect_oversight` points clients to
+`GET /runs/{task_id}/oversight` for diagnostics.
 
 `actions.next_action` gives chat clients and higher-level governors one
 recommended next operation with `kind`, `method`, `endpoint`, `body`, and
 `reason`. It must prefer resume for interrupted runs, revision execution for
-valid required revisions, revision inspection for invalid revision plans,
-polling for active runs, and force-gated rerun guidance for completed runs. When
-the recommendation is a completed-run rerun, `body.force` must be true.
+valid required revisions, oversight inspection for invalid governor oversight,
+revision inspection for invalid revision plans, polling for active runs, and
+force-gated rerun guidance for completed runs. When the recommendation is a
+completed-run rerun, `body.force` must be true.
 
 Run summaries include `oversight_summary` when the run package has
 `oversight.json`. It is a compact view of the governor's run-specific

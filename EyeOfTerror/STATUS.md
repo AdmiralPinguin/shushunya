@@ -19,6 +19,8 @@
 - Warmaster run summaries expose compact `oversight_summary` so clients and
   higher-level governors can inspect final review requirements without fetching
   the full oversight document.
+- Warmaster action hints disable start/resume/revision actions and recommend
+  oversight inspection when run oversight validation fails.
 - Mechanicum prototype workers cover the current lore pipeline:
   - `Lexmechanic`
   - `AuspexBrowser`

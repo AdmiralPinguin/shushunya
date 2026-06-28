@@ -499,6 +499,13 @@ def main() -> int:
                 or not any("not required by contract" in error for error in bad_oversight_inspection.get("validation", {}).get("errors", []))
             ):
                 raise AssertionError(f"oversight endpoint should diagnose inconsistent oversight: {bad_oversight_inspection}")
+            bad_oversight_summary = request_json(base + "/runs/warmaster-bad-oversight-test/summary")
+            if (
+                not bad_oversight_summary.get("summary", {}).get("oversight_errors")
+                or bad_oversight_summary.get("summary", {}).get("actions", {}).get("can_start")
+                or bad_oversight_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "inspect_oversight"
+            ):
+                raise AssertionError(f"summary should block actions for inconsistent oversight: {bad_oversight_summary}")
             try:
                 request_json(base + "/runs/warmaster-bad-oversight-test/preflight_local", {"timeout_sec": 30})
             except urllib.error.HTTPError as exc:
