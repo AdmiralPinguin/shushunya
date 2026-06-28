@@ -3527,16 +3527,19 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     return
                 if len(parts) == 3 and parts[2] == "contract":
                     payload = run_contract(run_dir)
+                    payload = payload_with_run_view(payload, run_dir, task_id)
                     status_code = 500 if payload.get("error_code") == "corrupt_contract" else 404
                     response(self, 200 if payload.get("ok") else status_code, payload)
                     return
                 if len(parts) == 3 and parts[2] == "oversight":
                     payload = run_oversight_diagnostics(run_dir)
+                    payload = payload_with_run_view(payload, run_dir, task_id)
                     status_code = 500 if payload.get("error_code") == "corrupt_oversight" else 404
                     response(self, 200 if payload.get("ok") else status_code, payload)
                     return
                 if len(parts) == 3 and parts[2] == "dispatch":
                     payload = run_dispatch_packets(run_dir)
+                    payload = payload_with_run_view(payload, run_dir, task_id)
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 if len(parts) == 3 and parts[2] == "worker_tasks":

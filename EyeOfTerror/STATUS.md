@@ -238,6 +238,9 @@
 - Warmaster Gateway exposes `GET /doctor` for registry and manifest diagnostics.
 - Warmaster Gateway exposes focused run inspection endpoints for contract,
   dispatch packets, and ledger event history.
+- Focused contract, oversight, and dispatch inspection endpoints expose
+  `run_summary`, `phase`, `decision`, `display`, `next_action`, and executable
+  `client_action` fields for client detail screens.
 - Warmaster exposes `GET /runs/{task_id}/package` for combined run-package
   diagnostics across contract, oversight, status, and dispatch files.
 - Run-package diagnostics include `run_summary`, `phase`, `decision`,

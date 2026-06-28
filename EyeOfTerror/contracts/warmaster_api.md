@@ -314,13 +314,15 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
   diagnostics and continue with the recommended run action without a separate
   summary fetch.
 - `/runs/{task_id}/contract` and `/runs/{task_id}/dispatch` for orchestration
-  debugging.
+  debugging. Focused run inspection responses include the same `run_summary`,
+  `phase`, `decision`, `display`, `next_action`, and executable
+  `client_action` fields as package diagnostics.
 - `/runs/{task_id}/oversight` for the immutable governor oversight plan saved
   with the run package. This lets clients and higher-level governors inspect the
   specific run's artifact roles, handoffs, quality gates, and final review
   expectations even if the governor service changes later. The response also
   includes a compact `summary` and `validation` diagnostics against the current
-  contract and status files.
+  contract and status files, plus the focused run inspection client-view fields.
 - `/runs/{task_id}/worker_tasks?live=1` when worker services are running and
   live worker task state is needed.
 

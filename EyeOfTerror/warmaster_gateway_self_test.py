@@ -1009,6 +1009,16 @@ def main() -> int:
                     raise AssertionError(f"package diagnostics should reject bad oversight: {bad_package}")
             else:
                 raise AssertionError("package diagnostics should fail for inconsistent oversight")
+            bad_oversight_direct = request_json(base + "/runs/warmaster-bad-oversight-test/oversight")
+            if (
+                not bad_oversight_direct.get("ok")
+                or not bad_oversight_direct.get("validation", {}).get("errors")
+                or bad_oversight_direct.get("client_action", {}).get("path") != "/runs/warmaster-bad-oversight-test/oversight"
+                or bad_oversight_direct.get("next_action", {}).get("kind") != "inspect_oversight"
+                or not bad_oversight_direct.get("display", {}).get("headline")
+                or not bad_oversight_direct.get("run_summary", {}).get("oversight_errors")
+            ):
+                raise AssertionError(f"bad oversight diagnostics should expose client state: {bad_oversight_direct}")
             bad_package_task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bad-package-test"},
@@ -1165,7 +1175,13 @@ def main() -> int:
             if not run_active.get("ok") or run_active.get("active"):
                 raise AssertionError(f"bad run active response: {run_active}")
             contract = request_json(base + "/runs/warmaster-test/contract")
-            if not contract.get("ok") or contract["contract"].get("task_id") != "warmaster-test":
+            if (
+                not contract.get("ok")
+                or contract["contract"].get("task_id") != "warmaster-test"
+                or contract.get("phase") != "ready_to_start"
+                or contract.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
+                or not contract.get("display", {}).get("headline")
+            ):
                 raise AssertionError(f"bad run contract: {contract}")
             package = request_json(base + "/runs/warmaster-test/package")
             if (
@@ -1190,10 +1206,19 @@ def main() -> int:
                 or oversight.get("summary", {}).get("revision_policy", {}).get("requires_downstream_rerun") is not True
                 or oversight.get("oversight", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or oversight.get("oversight", {}).get("artifact_roles", {}).get("draft") != ["/work/skalathrax/reconstruction_ru.md"]
+                or oversight.get("phase") != "ready_to_start"
+                or oversight.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
+                or not oversight.get("display", {}).get("headline")
             ):
                 raise AssertionError(f"bad run oversight: {oversight}")
             dispatch = request_json(base + "/runs/warmaster-test/dispatch")
-            if not dispatch.get("ok") or not any(item.get("packet", {}).get("worker") == "Lexmechanic" for item in dispatch.get("dispatch", [])):
+            if (
+                not dispatch.get("ok")
+                or not any(item.get("packet", {}).get("worker") == "Lexmechanic" for item in dispatch.get("dispatch", []))
+                or dispatch.get("phase") != "ready_to_start"
+                or dispatch.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
+                or not dispatch.get("display", {}).get("headline")
+            ):
                 raise AssertionError(f"bad run dispatch: {dispatch}")
             worker_tasks = request_json(base + "/runs/warmaster-test/worker_tasks")
             if (
