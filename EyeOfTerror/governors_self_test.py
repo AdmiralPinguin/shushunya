@@ -1,15 +1,40 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from eye_of_terror.governors import governor_by_name, governor_refs
 from eye_of_terror.inner_circle.iskandar_service import service_capabilities
 
 
 def main() -> int:
+    repo_root = Path(__file__).resolve().parents[1]
+    ports = json.loads((repo_root / "EyeOfTerror" / "registry" / "ports.json").read_text(encoding="utf-8"))
+    eye_ports = ports.get("eye_of_terror", {}) if isinstance(ports, dict) else {}
+    port_governors = {
+        int(port): item
+        for port, item in eye_ports.items()
+        if isinstance(item, dict) and int(port) >= 7101
+    }
     refs = governor_refs()
     names = {ref.name for ref in refs}
     if "IskandarKhayon" not in names:
         raise AssertionError(names)
+    seen_ports: dict[int, str] = {}
+    for ref in refs:
+        owner = seen_ports.setdefault(ref.port, ref.name)
+        if owner != ref.name:
+            raise AssertionError(f"governor port collision on {ref.port}: {owner} and {ref.name}")
+        port_entry = port_governors.get(ref.port)
+        if ref.active() and not port_entry:
+            raise AssertionError(f"active governor missing from ports.json: {ref.name}")
+        if port_entry and port_entry.get("name") != ref.name:
+            raise AssertionError(f"governor registry and ports.json disagree for {ref.name}: {port_entry}")
+        if ref.active() and not ref.service:
+            raise AssertionError(f"active governor must declare service: {ref}")
+        if not ref.active() and ref.service:
+            raise AssertionError(f"planned governor should not declare a runnable service yet: {ref}")
     iskandar = governor_by_name("IskandarKhayon")
     if not iskandar or not iskandar.active() or iskandar.port != 7101:
         raise AssertionError(iskandar)
