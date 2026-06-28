@@ -1110,6 +1110,18 @@ def looks_like_oversized_inline_file_action(raw: str, error: Exception | None = 
     return "unterminated string" in error_text and len(text) >= 1000
 
 
+def looks_like_oversized_inline_python_action(raw: str, error: Exception | None = None) -> bool:
+    text = str(raw or "")
+    lowered = text.lower()
+    compact = "".join(lowered.split())
+    if '"action":"python"' not in compact or '"code"' not in compact:
+        return False
+    if len(text) >= 5000:
+        return True
+    error_text = str(error or "").lower()
+    return "unterminated string" in error_text and len(text) >= 1000
+
+
 def strip_json_fence(raw: str) -> str:
     text = str(raw or "").strip()
     if text.startswith("```"):
@@ -4981,6 +4993,24 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     write_task_journal(
                         config,
                         "oversized_inline_file_action",
+                        {"step": step, "error": str(exc), "raw_prefix": truncate(raw, 1200)},
+                    )
+                    messages.append({"role": "assistant", "content": truncate(raw, 1200)})
+                    messages.append({"role": "user", "content": message})
+                    continue
+                if looks_like_oversized_inline_python_action(raw, exc):
+                    message = (
+                        "Supervisor blocked an oversized inline python action. The model tried to put too much code or embedded "
+                        "data inside one JSON code field, which is unreliable and was truncated. Do not retry a large inline "
+                        "python action. Use one short python action under 900 characters that reads real files from cwd and "
+                        "delegates to an existing script, or create/update a script file with short write_file/append_file chunks "
+                        "and then run it with a short python action. Do not embed input data that was already read; read the files "
+                        "from disk inside the script."
+                    )
+                    emit(event_sink, {"type": "warning", "code": "oversized_inline_python_action", "step": step, "message": message})
+                    write_task_journal(
+                        config,
+                        "oversized_inline_python_action",
                         {"step": step, "error": str(exc), "raw_prefix": truncate(raw, 1200)},
                     )
                     messages.append({"role": "assistant", "content": truncate(raw, 1200)})

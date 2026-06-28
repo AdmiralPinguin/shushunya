@@ -52,6 +52,7 @@ from .agent_runner import (
     web_search,
     write_task_journal,
     looks_like_oversized_inline_file_action,
+    looks_like_oversized_inline_python_action,
     extract_sandbox_paths_from_text,
     required_artifact_paths_from_task,
     required_min_chars_by_path_from_task,
@@ -1294,6 +1295,36 @@ def main() -> int:
         raise AssertionError(f"json parse continuation task did not force chunked writes: {json_parse_continuation}")
     print("[ok] auto-continue json parse prompt")
 
+    journal_events = [
+        {"type": "start", "data_sources": ["/work/a.csv", "/work/b.jsonl"]},
+        {"type": "data_source_inspected", "path": "/work/a.csv"},
+    ]
+    with mock.patch.object(server, "read_task_journal", return_value={"ok": True, "events": journal_events}):
+        repeated_missing_continuation = server.continuation_task(
+            "base",
+            "self-test-journal-sources",
+            1,
+            {"message": "Агент остановлен супервизором: обнаружен цикл повторяющихся действий без прогресса."},
+        )
+    if "/work/b.jsonl" not in repeated_missing_continuation or "ровно для одного недостающего источника" not in repeated_missing_continuation:
+        raise AssertionError(
+            f"journal missing data source was not exposed to continuation: {repeated_missing_continuation}"
+        )
+    journal_events_all_read = [
+        {"type": "start", "data_sources": ["/work/a.csv"]},
+        {"type": "data_source_inspected", "path": "/work/a.csv"},
+    ]
+    with mock.patch.object(server, "read_task_journal", return_value={"ok": True, "events": journal_events_all_read}):
+        json_all_read_continuation = server.continuation_task(
+            "base",
+            "self-test-journal-sources-all-read",
+            1,
+            {"message": "Агент остановлен супервизором: модель несколько раз вернула невалидный JSON."},
+        )
+    if "Все известные data sources уже прочитаны" not in json_all_read_continuation or "script file" not in json_all_read_continuation:
+        raise AssertionError(f"json parse continuation did not use journal source state: {json_all_read_continuation}")
+    print("[ok] auto-continue journal data source state")
+
     loop_calls: list[tuple[str, dict]] = []
 
     def fake_auto_continue_loop(task: str, run_config: AgentConfig, event_sink=None, **kwargs):
@@ -1547,6 +1578,18 @@ def main() -> int:
     if looks_like_oversized_inline_file_action('{"action":"final","message":"ok"}', ValueError("broken")):
         raise AssertionError("oversized inline write guard matched a normal final action")
     print("[ok] oversized inline write guard")
+    broken_inline_python = (
+        '{"action":"python","cwd":"/work/project","code":"'
+        + ("import json\\n" * 160)
+    )
+    if not looks_like_oversized_inline_python_action(
+        broken_inline_python,
+        ValueError("Unterminated string starting at: line 1 column 45"),
+    ):
+        raise AssertionError("oversized inline python guard missed truncated python JSON")
+    if looks_like_oversized_inline_python_action('{"action":"python","code":"print(1)"}', ValueError("broken")):
+        raise AssertionError("oversized inline python guard matched a normal short python action")
+    print("[ok] oversized inline python guard")
 
     parse_stall_stdout = io.StringIO()
     parse_stall_config = AgentConfig(

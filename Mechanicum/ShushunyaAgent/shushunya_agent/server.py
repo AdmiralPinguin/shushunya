@@ -818,12 +818,53 @@ def missing_data_sources_from_result(result: dict[str, Any] | None) -> list[str]
     return paths[:10]
 
 
+def journal_data_source_state(task_id: str) -> tuple[list[str], list[str]]:
+    journal = read_task_journal(task_id, limit=500)
+    if not journal.get("ok"):
+        return [], []
+    events = journal.get("events")
+    if not isinstance(events, list):
+        return [], []
+    data_sources: list[str] = []
+    inspected: list[str] = []
+    seen_sources: set[str] = set()
+    seen_inspected: set[str] = set()
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if str(event.get("type") or "") == "start":
+            sources = event.get("data_sources")
+            if isinstance(sources, list):
+                for source in sources:
+                    path = str(source or "").strip()
+                    if path and path not in seen_sources:
+                        seen_sources.add(path)
+                        data_sources.append(path)
+            continue
+        if str(event.get("type") or "") == "data_source_inspected":
+            path = str(event.get("path") or "").strip()
+            if path and path not in seen_inspected:
+                seen_inspected.add(path)
+                inspected.append(path)
+            continue
+        if str(event.get("type") or "") == "tool_result" and str(event.get("action") or "") == "read_file":
+            result = event.get("result")
+            if isinstance(result, dict) and result.get("ok") is True:
+                path = str(result.get("path") or "").strip()
+                if path and path not in seen_inspected:
+                    seen_inspected.add(path)
+                    inspected.append(path)
+    missing = [path for path in data_sources if path not in seen_inspected]
+    return inspected, missing
+
+
 def continuation_task(base_task: str, task_id: str, cycle: int, previous_result: dict[str, Any] | None = None) -> str:
     previous_message = str((previous_result or {}).get("message") or "").lower()
     repeated_mode = any(token in previous_message for token in ("повторяющихся действий", "repeated", "without progress"))
     json_parse_mode = any(token in previous_message for token in ("невалидный json", "invalid json", "json_parse_stall"))
     verified_mutation_mode = result_has_verified_artifact_mutation_rejection(previous_result)
-    missing_data_sources = missing_data_sources_from_result(previous_result)
+    inspected_data_sources, journal_missing_data_sources = journal_data_source_state(task_id)
+    missing_data_sources = journal_missing_data_sources or missing_data_sources_from_result(previous_result)
     recovery_instruction = ""
     if repeated_mode:
         missing_instruction = ""
@@ -833,6 +874,11 @@ def continuation_task(base_task: str, task_id: str, cycle: int, previous_result:
                 "сделать read_file ровно для одного недостающего источника из этого списка: "
                 + ", ".join(missing_data_sources)
                 + ". Такое чтение считается продуктивным действием. Не читай заново уже inspected источники."
+            )
+        elif inspected_data_sources:
+            missing_instruction = (
+                " Все известные data files уже прочитаны по task journal; не вызывай read_file/list_files снова. "
+                "Следующим действием создай, исправь или проверь обязательный артефакт."
             )
         recovery_instruction += (
             "\n\nПредыдущий цикл остановился из-за повторяющихся действий без прогресса. "
@@ -854,11 +900,24 @@ def continuation_task(base_task: str, task_id: str, cycle: int, previous_result:
             "Если остались непроверенные обязательные артефакты, разрешено только проверить их, а не переписывать готовые файлы."
         )
     if json_parse_mode:
+        source_instruction = ""
+        if missing_data_sources:
+            source_instruction = (
+                " Перед созданием артефактов первым коротким действием прочитай ровно один недостающий data source: "
+                + ", ".join(missing_data_sources)
+                + "."
+            )
+        elif inspected_data_sources:
+            source_instruction = (
+                " Все известные data sources уже прочитаны по journal; не вызывай read_file/list_files снова. "
+                "Пиши код, который читает реальные файлы из рабочего каталога, без встроенных копий данных."
+            )
         recovery_instruction += (
             "\n\nПредыдущий цикл остановился из-за невалидного JSON при большом inline content/code. "
-            "Не генерируй большой write_file/python JSON одним ответом. Следующие действия должны быть короткими и валидными: "
-            "write_file только для небольшого заголовка/начала файла, затем append_file чанками до 1500 символов, "
-            "или короткий python-код без большого встроенного текста. Не вставляй длинный рассказ, HTML, книгу или большой код в одно JSON-поле."
+            "Не генерируй большой write_file/python JSON одним ответом. Следующие действия должны быть короткими и валидными. "
+            "Если нужен код больше 900 символов, создай script file короткими write_file/append_file чанками до 1500 символов, "
+            "а затем запусти его коротким python action. Не вставляй длинный рассказ, HTML, книгу, большие данные или большой код в одно JSON-поле."
+            + source_instruction
         )
     return (
         "Продолжи выполнение той же задачи по task journal. "
