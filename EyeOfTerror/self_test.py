@@ -207,6 +207,12 @@ def main() -> int:
         written_oversight = json.loads((Path(temp_dir) / "oversight.json").read_text(encoding="utf-8"))
         if written_oversight.get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json":
             raise AssertionError(f"pipeline run wrote bad oversight: {written_oversight}")
+        if (
+            written_oversight.get("revision_policy", {}).get("source_step") != "critic_review"
+            or written_oversight.get("revision_policy", {}).get("final_steps") != ["critic_review", "finalize"]
+            or written_oversight.get("revision_policy", {}).get("requires_downstream_rerun") is not True
+        ):
+            raise AssertionError(f"pipeline run wrote bad revision policy: {written_oversight}")
     print("[ok] Iskandar pipeline run package")
     return 0
 

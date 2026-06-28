@@ -48,6 +48,7 @@ def main() -> int:
         or oversight.get("final_review", {}).get("requires_evidence_trace") is not True
         or not oversight.get("artifact_roles", {}).get("final", [])[0].endswith("/final_manifest.json")
         or not any(item.get("from_step") == "critic_review" and item.get("to_steps") == ["finalize"] for item in oversight.get("handoffs", []))
+        or oversight.get("revision_policy", {}).get("final_steps") != ["critic_review", "finalize"]
     ):
         raise AssertionError(f"bad Iskandar oversight template: {oversight}")
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -79,6 +80,7 @@ def main() -> int:
             if (
                 "oversight_plan" not in capabilities.get("capabilities", [])
                 or capabilities.get("oversight", {}).get("final_review", {}).get("final_step") != "finalize"
+                or capabilities.get("oversight", {}).get("revision_policy", {}).get("requires_focused_context") is not True
             ):
                 raise AssertionError(f"capabilities did not expose oversight plan: {capabilities}")
             if (

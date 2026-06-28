@@ -58,6 +58,13 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
             "requires_gap_disclosure": True,
             "requires_evidence_trace": True,
         },
+        "revision_policy": {
+            "source_step": "critic_review",
+            "final_steps": ["critic_review", "finalize"],
+            "requires_downstream_rerun": True,
+            "requires_focused_context": True,
+            "requires_gap_disclosure": True,
+        },
     }
 
 

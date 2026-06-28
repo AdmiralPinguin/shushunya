@@ -242,6 +242,9 @@
   and review path instead of leaving stale derived artifacts.
 - Warmaster run summaries and snapshots expose `revision_plan_summary` for
   compact client/governor decisions about required revision work.
+- `IskandarKhayon` oversight plans include a `revision_policy` describing the
+  critic source step, required final review steps, downstream rerun requirement,
+  and focused revision context requirement.
 - HTTP execution preflights all worker `/health` endpoints before running steps
   and rejects worker identity mismatches before dispatch.
 - Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.
