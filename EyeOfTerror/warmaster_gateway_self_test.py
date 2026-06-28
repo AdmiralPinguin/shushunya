@@ -237,7 +237,17 @@ def main() -> int:
             if not health.get("ok"):
                 raise AssertionError(f"bad health: {health}")
             capabilities = request_json(base + "/capabilities")
-            required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout", "run_action_hints", "interrupted_run_resume", "http_governor_planning", "brigade_plan_snapshot", "brigade_health_snapshot"}
+            required_capabilities = {
+                "background_execution",
+                "worker_registry",
+                "worker_cancel_fanout",
+                "run_action_hints",
+                "run_execution_preflight",
+                "interrupted_run_resume",
+                "http_governor_planning",
+                "brigade_plan_snapshot",
+                "brigade_health_snapshot",
+            }
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
                 raise AssertionError(f"bad gateway capabilities response: {capabilities}")
             if (

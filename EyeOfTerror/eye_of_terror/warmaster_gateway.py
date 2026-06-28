@@ -1135,6 +1135,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "process_active_run_snapshot",
             "run_action_hints",
             "run_step_artifact_read",
+            "run_execution_preflight",
             "doctor",
         ],
         "endpoints": [
