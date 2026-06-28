@@ -185,6 +185,8 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
     ledger_path = run_dir / "task_ledger.json"
     status, status_error = load_json_object(status_path, "status") if status_path.exists() else ({}, "")
     ledger, ledger_error = load_ledger_dict(ledger_path)
+    result = ledger.get("result", {}) if isinstance(ledger.get("result"), dict) else {}
+    revision_plan = result.get("revision_plan") if isinstance(result.get("revision_plan"), dict) else {"required": False, "steps": []}
     summary = {
         "task_id": ledger.get("task_id") or status.get("task_id") or run_dir.name,
         "run_dir": str(run_dir),
@@ -193,7 +195,8 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "governor": ledger.get("governor") or status.get("governor") or "",
         "created_at": ledger.get("created_at") or "",
         "updated_at": ledger.get("updated_at") or "",
-        "result": ledger.get("result", {}),
+        "result": result,
+        "revision_plan": revision_plan,
         "progress": run_progress(status, ledger),
     }
     if status_error:
@@ -318,6 +321,7 @@ def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: in
     events_payload = run_events(run_dir, limit=event_limit, after=events_after)
     payload["events"] = events_payload.get("events", [])
     payload["event_cursor"] = events_payload.get("cursor", {"after": 0, "next": 0, "total": 0})
+    payload["revision_plan"] = payload["summary"].get("revision_plan", {"required": False, "steps": []})
     if not events_payload.get("ok"):
         payload["events_error"] = events_payload.get("error", "events unavailable")
     ledger_path = run_dir / "task_ledger.json"
