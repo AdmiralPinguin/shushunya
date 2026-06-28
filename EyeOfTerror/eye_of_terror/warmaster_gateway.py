@@ -573,6 +573,29 @@ def run_status_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return {"total": len(runs), "active": active, "by_status": by_status}
 
 
+def recovery_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+    for run in runs:
+        actions = run.get("actions") if isinstance(run.get("actions"), dict) else {}
+        if run.get("status") != "interrupted" or not actions.get("can_resume"):
+            continue
+        next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+        candidates.append(
+            {
+                "task_id": str(run.get("task_id") or ""),
+                "status": str(run.get("status") or ""),
+                "updated_at": str(run.get("updated_at") or ""),
+                "pending_step_ids": run.get("progress", {}).get("pending_step_ids", []) if isinstance(run.get("progress"), dict) else [],
+                "next_action": next_action,
+            }
+        )
+    return {
+        "recoverable": len(candidates),
+        "task_ids": [candidate["task_id"] for candidate in candidates if candidate.get("task_id")],
+        "candidates": candidates,
+    }
+
+
 def last_run_preflight(ledger: dict[str, Any]) -> dict[str, Any]:
     events = ledger.get("events") if isinstance(ledger.get("events"), list) else []
     for event in reversed(events):
@@ -1385,6 +1408,7 @@ def gateway_state(run_root: Path, run_limit: int = 20, include_health: bool = Fa
         "workers": worker_registry_snapshot(),
         "brigade_plan": brigade_plan_snapshot(),
         "run_summary": run_status_summary(all_runs),
+        "recovery": recovery_summary(all_runs),
         "process_active_runs": process_active_runs,
         "runs": runs,
     }
@@ -1535,7 +1559,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 raw_limit = query.get("limit", [""])[0]
                 all_runs = list_runs(run_root)
                 runs = all_runs[: parse_limit(raw_limit, default=MAX_LIST_LIMIT)] if raw_limit else all_runs
-                response(self, 200, {"ok": True, "run_summary": run_status_summary(all_runs), "runs": runs})
+                response(self, 200, {"ok": True, "run_summary": run_status_summary(all_runs), "recovery": recovery_summary(all_runs), "runs": runs})
                 return
             if len(parts) == 4 and parts[0] == "runs" and parts[2] == "steps":
                 task_id = parts[1]

@@ -885,6 +885,20 @@ def main() -> int:
                 raise AssertionError(f"bad stale recovery: {recovered}")
             if not recovered["recovered"][0].get("actions", {}).get("can_resume"):
                 raise AssertionError(f"recovered run did not expose resume action: {recovered}")
+            recovery_state = request_json(base + "/state?run_limit=5")
+            if (
+                recovery_state.get("recovery", {}).get("recoverable", 0) < 1
+                or "stale-test" not in recovery_state.get("recovery", {}).get("task_ids", [])
+                or not any(
+                    item.get("task_id") == "stale-test"
+                    and item.get("next_action", {}).get("kind") == "resume"
+                    for item in recovery_state.get("recovery", {}).get("candidates", [])
+                )
+            ):
+                raise AssertionError(f"state did not expose recoverable interrupted runs: {recovery_state}")
+            recovery_runs = request_json(base + "/runs?limit=5")
+            if recovery_runs.get("recovery", {}).get("recoverable", 0) < 1:
+                raise AssertionError(f"run listing did not expose recovery summary: {recovery_runs}")
         finally:
             server.shutdown()
             thread.join(timeout=5)
