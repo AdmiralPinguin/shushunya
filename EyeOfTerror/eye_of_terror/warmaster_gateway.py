@@ -733,6 +733,20 @@ def run_oversight(run_dir: Path) -> dict[str, Any]:
     return {"ok": True, "oversight": payload}
 
 
+def run_oversight_diagnostics(run_dir: Path) -> dict[str, Any]:
+    payload = run_oversight(run_dir)
+    if not payload.get("ok"):
+        return payload
+    oversight = payload.get("oversight") if isinstance(payload.get("oversight"), dict) else {}
+    status, status_error = load_json_object(run_dir / "status.json", "status")
+    validation_errors = [status_error] if status_error else validate_oversight_against_run(run_dir, oversight, status)
+    return {
+        **payload,
+        "summary": compact_oversight_summary(oversight),
+        "validation": {"ok": not validation_errors, "errors": validation_errors},
+    }
+
+
 def compact_oversight_summary(oversight: dict[str, Any]) -> dict[str, Any]:
     artifact_roles = oversight.get("artifact_roles") if isinstance(oversight.get("artifact_roles"), dict) else {}
     final_review = oversight.get("final_review") if isinstance(oversight.get("final_review"), dict) else {}
@@ -1983,7 +1997,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     response(self, 200 if payload.get("ok") else status_code, payload)
                     return
                 if len(parts) == 3 and parts[2] == "oversight":
-                    payload = run_oversight(run_dir)
+                    payload = run_oversight_diagnostics(run_dir)
                     status_code = 500 if payload.get("error_code") == "corrupt_oversight" else 404
                     response(self, 200 if payload.get("ok") else status_code, payload)
                     return

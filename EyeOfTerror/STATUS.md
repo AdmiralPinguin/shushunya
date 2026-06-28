@@ -14,6 +14,8 @@
   criteria, and final review expectations.
 - Iskandar run packages persist the governor oversight plan as `oversight.json`,
   and Warmaster exposes it through `GET /runs/{task_id}/oversight`.
+- Warmaster oversight inspection includes compact summary and validation
+  diagnostics against the current run package.
 - Warmaster run summaries expose compact `oversight_summary` so clients and
   higher-level governors can inspect final review requirements without fetching
   the full oversight document.

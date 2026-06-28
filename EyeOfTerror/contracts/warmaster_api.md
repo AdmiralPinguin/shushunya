@@ -192,7 +192,9 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
 - `/runs/{task_id}/oversight` for the immutable governor oversight plan saved
   with the run package. This lets clients and higher-level governors inspect the
   specific run's artifact roles, handoffs, quality gates, and final review
-  expectations even if the governor service changes later.
+  expectations even if the governor service changes later. The response also
+  includes a compact `summary` and `validation` diagnostics against the current
+  contract and status files.
 - `/runs/{task_id}/worker_tasks?live=1` when worker services are running and
   live worker task state is needed.
 

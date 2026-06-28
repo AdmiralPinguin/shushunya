@@ -492,6 +492,13 @@ def main() -> int:
             bad_oversight_payload = json.loads(bad_oversight_path.read_text(encoding="utf-8"))
             bad_oversight_payload["final_review"]["final_artifact"] = "/work/skalathrax/not-produced.json"
             write_json(bad_oversight_path, bad_oversight_payload)
+            bad_oversight_inspection = request_json(base + "/runs/warmaster-bad-oversight-test/oversight")
+            if (
+                not bad_oversight_inspection.get("ok")
+                or bad_oversight_inspection.get("validation", {}).get("ok")
+                or not any("not required by contract" in error for error in bad_oversight_inspection.get("validation", {}).get("errors", []))
+            ):
+                raise AssertionError(f"oversight endpoint should diagnose inconsistent oversight: {bad_oversight_inspection}")
             try:
                 request_json(base + "/runs/warmaster-bad-oversight-test/preflight_local", {"timeout_sec": 30})
             except urllib.error.HTTPError as exc:
@@ -607,6 +614,8 @@ def main() -> int:
             oversight = request_json(base + "/runs/warmaster-test/oversight")
             if (
                 not oversight.get("ok")
+                or not oversight.get("validation", {}).get("ok")
+                or oversight.get("summary", {}).get("final_review", {}).get("final_step") != "finalize"
                 or oversight.get("oversight", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or oversight.get("oversight", {}).get("artifact_roles", {}).get("draft") != ["/work/skalathrax/reconstruction_ru.md"]
             ):
