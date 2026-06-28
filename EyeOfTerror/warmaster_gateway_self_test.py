@@ -467,6 +467,9 @@ def main() -> int:
                 or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "source_discovery"
                 or run_summary.get("summary", {}).get("progress", {}).get("next_ready_step_id") != "source_discovery"
                 or run_summary.get("summary", {}).get("progress", {}).get("ready_step_ids") != ["source_discovery"]
+                or "fact_extraction" not in run_summary.get("summary", {}).get("progress", {}).get("waiting_step_ids", [])
+                or run_summary.get("summary", {}).get("progress", {}).get("ready_steps") != 1
+                or run_summary.get("summary", {}).get("progress", {}).get("waiting_steps") != 6
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("worker") != "Lexmechanic"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("status") != "pending"
             ):

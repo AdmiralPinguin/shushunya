@@ -173,11 +173,13 @@ latest startup check.
 
 Run summaries also include ordered progress hints:
 `planned_step_ids`, `completed_step_ids`, `failed_step_ids`,
-`pending_step_ids`, `ready_step_ids`, `blocked_step_ids`, `next_step_id`,
-`next_ready_step_id`, and `step_states`. These are derived from the run package
-and ledger records, so clients can display restart/resume position, worker
-ownership, dependency readiness, expected artifacts, produced artifacts, and
-per-step summaries without parsing dispatch packets. Step states include
+`pending_step_ids`, `ready_step_ids`, `blocked_step_ids`, `waiting_step_ids`,
+`next_step_id`, `next_ready_step_id`, and `step_states`. These are derived from
+the run package and ledger records, so clients can display restart/resume
+position, worker ownership, dependency readiness, expected artifacts, produced
+artifacts, and per-step summaries without parsing dispatch packets. Progress
+also includes count fields for pending, ready, blocked, and waiting steps. Step
+states include
 `depends_on`, `dependency_status`, `dependencies_ready`, `dependencies_blocked`,
 `input_artifacts`, `expected_artifacts`, and produced `artifacts`; each artifact
 set also has status entries with `exists`, `bytes`, and `host_path` when a run

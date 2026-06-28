@@ -441,6 +441,7 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
     failed_set = set(failed_step_ids)
     ready_step_ids: list[str] = []
     blocked_step_ids: list[str] = []
+    waiting_step_ids: list[str] = []
     step_states: list[dict[str, Any]] = []
     for planned in planned_steps:
         if not isinstance(planned, dict):
@@ -469,6 +470,8 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
                 ready_step_ids.append(step_id)
             elif dependency_blocked:
                 blocked_step_ids.append(step_id)
+            else:
+                waiting_step_ids.append(step_id)
         step_states.append(
             {
                 "step_id": step_id,
@@ -493,6 +496,10 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
         "recorded_steps": len(ledger_steps),
         "completed_steps": completed,
         "failed_steps": failed,
+        "pending_steps": len(pending_step_ids),
+        "ready_steps": len(ready_step_ids),
+        "blocked_steps": len(blocked_step_ids),
+        "waiting_steps": len(waiting_step_ids),
         "by_status": by_status,
         "planned_step_ids": planned_step_ids,
         "completed_step_ids": completed_step_ids,
@@ -500,6 +507,7 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
         "pending_step_ids": pending_step_ids,
         "ready_step_ids": ready_step_ids,
         "blocked_step_ids": blocked_step_ids,
+        "waiting_step_ids": waiting_step_ids,
         "next_step_id": pending_step_ids[0] if pending_step_ids else "",
         "next_ready_step_id": ready_step_ids[0] if ready_step_ids else "",
         "step_states": step_states,

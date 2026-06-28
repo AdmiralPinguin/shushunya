@@ -40,6 +40,7 @@
 - Run progress exposes per-step input, expected, and produced artifact statuses.
 - Run progress exposes dependency readiness through ready, blocked, and
   dependency-status step hints for higher-level governors.
+- Run progress separates waiting steps from ready and dependency-blocked steps.
 - Warmaster Gateway can prepare tasks through the local governor path or through
   the active governor's HTTP service.
 - Warmaster rejects HTTP-governor task preparation when reachable governor
