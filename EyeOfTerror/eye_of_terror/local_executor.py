@@ -90,6 +90,22 @@ def input_artifact_errors(request: dict[str, Any], workspace_root: Path) -> list
     return errors
 
 
+def split_revision_values(value: str, separators: tuple[str, ...]) -> list[str]:
+    values = [value.strip()]
+    for separator in separators:
+        next_values: list[str] = []
+        for item in values:
+            next_values.extend(part.strip() for part in item.split(separator))
+        values = next_values
+    return [item for item in values if item]
+
+
+def append_unique(items: list[str], values: list[str]) -> None:
+    for value in values:
+        if value not in items:
+            items.append(value)
+
+
 def revision_contexts_from_result(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
     revision_plan = result.get("revision_plan") if isinstance(result.get("revision_plan"), dict) else {}
     contexts: dict[str, dict[str, Any]] = {}
@@ -103,10 +119,10 @@ def revision_contexts_from_result(result: dict[str, Any]) -> dict[str, dict[str,
         context = contexts[step_id]
         reason = str(item.get("reason") or "").strip()
         if reason:
-            context["reasons"].append(reason)
+            append_unique(context["reasons"], split_revision_values(reason, (" | ",)))
         source = str(item.get("source") or "").strip()
         if source:
-            context["source_steps"].append(source)
+            append_unique(context["source_steps"], split_revision_values(source, (",",)))
         context["priority"] = str(item.get("priority") or "blocker")
     return contexts
 

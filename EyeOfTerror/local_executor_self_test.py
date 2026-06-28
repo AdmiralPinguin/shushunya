@@ -34,16 +34,21 @@ def main() -> int:
                     {
                         "step_id": "draft_reconstruction",
                         "worker": "ScriptoriumDaemon",
-                        "reason": "Draft misses required event",
-                        "source": "critic_finding",
+                        "reason": "Draft misses required event | Depends on revised step timeline",
+                        "source": "critic_finding,revision_dependency",
                         "priority": "blocker",
                     }
                 ],
             }
         }
     )
-    if revision_contexts.get("draft_reconstruction", {}).get("reasons") != ["Draft misses required event"]:
+    if revision_contexts.get("draft_reconstruction", {}).get("reasons") != [
+        "Draft misses required event",
+        "Depends on revised step timeline",
+    ]:
         raise AssertionError(f"bad revision context mapping: {revision_contexts}")
+    if revision_contexts.get("draft_reconstruction", {}).get("source_steps") != ["critic_finding", "revision_dependency"]:
+        raise AssertionError(f"bad revision source mapping: {revision_contexts}")
     repo_root = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
