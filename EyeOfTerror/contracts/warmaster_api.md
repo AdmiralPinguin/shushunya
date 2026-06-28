@@ -96,9 +96,10 @@ instead of duplicating Warmaster status rules.
 
 Run summaries also include ordered progress hints:
 `planned_step_ids`, `completed_step_ids`, `failed_step_ids`,
-`pending_step_ids`, and `next_step_id`. These are derived from the run package
-and ledger records, so clients can display restart/resume position without
-parsing dispatch packets.
+`pending_step_ids`, `next_step_id`, and `step_states`. These are derived from
+the run package and ledger records, so clients can display restart/resume
+position, worker ownership, expected artifacts, produced artifacts, and per-step
+summaries without parsing dispatch packets.
 
 ## Cancellation
 

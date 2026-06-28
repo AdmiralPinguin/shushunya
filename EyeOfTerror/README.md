@@ -93,8 +93,9 @@ and artifact metadata in one response.
 Run summaries expose `actions` hints for client controls such as start, cancel,
 resume, and revision execution.
 
-Run progress exposes ordered step ids, completed/failed/pending step ids, and
-`next_step_id` for client progress displays and future partial resume logic.
+Run progress exposes ordered step ids, completed/failed/pending step ids,
+`next_step_id`, and `step_states` for client progress displays and future
+partial resume logic.
 
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the

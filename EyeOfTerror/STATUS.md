@@ -58,7 +58,7 @@
 - Warmaster run summaries expose `actions` hints for start/cancel/resume and
   revision controls.
 - Warmaster progress summaries expose ordered planned/completed/failed/pending
-  step ids and `next_step_id`.
+  step ids, `next_step_id`, and per-step state records.
 - Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
 - Warmaster routing is driven by `route_terms` in the governor registry instead
   of hardcoded per-governor keyword lists.

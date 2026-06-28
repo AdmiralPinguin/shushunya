@@ -196,6 +196,27 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
         for step_id in planned_step_ids
         if step_id not in completed_step_ids and step_id not in failed_step_ids
     ]
+    step_states: list[dict[str, Any]] = []
+    for planned in planned_steps:
+        if not isinstance(planned, dict):
+            continue
+        step_id = str(planned.get("step_id") or "")
+        if not step_id:
+            continue
+        recorded = ledger_by_step.get(step_id, {})
+        recorded_status = str(recorded.get("status") or "")
+        step_states.append(
+            {
+                "step_id": step_id,
+                "worker": str(planned.get("worker") or recorded.get("worker") or ""),
+                "status": recorded_status or "pending",
+                "depends_on": planned.get("depends_on") if isinstance(planned.get("depends_on"), list) else [],
+                "expected_artifacts": planned.get("expected_artifacts") if isinstance(planned.get("expected_artifacts"), list) else [],
+                "artifacts": recorded.get("artifacts") if isinstance(recorded.get("artifacts"), list) else [],
+                "summary": str(recorded.get("summary") or ""),
+                "recorded": bool(recorded),
+            }
+        )
     return {
         "planned_steps": len(planned_steps),
         "recorded_steps": len(ledger_steps),
@@ -207,6 +228,7 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
         "failed_step_ids": failed_step_ids,
         "pending_step_ids": pending_step_ids,
         "next_step_id": pending_step_ids[0] if pending_step_ids else "",
+        "step_states": step_states,
     }
 
 
