@@ -64,10 +64,14 @@ Gateway endpoints:
 - `POST /runs/<task_id>/execute_http`
 - `POST /runs/<task_id>/execute_revision_local`
 - `POST /runs/<task_id>/execute_revision_http`
+- `POST /runs/<task_id>/resume_local`
+- `POST /runs/<task_id>/resume_http`
 - `POST /runs/<task_id>/start_local`
 - `POST /runs/<task_id>/start_http`
 - `POST /runs/<task_id>/start_revision_local`
 - `POST /runs/<task_id>/start_revision_http`
+- `POST /runs/<task_id>/start_resume_local`
+- `POST /runs/<task_id>/start_resume_http`
 - `POST /runs/<task_id>/cancel`
 - `POST /recover_stale`
 
@@ -97,6 +101,9 @@ Revision execution endpoints use a failed/blocked run's `revision_plan` and run
 only the requested rework steps, then `critic_review` and `finalize`. Revision
 reruns pass focused `revision_context` into the selected worker request; writer,
 critic, and finalizer artifacts preserve that focus as `revision_focus`.
+
+Resume endpoints rerun an `interrupted` package through local or HTTP execution
+and reject non-interrupted runs.
 
 `GET /runs/<task_id>/worker_tasks` maps a Warmaster run to the task ids sent to
 Mechanicum workers. Add `?live=1` for a best-effort lookup against worker

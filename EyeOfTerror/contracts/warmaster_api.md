@@ -37,10 +37,14 @@ POST /runs/{task_id}/execute_local
 POST /runs/{task_id}/execute_http
 POST /runs/{task_id}/execute_revision_local
 POST /runs/{task_id}/execute_revision_http
+POST /runs/{task_id}/resume_local
+POST /runs/{task_id}/resume_http
 POST /runs/{task_id}/start_local
 POST /runs/{task_id}/start_http
 POST /runs/{task_id}/start_revision_local
 POST /runs/{task_id}/start_revision_http
+POST /runs/{task_id}/start_resume_local
+POST /runs/{task_id}/start_resume_http
 POST /runs/{task_id}/cancel
 POST /recover_stale
 ```
@@ -108,6 +112,11 @@ be a loopback worker service host such as `127.0.0.1` or `localhost`.
 Revision execution endpoints use the current run ledger `revision_plan` and run
 only those dispatch steps, followed by `critic_review` and `finalize`. They must
 reject runs that do not have `revision_plan.required=true`.
+
+Resume execution endpoints run an `interrupted` run package again through the
+selected executor and must reject runs whose ledger status is not `interrupted`.
+They record `resume_execution_requested` before dispatch so clients can audit
+manual recovery.
 
 When a revision rerun reaches the writer, the executor passes a focused
 `revision_context` from the previous `revision_plan`. Writer artifacts should

@@ -121,7 +121,7 @@ def main() -> int:
             if not health.get("ok"):
                 raise AssertionError(f"bad health: {health}")
             capabilities = request_json(base + "/capabilities")
-            required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout", "run_action_hints"}
+            required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout", "run_action_hints", "interrupted_run_resume"}
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
                 raise AssertionError(f"bad gateway capabilities response: {capabilities}")
             doctor = request_json(base + "/doctor")
@@ -349,6 +349,25 @@ def main() -> int:
             forced = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30, "force": True}, timeout=60)
             if not forced.get("ok"):
                 raise AssertionError(f"forced rerun failed: {forced}")
+            resume_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-resume-test"},
+            )
+            if not resume_task.get("ok"):
+                raise AssertionError(f"bad resume task response: {resume_task}")
+            resume_ledger_path = Path(resume_task["run_dir"]) / "task_ledger.json"
+            resume_ledger = TaskLedger.load(resume_ledger_path)
+            resume_ledger.set_status("interrupted")
+            resume_summary = request_json(base + "/runs/warmaster-resume-test/summary")
+            if not resume_summary.get("summary", {}).get("actions", {}).get("can_resume"):
+                raise AssertionError(f"interrupted run did not expose resume action: {resume_summary}")
+            resumed = request_json(base + "/runs/warmaster-resume-test/resume_local", {"timeout_sec": 30}, timeout=60)
+            if not resumed.get("ok"):
+                raise AssertionError(f"resume execution failed: {resumed}")
+            resumed_ledger = request_json(base + "/runs/warmaster-resume-test/ledger")
+            resumed_events = [event.get("type") for event in resumed_ledger.get("ledger", {}).get("events", [])]
+            if "resume_execution_requested" not in resumed_events or resumed_ledger.get("ledger", {}).get("status") != "completed":
+                raise AssertionError(f"resume execution was not recorded: {resumed_ledger}")
             ledger_path = run_dir / "task_ledger.json"
             ledger_payload = json.loads(ledger_path.read_text(encoding="utf-8"))
             ledger_payload.setdefault("result", {})["revision_plan"] = {

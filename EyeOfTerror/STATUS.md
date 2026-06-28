@@ -69,6 +69,8 @@
 - HTTP execution preflights all worker `/health` endpoints before running steps
   and rejects worker identity mismatches before dispatch.
 - Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.
+- Warmaster Gateway exposes explicit local/HTTP resume endpoints for
+  `interrupted` run packages and records resume requests in the ledger.
 - Mechanicum worker manifests are validated for required metadata, stable ports,
   API contract, and service-registry consistency.
 - Inner Circle governors are tracked in `EyeOfTerror/registry/governors.json`; code/image governors are explicit planned entries.

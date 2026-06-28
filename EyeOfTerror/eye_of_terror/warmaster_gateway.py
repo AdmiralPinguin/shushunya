@@ -553,6 +553,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "cooperative_cancellation",
             "worker_cancel_fanout",
             "stale_run_recovery",
+            "interrupted_run_resume",
             "governor_registry",
             "governor_health_snapshot",
             "worker_registry",
@@ -593,10 +594,14 @@ def gateway_capabilities() -> dict[str, Any]:
             "POST /runs/{task_id}/execute_http",
             "POST /runs/{task_id}/execute_revision_local",
             "POST /runs/{task_id}/execute_revision_http",
+            "POST /runs/{task_id}/resume_local",
+            "POST /runs/{task_id}/resume_http",
             "POST /runs/{task_id}/start_local",
             "POST /runs/{task_id}/start_http",
             "POST /runs/{task_id}/start_revision_local",
             "POST /runs/{task_id}/start_revision_http",
+            "POST /runs/{task_id}/start_resume_local",
+            "POST /runs/{task_id}/start_resume_http",
             "POST /runs/{task_id}/cancel",
             "POST /recover_stale",
         ],
@@ -890,8 +895,12 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     "start_http",
                     "execute_revision_local",
                     "execute_revision_http",
+                    "resume_local",
+                    "resume_http",
                     "start_revision_local",
                     "start_revision_http",
+                    "start_resume_local",
+                    "start_resume_http",
                 }
                 if len(parts) == 3 and parts[0] == "runs" and parts[2] in execution_modes:
                     task_id = parts[1]
@@ -902,23 +911,38 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     ledger_path = run_dir / "task_ledger.json"
                     force = bool(payload.get("force"))
                     revision_mode = "revision" in parts[2]
+                    resume_mode = "resume" in parts[2]
                     revision_step_ids = revision_step_ids_from_run(run_dir) if revision_mode else None
-                    if ledger_path.exists() and not force:
-                        ledger = TaskLedger.load(ledger_path).to_dict()
-                        if ledger.get("status") == "completed" and not revision_mode:
+                    if ledger_path.exists():
+                        ledger = TaskLedger.load(ledger_path)
+                        ledger_data = ledger.to_dict()
+                        if resume_mode and ledger_data.get("status") != "interrupted":
+                            response(
+                                self,
+                                409,
+                                {
+                                    "ok": False,
+                                    "error": "resume requires an interrupted run",
+                                    "ledger": ledger_data,
+                                },
+                            )
+                            return
+                        if not force and ledger_data.get("status") == "completed" and not revision_mode:
                             response(
                                 self,
                                 409,
                                 {
                                     "ok": False,
                                     "error": "run already completed; pass force=true to rerun",
-                                    "ledger": ledger,
+                                    "ledger": ledger_data,
                                 },
                             )
                             return
+                        if resume_mode:
+                            ledger.record_event("resume_execution_requested", {"mode": parts[2]})
                     workspace_root = resolve_run_child_path(run_dir, str(payload.get("workspace_root") or ""), "work")
                     timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
-                    if parts[2] in {"execute_local", "start_local", "execute_revision_local", "start_revision_local"}:
+                    if parts[2] in {"execute_local", "start_local", "execute_revision_local", "start_revision_local", "resume_local", "start_resume_local"}:
                         executor = lambda: execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec, step_ids=revision_step_ids)
                     else:
                         host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
@@ -939,7 +963,7 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                             return
                         response(self, 202, {"ok": True, "task_id": task_id, "status": "started"})
                         return
-                    if parts[2] in {"execute_local", "execute_revision_local"}:
+                    if parts[2] in {"execute_local", "execute_revision_local", "resume_local"}:
                         summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec, step_ids=revision_step_ids)
                     else:
                         host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
