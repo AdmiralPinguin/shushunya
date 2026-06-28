@@ -69,6 +69,9 @@
 - Warmaster Gateway exposes prepare-only `POST /orchestrate` for chat clients:
   task preflight, task creation, run preflight, trace, and next start/inspect
   action without launching long worker execution.
+- Prepare-only orchestration responses expose executable `client_action`
+  fields for both successful start recommendations and direct diagnostic
+  actions.
 - Warmaster Gateway exposes `POST /orchestrate_start` to safely start prepared
   runs in the background through run-summary action gates and return an
   immediate polling snapshot.

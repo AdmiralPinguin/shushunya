@@ -2155,18 +2155,21 @@ def orchestrate_prepare_task(
     task_preflight_actions = task_preflight.get("actions") if isinstance(task_preflight.get("actions"), dict) else {}
     trace.append({"stage": "task_preflight", "ok": bool(task_preflight.get("ok")), "next_action": task_preflight_actions.get("next_action", {})})
     if not task_preflight.get("ok"):
+        next_action = task_preflight_actions.get("next_action", {}) if isinstance(task_preflight_actions.get("next_action"), dict) else {}
         return {
             "ok": False,
             "phase": "task_preflight",
             "trace": trace,
             "task_preflight": task_preflight,
             "actions": task_preflight_actions,
-            "next_action": task_preflight_actions.get("next_action", {}),
+            "next_action": next_action,
+            "client_action": executable_client_action(str(task_preflight.get("task_id") or task_id or ""), next_action),
         }
     task = prepare_task(message, task_id, run_root, governor_transport=governor_transport, governor_host=governor_host)
     task_actions = task.get("actions") if isinstance(task.get("actions"), dict) else {}
     trace.append({"stage": "task", "ok": bool(task.get("ok")), "task_id": str(task.get("task_id") or ""), "next_action": task_actions.get("next_action", {})})
     if not task.get("ok"):
+        next_action = task_actions.get("next_action", {}) if isinstance(task_actions.get("next_action"), dict) else {}
         return {
             "ok": False,
             "phase": "task",
@@ -2174,7 +2177,8 @@ def orchestrate_prepare_task(
             "task_preflight": task_preflight,
             "task": task,
             "actions": task_actions,
-            "next_action": task_actions.get("next_action", {}),
+            "next_action": next_action,
+            "client_action": executable_client_action(str(task.get("task_id") or task_id or ""), next_action),
         }
     run_dir = Path(str(task.get("run_dir") or ""))
     if not run_dir.exists():
@@ -2187,6 +2191,7 @@ def orchestrate_prepare_task(
             "task": task,
             "error": "task did not create a run directory",
             "next_action": next_action,
+            "client_action": executable_client_action(str(task.get("task_id") or task_id or ""), next_action),
         }
     preflight_workspace = resolve_run_child_path(run_dir, "", "work") if run_mode == "local" else None
     run_preflight = run_execution_preflight(
@@ -2206,10 +2211,12 @@ def orchestrate_prepare_task(
             "next_action": run_preflight_actions.get("next_action", {}),
         }
     )
+    next_action = run_preflight_actions.get("next_action", {}) if isinstance(run_preflight_actions.get("next_action"), dict) else {}
+    prepared_task_id = str(task.get("task_id") or run_preflight.get("task_id") or "")
     return {
         "ok": bool(run_preflight.get("ok")),
         "phase": "ready_to_start" if run_preflight.get("ok") else "run_preflight",
-        "task_id": str(task.get("task_id") or run_preflight.get("task_id") or ""),
+        "task_id": prepared_task_id,
         "run_dir": str(run_dir),
         "run_mode": run_mode,
         "trace": trace,
@@ -2217,7 +2224,8 @@ def orchestrate_prepare_task(
         "task": task,
         "run_preflight": run_preflight,
         "actions": run_preflight_actions,
-        "next_action": run_preflight_actions.get("next_action", {}),
+        "next_action": next_action,
+        "client_action": executable_client_action(prepared_task_id, next_action),
     }
 
 
@@ -2317,6 +2325,7 @@ def orchestrate_run_task(
             "trace": trace,
             "prepare": prepared,
             "next_action": prepared.get("next_action") if isinstance(prepared.get("next_action"), dict) else {},
+            "client_action": prepared.get("client_action") if isinstance(prepared.get("client_action"), dict) else {},
         }
     if not auto_start:
         state = orchestration_state(run_root / run_task_id, event_limit=5, events_after=0)

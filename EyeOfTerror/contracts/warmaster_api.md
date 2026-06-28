@@ -163,7 +163,9 @@ preflight preserve the same executable body shape.
 performs task preflight, task creation, and run preflight in order, records the
 run preflight event, and returns a `trace` plus the next safe action. It does
 not start worker execution; successful responses end at `phase=ready_to_start`
-with a `start_*` recommendation in `next_action`.
+with a `start_*` recommendation in `next_action` and executable
+`client_action` fields for simple clients. Failed prepare responses also carry
+`client_action` when their `next_action` can be executed directly.
 
 `POST /orchestrate_start` starts an existing prepared run in the background only
 when Warmaster run-summary action gates allow it. It chooses normal start,

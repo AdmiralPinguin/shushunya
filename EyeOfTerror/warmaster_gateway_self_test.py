@@ -642,6 +642,20 @@ def main() -> int:
             else:
                 raise AssertionError("unsupported image preflight should be rejected until an image governor exists")
             try:
+                request_json(base + "/orchestrate", {"message": "сделай рисовалку stable diffusion", "task_id": "unsupported-image-orchestrate"})
+            except urllib.error.HTTPError as exc:
+                if exc.code not in {400, 409}:
+                    raise
+                rejected_orchestrate = json.loads(exc.read().decode("utf-8"))
+                if (
+                    rejected_orchestrate.get("phase") != "task_preflight"
+                    or rejected_orchestrate.get("next_action", {}).get("kind") != "inspect_capabilities"
+                    or rejected_orchestrate.get("client_action", {}).get("path") != "/capabilities"
+                ):
+                    raise AssertionError(f"bad unsupported orchestrate response: {rejected_orchestrate}")
+            else:
+                raise AssertionError("unsupported image orchestration should be rejected until an image governor exists")
+            try:
                 request_json(
                     base + "/task",
                     {"message": "Собери все известное о событиях Скалатракса.", "task_id": "../escape"},
@@ -711,6 +725,7 @@ def main() -> int:
                 or [item.get("stage") for item in orchestrated.get("trace", [])] != ["task_preflight", "task", "run_preflight"]
                 or orchestrated.get("next_action", {}).get("kind") != "start_run"
                 or orchestrated.get("next_action", {}).get("endpoint") != "POST /runs/{task_id}/start_local"
+                or orchestrated.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/start_local"
                 or orchestrated_ledger.get("status") != "created"
                 or not any(item.get("type") == "run_preflight_recorded" for item in orchestrated_ledger.get("events", []))
             ):
