@@ -16,6 +16,8 @@ class CommandSpec:
     role: str
     host: str
     port: int
+    depends_on: list[str]
+    health_url: str
     command: list[str]
     env: dict[str, str]
 
@@ -29,6 +31,8 @@ class CommandSpec:
             "role": self.role,
             "host": self.host,
             "port": self.port,
+            "depends_on": self.depends_on,
+            "health_url": self.health_url,
             "command": self.command,
             "env": self.env,
             "rendered": self.rendered(),
@@ -67,6 +71,8 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
             "Mechanicum worker service supervisor",
             host,
             0,
+            [],
+            "",
             [
                 sys.executable,
                 str(repo_root / "Mechanicum" / "start_all_workers.py"),
@@ -84,6 +90,8 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
             "Inner Circle lore reconstruction governor",
             host,
             7101,
+            [],
+            f"http://{host}:7101/health",
             [
                 sys.executable,
                 "-m",
@@ -102,6 +110,8 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
             "user-facing orchestration gateway",
             host,
             7000,
+            ["mechanicum-workers", "iskandar-khayon"],
+            f"http://{host}:7000/health",
             [
                 sys.executable,
                 "-m",
@@ -141,6 +151,8 @@ def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run
         "iskandar_run_root": str(iskandar_run_root),
         "mechanicum_workers": workers,
         "services": [command.to_dict() for command in commands],
+        "dependencies": {command.name: command.depends_on for command in commands},
+        "health_urls": {command.name: command.health_url for command in commands if command.health_url},
     }
 
 

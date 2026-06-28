@@ -136,7 +136,8 @@ Use `--dry-run` to print the Mechanicum worker supervisor, Iskandar service, and
 Warmaster Gateway commands without starting them.
 Use `--json` to print the same startup plan in a machine-readable form for
 diagnostics or future admin clients. The JSON includes top-level services and
-the individual Mechanicum worker names, ports, and modules.
+the individual Mechanicum worker names, ports, modules, service dependencies,
+and readiness URLs.
 
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the

@@ -41,6 +41,12 @@ def main() -> int:
     service_names = {item.get("name") for item in plan.get("services", []) if isinstance(item, dict)}
     if service_names != expected_names:
         raise AssertionError(f"bad brigade service names in JSON plan: {plan}")
+    dependencies = plan.get("dependencies", {})
+    if dependencies.get("warmaster-gateway") != ["mechanicum-workers", "iskandar-khayon"]:
+        raise AssertionError(f"bad brigade dependencies: {plan}")
+    health_urls = plan.get("health_urls", {})
+    if health_urls.get("warmaster-gateway") != "http://127.0.0.1:7000/health" or health_urls.get("iskandar-khayon") != "http://127.0.0.1:7101/health":
+        raise AssertionError(f"bad brigade health URLs: {plan}")
     worker_names = {item.get("name") for item in plan.get("mechanicum_workers", []) if isinstance(item, dict)}
     required_workers = {"Lexmechanic", "AuspexBrowser", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon", "ReductorVerifier", "FabricatorFinalis"}
     if not required_workers.issubset(worker_names):
