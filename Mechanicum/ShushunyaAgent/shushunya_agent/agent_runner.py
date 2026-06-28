@@ -1271,6 +1271,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe edit before diagnostic rejected by supervisor",
     "swe edit before test diagnostic rejected by supervisor",
     "swe cli verification required by supervisor",
+    "swe failed cli repair source required by supervisor",
     "swe test diagnostic inspection stall rejected by supervisor",
     "swe syntax edit loop rejected by supervisor",
     "swe repeated failing-test file read rejected by supervisor",
@@ -2161,6 +2162,41 @@ def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
         )
     elif passing:
         enriched["supervisor_instruction"] = "The pytest fallback ran existing tests and all discovered tests passed."
+    return enriched
+
+
+def enrich_failed_cli_verification_result(result: dict[str, Any]) -> dict[str, Any]:
+    if result.get("ok") is not False:
+        return result
+    text = f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}"
+    if "traceback" not in text.lower():
+        return result
+    source_hints = [
+        path
+        for path in extract_sandbox_paths_from_text(text)
+        if path.endswith(SWE_SOURCE_SUFFIXES) and not path_looks_like_test_file(path)
+    ]
+    if not source_hints:
+        return result
+    enriched = dict(result)
+    unique_hints = list(dict.fromkeys(source_hints))[:10]
+    enriched["candidate_source_paths"] = unique_hints
+    serialization_hint = (
+        " The traceback says an object is not JSON serializable; fix the CLI/output serialization path "
+        "so non-JSON-native values are converted before json.dumps."
+        if "not json serializable" in text.lower()
+        else ""
+    )
+    cli_instruction = (
+        "The CLI verification command executed and failed with a traceback. Do not repeat discovery or the same CLI "
+        "command before a code change. Read exactly one likely source file from candidate_source_paths, make a narrow "
+        "source edit, then rerun the same CLI verification with JSON validation."
+        + serialization_hint
+    )
+    if enriched.get("supervisor_instruction"):
+        enriched["supervisor_instruction"] = f"{cli_instruction} {enriched['supervisor_instruction']}"
+    else:
+        enriched["supervisor_instruction"] = cli_instruction
     return enriched
 
 
@@ -4562,6 +4598,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     swe_verified_after_edit = False
     swe_cli_verified_after_edit = False
     swe_cli_verification_attempted_after_edit = False
+    pending_failed_cli_source_candidates: list[str] = []
     swe_syntax_error_cycles = 0
     last_swe_syntax_error = ""
     last_required_artifact_hint = ""
@@ -5580,6 +5617,26 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 }
             elif (
                 swe_task
+                and pending_failed_cli_source_candidates
+                and action_type in SWE_DIAGNOSTIC_ACTIONS
+                and not (
+                    action_type == "read_file"
+                    and str(action.get("path") or "") in set(pending_failed_cli_source_candidates)
+                )
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe failed cli repair source required by supervisor",
+                    "candidate_source_paths": pending_failed_cli_source_candidates[:10],
+                    "instruction": (
+                        "The last CLI verification failed with a traceback and candidate_source_paths. "
+                        "Do not repeat discovery, rerun the same CLI command, or inspect unrelated files before a code change. "
+                        "Read exactly one candidate source file, make a narrow fix for the CLI failure, then rerun the CLI "
+                        "verification with JSON validation."
+                    ),
+                }
+            elif (
+                swe_task
                 and swe_requires_cli_verification
                 and not pending_failing_tests
                 and (swe_verified_after_edit or swe_resume_requires_cli_verification)
@@ -5893,6 +5950,14 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             )
         if (
             swe_task
+            and action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
+            and isinstance(result, dict)
+            and result.get("ok") is False
+            and str(result.get("error") or "") not in SUPERVISOR_REJECTION_ERRORS
+        ):
+            result = enrich_failed_cli_verification_result(result)
+        if (
+            swe_task
             and pending_failing_tests
             and code_mutated_since_last_pytest
             and (action_runs_test_diagnostic(action_type, action) or action_looks_like_python_verification(action_type, action))
@@ -5996,6 +6061,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             swe_verified_after_edit = False
             swe_cli_verified_after_edit = False
             swe_cli_verification_attempted_after_edit = False
+            pending_failed_cli_source_candidates = []
             if swe_task and action_type in SWE_EDIT_ACTIONS:
                 last_successful_swe_edit_path = path
                 if swe_requires_cli_verification:
@@ -6019,6 +6085,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             swe_verified_after_edit = False
             swe_cli_verified_after_edit = False
             swe_cli_verification_attempted_after_edit = False
+            pending_failed_cli_source_candidates = []
             last_successful_swe_edit_path = python_written_code_paths[0]
             if swe_requires_cli_verification:
                 last_cli_required_swe_edit_path = python_written_code_paths[0]
@@ -6070,6 +6137,14 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             and not supervisor_rejection
         ):
             swe_cli_verification_attempted_after_edit = True
+            if isinstance(result, dict) and result.get("ok") is False:
+                cli_source_candidates = [
+                    str(path)
+                    for path in result.get("candidate_source_paths", [])
+                    if isinstance(path, str) and path and not path_looks_like_test_file(path)
+                ]
+                if cli_source_candidates:
+                    pending_failed_cli_source_candidates = list(dict.fromkeys(cli_source_candidates))[:10]
         if (
             swe_task
             and swe_requires_cli_verification
@@ -6078,6 +6153,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             and result.get("ok") is True
         ):
             swe_cli_verified_after_edit = True
+            pending_failed_cli_source_candidates = []
         if (
             swe_task
             and pending_failing_tests

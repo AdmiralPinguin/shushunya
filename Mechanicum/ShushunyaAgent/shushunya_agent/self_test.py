@@ -4720,6 +4720,55 @@ def main() -> int:
         raise AssertionError(f"SWE CLI verification should run after rejected final: {swe_cli_requires_verify_payload}")
     print("[ok] SWE final requires CLI verification after edit")
 
+    swe_failed_cli_repair_stdout = io.StringIO()
+    swe_failed_cli_repair_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-failed-cli-repair-source"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    failed_cli_resume_task = (
+        "Продолжи выполнение той же задачи по task journal.\n\n"
+        "Resume context from previous agent task journal:\n"
+        "[{\"type\":\"start\",\"task\":\"Исправь Python-проект. CLI должен печатать валидный JSON; "
+        "проверь python3 -m package.cli data.csv.\\n\\nРабочий каталог для этой задачи: /work/project\"},"
+        "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":true,"
+        "\"passing_tests\":[\"tests/test_core.py::test_core\"],\"failing_tests\":[]}}]"
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m package.cli /work/project/data.csv | python3 -c \\"import sys,json; json.load(sys.stdin)\\"","timeout":60}',
+            '{"action":"list_files","path":"/work/project","max_depth":3,"limit":100,"offset":0}',
+            '{"action":"read_file","path":"/work/project/package/cli.py","max_bytes":20000,"offset":0}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": (
+                "Traceback (most recent call last):\n"
+                "  File \"/work/project/package/cli.py\", line 12, in <module>\n"
+                "    print(json.dumps(payload))\n"
+                "TypeError: Object of type datetime is not JSON serializable\n"
+            ),
+    }), mock.patch.object(agent_runner, "file_tool", return_value={
+            "ok": True,
+            "path": "/work/project/package/cli.py",
+            "content": "print(json.dumps(payload))",
+    }) as mocked_failed_cli_file, \
+            contextlib.redirect_stdout(swe_failed_cli_repair_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(failed_cli_resume_task, swe_failed_cli_repair_config)
+    swe_failed_cli_repair_payload = json.loads(swe_failed_cli_repair_stdout.getvalue())
+    failed_cli_results = [step.get("result") or {} for step in swe_failed_cli_repair_payload.get("steps", [])]
+    if not any(result.get("candidate_source_paths") == ["/work/project/package/cli.py"] for result in failed_cli_results):
+        raise AssertionError(f"Failed CLI traceback should expose source candidates: {swe_failed_cli_repair_payload}")
+    if not any(result.get("error") == "swe failed cli repair source required by supervisor" for result in failed_cli_results):
+        raise AssertionError(f"Failed CLI repair should block unrelated discovery: {swe_failed_cli_repair_payload}")
+    if not any((call.args[1] if len(call.args) > 1 else {}).get("path") == "/work/project/package/cli.py" for call in mocked_failed_cli_file.call_args_list):
+        raise AssertionError(f"Failed CLI repair should allow reading traceback source: {swe_failed_cli_repair_payload}")
+    print("[ok] SWE failed CLI traceback narrows repair source")
+
     swe_cli_input_discovery_stdout = io.StringIO()
     swe_cli_input_discovery_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-cli-input-discovery-after-tests"),
