@@ -35,6 +35,8 @@
   overwriting existing run history.
 - Task ledgers, run packages, and executor reports are written atomically to
   avoid partial JSON reads during background execution.
+- Task ledger saves merge concurrent event/step/cancel updates from stale
+  in-process ledger instances.
 - Warmaster run listing/state endpoints tolerate corrupt ledger files and report
   those runs as `corrupt` instead of dropping the whole API response.
 - Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
