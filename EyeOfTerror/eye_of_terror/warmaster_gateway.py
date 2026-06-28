@@ -199,6 +199,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "revision_plan": revision_plan,
         "progress": run_progress(status, ledger),
     }
+    summary["actions"] = run_actions(str(summary["status"]), revision_plan)
     if status_error:
         summary["status_error"] = status_error
     if ledger_error and ledger_path.exists():
@@ -220,6 +221,22 @@ def run_status_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
         by_status[status] = by_status.get(status, 0) + 1
     active = sum(by_status.get(status, 0) for status in ("running", "cancelling", "queued"))
     return {"total": len(runs), "active": active, "by_status": by_status}
+
+
+def run_actions(status: str, revision_plan: dict[str, Any]) -> dict[str, Any]:
+    terminal_locked = status in {"completed", "running", "cancelling", "queued", "corrupt"}
+    runnable = not terminal_locked
+    revision_required = bool(revision_plan.get("required"))
+    revision_runnable = revision_required and status not in {"running", "cancelling", "queued", "corrupt"}
+    return {
+        "can_execute": runnable,
+        "can_start": runnable,
+        "can_cancel": status in {"running", "cancelling", "queued"},
+        "can_resume": status == "interrupted",
+        "can_execute_revision": revision_runnable,
+        "can_start_revision": revision_runnable,
+        "force_required_for_rerun": status == "completed" and not revision_required,
+    }
 
 
 def run_contract(run_dir: Path) -> dict[str, Any]:
@@ -542,6 +559,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "worker_health_snapshot",
             "state_snapshot",
             "process_active_run_snapshot",
+            "run_action_hints",
             "doctor",
         ],
         "endpoints": [

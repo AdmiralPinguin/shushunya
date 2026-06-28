@@ -84,6 +84,12 @@ Clients should use:
 - `/runs/{task_id}/worker_tasks?live=1` when worker services are running and
   live worker task state is needed.
 
+Run summaries include an `actions` object with client-facing booleans:
+`can_execute`, `can_start`, `can_cancel`, `can_resume`,
+`can_execute_revision`, `can_start_revision`, and
+`force_required_for_rerun`. Clients should use these hints for button state
+instead of duplicating Warmaster status rules.
+
 ## Cancellation
 
 `POST /runs/{task_id}/cancel` marks the Warmaster ledger as cancelling and

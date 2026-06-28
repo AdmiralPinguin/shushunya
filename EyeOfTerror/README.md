@@ -86,6 +86,9 @@ counts in one response.
 clients. It returns summary, process-local active state, cursor event updates,
 and artifact metadata in one response.
 
+Run summaries expose `actions` hints for client controls such as start, cancel,
+resume, and revision execution.
+
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the
 same artifact text endpoint.

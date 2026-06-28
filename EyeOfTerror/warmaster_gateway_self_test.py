@@ -121,7 +121,7 @@ def main() -> int:
             if not health.get("ok"):
                 raise AssertionError(f"bad health: {health}")
             capabilities = request_json(base + "/capabilities")
-            required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout"}
+            required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout", "run_action_hints"}
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
                 raise AssertionError(f"bad gateway capabilities response: {capabilities}")
             doctor = request_json(base + "/doctor")
@@ -247,6 +247,7 @@ def main() -> int:
                 not run_summary.get("ok")
                 or run_summary.get("summary", {}).get("task_id") != "warmaster-test"
                 or run_summary.get("summary", {}).get("revision_plan", {}).get("required")
+                or not run_summary.get("summary", {}).get("actions", {}).get("can_start")
             ):
                 raise AssertionError(f"bad run summary: {run_summary}")
             snapshot = request_json(base + "/runs/warmaster-test/snapshot?events_after=0&event_limit=1")
@@ -318,6 +319,8 @@ def main() -> int:
                 or not completed_snapshot.get("artifacts")
                 or completed_snapshot.get("summary", {}).get("status") != "completed"
                 or completed_snapshot.get("revision_plan", {}).get("required")
+                or not completed_snapshot.get("summary", {}).get("actions", {}).get("force_required_for_rerun")
+                or completed_snapshot.get("summary", {}).get("actions", {}).get("can_start")
             ):
                 raise AssertionError(f"bad completed run snapshot: {completed_snapshot}")
             artifact_path = artifacts["artifacts"][0]["path"]
@@ -361,6 +364,9 @@ def main() -> int:
                 ],
             }
             write_json(ledger_path, ledger_payload)
+            revision_summary = request_json(base + "/runs/warmaster-test/summary")
+            if not revision_summary.get("summary", {}).get("actions", {}).get("can_execute_revision"):
+                raise AssertionError(f"summary did not expose revision action: {revision_summary}")
             revision_steps = revision_step_ids_from_run(run_dir)
             if revision_steps != ["draft_reconstruction", "critic_review", "finalize"]:
                 raise AssertionError(f"bad revision step expansion: {revision_steps}")
@@ -476,6 +482,8 @@ def main() -> int:
             recovered = request_json(base + "/recover_stale", {}, timeout=10)
             if not recovered.get("ok") or recovered["recovered"][0].get("status") != "interrupted":
                 raise AssertionError(f"bad stale recovery: {recovered}")
+            if not recovered["recovered"][0].get("actions", {}).get("can_resume"):
+                raise AssertionError(f"recovered run did not expose resume action: {recovered}")
         finally:
             server.shutdown()
             thread.join(timeout=5)
