@@ -106,6 +106,10 @@ Warmaster ledger after the governor prepares the run package. `governor_host`
 must be loopback. If the gateway was started with `--governor-transport http`,
 clients can omit this field and still use the service-separated path.
 
+For HTTP governor planning, Warmaster reads reachable governor capabilities and
+rejects the task with `error_code=governor_workers_missing` when
+`required_workers` are absent from the Mechanicum registry.
+
 ## Run Inspection
 
 Clients should use:

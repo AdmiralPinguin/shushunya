@@ -24,6 +24,8 @@
 - Warmaster Gateway can prepare Iskandar run packages, expose run status, execute local dev pipelines, and execute HTTP worker-service pipelines.
 - Warmaster Gateway can prepare tasks through the local governor path or through
   the active governor's HTTP service.
+- Warmaster rejects HTTP-governor task preparation when reachable governor
+  `required_workers` are missing from the Mechanicum registry.
 - Warmaster Gateway can default new task planning to local or HTTP governor
   transport through startup flags, with per-request override.
 - `EyeOfTerror/start_brigade.py` can start the current service-separated

@@ -146,6 +146,19 @@ def main() -> int:
                 or not (Path(service_prepared["run_dir"]) / "task_ledger.json").exists()
             ):
                 raise AssertionError(f"bad http governor preparation: {service_prepared}")
+            original_worker_refs = warmaster_gateway.worker_refs
+            warmaster_gateway.worker_refs = lambda: []
+            try:
+                missing_workers = warmaster_gateway.prepare_task_via_governor_service(
+                    "Собери все известное о событиях Скалатракса.",
+                    "warmaster-governor-missing-workers-test",
+                    run_root,
+                    ServiceGovernor(),
+                )
+                if missing_workers.get("error_code") != "governor_workers_missing" or "Lexmechanic" not in missing_workers.get("missing_workers", []):
+                    raise AssertionError(f"missing governor workers were not rejected: {missing_workers}")
+            finally:
+                warmaster_gateway.worker_refs = original_worker_refs
             original_governor_by_name = warmaster_gateway.governor_by_name
             warmaster_gateway.governor_by_name = lambda _name: ServiceGovernor()
             gateway_server = ThreadingHTTPServer(

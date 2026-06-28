@@ -116,6 +116,8 @@ that behavior for diagnostics.
 `governor_transport: "http"` makes Warmaster call the selected active governor
 service on its registry port, keeping the planning boundary compatible with
 future Inner Circle services.
+Before preparing an HTTP-governor run, Warmaster checks reachable governor
+`required_workers` against the Mechanicum registry.
 
 Warmaster Gateway can also be started with `--governor-transport http` and
 `--governor-host 127.0.0.1` so ordinary client task submissions use governor

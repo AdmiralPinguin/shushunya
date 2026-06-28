@@ -110,6 +110,25 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "error_code": "governor_service_unavailable",
             "governor": governor.name,
         }
+    capabilities = fetch_service_capabilities(host, service_port, timeout_sec=2.0)
+    required_workers = []
+    if capabilities.get("ok"):
+        payload = capabilities.get("capabilities") if isinstance(capabilities.get("capabilities"), dict) else {}
+        raw_required = payload.get("required_workers") if isinstance(payload.get("required_workers"), list) else []
+        required_workers = [str(worker) for worker in raw_required if str(worker)]
+    if required_workers:
+        available_workers = {worker.name for worker in worker_refs()}
+        missing_workers = [worker for worker in required_workers if worker not in available_workers]
+        if missing_workers:
+            return {
+                "ok": False,
+                "gateway": "WarmasterGateway",
+                "error": "governor required workers are missing from Mechanicum registry",
+                "error_code": "governor_workers_missing",
+                "governor": governor.name,
+                "required_workers": required_workers,
+                "missing_workers": missing_workers,
+            }
     if not plan.get("ok"):
         return {
             "ok": False,
