@@ -318,7 +318,9 @@ worker health failures, and input artifact failures. Full-run
 preflight treats artifacts produced by earlier selected steps as satisfiable by
 the same run; restricted preflight can accept `step_ids` and then requires
 unselected dependency artifacts to already exist when a `workspace_root` is
-provided. Each run preflight records a compact `run_preflight_recorded` ledger
+provided. Run preflight responses include `actions.next_action` recommending
+start execution after success or package/oversight/brigade diagnostics after
+failure. Each run preflight records a compact `run_preflight_recorded` ledger
 event with mode, selected steps, result, and failure counts.
 
 Local and HTTP executors must convert malformed dispatch packets into

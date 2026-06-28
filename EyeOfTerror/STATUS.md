@@ -60,6 +60,8 @@
 - Warmaster local and HTTP execution can run validated step subsets without
   marking the whole run completed while downstream steps remain pending.
 - Run preflight records compact audit events in the task ledger.
+- Run preflight responses expose action hints for starting execution after
+  success or inspecting package/oversight/brigade diagnostics after failure.
 - Warmaster Gateway exposes `POST /task_preflight` for routing, governor,
   contract, and worker checks without creating run history.
 - Task preflight contract summaries expose planned worker steps, dependency

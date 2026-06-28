@@ -1028,6 +1028,63 @@ def run_actions(
     return actions
 
 
+def run_preflight_actions(preflight: dict[str, Any]) -> dict[str, Any]:
+    mode = str(preflight.get("mode") or "http")
+    ok = bool(preflight.get("ok"))
+    step_ids = preflight.get("step_ids") if isinstance(preflight.get("step_ids"), list) else []
+    body: dict[str, Any] = {}
+    if step_ids:
+        body["step_ids"] = step_ids
+    actions = {
+        "can_start_run": ok,
+        "can_inspect_package": True,
+        "can_inspect_oversight": True,
+        "can_check_brigade_readiness": True,
+    }
+    if ok:
+        next_action = {
+            "kind": "start_run",
+            "method": "POST",
+            "endpoint": "POST /runs/{task_id}/start_http" if mode == "http" else "POST /runs/{task_id}/start_local",
+            "body": body,
+            "reason": "run preflight passed",
+        }
+    elif preflight.get("oversight_errors"):
+        next_action = {
+            "kind": "inspect_oversight",
+            "method": "GET",
+            "endpoint": "GET /runs/{task_id}/oversight",
+            "body": {},
+            "reason": "run oversight failed preflight",
+        }
+    elif preflight.get("dispatch_errors") or preflight.get("input_failures") or preflight.get("missing_local_commands"):
+        next_action = {
+            "kind": "inspect_package",
+            "method": "GET",
+            "endpoint": "GET /runs/{task_id}/package",
+            "body": {},
+            "reason": "run package failed preflight",
+        }
+    elif preflight.get("worker_preflight_failures"):
+        next_action = {
+            "kind": "inspect_brigade",
+            "method": "GET",
+            "endpoint": "GET /brigade_health",
+            "body": {},
+            "reason": "worker service preflight failed",
+        }
+    else:
+        next_action = {
+            "kind": "inspect_preflight",
+            "method": "POST",
+            "endpoint": "POST /runs/{task_id}/preflight_http" if mode == "http" else "POST /runs/{task_id}/preflight_local",
+            "body": body,
+            "reason": "run preflight failed",
+        }
+    actions["next_action"] = next_action
+    return actions
+
+
 def run_contract(run_dir: Path) -> dict[str, Any]:
     contract_path = run_dir / "contract.json"
     if not contract_path.exists():
@@ -1573,7 +1630,7 @@ def run_execution_preflight(
             }
         )
     worker_failures = preflight_http_workers(run_dir, host, timeout_sec, step_ids=step_ids) if mode == "http" else []
-    return {
+    preflight = {
         "ok": not dispatch_errors and not input_failures and not missing_local_commands and not worker_failures and not oversight_errors,
         "task_id": run_dir.name,
         "mode": mode,
@@ -1589,6 +1646,8 @@ def run_execution_preflight(
         "missing_local_commands": missing_local_commands,
         "worker_preflight_failures": worker_failures,
     }
+    preflight["actions"] = run_preflight_actions(preflight)
+    return preflight
 
 
 def planned_step_ids_from_run(run_dir: Path) -> list[str]:

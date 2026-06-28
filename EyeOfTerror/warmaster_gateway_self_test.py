@@ -730,6 +730,9 @@ def main() -> int:
                 not run_preflight.get("ok")
                 or run_preflight.get("step_ids", [])[0] != "source_discovery"
                 or run_preflight.get("oversight_summary", {}).get("final_review", {}).get("final_step") != "finalize"
+                or run_preflight.get("actions", {}).get("can_start_run") is not True
+                or run_preflight.get("actions", {}).get("next_action", {}).get("kind") != "start_run"
+                or run_preflight.get("actions", {}).get("next_action", {}).get("endpoint") != "POST /runs/{task_id}/start_local"
             ):
                 raise AssertionError(f"bad local run preflight: {run_preflight}")
             missing_oversight_task = request_json(
@@ -743,7 +746,11 @@ def main() -> int:
                 if exc.code != 409:
                     raise
                 missing_oversight = json.loads(exc.read().decode("utf-8"))
-                if missing_oversight.get("ok") or not missing_oversight.get("oversight_errors"):
+                if (
+                    missing_oversight.get("ok")
+                    or not missing_oversight.get("oversight_errors")
+                    or missing_oversight.get("actions", {}).get("next_action", {}).get("kind") != "inspect_oversight"
+                ):
                     raise AssertionError(f"run preflight should reject missing oversight: {missing_oversight}")
             else:
                 raise AssertionError("run preflight should fail when oversight.json is missing")
@@ -833,6 +840,7 @@ def main() -> int:
                 if (
                     bad_oversight.get("ok")
                     or not any("not required by contract" in error for error in bad_oversight.get("oversight_errors", []))
+                    or bad_oversight.get("actions", {}).get("next_action", {}).get("kind") != "inspect_oversight"
                 ):
                     raise AssertionError(f"run preflight should reject inconsistent oversight: {bad_oversight}")
             else:
@@ -845,6 +853,8 @@ def main() -> int:
                 blocked_preflight = json.loads(exc.read().decode("utf-8"))
                 if blocked_preflight.get("ok") or not blocked_preflight.get("input_failures"):
                     raise AssertionError(f"restricted run preflight should require existing inputs: {blocked_preflight}")
+                if blocked_preflight.get("actions", {}).get("next_action", {}).get("kind") != "inspect_package":
+                    raise AssertionError(f"restricted run preflight should expose package inspection action: {blocked_preflight}")
             else:
                 raise AssertionError("restricted local run preflight should fail before dependency artifacts exist")
             try:
