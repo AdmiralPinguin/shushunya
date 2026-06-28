@@ -52,6 +52,7 @@ Gateway endpoints:
 - `GET /runs/<task_id>/summary`
 - `GET /runs/<task_id>/snapshot`
 - `GET /runs/<task_id>/active`
+- `GET /runs/<task_id>/steps/<step_id>`
 - `GET /runs/<task_id>/ledger`
 - `GET /runs/<task_id>/contract`
 - `GET /runs/<task_id>/dispatch`
@@ -96,6 +97,9 @@ resume, and revision execution.
 Run progress exposes ordered step ids, completed/failed/pending step ids,
 `next_step_id`, and `step_states` for client progress displays and future
 partial resume logic.
+
+`GET /runs/<task_id>/steps/<step_id>` returns one normalized step state from the
+same progress model.
 
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the

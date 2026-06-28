@@ -253,6 +253,13 @@ def main() -> int:
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("status") != "pending"
             ):
                 raise AssertionError(f"bad run summary: {run_summary}")
+            source_step = request_json(base + "/runs/warmaster-test/steps/source_discovery")
+            if (
+                not source_step.get("ok")
+                or source_step.get("step", {}).get("worker") != "Lexmechanic"
+                or source_step.get("step", {}).get("status") != "pending"
+            ):
+                raise AssertionError(f"bad run step state: {source_step}")
             snapshot = request_json(base + "/runs/warmaster-test/snapshot?events_after=0&event_limit=1")
             if (
                 not snapshot.get("ok")
@@ -330,6 +337,9 @@ def main() -> int:
             final_state = completed_snapshot.get("summary", {}).get("progress", {}).get("step_states", [])[-1]
             if final_state.get("step_id") != "finalize" or "/work/skalathrax/final_manifest.json" not in final_state.get("artifacts", []):
                 raise AssertionError(f"completed progress did not expose final step artifacts: {completed_snapshot}")
+            final_step_state = request_json(base + "/runs/warmaster-test/steps/finalize")
+            if "/work/skalathrax/final_manifest.json" not in final_step_state.get("step", {}).get("artifacts", []):
+                raise AssertionError(f"bad final step state endpoint: {final_step_state}")
             artifact_path = artifacts["artifacts"][0]["path"]
             text_artifact = request_json(base + f"/runs/warmaster-test/artifact_text?path={artifact_path}")
             if not text_artifact.get("ok") or "ready" not in text_artifact.get("text", ""):

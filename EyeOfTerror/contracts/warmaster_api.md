@@ -22,6 +22,7 @@ GET  /runs/{task_id}
 GET  /runs/{task_id}/summary
 GET  /runs/{task_id}/snapshot
 GET  /runs/{task_id}/active
+GET  /runs/{task_id}/steps/{step_id}
 GET  /runs/{task_id}/ledger
 GET  /runs/{task_id}/contract
 GET  /runs/{task_id}/dispatch
@@ -77,6 +78,8 @@ Clients should use:
 - `/runs/{task_id}/summary` for lightweight polling.
 - `/runs/{task_id}/snapshot` for a compact polling view containing summary,
   process-local active state, cursor events, and artifact metadata.
+- `/runs/{task_id}/steps/{step_id}` for one normalized step state from
+  `summary.progress.step_states`.
 - `/runs/{task_id}/events` for ledger event history.
 - `/runs/{task_id}/events?after=N` for incremental client polling. Responses
   include `cursor.after`, `cursor.next`, and `cursor.total`.

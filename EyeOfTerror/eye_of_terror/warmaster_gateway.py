@@ -403,6 +403,14 @@ def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: in
     return payload
 
 
+def run_step_state(run_dir: Path, step_id: str) -> dict[str, Any]:
+    summary = run_summary(run_dir)
+    for step in summary.get("progress", {}).get("step_states", []):
+        if isinstance(step, dict) and step.get("step_id") == step_id:
+            return {"ok": True, "task_id": run_dir.name, "step": step, "summary": summary}
+    return {"ok": False, "task_id": run_dir.name, "error": "step not found", "step_id": step_id}
+
+
 def revision_step_ids_from_run(run_dir: Path) -> list[str]:
     ledger_path = run_dir / "task_ledger.json"
     ledger, ledger_error = load_ledger_dict(ledger_path)
@@ -645,6 +653,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/summary",
             "GET /runs/{task_id}/snapshot",
             "GET /runs/{task_id}/active",
+            "GET /runs/{task_id}/steps/{step_id}",
             "GET /runs/{task_id}/ledger",
             "GET /runs/{task_id}/contract",
             "GET /runs/{task_id}/dispatch",
@@ -807,6 +816,15 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 all_runs = list_runs(run_root)
                 runs = all_runs[: parse_limit(raw_limit, default=MAX_LIST_LIMIT)] if raw_limit else all_runs
                 response(self, 200, {"ok": True, "run_summary": run_status_summary(all_runs), "runs": runs})
+                return
+            if len(parts) == 4 and parts[0] == "runs" and parts[2] == "steps":
+                task_id = parts[1]
+                run_dir = run_root / task_id
+                if not run_dir.exists():
+                    response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
+                    return
+                payload = run_step_state(run_dir, parts[3])
+                response(self, 200 if payload.get("ok") else 404, payload)
                 return
             if len(parts) in {2, 3} and parts[0] == "runs":
                 task_id = parts[1]
