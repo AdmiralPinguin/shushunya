@@ -55,6 +55,36 @@ class TaskLedger:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.exists():
+            try:
+                current = json.loads(self.path.read_text(encoding="utf-8"))
+            except Exception:
+                current = {}
+            if isinstance(current, dict):
+                if current.get("cancel_requested"):
+                    self.data["cancel_requested"] = True
+                    self.data["cancel_reason"] = current.get("cancel_reason", self.data.get("cancel_reason", ""))
+                    if self.data.get("status") == "running":
+                        self.data["status"] = "cancelling"
+                if "result" not in self.data and isinstance(current.get("result"), dict):
+                    self.data["result"] = current["result"]
+                current_events = current.get("events", []) if isinstance(current.get("events"), list) else []
+                new_events = self.data.get("events", []) if isinstance(self.data.get("events"), list) else []
+                seen_events = {json.dumps(event, sort_keys=True, ensure_ascii=False) for event in current_events if isinstance(event, dict)}
+                merged_events = list(current_events)
+                for event in new_events:
+                    marker = json.dumps(event, sort_keys=True, ensure_ascii=False)
+                    if marker not in seen_events:
+                        merged_events.append(event)
+                        seen_events.add(marker)
+                self.data["events"] = merged_events
+                current_steps = current.get("steps", []) if isinstance(current.get("steps"), list) else []
+                new_steps = self.data.get("steps", []) if isinstance(self.data.get("steps"), list) else []
+                steps_by_id = {str(step.get("step_id") or ""): step for step in current_steps if isinstance(step, dict)}
+                for step in new_steps:
+                    if isinstance(step, dict):
+                        steps_by_id[str(step.get("step_id") or "")] = step
+                self.data["steps"] = [step for key, step in steps_by_id.items() if key]
         self.data["updated_at"] = now_iso()
         tmp_path = self.path.with_name(f".{self.path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         tmp_path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

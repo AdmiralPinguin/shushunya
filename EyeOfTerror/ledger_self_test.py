@@ -35,6 +35,14 @@ def main() -> int:
             pass
         else:
             raise AssertionError("corrupt ledger should not load")
+        stale_a = TaskLedger.load(path)
+        stale_b = TaskLedger.load(path)
+        stale_a.record_event("stale_a_event", {})
+        stale_b.request_cancel("stale b")
+        merged = TaskLedger.load(path).to_dict()
+        event_types = [event.get("type") for event in merged.get("events", [])]
+        if "stale_a_event" not in event_types or not merged.get("cancel_requested"):
+            raise AssertionError(f"ledger save did not merge stale updates: {merged}")
     print("[ok] task ledger")
     return 0
 
