@@ -465,6 +465,8 @@ def main() -> int:
                 or run_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "start"
                 or run_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("method") != "POST"
                 or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "source_discovery"
+                or run_summary.get("summary", {}).get("progress", {}).get("next_ready_step_id") != "source_discovery"
+                or run_summary.get("summary", {}).get("progress", {}).get("ready_step_ids") != ["source_discovery"]
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("worker") != "Lexmechanic"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("status") != "pending"
             ):
@@ -479,6 +481,8 @@ def main() -> int:
             )
             if fact_step.get("input_artifacts") != ["/work/skalathrax/source_snapshots.json"]:
                 raise AssertionError(f"run summary did not expose step input artifacts: {run_summary}")
+            if fact_step.get("dependencies_ready") or not fact_step.get("dependency_status"):
+                raise AssertionError(f"run summary did not expose dependency readiness: {run_summary}")
             source_step = request_json(base + "/runs/warmaster-test/steps/source_discovery")
             if (
                 not source_step.get("ok")
@@ -552,6 +556,9 @@ def main() -> int:
             restricted_ledger = request_json(base + "/runs/warmaster-restricted-test/ledger")
             if restricted_ledger.get("ledger", {}).get("status") != "interrupted":
                 raise AssertionError(f"restricted execution should leave pending work interrupted: {restricted_ledger}")
+            restricted_summary = request_json(base + "/runs/warmaster-restricted-test/summary")
+            if restricted_summary.get("summary", {}).get("progress", {}).get("ready_step_ids", [None])[0] != "source_acquisition":
+                raise AssertionError(f"restricted execution did not advance ready steps: {restricted_summary}")
             restricted_pending = resume_step_ids_from_run(restricted_run_dir)
             if not restricted_pending or restricted_pending[0] != "source_acquisition" or "source_discovery" in restricted_pending:
                 raise AssertionError(f"restricted execution did not expose resumable pending steps: {restricted_pending}")

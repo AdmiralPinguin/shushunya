@@ -38,6 +38,8 @@
   contract, and worker checks without creating run history.
 - Task preflight returns a compact contract summary with planned worker steps.
 - Run progress exposes per-step input, expected, and produced artifact statuses.
+- Run progress exposes dependency readiness through ready, blocked, and
+  dependency-status step hints for higher-level governors.
 - Warmaster Gateway can prepare tasks through the local governor path or through
   the active governor's HTTP service.
 - Warmaster rejects HTTP-governor task preparation when reachable governor

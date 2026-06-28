@@ -437,6 +437,10 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
         for step_id in planned_step_ids
         if step_id not in completed_step_ids and step_id not in failed_step_ids
     ]
+    completed_set = set(completed_step_ids)
+    failed_set = set(failed_step_ids)
+    ready_step_ids: list[str] = []
+    blocked_step_ids: list[str] = []
     step_states: list[dict[str, Any]] = []
     for planned in planned_steps:
         if not isinstance(planned, dict):
@@ -449,12 +453,31 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
         input_artifacts = planned.get("input_artifacts") if isinstance(planned.get("input_artifacts"), list) else []
         expected_artifacts = planned.get("expected_artifacts") if isinstance(planned.get("expected_artifacts"), list) else []
         artifacts = recorded.get("artifacts") if isinstance(recorded.get("artifacts"), list) else []
+        depends_on = planned.get("depends_on") if isinstance(planned.get("depends_on"), list) else []
+        dependency_status = [
+            {
+                "step_id": str(dependency),
+                "completed": str(dependency) in completed_set,
+                "failed": str(dependency) in failed_set,
+            }
+            for dependency in depends_on
+        ]
+        dependency_blocked = any(item["failed"] for item in dependency_status)
+        dependency_ready = all(item["completed"] for item in dependency_status)
+        if step_id in pending_step_ids:
+            if dependency_ready:
+                ready_step_ids.append(step_id)
+            elif dependency_blocked:
+                blocked_step_ids.append(step_id)
         step_states.append(
             {
                 "step_id": step_id,
                 "worker": str(planned.get("worker") or recorded.get("worker") or ""),
                 "status": recorded_status or "pending",
-                "depends_on": planned.get("depends_on") if isinstance(planned.get("depends_on"), list) else [],
+                "depends_on": depends_on,
+                "dependency_status": dependency_status,
+                "dependencies_ready": dependency_ready,
+                "dependencies_blocked": dependency_blocked,
                 "input_artifacts": input_artifacts,
                 "input_artifact_status": [sandbox_artifact_file_status(workspace_root, str(path)) for path in input_artifacts],
                 "expected_artifacts": expected_artifacts,
@@ -475,7 +498,10 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
         "completed_step_ids": completed_step_ids,
         "failed_step_ids": failed_step_ids,
         "pending_step_ids": pending_step_ids,
+        "ready_step_ids": ready_step_ids,
+        "blocked_step_ids": blocked_step_ids,
         "next_step_id": pending_step_ids[0] if pending_step_ids else "",
+        "next_ready_step_id": ready_step_ids[0] if ready_step_ids else "",
         "step_states": step_states,
     }
 
