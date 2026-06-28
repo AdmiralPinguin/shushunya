@@ -41,9 +41,11 @@ def check_governors(errors: list[str]) -> int:
         status = str(item.get("status") or "")
         port = int(item.get("port") or 0)
         task_kinds = item.get("task_kinds")
+        route_terms = item.get("route_terms")
         require(status in VALID_GOVERNOR_STATUSES, f"governor {name} has invalid status: {status}", errors)
         require(port >= 7101, f"governor {name} has invalid port: {port}", errors)
         require(isinstance(task_kinds, list) and all(isinstance(kind, str) and kind for kind in task_kinds), f"governor {name} has invalid task_kinds", errors)
+        require(isinstance(route_terms, list) and all(isinstance(term, str) and term for term in route_terms), f"governor {name} has invalid route_terms", errors)
         owner = seen_ports.setdefault(port, name)
         require(owner == name, f"governor port collision on {port}: {owner} and {name}", errors)
         governor_ports[port] = name

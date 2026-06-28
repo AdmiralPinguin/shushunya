@@ -15,6 +15,7 @@ class GovernorRef:
     status: str
     port: int
     task_kinds: list[str]
+    route_terms: list[str]
     service: str
 
     def active(self) -> bool:
@@ -26,6 +27,7 @@ class GovernorRef:
             "status": self.status,
             "port": self.port,
             "task_kinds": self.task_kinds,
+            "route_terms": self.route_terms,
             "service": self.service,
         }
 
@@ -44,6 +46,7 @@ def governor_refs() -> list[GovernorRef]:
                 status=str(item.get("status") or "planned"),
                 port=int(item.get("port") or 0),
                 task_kinds=[str(kind) for kind in item.get("task_kinds", [])],
+                route_terms=[str(term) for term in item.get("route_terms", [])],
                 service=str(item.get("service") or ""),
             )
         )

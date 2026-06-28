@@ -3,18 +3,21 @@
     "status": "active",
     "port": 7101,
     "task_kinds": ["research", "lore_reconstruction"],
+    "route_terms": ["скалатрак", "skalathrax", "лор", "lore", "источник", "source", "событи", "event", "реконструкц", "reconstruction"],
     "service": "eye_of_terror.inner_circle.iskandar_service"
   },
   "CogitatorCodewrightGovernor": {
     "status": "planned",
     "port": 7102,
     "task_kinds": ["code"],
+    "route_terms": ["код", "repo", "repository", "python", "bug", "ошибк", "приложени"],
     "service": ""
   },
   "ForgeMasterGovernor": {
     "status": "planned",
     "port": 7103,
     "task_kinds": ["image_generation"],
+    "route_terms": ["картин", "image", "stable diffusion", "рисовал", "forge"],
     "service": ""
   }
 }

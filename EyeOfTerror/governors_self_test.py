@@ -35,6 +35,8 @@ def main() -> int:
             raise AssertionError(f"active governor must declare service: {ref}")
         if not ref.active() and ref.service:
             raise AssertionError(f"planned governor should not declare a runnable service yet: {ref}")
+        if not ref.route_terms:
+            raise AssertionError(f"governor must declare route_terms: {ref}")
     iskandar = governor_by_name("IskandarKhayon")
     if not iskandar or not iskandar.active() or iskandar.port != 7101:
         raise AssertionError(iskandar)
