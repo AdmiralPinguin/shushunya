@@ -20,7 +20,8 @@ services unless it is doing explicit diagnostics.
    governor.
 3. The governor builds a task contract, dispatch packets, and verification
    expectations. Warmaster can use an in-process governor path for local
-   development or the governor HTTP API for service-separated execution.
+   development or the governor HTTP API for service-separated execution; the
+   gateway can be started in either default mode.
 4. Warmaster executes or starts the run, records durable ledger state, and
    exposes polling/cancellation endpoints to clients.
 5. Mechanicum workers perform focused steps through the common worker API.

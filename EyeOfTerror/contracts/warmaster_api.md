@@ -55,6 +55,10 @@ On normal server startup, Warmaster creates the run root and marks stale
 `running`/`cancelling` ledgers as `interrupted`. Operators can disable this with
 `--no-recover-stale-on-start` for diagnostics.
 
+Operators can choose the default governor planning boundary with
+`--governor-transport local|http` and `--governor-host`. Per-request
+`governor_transport` and `governor_host` override those defaults.
+
 ## Client Bootstrap
 
 Clients should call `GET /state` after startup or reconnect. The response
@@ -81,7 +85,8 @@ not contain `..`.
 `governor_transport` defaults to `local`. When set to `http`, Warmaster calls
 the selected active governor service on its registry port and writes the
 Warmaster ledger after the governor prepares the run package. `governor_host`
-must be loopback.
+must be loopback. If the gateway was started with `--governor-transport http`,
+clients can omit this field and still use the service-separated path.
 
 ## Run Inspection
 

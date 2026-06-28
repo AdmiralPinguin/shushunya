@@ -118,6 +118,10 @@ def main() -> int:
             class ServiceGovernor:
                 name = "IskandarKhayon"
                 port = iskandar_server.server_port
+                status = "active"
+
+                def active(self) -> bool:
+                    return True
 
             service_prepared = warmaster_gateway.prepare_task_via_governor_service(
                 "Собери все известное о событиях Скалатракса.",
@@ -132,6 +136,26 @@ def main() -> int:
                 or not (Path(service_prepared["run_dir"]) / "task_ledger.json").exists()
             ):
                 raise AssertionError(f"bad http governor preparation: {service_prepared}")
+            original_governor_by_name = warmaster_gateway.governor_by_name
+            warmaster_gateway.governor_by_name = lambda _name: ServiceGovernor()
+            gateway_server = ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(run_root, default_governor_transport="http"),
+            )
+            gateway_thread = threading.Thread(target=gateway_server.serve_forever, daemon=True)
+            gateway_thread.start()
+            try:
+                gateway_base = f"http://127.0.0.1:{gateway_server.server_port}"
+                service_task = request_json(
+                    gateway_base + "/task",
+                    {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-default-http-governor-test"},
+                )
+                if service_task.get("governor_transport") != "http" or not service_task.get("ok"):
+                    raise AssertionError(f"gateway did not use default http governor transport: {service_task}")
+            finally:
+                gateway_server.shutdown()
+                gateway_thread.join(timeout=5)
+                warmaster_gateway.governor_by_name = original_governor_by_name
         finally:
             iskandar_server.shutdown()
             iskandar_thread.join(timeout=5)

@@ -114,6 +114,10 @@ that behavior for diagnostics.
 service on its registry port, keeping the planning boundary compatible with
 future Inner Circle services.
 
+Warmaster Gateway can also be started with `--governor-transport http` and
+`--governor-host 127.0.0.1` so ordinary client task submissions use governor
+services by default.
+
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the
 same artifact text endpoint.

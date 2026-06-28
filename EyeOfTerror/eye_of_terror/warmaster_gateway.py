@@ -893,7 +893,7 @@ def start_background(task_id: str, target: Any) -> bool:
     return True
 
 
-def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
+def make_handler(run_root: Path, default_governor_transport: str = "local", default_governor_host: str = "127.0.0.1") -> type[BaseHTTPRequestHandler]:
     class WarmasterHandler(BaseHTTPRequestHandler):
         server_version = "WarmasterGateway/0.1"
 
@@ -1092,8 +1092,8 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         response(self, 400, {"ok": False, "error": "message is required"})
                         return
                     task_id = str(payload.get("task_id") or "").strip() or None
-                    governor_transport = str(payload.get("governor_transport") or "local").strip() or "local"
-                    governor_host = str(payload.get("governor_host") or "127.0.0.1").strip() or "127.0.0.1"
+                    governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
+                    governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
                     prepared = prepare_task(message, task_id, run_root, governor_transport=governor_transport, governor_host=governor_host)
                     response(self, 409 if prepared.get("error_code") == "task_exists" else (200 if prepared.get("ok") else 400), prepared)
                     return
@@ -1218,9 +1218,9 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
     return WarmasterHandler
 
 
-def serve(host: str, port: int, run_root: Path, recover_stale_on_start: bool = True) -> None:
+def serve(host: str, port: int, run_root: Path, recover_stale_on_start: bool = True, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> None:
     prepare_run_root(run_root, recover_stale_on_start=recover_stale_on_start)
-    server = ThreadingHTTPServer((host, port), make_handler(run_root))
+    server = ThreadingHTTPServer((host, port), make_handler(run_root, default_governor_transport=governor_transport, default_governor_host=governor_host))
     server.serve_forever()
 
 
@@ -1230,8 +1230,17 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=7000)
     parser.add_argument("--run-root", default="runtime/warmaster-runs")
     parser.add_argument("--no-recover-stale-on-start", action="store_true")
+    parser.add_argument("--governor-transport", choices=["local", "http"], default="local")
+    parser.add_argument("--governor-host", default="127.0.0.1")
     args = parser.parse_args()
-    serve(args.host, args.port, Path(args.run_root), recover_stale_on_start=not args.no_recover_stale_on_start)
+    serve(
+        args.host,
+        args.port,
+        Path(args.run_root),
+        recover_stale_on_start=not args.no_recover_stale_on_start,
+        governor_transport=args.governor_transport,
+        governor_host=args.governor_host,
+    )
     return 0
 
 
