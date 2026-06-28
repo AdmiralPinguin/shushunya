@@ -1218,6 +1218,50 @@ def artifact_text(ledger: dict[str, Any], artifact_path: str, max_bytes: int = 5
     }
 
 
+def final_package(ledger: dict[str, Any], max_bytes: int = 20000) -> dict[str, Any]:
+    result = ledger.get("result", {}) if isinstance(ledger.get("result"), dict) else {}
+    artifacts = result.get("artifacts") if isinstance(result.get("artifacts"), list) else []
+    manifest_artifact = next((str(path) for path in artifacts if str(path).endswith("/final_manifest.json")), "")
+    if not manifest_artifact:
+        return {"ok": False, "error": "final manifest is not recorded"}
+    manifest_path = resolve_artifact(ledger, manifest_artifact)
+    if not manifest_path.exists():
+        return {"ok": False, "error": "final manifest not found", "path": manifest_artifact}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "error": f"final manifest is corrupt: {exc}", "path": manifest_artifact}
+    if not isinstance(manifest, dict):
+        return {"ok": False, "error": "final manifest is not a JSON object", "path": manifest_artifact}
+    files: list[dict[str, Any]] = []
+    raw_files = manifest.get("files") if isinstance(manifest.get("files"), list) else []
+    for raw_file in raw_files:
+        if not isinstance(raw_file, dict):
+            continue
+        sandbox_path = str(raw_file.get("path") or "")
+        if not sandbox_path:
+            continue
+        item = {**raw_file, **sandbox_artifact_file_status(str(result.get("workspace_root") or ""), sandbox_path)}
+        if item.get("exists"):
+            preview = artifact_text(ledger, sandbox_path, max_bytes=max_bytes)
+            if preview.get("ok"):
+                item["preview"] = {
+                    "bytes": preview.get("bytes", 0),
+                    "truncated": bool(preview.get("truncated")),
+                    "text": preview.get("text", ""),
+                }
+        files.append(item)
+    return {
+        "ok": True,
+        "manifest_path": manifest_artifact,
+        "host_path": str(manifest_path),
+        "summary": compact_manifest_summary(manifest),
+        "deliverable": str(manifest.get("deliverable") or ""),
+        "manifest": manifest,
+        "files": files,
+    }
+
+
 def fetch_json_endpoint(url: str, timeout_sec: float = 1.0) -> dict[str, Any]:
     with urllib.request.urlopen(url, timeout=timeout_sec) as response:
         payload = json.loads(response.read().decode("utf-8"))
@@ -1422,6 +1466,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "ledger_read",
             "artifact_listing",
             "artifact_text_read",
+            "final_package_read",
             "http_governor_planning",
             "run_contract_read",
             "run_dispatch_read",
@@ -1488,6 +1533,8 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/events?limit=20",
             "GET /runs/{task_id}/events?after=0",
             "GET /runs/{task_id}/artifacts",
+            "GET /runs/{task_id}/final",
+            "GET /runs/{task_id}/final?max_bytes=1000",
             "GET /runs/{task_id}/artifact_text?path=/work/...",
             "GET /runs/{task_id}/artifact_text?path=/work/...&max_bytes=1000",
             "POST /runs/{task_id}/preflight_local",
@@ -1857,6 +1904,24 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         response(self, 500, {"ok": False, "error": ledger_error, "task_id": task_id})
                         return
                     response(self, 200, {"ok": True, "task_id": task_id, **artifact_status(ledger)})
+                    return
+                if len(parts) == 3 and parts[2] == "final":
+                    if not ledger_path.exists():
+                        response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
+                        return
+                    query = parse_qs(parsed.query)
+                    raw_max_bytes = query.get("max_bytes", [""])[0]
+                    max_bytes = parse_limit(raw_max_bytes, default=20000, maximum=MAX_ARTIFACT_TEXT_BYTES) if raw_max_bytes else 20000
+                    ledger, ledger_error = load_ledger_dict(ledger_path)
+                    if ledger_error:
+                        response(self, 500, {"ok": False, "error": ledger_error, "task_id": task_id})
+                        return
+                    try:
+                        payload = final_package(ledger, max_bytes=max_bytes)
+                    except ValueError as exc:
+                        response(self, 400, {"ok": False, "error": str(exc), "task_id": task_id})
+                        return
+                    response(self, 200 if payload.get("ok") else 404, {"task_id": task_id, **payload})
                     return
                 if len(parts) == 3 and parts[2] == "artifact_text":
                     if not ledger_path.exists():

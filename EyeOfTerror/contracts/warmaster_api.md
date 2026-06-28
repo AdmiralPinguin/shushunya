@@ -43,6 +43,8 @@ GET  /runs/{task_id}/events
 GET  /runs/{task_id}/events?limit=20
 GET  /runs/{task_id}/events?after=0
 GET  /runs/{task_id}/artifacts
+GET  /runs/{task_id}/final
+GET  /runs/{task_id}/final?max_bytes=1000
 GET  /runs/{task_id}/artifact_text?path=/work/...
 GET  /runs/{task_id}/artifact_text?path=/work/...&max_bytes=1000
 POST /runs/{task_id}/preflight_local
@@ -180,6 +182,10 @@ for each event.
   so clients can list and fetch the whole final package. The final manifest
   artifact item includes `manifest_summary` with status, critic status, critic
   metrics, revision focus, warnings, and blockers.
+- `/runs/{task_id}/final` for a completed final package in one response:
+  manifest summary, full manifest object, deliverable path, package files, and
+  bounded text previews. `max_bytes` limits each file preview and is clamped by
+  the same artifact text maximum.
 - `/runs/{task_id}/contract` and `/runs/{task_id}/dispatch` for orchestration
   debugging.
 - `/runs/{task_id}/worker_tasks?live=1` when worker services are running and

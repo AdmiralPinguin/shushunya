@@ -277,6 +277,7 @@ def main() -> int:
                 or "POST /runs/{task_id}/preflight_http" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
                 or "GET /events?after=0" not in capabilities.get("actions", {}).get("polling", [])
                 or "GET /recovery" not in capabilities.get("actions", {}).get("maintenance", [])
+                or "final_package_read" not in capabilities.get("capabilities", [])
                 or "POST /recovery/start_resume_local" not in capabilities.get("actions", {}).get("maintenance", [])
             ):
                 raise AssertionError(f"gateway capabilities did not expose task action hints: {capabilities}")
@@ -675,6 +676,19 @@ def main() -> int:
             reconstruction_text = request_json(base + "/runs/warmaster-test/artifact_text?path=/work/skalathrax/reconstruction_ru.md")
             if not reconstruction_text.get("ok") or "Реконструкция" not in reconstruction_text.get("text", ""):
                 raise AssertionError(f"bad expanded artifact text response: {reconstruction_text}")
+            final_package = request_json(base + "/runs/warmaster-test/final?max_bytes=1000")
+            reconstruction_preview = next(
+                (item for item in final_package.get("files", []) if item.get("path") == "/work/skalathrax/reconstruction_ru.md"),
+                {},
+            )
+            if (
+                not final_package.get("ok")
+                or final_package.get("summary", {}).get("status") != "ready"
+                or final_package.get("deliverable") != "/work/skalathrax/reconstruction_ru.md"
+                or final_package.get("manifest", {}).get("status") != "ready"
+                or "Реконструкция" not in reconstruction_preview.get("preview", {}).get("text", "")
+            ):
+                raise AssertionError(f"bad final package response: {final_package}")
             text_preview = request_json(base + f"/runs/warmaster-test/artifact_text?path={artifact_path}&max_bytes=8")
             if not text_preview.get("ok") or len(text_preview.get("text", "").encode("utf-8")) > 8:
                 raise AssertionError(f"bad artifact preview response: {text_preview}")

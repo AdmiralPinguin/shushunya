@@ -135,6 +135,9 @@
   critic metrics, warnings, blockers, and revision focus for client display.
 - Completed run summaries expose `final_manifest_summary` so clients can render
   final quality state without an extra artifact listing request.
+- Warmaster exposes `GET /runs/{task_id}/final` so clients and higher-level
+  governors can fetch the final manifest, deliverable path, package files, and
+  bounded text previews in one request.
 - Task ledgers, run packages, and executor reports are written atomically to
   avoid partial JSON reads during background execution.
 - Task ledger saves merge concurrent event/step/cancel updates from stale
