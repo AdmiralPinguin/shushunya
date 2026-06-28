@@ -79,6 +79,11 @@
       "role": "ArchiveOfHeresy adapter",
       "path": "Mechanicum/MnemosyneRelay",
       "backend": "http://127.0.0.1:8090"
+    },
+    "7012": {
+      "name": "OcularisRenderium",
+      "role": "JavaScript render and screenshot worker",
+      "path": "Mechanicum/OcularisRenderium"
     }
   }
 }
