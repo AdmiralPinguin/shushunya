@@ -264,9 +264,11 @@ def main() -> int:
                 or not capabilities.get("actions", {}).get("can_preflight_runs")
                 or not capabilities.get("actions", {}).get("can_execute_step_subsets")
                 or not capabilities.get("actions", {}).get("can_list_recoverable_runs")
+                or not capabilities.get("actions", {}).get("can_bulk_start_recoverable_runs")
                 or "POST /task_preflight" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
                 or "POST /runs/{task_id}/preflight_http" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
                 or "GET /recovery" not in capabilities.get("actions", {}).get("maintenance", [])
+                or "POST /recovery/start_resume_local" not in capabilities.get("actions", {}).get("maintenance", [])
             ):
                 raise AssertionError(f"gateway capabilities did not expose task action hints: {capabilities}")
             brigade_plan = request_json(base + "/brigade_plan")
@@ -907,6 +909,31 @@ def main() -> int:
                 or "stale-test" not in recovery_endpoint.get("recovery", {}).get("task_ids", [])
             ):
                 raise AssertionError(f"recovery endpoint did not expose stale run: {recovery_endpoint}")
+            bulk_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bulk-recovery-test"},
+            )
+            if not bulk_task.get("ok"):
+                raise AssertionError(f"bad bulk recovery task response: {bulk_task}")
+            bulk_ledger_path = Path(bulk_task["run_dir"]) / "task_ledger.json"
+            TaskLedger.load(bulk_ledger_path).set_status("interrupted")
+            bulk_started = request_json(base + "/recovery/start_resume_local", {"timeout_sec": 30}, timeout=60)
+            if (
+                bulk_started.get("started", 0) < 1
+                or not any(item.get("task_id") == "warmaster-bulk-recovery-test" and item.get("ok") for item in bulk_started.get("results", []))
+                or not any(item.get("task_id") == "stale-test" and not item.get("ok") for item in bulk_started.get("results", []))
+            ):
+                raise AssertionError(f"bulk recovery did not start valid runs and skip malformed runs: {bulk_started}")
+            for _ in range(60):
+                bulk_ledger = request_json(base + "/runs/warmaster-bulk-recovery-test/ledger")
+                if bulk_ledger["ledger"].get("status") == "completed":
+                    break
+                time.sleep(0.2)
+            else:
+                raise AssertionError(f"bulk recovery run did not complete: {bulk_ledger}")
+            bulk_events = [event.get("type") for event in bulk_ledger["ledger"].get("events", [])]
+            if "resume_execution_requested" not in bulk_events or "background_start_requested" not in bulk_events:
+                raise AssertionError(f"bulk recovery did not record resume/background events: {bulk_ledger}")
         finally:
             server.shutdown()
             thread.join(timeout=5)

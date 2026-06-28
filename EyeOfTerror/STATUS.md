@@ -103,6 +103,8 @@
   with resume `next_action` hints.
 - Warmaster exposes `GET /recovery` for lightweight interrupted-run recovery
   queues.
+- Warmaster exposes bulk recovery start endpoints that resume valid
+  interrupted runs while reporting malformed run packages per item.
 - Warmaster Gateway supports cursor-based ledger event polling with
   `/runs/{task_id}/events?after=N`.
 - Warmaster Gateway exposes compact per-run snapshots for mobile/client
@@ -193,7 +195,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `NoosphericExtractor` still uses rule-based event playbooks; Skalathrax rules now live in data, not Python code.
 - `AuspexBrowser` performs guarded HTTP text fetches; it does not yet render JavaScript pages or screenshots.
 - The pipeline records inaccessible primary books as gaps instead of solving book acquisition.
-- Warmaster Gateway background execution is in-process only; restart recovery marks stale jobs interrupted but does not resume them.
+- Warmaster Gateway background execution is in-process only; restart recovery
+  marks stale jobs interrupted, and operators can bulk-start recoverable runs
+  through explicit recovery endpoints.
 - `GET /state` is a snapshot endpoint, not a live event stream; clients still
   need polling or a future push channel for real-time updates.
 - Cancellation is still cooperative. It prevents future worker starts and marks

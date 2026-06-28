@@ -1375,6 +1375,8 @@ def gateway_capabilities() -> dict[str, Any]:
             "POST /runs/{task_id}/start_revision_http",
             "POST /runs/{task_id}/start_resume_local",
             "POST /runs/{task_id}/start_resume_http",
+            "POST /recovery/start_resume_local",
+            "POST /recovery/start_resume_http",
             "POST /runs/{task_id}/cancel",
             "POST /recover_stale",
         ],
@@ -1389,11 +1391,12 @@ def gateway_actions() -> dict[str, Any]:
         "can_start_runs": True,
         "can_resume_interrupted_runs": True,
         "can_list_recoverable_runs": True,
+        "can_bulk_start_recoverable_runs": True,
         "can_execute_revisions": True,
         "can_execute_step_subsets": True,
         "can_cancel_runs": True,
         "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
-        "maintenance": ["GET /recovery", "POST /recover_stale"],
+        "maintenance": ["GET /recovery", "POST /recovery/start_resume_local", "POST /recovery/start_resume_http", "POST /recover_stale"],
         "diagnostics": ["GET /state?health=1", "GET /brigade_health", "GET /doctor"],
     }
 
@@ -1470,6 +1473,62 @@ def start_background(task_id: str, target: Any) -> bool:
 
     threading.Thread(target=wrapped, daemon=True).start()
     return True
+
+
+def start_recoverable_runs(run_root: Path, mode: str, host: str = "127.0.0.1", timeout_sec: int = 1800) -> dict[str, Any]:
+    if mode not in {"local", "http"}:
+        raise ValueError("mode must be local or http")
+    host = validate_service_host(host)
+    timeout_sec = max(1, min(int(timeout_sec), 7200))
+    all_runs = list_runs(run_root)
+    candidates = recovery_summary(all_runs).get("candidates", [])
+    results: list[dict[str, Any]] = []
+    started_count = 0
+    for candidate in candidates:
+        task_id = str(candidate.get("task_id") or "")
+        if not task_id:
+            continue
+        run_dir = run_root / task_id
+        ledger_path = run_dir / "task_ledger.json"
+        try:
+            step_ids = resume_step_ids_from_run(run_dir)
+            if ledger_path.exists():
+                ledger = TaskLedger.load(ledger_path)
+                ledger.record_event("resume_execution_requested", {"mode": f"bulk_start_resume_{mode}"})
+                ledger.record_event("background_start_requested", {"mode": f"bulk_start_resume_{mode}", "step_ids": step_ids})
+            workspace_root = resolve_run_child_path(run_dir, "", "work")
+            if mode == "local":
+                executor = lambda run_dir=run_dir, workspace_root=workspace_root, step_ids=step_ids: execute_local_run(
+                    REPO_ROOT,
+                    run_dir,
+                    workspace_root,
+                    timeout_sec=timeout_sec,
+                    step_ids=step_ids,
+                    execution_mode="resume",
+                )
+            else:
+                executor = lambda run_dir=run_dir, step_ids=step_ids: execute_http_run(
+                    run_dir,
+                    host=host,
+                    timeout_sec=timeout_sec,
+                    workspace_root=None,
+                    step_ids=step_ids,
+                    execution_mode="resume",
+                )
+            if not start_background(task_id, executor):
+                results.append({"task_id": task_id, "ok": False, "status": "already_active"})
+                continue
+            started_count += 1
+            results.append({"task_id": task_id, "ok": True, "status": "started", "step_ids": step_ids})
+        except Exception as exc:  # noqa: BLE001 - one malformed recoverable run must not block the queue.
+            results.append({"task_id": task_id, "ok": False, "status": "skipped", "error": str(exc)})
+    return {
+        "ok": True,
+        "mode": mode,
+        "started": started_count,
+        "total_candidates": len(candidates),
+        "results": results,
+    }
 
 
 def make_handler(run_root: Path, default_governor_transport: str = "local", default_governor_host: str = "127.0.0.1") -> type[BaseHTTPRequestHandler]:
@@ -1721,6 +1780,17 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 if self.path == "/recover_stale":
                     recovered = recover_stale_runs(run_root)
                     response(self, 200, {"ok": True, "recovered": recovered})
+                    return
+                if self.path in {"/recovery/start_resume_local", "/recovery/start_resume_http"}:
+                    try:
+                        mode = "local" if self.path.endswith("_local") else "http"
+                        host = str(payload.get("host") or "127.0.0.1")
+                        timeout_sec = int(payload.get("timeout_sec") or 1800)
+                        recovered = start_recoverable_runs(run_root, mode=mode, host=host, timeout_sec=timeout_sec)
+                    except ValueError as exc:
+                        response(self, 400, {"ok": False, "error": str(exc)})
+                        return
+                    response(self, 202, recovered)
                     return
                 parts = [part for part in self.path.split("?")[0].split("/") if part]
                 if len(parts) == 3 and parts[0] == "runs" and parts[2] == "cancel":

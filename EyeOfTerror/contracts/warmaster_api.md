@@ -56,6 +56,8 @@ POST /runs/{task_id}/start_revision_local
 POST /runs/{task_id}/start_revision_http
 POST /runs/{task_id}/start_resume_local
 POST /runs/{task_id}/start_resume_http
+POST /recovery/start_resume_local
+POST /recovery/start_resume_http
 POST /runs/{task_id}/cancel
 POST /recover_stale
 ```
@@ -79,6 +81,11 @@ section listing interrupted runs whose action hints allow resume. `state.actions
 preferred task flow: preflight, create, then start.
 Clients can call `GET /recovery` when they only need the recoverable interrupted
 run list without a full bootstrap snapshot.
+Operators can call `POST /recovery/start_resume_local` or
+`POST /recovery/start_resume_http` to start all currently recoverable
+interrupted runs in the background. The response is per-run: a malformed or
+incomplete run package must be reported as skipped instead of blocking other
+recoverable runs.
 Use `GET /state?health=1` for an admin/bootstrap snapshot that also includes
 best-effort `brigade_health`; plain `/state` stays lightweight for polling.
 
