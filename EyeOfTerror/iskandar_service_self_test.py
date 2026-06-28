@@ -9,7 +9,8 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from eye_of_terror.inner_circle.iskandar_service import make_handler, resolve_run_dir
+from eye_of_terror.contracts import build_lore_reconstruction_contract
+from eye_of_terror.inner_circle.iskandar_service import make_handler, required_workers, resolve_run_dir
 
 
 def request_json(url: str, payload: dict | None = None) -> dict:
@@ -27,6 +28,12 @@ def request_options(url: str) -> int:
 
 
 def main() -> int:
+    contract_workers = [
+        step.worker
+        for step in build_lore_reconstruction_contract("Собери события Скалатракса", task_id="iskandar-service-test").worker_plan
+    ]
+    if required_workers() != contract_workers:
+        raise AssertionError(f"Iskandar required workers drifted from contract plan: {required_workers()}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         if resolve_run_dir(root / "runs", "child", "task").resolve() != (root / "runs" / "child").resolve():

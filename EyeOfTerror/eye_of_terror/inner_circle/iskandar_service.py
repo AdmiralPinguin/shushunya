@@ -6,19 +6,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from ..contracts import lore_worker_plan
 from .iskandar import plan_lore_reconstruction
 from ..pipeline import write_pipeline_run
 
 
-REQUIRED_WORKERS = [
-    "Lexmechanic",
-    "AuspexBrowser",
-    "NoosphericExtractor",
-    "Chronologis",
-    "ScriptoriumDaemon",
-    "ReductorVerifier",
-    "FabricatorFinalis",
-]
+def required_workers() -> list[str]:
+    workers: list[str] = []
+    for step in lore_worker_plan("capabilities"):
+        if step.worker not in workers:
+            workers.append(step.worker)
+    return workers
 
 
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -47,7 +45,7 @@ def service_capabilities() -> dict[str, Any]:
         "governor": "IskandarKhayon",
         "api_version": 1,
         "task_kinds": ["research", "lore_reconstruction"],
-        "required_workers": REQUIRED_WORKERS,
+        "required_workers": required_workers(),
         "capabilities": [
             "lore_reconstruction_planning",
             "worker_plan_resolution",
