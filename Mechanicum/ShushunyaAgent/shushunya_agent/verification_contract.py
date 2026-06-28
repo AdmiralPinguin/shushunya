@@ -81,6 +81,48 @@ def cli_modules_from_text_paths(text: str, workspace: str = "") -> list[str]:
     return list(dict.fromkeys(modules))
 
 
+def _paths_from_listing_text(text: str, workspace: str = "") -> list[str]:
+    paths: list[str] = []
+    current_dir = ""
+    workspace_norm = posixpath.normpath(workspace or "")
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("total "):
+            continue
+        if line.endswith(":"):
+            section = line[:-1].strip()
+            if section == ".":
+                current_dir = ""
+            elif section.startswith("./"):
+                current_dir = posixpath.normpath(section[2:])
+            elif workspace_norm and section.startswith(workspace_norm + "/"):
+                current_dir = posixpath.relpath(posixpath.normpath(section), workspace_norm)
+                if current_dir == ".":
+                    current_dir = ""
+            else:
+                current_dir = posixpath.normpath(section)
+            continue
+        if line.startswith("./"):
+            path = posixpath.normpath(line[2:])
+        elif line.startswith("/"):
+            path = posixpath.normpath(line)
+        else:
+            path = posixpath.normpath(posixpath.join(current_dir, line)) if current_dir else line
+        if workspace_norm and not path.startswith("/"):
+            path = posixpath.normpath(posixpath.join(workspace_norm, path))
+        paths.append(path)
+    return list(dict.fromkeys(paths))
+
+
+def cli_modules_from_listing_text(text: str, workspace: str = "") -> list[str]:
+    modules: list[str] = []
+    for path in _paths_from_listing_text(text, workspace):
+        module = cli_module_from_path(path, workspace)
+        if module:
+            modules.append(module)
+    return list(dict.fromkeys(modules))
+
+
 def action_invokes_cli_module(action_type: str, action: dict[str, Any], module: str) -> bool:
     cmd = str(action.get("cmd") or "")
     code = str(action.get("code") or "")
@@ -109,6 +151,15 @@ def cli_input_path_from_listing_item(item: dict[str, Any]) -> str:
     if "tests" in lowered_parts or "__pycache__" in lowered_parts:
         return ""
     return normalized
+
+
+def cli_input_paths_from_listing_text(text: str, workspace: str = "") -> list[str]:
+    paths: list[str] = []
+    for path in _paths_from_listing_text(text, workspace):
+        detected = cli_input_path_from_listing_item({"path": path, "type": "file"})
+        if detected:
+            paths.append(detected)
+    return list(dict.fromkeys(paths))
 
 
 def action_uses_cli_input_path(action: dict[str, Any], input_paths: Iterable[str]) -> bool:

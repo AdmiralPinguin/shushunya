@@ -46,8 +46,10 @@ from .validation import validate_action as validate_action_schema
 from .verification_contract import (
     action_is_cli_verification,
     cli_input_path_from_listing_item,
+    cli_input_paths_from_listing_text,
     cli_input_paths_from_task,
     cli_module_from_path,
+    cli_modules_from_listing_text,
     cli_modules_from_task,
     cli_modules_from_text_paths,
     cli_modules_from_workspace,
@@ -1934,6 +1936,19 @@ def looks_like_pytest_shell(cmd: str) -> bool:
 def looks_like_inspection_shell(cmd: str) -> bool:
     lowered = cmd.lower()
     return bool(re.search(r"(^|[;&|]\s*|\s)(ls|find|cat|sed|grep|rg)\b", lowered))
+
+
+def action_can_discover_cli_contract(action_type: str, action: dict[str, Any], workspace: str) -> bool:
+    if action_type in {"list_files", "find_files"}:
+        return True
+    if action_type == "shell":
+        return looks_like_inspection_shell(str(action.get("cmd") or ""))
+    if action_type == "read_file":
+        path = str(action.get("path") or "")
+        if cli_module_from_path(path, workspace):
+            return True
+        return bool(cli_input_path_from_listing_item({"path": path, "type": "file"}))
+    return False
 
 
 def sandbox_path_outside_workspace(path: str, workspace: str) -> bool:
@@ -5531,9 +5546,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and not pending_failing_tests
                 and (swe_verified_after_edit or swe_resume_requires_cli_verification)
                 and (last_cli_required_swe_edit_path or swe_resume_requires_cli_verification)
-                and (expected_cli_modules or expected_cli_input_paths)
-                and not (expected_cli_modules and not expected_cli_input_paths and action_type in {"list_files", "find_files"})
                 and not swe_cli_verification_attempted_after_edit
+                and not action_can_discover_cli_contract(action_type, action, explicit_workspace)
                 and not action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
             ):
                 result = {
@@ -5548,8 +5562,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "entrypoint/subprocess and validates stdout/JSON output. If expected_cli_modules is non-empty, "
                         "invoke one of those modules with python -m and the real input file from the workspace. If "
                         "expected_cli_input_paths is non-empty, use one of those existing files instead of generating a dummy input. "
-                        "If expected_cli_modules is known but expected_cli_input_paths is empty and the CLI needs a file, "
-                        "use list_files/find_files once to discover real workspace input files, then run the CLI verification."
+                        "If the CLI module or input file is not known yet, inspect the workspace with list_files/find_files/read_file "
+                        "or a focused ls/find shell command, then run the CLI verification. Do not use memory/archive tools as "
+                        "completion proof for a code task that still needs CLI verification."
                     ),
                 }
             elif (
@@ -6136,6 +6151,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 content = str(result.get("content") or "")
                 if content:
                     last_read_file_excerpts[read_path] = content[:4000]
+        if action_type == "shell" and isinstance(result, dict) and result.get("ok") is True:
+            shell_listing_text = f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}"
+            for cli_module in cli_modules_from_listing_text(shell_listing_text, explicit_workspace):
+                expected_cli_modules.add(cli_module)
+            for cli_input_path in cli_input_paths_from_listing_text(shell_listing_text, explicit_workspace):
+                expected_cli_input_paths.add(cli_input_path)
         if action_type == "list_files" and isinstance(result, dict) and result.get("ok") is True:
             for item in result.get("items", []) if isinstance(result.get("items"), list) else []:
                 if not isinstance(item, dict):

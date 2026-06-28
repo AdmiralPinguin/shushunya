@@ -737,6 +737,11 @@ def main() -> int:
     )
     if text_cli != ["scheduler.cli"]:
         raise AssertionError(f"CLI text path detector missed list_files path: {text_cli}")
+    recursive_listing = ".:\njobs.csv\nscheduler\ntests\n\n./scheduler:\n__init__.py\ncli.py\ncore.py\n\n./tests:\ntest_scheduler.py\n"
+    if agent_runner.cli_modules_from_listing_text(recursive_listing, "/work/project") != ["scheduler.cli"]:
+        raise AssertionError("CLI module detector missed ls -R output")
+    if agent_runner.cli_input_paths_from_listing_text(recursive_listing, "/work/project") != ["/work/project/jobs.csv"]:
+        raise AssertionError("CLI input detector missed ls -R output")
     with tempfile.TemporaryDirectory() as tmp:
         package_dir = Path(tmp) / "scheduler"
         package_dir.mkdir()
@@ -4795,6 +4800,44 @@ def main() -> int:
     if any(result.get("error") == "swe cli verification required by supervisor" for result in unknown_cli_results):
         raise AssertionError(f"SWE resume unknown CLI contract should not reject discovery before contract exists: {swe_resume_unknown_cli_payload}")
     print("[ok] SWE resume unknown CLI contract allows discovery")
+
+    swe_resume_cli_archive_stdout = io.StringIO()
+    swe_resume_cli_archive_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-resume-cli-blocks-archive"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    resume_cli_archive_task = (
+        "Продолжи выполнение той же задачи по task journal.\n\n"
+        "Resume context from previous agent task journal:\n"
+        "[{\"type\":\"start\",\"task\":\"Исправь Python-проект. CLI должен печатать валидный JSON.\\n\\n"
+        "Рабочий каталог для этой задачи: /work/project\"},"
+        "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":true,"
+        "\"passing_tests\":[\"tests/test_core.py::test_core\"],\"failing_tests\":[]}}]"
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && ls -R","timeout":60,"reason":"discover CLI entrypoint"}',
+            '{"action":"archive_memory_propose","target":"focus","proposal":"tests pass","evidence":"fallback ok"}',
+            '{"action":"final","message":"premature"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": True,
+            "returncode": 0,
+            "stdout": ".:\\njobs.csv\\npackage\\n\\n./package:\\n__init__.py\\ncli.py\\ncore.py\\n",
+            "stderr": "",
+    }), mock.patch.object(agent_runner, "archive_memory_propose", return_value={"ok": True}) as mocked_archive_propose, \
+            contextlib.redirect_stdout(swe_resume_cli_archive_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(resume_cli_archive_task, swe_resume_cli_archive_config)
+    swe_resume_cli_archive_payload = json.loads(swe_resume_cli_archive_stdout.getvalue())
+    archive_gate_results = [step.get("result") or {} for step in swe_resume_cli_archive_payload.get("steps", [])]
+    if mocked_archive_propose.called:
+        raise AssertionError(f"SWE CLI gate should reject archive proposal before archive call: {swe_resume_cli_archive_payload}")
+    if not any(result.get("error") == "swe cli verification required by supervisor" for result in archive_gate_results):
+        raise AssertionError(f"SWE CLI gate did not reject archive proposal after test pass: {swe_resume_cli_archive_payload}")
+    print("[ok] SWE CLI pending blocks archive memory")
 
     swe_resume_failing_cli_stdout = io.StringIO()
     swe_resume_failing_cli_config = AgentConfig(
