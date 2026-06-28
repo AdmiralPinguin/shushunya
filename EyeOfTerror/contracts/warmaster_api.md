@@ -294,6 +294,10 @@ unselected dependency artifacts to already exist when a `workspace_root` is
 provided. Each run preflight records a compact `run_preflight_recorded` ledger
 event with mode, selected steps, result, and failure counts.
 
+Local and HTTP executors must convert malformed dispatch packets into
+structured failed or preflight-failed run results instead of crashing before the
+ledger can record the failure.
+
 Execution endpoints also accept optional `step_ids` for orchestrator-controlled
 step subsets. `step_ids` must be a list of unique non-empty strings and every
 requested id must exist in the run package. Unknown or duplicate step ids must

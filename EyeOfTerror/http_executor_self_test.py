@@ -118,6 +118,29 @@ def main() -> int:
             summary = execute_run(run_dir, timeout_sec=1)
             if summary.get("ok") or not summary.get("preflight_failures"):
                 raise AssertionError(f"expected preflight failure: {summary}")
+            corrupt_dispatch_run = root / "corrupt-dispatch-run"
+            corrupt_dispatch_dir = corrupt_dispatch_run / "dispatch"
+            write_json(
+                corrupt_dispatch_run / "status.json",
+                {
+                    "steps": [
+                        {
+                            "step_id": "fact_extraction",
+                            "worker": "NoosphericExtractor",
+                            "port": server.server_port,
+                        }
+                    ],
+                    "dispatch_dir": str(corrupt_dispatch_dir),
+                },
+            )
+            corrupt_dispatch_dir.mkdir(parents=True, exist_ok=True)
+            (corrupt_dispatch_dir / "fact_extraction.json").write_text("{", encoding="utf-8")
+            corrupt_summary = execute_run(corrupt_dispatch_run, timeout_sec=1)
+            if corrupt_summary.get("ok") or "dispatch unavailable" not in corrupt_summary.get("preflight_failures", [{}])[0].get("error", ""):
+                raise AssertionError(f"HTTP executor did not record corrupt dispatch preflight failure: {corrupt_summary}")
+            corrupt_ledger = json.loads((corrupt_dispatch_run / "task_ledger.json").read_text(encoding="utf-8"))
+            if corrupt_ledger.get("status") != "failed" or corrupt_ledger.get("result", {}).get("status") != "preflight_failed":
+                raise AssertionError(f"corrupt dispatch preflight failure was not recorded durably: {corrupt_ledger}")
             capture_dispatch = root / "capture.json"
             capture_server = ThreadingHTTPServer(("127.0.0.1", 0), CaptureRunHandler)
             capture_thread = threading.Thread(target=capture_server.serve_forever, daemon=True)

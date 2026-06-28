@@ -45,6 +45,8 @@
 - Local and HTTP executors write `task_ledger.json` with task status, step status, artifacts, and event history.
 - Local and HTTP executors require explicit allowed terminal statuses before
   marking a run completed.
+- Local and HTTP executors record malformed dispatch packets as structured
+  failed/preflight-failed runs instead of crashing.
 - Warmaster Gateway can prepare Iskandar run packages, expose run status, execute local dev pipelines, and execute HTTP worker-service pipelines.
 - Warmaster Gateway can preflight existing run packages before local or HTTP
   execution without starting workers.

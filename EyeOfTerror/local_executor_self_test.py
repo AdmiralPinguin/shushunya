@@ -88,6 +88,29 @@ def main() -> int:
         missing_ledger = json.loads((missing_input_run / "task_ledger.json").read_text(encoding="utf-8"))
         if missing_ledger.get("status") != "failed" or missing_ledger.get("steps", [{}])[0].get("status") != "failed":
             raise AssertionError(f"missing input failure was not recorded durably: {missing_ledger}")
+        corrupt_dispatch_run = root / "corrupt-dispatch-run"
+        corrupt_dispatch_dir = corrupt_dispatch_run / "dispatch"
+        write_json(
+            corrupt_dispatch_run / "contract.json",
+            {"task_id": "corrupt-dispatch-local", "goal": "test corrupt dispatch", "assigned_governor": "IskandarKhayon"},
+        )
+        write_json(
+            corrupt_dispatch_run / "status.json",
+            {
+                "task_id": "corrupt-dispatch-local",
+                "governor": "IskandarKhayon",
+                "steps": [{"step_id": "fact_extraction", "worker": "NoosphericExtractor"}],
+                "dispatch_dir": str(corrupt_dispatch_dir),
+            },
+        )
+        corrupt_dispatch_dir.mkdir(parents=True, exist_ok=True)
+        (corrupt_dispatch_dir / "fact_extraction.json").write_text("{", encoding="utf-8")
+        corrupt_summary = execute_run(repo_root, corrupt_dispatch_run, root / "corrupt-work", timeout_sec=30)
+        if corrupt_summary.get("ok") or "dispatch unavailable" not in corrupt_summary.get("steps", [{}])[0].get("payload", {}).get("error", ""):
+            raise AssertionError(f"local executor did not record corrupt dispatch failure: {corrupt_summary}")
+        corrupt_ledger = json.loads((corrupt_dispatch_run / "task_ledger.json").read_text(encoding="utf-8"))
+        if corrupt_ledger.get("status") != "failed" or corrupt_ledger.get("steps", [{}])[0].get("status") != "failed":
+            raise AssertionError(f"corrupt dispatch failure was not recorded durably: {corrupt_ledger}")
         run_dir = root / "run"
         work_dir = root / "work"
         plan = plan_lore_reconstruction("Собери все известное о событиях Скалатракса.", task_id="executor-test")

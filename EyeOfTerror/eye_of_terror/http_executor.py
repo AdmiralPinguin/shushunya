@@ -61,7 +61,11 @@ def get_json(url: str, timeout_sec: int) -> dict[str, Any]:
 def preflight_workers(run_dir: Path, host: str, timeout_sec: int, step_ids: list[str] | None = None) -> list[dict[str, Any]]:
     failures: list[dict[str, Any]] = []
     for dispatch_path in ordered_dispatch_paths(run_dir, step_ids=step_ids):
-        packet = load_json(dispatch_path)
+        try:
+            packet = load_json(dispatch_path)
+        except Exception as exc:  # noqa: BLE001 - preflight should report malformed dispatch packets.
+            failures.append({"dispatch": str(dispatch_path), "error": f"dispatch unavailable: {exc}"})
+            continue
         worker = str(packet.get("worker") or "")
         port = int(packet.get("port") or 0)
         try:
@@ -98,7 +102,11 @@ def terminal_payload_allows_completion(payload: dict[str, Any]) -> bool:
 
 
 def run_step(dispatch_path: Path, host: str, timeout_sec: int, revision_context: dict[str, Any] | None = None) -> HttpStepResult:
-    packet = load_json(dispatch_path)
+    try:
+        packet = load_json(dispatch_path)
+    except Exception as exc:  # noqa: BLE001 - executor should record malformed dispatch as a step failure.
+        payload = {"ok": False, "status": "failed", "error": f"dispatch unavailable: {exc}"}
+        return HttpStepResult(dispatch_path.stem, "", 0, False, payload, str(exc))
     step_id = str(packet.get("step_id") or dispatch_path.stem)
     worker = str(packet.get("worker") or "")
     port = int(packet.get("port") or 0)

@@ -137,7 +137,11 @@ def run_step(
     timeout_sec: int,
     revision_context: dict[str, Any] | None = None,
 ) -> StepResult:
-    packet = load_json(dispatch_path)
+    try:
+        packet = load_json(dispatch_path)
+    except Exception as exc:  # noqa: BLE001 - executor should record malformed dispatch as a step failure.
+        payload = {"ok": False, "status": "failed", "error": f"dispatch unavailable: {exc}"}
+        return StepResult(dispatch_path.stem, "", 2, False, payload, "", payload["error"])
     worker = str(packet.get("worker") or "")
     step_id = str(packet.get("step_id") or dispatch_path.stem)
     request = packet.get("request") if isinstance(packet.get("request"), dict) else packet
