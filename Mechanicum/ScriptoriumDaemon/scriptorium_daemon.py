@@ -199,9 +199,12 @@ def build_coverage_report(
             if isinstance(item, dict)
         )
         evidence_text = f" | evidence={evidence}" if evidence else " | evidence=missing"
+        method = str(event.get("extraction_method") or note.get("extraction_method") or "")
+        method_text = f" | method={method}" if method else ""
+        lead_text = " | evidence_lead=true" if event.get("evidence_lead") or method == "generic_snapshot_lead" else ""
         lines.append(
             f"- {event.get('event_id')} | phase={event.get('phase')} | "
-            f"confidence={event.get('confidence')} | refs={refs}{evidence_text}"
+            f"confidence={event.get('confidence')} | refs={refs}{method_text}{lead_text}{evidence_text}"
         )
     return "\n".join(lines).rstrip() + "\n"
 

@@ -86,7 +86,16 @@ def main() -> int:
                         "summary": "moon parley",
                         "confidence": "medium",
                         "source_refs": ["Kharn: Eater of Worlds"],
-                    }
+                    },
+                    {
+                        "event_id": "evidence_lead_1",
+                        "phase": "unknown",
+                        "summary": "generic lead",
+                        "confidence": "low",
+                        "source_refs": ["Recovered Chronicle"],
+                        "extraction_method": "generic_snapshot_lead",
+                        "evidence_lead": True,
+                    },
                 ],
                 "gaps": ["needs chapter evidence"],
                 "contradictions": [{"topic": "direct events vs aftermath", "note": "keep aftermath separate"}],
@@ -107,6 +116,8 @@ def main() -> int:
             raise AssertionError("coverage report is incomplete")
         if "evidence=Kharn: Eater of Worlds: parley" not in coverage:
             raise AssertionError("coverage report should include event evidence")
+        if "evidence_lead_1" not in coverage or "method=generic_snapshot_lead" not in coverage or "evidence_lead=true" not in coverage:
+            raise AssertionError("coverage report should preserve generic evidence lead metadata")
         if "Revision Context" not in coverage or "Source step: critic_review" not in coverage:
             raise AssertionError("coverage report should expose revision context")
     print("[ok] ScriptoriumDaemon draft")

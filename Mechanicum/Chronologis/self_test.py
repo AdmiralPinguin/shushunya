@@ -20,6 +20,14 @@ def main() -> int:
             {"event_id": "moon_parley", "phase": "parley", "summary": "moon parley", "confidence": "medium"},
             {"event_id": "ec_claim_system", "phase": "prelude", "summary": "claim", "confidence": "high"},
             {"event_id": "legion_fractures", "phase": "aftermath_boundary", "summary": "fractures", "confidence": "high"},
+            {
+                "event_id": "evidence_lead_1",
+                "phase": "unknown",
+                "summary": "generic lead",
+                "confidence": "low",
+                "source_class": "secondary",
+                "extraction_method": "generic_snapshot_lead",
+            },
         ],
         "gaps": ["gap"],
     }
@@ -32,10 +40,15 @@ def main() -> int:
             raise AssertionError(f"Chronologis failed: {result}")
         data = json.loads((Path(temp_dir) / "skalathrax" / "timeline.json").read_text(encoding="utf-8"))
         ordered = [item["event_id"] for item in data["timeline"]]
-        if ordered != ["ec_claim_system", "moon_parley", "kharn_burns_shelters", "legion_fractures"]:
+        if ordered != ["ec_claim_system", "moon_parley", "kharn_burns_shelters", "legion_fractures", "evidence_lead_1"]:
             raise AssertionError(f"timeline order is wrong: {ordered}")
         if not data["contradictions"]:
             raise AssertionError("timeline should flag aftermath boundary")
+        lead = data["timeline"][-1]
+        if not lead.get("evidence_lead") or lead.get("extraction_method") != "generic_snapshot_lead":
+            raise AssertionError(f"timeline should preserve generic evidence lead metadata: {lead}")
+        if data.get("summary", {}).get("generic_evidence_leads") != 1 or data.get("summary", {}).get("low_confidence_events") != 1:
+            raise AssertionError(f"timeline should summarize evidence lead uncertainty: {data.get('summary')}")
     print("[ok] Chronologis timeline")
     return 0
 

@@ -3,6 +3,6 @@
   "port": 7004,
   "role": "timeline builder",
   "status": "prototype",
-  "capabilities": ["timeline", "sequence_repair", "gap_detection"],
+  "capabilities": ["timeline", "sequence_repair", "gap_detection", "uncertainty_summary"],
   "api_contract": "EyeOfTerror/contracts/worker_api.md"
 }

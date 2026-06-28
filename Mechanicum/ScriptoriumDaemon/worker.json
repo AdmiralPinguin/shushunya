@@ -3,6 +3,6 @@
   "port": 7005,
   "role": "writer",
   "status": "prototype",
-  "capabilities": ["longform_writing", "translation_ru", "style_revision"],
+  "capabilities": ["longform_writing", "translation_ru", "style_revision", "evidence_lead_reporting"],
   "api_contract": "EyeOfTerror/contracts/worker_api.md"
 }

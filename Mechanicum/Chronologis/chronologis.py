@@ -50,6 +50,9 @@ def build_timeline(notes: dict[str, Any]) -> dict[str, Any]:
                 "summary": event.get("summary"),
                 "confidence": event.get("confidence"),
                 "source_refs": event.get("source_refs", []),
+                "source_class": event.get("source_class", ""),
+                "extraction_method": event.get("extraction_method", ""),
+                "evidence_lead": str(event.get("extraction_method") or "") == "generic_snapshot_lead",
             }
         )
     contradictions = []
@@ -63,6 +66,11 @@ def build_timeline(notes: dict[str, Any]) -> dict[str, Any]:
     return {
         "topic": notes.get("topic", ""),
         "timeline": timeline,
+        "summary": {
+            "events": len(timeline),
+            "low_confidence_events": sum(1 for item in timeline if item.get("confidence") == "low"),
+            "generic_evidence_leads": sum(1 for item in timeline if item.get("evidence_lead")),
+        },
         "phase_order": PHASE_ORDER,
         "contradictions": contradictions,
         "gaps": notes.get("gaps", []),
@@ -114,4 +122,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
