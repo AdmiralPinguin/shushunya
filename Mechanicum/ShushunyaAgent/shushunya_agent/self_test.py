@@ -700,6 +700,24 @@ def main() -> int:
     cli_task = "Исправь CLI и проверь python3 -m package.cli data.csv."
     if agent_runner.cli_modules_from_task(cli_task) != ["package.cli"]:
         raise AssertionError("CLI module extractor missed requested python -m entrypoint")
+    if agent_runner.cli_input_paths_from_task(cli_task, "/work/project") != ["/work/project/data.csv"]:
+        raise AssertionError("CLI input extractor missed requested relative input path")
+    scheduler_cli_task = "Проверь python3 -m scheduler.cli jobs.csv и валидный JSON."
+    if agent_runner.action_is_cli_verification(
+        "python",
+        {
+            "code": (
+                "import subprocess,json\n"
+                "open('test_input.json','w').write('[]')\n"
+                "r=subprocess.run(['python3','-m','scheduler.cli','test_input.json'], capture_output=True, text=True)\n"
+                "json.loads(r.stdout)\nassert r.returncode == 0"
+            )
+        },
+        scheduler_cli_task,
+        {"scheduler.cli"},
+        set(agent_runner.cli_input_paths_from_task(scheduler_cli_task, "/work/project")),
+    ):
+        raise AssertionError("task-mentioned CLI input path must reject generated dummy input verification")
     if agent_runner.cli_modules_from_task("bad resume tried python3 -m and input.json"):
         raise AssertionError("CLI module extractor accepted resume stopword as module")
     discovered_cli = agent_runner.cli_module_from_path("/work/project/scheduler/cli.py", "/work/project")

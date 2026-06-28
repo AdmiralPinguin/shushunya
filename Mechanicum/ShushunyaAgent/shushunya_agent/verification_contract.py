@@ -125,6 +125,22 @@ def action_uses_cli_input_path(action: dict[str, Any], input_paths: Iterable[str
     return False
 
 
+def cli_input_paths_from_task(task: str, workspace: str = "") -> list[str]:
+    paths: list[str] = []
+    extension_pattern = "|".join(re.escape(ext.lstrip(".")) for ext in sorted(CLI_INPUT_EXTENSIONS))
+    pattern = rf"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.({extension_pattern}))(?![\w/-])"
+    for match in re.finditer(pattern, task or "", flags=re.IGNORECASE):
+        raw_path = match.group(1)
+        normalized = posixpath.normpath(raw_path)
+        lowered_parts = {part.lower() for part in normalized.split("/")}
+        if "tests" in lowered_parts or "__pycache__" in lowered_parts:
+            continue
+        if workspace and not normalized.startswith("/"):
+            normalized = posixpath.normpath(posixpath.join(workspace, normalized))
+        paths.append(normalized)
+    return list(dict.fromkeys(paths))
+
+
 def cli_semantic_markers_from_task(task: str) -> list[str]:
     if "resume context" in (task or "").lower():
         return []
