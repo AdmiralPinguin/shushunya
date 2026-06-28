@@ -263,8 +263,10 @@ def main() -> int:
                 not capabilities.get("actions", {}).get("can_preflight_task")
                 or not capabilities.get("actions", {}).get("can_preflight_runs")
                 or not capabilities.get("actions", {}).get("can_execute_step_subsets")
+                or not capabilities.get("actions", {}).get("can_list_recoverable_runs")
                 or "POST /task_preflight" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
                 or "POST /runs/{task_id}/preflight_http" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
+                or "GET /recovery" not in capabilities.get("actions", {}).get("maintenance", [])
             ):
                 raise AssertionError(f"gateway capabilities did not expose task action hints: {capabilities}")
             brigade_plan = request_json(base + "/brigade_plan")
@@ -899,6 +901,12 @@ def main() -> int:
             recovery_runs = request_json(base + "/runs?limit=5")
             if recovery_runs.get("recovery", {}).get("recoverable", 0) < 1:
                 raise AssertionError(f"run listing did not expose recovery summary: {recovery_runs}")
+            recovery_endpoint = request_json(base + "/recovery")
+            if (
+                not recovery_endpoint.get("ok")
+                or "stale-test" not in recovery_endpoint.get("recovery", {}).get("task_ids", [])
+            ):
+                raise AssertionError(f"recovery endpoint did not expose stale run: {recovery_endpoint}")
         finally:
             server.shutdown()
             thread.join(timeout=5)

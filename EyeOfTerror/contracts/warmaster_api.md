@@ -11,6 +11,7 @@ GET  /health
 GET  /capabilities
 GET  /state
 GET  /state?health=1
+GET  /recovery
 GET  /doctor
 GET  /brigade_plan
 GET  /brigade_plan?host=127.0.0.1
@@ -76,6 +77,8 @@ service-separated brigade startup plan. It also includes a compact `recovery`
 section listing interrupted runs whose action hints allow resume. `state.actions` and
 `capabilities.actions` expose client-facing gateway action hints, including the
 preferred task flow: preflight, create, then start.
+Clients can call `GET /recovery` when they only need the recoverable interrupted
+run list without a full bootstrap snapshot.
 Use `GET /state?health=1` for an admin/bootstrap snapshot that also includes
 best-effort `brigade_health`; plain `/state` stays lightweight for polling.
 

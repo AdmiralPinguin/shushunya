@@ -101,6 +101,8 @@
   worker task mappings for client polling/debugging.
 - Warmaster state and run-list responses expose recoverable interrupted runs
   with resume `next_action` hints.
+- Warmaster exposes `GET /recovery` for lightweight interrupted-run recovery
+  queues.
 - Warmaster Gateway supports cursor-based ledger event polling with
   `/runs/{task_id}/events?after=N`.
 - Warmaster Gateway exposes compact per-run snapshots for mobile/client

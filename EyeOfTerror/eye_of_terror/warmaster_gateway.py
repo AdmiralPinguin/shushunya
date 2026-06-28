@@ -1322,6 +1322,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "run_step_artifact_read",
             "run_execution_preflight",
             "restricted_step_execution",
+            "recoverable_run_listing",
             "doctor",
         ],
         "endpoints": [
@@ -1329,6 +1330,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /capabilities",
             "GET /state",
             "GET /state?health=1",
+            "GET /recovery",
             "GET /doctor",
             "GET /brigade_plan",
             "GET /brigade_plan?host=127.0.0.1",
@@ -1386,10 +1388,12 @@ def gateway_actions() -> dict[str, Any]:
         "can_create_task": True,
         "can_start_runs": True,
         "can_resume_interrupted_runs": True,
+        "can_list_recoverable_runs": True,
         "can_execute_revisions": True,
         "can_execute_step_subsets": True,
         "can_cancel_runs": True,
         "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
+        "maintenance": ["GET /recovery", "POST /recover_stale"],
         "diagnostics": ["GET /state?health=1", "GET /brigade_health", "GET /doctor"],
     }
 
@@ -1506,6 +1510,10 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
             if parsed.path == "/doctor":
                 payload = run_doctor()
                 response(self, 200 if payload.get("ok") else 500, payload)
+                return
+            if parsed.path == "/recovery":
+                all_runs = list_runs(run_root)
+                response(self, 200, {"ok": True, "recovery": recovery_summary(all_runs)})
                 return
             if parsed.path == "/brigade_plan":
                 query = parse_qs(parsed.query)
