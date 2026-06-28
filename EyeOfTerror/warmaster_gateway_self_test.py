@@ -717,6 +717,8 @@ def main() -> int:
             if (
                 orchestrated_state.get("phase") != "ready_to_start"
                 or not orchestrated_state.get("decision", {}).get("can_start")
+                or orchestrated_state.get("display", {}).get("headline") != "Run is ready to start"
+                or orchestrated_state.get("display", {}).get("progress", {}).get("planned_steps") != 7
                 or orchestrated_state.get("next_action", {}).get("kind") != "start"
                 or orchestrated_state.get("snapshot", {}).get("summary", {}).get("task_id") != "warmaster-orchestrate-test"
             ):
@@ -774,6 +776,7 @@ def main() -> int:
                 or orchestrated_retry.get("phase") != "existing_run"
                 or not orchestrated_retry.get("reused_existing")
                 or orchestrated_retry.get("orchestration", {}).get("task_id") != "warmaster-orchestrate-run-test"
+                or "headline" not in orchestrated_retry.get("orchestration", {}).get("display", {})
                 or orchestrated_retry.get("prepare", {}).get("task_preflight", {}).get("error_code") != "task_exists"
             ):
                 raise AssertionError(f"one-shot orchestration retry did not reuse existing run: {orchestrated_retry}")
@@ -1270,6 +1273,8 @@ def main() -> int:
             if (
                 completed_orchestration.get("phase") != "completed"
                 or not completed_orchestration.get("decision", {}).get("can_inspect_final")
+                or completed_orchestration.get("display", {}).get("headline") != "Run completed"
+                or completed_orchestration.get("display", {}).get("final_deliverable") != "/work/skalathrax/reconstruction_ru.md"
                 or completed_orchestration.get("final", {}).get("summary", {}).get("status") != "ready"
                 or completed_orchestration.get("next_action", {}).get("kind") != "inspect_final"
                 or completed_orchestration.get("snapshot", {}).get("summary", {}).get("status") != "completed"

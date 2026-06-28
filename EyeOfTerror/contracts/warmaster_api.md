@@ -182,7 +182,10 @@ clients. It wraps the run snapshot with an orchestration `phase` such as
 includes the bounded final package when the run has completed. Its `decision`
 object exposes booleans such as `can_poll`, `can_start`, `can_resume`,
 `can_execute_revision`, `can_inspect_final`, and `can_inspect_diagnostics` so
-clients do not need to reimplement phase parsing.
+clients do not need to reimplement phase parsing. Its `display` object exposes
+compact chat/UI fields such as `headline`, `detail`, `severity`, progress
+counts, next step/worker, and final deliverable path so clients do not need to
+parse the full run summary for common status rendering.
 
 ```json
 {

@@ -84,6 +84,9 @@
 - Orchestration state exposes a stable `decision` object so clients can render
   poll/start/resume/revision/final/diagnostic controls without parsing phase
   strings.
+- Orchestration state exposes a compact `display` object with headline, detail,
+  severity, progress counts, next step/worker, and final deliverable for chat
+  and mobile status rendering.
 - Task preflight contract summaries expose planned worker steps, dependency
   edges, and expected artifacts.
 - Task preflight exposes compact governor oversight summaries and validation so

@@ -1641,6 +1641,77 @@ def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: in
     return payload
 
 
+def orchestration_display(
+    phase: str,
+    status: str,
+    snapshot: dict[str, Any],
+    next_action: dict[str, Any],
+    final_payload: dict[str, Any],
+) -> dict[str, Any]:
+    summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
+    progress = summary.get("progress") if isinstance(summary.get("progress"), dict) else {}
+    planned_steps = int(progress.get("planned_steps") or 0)
+    completed_steps = int(progress.get("completed_steps") or 0)
+    failed_steps = int(progress.get("failed_steps") or 0)
+    pending_steps = int(progress.get("pending_steps") or 0)
+    next_step_id = str(progress.get("next_ready_step_id") or progress.get("next_step_id") or "")
+    next_worker = ""
+    step_states = progress.get("step_states") if isinstance(progress.get("step_states"), list) else []
+    for step in step_states:
+        if isinstance(step, dict) and step.get("step_id") == next_step_id:
+            next_worker = str(step.get("worker") or "")
+            break
+    final_summary = final_payload.get("summary") if isinstance(final_payload.get("summary"), dict) else {}
+    final_deliverable = str(final_payload.get("deliverable") or "")
+    revision_summary = summary.get("revision_plan_summary") if isinstance(summary.get("revision_plan_summary"), dict) else {}
+    headlines = {
+        "running": "Run is active",
+        "completed": "Run completed",
+        "ready_to_start": "Run is ready to start",
+        "resume_required": "Run can be resumed",
+        "revision_required": "Revision is required",
+        "needs_attention": "Run needs attention",
+        "ready_to_preflight": "Run needs preflight",
+        "inspect": "Inspect run state",
+    }
+    headline = headlines.get(phase, "Inspect run state")
+    if phase == "running" and planned_steps:
+        detail = f"{completed_steps}/{planned_steps} steps complete"
+    elif phase == "completed" and final_summary:
+        detail = f"Final package status: {final_summary.get('status') or 'unknown'}"
+    elif phase == "revision_required":
+        detail = f"{int(revision_summary.get('step_count') or 0)} revision steps ready"
+    elif phase == "resume_required":
+        detail = f"{pending_steps} pending steps can resume"
+    elif phase == "ready_to_start":
+        detail = "Preflight passed; execution can start"
+    elif phase == "needs_attention":
+        detail = str(next_action.get("reason") or "Diagnostics are required")
+    else:
+        detail = str(next_action.get("reason") or status or phase)
+    severity = "info"
+    if phase in {"needs_attention", "revision_required"} or failed_steps:
+        severity = "warning"
+    if status in {"failed", "corrupt"}:
+        severity = "error"
+    return {
+        "headline": headline,
+        "detail": detail,
+        "severity": severity,
+        "progress": {
+            "planned_steps": planned_steps,
+            "completed_steps": completed_steps,
+            "failed_steps": failed_steps,
+            "pending_steps": pending_steps,
+        },
+        "next_step": {
+            "step_id": next_step_id,
+            "worker": next_worker,
+        },
+        "final_deliverable": final_deliverable,
+    }
+
+
 def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_after: int | None = 0, max_bytes: int = 2000) -> dict[str, Any]:
     snapshot = run_snapshot(run_dir, event_limit=event_limit, events_after=events_after)
     summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
@@ -1682,6 +1753,7 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
         "recommended_kind": str(next_action.get("kind") or ""),
         "recommended_endpoint": str(next_action.get("endpoint") or ""),
     }
+    display = orchestration_display(phase, status, snapshot, next_action, final_payload)
     return {
         "ok": True,
         "task_id": run_dir.name,
@@ -1689,6 +1761,7 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
         "status": status,
         "active": bool(snapshot.get("active")),
         "decision": decision,
+        "display": display,
         "snapshot": snapshot,
         "final": final_payload,
         "next_action": next_action,
