@@ -730,11 +730,31 @@ def main() -> int:
                 not run_preflight.get("ok")
                 or run_preflight.get("step_ids", [])[0] != "source_discovery"
                 or run_preflight.get("oversight_summary", {}).get("final_review", {}).get("final_step") != "finalize"
+                or run_preflight.get("run_status") != "created"
                 or run_preflight.get("actions", {}).get("can_start_run") is not True
                 or run_preflight.get("actions", {}).get("next_action", {}).get("kind") != "start_run"
                 or run_preflight.get("actions", {}).get("next_action", {}).get("endpoint") != "POST /runs/{task_id}/start_local"
             ):
                 raise AssertionError(f"bad local run preflight: {run_preflight}")
+            completed_preflight_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-completed-preflight-test"},
+            )
+            completed_ledger_path = Path(completed_preflight_task["run_dir"], "task_ledger.json")
+            completed_ledger = json.loads(completed_ledger_path.read_text(encoding="utf-8"))
+            completed_ledger["status"] = "completed"
+            completed_ledger["result"] = {"status": "ready", "workspace_root": str(Path(completed_preflight_task["run_dir"], "workspace"))}
+            write_json(completed_ledger_path, completed_ledger)
+            completed_preflight = request_json(base + "/runs/warmaster-completed-preflight-test/preflight_local", {"timeout_sec": 30})
+            completed_next_action = completed_preflight.get("actions", {}).get("next_action", {})
+            if (
+                not completed_preflight.get("ok")
+                or completed_preflight.get("actions", {}).get("can_start_run")
+                or completed_next_action.get("kind") != "rerun_requires_force"
+                or completed_next_action.get("endpoint") != "POST /runs/{task_id}/start_local"
+                or completed_next_action.get("body", {}).get("force") is not True
+            ):
+                raise AssertionError(f"completed run preflight should preserve run-status action gates: {completed_preflight}")
             missing_oversight_task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-missing-oversight-test"},

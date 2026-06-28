@@ -1028,20 +1028,33 @@ def run_actions(
     return actions
 
 
-def run_preflight_actions(preflight: dict[str, Any]) -> dict[str, Any]:
+def action_for_mode(action: dict[str, Any], mode: str) -> dict[str, Any]:
+    result = dict(action)
+    endpoint = str(result.get("endpoint") or "")
+    if mode == "local":
+        endpoint = endpoint.replace("_http", "_local")
+    elif mode == "http":
+        endpoint = endpoint.replace("_local", "_http")
+    result["endpoint"] = endpoint
+    return result
+
+
+def run_preflight_actions(preflight: dict[str, Any], run_action_hints: dict[str, Any] | None = None) -> dict[str, Any]:
     mode = str(preflight.get("mode") or "http")
     ok = bool(preflight.get("ok"))
     step_ids = preflight.get("step_ids") if isinstance(preflight.get("step_ids"), list) else []
+    run_action_hints = run_action_hints or {}
+    summary_next_action = run_action_hints.get("next_action") if isinstance(run_action_hints.get("next_action"), dict) else {}
     body: dict[str, Any] = {}
     if step_ids:
         body["step_ids"] = step_ids
     actions = {
-        "can_start_run": ok,
+        "can_start_run": ok and bool(run_action_hints.get("can_start", True)),
         "can_inspect_package": True,
         "can_inspect_oversight": True,
         "can_check_brigade_readiness": True,
     }
-    if ok:
+    if ok and actions["can_start_run"]:
         next_action = {
             "kind": "start_run",
             "method": "POST",
@@ -1049,6 +1062,11 @@ def run_preflight_actions(preflight: dict[str, Any]) -> dict[str, Any]:
             "body": body,
             "reason": "run preflight passed",
         }
+    elif ok and summary_next_action:
+        next_action = action_for_mode(summary_next_action, mode)
+        if body and next_action.get("kind") in {"start", "start_run", "resume", "execute_revision"}:
+            next_body = next_action.get("body") if isinstance(next_action.get("body"), dict) else {}
+            next_action["body"] = {**next_body, **body}
     elif preflight.get("oversight_errors"):
         next_action = {
             "kind": "inspect_oversight",
@@ -1646,7 +1664,13 @@ def run_execution_preflight(
         "missing_local_commands": missing_local_commands,
         "worker_preflight_failures": worker_failures,
     }
-    preflight["actions"] = run_preflight_actions(preflight)
+    summary = run_summary(run_dir)
+    preflight["run_status"] = str(summary.get("status") or "")
+    preflight["run_next_action"] = summary.get("actions", {}).get("next_action", {}) if isinstance(summary.get("actions"), dict) else {}
+    preflight["actions"] = run_preflight_actions(
+        preflight,
+        summary.get("actions") if isinstance(summary.get("actions"), dict) else {},
+    )
     return preflight
 
 

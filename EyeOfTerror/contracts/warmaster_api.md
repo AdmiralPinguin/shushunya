@@ -320,7 +320,10 @@ the same run; restricted preflight can accept `step_ids` and then requires
 unselected dependency artifacts to already exist when a `workspace_root` is
 provided. Run preflight responses include `actions.next_action` recommending
 start execution after success or package/oversight/brigade diagnostics after
-failure. Each run preflight records a compact `run_preflight_recorded` ledger
+failure. Successful run preflight still respects the current run-summary action
+gates, so completed, interrupted, active, or revision-required runs return the
+same force, resume, poll, or revision recommendation instead of an unsafe plain
+start. Each run preflight records a compact `run_preflight_recorded` ledger
 event with mode, selected steps, result, and failure counts.
 
 Local and HTTP executors must convert malformed dispatch packets into

@@ -62,6 +62,8 @@
 - Run preflight records compact audit events in the task ledger.
 - Run preflight responses expose action hints for starting execution after
   success or inspecting package/oversight/brigade diagnostics after failure.
+- Run preflight action hints respect run-summary lifecycle gates, so completed
+  runs recommend force rerun instead of unsafe plain start.
 - Warmaster Gateway exposes `POST /task_preflight` for routing, governor,
   contract, and worker checks without creating run history.
 - Task preflight contract summaries expose planned worker steps, dependency
