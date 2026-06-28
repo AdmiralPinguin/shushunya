@@ -153,7 +153,8 @@ Run summaries include an `actions` object with client-facing booleans:
 `force_required_for_rerun`. Clients should use these hints for button state
 instead of duplicating Warmaster status rules. When `revision_plan.required` is
 true, ordinary `can_execute` and `can_start` are false; clients should use the
-revision actions instead.
+revision actions instead. When a run is `interrupted`, ordinary `can_execute`
+and `can_start` are false; clients should use resume actions instead.
 
 Run summaries also expose `last_preflight` when the ledger has a recorded run
 preflight. It contains the event timestamp, mode, selected steps, result, and

@@ -109,6 +109,8 @@
   revision controls.
 - Warmaster action hints disable ordinary start/execute when a required
   revision plan exists.
+- Warmaster action hints disable ordinary start/execute for interrupted runs so
+  clients prefer resume controls.
 - Warmaster action hints expose run preflight controls for local and HTTP
   execution.
 - Warmaster progress summaries expose ordered planned/completed/failed/pending

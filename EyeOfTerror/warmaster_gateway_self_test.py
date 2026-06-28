@@ -590,7 +590,12 @@ def main() -> int:
             resume_ledger = TaskLedger.load(resume_ledger_path)
             resume_ledger.set_status("interrupted")
             resume_summary = request_json(base + "/runs/warmaster-resume-test/summary")
-            if not resume_summary.get("summary", {}).get("actions", {}).get("can_resume"):
+            resume_actions = resume_summary.get("summary", {}).get("actions", {})
+            if (
+                not resume_actions.get("can_resume")
+                or resume_actions.get("can_start")
+                or resume_actions.get("can_execute")
+            ):
                 raise AssertionError(f"interrupted run did not expose resume action: {resume_summary}")
             resumed = request_json(base + "/runs/warmaster-resume-test/resume_local", {"timeout_sec": 30}, timeout=60)
             if not resumed.get("ok"):

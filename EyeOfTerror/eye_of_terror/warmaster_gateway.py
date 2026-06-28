@@ -521,7 +521,8 @@ def run_actions(status: str, revision_plan: dict[str, Any]) -> dict[str, Any]:
     terminal_locked = status in {"completed", "running", "cancelling", "queued", "corrupt"}
     preflightable = status != "corrupt"
     revision_required = bool(revision_plan.get("required"))
-    runnable = not terminal_locked and not revision_required
+    resume_required = status == "interrupted"
+    runnable = not terminal_locked and not revision_required and not resume_required
     revision_runnable = revision_required and status not in {"running", "cancelling", "queued", "corrupt"}
     return {
         "can_preflight_local": preflightable,
