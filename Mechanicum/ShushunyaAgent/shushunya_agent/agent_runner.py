@@ -1471,7 +1471,7 @@ def data_source_paths_from_task(task: str, workspace: str, required_paths: list[
     required_set = {posixpath.normpath(path) for path in required_paths}
     required_names = {posixpath.basename(path) for path in required_set}
     paths: list[str] = []
-    for match in re.finditer(r"(?<![\w/-])([\w./-]+\.(?:csv|tsv|jsonl|json|txt))(?![\w/-])", task, flags=re.I):
+    for match in re.finditer(r"(?<![\\\w/-])([\w./-]+\.(?:csv|tsv|jsonl|json|txt))(?![\w/-])", task, flags=re.I):
         raw = match.group(1).strip().strip(".,;:()[]{}\"'")
         if not raw:
             continue
@@ -1913,11 +1913,13 @@ def python_result_printed_nested_cli_failure(result: dict[str, Any]) -> bool:
             "failure: output is not valid json",
             "cli output is not valid json",
             "info: stdout is empty",
+            "stdout_empty",
             "return_code: 1",
             "return_code=1",
             "returncode: 1",
             "return code: 1",
             "can't open file",
+            "filenotfounderror",
             "jsondecodeerror",
         )
     )
@@ -4513,6 +4515,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     inspected_data_source_paths: set[str] = set(resume_context_inspected_data_sources(original_task, data_source_path_list))
     required_artifactless_inspection_actions = 0
     last_pytest_passing_tests, last_pytest_failing_tests = latest_pytest_sets_from_text(original_task)
+    if swe_resume_requires_cli_verification and not (last_pytest_passing_tests and not last_pytest_failing_tests):
+        swe_resume_requires_cli_verification = False
     code_mutated_since_last_pytest = False
     pytest_unavailable_seen = False
     pending_failing_tests = set(last_pytest_failing_tests)

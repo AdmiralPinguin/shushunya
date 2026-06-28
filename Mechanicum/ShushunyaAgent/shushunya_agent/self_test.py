@@ -742,6 +742,10 @@ def main() -> int:
         raise AssertionError("CLI module detector missed ls -R output")
     if agent_runner.cli_input_paths_from_listing_text(recursive_listing, "/work/project") != ["/work/project/jobs.csv"]:
         raise AssertionError("CLI input detector missed ls -R output")
+    if agent_runner.cli_input_paths_from_task('{"stdout": ".:\\\\njobs.csv\\\\n"}', "/work/project"):
+        raise AssertionError("CLI input detector should ignore JSON-escaped newline fragments")
+    if agent_runner.data_source_paths_from_task('{"stdout": ".:\\\\njobs.csv\\\\n"}', "/work/project", []):
+        raise AssertionError("data source detector should ignore JSON-escaped newline fragments")
     with tempfile.TemporaryDirectory() as tmp:
         package_dir = Path(tmp) / "scheduler"
         package_dir.mkdir()
@@ -814,6 +818,14 @@ def main() -> int:
         {"/work/project/jobs.csv"},
     ):
         raise AssertionError("known workspace input CLI verification was not recognized")
+    if not agent_runner.python_result_printed_nested_cli_failure(
+        {
+            "ok": True,
+            "stdout": "STDOUT: \nSTDERR: FileNotFoundError: [Errno 2] No such file or directory: 'jobs.csv'\nSTDOUT_EMPTY: True\n",
+            "stderr": "",
+        }
+    ):
+        raise AssertionError("nested CLI failure detector missed empty stdout/FileNotFoundError wrapper")
     semantic_task = "CLI должен вернуть scheduled_count, owners и rejected reason в JSON."
     if agent_runner.action_is_cli_verification(
         "python",
@@ -4861,6 +4873,33 @@ def main() -> int:
     if not any(result.get("error") == "swe cli verification required by supervisor" for result in archive_gate_results):
         raise AssertionError(f"SWE CLI gate did not reject archive proposal after test pass: {swe_resume_cli_archive_payload}")
     print("[ok] SWE CLI pending blocks archive memory")
+
+    swe_resume_no_tests_stdout = io.StringIO()
+    swe_resume_no_tests_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-resume-cli-no-tests-allows-python"),
+        json_output=True,
+        max_steps=1,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    resume_no_tests_task = (
+        "Продолжи выполнение той же задачи по task journal.\n\n"
+        "Resume context from previous agent task journal:\n"
+        "[{\"type\":\"start\",\"task\":\"Исправь Python-проект. CLI должен печатать валидный JSON.\\n\\n"
+        "Рабочий каталог для этой задачи: /work/project\"},"
+        "{\"type\":\"tool_result\",\"action\":\"list_files\",\"result\":{\"ok\":true,\"items\":[]}}]"
+    )
+    with mock.patch.object(agent_runner, "chat", return_value='{"action":"python","cwd":"/work/project","code":"print(1)","timeout":60}'), \
+            mock.patch.object(agent_runner, "python_tool", return_value={"ok": True, "stdout": "1\n", "stderr": "", "returncode": 0}), \
+            contextlib.redirect_stdout(swe_resume_no_tests_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(resume_no_tests_task, swe_resume_no_tests_config)
+    swe_resume_no_tests_payload = json.loads(swe_resume_no_tests_stdout.getvalue())
+    no_tests_results = [step.get("result") or {} for step in swe_resume_no_tests_payload.get("steps", [])]
+    if any(result.get("error") == "swe cli verification required by supervisor" for result in no_tests_results):
+        raise AssertionError(f"SWE resume without successful tests should not force CLI gate yet: {swe_resume_no_tests_payload}")
+    print("[ok] SWE resume without tests does not force CLI gate")
 
     swe_resume_failing_cli_stdout = io.StringIO()
     swe_resume_failing_cli_config = AgentConfig(

@@ -179,7 +179,7 @@ def action_uses_cli_input_path(action: dict[str, Any], input_paths: Iterable[str
 def cli_input_paths_from_task(task: str, workspace: str = "") -> list[str]:
     paths: list[str] = []
     extension_pattern = "|".join(re.escape(ext.lstrip(".")) for ext in sorted(CLI_INPUT_EXTENSIONS))
-    pattern = rf"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.({extension_pattern}))(?![\w/-])"
+    pattern = rf"(?<![\\\w./-])((?:[\w.-]+/)*[\w.-]+\.({extension_pattern}))(?![\w/-])"
     for match in re.finditer(pattern, task or "", flags=re.IGNORECASE):
         raw_path = match.group(1)
         normalized = posixpath.normpath(raw_path)
