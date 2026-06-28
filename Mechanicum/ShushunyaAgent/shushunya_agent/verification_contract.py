@@ -167,6 +167,22 @@ def action_checks_cli_semantics(action: dict[str, Any], markers: Iterable[str]) 
     return matched >= required
 
 
+def task_requires_cli_output_semantics(task: str) -> bool:
+    lowered = (task or "").lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "cli должен вернуть",
+            "cli должна вернуть",
+            "cli должен содерж",
+            "cli output",
+            "cli stdout",
+            "command output",
+            "stdout должен",
+        )
+    )
+
+
 def action_is_cli_verification(
     action_type: str,
     action: dict[str, Any],
@@ -182,8 +198,10 @@ def action_is_cli_verification(
     required_inputs = list(dict.fromkeys(expected_input_paths or []))
     if required_inputs and not action_uses_cli_input_path(action, required_inputs):
         return False
+    has_explicit_cli_contract = bool(required_modules or required_inputs)
     semantic_markers = cli_semantic_markers_from_task(task)
-    if semantic_markers and not action_checks_cli_semantics(action, semantic_markers):
+    should_check_semantics = (not has_explicit_cli_contract) or task_requires_cli_output_semantics(task)
+    if should_check_semantics and semantic_markers and not action_checks_cli_semantics(action, semantic_markers):
         return False
     cmd = str(action.get("cmd") or "").lower()
     code = str(action.get("code") or "").lower()

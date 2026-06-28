@@ -718,6 +718,14 @@ def main() -> int:
         set(agent_runner.cli_input_paths_from_task(scheduler_cli_task, "/work/project")),
     ):
         raise AssertionError("task-mentioned CLI input path must reject generated dummy input verification")
+    if not agent_runner.action_is_cli_verification(
+        "shell",
+        {"cmd": "cd /work/project && python3 -m scheduler.cli jobs.csv | python3 -c \"import sys,json; json.load(sys.stdin)\""},
+        scheduler_cli_task,
+        {"scheduler.cli"},
+        set(agent_runner.cli_input_paths_from_task(scheduler_cli_task, "/work/project")),
+    ):
+        raise AssertionError("explicit CLI contract should not require internal task semantic markers")
     if agent_runner.cli_modules_from_task("bad resume tried python3 -m and input.json"):
         raise AssertionError("CLI module extractor accepted resume stopword as module")
     discovered_cli = agent_runner.cli_module_from_path("/work/project/scheduler/cli.py", "/work/project")
@@ -4624,6 +4632,43 @@ def main() -> int:
     if mocked_resume_cli_python.called:
         raise AssertionError(f"SWE resume non-CLI python action reached python_tool: {swe_resume_cli_payload}")
     print("[ok] SWE resume final requires CLI verification")
+
+    swe_resume_unknown_cli_stdout = io.StringIO()
+    swe_resume_unknown_cli_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-resume-unknown-cli-allows-discovery"),
+        json_output=True,
+        max_steps=2,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    resume_unknown_cli_task = (
+        "Продолжи выполнение той же задачи по task journal.\n\n"
+        "Resume context from previous agent task journal:\n"
+        "[{\"type\":\"start\",\"task\":\"Исправь Python-проект. CLI должен печатать валидный JSON.\\n\\n"
+        "Рабочий каталог для этой задачи: /work/project\"},"
+        "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":true,"
+        "\"passing_tests\":[\"tests/test_core.py::test_core\"],\"failing_tests\":[]}}]"
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"final","message":"premature from resume"}',
+            '{"action":"shell","cmd":"cd /work/project && ls -R","timeout":60,"reason":"discover CLI entrypoint"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": True,
+            "returncode": 0,
+            "stdout": ".:\\ninput.csv\\npackage\\n\\n./package:\\ncli.py\\n",
+            "stderr": "",
+    }) as mocked_unknown_cli_shell, \
+            contextlib.redirect_stdout(swe_resume_unknown_cli_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(resume_unknown_cli_task, swe_resume_unknown_cli_config)
+    swe_resume_unknown_cli_payload = json.loads(swe_resume_unknown_cli_stdout.getvalue())
+    unknown_cli_results = [step.get("result") or {} for step in swe_resume_unknown_cli_payload.get("steps", [])]
+    if not mocked_unknown_cli_shell.called:
+        raise AssertionError(f"SWE resume with unknown CLI contract should allow discovery command: {swe_resume_unknown_cli_payload}")
+    if any(result.get("error") == "swe cli verification required by supervisor" for result in unknown_cli_results):
+        raise AssertionError(f"SWE resume unknown CLI contract should not reject discovery before contract exists: {swe_resume_unknown_cli_payload}")
+    print("[ok] SWE resume unknown CLI contract allows discovery")
 
     swe_resume_failing_cli_stdout = io.StringIO()
     swe_resume_failing_cli_config = AgentConfig(

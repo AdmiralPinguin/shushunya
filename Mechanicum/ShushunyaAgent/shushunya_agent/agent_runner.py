@@ -4941,6 +4941,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     "last_edited_path": last_cli_required_swe_edit_path,
                     "resume_requires_cli_verification": swe_resume_requires_cli_verification,
                     "required_verification": "cli_or_command_interface",
+                    "expected_cli_modules": sorted(expected_cli_modules),
+                    "expected_cli_input_paths": sorted(expected_cli_input_paths),
                 }
                 warning_message = (
                     "Supervisor rejected final because the user task explicitly required CLI/command-interface behavior, "
@@ -4956,6 +4958,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                             warning_message
                             + "\nRun the requested CLI/command-interface check after the code edit, for example the user-provided "
                             "python -m/run_check command or an equivalent command that validates stdout/stderr/JSON output. "
+                            "If the CLI entrypoint or input file is not known yet, inspect the project just enough to discover "
+                            "cli.py/main.py/__main__.py and real input files, then run the CLI verification. "
                             "Return final only after that command succeeds."
                         ),
                     }
@@ -5505,6 +5509,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and not pending_failing_tests
                 and (swe_verified_after_edit or swe_resume_requires_cli_verification)
                 and (last_cli_required_swe_edit_path or swe_resume_requires_cli_verification)
+                and (expected_cli_modules or expected_cli_input_paths)
                 and not swe_cli_verification_attempted_after_edit
                 and not action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
             ):
