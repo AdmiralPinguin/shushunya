@@ -171,7 +171,8 @@ with a `start_*` recommendation in `next_action` and executable
 when Warmaster run-summary action gates allow it. It chooses normal start,
 resume, or required revision execution from `summary.actions`, records the
 background-start event, and returns an immediate `snapshot` plus a polling
-`next_action`. Completed runs are not rerun unless `force=true` is explicit.
+`next_action` and executable `client_action`. Completed runs are not rerun
+unless `force=true` is explicit.
 
 `POST /orchestrate_run` is the one-shot chat submission helper. It performs the
 same prepare sequence as `POST /orchestrate` and, by default, immediately follows

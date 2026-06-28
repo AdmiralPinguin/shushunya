@@ -3156,6 +3156,7 @@ def orchestrate_start_run(
             "task_id": task_id,
             "summary": summary,
             "next_action": next_action,
+            "client_action": executable_client_action(task_id, next_action),
             "snapshot": run_snapshot(run_dir, event_limit=5, events_after=0),
         }
 
@@ -3197,6 +3198,7 @@ def orchestrate_start_run(
             "error": "run already active",
             "snapshot": run_snapshot(run_dir, event_limit=5, events_after=0),
         }
+    poll_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "run started in background"}
     return {
         "ok": True,
         "phase": "started",
@@ -3204,7 +3206,8 @@ def orchestrate_start_run(
         "run_mode": run_mode,
         "operation": operation,
         "step_ids": step_ids or [],
-        "next_action": {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "run started in background"},
+        "next_action": poll_action,
+        "client_action": executable_client_action(task_id, poll_action),
         "snapshot": run_snapshot(run_dir, event_limit=5, events_after=0),
     }
 

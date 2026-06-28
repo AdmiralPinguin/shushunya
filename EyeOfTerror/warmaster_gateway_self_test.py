@@ -750,6 +750,7 @@ def main() -> int:
                 or orchestrated_start.get("phase") != "started"
                 or orchestrated_start.get("operation") != "start"
                 or orchestrated_start.get("next_action", {}).get("kind") != "poll"
+                or orchestrated_start.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/snapshot"
                 or orchestrated_start.get("snapshot", {}).get("task_id") != "warmaster-orchestrate-test"
             ):
                 raise AssertionError(f"orchestrated start did not return a polling snapshot: {orchestrated_start}")
