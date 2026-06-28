@@ -84,7 +84,11 @@ def preflight_workers(run_dir: Path, host: str, timeout_sec: int, step_ids: list
 
 
 def terminal_payload_allows_completion(payload: dict[str, Any]) -> bool:
+    if not payload.get("ok"):
+        return False
     status = str(payload.get("status") or "").strip().lower()
+    if status not in {"ready", "completed", "passed", "passed_with_warnings"}:
+        return False
     if status in {"blocked", "needs_revision", "failed", "preflight_failed", "cancelled"}:
         return False
     revision_plan = payload.get("revision_plan")

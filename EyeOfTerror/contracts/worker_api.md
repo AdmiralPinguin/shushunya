@@ -109,6 +109,11 @@ returns unless the worker implements a stronger interruption mechanism.
 }
 ```
 
+Executors treat a successful terminal payload as complete only when `ok=true`,
+`revision_plan.required` is not true, and `status` is one of `ready`,
+`completed`, `passed`, or `passed_with_warnings`. Missing or unknown terminal
+statuses must not close the whole run as completed.
+
 ## Rules
 
 - Workers are functions with bounded inputs and structured outputs.

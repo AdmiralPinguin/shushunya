@@ -60,6 +60,10 @@ class CaptureRunHandler(BaseHTTPRequestHandler):
 def main() -> int:
     if terminal_payload_allows_completion({"ok": True, "status": "blocked"}):
         raise AssertionError("blocked terminal payload should not complete a run")
+    if terminal_payload_allows_completion({"ok": True}):
+        raise AssertionError("terminal payload without status should not complete a run")
+    if terminal_payload_allows_completion({"ok": True, "status": "mystery"}):
+        raise AssertionError("unknown terminal payload status should not complete a run")
     if terminal_payload_allows_completion({"ok": True, "status": "ready", "revision_plan": {"required": True}}):
         raise AssertionError("required revision plan should not complete a run")
     if not terminal_payload_allows_completion({"ok": True, "status": "ready", "revision_plan": {"required": False}}):

@@ -41,6 +41,8 @@
 - EyeOfTerror can execute dispatch packets through HTTP services with `eye_of_terror.http_executor`.
 - The end-to-end HTTP pipeline test reaches a `ready` final manifest for the Skalathrax test task.
 - Local and HTTP executors write `task_ledger.json` with task status, step status, artifacts, and event history.
+- Local and HTTP executors require explicit allowed terminal statuses before
+  marking a run completed.
 - Warmaster Gateway can prepare Iskandar run packages, expose run status, execute local dev pipelines, and execute HTTP worker-service pipelines.
 - Warmaster Gateway can preflight existing run packages before local or HTTP
   execution without starting workers.
