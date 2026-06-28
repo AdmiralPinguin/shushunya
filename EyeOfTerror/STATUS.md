@@ -90,6 +90,8 @@
 - Orchestration state exposes a compact `display` object with headline, detail,
   severity, progress counts, next step/worker, and final deliverable for chat
   and mobile status rendering.
+- Orchestration and one-shot chat responses expose top-level `display_events`
+  so task detail screens can render recent history without traversing snapshots.
 - Task preflight contract summaries expose planned worker steps, dependency
   edges, and expected artifacts.
 - Task preflight exposes compact governor oversight summaries and validation so

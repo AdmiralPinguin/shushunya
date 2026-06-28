@@ -189,7 +189,8 @@ object exposes booleans such as `can_poll`, `can_start`, `can_resume`,
 clients do not need to reimplement phase parsing. Its `display` object exposes
 compact chat/UI fields such as `headline`, `detail`, `severity`, progress
 counts, next step/worker, and final deliverable path so clients do not need to
-parse the full run summary for common status rendering.
+parse the full run summary for common status rendering. The response also
+copies bounded `display_events` to the top level for task-detail history views.
 
 ```json
 {

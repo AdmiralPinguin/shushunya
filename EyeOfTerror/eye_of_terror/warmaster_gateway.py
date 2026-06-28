@@ -1879,6 +1879,7 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
         "active": view["active"],
         "decision": view["decision"],
         "display": view["display"],
+        "display_events": snapshot.get("display_events", []),
         "snapshot": snapshot,
         "final": final_payload,
         "next_action": view["next_action"],
@@ -2224,6 +2225,7 @@ def orchestrate_run_task(
                     "orchestration": state,
                     "decision": state.get("decision", {}) if isinstance(state, dict) else {},
                     "display": state.get("display", {}) if isinstance(state, dict) else {},
+                    "display_events": state.get("display_events", []) if isinstance(state, dict) else [],
                     "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else state.get("next_action", {}),
                 }
             return {
@@ -2237,6 +2239,7 @@ def orchestrate_run_task(
                 "orchestration": state,
                 "decision": state.get("decision", {}) if isinstance(state, dict) else {},
                 "display": state.get("display", {}) if isinstance(state, dict) else {},
+                "display_events": state.get("display_events", []) if isinstance(state, dict) else [],
                 "next_action": state.get("next_action", {}) if isinstance(state, dict) else {},
             }
         return {
@@ -2259,6 +2262,7 @@ def orchestrate_run_task(
             "orchestration": state,
             "decision": state.get("decision", {}),
             "display": state.get("display", {}),
+            "display_events": state.get("display_events", []),
         }
     started = orchestrate_start_run(
         run_root,
@@ -2289,6 +2293,7 @@ def orchestrate_run_task(
         "orchestration": state,
         "decision": state.get("decision", {}) if isinstance(state, dict) else {},
         "display": state.get("display", {}) if isinstance(state, dict) else {},
+        "display_events": state.get("display_events", []) if isinstance(state, dict) else [],
         "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else {},
     }
 
