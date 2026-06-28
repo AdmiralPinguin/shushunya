@@ -184,6 +184,9 @@
   capabilities, including required worker declarations.
 - Warmaster Gateway exposes `GET /state` as a client bootstrap snapshot with
   capabilities, governors, workers, and recent runs.
+- Warmaster Gateway exposes compact `orchestration_cards` in `/state` and
+  `/runs` so chat/mobile clients can restore task history, controls, and status
+  displays without parsing full run summaries.
 - Warmaster Gateway exposes gateway-level action hints for preflight, creation,
   start, resume, revision, cancellation, and diagnostics.
 - Run action hints include `next_action` with a recommended endpoint and reason

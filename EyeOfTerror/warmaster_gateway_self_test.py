@@ -500,6 +500,7 @@ def main() -> int:
                 "worker_registry",
                 "worker_cancel_fanout",
                 "run_action_hints",
+                "run_orchestration_cards",
                 "run_execution_preflight",
                 "restricted_step_execution",
                 "interrupted_run_resume",
@@ -518,6 +519,7 @@ def main() -> int:
                 or not capabilities.get("actions", {}).get("can_execute_step_subsets")
                 or not capabilities.get("actions", {}).get("can_check_brigade_readiness")
                 or not capabilities.get("actions", {}).get("can_list_recoverable_runs")
+                or not capabilities.get("actions", {}).get("can_list_orchestration_cards")
                 or not capabilities.get("actions", {}).get("can_bulk_start_recoverable_runs")
                 or not capabilities.get("actions", {}).get("can_poll_global_events")
                 or "POST /task_preflight" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
@@ -855,6 +857,10 @@ def main() -> int:
                 or "process_active_run_snapshot" not in state.get("capabilities", {}).get("capabilities", [])
                 or not isinstance(state.get("process_active_runs"), list)
                 or state.get("run_summary", {}).get("total", 0) < 2
+                or not any(
+                    item.get("task_id") == "warmaster-test" and "headline" in item.get("display", {}) and isinstance(item.get("decision"), dict)
+                    for item in state.get("orchestration_cards", [])
+                )
             ):
                 raise AssertionError(f"bad gateway state: {state}")
             run_dir = Path(task["run_dir"])
@@ -1152,10 +1158,16 @@ def main() -> int:
                 not run_list.get("ok")
                 or run_list.get("run_summary", {}).get("total", 0) < 1
                 or not any(item.get("task_id") == "warmaster-test" and item.get("progress", {}).get("planned_steps") == 7 for item in run_list.get("runs", []))
+                or not any(item.get("task_id") == "warmaster-test" and "headline" in item.get("display", {}) for item in run_list.get("orchestration_cards", []))
             ):
                 raise AssertionError(f"bad run list: {run_list}")
             limited_run_list = request_json(base + "/runs?limit=1")
-            if not limited_run_list.get("ok") or len(limited_run_list.get("runs", [])) != 1 or limited_run_list.get("run_summary", {}).get("total", 0) < 2:
+            if (
+                not limited_run_list.get("ok")
+                or len(limited_run_list.get("runs", [])) != 1
+                or len(limited_run_list.get("orchestration_cards", [])) != 1
+                or limited_run_list.get("run_summary", {}).get("total", 0) < 2
+            ):
                 raise AssertionError(f"bad limited run list: {limited_run_list}")
             restricted_task = request_json(
                 base + "/task",

@@ -958,6 +958,62 @@ def run_status_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return {"total": len(runs), "active": active, "by_status": by_status}
 
 
+def run_orchestration_card(run: dict[str, Any], active: bool = False) -> dict[str, Any]:
+    actions = run.get("actions") if isinstance(run.get("actions"), dict) else {}
+    next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+    status = str(run.get("status") or "")
+    phase = "inspect"
+    final_payload: dict[str, Any] = {}
+    if active or status in {"running", "queued", "cancelling"}:
+        phase = "running"
+        next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/orchestration", "body": {"events_after": 0}, "reason": "run is active"}
+    elif actions.get("can_start_revision"):
+        phase = "revision_required"
+    elif status == "completed":
+        phase = "completed"
+        final_payload = {
+            "summary": run.get("final_manifest_summary") if isinstance(run.get("final_manifest_summary"), dict) else {},
+            "deliverable": "",
+        }
+    elif actions.get("can_resume"):
+        phase = "resume_required"
+    elif actions.get("can_start"):
+        phase = "ready_to_start"
+    elif status in {"failed", "cancelled", "interrupted", "preflight_failed"}:
+        phase = "needs_attention"
+    elif status == "created":
+        phase = "ready_to_preflight"
+    decision = {
+        "can_poll": phase == "running",
+        "can_start": phase == "ready_to_start",
+        "can_resume": phase == "resume_required",
+        "can_execute_revision": phase == "revision_required",
+        "can_inspect_final": phase == "completed" and bool(final_payload.get("summary")),
+        "can_inspect_diagnostics": phase in {"needs_attention", "inspect", "ready_to_preflight"},
+        "recommended_kind": str(next_action.get("kind") or ""),
+        "recommended_endpoint": str(next_action.get("endpoint") or ""),
+    }
+    snapshot = {"summary": run, "active": active}
+    return {
+        "task_id": str(run.get("task_id") or ""),
+        "status": status,
+        "phase": phase,
+        "active": active,
+        "goal": str(run.get("goal") or ""),
+        "governor": str(run.get("governor") or ""),
+        "created_at": str(run.get("created_at") or ""),
+        "updated_at": str(run.get("updated_at") or ""),
+        "decision": decision,
+        "display": orchestration_display(phase, status, snapshot, next_action, final_payload),
+        "next_action": next_action,
+    }
+
+
+def run_orchestration_cards(runs: list[dict[str, Any]], active_task_ids: list[str] | set[str] | None = None) -> list[dict[str, Any]]:
+    active_set = set(active_task_ids or [])
+    return [run_orchestration_card(run, active=str(run.get("task_id") or "") in active_set) for run in runs]
+
+
 def recovery_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     for run in runs:
@@ -2701,6 +2757,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "run_preparation",
             "run_listing",
             "run_status_summary",
+            "run_orchestration_cards",
             "ledger_read",
             "artifact_listing",
             "artifact_text_read",
@@ -2817,6 +2874,7 @@ def gateway_actions() -> dict[str, Any]:
         "can_start_runs": True,
         "can_resume_interrupted_runs": True,
         "can_list_recoverable_runs": True,
+        "can_list_orchestration_cards": True,
         "can_bulk_start_recoverable_runs": True,
         "can_poll_global_events": True,
         "can_execute_revisions": True,
@@ -2856,6 +2914,7 @@ def gateway_state(run_root: Path, run_limit: int = 20, include_health: bool = Fa
         "recovery": recovery_summary(all_runs),
         "process_active_runs": process_active_runs,
         "runs": runs,
+        "orchestration_cards": run_orchestration_cards(runs, process_active_runs),
     }
     if include_health:
         payload["brigade_health"] = brigade_health_snapshot(host=host)
@@ -3164,7 +3223,19 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 raw_limit = query.get("limit", [""])[0]
                 all_runs = list_runs(run_root)
                 runs = all_runs[: parse_limit(raw_limit, default=MAX_LIST_LIMIT)] if raw_limit else all_runs
-                response(self, 200, {"ok": True, "run_summary": run_status_summary(all_runs), "recovery": recovery_summary(all_runs), "runs": runs})
+                with ACTIVE_RUNS_LOCK:
+                    process_active_runs = sorted(ACTIVE_RUNS)
+                response(
+                    self,
+                    200,
+                    {
+                        "ok": True,
+                        "run_summary": run_status_summary(all_runs),
+                        "recovery": recovery_summary(all_runs),
+                        "runs": runs,
+                        "orchestration_cards": run_orchestration_cards(runs, process_active_runs),
+                    },
+                )
                 return
             if len(parts) == 4 and parts[0] == "runs" and parts[2] == "steps":
                 task_id = parts[1]

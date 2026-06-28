@@ -87,7 +87,10 @@ Clients should call `GET /state` after startup or reconnect. The response
 contains gateway capabilities, governor registry, worker registry, run status
 counts, process-local active run ids, recent run summaries, and the expected
 service-separated brigade startup plan. It also includes a compact `recovery`
-section listing interrupted runs whose action hints allow resume. `state.actions` and
+section listing interrupted runs whose action hints allow resume. It also
+includes `orchestration_cards`, a compact chat/mobile list with each recent
+run's phase, decision, display status, and next action for restoring task
+history after a client reconnect. `state.actions` and
 `capabilities.actions` expose client-facing gateway action hints, including the
 preferred task flow: preflight, create, then start. `can_check_brigade_readiness`
 means clients can use `GET /brigade_health` summary fields to decide whether
@@ -259,8 +262,8 @@ and a compact `route` object. When no route matches, they return
 
 Clients should use:
 
-- `/runs` for a run list plus aggregate status and recoverable interrupted run
-  summary.
+- `/runs` for a run list plus aggregate status, recoverable interrupted run
+  summary, and compact `orchestration_cards` for chat/mobile list rendering.
 - `/events?after=N` for a compact aggregate run-event feed when the client
   wants one polling cursor across all runs.
 - `/runs/{task_id}/summary` for lightweight polling.
