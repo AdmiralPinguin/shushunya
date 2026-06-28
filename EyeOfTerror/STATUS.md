@@ -29,6 +29,10 @@
 - Warmaster Gateway exposes `GET /doctor` for registry and manifest diagnostics.
 - Warmaster Gateway exposes focused run inspection endpoints for contract,
   dispatch packets, and ledger event history.
+- Warmaster Gateway exposes lightweight run summaries, progress counters, and
+  worker task mappings for client polling/debugging.
+- Warmaster Gateway rejects duplicate `task_id` creation instead of silently
+  overwriting existing run history.
 - Task ledgers, run packages, and executor reports are written atomically to
   avoid partial JSON reads during background execution.
 - Warmaster run listing/state endpoints tolerate corrupt ledger files and report
