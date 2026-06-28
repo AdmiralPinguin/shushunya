@@ -808,6 +808,9 @@ def all_run_events(run_root: Path, limit: int | None = None, after: int | None =
             errors.append({"task_id": run_dir.name, "error": ledger_error})
             continue
         task_id = str(ledger.get("task_id") or run_dir.name)
+        run_status = str(ledger.get("status") or "")
+        governor = str(ledger.get("governor") or "")
+        run_updated_at = str(ledger.get("updated_at") or "")
         raw_events = ledger.get("events") if isinstance(ledger.get("events"), list) else []
         for index, event in enumerate(raw_events):
             if not isinstance(event, dict):
@@ -815,6 +818,9 @@ def all_run_events(run_root: Path, limit: int | None = None, after: int | None =
             events.append(
                 {
                     "task_id": task_id,
+                    "run_status": run_status,
+                    "governor": governor,
+                    "run_updated_at": run_updated_at,
                     "event_index": index,
                     "at": str(event.get("at") or ""),
                     "type": str(event.get("type") or ""),
