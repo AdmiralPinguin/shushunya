@@ -202,7 +202,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `Lexmechanic` uses source playbooks plus optional live discovery; allowlisted live results can become source candidates.
 - `Lexmechanic` ranks source candidates and labels live discovery results with
   source types and ranking reasons.
-- `NoosphericExtractor` still uses rule-based event playbooks; Skalathrax rules now live in data, not Python code.
+- `NoosphericExtractor` uses data playbooks when available and falls back to
+  low-confidence generic evidence leads from fetched source snapshots.
 - `AuspexBrowser` performs guarded HTTP text fetches; it does not yet render JavaScript pages or screenshots.
 - The pipeline records inaccessible primary books as gaps instead of solving book acquisition.
 - Warmaster Gateway background execution is in-process only; restart recovery

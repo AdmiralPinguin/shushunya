@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -109,6 +110,44 @@ def events_from_playbook(playbook: dict[str, Any], source_titles: set[str]) -> l
     return events
 
 
+def first_sentence(text: str, max_chars: int = 360) -> str:
+    compact = " ".join(text.split())
+    if not compact:
+        return ""
+    match = re.search(r"(?<=[.!?])\s+", compact)
+    sentence = compact[: match.start()].strip() if match else compact[:max_chars].strip()
+    return sentence[:max_chars].strip()
+
+
+def generic_events_from_snapshots(source_snapshots: dict[str, Any]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for snapshot in source_snapshots.get("snapshots", []):
+        if not isinstance(snapshot, dict) or not snapshot.get("ok"):
+            continue
+        excerpt = first_sentence(str(snapshot.get("text_excerpt") or ""))
+        if not excerpt:
+            continue
+        event_id = f"evidence_lead_{len(events) + 1}"
+        events.append(
+            {
+                "event_id": event_id,
+                "summary": excerpt,
+                "phase": "unknown",
+                "confidence": "low",
+                "source_refs": [str(snapshot.get("source_title") or snapshot.get("requested_url") or "unknown source")],
+                "source_class": str(snapshot.get("source_class") or ""),
+                "extraction_method": "generic_snapshot_lead",
+                "evidence_snapshots": [
+                    {
+                        "source_title": str(snapshot.get("source_title") or ""),
+                        "matched_markers": "generic excerpt lead",
+                    }
+                ],
+            }
+        )
+    return events
+
+
 def extract_events(source_map: dict[str, Any], source_snapshots: dict[str, Any] | None = None) -> dict[str, Any]:
     topic = str(source_map.get("topic") or "")
     source_snapshots = source_snapshots or {}
@@ -121,12 +160,17 @@ def extract_events(source_map: dict[str, Any], source_snapshots: dict[str, Any] 
     for playbook in EVENT_PLAYBOOKS:
         if playbook_matches(playbook, topic, source_titles):
             events.extend(events_from_playbook(playbook, source_titles))
+    extraction_method = "playbook" if events else "generic_snapshot_leads"
+    if not events:
+        events.extend(generic_events_from_snapshots(source_snapshots))
     for event in events:
         if isinstance(event, dict):
-            event["evidence_snapshots"] = snapshot_evidence(str(event.get("event_id") or ""), source_snapshots)
+            if "evidence_snapshots" not in event:
+                event["evidence_snapshots"] = snapshot_evidence(str(event.get("event_id") or ""), source_snapshots)
     return {
         "topic": topic,
         "events": events,
+        "extraction_method": extraction_method,
         "gaps": [
             "Extractor needs direct source text for exact wording and chapter-level evidence.",
             "Events marked medium confidence require confirmation from official narrative text.",

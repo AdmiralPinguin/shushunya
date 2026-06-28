@@ -62,6 +62,45 @@ def main() -> int:
             raise AssertionError("moon parley should include snapshot evidence")
         if not any("HTTP Error 403" in gap for gap in data.get("gaps", [])):
             raise AssertionError("snapshot fetch failures should be reported as gaps")
+        generic_root = Path(temp_dir) / "generic"
+        generic_root.mkdir(parents=True, exist_ok=True)
+        (generic_root / "source_map.json").write_text(
+            json.dumps({"topic": "Unknown battle", "sources": [{"title": "Recovered Chronicle"}]}),
+            encoding="utf-8",
+        )
+        (generic_root / "source_snapshots.json").write_text(
+            json.dumps(
+                {
+                    "snapshots": [
+                        {
+                            "source_title": "Recovered Chronicle",
+                            "source_class": "secondary",
+                            "requested_url": "https://example.test/chronicle",
+                            "ok": True,
+                            "text_excerpt": "The first clash began at dawn. Later commentary drifts into speculation.",
+                        }
+                    ],
+                    "skipped": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        generic_result = run(
+            {"task_id": "test-generic:fact_extraction", "step": {"expected_artifacts": ["/work/generic/direct_event_notes.json"]}},
+            Path(temp_dir),
+        )
+        if not generic_result.get("ok"):
+            raise AssertionError(f"NoosphericExtractor generic fallback failed: {generic_result}")
+        generic_data = json.loads((generic_root / "direct_event_notes.json").read_text(encoding="utf-8"))
+        generic_events = generic_data.get("events", [])
+        if (
+            generic_data.get("extraction_method") != "generic_snapshot_leads"
+            or not generic_events
+            or generic_events[0].get("extraction_method") != "generic_snapshot_lead"
+            or generic_events[0].get("confidence") != "low"
+            or "first clash began" not in generic_events[0].get("summary", "")
+        ):
+            raise AssertionError(f"generic fallback should create low-confidence evidence leads: {generic_data}")
     print("[ok] NoosphericExtractor event notes")
     return 0
 
