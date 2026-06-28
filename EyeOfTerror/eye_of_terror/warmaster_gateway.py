@@ -397,6 +397,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "POST /task",
             "GET /runs",
             "GET /runs/{task_id}",
+            "GET /runs/{task_id}/summary",
             "GET /runs/{task_id}/ledger",
             "GET /runs/{task_id}/contract",
             "GET /runs/{task_id}/dispatch",
@@ -548,6 +549,9 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 ledger_path = run_dir / "task_ledger.json"
                 if not run_dir.exists():
                     response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
+                    return
+                if len(parts) == 3 and parts[2] == "summary":
+                    response(self, 200, {"ok": True, "summary": run_summary(run_dir)})
                     return
                 if len(parts) == 3 and parts[2] == "ledger":
                     if not ledger_path.exists():
