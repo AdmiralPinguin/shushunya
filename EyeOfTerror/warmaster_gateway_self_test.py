@@ -713,6 +713,13 @@ def main() -> int:
                 or not any(item.get("type") == "run_preflight_recorded" for item in orchestrated_ledger.get("events", []))
             ):
                 raise AssertionError(f"prepare orchestration did not stop at a start recommendation: {orchestrated}")
+            orchestrated_state = request_json(base + "/runs/warmaster-orchestrate-test/orchestration?events_after=0")
+            if (
+                orchestrated_state.get("phase") != "ready_to_start"
+                or orchestrated_state.get("next_action", {}).get("kind") != "start"
+                or orchestrated_state.get("snapshot", {}).get("summary", {}).get("task_id") != "warmaster-orchestrate-test"
+            ):
+                raise AssertionError(f"orchestration state did not expose ready-to-start decision: {orchestrated_state}")
             orchestrated_start = request_json(
                 base + "/orchestrate_start",
                 {"task_id": "warmaster-orchestrate-test", "run_mode": "local", "timeout_sec": 30},
@@ -1217,6 +1224,14 @@ def main() -> int:
                 or "Реконструкция" not in reconstruction_preview.get("preview", {}).get("text", "")
             ):
                 raise AssertionError(f"bad final package response: {final_package}")
+            completed_orchestration = request_json(base + "/runs/warmaster-test/orchestration?max_bytes=1000")
+            if (
+                completed_orchestration.get("phase") != "completed"
+                or completed_orchestration.get("final", {}).get("summary", {}).get("status") != "ready"
+                or completed_orchestration.get("next_action", {}).get("kind") != "inspect_final"
+                or completed_orchestration.get("snapshot", {}).get("summary", {}).get("status") != "completed"
+            ):
+                raise AssertionError(f"completed orchestration state did not expose final package: {completed_orchestration}")
             completed_global_events = request_json(base + "/events?limit=200")
             completed_result_event = next(
                 (

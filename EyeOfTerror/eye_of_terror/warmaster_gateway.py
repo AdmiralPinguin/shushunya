@@ -1641,6 +1641,49 @@ def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: in
     return payload
 
 
+def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_after: int | None = 0, max_bytes: int = 2000) -> dict[str, Any]:
+    snapshot = run_snapshot(run_dir, event_limit=event_limit, events_after=events_after)
+    summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
+    actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
+    next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+    status = str(summary.get("status") or "")
+    phase = "inspect"
+    final_payload: dict[str, Any] = {}
+    if snapshot.get("active") or status in {"running", "queued", "cancelling"}:
+        phase = "running"
+        next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/orchestration", "body": {"events_after": snapshot.get("event_cursor", {}).get("next", 0)}, "reason": "run is active"}
+    elif status == "completed":
+        phase = "completed"
+        ledger_path = run_dir / "task_ledger.json"
+        ledger, ledger_error = load_ledger_dict(ledger_path)
+        if ledger_error:
+            final_payload = {"ok": False, "error": ledger_error}
+        else:
+            final_payload = final_package(ledger, max_bytes=max_bytes)
+        if final_payload.get("ok"):
+            next_action = {"kind": "inspect_final", "method": "GET", "endpoint": "GET /runs/{task_id}/final", "body": {"max_bytes": max_bytes}, "reason": "run completed and final package is available"}
+    elif actions.get("can_start_revision"):
+        phase = "revision_required"
+    elif actions.get("can_resume"):
+        phase = "resume_required"
+    elif actions.get("can_start"):
+        phase = "ready_to_start"
+    elif status in {"failed", "cancelled", "interrupted", "preflight_failed"}:
+        phase = "needs_attention"
+    elif status == "created":
+        phase = "ready_to_preflight"
+    return {
+        "ok": True,
+        "task_id": run_dir.name,
+        "phase": phase,
+        "status": status,
+        "active": bool(snapshot.get("active")),
+        "snapshot": snapshot,
+        "final": final_payload,
+        "next_action": next_action,
+    }
+
+
 def run_step_state(run_dir: Path, step_id: str) -> dict[str, Any]:
     summary = run_summary(run_dir)
     for step in summary.get("progress", {}).get("step_states", []):
@@ -2430,6 +2473,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "task_preflight",
             "task_prepare_orchestration",
             "run_start_orchestration",
+            "run_orchestration_state",
             "run_preparation",
             "run_listing",
             "run_status_summary",
@@ -2496,6 +2540,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}",
             "GET /runs/{task_id}/summary",
             "GET /runs/{task_id}/snapshot",
+            "GET /runs/{task_id}/orchestration",
             "GET /runs/{task_id}/active",
             "GET /runs/{task_id}/steps/{step_id}",
             "GET /runs/{task_id}/steps/{step_id}/artifacts",
@@ -2553,7 +2598,7 @@ def gateway_actions() -> dict[str, Any]:
         "can_cancel_runs": True,
         "can_check_brigade_readiness": True,
         "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
-        "prepare_task_flow": ["POST /orchestrate", "POST /orchestrate_start", "GET /runs/{task_id}/snapshot?events_after=0"],
+        "prepare_task_flow": ["POST /orchestrate", "POST /orchestrate_start", "GET /runs/{task_id}/orchestration?events_after=0"],
         "polling": ["GET /events?after=0", "GET /runs/{task_id}/snapshot?events_after=0"],
         "maintenance": ["GET /recovery", "POST /recovery/start_resume_local", "POST /recovery/start_resume_http", "POST /recover_stale"],
         "run_inspection": [
@@ -2930,6 +2975,16 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     raw_events_after = query.get("events_after", [""])[0]
                     events_after = parse_nonnegative_int(raw_events_after, default=0) if raw_events_after else None
                     response(self, 200, run_snapshot(run_dir, event_limit=event_limit, events_after=events_after))
+                    return
+                if len(parts) == 3 and parts[2] == "orchestration":
+                    query = parse_qs(parsed.query)
+                    raw_event_limit = query.get("event_limit", [""])[0]
+                    event_limit = parse_limit(raw_event_limit, default=20) if raw_event_limit else 20
+                    raw_events_after = query.get("events_after", [""])[0]
+                    events_after = parse_nonnegative_int(raw_events_after, default=0) if raw_events_after else 0
+                    raw_max_bytes = query.get("max_bytes", [""])[0]
+                    max_bytes = parse_limit(raw_max_bytes, default=2000, maximum=MAX_ARTIFACT_TEXT_BYTES) if raw_max_bytes else 2000
+                    response(self, 200, orchestration_state(run_dir, event_limit=event_limit, events_after=events_after, max_bytes=max_bytes))
                     return
                 if len(parts) == 3 and parts[2] == "active":
                     with ACTIVE_RUNS_LOCK:

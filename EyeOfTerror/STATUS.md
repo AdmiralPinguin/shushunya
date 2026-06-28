@@ -72,6 +72,9 @@
 - Warmaster Gateway exposes `POST /orchestrate_start` to safely start prepared
   runs in the background through run-summary action gates and return an
   immediate polling snapshot.
+- Warmaster Gateway exposes `GET /runs/{task_id}/orchestration` as a read-only
+  chat decision view with phase, snapshot, next action, and final package when
+  completed.
 - Task preflight contract summaries expose planned worker steps, dependency
   edges, and expected artifacts.
 - Task preflight exposes compact governor oversight summaries and validation so

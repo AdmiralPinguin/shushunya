@@ -33,6 +33,7 @@ GET  /runs?limit=20
 GET  /runs/{task_id}
 GET  /runs/{task_id}/summary
 GET  /runs/{task_id}/snapshot
+GET  /runs/{task_id}/orchestration
 GET  /runs/{task_id}/active
 GET  /runs/{task_id}/steps/{step_id}
 GET  /runs/{task_id}/steps/{step_id}/artifacts
@@ -163,6 +164,12 @@ when Warmaster run-summary action gates allow it. It chooses normal start,
 resume, or required revision execution from `summary.actions`, records the
 background-start event, and returns an immediate `snapshot` plus a polling
 `next_action`. Completed runs are not rerun unless `force=true` is explicit.
+
+`GET /runs/{task_id}/orchestration` is the read-only decision view for chat
+clients. It wraps the run snapshot with an orchestration `phase` such as
+`running`, `completed`, `ready_to_start`, `resume_required`,
+`revision_required`, or `needs_attention`, preserves the next safe action, and
+includes the bounded final package when the run has completed.
 
 ```json
 {
