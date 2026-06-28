@@ -5925,13 +5925,13 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 elif result.get("ok") is True or "syntaxerror" not in combined_test_output.lower():
                     swe_syntax_error_cycles = 0
                     last_swe_syntax_error = ""
-        elif (
+        if (
             swe_task
             and swe_requires_test_diagnostic
             and not swe_test_diagnostic_seen
             and action_type in SWE_DIAGNOSTIC_ACTIONS
-            and isinstance(result, dict)
-            and result.get("ok") is True
+            and not action_is_test_diagnostic(action_type, action)
+            and not supervisor_rejection
         ):
             non_test_diagnostics_before_test += 1
         if (
