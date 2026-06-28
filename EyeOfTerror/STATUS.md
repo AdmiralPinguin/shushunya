@@ -115,6 +115,8 @@
   revision controls.
 - Warmaster action hints disable ordinary start/execute when a required
   revision plan exists.
+- Warmaster validates required revision plans against the run dispatch package
+  and disables revision actions when the plan is invalid.
 - Warmaster action hints disable ordinary start/execute for interrupted runs so
   clients prefer resume controls.
 - Warmaster action hints expose run preflight controls for local and HTTP

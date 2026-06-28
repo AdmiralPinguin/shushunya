@@ -470,6 +470,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
     ledger, ledger_error = load_ledger_dict(ledger_path)
     result = ledger.get("result", {}) if isinstance(ledger.get("result"), dict) else {}
     revision_plan = result.get("revision_plan") if isinstance(result.get("revision_plan"), dict) else {"required": False, "steps": []}
+    revision_plan_errors = validate_revision_plan(run_dir, revision_plan)
     summary = {
         "task_id": ledger.get("task_id") or status.get("task_id") or run_dir.name,
         "run_dir": str(run_dir),
@@ -480,10 +481,11 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "updated_at": ledger.get("updated_at") or "",
         "result": result,
         "revision_plan": revision_plan,
+        "revision_plan_errors": revision_plan_errors,
         "progress": run_progress(status, ledger),
         "last_preflight": last_run_preflight(ledger),
     }
-    summary["actions"] = run_actions(str(summary["status"]), revision_plan)
+    summary["actions"] = run_actions(str(summary["status"]), revision_plan, revision_plan_errors=revision_plan_errors)
     if status_error:
         summary["status_error"] = status_error
     if ledger_error and ledger_path.exists():
@@ -517,13 +519,62 @@ def last_run_preflight(ledger: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def run_actions(status: str, revision_plan: dict[str, Any]) -> dict[str, Any]:
+def dispatch_workers_by_step(run_dir: Path) -> dict[str, str]:
+    workers: dict[str, str] = {}
+    for dispatch_path in ordered_dispatch_paths(run_dir):
+        packet = load_json_file(dispatch_path)
+        step_id = str(packet.get("step_id") or dispatch_path.stem)
+        worker = str(packet.get("worker") or "")
+        if step_id:
+            workers[step_id] = worker
+    return workers
+
+
+def validate_revision_plan(run_dir: Path, revision_plan: dict[str, Any]) -> list[str]:
+    if not revision_plan.get("required"):
+        return []
+    raw_steps = revision_plan.get("steps")
+    if not isinstance(raw_steps, list) or not raw_steps:
+        return ["revision_plan.steps must be a non-empty list when required"]
+    try:
+        workers_by_step = dispatch_workers_by_step(run_dir)
+    except Exception as exc:  # noqa: BLE001 - summaries should report invalid run packages instead of crashing.
+        return [f"revision dispatch unavailable: {exc}"]
+    errors: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw_steps):
+        if not isinstance(item, dict):
+            errors.append(f"revision_plan.steps[{index}] must be an object")
+            continue
+        step_id = str(item.get("step_id") or "").strip()
+        worker = str(item.get("worker") or "").strip()
+        if not step_id:
+            errors.append(f"revision_plan.steps[{index}].step_id must be a non-empty string")
+            continue
+        if step_id in seen:
+            errors.append(f"revision_plan references duplicate step: {step_id}")
+        seen.add(step_id)
+        expected_worker = workers_by_step.get(step_id)
+        if expected_worker is None:
+            errors.append(f"revision_plan references unknown dispatch step: {step_id}")
+        if not worker:
+            errors.append(f"revision_plan.steps[{index}].worker must be a non-empty string")
+        elif expected_worker is not None and worker != expected_worker:
+            errors.append(f"revision_plan worker mismatch for {step_id}: expected {expected_worker}, got {worker}")
+        for field_name in ("reason", "source", "priority"):
+            if field_name in item and not isinstance(item.get(field_name), str):
+                errors.append(f"revision_plan.steps[{index}].{field_name} must be a string")
+    return errors
+
+
+def run_actions(status: str, revision_plan: dict[str, Any], revision_plan_errors: list[str] | None = None) -> dict[str, Any]:
     terminal_locked = status in {"completed", "running", "cancelling", "queued", "corrupt"}
     preflightable = status != "corrupt"
     revision_required = bool(revision_plan.get("required"))
+    revision_valid = not (revision_plan_errors or [])
     resume_required = status == "interrupted"
     runnable = not terminal_locked and not revision_required and not resume_required
-    revision_runnable = revision_required and status not in {"running", "cancelling", "queued", "corrupt"}
+    revision_runnable = revision_required and revision_valid and status not in {"running", "cancelling", "queued", "corrupt"}
     return {
         "can_preflight_local": preflightable,
         "can_preflight_http": preflightable,
@@ -797,6 +848,9 @@ def revision_step_ids_from_run(run_dir: Path) -> list[str]:
     revision_plan = result.get("revision_plan") if isinstance(result.get("revision_plan"), dict) else {}
     if not revision_plan.get("required"):
         raise ValueError("run does not have a required revision_plan")
+    revision_errors = validate_revision_plan(run_dir, revision_plan)
+    if revision_errors:
+        raise ValueError(f"revision_plan is invalid: {revision_errors}")
     raw_steps = revision_plan.get("steps", [])
     if not isinstance(raw_steps, list):
         raise ValueError("revision_plan.steps must be a list")

@@ -155,6 +155,9 @@ instead of duplicating Warmaster status rules. When `revision_plan.required` is
 true, ordinary `can_execute` and `can_start` are false; clients should use the
 revision actions instead. When a run is `interrupted`, ordinary `can_execute`
 and `can_start` are false; clients should use resume actions instead.
+Revision actions are false when the required `revision_plan` is structurally
+invalid or references workers that do not match the run dispatch package;
+summaries expose these diagnostics as `revision_plan_errors`.
 
 Run summaries also expose `last_preflight` when the ledger has a recorded run
 preflight. It contains the event timestamp, mode, selected steps, result, and

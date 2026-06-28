@@ -654,6 +654,42 @@ def main() -> int:
                 or not failed_revision_actions.get("can_execute_revision")
             ):
                 raise AssertionError(f"revision-required failed run exposed unsafe actions: {failed_revision_summary}")
+            invalid_revision_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-invalid-revision-plan-test"},
+            )
+            invalid_revision_dir = Path(invalid_revision_task["run_dir"])
+            invalid_revision_ledger_path = invalid_revision_dir / "task_ledger.json"
+            invalid_revision_ledger = json.loads(invalid_revision_ledger_path.read_text(encoding="utf-8"))
+            invalid_revision_ledger["status"] = "failed"
+            invalid_revision_ledger.setdefault("result", {})["revision_plan"] = {
+                "required": True,
+                "steps": [
+                    {
+                        "step_id": "draft_reconstruction",
+                        "worker": "Chronologis",
+                        "reason": "wrong worker",
+                        "source": "self_test",
+                        "priority": "blocker",
+                    }
+                ],
+            }
+            write_json(invalid_revision_ledger_path, invalid_revision_ledger)
+            invalid_revision_summary = request_json(base + "/runs/warmaster-invalid-revision-plan-test/summary")
+            invalid_revision_actions = invalid_revision_summary.get("summary", {}).get("actions", {})
+            if (
+                not invalid_revision_summary.get("summary", {}).get("revision_plan_errors")
+                or invalid_revision_actions.get("can_start_revision")
+                or invalid_revision_actions.get("can_execute_revision")
+            ):
+                raise AssertionError(f"invalid revision plan exposed revision actions: {invalid_revision_summary}")
+            try:
+                revision_step_ids_from_run(invalid_revision_dir)
+            except ValueError as exc:
+                if "revision_plan is invalid" not in str(exc):
+                    raise
+            else:
+                raise AssertionError("invalid revision plan should not produce revision step ids")
             revision_steps = revision_step_ids_from_run(run_dir)
             if revision_steps != ["draft_reconstruction", "critic_review", "finalize"]:
                 raise AssertionError(f"bad revision step expansion: {revision_steps}")
