@@ -12,6 +12,8 @@
 - Iskandar Khayon exposes an oversight plan through `/capabilities` and
   `/plan`, including artifact roles, handoffs, quality gates, completion
   criteria, and final review expectations.
+- Iskandar run packages persist the governor oversight plan as `oversight.json`,
+  and Warmaster exposes it through `GET /runs/{task_id}/oversight`.
 - Mechanicum prototype workers cover the current lore pipeline:
   - `Lexmechanic`
   - `AuspexBrowser`

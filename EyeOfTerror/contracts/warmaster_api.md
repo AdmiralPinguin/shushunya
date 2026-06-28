@@ -36,6 +36,7 @@ GET  /runs/{task_id}/steps/{step_id}
 GET  /runs/{task_id}/steps/{step_id}/artifacts
 GET  /runs/{task_id}/ledger
 GET  /runs/{task_id}/contract
+GET  /runs/{task_id}/oversight
 GET  /runs/{task_id}/dispatch
 GET  /runs/{task_id}/worker_tasks
 GET  /runs/{task_id}/worker_tasks?live=1
@@ -188,6 +189,10 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
   the same artifact text maximum.
 - `/runs/{task_id}/contract` and `/runs/{task_id}/dispatch` for orchestration
   debugging.
+- `/runs/{task_id}/oversight` for the immutable governor oversight plan saved
+  with the run package. This lets clients and higher-level governors inspect the
+  specific run's artifact roles, handoffs, quality gates, and final review
+  expectations even if the governor service changes later.
 - `/runs/{task_id}/worker_tasks?live=1` when worker services are running and
   live worker task state is needed.
 

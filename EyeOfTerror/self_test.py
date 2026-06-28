@@ -173,11 +173,15 @@ def main() -> int:
     print("[ok] Iskandar dispatch packets")
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        status = write_pipeline_run(contract, Path(temp_dir))
+        oversight = plan_lore_reconstruction(task, task_id="test-skalathrax").to_dict()["oversight"]
+        status = write_pipeline_run(contract, Path(temp_dir), oversight=oversight)
         if not status["ok"]:
             raise AssertionError(f"pipeline status failed: {status}")
+        if not status.get("oversight_path"):
+            raise AssertionError(f"pipeline status did not expose oversight path: {status}")
         expected_files = [
             "contract.json",
+            "oversight.json",
             "status.json",
             "dispatch/source_discovery.json",
             "dispatch/source_acquisition.json",
@@ -193,6 +197,9 @@ def main() -> int:
         leftovers = list(Path(temp_dir).glob("**/*.tmp"))
         if leftovers:
             raise AssertionError(f"pipeline run left atomic temp files: {leftovers}")
+        written_oversight = json.loads((Path(temp_dir) / "oversight.json").read_text(encoding="utf-8"))
+        if written_oversight.get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json":
+            raise AssertionError(f"pipeline run wrote bad oversight: {written_oversight}")
     print("[ok] Iskandar pipeline run package")
     return 0
 

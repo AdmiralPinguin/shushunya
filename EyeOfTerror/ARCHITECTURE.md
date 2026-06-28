@@ -18,10 +18,11 @@ services unless it is doing explicit diagnostics.
 1. A client sends a user message or task to Warmaster Gateway.
 2. Warmaster classifies the request and chooses one active Inner Circle
    governor.
-3. The governor builds a task contract, dispatch packets, and verification
-   expectations. Warmaster can use an in-process governor path for local
-   development or the governor HTTP API for service-separated execution; the
-   gateway can be started in either default mode.
+3. The governor builds a task contract, dispatch packets, an immutable
+   oversight plan, and verification expectations. Warmaster can use an
+   in-process governor path for local development or the governor HTTP API for
+   service-separated execution; the gateway can be started in either default
+   mode.
 4. Warmaster executes or starts the run, records durable ledger state, and
    exposes polling/cancellation endpoints to clients.
 5. Mechanicum workers perform focused steps through the common worker API.
@@ -69,6 +70,13 @@ Clients should use:
 
 Detailed run endpoints remain available for debugging, but normal clients
 should prefer snapshots over many separate requests.
+
+Each prepared run package should include:
+
+- `contract.json` for the user task contract.
+- `oversight.json` for the governor's run-specific supervision plan.
+- `status.json` for pipeline status and file locations.
+- `dispatch/*.json` for worker requests.
 
 ## Service Startup
 

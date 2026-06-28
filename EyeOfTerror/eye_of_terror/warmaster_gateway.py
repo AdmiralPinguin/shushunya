@@ -295,7 +295,9 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "governor": governor,
             "missing_workers": missing_workers,
         }
-    status = write_pipeline_run(plan.contract, run_dir)
+    plan_payload = plan.to_dict()
+    oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else None
+    status = write_pipeline_run(plan.contract, run_dir, oversight=oversight)
     TaskLedger.create(run_dir / "task_ledger.json", plan.contract.task_id, plan.contract.goal, governor)
     return {
         "ok": status["ok"],
@@ -718,6 +720,16 @@ def run_contract(run_dir: Path) -> dict[str, Any]:
     if error:
         return {"ok": False, "error": error, "error_code": "corrupt_contract"}
     return {"ok": True, "contract": payload}
+
+
+def run_oversight(run_dir: Path) -> dict[str, Any]:
+    oversight_path = run_dir / "oversight.json"
+    if not oversight_path.exists():
+        return {"ok": False, "error": "oversight not found", "error_code": "oversight_not_found"}
+    payload, error = load_json_object(oversight_path, "oversight")
+    if error:
+        return {"ok": False, "error": error, "error_code": "corrupt_oversight"}
+    return {"ok": True, "oversight": payload}
 
 
 def run_dispatch_packets(run_dir: Path) -> dict[str, Any]:
@@ -1475,6 +1487,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "final_package_read",
             "http_governor_planning",
             "run_contract_read",
+            "run_oversight_read",
             "run_dispatch_read",
             "run_worker_task_read",
             "run_events_read",
@@ -1532,6 +1545,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/steps/{step_id}/artifacts",
             "GET /runs/{task_id}/ledger",
             "GET /runs/{task_id}/contract",
+            "GET /runs/{task_id}/oversight",
             "GET /runs/{task_id}/dispatch",
             "GET /runs/{task_id}/worker_tasks",
             "GET /runs/{task_id}/worker_tasks?live=1",
@@ -1875,6 +1889,11 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 if len(parts) == 3 and parts[2] == "contract":
                     payload = run_contract(run_dir)
                     status_code = 500 if payload.get("error_code") == "corrupt_contract" else 404
+                    response(self, 200 if payload.get("ok") else status_code, payload)
+                    return
+                if len(parts) == 3 and parts[2] == "oversight":
+                    payload = run_oversight(run_dir)
+                    status_code = 500 if payload.get("error_code") == "corrupt_oversight" else 404
                     response(self, 200 if payload.get("ok") else status_code, payload)
                     return
                 if len(parts) == 3 and parts[2] == "dispatch":

@@ -105,20 +105,25 @@ def pipeline_status(contract: TaskContract, packets: list[DispatchPacket]) -> di
     }
 
 
-def write_pipeline_run(contract: TaskContract, run_dir: Path) -> dict[str, Any]:
+def write_pipeline_run(contract: TaskContract, run_dir: Path, oversight: dict[str, Any] | None = None) -> dict[str, Any]:
     run_dir.mkdir(parents=True, exist_ok=True)
     dispatch_dir = run_dir / "dispatch"
     dispatch_dir.mkdir(parents=True, exist_ok=True)
     packets = build_dispatch_packets(contract)
     contract_path = run_dir / "contract.json"
+    oversight_path = run_dir / "oversight.json"
     status_path = run_dir / "status.json"
     write_json_atomic(contract_path, contract.to_dict())
+    if oversight is not None:
+        write_json_atomic(oversight_path, oversight)
     for packet in packets:
         packet_path = dispatch_dir / f"{packet.step_id}.json"
         write_json_atomic(packet_path, packet.to_dict())
     status = pipeline_status(contract, packets)
     status["run_dir"] = str(run_dir)
     status["contract_path"] = str(contract_path)
+    if oversight is not None:
+        status["oversight_path"] = str(oversight_path)
     status["dispatch_dir"] = str(dispatch_dir)
     write_json_atomic(status_path, status)
     return status

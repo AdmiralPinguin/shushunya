@@ -134,7 +134,7 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 if self.path == "/prepare_run":
                     run_dir = resolve_run_dir(default_run_root, str(payload.get("run_dir") or ""), plan.contract.task_id)
-                    status = write_pipeline_run(plan.contract, run_dir)
+                    status = write_pipeline_run(plan.contract, run_dir, oversight=oversight_plan(plan.contract))
                     response(self, 200, {"ok": status["ok"], "governor": "IskandarKhayon", "status": status})
                     return
                 response(self, 404, {"ok": False, "error": "not found"})

@@ -92,8 +92,16 @@ def main() -> int:
                 base + "/prepare_run",
                 {"task": "Собери события Скалатракса", "task_id": "iskandar-http-test", "run_dir": str(run_dir)},
             )
-            if not prepared.get("ok") or not (run_dir / "dispatch" / "source_discovery.json").exists():
+            if (
+                not prepared.get("ok")
+                or not (run_dir / "dispatch" / "source_discovery.json").exists()
+                or not (run_dir / "oversight.json").exists()
+                or not prepared.get("status", {}).get("oversight_path")
+            ):
                 raise AssertionError(f"bad prepared run: {prepared}")
+            prepared_oversight = json.loads((run_dir / "oversight.json").read_text(encoding="utf-8"))
+            if prepared_oversight.get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json":
+                raise AssertionError(f"prepare_run wrote bad oversight: {prepared_oversight}")
             try:
                 request_json(
                     base + "/prepare_run",

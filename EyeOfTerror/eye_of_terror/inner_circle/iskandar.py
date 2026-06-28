@@ -89,7 +89,7 @@ def main() -> int:
     args = parser.parse_args()
     plan = plan_lore_reconstruction(args.task, task_id=args.task_id or None)
     if args.run_dir:
-        status = write_pipeline_run(plan.contract, Path(args.run_dir))
+        status = write_pipeline_run(plan.contract, Path(args.run_dir), oversight=oversight_plan(plan.contract))
         print(json.dumps(status, ensure_ascii=False, indent=2))
     else:
         payload = plan.to_dict()

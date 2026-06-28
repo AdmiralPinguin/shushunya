@@ -263,6 +263,7 @@ def main() -> int:
                 "http_governor_planning",
                 "brigade_plan_snapshot",
                 "brigade_health_snapshot",
+                "run_oversight_read",
             }
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
                 raise AssertionError(f"bad gateway capabilities response: {capabilities}")
@@ -560,6 +561,13 @@ def main() -> int:
             contract = request_json(base + "/runs/warmaster-test/contract")
             if not contract.get("ok") or contract["contract"].get("task_id") != "warmaster-test":
                 raise AssertionError(f"bad run contract: {contract}")
+            oversight = request_json(base + "/runs/warmaster-test/oversight")
+            if (
+                not oversight.get("ok")
+                or oversight.get("oversight", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
+                or oversight.get("oversight", {}).get("artifact_roles", {}).get("draft") != ["/work/skalathrax/reconstruction_ru.md"]
+            ):
+                raise AssertionError(f"bad run oversight: {oversight}")
             dispatch = request_json(base + "/runs/warmaster-test/dispatch")
             if not dispatch.get("ok") or not any(item.get("packet", {}).get("worker") == "Lexmechanic" for item in dispatch.get("dispatch", [])):
                 raise AssertionError(f"bad run dispatch: {dispatch}")
