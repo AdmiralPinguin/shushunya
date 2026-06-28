@@ -692,6 +692,27 @@ def main() -> int:
                 or not isinstance(preflight_with_readiness.get("brigade_readiness", {}).get("warnings"), list)
             ):
                 raise AssertionError(f"task preflight did not expose compact brigade readiness: {preflight_with_readiness}")
+            orchestrated = request_json(
+                base + "/orchestrate",
+                {
+                    "message": "Собери все известное о событиях Скалатракса.",
+                    "task_id": "warmaster-orchestrate-test",
+                    "run_mode": "local",
+                    "timeout_sec": 30,
+                },
+            )
+            orchestrated_run_dir = Path(orchestrated.get("run_dir", ""))
+            orchestrated_ledger = json.loads((orchestrated_run_dir / "task_ledger.json").read_text(encoding="utf-8"))
+            if (
+                not orchestrated.get("ok")
+                or orchestrated.get("phase") != "ready_to_start"
+                or [item.get("stage") for item in orchestrated.get("trace", [])] != ["task_preflight", "task", "run_preflight"]
+                or orchestrated.get("next_action", {}).get("kind") != "start_run"
+                or orchestrated.get("next_action", {}).get("endpoint") != "POST /runs/{task_id}/start_local"
+                or orchestrated_ledger.get("status") != "created"
+                or not any(item.get("type") == "run_preflight_recorded" for item in orchestrated_ledger.get("events", []))
+            ):
+                raise AssertionError(f"prepare orchestration did not stop at a start recommendation: {orchestrated}")
             task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},

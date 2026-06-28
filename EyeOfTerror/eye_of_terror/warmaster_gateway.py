@@ -1819,6 +1819,97 @@ def record_run_preflight_event(run_dir: Path, preflight: dict[str, Any]) -> None
     TaskLedger.load(ledger_path).record_event("run_preflight_recorded", payload)
 
 
+def orchestrate_prepare_task(
+    message: str,
+    task_id: str | None,
+    run_root: Path,
+    governor_transport: str = "local",
+    governor_host: str = "127.0.0.1",
+    run_mode: str = "http",
+    host: str = "127.0.0.1",
+    timeout_sec: int = 30,
+    include_brigade_health: bool = False,
+) -> dict[str, Any]:
+    if run_mode not in {"local", "http"}:
+        raise ValueError("run_mode must be local or http")
+    trace: list[dict[str, Any]] = []
+    task_preflight = preflight_task(
+        message,
+        task_id,
+        run_root,
+        governor_transport=governor_transport,
+        governor_host=governor_host,
+        include_brigade_health=include_brigade_health,
+    )
+    task_preflight_actions = task_preflight.get("actions") if isinstance(task_preflight.get("actions"), dict) else {}
+    trace.append({"stage": "task_preflight", "ok": bool(task_preflight.get("ok")), "next_action": task_preflight_actions.get("next_action", {})})
+    if not task_preflight.get("ok"):
+        return {
+            "ok": False,
+            "phase": "task_preflight",
+            "trace": trace,
+            "task_preflight": task_preflight,
+            "actions": task_preflight_actions,
+            "next_action": task_preflight_actions.get("next_action", {}),
+        }
+    task = prepare_task(message, task_id, run_root, governor_transport=governor_transport, governor_host=governor_host)
+    task_actions = task.get("actions") if isinstance(task.get("actions"), dict) else {}
+    trace.append({"stage": "task", "ok": bool(task.get("ok")), "task_id": str(task.get("task_id") or ""), "next_action": task_actions.get("next_action", {})})
+    if not task.get("ok"):
+        return {
+            "ok": False,
+            "phase": "task",
+            "trace": trace,
+            "task_preflight": task_preflight,
+            "task": task,
+            "actions": task_actions,
+            "next_action": task_actions.get("next_action", {}),
+        }
+    run_dir = Path(str(task.get("run_dir") or ""))
+    if not run_dir.exists():
+        next_action = {"kind": "inspect_existing_run", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "run directory is missing after task creation"}
+        return {
+            "ok": False,
+            "phase": "task",
+            "trace": trace,
+            "task_preflight": task_preflight,
+            "task": task,
+            "error": "task did not create a run directory",
+            "next_action": next_action,
+        }
+    preflight_workspace = resolve_run_child_path(run_dir, "", "work") if run_mode == "local" else None
+    run_preflight = run_execution_preflight(
+        run_dir,
+        mode=run_mode,
+        workspace_root=preflight_workspace,
+        host=host,
+        timeout_sec=timeout_sec,
+    )
+    record_run_preflight_event(run_dir, run_preflight)
+    run_preflight_actions = run_preflight.get("actions") if isinstance(run_preflight.get("actions"), dict) else {}
+    trace.append(
+        {
+            "stage": "run_preflight",
+            "ok": bool(run_preflight.get("ok")),
+            "task_id": str(run_preflight.get("task_id") or task.get("task_id") or ""),
+            "next_action": run_preflight_actions.get("next_action", {}),
+        }
+    )
+    return {
+        "ok": bool(run_preflight.get("ok")),
+        "phase": "ready_to_start" if run_preflight.get("ok") else "run_preflight",
+        "task_id": str(task.get("task_id") or run_preflight.get("task_id") or ""),
+        "run_dir": str(run_dir),
+        "run_mode": run_mode,
+        "trace": trace,
+        "task_preflight": task_preflight,
+        "task": task,
+        "run_preflight": run_preflight,
+        "actions": run_preflight_actions,
+        "next_action": run_preflight_actions.get("next_action", {}),
+    }
+
+
 def revision_step_ids_from_run(run_dir: Path) -> list[str]:
     ledger_path = run_dir / "task_ledger.json"
     ledger, ledger_error = load_ledger_dict(ledger_path)
@@ -2337,6 +2428,7 @@ def gateway_capabilities() -> dict[str, Any]:
         "capabilities": [
             "task_routing",
             "task_preflight",
+            "task_prepare_orchestration",
             "run_preparation",
             "run_listing",
             "run_status_summary",
@@ -2395,6 +2487,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /events?limit=20",
             "GET /events?after=0",
             "POST /task_preflight",
+            "POST /orchestrate",
             "POST /task",
             "GET /runs",
             "GET /runs?limit=20",
@@ -2444,6 +2537,7 @@ def gateway_capabilities() -> dict[str, Any]:
 def gateway_actions() -> dict[str, Any]:
     return {
         "can_preflight_task": True,
+        "can_orchestrate_prepare": True,
         "can_preflight_runs": True,
         "can_create_task": True,
         "can_start_runs": True,
@@ -2456,6 +2550,7 @@ def gateway_actions() -> dict[str, Any]:
         "can_cancel_runs": True,
         "can_check_brigade_readiness": True,
         "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
+        "prepare_task_flow": ["POST /orchestrate", "follow next_action to start or inspect"],
         "polling": ["GET /events?after=0", "GET /runs/{task_id}/snapshot?events_after=0"],
         "maintenance": ["GET /recovery", "POST /recovery/start_resume_local", "POST /recovery/start_resume_http", "POST /recover_stale"],
         "run_inspection": [
@@ -2858,6 +2953,31 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             try:
                 payload = read_payload(self)
+                if self.path == "/orchestrate":
+                    message = str(payload.get("message") or payload.get("task") or "").strip()
+                    if not message:
+                        response(self, 400, {"ok": False, "error": "message is required"})
+                        return
+                    task_id = str(payload.get("task_id") or "").strip() or None
+                    governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
+                    governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
+                    run_mode = str(payload.get("run_mode") or "http").strip() or "http"
+                    host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
+                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 30), 7200))
+                    include_brigade_health = bool(payload.get("include_brigade_health"))
+                    prepared = orchestrate_prepare_task(
+                        message,
+                        task_id,
+                        run_root,
+                        governor_transport=governor_transport,
+                        governor_host=governor_host,
+                        run_mode=run_mode,
+                        host=host,
+                        timeout_sec=timeout_sec,
+                        include_brigade_health=include_brigade_health,
+                    )
+                    response(self, 200 if prepared.get("ok") else 409, prepared)
+                    return
                 if self.path == "/task":
                     message = str(payload.get("message") or payload.get("task") or "").strip()
                     if not message:

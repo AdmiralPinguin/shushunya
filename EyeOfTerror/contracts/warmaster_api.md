@@ -25,6 +25,7 @@ GET  /events
 GET  /events?limit=20
 GET  /events?after=0
 POST /task_preflight
+POST /orchestrate
 POST /task
 GET  /runs
 GET  /runs?limit=20
@@ -150,12 +151,19 @@ planning boundaries. Task preflight action bodies include the original
 chat clients. Rejected task creation responses that recommend retrying task
 preflight preserve the same executable body shape.
 
+`POST /orchestrate` is a prepare-only orchestration helper for chat clients. It
+performs task preflight, task creation, and run preflight in order, records the
+run preflight event, and returns a `trace` plus the next safe action. It does
+not start worker execution; successful responses end at `phase=ready_to_start`
+with a `start_*` recommendation in `next_action`.
+
 ```json
 {
   "message": "User task text",
   "task_id": "optional-stable-id",
   "governor_transport": "local|http",
   "governor_host": "optional-loopback-host",
+  "run_mode": "local|http",
   "include_brigade_health": true
 }
 ```

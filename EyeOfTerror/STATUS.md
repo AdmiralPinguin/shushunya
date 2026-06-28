@@ -66,6 +66,9 @@
   runs recommend force rerun instead of unsafe plain start.
 - Warmaster Gateway exposes `POST /task_preflight` for routing, governor,
   contract, and worker checks without creating run history.
+- Warmaster Gateway exposes prepare-only `POST /orchestrate` for chat clients:
+  task preflight, task creation, run preflight, trace, and next start/inspect
+  action without launching long worker execution.
 - Task preflight contract summaries expose planned worker steps, dependency
   edges, and expected artifacts.
 - Task preflight exposes compact governor oversight summaries and validation so
