@@ -77,4 +77,5 @@ from `Mechanicum/worker_services.json`, top-level service dependencies, and
 readiness URLs. `--wait-ready` turns Warmaster, governor, and worker health URLs
 into a startup readiness gate.
 The launcher fails fast if any managed top-level process exits and terminates
-the remaining managed processes.
+the remaining managed processes. It also checks managed port availability before
+starting unless `--skip-port-check` is passed.

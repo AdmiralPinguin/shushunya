@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -188,6 +189,18 @@ def wait_for_urls(urls: list[str], timeout_sec: float, interval_sec: float = 0.2
     return {"ok": not pending, "ready": sorted(ready), "pending": sorted(pending), "timeout_sec": timeout_sec}
 
 
+def port_is_free(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        return sock.connect_ex((host, port)) != 0
+
+
+def port_preflight(host: str, ports: list[int]) -> dict[str, object]:
+    checked = sorted(set(port for port in ports if port > 0))
+    busy = [port for port in checked if not port_is_free(host, port)]
+    return {"ok": not busy, "host": host, "checked": checked, "busy": busy}
+
+
 def terminate_processes(processes: list[subprocess.Popen[bytes]]) -> None:
     for process in processes:
         if process.poll() is None:
@@ -218,6 +231,7 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Print a machine-readable startup plan and exit.")
     parser.add_argument("--wait-ready", action="store_true", help="Wait for top-level service health URLs after starting.")
     parser.add_argument("--ready-timeout-sec", type=float, default=30.0)
+    parser.add_argument("--skip-port-check", action="store_true", help="Skip managed port availability preflight before starting.")
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
@@ -245,6 +259,13 @@ def main() -> int:
         for command in commands:
             print(f"{command.name}: {command.rendered()}")
         return 0
+
+    if not args.skip_port_check:
+        ports = [7000, 7101] + [int(port) for port in plan.get("ports", {}).get("mechanicum_workers", [])]
+        preflight = port_preflight(args.host, ports)
+        if not preflight["ok"]:
+            print(json.dumps({"ok": False, "port_preflight": preflight}, ensure_ascii=False, indent=2), file=sys.stderr)
+            return 1
 
     processes = [
         subprocess.Popen(command.command, cwd=repo_root, env={**os.environ, **command.env})

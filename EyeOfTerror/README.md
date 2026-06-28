@@ -143,6 +143,8 @@ Use `--wait-ready` to wait for top-level health URLs after starting the stack;
 Warmaster, Iskandar, and registered Mechanicum worker health URLs.
 If one managed process exits, the launcher terminates the remaining managed
 processes and returns the first exit code.
+Before starting, the launcher checks managed ports and refuses to start over a
+busy port. Use `--skip-port-check` only for diagnostics.
 
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the

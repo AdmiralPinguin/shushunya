@@ -8,7 +8,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from start_brigade import brigade_commands, brigade_plan, supervise_processes, wait_for_urls
+from start_brigade import brigade_commands, brigade_plan, port_preflight, supervise_processes, wait_for_urls
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -87,6 +87,16 @@ def main() -> int:
     finally:
         server.shutdown()
         thread.join(timeout=5)
+    busy_server = ThreadingHTTPServer(("127.0.0.1", 0), HealthHandler)
+    busy_thread = threading.Thread(target=busy_server.serve_forever, daemon=True)
+    busy_thread.start()
+    try:
+        preflight = port_preflight("127.0.0.1", [busy_server.server_port])
+        if preflight.get("ok") or busy_server.server_port not in preflight.get("busy", []):
+            raise AssertionError(f"port preflight did not detect busy port: {preflight}")
+    finally:
+        busy_server.shutdown()
+        busy_thread.join(timeout=5)
     short = subprocess.Popen([sys.executable, "-c", "raise SystemExit(7)"])
     long = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     code = supervise_processes([short, long], poll_interval_sec=0.05)
