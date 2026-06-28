@@ -82,6 +82,9 @@ stronger interruption mechanism.
 If execution endpoints accept `workspace_root`, that path must stay inside the
 selected run directory. Relative paths are resolved below the run directory.
 
+If execution, cancellation, or live worker task endpoints accept `host`, it must
+be a loopback worker service host such as `127.0.0.1` or `localhost`.
+
 ## Rules
 
 - Warmaster must not do specialist worker jobs directly.

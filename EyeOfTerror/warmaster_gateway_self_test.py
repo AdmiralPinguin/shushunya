@@ -10,7 +10,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, resolve_run_child_path, valid_task_id
+from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, resolve_run_child_path, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
 
 
@@ -63,6 +63,14 @@ def main() -> int:
         raise AssertionError("limit parser did not clamp values")
     if not valid_task_id("valid-task_1.2") or valid_task_id("../escape") or valid_task_id("x" * 129):
         raise AssertionError("task id validator accepted an unsafe value")
+    if validate_service_host("localhost") != "localhost":
+        raise AssertionError("loopback host validator rejected localhost")
+    try:
+        validate_service_host("example.com")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("service host validator accepted non-loopback host")
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir) / "runs"
         try:
@@ -193,6 +201,16 @@ def main() -> int:
                 or worker_tasks["worker_tasks"][0].get("task_id") != "warmaster-test:source_discovery"
             ):
                 raise AssertionError(f"bad worker task mapping: {worker_tasks}")
+            try:
+                request_json(base + "/runs/warmaster-test/worker_tasks?live=1&host=example.com")
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                bad_host = json.loads(exc.read().decode("utf-8"))
+                if "loopback" not in bad_host.get("error", ""):
+                    raise AssertionError(f"bad worker task host rejection: {bad_host}")
+            else:
+                raise AssertionError("worker task live lookup should reject non-loopback host")
             events = request_json(base + "/runs/warmaster-test/events?limit=1")
             if not events.get("ok") or len(events.get("events", [])) != 1:
                 raise AssertionError(f"bad run events: {events}")
@@ -244,6 +262,20 @@ def main() -> int:
             )
             if not unsafe_task.get("ok"):
                 raise AssertionError(f"bad unsafe workspace task response: {unsafe_task}")
+            try:
+                request_json(
+                    base + "/runs/warmaster-unsafe-workspace-test/execute_http",
+                    {"timeout_sec": 30, "host": "example.com"},
+                    timeout=60,
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                bad_host = json.loads(exc.read().decode("utf-8"))
+                if "loopback" not in bad_host.get("error", ""):
+                    raise AssertionError(f"bad execute_http host rejection: {bad_host}")
+            else:
+                raise AssertionError("execute_http should reject non-loopback host")
             try:
                 request_json(
                     base + "/runs/warmaster-unsafe-workspace-test/execute_local",

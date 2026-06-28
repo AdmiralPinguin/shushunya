@@ -28,6 +28,7 @@ ACTIVE_RUNS_LOCK = threading.Lock()
 MAX_LIST_LIMIT = 200
 MAX_ARTIFACT_TEXT_BYTES = 500000
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+ALLOWED_SERVICE_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def parse_limit(raw_value: str, default: int, maximum: int = MAX_LIST_LIMIT) -> int:
@@ -49,6 +50,13 @@ def resolve_run_child_path(run_dir: Path, requested: str, default_name: str) -> 
     if resolved != root and root not in resolved.parents:
         raise ValueError(f"path must stay inside run_dir: {default_name}")
     return resolved
+
+
+def validate_service_host(host: str) -> str:
+    normalized = host.strip().lower()
+    if normalized not in ALLOWED_SERVICE_HOSTS:
+        raise ValueError("worker service host must be a loopback host")
+    return normalized
 
 
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -212,6 +220,7 @@ def run_dispatch_packets(run_dir: Path) -> dict[str, Any]:
 
 
 def run_worker_tasks(run_dir: Path, include_health: bool = False, host: str = "127.0.0.1") -> dict[str, Any]:
+    host = validate_service_host(host)
     dispatch_payload = run_dispatch_packets(run_dir)
     if not dispatch_payload.get("ok"):
         return dispatch_payload
@@ -460,6 +469,7 @@ def gateway_state(run_root: Path, run_limit: int = 20) -> dict[str, Any]:
 
 
 def cancel_http_worker_tasks(run_dir: Path, host: str = "127.0.0.1", timeout_sec: float = 1.0) -> list[dict[str, Any]]:
+    host = validate_service_host(host)
     dispatch_dir = run_dir / "dispatch"
     if not dispatch_dir.exists():
         return []
@@ -608,7 +618,11 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     query = parse_qs(parsed.query)
                     include_live = query.get("live", ["0"])[0] in {"1", "true", "yes"}
                     host = query.get("host", ["127.0.0.1"])[0]
-                    payload = run_worker_tasks(run_dir, include_health=include_live, host=host)
+                    try:
+                        payload = run_worker_tasks(run_dir, include_health=include_live, host=host)
+                    except ValueError as exc:
+                        response(self, 400, {"ok": False, "error": str(exc)})
+                        return
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 if len(parts) == 3 and parts[2] == "events":
@@ -682,7 +696,7 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     reason = str(payload.get("reason") or "").strip()
                     ledger = TaskLedger.load(ledger_path)
                     ledger.request_cancel(reason)
-                    host = str(payload.get("host") or "127.0.0.1")
+                    host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
                     worker_cancellations = cancel_http_worker_tasks(run_root / task_id, host=host)
                     response(
                         self,
@@ -722,7 +736,7 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     if parts[2] in {"execute_local", "start_local"}:
                         executor = lambda: execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
                     else:
-                        host = str(payload.get("host") or "127.0.0.1")
+                        host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
                         http_workspace_root = workspace_root if "workspace_root" in payload else None
                         executor = lambda: execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root)
                     if parts[2].startswith("start_"):
@@ -740,7 +754,7 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     if parts[2] == "execute_local":
                         summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
                     else:
-                        host = str(payload.get("host") or "127.0.0.1")
+                        host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
                         http_workspace_root = workspace_root if "workspace_root" in payload else None
                         summary = execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root)
                     response(self, 200 if summary.get("ok") else 500, {"ok": bool(summary.get("ok")), "summary": summary})
