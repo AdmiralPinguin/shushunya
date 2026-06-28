@@ -795,19 +795,53 @@ def result_has_verified_artifact_mutation_rejection(result: dict[str, Any] | Non
     return False
 
 
+def missing_data_sources_from_result(result: dict[str, Any] | None) -> list[str]:
+    steps = (result or {}).get("steps")
+    if not isinstance(steps, list):
+        return []
+    paths: list[str] = []
+    seen: set[str] = set()
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        step_result = step.get("result")
+        if not isinstance(step_result, dict):
+            continue
+        missing = step_result.get("missing_data_sources")
+        if not isinstance(missing, list):
+            continue
+        for path in missing:
+            path_text = str(path or "").strip()
+            if path_text and path_text not in seen:
+                seen.add(path_text)
+                paths.append(path_text)
+    return paths[:10]
+
+
 def continuation_task(base_task: str, task_id: str, cycle: int, previous_result: dict[str, Any] | None = None) -> str:
     previous_message = str((previous_result or {}).get("message") or "").lower()
     repeated_mode = any(token in previous_message for token in ("повторяющихся действий", "repeated", "without progress"))
     json_parse_mode = any(token in previous_message for token in ("невалидный json", "invalid json", "json_parse_stall"))
     verified_mutation_mode = result_has_verified_artifact_mutation_rejection(previous_result)
+    missing_data_sources = missing_data_sources_from_result(previous_result)
     recovery_instruction = ""
     if repeated_mode:
+        missing_instruction = ""
+        if missing_data_sources:
+            missing_instruction = (
+                " Если в resume context еще нет успешного чтения всех входных data files, первым действием разрешено "
+                "сделать read_file ровно для одного недостающего источника из этого списка: "
+                + ", ".join(missing_data_sources)
+                + ". Такое чтение считается продуктивным действием. Не читай заново уже inspected источники."
+            )
         recovery_instruction += (
             "\n\nПредыдущий цикл остановился из-за повторяющихся действий без прогресса. "
             "До первого продуктивного действия запрещены inspection-действия: list_files, find_files, search_text, "
-            "read_file, file_info, web_search, web_fetch, web_links. "
+            "file_info, web_search, web_fetch, web_links, а также повторный read_file уже прочитанных источников. "
             "Следующий шаг должен быть продуктивным: write_file, append_file, replace_in_file, python, "
-            "web_extract_to_file, bundle_text_files, verify_text_file, telegram_send_document или final. "
+            "web_extract_to_file, bundle_text_files, verify_text_file, telegram_send_document или final."
+            + missing_instruction
+            + " "
             "Если задача зависит от входных data files, используй только факты из сохраненных read_file tool_result в resume context "
             "или python, который открывает и парсит реальные файлы из рабочего каталога. Не выдумывай строки, даты, сообщения или числа."
         )

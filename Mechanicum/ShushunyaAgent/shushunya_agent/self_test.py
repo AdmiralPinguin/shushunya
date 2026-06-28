@@ -2761,7 +2761,57 @@ def main() -> int:
         "/work/project/tickets.jsonl",
     ]:
         raise AssertionError(f"relative required artifacts polluted data sources: {relative_data_sources}")
+    resume_task = (
+        "Продолжи выполнение той же задачи по task journal. Исходную цель бери из start-событий в resume context.\n\n"
+        "Resume context from previous agent task journal arena-x:\n"
+        + json.dumps(
+            [
+                {
+                    "type": "start",
+                    "task": relative_required_task + "\n\nРабочий каталог для этой задачи: /work/project",
+                },
+                {
+                    "type": "tool_result",
+                    "action": "list_files",
+                    "result": {
+                        "ok": True,
+                        "items": [
+                            {"path": "/work/project/customers.csv"},
+                            {"path": "/work/project/invoices.csv"},
+                            {"path": "/work/project/tickets.jsonl"},
+                        ],
+                    },
+                },
+            ],
+            ensure_ascii=False,
+        )
+    )
+    resume_classification = agent_runner.task_text_for_runtime_classification(resume_task)
+    resume_required_paths = required_artifact_paths_from_task(resume_classification, "/work/project")
+    resume_data_sources = agent_runner.data_source_paths_from_task(resume_classification, "/work/project", resume_required_paths)
+    if resume_required_paths != relative_required_paths or resume_data_sources != relative_data_sources:
+        raise AssertionError(
+            f"resume classification polluted paths: required={resume_required_paths}, data={resume_data_sources}"
+        )
     print("[ok] required artifact path extraction")
+
+    repeated_result = {
+        "ok": False,
+        "message": "Агент остановлен супервизором: обнаружен цикл повторяющихся действий без прогресса.",
+        "steps": [
+            {
+                "result": {
+                    "ok": False,
+                    "error": "data source reread rejected by supervisor",
+                    "missing_data_sources": ["/work/project/tickets.jsonl"],
+                }
+            }
+        ],
+    }
+    continuation_text = server.continuation_task("base", "arena-x", 1, repeated_result)
+    if "/work/project/tickets.jsonl" not in continuation_text or "первым действием разрешено" not in continuation_text:
+        raise AssertionError(f"continuation task did not permit exact missing data source read: {continuation_text}")
+    print("[ok] repeated-stall continuation permits missing data source read")
 
     omitted_final_events: list[dict] = []
     omitted_final_stdout = io.StringIO()

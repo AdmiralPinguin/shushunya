@@ -1628,11 +1628,34 @@ def active_task_without_resume_context(task: str) -> str:
     return text[:cut].strip() or text
 
 
+def resume_context_start_task_text(task: str) -> str:
+    marker = "Resume context from previous agent task journal"
+    marker_index = (task or "").find(marker)
+    if marker_index < 0:
+        return ""
+    json_start = task.find("[", marker_index)
+    if json_start < 0:
+        return ""
+    try:
+        events, _end = json.JSONDecoder().raw_decode(task[json_start:])
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(events, list):
+        return ""
+    for event in events:
+        if not isinstance(event, dict) or str(event.get("type") or "") != "start":
+            continue
+        original_task = str(event.get("task") or "").strip()
+        if original_task:
+            return original_task
+    return ""
+
+
 def task_text_for_runtime_classification(task: str) -> str:
     active = active_task_without_resume_context(task)
     lowered = active.lower()
     if "той же задачи по task journal" in lowered or "исходную цель бери из start-событий" in lowered:
-        return task
+        return resume_context_start_task_text(task) or active
     return active
 
 
@@ -4685,10 +4708,10 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     verified_text_paths: set[str] = set(config.initial_verified_text_paths)
     explicit_workspace = explicit_workspace_from_task(original_task)
     restored_required_artifacts = [path for path in config.initial_required_artifact_paths if path_needs_text_verification(path)]
-    parsed_required_artifacts = required_artifact_paths_from_task(original_task, explicit_workspace)
+    parsed_required_artifacts = required_artifact_paths_from_task(classification_task_text, explicit_workspace)
     required_artifact_path_list = list(dict.fromkeys([*parsed_required_artifacts, *restored_required_artifacts]))[:20]
     required_artifact_paths = set(required_artifact_path_list)
-    required_min_chars_by_path = required_min_chars_by_path_from_task(original_task, required_artifact_path_list)
+    required_min_chars_by_path = required_min_chars_by_path_from_task(classification_task_text, required_artifact_path_list)
     expected_cli_modules: set[str] = set(cli_modules_from_task(classification_task_text))
     expected_cli_modules.update(cli_modules_from_text_paths(classification_task_text, explicit_workspace))
     expected_cli_modules.update(cli_modules_from_listing_text(classification_task_text, explicit_workspace))
@@ -4698,7 +4721,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     expected_cli_input_paths.update(cli_input_paths_from_listing_text(original_task, explicit_workspace))
     if swe_requires_cli_verification and explicit_workspace:
         expected_cli_modules.update(cli_modules_from_workspace(explicit_workspace))
-    data_source_path_list = data_source_paths_from_task(original_task, explicit_workspace, required_artifact_path_list)
+    data_source_path_list = data_source_paths_from_task(classification_task_text, explicit_workspace, required_artifact_path_list)
     data_source_paths = set(data_source_path_list)
     inspected_data_source_paths: set[str] = set(resume_context_inspected_data_sources(original_task, data_source_path_list))
     required_artifactless_inspection_actions = 0
