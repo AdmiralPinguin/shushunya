@@ -133,6 +133,18 @@ def load_ledger_dict(ledger_path: Path) -> tuple[dict[str, Any], str]:
         return {}, str(exc)
 
 
+def load_json_object(path: Path, label: str) -> tuple[dict[str, Any], str]:
+    if not path.exists():
+        return {}, f"{label} not found"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {}, f"{label} is corrupt: {exc}"
+    if not isinstance(payload, dict):
+        return {}, f"{label} is not a JSON object"
+    return payload, ""
+
+
 def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]:
     planned_steps = status.get("steps", [])
     ledger_steps = ledger.get("steps", [])
@@ -160,17 +172,12 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
 def run_summary(run_dir: Path) -> dict[str, Any]:
     status_path = run_dir / "status.json"
     ledger_path = run_dir / "task_ledger.json"
-    try:
-        status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
-        if not isinstance(status, dict):
-            status = {}
-    except Exception:
-        status = {}
+    status, status_error = load_json_object(status_path, "status") if status_path.exists() else ({}, "")
     ledger, ledger_error = load_ledger_dict(ledger_path)
     summary = {
         "task_id": ledger.get("task_id") or status.get("task_id") or run_dir.name,
         "run_dir": str(run_dir),
-        "status": "corrupt" if ledger_error and ledger_path.exists() else ledger.get("status") or status.get("status") or "unknown",
+        "status": "corrupt" if (ledger_error and ledger_path.exists()) or status_error else ledger.get("status") or status.get("status") or "unknown",
         "goal": ledger.get("goal") or "",
         "governor": ledger.get("governor") or status.get("governor") or "",
         "created_at": ledger.get("created_at") or "",
@@ -178,6 +185,8 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "result": ledger.get("result", {}),
         "progress": run_progress(status, ledger),
     }
+    if status_error:
+        summary["status_error"] = status_error
     if ledger_error and ledger_path.exists():
         summary["ledger_error"] = ledger_error
     return summary
@@ -202,10 +211,10 @@ def run_status_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
 def run_contract(run_dir: Path) -> dict[str, Any]:
     contract_path = run_dir / "contract.json"
     if not contract_path.exists():
-        return {"ok": False, "error": "contract not found"}
-    payload = json.loads(contract_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        return {"ok": False, "error": "contract is not a JSON object"}
+        return {"ok": False, "error": "contract not found", "error_code": "contract_not_found"}
+    payload, error = load_json_object(contract_path, "contract")
+    if error:
+        return {"ok": False, "error": error, "error_code": "corrupt_contract"}
     return {"ok": True, "contract": payload}
 
 
@@ -641,7 +650,8 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 if len(parts) == 3 and parts[2] == "contract":
                     payload = run_contract(run_dir)
-                    response(self, 200 if payload.get("ok") else 404, payload)
+                    status_code = 500 if payload.get("error_code") == "corrupt_contract" else 404
+                    response(self, 200 if payload.get("ok") else status_code, payload)
                     return
                 if len(parts) == 3 and parts[2] == "dispatch":
                     payload = run_dispatch_packets(run_dir)
@@ -696,12 +706,17 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         return
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return
-                status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
+                status, status_error = load_json_object(status_path, "status") if status_path.exists() else ({}, "")
                 ledger, ledger_error = load_ledger_dict(ledger_path)
+                status_payload = {"ok": True, "task_id": task_id, "run_dir": str(run_dir), "status": status, "ledger": ledger}
+                if status_error:
+                    status_payload["status_error"] = status_error
                 if ledger_error and ledger_path.exists():
-                    response(self, 200, {"ok": True, "task_id": task_id, "run_dir": str(run_dir), "status": status, "ledger": {}, "ledger_error": ledger_error})
+                    status_payload["ledger"] = {}
+                    status_payload["ledger_error"] = ledger_error
+                    response(self, 200, status_payload)
                     return
-                response(self, 200, {"ok": True, "task_id": task_id, "run_dir": str(run_dir), "status": status, "ledger": ledger})
+                response(self, 200, status_payload)
                 return
             response(self, 404, {"ok": False, "error": "not found"})
 

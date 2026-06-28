@@ -112,6 +112,29 @@ def main() -> int:
             corrupt_item = next((item for item in corrupt_runs.get("runs", []) if item.get("task_id") == "corrupt-ledger-test"), None)
             if not corrupt_item or corrupt_item.get("status") != "corrupt" or not corrupt_item.get("ledger_error"):
                 raise AssertionError(f"corrupt ledger was not represented safely: {corrupt_runs}")
+            corrupt_status_dir = run_root / "corrupt-status-test"
+            corrupt_status_dir.mkdir(parents=True, exist_ok=True)
+            (corrupt_status_dir / "status.json").write_text("{", encoding="utf-8")
+            TaskLedger.create(corrupt_status_dir / "task_ledger.json", "corrupt-status-test", "test corrupt status", "IskandarKhayon")
+            corrupt_status = request_json(base + "/runs/corrupt-status-test")
+            if not corrupt_status.get("ok") or "status_error" not in corrupt_status:
+                raise AssertionError(f"corrupt status was not represented safely: {corrupt_status}")
+            corrupt_status_summary = request_json(base + "/runs/corrupt-status-test/summary")
+            if corrupt_status_summary.get("summary", {}).get("status") != "corrupt":
+                raise AssertionError(f"corrupt status summary was not represented safely: {corrupt_status_summary}")
+            corrupt_contract_dir = run_root / "corrupt-contract-test"
+            corrupt_contract_dir.mkdir(parents=True, exist_ok=True)
+            (corrupt_contract_dir / "contract.json").write_text("{", encoding="utf-8")
+            try:
+                request_json(base + "/runs/corrupt-contract-test/contract")
+            except urllib.error.HTTPError as exc:
+                if exc.code != 500:
+                    raise
+                corrupt_contract = json.loads(exc.read().decode("utf-8"))
+                if corrupt_contract.get("error_code") != "corrupt_contract":
+                    raise AssertionError(f"bad corrupt contract response: {corrupt_contract}")
+            else:
+                raise AssertionError("corrupt contract endpoint should return a diagnostic error")
             governors = request_json(base + "/governors")
             if not governors.get("ok") or not any(item.get("name") == "IskandarKhayon" for item in governors.get("governors", [])):
                 raise AssertionError(f"bad governors response: {governors}")

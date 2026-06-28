@@ -49,6 +49,8 @@
   in-process ledger instances.
 - Warmaster run listing/state endpoints tolerate corrupt ledger files and report
   those runs as `corrupt` instead of dropping the whole API response.
+- Warmaster run inspection endpoints tolerate corrupt `status.json` and
+  `contract.json` files and return diagnostic JSON instead of crashing.
 - Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
 - Warmaster Gateway can request cooperative cancellation through the task ledger,
   and best-effort forwards cancellation to HTTP worker task endpoints from the
