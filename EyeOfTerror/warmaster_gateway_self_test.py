@@ -1617,7 +1617,11 @@ def main() -> int:
             if not background_task.get("ok"):
                 raise AssertionError(f"bad background task response: {background_task}")
             started = request_json(base + "/runs/warmaster-background-test/start_local", {"timeout_sec": 30})
-            if started.get("status") != "started":
+            if (
+                started.get("status") != "started"
+                or started.get("next_action", {}).get("kind") != "poll"
+                or started.get("client_action", {}).get("path") != "/runs/warmaster-background-test/snapshot"
+            ):
                 raise AssertionError(f"background start failed: {started}")
             for _ in range(60):
                 background_ledger = request_json(base + "/runs/warmaster-background-test/ledger")

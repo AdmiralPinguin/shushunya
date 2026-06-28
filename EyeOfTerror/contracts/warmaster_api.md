@@ -407,6 +407,10 @@ gates, so completed, interrupted, active, or revision-required runs return the
 same force, resume, poll, or revision recommendation instead of an unsafe plain
 start. Each run preflight records a compact `run_preflight_recorded` ledger
 event with mode, selected steps, result, and failure counts.
+Direct background start endpoints such as `POST /runs/{task_id}/start_local`,
+`POST /runs/{task_id}/start_http`, `POST /runs/{task_id}/start_revision_*`, and
+`POST /runs/{task_id}/start_resume_*` return a polling `next_action` and
+executable `client_action` when a run starts or is already active.
 
 Local and HTTP executors must convert malformed dispatch packets into
 structured failed or preflight-failed run results instead of crashing before the

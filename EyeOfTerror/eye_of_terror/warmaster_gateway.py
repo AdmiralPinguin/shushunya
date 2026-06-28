@@ -3854,9 +3854,31 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                                 pass
                         started = start_background(task_id, executor)
                         if not started:
-                            response(self, 409, {"ok": False, "error": "run already active", "task_id": task_id})
+                            poll_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "run is already active"}
+                            response(
+                                self,
+                                409,
+                                {
+                                    "ok": False,
+                                    "error": "run already active",
+                                    "task_id": task_id,
+                                    "next_action": poll_action,
+                                    "client_action": executable_client_action(task_id, poll_action),
+                                },
+                            )
                             return
-                        response(self, 202, {"ok": True, "task_id": task_id, "status": "started"})
+                        poll_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "run started in background"}
+                        response(
+                            self,
+                            202,
+                            {
+                                "ok": True,
+                                "task_id": task_id,
+                                "status": "started",
+                                "next_action": poll_action,
+                                "client_action": executable_client_action(task_id, poll_action),
+                            },
+                        )
                         return
                     if parts[2] in {"execute_local", "execute_revision_local", "resume_local"}:
                         summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec, step_ids=restricted_step_ids, execution_mode=execution_mode)

@@ -189,7 +189,10 @@
   the remaining managed processes.
 - The brigade launcher checks managed port availability before starting, with a
   diagnostic opt-out.
-- Warmaster Gateway can start local/HTTP execution in a background thread and expose progress through the ledger.
+- Warmaster Gateway can start local/HTTP execution in a background thread and
+  expose progress through the ledger.
+- Direct background run start responses expose polling `next_action` and
+  executable `client_action` fields.
 - Warmaster Gateway exposes `GET /governors`, `GET /workers`, and
   `GET /workers?health=1`; worker listings are enriched with available
   `Mechanicum/*/worker.json` metadata.
