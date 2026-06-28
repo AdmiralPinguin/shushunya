@@ -1296,6 +1296,14 @@ def main() -> int:
                 or completed_orchestration.get("snapshot", {}).get("summary", {}).get("status") != "completed"
             ):
                 raise AssertionError(f"completed orchestration state did not expose final package: {completed_orchestration}")
+            completed_run_list = request_json(base + "/runs")
+            completed_card = next((item for item in completed_run_list.get("orchestration_cards", []) if item.get("task_id") == "warmaster-test"), {})
+            if (
+                completed_card.get("phase") != completed_orchestration.get("phase")
+                or completed_card.get("decision", {}).get("recommended_kind") != completed_orchestration.get("decision", {}).get("recommended_kind")
+                or completed_card.get("display", {}).get("headline") != completed_orchestration.get("display", {}).get("headline")
+            ):
+                raise AssertionError(f"run card diverged from orchestration state: card={completed_card}, state={completed_orchestration}")
             completed_global_events = request_json(base + "/events?limit=200")
             completed_result_event = next(
                 (

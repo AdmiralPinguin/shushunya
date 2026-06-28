@@ -958,23 +958,33 @@ def run_status_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return {"total": len(runs), "active": active, "by_status": by_status}
 
 
-def run_orchestration_card(run: dict[str, Any], active: bool = False) -> dict[str, Any]:
-    actions = run.get("actions") if isinstance(run.get("actions"), dict) else {}
+def orchestration_view_fields(
+    summary: dict[str, Any],
+    active: bool = False,
+    event_cursor_next: int = 0,
+    final_payload: dict[str, Any] | None = None,
+    final_max_bytes: int | None = None,
+) -> dict[str, Any]:
+    actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
     next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
-    status = str(run.get("status") or "")
+    status = str(summary.get("status") or "")
     phase = "inspect"
-    final_payload: dict[str, Any] = {}
+    final_payload = final_payload if isinstance(final_payload, dict) else {}
     if active or status in {"running", "queued", "cancelling"}:
         phase = "running"
-        next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/orchestration", "body": {"events_after": 0}, "reason": "run is active"}
+        next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/orchestration", "body": {"events_after": event_cursor_next}, "reason": "run is active"}
     elif actions.get("can_start_revision"):
         phase = "revision_required"
     elif status == "completed":
         phase = "completed"
-        final_payload = {
-            "summary": run.get("final_manifest_summary") if isinstance(run.get("final_manifest_summary"), dict) else {},
-            "deliverable": "",
-        }
+        if not final_payload:
+            final_payload = {
+                "summary": summary.get("final_manifest_summary") if isinstance(summary.get("final_manifest_summary"), dict) else {},
+                "deliverable": "",
+            }
+        if final_payload.get("ok") or final_payload.get("summary"):
+            body = {"max_bytes": final_max_bytes} if final_max_bytes is not None else {}
+            next_action = {"kind": "inspect_final", "method": "GET", "endpoint": "GET /runs/{task_id}/final", "body": body, "reason": "run completed and final package is available"}
     elif actions.get("can_resume"):
         phase = "resume_required"
     elif actions.get("can_start"):
@@ -988,24 +998,36 @@ def run_orchestration_card(run: dict[str, Any], active: bool = False) -> dict[st
         "can_start": phase == "ready_to_start",
         "can_resume": phase == "resume_required",
         "can_execute_revision": phase == "revision_required",
-        "can_inspect_final": phase == "completed" and bool(final_payload.get("summary")),
+        "can_inspect_final": phase == "completed" and bool(final_payload.get("ok") or final_payload.get("summary")),
         "can_inspect_diagnostics": phase in {"needs_attention", "inspect", "ready_to_preflight"},
         "recommended_kind": str(next_action.get("kind") or ""),
         "recommended_endpoint": str(next_action.get("endpoint") or ""),
     }
-    snapshot = {"summary": run, "active": active}
+    snapshot = {"summary": summary, "active": active}
     return {
-        "task_id": str(run.get("task_id") or ""),
         "status": status,
         "phase": phase,
         "active": active,
+        "decision": decision,
+        "display": orchestration_display(phase, status, snapshot, next_action, final_payload),
+        "next_action": next_action,
+    }
+
+
+def run_orchestration_card(run: dict[str, Any], active: bool = False) -> dict[str, Any]:
+    view = orchestration_view_fields(run, active=active, event_cursor_next=0)
+    return {
+        "task_id": str(run.get("task_id") or ""),
+        "status": view["status"],
+        "phase": view["phase"],
+        "active": view["active"],
         "goal": str(run.get("goal") or ""),
         "governor": str(run.get("governor") or ""),
         "created_at": str(run.get("created_at") or ""),
         "updated_at": str(run.get("updated_at") or ""),
-        "decision": decision,
-        "display": orchestration_display(phase, status, snapshot, next_action, final_payload),
-        "next_action": next_action,
+        "decision": view["decision"],
+        "display": view["display"],
+        "next_action": view["next_action"],
     }
 
 
@@ -1771,56 +1793,33 @@ def orchestration_display(
 def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_after: int | None = 0, max_bytes: int = 2000) -> dict[str, Any]:
     snapshot = run_snapshot(run_dir, event_limit=event_limit, events_after=events_after)
     summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
-    actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
-    next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
     status = str(summary.get("status") or "")
-    phase = "inspect"
     final_payload: dict[str, Any] = {}
-    if snapshot.get("active") or status in {"running", "queued", "cancelling"}:
-        phase = "running"
-        next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/orchestration", "body": {"events_after": snapshot.get("event_cursor", {}).get("next", 0)}, "reason": "run is active"}
-    elif actions.get("can_start_revision"):
-        phase = "revision_required"
-    elif status == "completed":
-        phase = "completed"
+    if status == "completed":
         ledger_path = run_dir / "task_ledger.json"
         ledger, ledger_error = load_ledger_dict(ledger_path)
         if ledger_error:
             final_payload = {"ok": False, "error": ledger_error}
         else:
             final_payload = final_package(ledger, max_bytes=max_bytes)
-        if final_payload.get("ok"):
-            next_action = {"kind": "inspect_final", "method": "GET", "endpoint": "GET /runs/{task_id}/final", "body": {"max_bytes": max_bytes}, "reason": "run completed and final package is available"}
-    elif actions.get("can_resume"):
-        phase = "resume_required"
-    elif actions.get("can_start"):
-        phase = "ready_to_start"
-    elif status in {"failed", "cancelled", "interrupted", "preflight_failed"}:
-        phase = "needs_attention"
-    elif status == "created":
-        phase = "ready_to_preflight"
-    decision = {
-        "can_poll": phase == "running",
-        "can_start": phase == "ready_to_start",
-        "can_resume": phase == "resume_required",
-        "can_execute_revision": phase == "revision_required",
-        "can_inspect_final": phase == "completed" and bool(final_payload.get("ok")),
-        "can_inspect_diagnostics": phase in {"needs_attention", "inspect", "ready_to_preflight"},
-        "recommended_kind": str(next_action.get("kind") or ""),
-        "recommended_endpoint": str(next_action.get("endpoint") or ""),
-    }
-    display = orchestration_display(phase, status, snapshot, next_action, final_payload)
+    view = orchestration_view_fields(
+        summary,
+        active=bool(snapshot.get("active")),
+        event_cursor_next=int(snapshot.get("event_cursor", {}).get("next", 0)),
+        final_payload=final_payload,
+        final_max_bytes=max_bytes,
+    )
     return {
         "ok": True,
         "task_id": run_dir.name,
-        "phase": phase,
-        "status": status,
-        "active": bool(snapshot.get("active")),
-        "decision": decision,
-        "display": display,
+        "phase": view["phase"],
+        "status": view["status"],
+        "active": view["active"],
+        "decision": view["decision"],
+        "display": view["display"],
         "snapshot": snapshot,
         "final": final_payload,
-        "next_action": next_action,
+        "next_action": view["next_action"],
     }
 
 
