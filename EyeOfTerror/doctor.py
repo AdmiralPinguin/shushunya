@@ -130,8 +130,12 @@ def check_worker_services(errors: list[str]) -> int:
         if not isinstance(service, dict):
             continue
         module_path = REPO_ROOT / str(service.get("module_path") or "")
+        module_name = str(service.get("module") or "")
         metadata_path = module_path / "worker.json"
         require(module_path.exists(), f"worker service {name} module path missing: {module_path}", errors)
+        require(bool(module_name), f"worker service {name} module missing", errors)
+        if module_name:
+            require((module_path / f"{module_name}.py").exists(), f"worker service {name} module file missing: {module_name}.py", errors)
         require(metadata_path.exists(), f"worker service {name} metadata missing: {metadata_path}", errors)
         if metadata_path.exists():
             metadata = load_json(metadata_path)
