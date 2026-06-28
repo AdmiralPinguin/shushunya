@@ -142,7 +142,9 @@ existing-run, brigade, governor, capability, or preflight diagnostics.
 When task preflight is run with explicit or default HTTP governor transport,
 its `create_task` and retry action bodies preserve `governor_transport` and
 `governor_host` so clients can follow `actions.next_action` without switching
-planning boundaries.
+planning boundaries. Task preflight action bodies include the original
+`message`, making successful `create_task` hints directly executable by simple
+chat clients.
 
 ```json
 {

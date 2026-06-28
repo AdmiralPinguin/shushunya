@@ -438,6 +438,7 @@ def main() -> int:
                 if (
                     not service_preflight.get("ok")
                     or service_preflight.get("governor_transport") != "http"
+                    or service_preflight_body.get("message") != "Собери все известное о событиях Скалатракса."
                     or service_preflight_body.get("governor_transport") != "http"
                     or service_preflight_body.get("task_id") != "warmaster-default-http-preflight-test"
                 ):
@@ -641,6 +642,7 @@ def main() -> int:
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-preflight-test"},
             )
             preflight_steps = preflight.get("contract_summary", {}).get("steps", [])
+            preflight_action_body = preflight.get("actions", {}).get("next_action", {}).get("body", {})
             if (
                 not preflight.get("ok")
                 or (run_root / "warmaster-preflight-test").exists()
@@ -652,6 +654,8 @@ def main() -> int:
                 or preflight.get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or not preflight.get("oversight_validation", {}).get("ok")
                 or preflight.get("actions", {}).get("can_create_task") is not True
+                or preflight_action_body.get("message") != "Собери все известное о событиях Скалатракса."
+                or preflight_action_body.get("task_id") != "warmaster-preflight-test"
                 or preflight.get("actions", {}).get("next_action", {}).get("kind") != "create_task"
                 or preflight.get("actions", {}).get("next_action", {}).get("method") != "POST"
             ):
