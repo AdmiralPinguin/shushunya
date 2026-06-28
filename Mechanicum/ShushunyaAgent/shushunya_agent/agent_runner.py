@@ -2226,6 +2226,15 @@ def failed_cli_read_source_candidates_from_text(text: str, candidates: list[str]
     return [path for path in candidates if path in text]
 
 
+def python_action_looks_like_source_replacement(action: dict[str, Any]) -> bool:
+    code = str(action.get("code") or "")
+    lowered = code.lower()
+    return bool(code.strip()) and (
+        ("\ndef " in code and ("import " in lowered or "from " in lowered))
+        or "if __name__ == " in code
+    )
+
+
 def pytest_result_sets(result: dict[str, Any]) -> tuple[set[str], set[str]]:
     passing = {
         str(item)
@@ -5652,15 +5661,26 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and pending_failed_cli_read_paths
                 and action_type in SWE_DIAGNOSTIC_ACTIONS
             ):
+                suggested_action = None
+                if action_type == "python" and python_action_looks_like_source_replacement(action):
+                    suggested_path = sorted(pending_failed_cli_read_paths)[0]
+                    suggested_action = {
+                        "action": "write_file",
+                        "path": suggested_path,
+                        "content": str(action.get("code") or ""),
+                    }
                 result = {
                     "ok": False,
                     "error": "swe failed cli repair source required by supervisor",
                     "candidate_source_paths": pending_failed_cli_source_candidates[:10],
                     "read_candidate_paths": sorted(pending_failed_cli_read_paths)[:10],
+                    **({"suggested_action": suggested_action} if suggested_action else {}),
                     "instruction": (
                         "A candidate source file for the failed CLI verification has already been read. "
                         "Do not inspect more files or rerun CLI before a code change. Make a narrow edit to one of "
-                        "read_candidate_paths, then rerun the CLI verification with JSON validation."
+                        "read_candidate_paths using write_file or replace_in_file, then rerun the CLI verification with "
+                        "JSON validation. Do not paste replacement source into action=python unless that Python code writes "
+                        "the file; use the suggested_action shape when present."
                     ),
                 }
             elif (

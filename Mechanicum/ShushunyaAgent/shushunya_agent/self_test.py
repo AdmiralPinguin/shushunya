@@ -4859,6 +4859,41 @@ def main() -> int:
         raise AssertionError(f"After reading failed CLI source, further discovery should require edit: {swe_failed_cli_read_then_list_payload}")
     print("[ok] SWE failed CLI source read requires edit next")
 
+    swe_failed_cli_python_pseudo_edit_stdout = io.StringIO()
+    swe_failed_cli_python_pseudo_edit_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-failed-cli-python-pseudo-edit"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m package.cli /work/project/data.csv | python3 -c \\"import sys,json; json.load(sys.stdin)\\"","timeout":60}',
+            '{"action":"read_file","path":"/work/project/package/cli.py","max_bytes":20000,"offset":0}',
+            '{"action":"python","cwd":"/work/project","code":"import json\\nfrom datetime import datetime\\ndef main():\\n    print(json.dumps({}, default=str))"}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "Traceback (most recent call last):\n  File \"/work/project/package/cli.py\", line 12\nTypeError: Object of type datetime is not JSON serializable\n",
+    }), mock.patch.object(agent_runner, "file_tool", return_value={
+            "ok": True,
+            "path": "/work/project/package/cli.py",
+            "content": "print(json.dumps(payload))",
+    }), contextlib.redirect_stdout(swe_failed_cli_python_pseudo_edit_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(failed_cli_resume_task, swe_failed_cli_python_pseudo_edit_config)
+    pseudo_edit_payload = json.loads(swe_failed_cli_python_pseudo_edit_stdout.getvalue())
+    pseudo_edit_results = [step.get("result") or {} for step in pseudo_edit_payload.get("steps", [])]
+    if not any(
+        (result.get("suggested_action") or {}).get("action") == "write_file"
+        and (result.get("suggested_action") or {}).get("path") == "/work/project/package/cli.py"
+        for result in pseudo_edit_results
+    ):
+        raise AssertionError(f"Python pseudo-edit should receive write_file suggested_action: {pseudo_edit_payload}")
+    print("[ok] SWE failed CLI python pseudo-edit suggests write_file")
+
     swe_resume_failed_cli_edit_stdout = io.StringIO()
     swe_resume_failed_cli_edit_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-resume-failed-cli-allows-source-edit"),
