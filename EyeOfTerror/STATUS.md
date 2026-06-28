@@ -33,6 +33,11 @@
   worker task mappings for client polling/debugging.
 - Warmaster Gateway rejects duplicate `task_id` creation instead of silently
   overwriting existing run history.
+- Warmaster validates user-provided task ids and constrains execution workspace
+  paths to each run directory.
+- Iskandar `prepare_run` constrains custom run output paths to its configured
+  default run root.
+- Warmaster artifact text reads support bounded previews through `max_bytes`.
 - Task ledgers, run packages, and executor reports are written atomically to
   avoid partial JSON reads during background execution.
 - Task ledger saves merge concurrent event/step/cancel updates from stale
