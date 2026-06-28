@@ -1244,7 +1244,10 @@ def main() -> int:
                 if exc.code != 409:
                     raise
                 late_cancel = json.loads(exc.read().decode("utf-8"))
-                if late_cancel.get("ledger", {}).get("status") != "completed":
+                if (
+                    late_cancel.get("ledger", {}).get("status") != "completed"
+                    or late_cancel.get("client_action", {}).get("path") != "/runs/warmaster-test/summary"
+                ):
                     raise AssertionError(f"late cancel should preserve completed ledger: {late_cancel}")
             else:
                 raise AssertionError("Warmaster should reject cancellation for completed runs")
@@ -1649,7 +1652,12 @@ def main() -> int:
             finally:
                 worker_server.shutdown()
                 worker_thread.join(timeout=5)
-            if not cancelled.get("ok") or not cancelled["ledger"].get("cancel_requested"):
+            if (
+                not cancelled.get("ok")
+                or not cancelled["ledger"].get("cancel_requested")
+                or cancelled.get("next_action", {}).get("kind") != "poll"
+                or cancelled.get("client_action", {}).get("path") != "/runs/warmaster-cancel-test/snapshot"
+            ):
                 raise AssertionError(f"bad cancel response: {cancelled}")
             if not cancel_calls or not any(item.get("ok") for item in cancelled.get("worker_cancellations", [])):
                 raise AssertionError(f"cancel was not propagated to worker tasks: {cancelled}")

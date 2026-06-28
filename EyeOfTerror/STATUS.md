@@ -318,6 +318,8 @@
 - Warmaster Gateway can request cooperative cancellation through the task ledger,
   and best-effort forwards cancellation to HTTP worker task endpoints from the
   run dispatch package.
+- Warmaster cancel responses expose polling or inspection `next_action` and
+  executable `client_action` fields.
 - Warmaster Gateway rejects late cancellation of terminal runs without
   rewriting completed/failed ledger state.
 - Warmaster revision execution uses `revision_plan` to rerun focused worker

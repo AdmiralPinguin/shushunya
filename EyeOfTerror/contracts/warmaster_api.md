@@ -388,7 +388,9 @@ best-effort forwards cancellation to HTTP worker task endpoints from the run
 dispatch package. Cancellation is cooperative unless a worker implements a
 stronger interruption mechanism.
 Cancelling an already terminal run must return a conflict and must not rewrite
-the recorded terminal ledger status.
+the recorded terminal ledger status. Cancel responses include `next_action` and
+executable `client_action` fields for polling cooperative cancellation or
+inspecting an already-terminal run.
 
 ## Execution Paths
 

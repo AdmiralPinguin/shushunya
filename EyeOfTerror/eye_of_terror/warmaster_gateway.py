@@ -3724,6 +3724,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     reason = str(payload.get("reason") or "").strip()
                     ledger = TaskLedger.load(ledger_path)
                     if ledger.to_dict().get("status") in {"completed", "failed", "cancelled", "corrupt"}:
+                        inspect_action = {"kind": "inspect", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "run is already terminal"}
                         response(
                             self,
                             409,
@@ -3732,12 +3733,15 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                                 "task_id": task_id,
                                 "error": "run is already terminal",
                                 "ledger": ledger.to_dict(),
+                                "next_action": inspect_action,
+                                "client_action": executable_client_action(task_id, inspect_action),
                             },
                         )
                         return
                     ledger.request_cancel(reason)
                     host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
                     worker_cancellations = cancel_http_worker_tasks(run_root / task_id, host=host)
+                    poll_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "cancellation is cooperative and should be polled"}
                     response(
                         self,
                         200,
@@ -3747,6 +3751,8 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             "status": "cancelling",
                             "ledger": ledger.to_dict(),
                             "worker_cancellations": worker_cancellations,
+                            "next_action": poll_action,
+                            "client_action": executable_client_action(task_id, poll_action),
                         },
                     )
                     return
