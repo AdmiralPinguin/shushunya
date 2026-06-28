@@ -127,7 +127,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "error": f"governor service unavailable: {exc}",
             "error_code": "governor_service_unavailable",
             "governor": governor.name,
-            "actions": task_preflight_actions(False, "governor_service_unavailable", task_id or ""),
+            "actions": task_preflight_actions(False, "governor_service_unavailable", task_id or "", governor_transport="http", governor_host=host, message=message),
         }
     capabilities = fetch_service_capabilities(host, service_port, timeout_sec=2.0)
     required_workers = []
@@ -151,6 +151,9 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
                     False,
                     "governor_workers_unavailable" if availability["unavailable_workers"] and not availability["missing_workers"] else "governor_workers_missing",
                     task_id or "",
+                    governor_transport="http",
+                    governor_host=host,
+                    message=message,
                 ),
             }
     if not plan.get("ok"):
@@ -161,7 +164,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "error_code": "governor_plan_failed",
             "governor": governor.name,
             "plan": plan,
-            "actions": task_preflight_actions(False, "governor_plan_failed", task_id or ""),
+            "actions": task_preflight_actions(False, "governor_plan_failed", task_id or "", governor_transport="http", governor_host=host, message=message),
         }
     contract = plan.get("contract") if isinstance(plan.get("contract"), dict) else {}
     service_task_id = str(contract.get("task_id") or "").strip()
@@ -173,7 +176,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "error_code": "invalid_governor_task_id",
             "governor": governor.name,
             "task_id": service_task_id,
-            "actions": task_preflight_actions(False, "invalid_governor_task_id", service_task_id),
+            "actions": task_preflight_actions(False, "invalid_governor_task_id", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
     validation_errors = validate_task_contract_payload(contract)
     if validation_errors:
@@ -184,7 +187,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "error_code": "invalid_task_contract",
             "task_id": service_task_id,
             "validation": {"ok": False, "errors": validation_errors},
-            "actions": task_preflight_actions(False, "invalid_task_contract", service_task_id),
+            "actions": task_preflight_actions(False, "invalid_task_contract", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
     availability = worker_availability(contract_required_workers(contract))
     if not availability["ok"]:
@@ -202,6 +205,9 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
                 False,
                 "contract_workers_unavailable" if availability["unavailable_workers"] and not availability["missing_workers"] else "contract_workers_missing",
                 service_task_id,
+                governor_transport="http",
+                governor_host=host,
+                message=message,
             ),
         }
     oversight_errors = plan_oversight_errors(contract, plan)
@@ -213,7 +219,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "error_code": "invalid_oversight",
             "task_id": service_task_id,
             "oversight_validation": {"ok": False, "errors": oversight_errors},
-            "actions": task_preflight_actions(False, "invalid_oversight", service_task_id),
+            "actions": task_preflight_actions(False, "invalid_oversight", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
     run_dir = run_root / service_task_id
     if run_dir.exists():
@@ -224,7 +230,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "error_code": "task_exists",
             "task_id": service_task_id,
             "run_dir": str(run_dir),
-            "actions": task_preflight_actions(False, "task_exists", service_task_id),
+            "actions": task_preflight_actions(False, "task_exists", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
     try:
         prepared = post_json(base + "/prepare_run", {"task": message, "task_id": service_task_id, "run_dir": str(run_dir)})
@@ -236,7 +242,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "error_code": "governor_service_unavailable",
             "governor": governor.name,
             "task_id": service_task_id,
-            "actions": task_preflight_actions(False, "governor_service_unavailable", service_task_id),
+            "actions": task_preflight_actions(False, "governor_service_unavailable", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
     if not prepared.get("ok"):
         cleanup = cleanup_unregistered_run_dir(run_root, run_dir)
@@ -249,7 +255,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "task_id": service_task_id,
             "response": prepared,
             "cleanup": cleanup,
-            "actions": task_preflight_actions(False, "governor_prepare_failed", service_task_id),
+            "actions": task_preflight_actions(False, "governor_prepare_failed", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
     planned_oversight = plan.get("oversight") if isinstance(plan.get("oversight"), dict) else {}
     package_errors = verify_prepared_run_package(run_dir, contract, planned_oversight)
@@ -264,7 +270,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "task_id": service_task_id,
             "validation": {"ok": False, "errors": package_errors},
             "cleanup": cleanup,
-            "actions": task_preflight_actions(False, "governor_prepare_invalid_run", service_task_id),
+            "actions": task_preflight_actions(False, "governor_prepare_invalid_run", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
     TaskLedger.create(run_dir / "task_ledger.json", service_task_id, str(contract.get("goal") or message), governor.name)
     return {
@@ -358,7 +364,7 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "error": "task_id must match [A-Za-z0-9][A-Za-z0-9_.-]{0,127} and must not contain '..'",
             "error_code": "invalid_task_id",
             "task_id": task_id,
-            "actions": task_preflight_actions(False, "invalid_task_id", task_id or ""),
+            "actions": task_preflight_actions(False, "invalid_task_id", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
     route = route_message(message)
     if not route.ok:
@@ -372,7 +378,7 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "error": f"governor is not active: {governor}",
             "error_code": "governor_inactive",
             "kind": route.kind,
-            "actions": task_preflight_actions(False, "governor_inactive", task_id or ""),
+            "actions": task_preflight_actions(False, "governor_inactive", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
     if governor_transport == "http":
         return prepare_task_via_governor_service(message, task_id, run_root, governor_ref, host=governor_host)
@@ -382,7 +388,7 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "gateway": "WarmasterGateway",
             "error": "governor_transport must be local or http",
             "error_code": "invalid_governor_transport",
-            "actions": task_preflight_actions(False, "invalid_governor_transport", task_id or ""),
+            "actions": task_preflight_actions(False, "invalid_governor_transport", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
     plan = plan_lore_reconstruction(message, task_id=task_id)
     run_dir = run_root / plan.contract.task_id
@@ -394,7 +400,7 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "error_code": "task_exists",
             "task_id": plan.contract.task_id,
             "run_dir": str(run_dir),
-            "actions": task_preflight_actions(False, "task_exists", plan.contract.task_id),
+            "actions": task_preflight_actions(False, "task_exists", plan.contract.task_id, governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
     validation_errors = validate_task_contract_payload(plan.contract.to_dict())
     if validation_errors:
@@ -405,7 +411,7 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "error_code": "invalid_task_contract",
             "task_id": plan.contract.task_id,
             "validation": {"ok": False, "errors": validation_errors},
-            "actions": task_preflight_actions(False, "invalid_task_contract", plan.contract.task_id),
+            "actions": task_preflight_actions(False, "invalid_task_contract", plan.contract.task_id, governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
     contract_payload = plan.contract.to_dict()
     availability = worker_availability(contract_required_workers(contract_payload))
@@ -424,6 +430,9 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
                 False,
                 "contract_workers_unavailable" if availability["unavailable_workers"] and not availability["missing_workers"] else "contract_workers_missing",
                 plan.contract.task_id,
+                governor_transport=governor_transport,
+                governor_host=governor_host,
+                message=message,
             ),
         }
     plan_payload = plan.to_dict()
@@ -436,7 +445,7 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "error_code": "invalid_oversight",
             "task_id": plan.contract.task_id,
             "oversight_validation": {"ok": False, "errors": oversight_errors},
-            "actions": task_preflight_actions(False, "invalid_oversight", plan.contract.task_id),
+            "actions": task_preflight_actions(False, "invalid_oversight", plan.contract.task_id, governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
     oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else None
     status = write_pipeline_run(plan.contract, run_dir, oversight=oversight)

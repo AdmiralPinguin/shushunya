@@ -144,7 +144,8 @@ its `create_task` and retry action bodies preserve `governor_transport` and
 `governor_host` so clients can follow `actions.next_action` without switching
 planning boundaries. Task preflight action bodies include the original
 `message`, making successful `create_task` hints directly executable by simple
-chat clients.
+chat clients. Rejected task creation responses that recommend retrying task
+preflight preserve the same executable body shape.
 
 ```json
 {

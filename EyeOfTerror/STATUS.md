@@ -87,6 +87,8 @@
   following `next_action` keep the intended local or HTTP planning boundary.
 - Task preflight `create_task` hints include the original message, making the
   recommended `POST /task` body directly executable by simple chat clients.
+- Retry-style rejected task creation hints preserve the same executable message
+  and governor transport body shape.
 - Governor API contract checks document the active Iskandar required worker
   chain exposed through `/capabilities`.
 - Iskandar `/plan` resolves worker metadata and reports planned workers as

@@ -168,6 +168,20 @@ def main() -> int:
             pass
         else:
             raise AssertionError("run child path resolver accepted path outside run_dir")
+        invalid_transport = warmaster_gateway.prepare_task(
+            "Собери все известное о событиях Скалатракса.",
+            "invalid-transport-task",
+            run_root,
+            governor_transport="warp",
+        )
+        invalid_transport_body = invalid_transport.get("actions", {}).get("next_action", {}).get("body", {})
+        if (
+            invalid_transport.get("error_code") != "invalid_governor_transport"
+            or invalid_transport_body.get("message") != "Собери все известное о событиях Скалатракса."
+            or invalid_transport_body.get("task_id") != "invalid-transport-task"
+            or invalid_transport_body.get("governor_transport") != "warp"
+        ):
+            raise AssertionError(f"invalid transport action did not preserve executable task body: {invalid_transport}")
         original_planner = warmaster_gateway.plan_lore_reconstruction
         try:
             class BadContract:
