@@ -8,7 +8,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from start_brigade import brigade_commands, brigade_plan, port_preflight, supervise_processes, wait_for_urls
+from start_brigade import CommandSpec, brigade_commands, brigade_plan, port_preflight, startup_stages, supervise_processes, wait_for_urls
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -63,6 +63,27 @@ def main() -> int:
     dependencies = plan.get("dependencies", {})
     if dependencies.get("warmaster-gateway") != ["mechanicum-workers", "iskandar-khayon"]:
         raise AssertionError(f"bad brigade dependencies: {plan}")
+    stages = plan.get("startup_stages", [])
+    if (
+        len(stages) != 2
+        or set(stages[0].get("services", [])) != {"mechanicum-workers", "iskandar-khayon"}
+        or stages[1].get("services") != ["warmaster-gateway"]
+        or "http://127.0.0.1:7002/health" not in stages[0].get("health_urls", [])
+        or "http://127.0.0.1:7000/health" not in stages[1].get("health_urls", [])
+    ):
+        raise AssertionError(f"bad brigade startup stages: {plan}")
+    try:
+        startup_stages(
+            [
+                CommandSpec("a", "fixture", "127.0.0.1", 1, ["b"], "", [sys.executable, "-c", "pass"], {}),
+                CommandSpec("b", "fixture", "127.0.0.1", 2, ["a"], "", [sys.executable, "-c", "pass"], {}),
+            ],
+            [],
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("startup stages should reject cyclic dependencies")
     health_urls = plan.get("health_urls", {})
     if health_urls.get("warmaster-gateway") != "http://127.0.0.1:7000/health" or health_urls.get("iskandar-khayon") != "http://127.0.0.1:7101/health":
         raise AssertionError(f"bad brigade health URLs: {plan}")

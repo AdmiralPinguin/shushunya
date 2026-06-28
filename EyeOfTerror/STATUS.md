@@ -64,8 +64,8 @@
   names, ports, commands, and runtime roots.
 - The startup plan expands registered Mechanicum workers with their names,
   ports, module paths, and modules.
-- The startup plan exposes top-level service dependencies and readiness URLs for
-  future supervisors and admin clients.
+- The startup plan exposes top-level service dependencies, dependency-ordered
+  startup stages, and readiness URLs for future supervisors and admin clients.
 - The brigade launcher can wait for top-level readiness URLs after starting the
   stack.
 - Launcher readiness covers Warmaster, Iskandar, and registered Mechanicum

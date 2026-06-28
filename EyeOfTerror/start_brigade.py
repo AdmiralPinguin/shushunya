@@ -137,6 +137,39 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
     ]
 
 
+def startup_stages(commands: list[CommandSpec], workers: list[dict[str, object]]) -> list[dict[str, object]]:
+    pending = {command.name: command for command in commands}
+    completed: set[str] = set()
+    stages: list[dict[str, object]] = []
+    while pending:
+        ready = [
+            command
+            for command in pending.values()
+            if all(dependency in completed for dependency in command.depends_on)
+        ]
+        if not ready:
+            unresolved = {name: command.depends_on for name, command in pending.items()}
+            raise ValueError(f"cyclic or unresolved brigade dependencies: {unresolved}")
+        ready.sort(key=lambda command: command.name)
+        health_urls: list[str] = []
+        for command in ready:
+            if command.health_url:
+                health_urls.append(command.health_url)
+            if command.name == "mechanicum-workers":
+                health_urls.extend(str(worker["health_url"]) for worker in workers if worker.get("health_url"))
+        stages.append(
+            {
+                "stage": len(stages) + 1,
+                "services": [command.name for command in ready],
+                "health_urls": health_urls,
+            }
+        )
+        for command in ready:
+            pending.pop(command.name)
+            completed.add(command.name)
+    return stages
+
+
 def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run_root: Path, iskandar_run_root: Path) -> dict[str, object]:
     commands = brigade_commands(repo_root, host, workspace_root, warmaster_run_root, iskandar_run_root)
     workers = worker_service_plan(repo_root, host)
@@ -159,6 +192,7 @@ def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run
         "mechanicum_workers": workers,
         "services": [command.to_dict() for command in commands],
         "dependencies": {command.name: command.depends_on for command in commands},
+        "startup_stages": startup_stages(commands, workers),
         "health_urls": {**top_level_health_urls, **worker_health_urls},
         "readiness_urls": list(top_level_health_urls.values()) + list(worker_health_urls.values()),
     }
