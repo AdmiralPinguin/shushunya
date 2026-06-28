@@ -36,6 +36,8 @@
   `POST /tasks/{task_id}/cancel` through the shared runtime.
 - The shared worker runtime rejects `/run` requests without `task_id` so every
   worker step remains pollable and cancellable.
+- The shared worker runtime rejects late cancellation of terminal worker tasks
+  without rewriting completed/failed task state.
 - The shared worker runtime rejects dispatch packets addressed to a different
   worker before calling worker code.
 - The shared worker runtime and local executor reject missing or invalid

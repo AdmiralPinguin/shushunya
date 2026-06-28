@@ -75,6 +75,19 @@ def main() -> int:
             if not task.get("ok") or task["task"].get("status") != "completed" or not task["task"].get("created_at") or not task["task"].get("updated_at"):
                 raise AssertionError(f"bad task status response: {task}")
             try:
+                request_json(base + "/tasks/runtime-test/cancel", {})
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                terminal_cancel = json.loads(exc.read().decode("utf-8"))
+                if terminal_cancel.get("task", {}).get("status") != "completed":
+                    raise AssertionError(f"late cancel should preserve completed status: {terminal_cancel}")
+            else:
+                raise AssertionError("worker runtime should reject cancellation for terminal tasks")
+            still_completed = request_json(base + "/tasks/runtime-test")
+            if still_completed.get("task", {}).get("status") != "completed":
+                raise AssertionError(f"late cancel rewrote terminal task state: {still_completed}")
+            try:
                 request_json(
                     base + "/run",
                     {

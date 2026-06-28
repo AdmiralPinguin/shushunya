@@ -96,6 +96,8 @@ Cancellation is cooperative. A worker runtime must record the cancellation flag
 and must not start a task that was already cancelled. A worker that is already
 inside a long model call or external process may only stop after that call
 returns unless the worker implements a stronger interruption mechanism.
+Cancelling an already terminal task must be rejected and must not rewrite the
+recorded terminal status or result.
 
 ## Response Shape
 

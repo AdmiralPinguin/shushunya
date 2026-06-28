@@ -107,6 +107,7 @@ def make_handler(
     worker_metadata.setdefault("api_contract", "EyeOfTerror/contracts/worker_api.md")
     tasks: dict[str, dict[str, Any]] = {}
     tasks_lock = threading.RLock()
+    terminal_statuses = {"completed", "ready", "passed", "passed_with_warnings", "failed", "blocked", "needs_revision", "cancelled"}
 
     def ensure_task(task_id: str) -> dict[str, Any]:
         task = tasks.setdefault(task_id, {"task_id": task_id, "worker": worker_name, "created_at": now_iso()})
@@ -165,6 +166,9 @@ def make_handler(
                 task_id = unquote(parts[1])
                 with tasks_lock:
                     task = ensure_task(task_id)
+                    if task.get("status") in terminal_statuses:
+                        response(self, 409, {"ok": False, "worker": worker_name, "task": dict(task), "error": "task is already terminal"})
+                        return
                     task["cancel_requested"] = True
                     task["cancel_reason"] = "requested through worker API"
                     task["status"] = "cancelling" if task.get("status") == "running" else "cancelled"
