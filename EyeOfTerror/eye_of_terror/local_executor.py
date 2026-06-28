@@ -100,6 +100,16 @@ def ordered_dispatch_paths(run_dir: Path) -> list[Path]:
     return paths
 
 
+def terminal_payload_allows_completion(payload: dict[str, Any]) -> bool:
+    status = str(payload.get("status") or "").strip().lower()
+    if status in {"blocked", "needs_revision", "failed", "preflight_failed", "cancelled"}:
+        return False
+    revision_plan = payload.get("revision_plan")
+    if isinstance(revision_plan, dict) and revision_plan.get("required"):
+        return False
+    return True
+
+
 def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_sec: int = 1800) -> dict[str, Any]:
     contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
     ledger_path = run_dir / "task_ledger.json"
@@ -131,16 +141,19 @@ def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_se
         if not result.ok:
             break
     cancelled = TaskLedger.load(ledger_path).cancel_requested()
+    final_payload = results[-1].payload if results else {}
+    terminal_ok = terminal_payload_allows_completion(final_payload) if isinstance(final_payload, dict) else False
     summary = {
-        "ok": bool(results) and all(item.ok for item in results) and not cancelled,
+        "ok": bool(results) and all(item.ok for item in results) and terminal_ok and not cancelled,
         "run_dir": str(run_dir),
         "workspace_root": str(workspace_root),
         "steps": [item.to_dict() for item in results],
         "cancelled": cancelled,
     }
+    if isinstance(final_payload, dict) and isinstance(final_payload.get("revision_plan"), dict):
+        summary["revision_plan"] = final_payload["revision_plan"]
     report_path = run_dir / "execution_report.json"
     write_json_atomic(report_path, summary)
-    final_payload = results[-1].payload if results else {}
     if isinstance(final_payload, dict):
         ledger.set_result(
             {
@@ -150,6 +163,7 @@ def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_se
                 "workspace_root": str(workspace_root),
                 "status": "cancelled" if cancelled else final_payload.get("status", ""),
                 "summary": "Execution cancelled before next step." if cancelled else final_payload.get("summary", ""),
+                "revision_plan": final_payload.get("revision_plan", {}),
             }
         )
     ledger.set_status("completed" if summary["ok"] else ("cancelled" if cancelled else "failed"))

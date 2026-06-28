@@ -7,7 +7,7 @@ import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from eye_of_terror.http_executor import execute_run
+from eye_of_terror.http_executor import execute_run, terminal_payload_allows_completion
 
 import sys
 
@@ -33,6 +33,12 @@ def patch_dispatch_ports(run_dir: Path, ports_by_worker: dict[str, int]) -> None
 
 
 def main() -> int:
+    if terminal_payload_allows_completion({"ok": True, "status": "blocked"}):
+        raise AssertionError("blocked terminal payload should not complete a run")
+    if terminal_payload_allows_completion({"ok": True, "status": "ready", "revision_plan": {"required": True}}):
+        raise AssertionError("required revision plan should not complete a run")
+    if not terminal_payload_allows_completion({"ok": True, "status": "ready", "revision_plan": {"required": False}}):
+        raise AssertionError("ready terminal payload should complete a run")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         work = root / "work"
