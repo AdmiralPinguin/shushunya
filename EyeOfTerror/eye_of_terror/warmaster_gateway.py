@@ -430,6 +430,24 @@ def run_step_state(run_dir: Path, step_id: str) -> dict[str, Any]:
     return {"ok": False, "task_id": run_dir.name, "error": "step not found", "step_id": step_id}
 
 
+def run_step_artifacts(run_dir: Path, step_id: str) -> dict[str, Any]:
+    state = run_step_state(run_dir, step_id)
+    if not state.get("ok"):
+        return state
+    step = state.get("step") if isinstance(state.get("step"), dict) else {}
+    return {
+        "ok": True,
+        "task_id": run_dir.name,
+        "step_id": step_id,
+        "worker": step.get("worker", ""),
+        "status": step.get("status", ""),
+        "expected_artifacts": step.get("expected_artifacts", []),
+        "expected_artifact_status": step.get("expected_artifact_status", []),
+        "artifacts": step.get("artifacts", []),
+        "artifact_status": step.get("artifact_status", []),
+    }
+
+
 def revision_step_ids_from_run(run_dir: Path) -> list[str]:
     ledger_path = run_dir / "task_ledger.json"
     ledger, ledger_error = load_ledger_dict(ledger_path)
@@ -647,6 +665,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "state_snapshot",
             "process_active_run_snapshot",
             "run_action_hints",
+            "run_step_artifact_read",
             "doctor",
         ],
         "endpoints": [
@@ -666,6 +685,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/snapshot",
             "GET /runs/{task_id}/active",
             "GET /runs/{task_id}/steps/{step_id}",
+            "GET /runs/{task_id}/steps/{step_id}/artifacts",
             "GET /runs/{task_id}/ledger",
             "GET /runs/{task_id}/contract",
             "GET /runs/{task_id}/dispatch",
@@ -836,6 +856,15 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                     return
                 payload = run_step_state(run_dir, parts[3])
+                response(self, 200 if payload.get("ok") else 404, payload)
+                return
+            if len(parts) == 5 and parts[0] == "runs" and parts[2] == "steps" and parts[4] == "artifacts":
+                task_id = parts[1]
+                run_dir = run_root / task_id
+                if not run_dir.exists():
+                    response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
+                    return
+                payload = run_step_artifacts(run_dir, parts[3])
                 response(self, 200 if payload.get("ok") else 404, payload)
                 return
             if len(parts) in {2, 3} and parts[0] == "runs":

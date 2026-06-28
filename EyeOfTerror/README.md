@@ -101,6 +101,8 @@ artifacts when a run workspace is known.
 
 `GET /runs/<task_id>/steps/<step_id>` returns one normalized step state from the
 same progress model.
+`GET /runs/<task_id>/steps/<step_id>/artifacts` returns the expected and
+produced artifact status for that worker step only.
 
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the

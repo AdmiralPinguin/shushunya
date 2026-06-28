@@ -61,6 +61,8 @@
   step ids, `next_step_id`, per-step state records, and artifact file status.
 - Warmaster exposes `GET /runs/{task_id}/steps/{step_id}` for focused step
   inspection.
+- Warmaster exposes `GET /runs/{task_id}/steps/{step_id}/artifacts` for
+  focused artifact inspection by worker step.
 - Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
 - Warmaster routing is driven by `route_terms` in the governor registry instead
   of hardcoded per-governor keyword lists.

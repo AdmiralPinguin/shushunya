@@ -23,6 +23,7 @@ GET  /runs/{task_id}/summary
 GET  /runs/{task_id}/snapshot
 GET  /runs/{task_id}/active
 GET  /runs/{task_id}/steps/{step_id}
+GET  /runs/{task_id}/steps/{step_id}/artifacts
 GET  /runs/{task_id}/ledger
 GET  /runs/{task_id}/contract
 GET  /runs/{task_id}/dispatch
@@ -80,6 +81,8 @@ Clients should use:
   process-local active state, cursor events, and artifact metadata.
 - `/runs/{task_id}/steps/{step_id}` for one normalized step state from
   `summary.progress.step_states`.
+- `/runs/{task_id}/steps/{step_id}/artifacts` for expected and produced
+  artifact status scoped to one worker step.
 - `/runs/{task_id}/events` for ledger event history.
 - `/runs/{task_id}/events?after=N` for incremental client polling. Responses
   include `cursor.after`, `cursor.next`, and `cursor.total`.

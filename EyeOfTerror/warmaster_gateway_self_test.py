@@ -344,6 +344,12 @@ def main() -> int:
             final_step_state = request_json(base + "/runs/warmaster-test/steps/finalize")
             if "/work/skalathrax/final_manifest.json" not in final_step_state.get("step", {}).get("artifacts", []):
                 raise AssertionError(f"bad final step state endpoint: {final_step_state}")
+            final_step_artifacts = request_json(base + "/runs/warmaster-test/steps/finalize/artifacts")
+            if (
+                "/work/skalathrax/final_manifest.json" not in final_step_artifacts.get("artifacts", [])
+                or not final_step_artifacts.get("artifact_status", [{}])[0].get("exists")
+            ):
+                raise AssertionError(f"bad final step artifacts endpoint: {final_step_artifacts}")
             artifact_path = artifacts["artifacts"][0]["path"]
             text_artifact = request_json(base + f"/runs/warmaster-test/artifact_text?path={artifact_path}")
             if not text_artifact.get("ok") or "ready" not in text_artifact.get("text", ""):
