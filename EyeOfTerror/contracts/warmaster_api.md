@@ -128,6 +128,9 @@ step ids, workers, dependency edges, expected artifact paths, and artifact
 counts for client review. When the governor exposes oversight, task preflight
 also returns `oversight_summary` and `oversight_validation` so clients can
 inspect final review expectations before creating a run package.
+When the governor plan exposes action hints, task preflight preserves them in
+`governor_plan_actions` so higher-level orchestrators can compare Warmaster's
+next step with the selected governor's own prepare-run recommendation.
 Set `include_brigade_health=true` to include compact `brigade_readiness`
 (`ready`, blocker/warning counts, blockers, and warnings) in the preflight
 response without fetching the full `/brigade_health` service payload.

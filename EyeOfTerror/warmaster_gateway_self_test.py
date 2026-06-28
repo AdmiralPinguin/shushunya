@@ -452,6 +452,7 @@ def main() -> int:
                 if (
                     not service_preflight.get("ok")
                     or service_preflight.get("governor_transport") != "http"
+                    or service_preflight.get("governor_plan_actions", {}).get("next_action", {}).get("kind") != "prepare_run"
                     or service_preflight_body.get("message") != "Собери все известное о событиях Скалатракса."
                     or service_preflight_body.get("governor_transport") != "http"
                     or service_preflight_body.get("task_id") != "warmaster-default-http-preflight-test"

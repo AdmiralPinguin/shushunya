@@ -723,6 +723,7 @@ def preflight_task(
         "task_id": resolved_task_id,
         "route": {"kind": route.kind, "governor": route.governor},
         "contract_summary": contract_summary(contract),
+        "governor_plan_actions": plan_payload.get("actions") if isinstance(plan_payload.get("actions"), dict) else {},
         "oversight_summary": compact_oversight_summary(oversight) if oversight else {},
         "oversight_validation": {"ok": not oversight_errors, "errors": oversight_errors},
         "validation": {"ok": not validation_errors, "errors": validation_errors},

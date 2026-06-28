@@ -70,6 +70,9 @@
   edges, and expected artifacts.
 - Task preflight exposes compact governor oversight summaries and validation so
   clients can inspect final review expectations before creating run history.
+- Task preflight preserves selected governor plan action hints for
+  higher-level orchestrators that need to compare Warmaster and governor next
+  steps.
 - Task preflight can optionally include compact `brigade_readiness` when clients
   set `include_brigade_health=true`.
 - Optional task-preflight brigade readiness fails soft as a diagnostic payload
