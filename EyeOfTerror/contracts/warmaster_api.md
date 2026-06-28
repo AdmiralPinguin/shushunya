@@ -235,6 +235,10 @@ required revision plan is present.
 Revision actions are false when the required `revision_plan` is structurally
 invalid or references workers that do not match the run dispatch package;
 summaries expose these diagnostics as `revision_plan_errors`.
+Summaries and snapshots also expose `revision_plan_summary` with `required`,
+`valid`, compact step/worker lists, top reasons, and validation errors so chat
+clients and higher-level governors can choose revision controls without parsing
+the full raw plan.
 Start, resume, and revision actions are false when `package_errors` is
 non-empty; `actions.next_action.kind=inspect_package` points clients to
 `GET /runs/{task_id}/package` for diagnostics.

@@ -660,6 +660,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "result": result,
         "revision_plan": revision_plan,
         "revision_plan_errors": revision_plan_errors,
+        "revision_plan_summary": revision_plan_summary(revision_plan, revision_plan_errors),
         "package_errors": package_errors,
         "oversight_errors": oversight_errors,
         "oversight_summary": run_oversight_summary(run_dir),
@@ -790,6 +791,35 @@ def validate_revision_plan(run_dir: Path, revision_plan: dict[str, Any]) -> list
             if field_name in item and not isinstance(item.get(field_name), str):
                 errors.append(f"revision_plan.steps[{index}].{field_name} must be a string")
     return errors
+
+
+def revision_plan_summary(revision_plan: dict[str, Any], revision_plan_errors: list[str] | None = None) -> dict[str, Any]:
+    raw_steps = revision_plan.get("steps") if isinstance(revision_plan.get("steps"), list) else []
+    steps = [item for item in raw_steps if isinstance(item, dict)]
+    step_ids: list[str] = []
+    workers: list[str] = []
+    reasons: list[str] = []
+    for item in steps:
+        step_id = str(item.get("step_id") or "").strip()
+        worker = str(item.get("worker") or "").strip()
+        reason = str(item.get("reason") or "").strip()
+        if step_id and step_id not in step_ids:
+            step_ids.append(step_id)
+        if worker and worker not in workers:
+            workers.append(worker)
+        if reason and reason not in reasons:
+            reasons.append(reason)
+    errors = revision_plan_errors or []
+    return {
+        "required": bool(revision_plan.get("required")),
+        "valid": not errors,
+        "step_count": len(step_ids),
+        "worker_count": len(workers),
+        "step_ids": step_ids,
+        "workers": workers,
+        "reasons": reasons[:5],
+        "errors": errors,
+    }
 
 
 def run_actions(
@@ -1228,6 +1258,7 @@ def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: in
     payload["events"] = events_payload.get("events", [])
     payload["event_cursor"] = events_payload.get("cursor", {"after": 0, "next": 0, "total": 0})
     payload["revision_plan"] = payload["summary"].get("revision_plan", {"required": False, "steps": []})
+    payload["revision_plan_summary"] = payload["summary"].get("revision_plan_summary", {})
     if not events_payload.get("ok"):
         payload["events_error"] = events_payload.get("error", "events unavailable")
     ledger_path = run_dir / "task_ledger.json"

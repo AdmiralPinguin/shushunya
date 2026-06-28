@@ -240,6 +240,8 @@
 - `ReductorVerifier` expands revision plans through downstream pipeline
   dependencies, so source/fact/timeline fixes also rerun the dependent draft
   and review path instead of leaving stale derived artifacts.
+- Warmaster run summaries and snapshots expose `revision_plan_summary` for
+  compact client/governor decisions about required revision work.
 - HTTP execution preflights all worker `/health` endpoints before running steps
   and rejects worker identity mismatches before dispatch.
 - Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.

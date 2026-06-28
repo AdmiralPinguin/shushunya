@@ -1088,7 +1088,14 @@ def main() -> int:
             }
             write_json(ledger_path, ledger_payload)
             revision_summary = request_json(base + "/runs/warmaster-test/summary")
-            if not revision_summary.get("summary", {}).get("actions", {}).get("can_execute_revision"):
+            revision_plan_summary = revision_summary.get("summary", {}).get("revision_plan_summary", {})
+            if (
+                not revision_summary.get("summary", {}).get("actions", {}).get("can_execute_revision")
+                or not revision_plan_summary.get("required")
+                or not revision_plan_summary.get("valid")
+                or revision_plan_summary.get("step_ids") != ["draft_reconstruction"]
+                or revision_plan_summary.get("workers") != ["ScriptoriumDaemon"]
+            ):
                 raise AssertionError(f"summary did not expose revision action: {revision_summary}")
             failed_revision_task = request_json(
                 base + "/task",
@@ -1150,8 +1157,11 @@ def main() -> int:
             write_json(invalid_revision_ledger_path, invalid_revision_ledger)
             invalid_revision_summary = request_json(base + "/runs/warmaster-invalid-revision-plan-test/summary")
             invalid_revision_actions = invalid_revision_summary.get("summary", {}).get("actions", {})
+            invalid_revision_plan_summary = invalid_revision_summary.get("summary", {}).get("revision_plan_summary", {})
             if (
                 not invalid_revision_summary.get("summary", {}).get("revision_plan_errors")
+                or invalid_revision_plan_summary.get("valid")
+                or not invalid_revision_plan_summary.get("errors")
                 or invalid_revision_actions.get("can_start_revision")
                 or invalid_revision_actions.get("can_execute_revision")
                 or invalid_revision_actions.get("next_action", {}).get("kind") != "inspect_revision"
