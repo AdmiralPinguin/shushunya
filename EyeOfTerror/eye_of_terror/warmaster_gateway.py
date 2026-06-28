@@ -1254,6 +1254,24 @@ def governor_worker_requirements(governors: list[dict[str, Any]], workers: list[
     return requirements
 
 
+def governor_pipeline_summaries(governors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    pipelines: list[dict[str, Any]] = []
+    for governor in governors:
+        runtime = governor.get("runtime") if isinstance(governor.get("runtime"), dict) else {}
+        capabilities_result = runtime.get("capabilities") if isinstance(runtime.get("capabilities"), dict) else {}
+        capabilities = capabilities_result.get("capabilities") if isinstance(capabilities_result.get("capabilities"), dict) else {}
+        pipeline = capabilities.get("pipeline") if isinstance(capabilities.get("pipeline"), dict) else {}
+        if not pipeline:
+            continue
+        pipelines.append(
+            {
+                "governor": str(governor.get("name") or ""),
+                "pipeline": pipeline,
+            }
+        )
+    return pipelines
+
+
 def brigade_plan_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
     host = validate_service_host(host)
     from start_brigade import brigade_plan  # Imported lazily to keep gateway boot independent from launcher tooling.
@@ -1273,6 +1291,7 @@ def brigade_health_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
     governors = governor_registry_snapshot(include_health=True, host=host)
     workers = worker_registry_snapshot(include_health=True, host=host)
     requirements = governor_worker_requirements(governors, workers)
+    pipelines = governor_pipeline_summaries(governors)
     reachable_governors = sum(1 for item in governors if item.get("runtime", {}).get("reachable"))
     reachable_workers = sum(1 for item in workers if item.get("runtime", {}).get("reachable"))
     return {
@@ -1285,13 +1304,14 @@ def brigade_health_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
             "governors": governors,
             "workers": workers,
         },
-        "requirements": {"governor_workers": requirements},
+        "requirements": {"governor_workers": requirements, "governor_pipelines": pipelines},
         "summary": {
             "governors_total": len(governors),
             "governors_reachable": reachable_governors,
             "workers_total": len(workers),
             "workers_reachable": reachable_workers,
             "governor_requirements_satisfied": all(item.get("satisfied") for item in requirements) if requirements else None,
+            "governor_pipelines_available": len(pipelines),
         },
     }
 

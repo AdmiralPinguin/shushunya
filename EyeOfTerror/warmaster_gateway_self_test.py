@@ -229,6 +229,13 @@ def main() -> int:
                 requirements = warmaster_gateway.governor_worker_requirements(governor_snapshot, warmaster_gateway.worker_registry_snapshot())
                 if not requirements or not requirements[0].get("satisfied") or requirements[0].get("missing_workers"):
                     raise AssertionError(f"governor worker requirements were not satisfied: {requirements}")
+                pipelines = warmaster_gateway.governor_pipeline_summaries(governor_snapshot)
+                if (
+                    not pipelines
+                    or pipelines[0].get("governor") != "IskandarKhayon"
+                    or pipelines[0].get("pipeline", {}).get("steps", [])[0].get("worker") != "Lexmechanic"
+                ):
+                    raise AssertionError(f"governor pipeline summaries were not exposed: {pipelines}")
             finally:
                 warmaster_gateway.governor_refs = original_governor_refs
         finally:
