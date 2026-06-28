@@ -4,6 +4,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from analyze_reports import analyze_reports
 from run_arena import RunResult, summarize_results, write_json
 
 
@@ -26,6 +27,20 @@ def main() -> int:
         leftovers = list(Path(temp_dir).glob("*.tmp"))
         if leftovers:
             raise AssertionError(f"arena write_json left temp files: {leftovers}")
+        report = Path(temp_dir) / "report.json"
+        write_json(
+            report,
+            {
+                "suite": "smoke",
+                "results": [
+                    {"agent": "shushunya", "task_id": "a", "ok": True, "duration_sec": 1.0},
+                    {"agent": "shushunya", "task_id": "b", "ok": False, "duration_sec": 2.0, "exit_code": 2},
+                ],
+            },
+        )
+        analysis = analyze_reports([report])
+        if analysis["stats"][0]["pass_rate"] != 0.5 or not analysis["recent_failures"]:
+            raise AssertionError(f"bad arena report analysis: {analysis}")
     print("[ok] AgentArena runner")
     return 0
 

@@ -46,3 +46,9 @@ Runner self-test:
 ```bash
 ./scripts/run_arena_self_test.py
 ```
+
+Summarize recent reports:
+
+```bash
+./scripts/analyze_reports.py --limit 30
+```
