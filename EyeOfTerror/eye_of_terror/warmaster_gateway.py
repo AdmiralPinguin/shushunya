@@ -1886,6 +1886,13 @@ def gateway_actions() -> dict[str, Any]:
         "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
         "polling": ["GET /events?after=0", "GET /runs/{task_id}/snapshot?events_after=0"],
         "maintenance": ["GET /recovery", "POST /recovery/start_resume_local", "POST /recovery/start_resume_http", "POST /recover_stale"],
+        "run_inspection": [
+            "GET /runs/{task_id}/summary",
+            "GET /runs/{task_id}/package",
+            "GET /runs/{task_id}/oversight",
+            "GET /runs/{task_id}/contract",
+            "GET /runs/{task_id}/dispatch",
+        ],
         "diagnostics": ["GET /state?health=1", "GET /brigade_health", "GET /doctor"],
     }
 

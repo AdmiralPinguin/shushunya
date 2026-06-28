@@ -361,6 +361,8 @@ def main() -> int:
                 or "POST /runs/{task_id}/preflight_http" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
                 or "GET /events?after=0" not in capabilities.get("actions", {}).get("polling", [])
                 or "GET /recovery" not in capabilities.get("actions", {}).get("maintenance", [])
+                or "GET /runs/{task_id}/package" not in capabilities.get("actions", {}).get("run_inspection", [])
+                or "GET /runs/{task_id}/oversight" not in capabilities.get("actions", {}).get("run_inspection", [])
                 or "final_package_read" not in capabilities.get("capabilities", [])
                 or "POST /recovery/start_resume_local" not in capabilities.get("actions", {}).get("maintenance", [])
             ):

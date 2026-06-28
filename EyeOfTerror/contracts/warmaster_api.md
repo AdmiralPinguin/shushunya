@@ -243,6 +243,10 @@ invalid revision plans, polling for active runs, and
 force-gated rerun guidance for completed runs. When the recommendation is a
 completed-run rerun, `body.force` must be true.
 
+Gateway capabilities expose `actions.run_inspection` with the preferred
+run-specific diagnostic endpoints for chat clients that need to render
+inspection buttons or follow `actions.next_action` without hardcoded URLs.
+
 Run summaries include `oversight_summary` when the run package has
 `oversight.json`. It is a compact view of the governor's run-specific
 supervision plan: governor, kind, artifact role highlights, quality gate count,
