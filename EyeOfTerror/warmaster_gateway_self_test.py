@@ -1080,7 +1080,15 @@ def main() -> int:
             else:
                 raise AssertionError("run without a revision plan should not expose revision steps")
             run_status = request_json(base + "/runs/warmaster-test")
-            if not run_status.get("ok") or run_status.get("task_id") != "warmaster-test" or not run_status.get("ledger"):
+            if (
+                not run_status.get("ok")
+                or run_status.get("task_id") != "warmaster-test"
+                or not run_status.get("ledger")
+                or run_status.get("phase") != "ready_to_start"
+                or not run_status.get("decision", {}).get("can_start")
+                or run_status.get("display", {}).get("headline") != "Run is ready to start"
+                or run_status.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
+            ):
                 raise AssertionError(f"bad run status: {run_status}")
             run_summary = request_json(base + "/runs/warmaster-test/summary")
             if (

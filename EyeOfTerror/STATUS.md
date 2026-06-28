@@ -211,6 +211,9 @@
 - Run summary responses expose the same top-level `phase`, `decision`,
   `display`, `next_action`, and executable `client_action` fields as
   orchestration views.
+- Base run status responses preserve raw status/ledger data and expose
+  `summary`, `phase`, `decision`, `display`, `next_action`, and executable
+  `client_action` fields when the ledger is readable.
 - Orchestration cards and single-run orchestration states share the same
   phase/decision/display builder to keep list and detail views consistent.
 - Warmaster Gateway exposes gateway-level action hints for preflight, creation,

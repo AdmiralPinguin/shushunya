@@ -3597,6 +3597,18 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     status_payload["ledger_error"] = ledger_error
                     response(self, 200, status_payload)
                     return
+                summary = run_summary(run_dir)
+                view = orchestration_view_fields(summary, task_id=task_id)
+                status_payload.update(
+                    {
+                        "summary": summary,
+                        "phase": view.get("phase", ""),
+                        "decision": view.get("decision", {}),
+                        "display": view.get("display", {}),
+                        "next_action": view.get("next_action", {}),
+                        "client_action": view.get("client_action", {}),
+                    }
+                )
                 response(self, 200, status_payload)
                 return
             response(self, 404, {"ok": False, "error": "not found"})
