@@ -462,6 +462,7 @@ def main() -> int:
                 "http_governor_planning",
                 "brigade_plan_snapshot",
                 "brigade_health_snapshot",
+                "brigade_readiness_summary",
                 "run_package_diagnostics",
                 "run_oversight_read",
             }
@@ -471,6 +472,7 @@ def main() -> int:
                 not capabilities.get("actions", {}).get("can_preflight_task")
                 or not capabilities.get("actions", {}).get("can_preflight_runs")
                 or not capabilities.get("actions", {}).get("can_execute_step_subsets")
+                or not capabilities.get("actions", {}).get("can_check_brigade_readiness")
                 or not capabilities.get("actions", {}).get("can_list_recoverable_runs")
                 or not capabilities.get("actions", {}).get("can_bulk_start_recoverable_runs")
                 or not capabilities.get("actions", {}).get("can_poll_global_events")

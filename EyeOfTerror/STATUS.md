@@ -143,6 +143,8 @@
 - Brigade health summary exposes `ready`, `blockers`, and `warnings` so
   higher-level orchestrators can decide whether the service-separated brigade is
   runnable without reinterpreting every service health payload.
+- Warmaster capabilities advertise brigade readiness checks through
+  `brigade_readiness_summary` and `actions.can_check_brigade_readiness`.
 - Brigade health reports whether reachable governor `required_workers` are
   present and runnable in the Mechanicum registry.
 - Brigade health reports reachable governor pipeline summaries when governor

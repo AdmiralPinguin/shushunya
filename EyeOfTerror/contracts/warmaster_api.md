@@ -85,7 +85,9 @@ counts, process-local active run ids, recent run summaries, and the expected
 service-separated brigade startup plan. It also includes a compact `recovery`
 section listing interrupted runs whose action hints allow resume. `state.actions` and
 `capabilities.actions` expose client-facing gateway action hints, including the
-preferred task flow: preflight, create, then start.
+preferred task flow: preflight, create, then start. `can_check_brigade_readiness`
+means clients can use `GET /brigade_health` summary fields to decide whether
+the service-separated brigade is runnable.
 Clients can call `GET /recovery` when they only need the recoverable interrupted
 run list without a full bootstrap snapshot. Each candidate reports
 `resume_ready`, `resume_errors`, and pending step ids so clients can separate
