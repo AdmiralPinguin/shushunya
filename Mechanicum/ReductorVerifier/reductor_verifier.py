@@ -66,6 +66,29 @@ def text_contains_markers(text: str, markers: list[str]) -> bool:
     return all(marker.lower() in lowered for marker in markers)
 
 
+def extract_section_bullets(text: str, headings: set[str]) -> list[str]:
+    bullets: list[str] = []
+    in_section = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("## "):
+            in_section = line.removeprefix("## ").strip().lower() in headings
+            continue
+        if in_section and line.startswith("- "):
+            bullets.append(line.removeprefix("- ").strip())
+    return bullets
+
+
+def revision_focus_from_artifacts(reconstruction: str, coverage: str) -> dict[str, Any]:
+    reconstruction_items = extract_section_bullets(reconstruction, {"фокус ревизии"})
+    coverage_items = extract_section_bullets(coverage, {"revision context"})
+    return {
+        "present": bool(reconstruction_items or coverage_items),
+        "reconstruction_items": reconstruction_items,
+        "coverage_items": coverage_items,
+    }
+
+
 def add_revision_step(steps: list[dict[str, str]], step_id: str, worker: str, reason: str, source: str) -> None:
     candidate = {
         "step_id": step_id,
@@ -137,6 +160,7 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
     timeline = load_json(workspace_root, timeline_path)
     reconstruction = read_text(workspace_root, reconstruction_path)
     coverage = read_text(workspace_root, coverage_path)
+    revision_focus = revision_focus_from_artifacts(reconstruction, coverage)
     timeline_event_ids = {
         str(item.get("event_id"))
         for item in timeline.get("timeline", [])
@@ -190,6 +214,7 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
         "findings": findings,
         "warnings": warnings,
         "revision_plan": revision_plan_from_findings(findings, []),
+        "revision_focus": revision_focus,
         "metrics": {
             "sources": len(source_map.get("sources", [])),
             "direct_event_notes": len(notes.get("events", [])),

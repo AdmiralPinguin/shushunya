@@ -59,15 +59,18 @@ def main() -> int:
             base / "reconstruction_ru.md",
             "На луне Скалатракса были переговоры. Дреагер стреляет в Антея. Golden Absolute. "
             "ночь Скалатракса и укрытия. Кхарн выжигает убежища. Пожиратели Миров стали резать друг друга. "
+            "## Фокус ревизии\n- Reason: Draft did not cover shelters\n"
             "## Что еще надо проверить\n- gap\n",
         )
-        write(base / "coverage_report.md", "## Gaps\n- gap\n")
+        write(base / "coverage_report.md", "## Revision Context\n- Source step: critic_review\n## Gaps\n- gap\n")
         result = run(request, root)
         if not result.get("ok"):
             raise AssertionError(f"ReductorVerifier failed: {result}")
         report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
         if not report["approved"] or report["status"] != "passed_with_warnings":
             raise AssertionError(f"expected approved with warnings: {report}")
+        if not report.get("revision_focus", {}).get("present"):
+            raise AssertionError(f"expected verifier to record revision focus: {report}")
         write_json(base / "timeline.json", {"timeline": [{"event_id": "moon_parley"}], "gaps": []})
         result = run(request, root)
         if not result.get("ok"):
