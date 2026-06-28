@@ -114,8 +114,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
     required_workers = []
     if capabilities.get("ok"):
         payload = capabilities.get("capabilities") if isinstance(capabilities.get("capabilities"), dict) else {}
-        raw_required = payload.get("required_workers") if isinstance(payload.get("required_workers"), list) else []
-        required_workers = [str(worker) for worker in raw_required if str(worker)]
+        required_workers = required_workers_from_capabilities(payload)
     if required_workers:
         available_workers = {worker.name for worker in worker_refs()}
         missing_workers = [worker for worker in required_workers if worker not in available_workers]
@@ -735,6 +734,11 @@ def fetch_service_capabilities(host: str, port: int, timeout_sec: float = 1.0) -
         return {"ok": False, "error": str(exc)}
 
 
+def required_workers_from_capabilities(payload: dict[str, Any]) -> list[str]:
+    raw_required = payload.get("required_workers") if isinstance(payload.get("required_workers"), list) else []
+    return [str(worker) for worker in raw_required if str(worker)]
+
+
 def enrich_worker_metadata(worker: dict[str, Any]) -> dict[str, Any]:
     worker_path = REPO_ROOT / str(worker.get("path") or "") / "worker.json"
     if not worker_path.exists():
@@ -783,8 +787,7 @@ def governor_worker_requirements(governors: list[dict[str, Any]], workers: list[
         runtime = governor.get("runtime") if isinstance(governor.get("runtime"), dict) else {}
         capabilities_result = runtime.get("capabilities") if isinstance(runtime.get("capabilities"), dict) else {}
         capabilities = capabilities_result.get("capabilities") if isinstance(capabilities_result.get("capabilities"), dict) else {}
-        required = capabilities.get("required_workers") if isinstance(capabilities.get("required_workers"), list) else []
-        required_workers = [str(worker) for worker in required if str(worker)]
+        required_workers = required_workers_from_capabilities(capabilities)
         if not required_workers:
             continue
         missing = [worker for worker in required_workers if worker not in worker_names]
