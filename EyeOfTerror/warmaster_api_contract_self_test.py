@@ -22,6 +22,11 @@ def documented_endpoints() -> set[str]:
     return endpoints
 
 
+def contract_text() -> str:
+    path = Path(__file__).resolve().parent / "contracts" / "warmaster_api.md"
+    return path.read_text(encoding="utf-8")
+
+
 def main() -> int:
     advertised = set(gateway_capabilities()["endpoints"])
     documented = documented_endpoints()
@@ -29,6 +34,10 @@ def main() -> int:
     extra = sorted(documented - advertised)
     if missing or extra:
         raise AssertionError(f"Warmaster API contract mismatch: missing={missing} extra={extra}")
+    text = contract_text()
+    for required in ("step_ids", "partial_execution=true", "interrupted"):
+        if required not in text:
+            raise AssertionError(f"Warmaster API contract missing restricted execution rule: {required}")
     print("[ok] Warmaster API contract")
     return 0
 

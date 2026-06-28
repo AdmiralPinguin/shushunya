@@ -86,6 +86,11 @@ Client-facing gateway behavior is specified in
 worker availability, and the compact planned step summary without creating run
 history.
 
+Execution endpoints accept optional `step_ids` when a governor needs to run a
+validated subset of a prepared pipeline. Successful partial execution leaves the
+run `interrupted` so the remaining work is resumed instead of silently marked
+complete.
+
 `GET /workers` returns the static port registry enriched with available
 `Mechanicum/*/worker.json` metadata. Add `?health=1` to include a live
 best-effort `/health` snapshot for each worker service.

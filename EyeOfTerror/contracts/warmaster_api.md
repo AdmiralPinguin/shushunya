@@ -193,6 +193,19 @@ unselected dependency artifacts to already exist when a `workspace_root` is
 provided. Each run preflight records a compact `run_preflight_recorded` ledger
 event with mode, selected steps, result, and failure counts.
 
+Execution endpoints also accept optional `step_ids` for orchestrator-controlled
+step subsets. `step_ids` must be a list of unique non-empty strings and every
+requested id must exist in the run package. Unknown or duplicate step ids must
+be rejected before dispatch. For `resume_*` and `*_revision_*` endpoints, a
+client-provided subset must stay inside the automatically eligible resume or
+revision step set.
+
+When a selected subset succeeds but does not cover the whole run package, the
+executor response includes `partial_execution=true`, the requested step ids, and
+the execution mode. The ledger must remain `interrupted` instead of
+`completed`, so clients and higher-level governors continue through resume
+actions rather than treating a partial worker call as a finished user task.
+
 If execution endpoints accept `workspace_root`, that path must stay inside the
 selected run directory. Relative paths are resolved below the run directory.
 
