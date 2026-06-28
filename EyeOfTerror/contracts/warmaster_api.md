@@ -131,6 +131,10 @@ inspect final review expectations before creating a run package.
 Set `include_brigade_health=true` to include compact `brigade_readiness`
 (`ready`, blocker/warning counts, blockers, and warnings) in the preflight
 response without fetching the full `/brigade_health` service payload.
+Task preflight responses include `actions.can_create_task` and
+`actions.next_action` so chat clients can either create the task, inspect an
+existing run after a `task_id` conflict, or inspect brigade/governor
+diagnostics after validation failures.
 
 ```json
 {

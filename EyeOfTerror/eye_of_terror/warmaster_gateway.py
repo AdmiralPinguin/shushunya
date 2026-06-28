@@ -420,6 +420,71 @@ def compact_brigade_readiness(host: str = "127.0.0.1") -> dict[str, Any]:
     }
 
 
+def task_preflight_actions(ok: bool, error_code: str, task_id: str, include_brigade_health: bool = False) -> dict[str, Any]:
+    actions = {
+        "can_create_task": ok,
+        "can_check_brigade_readiness": True,
+    }
+    if ok:
+        next_action = {
+            "kind": "create_task",
+            "method": "POST",
+            "endpoint": "POST /task",
+            "body": {"message": "<same message>", "task_id": task_id} if task_id else {"message": "<same message>"},
+            "reason": "task preflight passed",
+        }
+    elif error_code == "task_exists":
+        next_action = {
+            "kind": "inspect_existing_run",
+            "method": "GET",
+            "endpoint": "GET /runs/{task_id}/summary",
+            "body": {},
+            "reason": "task_id already exists",
+        }
+    elif error_code in {"contract_workers_missing", "contract_workers_unavailable", "governor_workers_missing", "governor_workers_unavailable"}:
+        next_action = {
+            "kind": "inspect_brigade",
+            "method": "GET",
+            "endpoint": "GET /brigade_health",
+            "body": {},
+            "reason": "required workers are missing or unavailable",
+        }
+    elif error_code == "invalid_oversight":
+        next_action = {
+            "kind": "inspect_governor",
+            "method": "GET",
+            "endpoint": "GET /governors?health=1",
+            "body": {},
+            "reason": "governor oversight is invalid",
+        }
+    elif error_code in {"governor_inactive", "no_supported_governor"}:
+        next_action = {
+            "kind": "inspect_capabilities",
+            "method": "GET",
+            "endpoint": "GET /capabilities",
+            "body": {},
+            "reason": "no active governor can accept this task",
+        }
+    elif include_brigade_health:
+        next_action = {
+            "kind": "inspect_preflight",
+            "method": "POST",
+            "endpoint": "POST /task_preflight",
+            "body": {"include_brigade_health": True},
+            "reason": error_code or "task preflight failed",
+        }
+    else:
+        next_action = {
+            "kind": "inspect_preflight",
+            "method": "POST",
+            "endpoint": "POST /task_preflight",
+            "body": {},
+            "reason": error_code or "task preflight failed",
+        }
+    actions["next_action"] = next_action
+    return actions
+
+
 def preflight_task(
     message: str,
     task_id: str | None,
@@ -429,7 +494,14 @@ def preflight_task(
     include_brigade_health: bool = False,
 ) -> dict[str, Any]:
     if task_id is not None and not valid_task_id(task_id):
-        return {"ok": False, "gateway": "WarmasterGateway", "error": "invalid task_id", "error_code": "invalid_task_id", "task_id": task_id}
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "invalid task_id",
+            "error_code": "invalid_task_id",
+            "task_id": task_id,
+            "actions": task_preflight_actions(False, "invalid_task_id", task_id or "", include_brigade_health),
+        }
     route = route_message(message)
     if not route.ok:
         return route_failure_payload(route)
@@ -437,7 +509,13 @@ def preflight_task(
     if governor_ref is None or not governor_ref.active():
         return {"ok": False, "gateway": "WarmasterGateway", "error": f"governor is not active: {route.governor}", "kind": route.kind}
     if governor_transport not in {"local", "http"}:
-        return {"ok": False, "gateway": "WarmasterGateway", "error": "governor_transport must be local or http", "error_code": "invalid_governor_transport"}
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "governor_transport must be local or http",
+            "error_code": "invalid_governor_transport",
+            "actions": task_preflight_actions(False, "invalid_governor_transport", task_id or "", include_brigade_health),
+        }
     if governor_transport == "http":
         host = validate_service_host(governor_host)
         port = int(governor_ref.port)
@@ -473,7 +551,15 @@ def preflight_task(
     resolved_task_id = str(contract.get("task_id") or "").strip()
     run_dir = run_root / resolved_task_id if resolved_task_id else run_root / "_invalid"
     if resolved_task_id and run_dir.exists():
-        return {"ok": False, "gateway": "WarmasterGateway", "error": "task_id already exists", "error_code": "task_exists", "task_id": resolved_task_id, "run_dir": str(run_dir)}
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "task_id already exists",
+            "error_code": "task_exists",
+            "task_id": resolved_task_id,
+            "run_dir": str(run_dir),
+            "actions": task_preflight_actions(False, "task_exists", resolved_task_id, include_brigade_health),
+        }
     validation_errors = validate_task_contract_payload(contract)
     availability = {"ok": True, "missing_workers": [], "unavailable_workers": []}
     if not validation_errors:
@@ -505,6 +591,7 @@ def preflight_task(
         "worker_availability": availability,
         "would_create_run_dir": str(run_dir) if resolved_task_id else "",
         "error_code": error_code,
+        "actions": task_preflight_actions(ok, error_code, resolved_task_id, include_brigade_health),
     }
     if include_brigade_health:
         payload["brigade_readiness"] = compact_brigade_readiness(host=governor_host)

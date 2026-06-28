@@ -621,6 +621,9 @@ def main() -> int:
                 or preflight_steps[1].get("expected_artifact_count") != 1
                 or preflight.get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or not preflight.get("oversight_validation", {}).get("ok")
+                or preflight.get("actions", {}).get("can_create_task") is not True
+                or preflight.get("actions", {}).get("next_action", {}).get("kind") != "create_task"
+                or preflight.get("actions", {}).get("next_action", {}).get("method") != "POST"
             ):
                 raise AssertionError(f"task preflight should not create a run: {preflight}")
             if "brigade_readiness" in preflight:
@@ -677,6 +680,23 @@ def main() -> int:
                     raise AssertionError(f"bad duplicate task response: {duplicate}")
             else:
                 raise AssertionError("duplicate task_id should not overwrite an existing run")
+            try:
+                request_json(
+                    base + "/task_preflight",
+                    {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                duplicate_preflight = json.loads(exc.read().decode("utf-8"))
+            else:
+                raise AssertionError("duplicate task preflight should return a conflict")
+            if (
+                duplicate_preflight.get("ok")
+                or duplicate_preflight.get("actions", {}).get("can_create_task")
+                or duplicate_preflight.get("actions", {}).get("next_action", {}).get("kind") != "inspect_existing_run"
+            ):
+                raise AssertionError(f"duplicate task preflight should expose inspect action: {duplicate_preflight}")
             state = request_json(base + "/state?run_limit=5")
             if (
                 not state.get("ok")
