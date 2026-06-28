@@ -383,6 +383,13 @@ def config_from_payload(payload: dict[str, Any]) -> AgentConfig:
         max_steps=int_field(payload, "max_steps", default_max_steps_for_payload(payload), 1, 2000),
         max_runtime_sec=int_field(payload, "max_runtime_sec", int(os.environ.get("SHUSHUNYA_AGENT_MAX_RUNTIME_SEC", "1800")), 30, 7200),
         max_model_tokens=int_field(payload, "max_tokens", int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "1024")), 128, 4096),
+        model_request_timeout=int_field(
+            payload,
+            "model_request_timeout",
+            int(os.environ.get("SHUSHUNYA_AGENT_MODEL_REQUEST_TIMEOUT", "240")),
+            10,
+            900,
+        ),
         llm_retries=int_field(payload, "llm_retries", int(os.environ.get("SHUSHUNYA_AGENT_LLM_RETRIES", "3")), 1, 5),
         json_output=True,
         technical_output=bool_field(payload, "technical", True),

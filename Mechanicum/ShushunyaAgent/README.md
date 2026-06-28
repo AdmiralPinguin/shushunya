@@ -82,6 +82,9 @@ The `task` text itself is capped by `SHUSHUNYA_AGENT_MAX_TASK_CHARS`, default
 `50000`, to avoid oversized prompts before model context compaction can help.
 Transient model HTTP errors `429`, `502`, `503`, and `504` are retried up to
 `SHUSHUNYA_AGENT_LLM_RETRIES`, default `3`.
+Each model HTTP request is bounded by `SHUSHUNYA_AGENT_MODEL_REQUEST_TIMEOUT`,
+default `240` seconds, and can be overridden per HTTP request with
+`model_request_timeout`.
 Total agent runtime is capped by `SHUSHUNYA_AGENT_MAX_RUNTIME_SEC`, default
 `1800`, and can be overridden per HTTP request with `max_runtime_sec`.
 

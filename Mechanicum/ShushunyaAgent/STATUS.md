@@ -83,6 +83,10 @@ Last verified: 2026-06-28 20:21 KST.
   imports for integrations.
 - Agent runs have a total runtime limit through `max_runtime_sec` /
   `SHUSHUNYA_AGENT_MAX_RUNTIME_SEC`.
+- Model HTTP calls have a configurable request timeout through
+  `model_request_timeout` / `SHUSHUNYA_AGENT_MODEL_REQUEST_TIMEOUT`, so
+  cooperative cancellation waits at most the active model request timeout before
+  the next step boundary.
 - `GET /task-journal?task_id=...` can inspect recent journal events, and
   `resume_task_id` can feed recent journal context into a follow-up run.
 - Task journal retention keeps the newest configured JSONL journals.

@@ -620,6 +620,11 @@ def main() -> int:
     if server.config_from_payload({"task": "tiny", "max_steps": 2500}).max_steps != 2000:
         raise AssertionError("HTTP max_steps should remain capped by the hard safety limit")
     print("[ok] adaptive HTTP step budget")
+    if server.config_from_payload({"model_request_timeout": 37}).model_request_timeout != 37:
+        raise AssertionError("HTTP model_request_timeout should be configurable")
+    if server.config_from_payload({"model_request_timeout": 2}).model_request_timeout != 10:
+        raise AssertionError("HTTP model_request_timeout should keep a minimum safety floor")
+    print("[ok] HTTP model request timeout config")
     if server.config_from_payload({"shell_enabled": True}).shell_enabled:
         raise AssertionError("HTTP shell should be disabled without API key or explicit env override")
     print("[ok] HTTP shell default locked")
@@ -2641,7 +2646,7 @@ def main() -> int:
         hdrs={},
         fp=io.BytesIO(b'{"error":"busy"}'),
     )
-    retry_config = AgentConfig(llm_retries=2, inject_memory=False, archive_internal_steps=False)
+    retry_config = AgentConfig(llm_retries=2, model_request_timeout=37, inject_memory=False, archive_internal_steps=False)
     with mock.patch.object(agent_runner, "archive_request", side_effect=[
         transient_error,
         {"choices": [{"message": {"content": '{"action":"final","message":"retry ok"}'}}]},
@@ -2649,6 +2654,8 @@ def main() -> int:
         retry_reply = chat(retry_config, [{"role": "user", "content": "retry"}], inject_memory=False, archive_enabled=False)
     if retry_reply != '{"action":"final","message":"retry ok"}' or mocked_archive.call_count != 2:
         raise AssertionError(f"model retry did not recover: reply={retry_reply}, calls={mocked_archive.call_count}")
+    if mocked_archive.call_args_list[0].kwargs.get("timeout") != 37:
+        raise AssertionError(f"model request timeout was not passed to Archive: {mocked_archive.call_args_list[0]}")
     print("[ok] model 429 retry")
 
     def queue_busy_then_ok(config_arg, method, path, payload=None, timeout=180):

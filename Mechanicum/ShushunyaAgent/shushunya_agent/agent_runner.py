@@ -95,6 +95,7 @@ MAX_STEPS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_STEPS", "200"))
 MAX_RUNTIME_SEC = int(os.environ.get("SHUSHUNYA_AGENT_MAX_RUNTIME_SEC", "1800"))
 MAX_MODEL_TOKENS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_MODEL_TOKENS", "2048"))
 MAX_CONTEXT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_CONTEXT_CHARS", "8000"))
+MODEL_REQUEST_TIMEOUT = int(os.environ.get("SHUSHUNYA_AGENT_MODEL_REQUEST_TIMEOUT", "240"))
 SHELL_TIMEOUT = int(os.environ.get("SHUSHUNYA_AGENT_SHELL_TIMEOUT", "60"))
 MAX_TOOL_OUTPUT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_TOOL_OUTPUT_CHARS", "12000"))
 LLM_RETRIES = int(os.environ.get("SHUSHUNYA_AGENT_LLM_RETRIES", "3"))
@@ -399,6 +400,7 @@ class AgentConfig:
     archive_api_key: str = ARCHIVE_API_KEY
     model: str = MODEL
     max_model_tokens: int = MAX_MODEL_TOKENS
+    model_request_timeout: int = MODEL_REQUEST_TIMEOUT
     llm_retries: int = LLM_RETRIES
     sandbox_shell: str = SANDBOX_SHELL
     sandbox_mode: str = SANDBOX_MODE
@@ -830,7 +832,7 @@ def chat(
             queue_busy_attempts = max(attempts, max(1, min(LLM_QUEUE_BUSY_RETRIES, 20)))
             for attempt in range(1, queue_busy_attempts + 1):
                 try:
-                    response = archive_request(config, "POST", "/v1/chat/completions", payload, timeout=240)
+                    response = archive_request(config, "POST", "/v1/chat/completions", payload, timeout=config.model_request_timeout)
                     return response_message_text(response)
                 except HTTPError as exc:
                     body = exc.read().decode("utf-8", errors="replace")
@@ -4803,6 +4805,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             "archive_user": config.archive_user,
             "max_steps": config.max_steps,
             "max_runtime_sec": config.max_runtime_sec,
+            "model_request_timeout": config.model_request_timeout,
         },
     )
     if planner_meta is not None:
