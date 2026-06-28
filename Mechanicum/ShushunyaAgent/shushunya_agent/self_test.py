@@ -2516,6 +2516,29 @@ def main() -> int:
         raise AssertionError(f"model retry did not recover: reply={retry_reply}, calls={mocked_archive.call_count}")
     print("[ok] model 429 retry")
 
+    def queue_busy_then_ok(config_arg, method, path, payload=None, timeout=180):
+        if queue_busy_then_ok.calls < 2:
+            queue_busy_then_ok.calls += 1
+            raise HTTPError(
+                url="http://archive/v1/chat/completions",
+                code=503,
+                msg="Service Unavailable",
+                hdrs={},
+                fp=io.BytesIO(b'{"error":"chat queue is busy after 30s","type":"chat_queue_busy"}'),
+            )
+        return {"choices": [{"message": {"content": '{"action":"final","message":"queue recovered"}'}}]}
+
+    queue_busy_then_ok.calls = 0
+    queue_busy_config = AgentConfig(llm_retries=1, inject_memory=False, archive_internal_steps=False)
+    with mock.patch.object(agent_runner, "archive_request", side_effect=queue_busy_then_ok) as mocked_queue_busy, \
+            mock.patch.object(agent_runner.time, "sleep") as mocked_queue_sleep:
+        queue_busy_reply = chat(queue_busy_config, [{"role": "user", "content": "retry queue"}], inject_memory=False, archive_enabled=False)
+    if queue_busy_reply != '{"action":"final","message":"queue recovered"}' or mocked_queue_busy.call_count != 3:
+        raise AssertionError(f"model queue-busy retry did not recover: reply={queue_busy_reply}, calls={mocked_queue_busy.call_count}")
+    if mocked_queue_sleep.call_count != 2:
+        raise AssertionError("model queue-busy retry should sleep between busy responses")
+    print("[ok] model queue busy retry")
+
     def context_side_effect(config_arg, method, path, payload=None, timeout=180):
         if payload and payload.get("focus_enabled"):
             raise HTTPError(

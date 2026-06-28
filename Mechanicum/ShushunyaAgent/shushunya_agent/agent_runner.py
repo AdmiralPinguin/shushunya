@@ -97,6 +97,8 @@ MAX_CONTEXT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_CONTEXT_CHARS", "800
 SHELL_TIMEOUT = int(os.environ.get("SHUSHUNYA_AGENT_SHELL_TIMEOUT", "60"))
 MAX_TOOL_OUTPUT_CHARS = int(os.environ.get("SHUSHUNYA_AGENT_MAX_TOOL_OUTPUT_CHARS", "12000"))
 LLM_RETRIES = int(os.environ.get("SHUSHUNYA_AGENT_LLM_RETRIES", "3"))
+LLM_QUEUE_BUSY_RETRIES = int(os.environ.get("SHUSHUNYA_AGENT_LLM_QUEUE_BUSY_RETRIES", "8"))
+LLM_QUEUE_BUSY_SLEEP_SEC = float(os.environ.get("SHUSHUNYA_AGENT_LLM_QUEUE_BUSY_SLEEP_SEC", "15"))
 REPEATED_REJECTION_CONSECUTIVE_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_REPEATED_REJECTION_CONSECUTIVE_LIMIT", "4"))
 REPEATED_REJECTION_TOTAL_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_REPEATED_REJECTION_TOTAL_LIMIT", "3"))
 JSON_REPAIR_FAILURE_TOTAL_LIMIT = int(os.environ.get("SHUSHUNYA_AGENT_JSON_REPAIR_FAILURE_TOTAL_LIMIT", "5"))
@@ -778,7 +780,8 @@ def chat(
             if chat_template_kwargs is not None:
                 payload["chat_template_kwargs"] = chat_template_kwargs
             attempts = max(1, min(config.llm_retries, 5))
-            for attempt in range(1, attempts + 1):
+            queue_busy_attempts = max(attempts, max(1, min(LLM_QUEUE_BUSY_RETRIES, 20)))
+            for attempt in range(1, queue_busy_attempts + 1):
                 try:
                     response = archive_request(config, "POST", "/v1/chat/completions", payload, timeout=240)
                     return response_message_text(response)
@@ -786,6 +789,10 @@ def chat(
                     body = exc.read().decode("utf-8", errors="replace")
                     last_error = f"HTTP {exc.code}: {truncate(body, 1000)}"
                     lowered = body.lower()
+                    queue_busy = exc.code == 503 and "chat_queue_busy" in lowered
+                    if queue_busy and attempt < queue_busy_attempts:
+                        time.sleep(min(90.0, max(1.0, LLM_QUEUE_BUSY_SLEEP_SEC) * attempt))
+                        continue
                     if exc.code == 400 and any(token in lowered for token in ("context", "token", "exceeds", "too large")):
                         break
                     if exc.code in {429, 502, 503, 504} and attempt < attempts:
