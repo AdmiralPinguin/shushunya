@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class CommandSpec:
+    name: str
+    command: list[str]
+    env: dict[str, str]
+
+    def rendered(self) -> str:
+        prefixes = [f"{key}={value}" for key, value in sorted(self.env.items())]
+        return " ".join(prefixes + self.command)
+
+
+def pythonpath(repo_root: Path) -> str:
+    return os.pathsep.join([str(repo_root / "EyeOfTerror"), str(repo_root / "Mechanicum")])
+
+
+def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster_run_root: Path, iskandar_run_root: Path) -> list[CommandSpec]:
+    env = {"PYTHONPATH": pythonpath(repo_root)}
+    return [
+        CommandSpec(
+            "mechanicum-workers",
+            [
+                sys.executable,
+                str(repo_root / "Mechanicum" / "start_all_workers.py"),
+                "--repo-root",
+                str(repo_root),
+                "--workspace-root",
+                str(workspace_root),
+                "--host",
+                host,
+            ],
+            env,
+        ),
+        CommandSpec(
+            "iskandar-khayon",
+            [
+                sys.executable,
+                "-m",
+                "eye_of_terror.inner_circle.iskandar_service",
+                "--host",
+                host,
+                "--port",
+                "7101",
+                "--default-run-root",
+                str(iskandar_run_root),
+            ],
+            env,
+        ),
+        CommandSpec(
+            "warmaster-gateway",
+            [
+                sys.executable,
+                "-m",
+                "eye_of_terror.warmaster_gateway",
+                "--host",
+                host,
+                "--port",
+                "7000",
+                "--run-root",
+                str(warmaster_run_root),
+                "--governor-transport",
+                "http",
+                "--governor-host",
+                host,
+            ],
+            env,
+        ),
+    ]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Start the EyeOfTerror + Iskandar + Mechanicum service brigade.")
+    parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--workspace-root", default="runtime/mechanicum-work")
+    parser.add_argument("--warmaster-run-root", default="runtime/warmaster-runs")
+    parser.add_argument("--iskandar-run-root", default="runtime/iskandar-runs")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
+    repo_root = Path(args.repo_root).resolve()
+    commands = brigade_commands(
+        repo_root=repo_root,
+        host=args.host,
+        workspace_root=Path(args.workspace_root),
+        warmaster_run_root=Path(args.warmaster_run_root),
+        iskandar_run_root=Path(args.iskandar_run_root),
+    )
+    if args.dry_run:
+        for command in commands:
+            print(f"{command.name}: {command.rendered()}")
+        return 0
+
+    processes = [
+        subprocess.Popen(command.command, cwd=repo_root, env={**os.environ, **command.env})
+        for command in commands
+    ]
+    try:
+        return max(process.wait() for process in processes)
+    except KeyboardInterrupt:
+        for process in processes:
+            process.terminate()
+        for process in processes:
+            process.wait(timeout=10)
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

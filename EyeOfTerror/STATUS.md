@@ -24,6 +24,8 @@
   the active governor's HTTP service.
 - Warmaster Gateway can default new task planning to local or HTTP governor
   transport through startup flags, with per-request override.
+- `EyeOfTerror/start_brigade.py` can start the current service-separated
+  Warmaster + Iskandar + Mechanicum stack, with a dry-run self-test.
 - Warmaster Gateway can start local/HTTP execution in a background thread and expose progress through the ledger.
 - Warmaster Gateway exposes `GET /governors`, `GET /workers`, and
   `GET /workers?health=1`; worker listings are enriched with available

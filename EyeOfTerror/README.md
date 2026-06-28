@@ -118,6 +118,15 @@ Warmaster Gateway can also be started with `--governor-transport http` and
 `--governor-host 127.0.0.1` so ordinary client task submissions use governor
 services by default.
 
+Start the current service-separated brigade with:
+
+```bash
+PYTHONPATH=EyeOfTerror:Mechanicum python3 EyeOfTerror/start_brigade.py --repo-root .
+```
+
+Use `--dry-run` to print the Mechanicum worker supervisor, Iskandar service, and
+Warmaster Gateway commands without starting them.
+
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the
 same artifact text endpoint.
