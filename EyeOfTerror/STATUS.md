@@ -35,6 +35,7 @@
   overwriting existing run history.
 - Warmaster validates user-provided task ids and constrains execution workspace
   paths to each run directory.
+- Warmaster constrains HTTP worker service `host` parameters to loopback hosts.
 - Iskandar `prepare_run` constrains custom run output paths to its configured
   default run root.
 - Warmaster artifact text reads support bounded previews through `max_bytes`.
