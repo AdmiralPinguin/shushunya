@@ -86,10 +86,16 @@ def pipeline_status(contract: TaskContract, packets: list[DispatchPacket]) -> di
         missing = [step_id for step_id in packet.depends_on if step_id not in steps_by_id]
         if missing:
             missing_dependencies[packet.step_id] = missing
+    required_workers: list[str] = []
+    for packet in packets:
+        if packet.worker not in required_workers:
+            required_workers.append(packet.worker)
     return {
         "ok": not missing_dependencies,
         "task_id": contract.task_id,
         "governor": contract.assigned_governor,
+        "step_count": len(packets),
+        "required_workers": required_workers,
         "steps": [
             {
                 "step_id": packet.step_id,

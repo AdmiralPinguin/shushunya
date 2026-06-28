@@ -117,9 +117,29 @@ rework when verification fails.
   "ok": true,
   "contract": {},
   "validation": {},
-  "oversight": {}
+  "pipeline": {},
+  "oversight": {},
+  "actions": {
+    "can_prepare_run": true,
+    "can_inspect_capabilities": true,
+    "next_action": {
+      "kind": "prepare_run",
+      "method": "POST",
+      "endpoint": "POST /prepare_run",
+      "body": {"task": "User task text", "task_id": "optional-stable-id"},
+      "reason": "governor plan is valid and required workers are available"
+    }
+  }
 }
 ```
+
+`POST /plan` responses include a concrete pipeline status with `step_count`,
+ordered `required_workers`, step dependencies, input artifacts, expected
+artifacts, and missing dependency diagnostics. The
+`actions` object tells Warmaster or another orchestrator whether the governor
+can proceed to `POST /prepare_run`; failed plans recommend capability
+inspection instead of forcing clients to infer the next step from validation
+fields.
 
 ## POST /prepare_run Request
 

@@ -94,6 +94,12 @@ def main() -> int:
                 or plan["contract"]["assigned_governor"] != "IskandarKhayon"
                 or plan.get("oversight", {}).get("artifact_roles", {}).get("critic") != ["/work/skalathrax/critic_report.json"]
                 or plan.get("oversight", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
+                or plan.get("pipeline", {}).get("step_count") != len(contract_workers)
+                or plan.get("pipeline", {}).get("steps", [])[0].get("worker") != "Lexmechanic"
+                or plan.get("actions", {}).get("can_prepare_run") is not True
+                or plan.get("actions", {}).get("next_action", {}).get("kind") != "prepare_run"
+                or plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task") != "Собери события Скалатракса"
+                or plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task_id") != "iskandar-http-test"
             ):
                 raise AssertionError(f"bad plan: {plan}")
             run_dir = root / "runs" / "custom-run"

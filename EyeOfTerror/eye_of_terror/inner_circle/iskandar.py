@@ -68,6 +68,39 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
     }
 
 
+def plan_actions(contract: dict[str, Any], ok: bool, errors: list[str], missing_workers: list[str], unavailable_workers: list[dict[str, Any]]) -> dict[str, Any]:
+    actions = {
+        "can_prepare_run": ok,
+        "can_inspect_capabilities": True,
+    }
+    if ok:
+        next_action = {
+            "kind": "prepare_run",
+            "method": "POST",
+            "endpoint": "POST /prepare_run",
+            "body": {
+                "task": str(contract.get("goal") or ""),
+                "task_id": str(contract.get("task_id") or ""),
+            },
+            "reason": "governor plan is valid and required workers are available",
+        }
+    else:
+        reason = "governor plan failed validation"
+        if missing_workers or unavailable_workers:
+            reason = "required Mechanicum workers are missing or unavailable"
+        elif errors:
+            reason = "task contract failed validation"
+        next_action = {
+            "kind": "inspect_capabilities",
+            "method": "GET",
+            "endpoint": "GET /capabilities",
+            "body": {},
+            "reason": reason,
+        }
+    actions["next_action"] = next_action
+    return actions
+
+
 @dataclass
 class IskandarPlan:
     contract: TaskContract
@@ -99,15 +132,18 @@ class IskandarPlan:
                             "path": worker.path,
                         }
                     )
+        ok = not missing_workers and not unavailable_workers and not validation_errors
         return {
-            "ok": not missing_workers and not unavailable_workers and not validation_errors,
+            "ok": ok,
             "governor": "IskandarKhayon",
             "contract": contract,
             "validation": {"ok": not validation_errors, "errors": validation_errors},
+            "pipeline": pipeline_status(self.contract, build_dispatch_packets(self.contract)),
             "resolved_workers": resolved_workers,
             "missing_workers": missing_workers,
             "unavailable_workers": unavailable_workers,
             "oversight": oversight_plan(self.contract),
+            "actions": plan_actions(contract, ok, validation_errors, missing_workers, unavailable_workers),
         }
 
 
@@ -129,7 +165,6 @@ def main() -> int:
         print(json.dumps(status, ensure_ascii=False, indent=2))
     else:
         payload = plan.to_dict()
-        payload["pipeline"] = pipeline_status(plan.contract, build_dispatch_packets(plan.contract))
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 

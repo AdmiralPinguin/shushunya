@@ -93,6 +93,8 @@
   chain exposed through `/capabilities`.
 - Iskandar `/plan` resolves worker metadata and reports planned workers as
   `unavailable_workers` instead of marking the plan runnable.
+- Iskandar `/plan` exposes concrete pipeline summaries and action hints for
+  preparing valid run packages or inspecting governor capabilities.
 - Iskandar `/capabilities` exposes worker availability metadata for the default
   lore pipeline before a concrete task plan is created.
 - Run progress exposes per-step input, expected, and produced artifact statuses.
