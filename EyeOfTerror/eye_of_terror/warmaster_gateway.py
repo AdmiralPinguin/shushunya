@@ -418,6 +418,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "worker_registry",
             "worker_health_snapshot",
             "state_snapshot",
+            "process_active_run_snapshot",
             "doctor",
         ],
         "endpoints": [
@@ -457,6 +458,8 @@ def gateway_capabilities() -> dict[str, Any]:
 def gateway_state(run_root: Path, run_limit: int = 20) -> dict[str, Any]:
     all_runs = list_runs(run_root)
     runs = all_runs[: parse_limit(str(run_limit), default=20)]
+    with ACTIVE_RUNS_LOCK:
+        process_active_runs = sorted(ACTIVE_RUNS)
     return {
         "ok": True,
         "gateway": "WarmasterGateway",
@@ -464,6 +467,7 @@ def gateway_state(run_root: Path, run_limit: int = 20) -> dict[str, Any]:
         "governors": governor_registry_snapshot(),
         "workers": worker_registry_snapshot(),
         "run_summary": run_status_summary(all_runs),
+        "process_active_runs": process_active_runs,
         "runs": runs,
     }
 

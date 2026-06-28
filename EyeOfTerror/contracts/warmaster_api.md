@@ -42,7 +42,7 @@ POST /recover_stale
 
 Clients should call `GET /state` after startup or reconnect. The response
 contains gateway capabilities, governor registry, worker registry, run status
-counts, and recent run summaries.
+counts, process-local active run ids, and recent run summaries.
 
 ## Task Creation
 

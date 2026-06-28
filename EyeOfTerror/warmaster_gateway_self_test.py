@@ -176,6 +176,8 @@ def main() -> int:
                 or not any(item.get("task_id") == "warmaster-test" for item in state.get("runs", []))
                 or not any(item.get("name") == "Lexmechanic" for item in state.get("workers", []))
                 or "state_snapshot" not in state.get("capabilities", {}).get("capabilities", [])
+                or "process_active_run_snapshot" not in state.get("capabilities", {}).get("capabilities", [])
+                or not isinstance(state.get("process_active_runs"), list)
                 or state.get("run_summary", {}).get("total", 0) < 2
             ):
                 raise AssertionError(f"bad gateway state: {state}")
