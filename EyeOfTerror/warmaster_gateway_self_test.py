@@ -10,7 +10,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, resolve_run_child_path, valid_task_id, validate_service_host
+from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, resolve_run_child_path, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
 
 
@@ -61,6 +61,8 @@ def make_cancel_handler(calls: list[str]) -> type[BaseHTTPRequestHandler]:
 def main() -> int:
     if parse_limit("999999", default=20) != 200 or parse_limit("bad", default=20) != 20:
         raise AssertionError("limit parser did not clamp values")
+    if parse_nonnegative_int("42", default=0) != 42 or parse_nonnegative_int("bad", default=7) != 7:
+        raise AssertionError("nonnegative integer parser returned an unexpected value")
     if not valid_task_id("valid-task_1.2") or valid_task_id("../escape") or valid_task_id("x" * 129):
         raise AssertionError("task id validator accepted an unsafe value")
     if validate_service_host("localhost") != "localhost":
@@ -217,8 +219,11 @@ def main() -> int:
             else:
                 raise AssertionError("worker task live lookup should reject non-loopback host")
             events = request_json(base + "/runs/warmaster-test/events?limit=1")
-            if not events.get("ok") or len(events.get("events", [])) != 1:
+            if not events.get("ok") or len(events.get("events", [])) != 1 or events.get("cursor", {}).get("next") != events.get("cursor", {}).get("total"):
                 raise AssertionError(f"bad run events: {events}")
+            first_events = request_json(base + "/runs/warmaster-test/events?after=0&limit=1")
+            if not first_events.get("ok") or len(first_events.get("events", [])) != 1 or first_events.get("cursor", {}).get("next") != 1:
+                raise AssertionError(f"bad cursor run events: {first_events}")
             run_list = request_json(base + "/runs")
             if (
                 not run_list.get("ok")

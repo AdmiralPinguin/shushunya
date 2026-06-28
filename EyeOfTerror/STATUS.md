@@ -31,6 +31,8 @@
   dispatch packets, and ledger event history.
 - Warmaster Gateway exposes lightweight run summaries, progress counters, and
   worker task mappings for client polling/debugging.
+- Warmaster Gateway supports cursor-based ledger event polling with
+  `/runs/{task_id}/events?after=N`.
 - Warmaster Gateway exposes process-local active run snapshots through
   `GET /runs/{task_id}/active` and `GET /state`.
 - Warmaster Gateway rejects duplicate `task_id` creation instead of silently

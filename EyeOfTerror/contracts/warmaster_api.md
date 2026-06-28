@@ -28,6 +28,7 @@ GET  /runs/{task_id}/worker_tasks
 GET  /runs/{task_id}/worker_tasks?live=1
 GET  /runs/{task_id}/events
 GET  /runs/{task_id}/events?limit=20
+GET  /runs/{task_id}/events?after=0
 GET  /runs/{task_id}/artifacts
 GET  /runs/{task_id}/artifact_text?path=/work/...
 GET  /runs/{task_id}/artifact_text?path=/work/...&max_bytes=1000
@@ -66,6 +67,8 @@ Clients should use:
 
 - `/runs/{task_id}/summary` for lightweight polling.
 - `/runs/{task_id}/events` for ledger event history.
+- `/runs/{task_id}/events?after=N` for incremental client polling. Responses
+  include `cursor.after`, `cursor.next`, and `cursor.total`.
 - `/runs/{task_id}/contract` and `/runs/{task_id}/dispatch` for orchestration
   debugging.
 - `/runs/{task_id}/worker_tasks?live=1` when worker services are running and

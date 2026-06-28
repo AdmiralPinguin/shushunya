@@ -37,6 +37,12 @@ def parse_limit(raw_value: str, default: int, maximum: int = MAX_LIST_LIMIT) -> 
     return max(0, min(int(raw_value), maximum))
 
 
+def parse_nonnegative_int(raw_value: str, default: int) -> int:
+    if not raw_value.isdigit():
+        return default
+    return max(0, int(raw_value))
+
+
 def valid_task_id(task_id: str) -> bool:
     return bool(TASK_ID_RE.fullmatch(task_id)) and ".." not in task_id
 
@@ -250,7 +256,7 @@ def run_worker_tasks(run_dir: Path, include_health: bool = False, host: str = "1
     return {"ok": True, "worker_tasks": tasks}
 
 
-def run_events(run_dir: Path, limit: int | None = None) -> dict[str, Any]:
+def run_events(run_dir: Path, limit: int | None = None, after: int | None = None) -> dict[str, Any]:
     ledger_path = run_dir / "task_ledger.json"
     ledger, ledger_error = load_ledger_dict(ledger_path)
     if ledger_error:
@@ -258,9 +264,25 @@ def run_events(run_dir: Path, limit: int | None = None) -> dict[str, Any]:
     events = ledger.get("events", [])
     if not isinstance(events, list):
         events = []
-    if limit is not None and limit >= 0:
+    total = len(events)
+    start = None
+    if after is not None:
+        start = max(0, min(after, total))
+        events = events[start:]
+        if limit is not None and limit >= 0:
+            events = events[:limit]
+    elif limit is not None and limit >= 0:
+        start = max(0, total - limit)
         events = events[-limit:]
-    return {"ok": True, "task_id": ledger.get("task_id") or run_dir.name, "events": events}
+    else:
+        start = 0
+    next_cursor = start + len(events)
+    return {
+        "ok": True,
+        "task_id": ledger.get("task_id") or run_dir.name,
+        "events": events,
+        "cursor": {"after": start, "next": next_cursor, "total": total},
+    }
 
 
 def recover_stale_runs(run_root: Path) -> list[dict[str, Any]]:
@@ -443,6 +465,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/worker_tasks?live=1",
             "GET /runs/{task_id}/events",
             "GET /runs/{task_id}/events?limit=20",
+            "GET /runs/{task_id}/events?after=0",
             "GET /runs/{task_id}/artifacts",
             "GET /runs/{task_id}/artifact_text?path=/work/...",
             "GET /runs/{task_id}/artifact_text?path=/work/...&max_bytes=1000",
@@ -639,7 +662,9 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     query = parse_qs(parsed.query)
                     raw_limit = query.get("limit", [""])[0]
                     limit = parse_limit(raw_limit, default=MAX_LIST_LIMIT) if raw_limit else None
-                    payload = run_events(run_dir, limit=limit)
+                    raw_after = query.get("after", [""])[0]
+                    after = parse_nonnegative_int(raw_after, default=0) if raw_after else None
+                    payload = run_events(run_dir, limit=limit, after=after)
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 if len(parts) == 3 and parts[2] == "artifacts":
