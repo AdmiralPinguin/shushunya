@@ -5,6 +5,24 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+TASK_CONTRACT_FIELDS = {
+    "version",
+    "task_id",
+    "kind",
+    "goal",
+    "assigned_governor",
+    "non_goals",
+    "required_artifacts",
+    "completion_criteria",
+    "quality_gates",
+    "worker_plan",
+}
+TASK_CONTRACT_REQUIRED_FIELDS = {"version", "task_id", "kind", "goal", "assigned_governor", "completion_criteria"}
+TASK_KINDS = {"chat", "research", "image_generation", "code", "general"}
+WORKER_STEP_FIELDS = {"step_id", "worker", "purpose", "depends_on", "expected_artifacts"}
+WORKER_STEP_REQUIRED_FIELDS = {"step_id", "worker", "purpose"}
+
+
 def slugify(value: str, fallback: str = "task") -> str:
     lowered = value.lower()
     replacements = {
@@ -165,3 +183,74 @@ def build_lore_reconstruction_contract(user_task: str, task_id: str | None = Non
         ],
         worker_plan=lore_worker_plan(slug),
     )
+
+
+def validate_task_contract_payload(payload: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = sorted(TASK_CONTRACT_REQUIRED_FIELDS - set(payload))
+    if missing:
+        errors.append(f"missing required fields: {missing}")
+    extra = sorted(set(payload) - TASK_CONTRACT_FIELDS)
+    if extra:
+        errors.append(f"unknown fields: {extra}")
+    if payload.get("version") != 1:
+        errors.append("version must be 1")
+    if not isinstance(payload.get("task_id"), str) or not payload.get("task_id"):
+        errors.append("task_id must be a non-empty string")
+    if payload.get("kind") not in TASK_KINDS:
+        errors.append(f"kind must be one of {sorted(TASK_KINDS)}")
+    for field_name in ("goal", "assigned_governor"):
+        if not isinstance(payload.get(field_name), str) or not payload.get(field_name):
+            errors.append(f"{field_name} must be a non-empty string")
+    for field_name in ("non_goals", "required_artifacts", "completion_criteria", "quality_gates", "worker_plan"):
+        if field_name in payload and not isinstance(payload[field_name], list):
+            errors.append(f"{field_name} must be a list")
+    if not payload.get("completion_criteria"):
+        errors.append("completion_criteria must not be empty")
+    required_artifacts = payload.get("required_artifacts", [])
+    if isinstance(required_artifacts, list):
+        for artifact in required_artifacts:
+            if not isinstance(artifact, str) or not artifact.startswith("/work/"):
+                errors.append(f"required artifact must be a /work path: {artifact!r}")
+    worker_plan = payload.get("worker_plan", [])
+    if not isinstance(worker_plan, list) or not worker_plan:
+        errors.append("worker_plan must be a non-empty list")
+        return errors
+    seen_steps: set[str] = set()
+    for index, step in enumerate(worker_plan):
+        if not isinstance(step, dict):
+            errors.append(f"worker_plan[{index}] must be an object")
+            continue
+        missing_step_fields = sorted(WORKER_STEP_REQUIRED_FIELDS - set(step))
+        if missing_step_fields:
+            errors.append(f"worker_plan[{index}] missing required fields: {missing_step_fields}")
+        extra_step_fields = sorted(set(step) - WORKER_STEP_FIELDS)
+        if extra_step_fields:
+            errors.append(f"worker_plan[{index}] unknown fields: {extra_step_fields}")
+        step_id = step.get("step_id")
+        if not isinstance(step_id, str) or not step_id:
+            errors.append(f"worker_plan[{index}].step_id must be a non-empty string")
+            continue
+        if step_id in seen_steps:
+            errors.append(f"duplicate worker step_id: {step_id}")
+        seen_steps.add(step_id)
+        for field_name in ("worker", "purpose"):
+            if not isinstance(step.get(field_name), str) or not step.get(field_name):
+                errors.append(f"worker_plan[{index}].{field_name} must be a non-empty string")
+        depends_on = step.get("depends_on", [])
+        if not isinstance(depends_on, list) or not all(isinstance(item, str) for item in depends_on):
+            errors.append(f"worker_plan[{index}].depends_on must be a list of strings")
+        expected_artifacts = step.get("expected_artifacts", [])
+        if not isinstance(expected_artifacts, list):
+            errors.append(f"worker_plan[{index}].expected_artifacts must be a list")
+        elif any(not isinstance(item, str) or not item.startswith("/work/") for item in expected_artifacts):
+            errors.append(f"worker_plan[{index}].expected_artifacts must contain /work paths")
+    for index, step in enumerate(worker_plan):
+        if not isinstance(step, dict):
+            continue
+        depends_on = step.get("depends_on", [])
+        if isinstance(depends_on, list):
+            for dependency in depends_on:
+                if isinstance(dependency, str) and dependency not in seen_steps:
+                    errors.append(f"worker_plan[{index}] depends on unknown step: {dependency}")
+    return errors

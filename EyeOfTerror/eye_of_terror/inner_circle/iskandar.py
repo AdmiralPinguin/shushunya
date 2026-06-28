@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..contracts import TaskContract, build_lore_reconstruction_contract
+from ..contracts import TaskContract, build_lore_reconstruction_contract, validate_task_contract_payload
 from ..pipeline import build_dispatch_packets, pipeline_status, write_pipeline_run
 from ..registry import worker_by_name
 
@@ -16,6 +16,7 @@ class IskandarPlan:
 
     def to_dict(self) -> dict[str, Any]:
         contract = self.contract.to_dict()
+        validation_errors = validate_task_contract_payload(contract)
         missing_workers: list[str] = []
         resolved_workers: dict[str, Any] = {}
         for step in self.contract.worker_plan:
@@ -25,9 +26,10 @@ class IskandarPlan:
             else:
                 resolved_workers[step.worker] = worker.to_dict()
         return {
-            "ok": not missing_workers,
+            "ok": not missing_workers and not validation_errors,
             "governor": "IskandarKhayon",
             "contract": contract,
+            "validation": {"ok": not validation_errors, "errors": validation_errors},
             "resolved_workers": resolved_workers,
             "missing_workers": missing_workers,
         }

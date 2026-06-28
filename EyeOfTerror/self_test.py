@@ -5,7 +5,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from eye_of_terror.contracts import build_lore_reconstruction_contract
+from eye_of_terror.contracts import build_lore_reconstruction_contract, validate_task_contract_payload
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
 from eye_of_terror.pipeline import build_dispatch_packets, write_pipeline_run
 from eye_of_terror.registry import worker_refs
@@ -37,6 +37,13 @@ def main() -> int:
     payload = contract.to_dict()
     if payload["assigned_governor"] != "IskandarKhayon" or payload["kind"] != "research":
         raise AssertionError(f"bad lore contract routing: {payload}")
+    validation_errors = validate_task_contract_payload(payload)
+    if validation_errors:
+        raise AssertionError(f"valid lore contract failed validation: {validation_errors}")
+    broken_payload = json.loads(json.dumps(payload))
+    broken_payload["worker_plan"][0]["depends_on"] = ["missing-step"]
+    if not validate_task_contract_payload(broken_payload):
+        raise AssertionError("broken lore contract should fail validation")
     if "/work/skalathrax/source_map.json" not in payload["required_artifacts"]:
         raise AssertionError(f"skalathrax artifacts not derived: {payload['required_artifacts']}")
     if "/work/skalathrax/source_snapshots.json" not in payload["required_artifacts"]:
@@ -60,6 +67,8 @@ def main() -> int:
     plan = plan_lore_reconstruction(task, task_id="test-skalathrax").to_dict()
     if not plan["ok"] or plan["missing_workers"]:
         raise AssertionError(f"Iskandar plan did not resolve workers: {json.dumps(plan, ensure_ascii=False)}")
+    if not plan.get("validation", {}).get("ok"):
+        raise AssertionError(f"Iskandar plan failed contract validation: {plan.get('validation')}")
     if "Do not deliver a shallow wiki summary" not in " ".join(plan["contract"]["non_goals"]):
         raise AssertionError("Iskandar contract does not guard against shallow wiki summaries")
     print("[ok] Iskandar worker plan")
