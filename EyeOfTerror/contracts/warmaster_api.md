@@ -135,8 +135,10 @@ Task preflight responses include `actions.can_create_task` and
 `actions.next_action` so chat clients can either create the task, inspect an
 existing run after a `task_id` conflict, or inspect brigade/governor
 diagnostics after validation failures.
-Successful `POST /task` responses include `actions.next_action` recommending
-run preflight before execution, plus a run-summary inspection action.
+`POST /task` responses use the same action hint vocabulary for both successful
+creation and rejected creation attempts. Successful creation recommends run
+preflight before execution, while rejected creation attempts point clients to
+existing-run, brigade, governor, capability, or preflight diagnostics.
 
 ```json
 {

@@ -81,6 +81,8 @@
   gateway capability inspection instead of attempting run creation.
 - Successful task creation responses expose action hints that recommend run
   preflight before execution.
+- Rejected task creation responses expose action hints for existing-run,
+  brigade, governor, capability, or preflight diagnostics.
 - Governor API contract checks document the active Iskandar required worker
   chain exposed through `/capabilities`.
 - Iskandar `/plan` resolves worker metadata and reports planned workers as

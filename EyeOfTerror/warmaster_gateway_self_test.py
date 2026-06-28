@@ -186,7 +186,11 @@ def main() -> int:
 
             warmaster_gateway.plan_lore_reconstruction = lambda _message, task_id=None: type("BadPlan", (), {"contract": BadContract()})()
             bad_contract = warmaster_gateway.prepare_task("Собери все известное о событиях Скалатракса.", "bad-contract", run_root)
-            if bad_contract.get("error_code") != "invalid_task_contract" or (run_root / "bad-contract").exists():
+            if (
+                bad_contract.get("error_code") != "invalid_task_contract"
+                or bad_contract.get("actions", {}).get("next_action", {}).get("kind") != "inspect_governor"
+                or (run_root / "bad-contract").exists()
+            ):
                 raise AssertionError(f"Warmaster accepted an invalid task contract: {bad_contract}")
         finally:
             warmaster_gateway.plan_lore_reconstruction = original_planner
@@ -218,7 +222,11 @@ def main() -> int:
                 "missing-worker-contract",
                 run_root,
             )
-            if missing_worker_contract.get("error_code") != "contract_workers_missing" or (run_root / "missing-worker-contract").exists():
+            if (
+                missing_worker_contract.get("error_code") != "contract_workers_missing"
+                or missing_worker_contract.get("actions", {}).get("next_action", {}).get("kind") != "inspect_brigade"
+                or (run_root / "missing-worker-contract").exists()
+            ):
                 raise AssertionError(f"Warmaster accepted a contract with a missing worker: {missing_worker_contract}")
         finally:
             warmaster_gateway.plan_lore_reconstruction = original_planner
@@ -398,7 +406,11 @@ def main() -> int:
                     run_root,
                     ServiceGovernor(),
                 )
-                if missing_workers.get("error_code") != "governor_workers_missing" or "Lexmechanic" not in missing_workers.get("missing_workers", []):
+                if (
+                    missing_workers.get("error_code") != "governor_workers_missing"
+                    or "Lexmechanic" not in missing_workers.get("missing_workers", [])
+                    or missing_workers.get("actions", {}).get("next_action", {}).get("kind") != "inspect_brigade"
+                ):
                     raise AssertionError(f"missing governor workers were not rejected: {missing_workers}")
             finally:
                 warmaster_gateway.worker_refs = original_worker_refs
