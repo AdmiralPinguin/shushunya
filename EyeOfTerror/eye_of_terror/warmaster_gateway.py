@@ -943,6 +943,7 @@ def gateway_capabilities() -> dict[str, Any]:
         "ok": True,
         "gateway": "WarmasterGateway",
         "api_version": 1,
+        "actions": gateway_actions(),
         "capabilities": [
             "task_routing",
             "task_preflight",
@@ -1030,6 +1031,19 @@ def gateway_capabilities() -> dict[str, Any]:
     }
 
 
+def gateway_actions() -> dict[str, Any]:
+    return {
+        "can_preflight_task": True,
+        "can_create_task": True,
+        "can_start_runs": True,
+        "can_resume_interrupted_runs": True,
+        "can_execute_revisions": True,
+        "can_cancel_runs": True,
+        "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/start_http"],
+        "diagnostics": ["GET /state?health=1", "GET /brigade_health", "GET /doctor"],
+    }
+
+
 def gateway_state(run_root: Path, run_limit: int = 20, include_health: bool = False, host: str = "127.0.0.1") -> dict[str, Any]:
     all_runs = list_runs(run_root)
     runs = all_runs[: parse_limit(str(run_limit), default=20)]
@@ -1039,6 +1053,7 @@ def gateway_state(run_root: Path, run_limit: int = 20, include_health: bool = Fa
         "ok": True,
         "gateway": "WarmasterGateway",
         "capabilities": gateway_capabilities(),
+        "actions": gateway_actions(),
         "governors": governor_registry_snapshot(),
         "workers": worker_registry_snapshot(),
         "brigade_plan": brigade_plan_snapshot(),

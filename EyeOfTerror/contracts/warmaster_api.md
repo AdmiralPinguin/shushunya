@@ -70,7 +70,9 @@ Operators can choose the default governor planning boundary with
 Clients should call `GET /state` after startup or reconnect. The response
 contains gateway capabilities, governor registry, worker registry, run status
 counts, process-local active run ids, recent run summaries, and the expected
-service-separated brigade startup plan.
+service-separated brigade startup plan. `state.actions` and
+`capabilities.actions` expose client-facing gateway action hints, including the
+preferred task flow: preflight, create, then start.
 Use `GET /state?health=1` for an admin/bootstrap snapshot that also includes
 best-effort `brigade_health`; plain `/state` stays lightweight for polling.
 

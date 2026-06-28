@@ -92,7 +92,8 @@ when reachable, governor `/capabilities` payloads such as `required_workers`.
 
 `GET /state` is the preferred client bootstrap endpoint after an app restart.
 It returns gateway capabilities, governors, workers, recent runs, and run status
-counts in one response.
+counts in one response. Gateway action hints identify the preferred task flow:
+preflight, create, then start.
 
 `GET /runs/<task_id>/snapshot` is the preferred per-run polling endpoint for
 clients. It returns summary, process-local active state, cursor event updates,

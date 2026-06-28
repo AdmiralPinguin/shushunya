@@ -240,6 +240,8 @@ def main() -> int:
             required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout", "run_action_hints", "interrupted_run_resume", "http_governor_planning", "brigade_plan_snapshot", "brigade_health_snapshot"}
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
                 raise AssertionError(f"bad gateway capabilities response: {capabilities}")
+            if not capabilities.get("actions", {}).get("can_preflight_task") or "POST /task_preflight" not in capabilities.get("actions", {}).get("preferred_task_flow", []):
+                raise AssertionError(f"gateway capabilities did not expose task action hints: {capabilities}")
             brigade_plan = request_json(base + "/brigade_plan")
             if (
                 not brigade_plan.get("ok")
@@ -257,6 +259,8 @@ def main() -> int:
             state = request_json(base + "/state")
             if state.get("brigade_plan", {}).get("mode") != "service-separated":
                 raise AssertionError(f"state did not include brigade plan: {state}")
+            if not state.get("actions", {}).get("can_create_task"):
+                raise AssertionError(f"state did not include gateway action hints: {state}")
             if "brigade_health" in state:
                 raise AssertionError(f"plain state should not include health checks: {state}")
             state_with_health = request_json(base + "/state?health=1")

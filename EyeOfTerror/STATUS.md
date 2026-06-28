@@ -56,6 +56,8 @@
   capabilities, including required worker declarations.
 - Warmaster Gateway exposes `GET /state` as a client bootstrap snapshot with
   capabilities, governors, workers, and recent runs.
+- Warmaster Gateway exposes gateway-level action hints for preflight, creation,
+  start, resume, revision, cancellation, and diagnostics.
 - Warmaster Gateway exposes the expected service-separated brigade topology
   through `GET /brigade_plan` and embeds it in `GET /state`.
 - Warmaster Gateway exposes `GET /brigade_health` for combined expected
