@@ -1709,11 +1709,15 @@ def run_events(run_dir: Path, limit: int | None = None, after: int | None = None
         start = 0
     next_cursor = start + len(events)
     task_id = str(ledger.get("task_id") or run_dir.name)
+    summary = run_summary(run_dir)
+    actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
+    next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
     return {
         "ok": True,
         "task_id": task_id,
         "events": events,
         "display_events": display_events_for(task_id, events),
+        "run_client_action": executable_client_action(task_id, next_action),
         "cursor": {"after": start, "next": next_cursor, "total": total},
     }
 
@@ -1795,6 +1799,7 @@ def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: in
     events_payload = run_events(run_dir, limit=event_limit, after=events_after)
     payload["events"] = events_payload.get("events", [])
     payload["display_events"] = events_payload.get("display_events", [])
+    payload["run_client_action"] = events_payload.get("run_client_action", {})
     payload["event_cursor"] = events_payload.get("cursor", {"after": 0, "next": 0, "total": 0})
     payload["revision_plan"] = payload["summary"].get("revision_plan", {"required": False, "steps": []})
     payload["revision_plan_summary"] = payload["summary"].get("revision_plan_summary", {})

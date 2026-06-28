@@ -1105,6 +1105,7 @@ def main() -> int:
                 or snapshot.get("active")
                 or snapshot.get("event_cursor", {}).get("next") != 1
                 or len(snapshot.get("display_events", [])) != 1
+                or snapshot.get("run_client_action", {}).get("path") != "/runs/warmaster-test/start_http"
                 or snapshot.get("revision_plan", {}).get("required")
                 or snapshot.get("summary", {}).get("oversight_summary", {}).get("final_review", {}).get("critic_step") != "critic_review"
             ):
@@ -1160,6 +1161,7 @@ def main() -> int:
                 not events.get("ok")
                 or len(events.get("events", [])) != 1
                 or len(events.get("display_events", [])) != 1
+                or events.get("run_client_action", {}).get("path") != "/runs/warmaster-test/start_http"
                 or events.get("cursor", {}).get("next") != events.get("cursor", {}).get("total")
             ):
                 raise AssertionError(f"bad run events: {events}")

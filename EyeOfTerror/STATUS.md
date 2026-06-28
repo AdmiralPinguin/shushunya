@@ -238,6 +238,9 @@
   `/events?after=N` for clients that need one feed across runs.
 - Run and aggregate event polling responses expose `display_events` with
   headline, detail, severity, and timestamp for chat/mobile history rendering.
+- Per-run event and snapshot polling responses expose executable
+  `run_client_action` so task detail screens can update controls without
+  rebuilding actions from summaries.
 - Aggregate run events include run status, governor, run update time, per-run
   event index, and global index for client-side list updates.
 - Aggregate run events include the current `run_next_action` and

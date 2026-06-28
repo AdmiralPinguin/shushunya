@@ -272,7 +272,8 @@ Clients should use:
   with compact headline/detail/severity fields for chat/mobile history views.
 - `/runs/{task_id}/summary` for lightweight polling.
 - `/runs/{task_id}/snapshot` for a compact polling view containing summary,
-  process-local active state, cursor events, and artifact metadata.
+  process-local active state, cursor events, executable `run_client_action`, and
+  artifact metadata.
   Completed run summaries include `final_manifest_summary` when the final
   artifact is available.
 - `/runs/{task_id}/steps/{step_id}` for one normalized step state from
@@ -281,7 +282,8 @@ Clients should use:
   artifact status scoped to one worker step.
 - `/runs/{task_id}/events` for ledger event history.
 - `/runs/{task_id}/events?after=N` for incremental client polling. Responses
-  include `cursor.after`, `cursor.next`, `cursor.total`, and `display_events`.
+  include `cursor.after`, `cursor.next`, `cursor.total`, `display_events`, and
+  executable `run_client_action`.
 Aggregate `/events` responses include the same cursor shape plus `task_id`,
 `run_status`, `governor`, `run_updated_at`, `event_index`, `global_index`,
 `run_next_action`, executable `run_client_action`, and
