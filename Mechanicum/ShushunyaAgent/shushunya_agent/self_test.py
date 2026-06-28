@@ -2742,6 +2742,25 @@ def main() -> int:
         "/work/nightly-error-recovery/recovery_log.json",
     ]:
         raise AssertionError(f"recovery task required artifact extraction failed: {recovery_required_paths}")
+    relative_required_task = (
+        "В текущем каталоге есть customers.csv, invoices.csv, tickets.jsonl. "
+        "Создай три артефакта: report.md, customer_scores.json, alerts.csv. "
+        "customer_scores.json должен быть валидным JSON object."
+    )
+    relative_required_paths = required_artifact_paths_from_task(relative_required_task, "/work/project")
+    if relative_required_paths != [
+        "/work/project/report.md",
+        "/work/project/customer_scores.json",
+        "/work/project/alerts.csv",
+    ]:
+        raise AssertionError(f"relative required artifact extraction failed: {relative_required_paths}")
+    relative_data_sources = agent_runner.data_source_paths_from_task(relative_required_task, "/work/project", relative_required_paths)
+    if relative_data_sources != [
+        "/work/project/customers.csv",
+        "/work/project/invoices.csv",
+        "/work/project/tickets.jsonl",
+    ]:
+        raise AssertionError(f"relative required artifacts polluted data sources: {relative_data_sources}")
     print("[ok] required artifact path extraction")
 
     omitted_final_events: list[dict] = []

@@ -1365,6 +1365,34 @@ def extract_sandbox_paths_from_text(text: str) -> list[str]:
     return paths[:20]
 
 
+RELATIVE_ARTIFACT_PATH_RE = re.compile(
+    r"(?<![\w/.-])([\w.-]+\.(?:md|txt|json|jsonl|csv|tsv|fb2|epub\.txt))(?![\w/-])",
+    re.IGNORECASE,
+)
+
+
+def relative_artifact_paths_from_text(text: str, workspace: str) -> list[str]:
+    if not workspace:
+        return []
+    paths: list[str] = []
+    seen: set[str] = set()
+    for match in RELATIVE_ARTIFACT_PATH_RE.finditer(text or ""):
+        raw = match.group(1).strip().strip(".,;:()[]{}\"'")
+        if not raw or raw.startswith("/"):
+            continue
+        path = posixpath.normpath(posixpath.join(workspace, raw))
+        if path not in seen:
+            seen.add(path)
+            paths.append(path)
+    return paths[:20]
+
+
+def marker_start_index(text: str, markers: tuple[str, ...]) -> int:
+    lowered = (text or "").lower()
+    indexes = [lowered.find(marker) for marker in markers if marker and lowered.find(marker) >= 0]
+    return min(indexes) if indexes else -1
+
+
 REQUIRED_ARTIFACT_MARKERS = (
     "required",
     "обяз",
@@ -1396,7 +1424,7 @@ NON_REQUIRED_ARTIFACT_MARKERS = (
 )
 
 
-def required_artifact_paths_from_task(task: str) -> list[str]:
+def required_artifact_paths_from_task(task: str, workspace: str = "") -> list[str]:
     required: list[str] = []
     seen: set[str] = set()
 
@@ -1406,7 +1434,10 @@ def required_artifact_paths_from_task(task: str) -> list[str]:
         line = raw_line.strip()
         lowered = line.lower()
         line_has_required_marker = any(marker in lowered for marker in REQUIRED_ARTIFACT_MARKERS)
-        paths = extract_sandbox_paths_from_text(line)
+        marker_index = marker_start_index(line, REQUIRED_ARTIFACT_MARKERS)
+        artifact_window = line[marker_index:] if marker_index >= 0 else line
+        relative_window = artifact_window if marker_index >= 0 else ""
+        paths = [*extract_sandbox_paths_from_text(artifact_window), *relative_artifact_paths_from_text(relative_window, workspace)]
         if line_has_required_marker:
             in_required_block = True
             required_block_had_paths = False
@@ -1432,7 +1463,10 @@ def required_artifact_paths_from_task(task: str) -> list[str]:
 
     for sentence in re.split(r"(?<=[.!?\n])\s+", task or ""):
         lowered = sentence.lower()
-        paths = extract_sandbox_paths_from_text(sentence)
+        marker_index = marker_start_index(sentence, REQUIRED_ARTIFACT_MARKERS)
+        artifact_window = sentence[marker_index:] if marker_index >= 0 else sentence
+        relative_window = artifact_window if marker_index >= 0 else ""
+        paths = [*extract_sandbox_paths_from_text(artifact_window), *relative_artifact_paths_from_text(relative_window, workspace)]
         if not paths:
             continue
         if any(marker in lowered for marker in NON_REQUIRED_ARTIFACT_MARKERS):
@@ -4649,12 +4683,12 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     consecutive_parse_failures = 0
     total_parse_failures = 0
     verified_text_paths: set[str] = set(config.initial_verified_text_paths)
+    explicit_workspace = explicit_workspace_from_task(original_task)
     restored_required_artifacts = [path for path in config.initial_required_artifact_paths if path_needs_text_verification(path)]
-    parsed_required_artifacts = [] if restored_required_artifacts else required_artifact_paths_from_task(original_task)
+    parsed_required_artifacts = required_artifact_paths_from_task(original_task, explicit_workspace)
     required_artifact_path_list = list(dict.fromkeys([*parsed_required_artifacts, *restored_required_artifacts]))[:20]
     required_artifact_paths = set(required_artifact_path_list)
     required_min_chars_by_path = required_min_chars_by_path_from_task(original_task, required_artifact_path_list)
-    explicit_workspace = explicit_workspace_from_task(original_task)
     expected_cli_modules: set[str] = set(cli_modules_from_task(classification_task_text))
     expected_cli_modules.update(cli_modules_from_text_paths(classification_task_text, explicit_workspace))
     expected_cli_modules.update(cli_modules_from_listing_text(classification_task_text, explicit_workspace))
