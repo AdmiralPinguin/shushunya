@@ -94,6 +94,8 @@
   so task detail screens can render recent history without traversing snapshots.
 - Orchestration responses and cards expose executable `client_action`
   method/path/body fields with `task_id` already resolved from `next_action`.
+- Recovery summaries expose executable `client_action` method/path/body fields
+  for each interrupted-run candidate.
 - Task preflight contract summaries expose planned worker steps, dependency
   edges, and expected artifacts.
 - Task preflight exposes compact governor oversight summaries and validation so

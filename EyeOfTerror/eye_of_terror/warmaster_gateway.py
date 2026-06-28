@@ -1079,15 +1079,17 @@ def recovery_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
             resume_ready = True
         except Exception as exc:  # noqa: BLE001 - recovery listing should diagnose malformed run packages.
             resume_errors.append(str(exc))
+        task_id = str(run.get("task_id") or "")
         candidates.append(
             {
-                "task_id": str(run.get("task_id") or ""),
+                "task_id": task_id,
                 "status": str(run.get("status") or ""),
                 "updated_at": str(run.get("updated_at") or ""),
                 "pending_step_ids": pending_step_ids,
                 "resume_ready": resume_ready,
                 "resume_errors": resume_errors,
                 "next_action": next_action,
+                "client_action": executable_client_action(task_id, next_action),
             }
         )
     startable = [candidate for candidate in candidates if candidate.get("resume_ready")]

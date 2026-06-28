@@ -97,8 +97,10 @@ means clients can use `GET /brigade_health` summary fields to decide whether
 the service-separated brigade is runnable.
 Clients can call `GET /recovery` when they only need the recoverable interrupted
 run list without a full bootstrap snapshot. Each candidate reports
-`resume_ready`, `resume_errors`, and pending step ids so clients can separate
-startable recovery work from malformed run packages that need inspection.
+`resume_ready`, `resume_errors`, pending step ids, and executable
+`client_action` method/path/body fields so clients can separate startable
+recovery work from malformed run packages that need inspection without
+rebuilding recovery endpoints.
 Operators can call `POST /recovery/start_resume_local` or
 `POST /recovery/start_resume_http` to start all currently recoverable
 interrupted runs in the background. The response is per-run: a malformed or
