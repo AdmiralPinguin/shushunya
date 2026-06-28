@@ -77,7 +77,8 @@ best-effort `brigade_health`; plain `/state` stays lightweight for polling.
 history. The optional `host` query parameter must be loopback.
 
 `GET /brigade_health` combines that topology with best-effort health checks for
-governors and workers.
+governors and workers. It also reports governor worker requirements when a
+reachable governor exposes `required_workers` from `/capabilities`.
 
 `GET /governors?health=1` includes reachable governor `/capabilities` payloads
 inside each governor runtime snapshot.

@@ -173,6 +173,9 @@ def main() -> int:
                 required_workers = governor_snapshot[0].get("runtime", {}).get("capabilities", {}).get("capabilities", {}).get("required_workers", [])
                 if "Lexmechanic" not in required_workers or "FabricatorFinalis" not in required_workers:
                     raise AssertionError(f"governor health snapshot did not include service capabilities: {governor_snapshot}")
+                requirements = warmaster_gateway.governor_worker_requirements(governor_snapshot, warmaster_gateway.worker_registry_snapshot())
+                if not requirements or not requirements[0].get("satisfied") or requirements[0].get("missing_workers"):
+                    raise AssertionError(f"governor worker requirements were not satisfied: {requirements}")
             finally:
                 warmaster_gateway.governor_refs = original_governor_refs
         finally:

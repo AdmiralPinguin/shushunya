@@ -757,6 +757,29 @@ def governor_registry_snapshot(include_health: bool = False, host: str = "127.0.
     return governors
 
 
+def governor_worker_requirements(governors: list[dict[str, Any]], workers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    worker_names = {str(worker.get("name") or "") for worker in workers}
+    requirements: list[dict[str, Any]] = []
+    for governor in governors:
+        runtime = governor.get("runtime") if isinstance(governor.get("runtime"), dict) else {}
+        capabilities_result = runtime.get("capabilities") if isinstance(runtime.get("capabilities"), dict) else {}
+        capabilities = capabilities_result.get("capabilities") if isinstance(capabilities_result.get("capabilities"), dict) else {}
+        required = capabilities.get("required_workers") if isinstance(capabilities.get("required_workers"), list) else []
+        required_workers = [str(worker) for worker in required if str(worker)]
+        if not required_workers:
+            continue
+        missing = [worker for worker in required_workers if worker not in worker_names]
+        requirements.append(
+            {
+                "governor": str(governor.get("name") or ""),
+                "required_workers": required_workers,
+                "missing_workers": missing,
+                "satisfied": not missing,
+            }
+        )
+    return requirements
+
+
 def brigade_plan_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
     host = validate_service_host(host)
     from start_brigade import brigade_plan  # Imported lazily to keep gateway boot independent from launcher tooling.
@@ -775,6 +798,7 @@ def brigade_health_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
     plan = brigade_plan_snapshot(host=host)
     governors = governor_registry_snapshot(include_health=True, host=host)
     workers = worker_registry_snapshot(include_health=True, host=host)
+    requirements = governor_worker_requirements(governors, workers)
     reachable_governors = sum(1 for item in governors if item.get("runtime", {}).get("reachable"))
     reachable_workers = sum(1 for item in workers if item.get("runtime", {}).get("reachable"))
     return {
@@ -787,11 +811,13 @@ def brigade_health_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
             "governors": governors,
             "workers": workers,
         },
+        "requirements": {"governor_workers": requirements},
         "summary": {
             "governors_total": len(governors),
             "governors_reachable": reachable_governors,
             "workers_total": len(workers),
             "workers_reachable": reachable_workers,
+            "governor_requirements_satisfied": all(item.get("satisfied") for item in requirements) if requirements else None,
         },
     }
 

@@ -54,6 +54,8 @@
   through `GET /brigade_plan` and embeds it in `GET /state`.
 - Warmaster Gateway exposes `GET /brigade_health` for combined expected
   topology and best-effort governor/worker health.
+- Brigade health reports whether reachable governor `required_workers` are
+  present in the Mechanicum registry.
 - Warmaster Gateway keeps plain `GET /state` lightweight and embeds brigade
   health only when clients request `GET /state?health=1`.
 - Warmaster Gateway exposes `GET /doctor` for registry and manifest diagnostics.

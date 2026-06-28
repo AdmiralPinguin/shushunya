@@ -125,7 +125,8 @@ services by default.
 brigade topology, including Warmaster, Iskandar, and registered Mechanicum
 workers.
 `GET /brigade_health` combines that topology with best-effort service health
-checks.
+checks and reports whether reachable governor `required_workers` are present in
+the Mechanicum registry.
 `GET /state?health=1` embeds the same health snapshot for admin bootstrap while
 plain `/state` remains lightweight.
 
