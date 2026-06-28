@@ -68,6 +68,8 @@
   workers absent from the Mechanicum registry.
 - Warmaster rejects task creation when the selected governor omits oversight or
   returns oversight that does not match the task contract.
+- Warmaster verifies HTTP-governor prepared run packages before writing the
+  Warmaster ledger.
 - Task contract runtime validation rejects non-string non-goals, completion
   criteria, and quality gates.
 - Task contract runtime validation requires every required artifact to have one

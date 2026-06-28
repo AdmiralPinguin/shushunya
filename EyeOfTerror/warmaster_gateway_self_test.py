@@ -14,6 +14,8 @@ import eye_of_terror.warmaster_gateway as warmaster_gateway
 from eye_of_terror.inner_circle.iskandar_service import make_handler as make_iskandar_handler
 from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, requested_step_ids_from_payload, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
+from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
+from eye_of_terror.pipeline import write_pipeline_run
 
 
 def write_json(path: Path, payload: dict) -> None:
@@ -58,6 +60,45 @@ def make_cancel_handler(calls: list[str]) -> type[BaseHTTPRequestHandler]:
             self.wfile.write(data)
 
     return CancelHandler
+
+
+def make_bad_prepare_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
+    class BadPrepareHandler(BaseHTTPRequestHandler):
+        def log_message(self, fmt: str, *args: object) -> None:
+            return
+
+        def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+            if self.path == "/capabilities":
+                body = {"ok": True, "required_workers": ["Lexmechanic", "FabricatorFinalis"]}
+            else:
+                body = {"ok": True, "governor": "IskandarKhayon"}
+            data = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+            payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode("utf-8"))
+            plan = plan_lore_reconstruction(str(payload.get("task") or ""), task_id=str(payload.get("task_id") or "") or None)
+            if self.path == "/plan":
+                body = plan.to_dict()
+            elif self.path == "/prepare_run":
+                run_dir = Path(str(payload.get("run_dir") or run_root / plan.contract.task_id))
+                status = write_pipeline_run(plan.contract, run_dir, oversight=plan.to_dict()["oversight"])
+                (run_dir / "oversight.json").unlink()
+                body = {"ok": True, "status": status}
+            else:
+                body = {"ok": False, "error": "not found"}
+            data = json.dumps(body).encode("utf-8")
+            self.send_response(200 if body.get("ok") else 404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    return BadPrepareHandler
 
 
 def main() -> int:
@@ -205,6 +246,27 @@ def main() -> int:
                 or not (Path(service_prepared["run_dir"]) / "task_ledger.json").exists()
             ):
                 raise AssertionError(f"bad http governor preparation: {service_prepared}")
+            bad_prepare_server = ThreadingHTTPServer(("127.0.0.1", 0), make_bad_prepare_handler(run_root))
+            bad_prepare_thread = threading.Thread(target=bad_prepare_server.serve_forever, daemon=True)
+            bad_prepare_thread.start()
+            try:
+                class BadPrepareGovernor(ServiceGovernor):
+                    port = bad_prepare_server.server_port
+
+                bad_prepared = warmaster_gateway.prepare_task_via_governor_service(
+                    "Собери все известное о событиях Скалатракса.",
+                    "warmaster-governor-bad-prepare-test",
+                    run_root,
+                    BadPrepareGovernor(),
+                )
+                if (
+                    bad_prepared.get("error_code") != "governor_prepare_invalid_run"
+                    or (run_root / "warmaster-governor-bad-prepare-test" / "task_ledger.json").exists()
+                ):
+                    raise AssertionError(f"Warmaster accepted invalid governor-prepared run package: {bad_prepared}")
+            finally:
+                bad_prepare_server.shutdown()
+                bad_prepare_thread.join(timeout=5)
             original_worker_refs = warmaster_gateway.worker_refs
             warmaster_gateway.worker_refs = lambda: []
             try:

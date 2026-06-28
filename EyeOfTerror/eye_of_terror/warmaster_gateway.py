@@ -227,6 +227,18 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "task_id": service_task_id,
             "response": prepared,
         }
+    planned_oversight = plan.get("oversight") if isinstance(plan.get("oversight"), dict) else {}
+    package_errors = verify_prepared_run_package(run_dir, contract, planned_oversight)
+    if package_errors:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "governor service prepared an invalid run package",
+            "error_code": "governor_prepare_invalid_run",
+            "governor": governor.name,
+            "task_id": service_task_id,
+            "validation": {"ok": False, "errors": package_errors},
+        }
     TaskLedger.create(run_dir / "task_ledger.json", service_task_id, str(contract.get("goal") or message), governor.name)
     return {
         "ok": True,
@@ -257,6 +269,28 @@ def plan_oversight_errors(contract: dict[str, Any], plan_payload: dict[str, Any]
     if not oversight:
         return ["governor plan did not include oversight"]
     return validate_oversight_payload(contract, oversight, {"steps": contract_summary(contract).get("steps", [])})
+
+
+def verify_prepared_run_package(run_dir: Path, planned_contract: dict[str, Any], planned_oversight: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    contract_payload = run_contract(run_dir)
+    if not contract_payload.get("ok"):
+        errors.append(str(contract_payload.get("error") or "contract unavailable"))
+    elif contract_payload.get("contract") != planned_contract:
+        errors.append("prepared contract does not match governor plan")
+    status, status_error = load_json_object(run_dir / "status.json", "status")
+    if status_error:
+        errors.append(status_error)
+    oversight_payload = run_oversight(run_dir)
+    if not oversight_payload.get("ok"):
+        errors.append(str(oversight_payload.get("error") or "oversight unavailable"))
+    else:
+        prepared_oversight = oversight_payload.get("oversight") if isinstance(oversight_payload.get("oversight"), dict) else {}
+        if prepared_oversight != planned_oversight:
+            errors.append("prepared oversight does not match governor plan")
+        if not status_error:
+            errors.extend(validate_oversight_against_run(run_dir, prepared_oversight, status))
+    return errors
 
 
 def prepare_task(message: str, task_id: str | None, run_root: Path, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> dict[str, Any]:

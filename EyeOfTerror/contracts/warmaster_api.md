@@ -157,6 +157,11 @@ For every planning path, Warmaster rejects task creation with
 oversight does not match the task contract. This prevents creating run packages
 that cannot later pass run preflight.
 
+For HTTP governor preparation, Warmaster verifies the written run package before
+creating the Warmaster ledger. If `contract.json`, `oversight.json`, or
+`status.json` is missing, corrupt, or differs from the governor's `/plan`
+response, task creation fails with `error_code=governor_prepare_invalid_run`.
+
 When routing terms match a planned but inactive governor, task creation and task
 preflight return `error_code=governor_inactive`, the matched `governor`, `kind`,
 and a compact `route` object. When no route matches, they return
