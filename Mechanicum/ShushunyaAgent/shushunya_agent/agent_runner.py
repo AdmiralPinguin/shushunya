@@ -159,6 +159,31 @@ MEMORY_NAMESPACE = os.environ.get("SHUSHUNYA_AGENT_MEMORY_NAMESPACE", "agent").s
 AGENT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def suggested_cli_verification_action(
+    workspace: str | None,
+    expected_cli_modules: set[str],
+    expected_cli_input_paths: set[str],
+    timeout: int | None = None,
+) -> dict[str, Any] | None:
+    if not expected_cli_modules:
+        return None
+    module = sorted(expected_cli_modules)[0]
+    cmd_parts = []
+    if workspace:
+        cmd_parts.append(f"cd {shlex.quote(workspace)}")
+    cli_argv = ["python3", "-m", module]
+    if expected_cli_input_paths:
+        cli_argv.append(sorted(expected_cli_input_paths)[0])
+    json_validator = "python3 -c " + shlex.quote("import sys,json; json.load(sys.stdin)")
+    cmd_parts.append(" ".join(shlex.quote(part) for part in cli_argv) + f" | {json_validator}")
+    return {
+        "action": "shell",
+        "cmd": " && ".join(cmd_parts),
+        "timeout": timeout or 60,
+        "reason": "Verify the CLI entrypoint with real workspace input and fail if stdout is not valid JSON.",
+    }
+
+
 SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локальный агент выполнения задач.
 
 У тебя нет собственной долговременной памяти. Долговременный контекст приходит только через ArchiveOfHeresy и доступные archive_search/archive_memory_* инструменты. Не утверждай, что помнишь что-то сам.
@@ -5563,18 +5588,27 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and not action_can_discover_cli_contract(action_type, action, explicit_workspace)
                 and not action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
             ):
+                suggested_action = suggested_cli_verification_action(
+                    explicit_workspace,
+                    expected_cli_modules,
+                    expected_cli_input_paths,
+                    int(action.get("timeout") or SHELL_TIMEOUT) if isinstance(action, dict) else SHELL_TIMEOUT,
+                )
                 result = {
                     "ok": False,
                     "error": "swe cli verification required by supervisor",
                     "last_edited_path": last_cli_required_swe_edit_path,
                     "expected_cli_modules": sorted(expected_cli_modules),
                     "expected_cli_input_paths": sorted(expected_cli_input_paths),
+                    **({"suggested_action": suggested_action} if suggested_action else {}),
                     "instruction": (
                         "The code already passed the unit-test/fallback verification after the last edit, but the user task "
                         "also requires CLI/command-interface behavior. Run the requested CLI command or an equivalent action that invokes the "
                         "entrypoint/subprocess and validates stdout/JSON output. If expected_cli_modules is non-empty, "
                         "invoke one of those modules with python -m and the real input file from the workspace. If "
                         "expected_cli_input_paths is non-empty, use one of those existing files instead of generating a dummy input. "
+                        "For shell actions, pipe stdout into python3 -c 'import sys,json; json.load(sys.stdin)' or use an "
+                        "equivalent subprocess + json.loads check. Do not run --help and do not merely print CLI stdout. "
                         "If the CLI module or input file is not known yet, inspect the workspace with list_files/find_files/read_file "
                         "or a focused ls/find shell command, then run the CLI verification. Do not use memory/archive tools as "
                         "completion proof for a code task that still needs CLI verification."

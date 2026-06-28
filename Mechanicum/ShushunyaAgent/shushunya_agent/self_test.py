@@ -4705,6 +4705,17 @@ def main() -> int:
     cli_required_results = [step.get("result") or {} for step in swe_cli_requires_verify_payload.get("steps", [])]
     if not any(result.get("error") == "swe cli verification required by supervisor" for result in cli_required_results):
         raise AssertionError(f"SWE CLI non-CLI action was not rejected before CLI verification: {swe_cli_requires_verify_payload}")
+    cli_required_suggestions = [
+        result.get("suggested_action") or {}
+        for result in cli_required_results
+        if result.get("error") == "swe cli verification required by supervisor"
+    ]
+    if not any(
+        "python3 -m package.cli data.csv" in str(suggestion.get("cmd") or "")
+        and "json.load(sys.stdin)" in str(suggestion.get("cmd") or "")
+        for suggestion in cli_required_suggestions
+    ):
+        raise AssertionError(f"SWE CLI rejection should include concrete JSON-validating command: {swe_cli_requires_verify_payload}")
     if len(swe_cli_requires_verify_payload.get("steps", [])) != 5:
         raise AssertionError(f"SWE CLI verification should run after rejected final: {swe_cli_requires_verify_payload}")
     print("[ok] SWE final requires CLI verification after edit")
