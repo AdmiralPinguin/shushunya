@@ -67,4 +67,5 @@ should prefer snapshots over many separate requests.
 `EyeOfTerror/start_brigade.py` starts the current service-separated stack:
 Mechanicum worker supervisor, `IskandarKhayon` on `7101`, and Warmaster Gateway
 on `7000` with default HTTP governor transport. It is a lightweight launcher,
-not a durable service manager.
+not a durable service manager. `--json` exposes the startup plan for diagnostics
+and future admin clients.

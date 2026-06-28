@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -12,12 +13,26 @@ from pathlib import Path
 @dataclass(frozen=True)
 class CommandSpec:
     name: str
+    role: str
+    host: str
+    port: int
     command: list[str]
     env: dict[str, str]
 
     def rendered(self) -> str:
         prefixes = [f"{key}={value}" for key, value in sorted(self.env.items())]
         return " ".join(prefixes + self.command)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "role": self.role,
+            "host": self.host,
+            "port": self.port,
+            "command": self.command,
+            "env": self.env,
+            "rendered": self.rendered(),
+        }
 
 
 def pythonpath(repo_root: Path) -> str:
@@ -29,6 +44,9 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
     return [
         CommandSpec(
             "mechanicum-workers",
+            "Mechanicum worker service supervisor",
+            host,
+            0,
             [
                 sys.executable,
                 str(repo_root / "Mechanicum" / "start_all_workers.py"),
@@ -43,6 +61,9 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
         ),
         CommandSpec(
             "iskandar-khayon",
+            "Inner Circle lore reconstruction governor",
+            host,
+            7101,
             [
                 sys.executable,
                 "-m",
@@ -58,6 +79,9 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
         ),
         CommandSpec(
             "warmaster-gateway",
+            "user-facing orchestration gateway",
+            host,
+            7000,
             [
                 sys.executable,
                 "-m",
@@ -78,6 +102,26 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
     ]
 
 
+def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run_root: Path, iskandar_run_root: Path) -> dict[str, object]:
+    commands = brigade_commands(repo_root, host, workspace_root, warmaster_run_root, iskandar_run_root)
+    return {
+        "ok": True,
+        "stack": "EyeOfTerror",
+        "mode": "service-separated",
+        "host": host,
+        "ports": {
+            "warmaster_gateway": 7000,
+            "iskandar_khayon": 7101,
+            "mechanicum_workers": "7002-7009 from Mechanicum/worker_services.json",
+        },
+        "repo_root": str(repo_root),
+        "workspace_root": str(workspace_root),
+        "warmaster_run_root": str(warmaster_run_root),
+        "iskandar_run_root": str(iskandar_run_root),
+        "services": [command.to_dict() for command in commands],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Start the EyeOfTerror + Iskandar + Mechanicum service brigade.")
     parser.add_argument("--repo-root", default=".")
@@ -86,16 +130,30 @@ def main() -> int:
     parser.add_argument("--warmaster-run-root", default="runtime/warmaster-runs")
     parser.add_argument("--iskandar-run-root", default="runtime/iskandar-runs")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true", help="Print a machine-readable startup plan and exit.")
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
+    workspace_root = Path(args.workspace_root)
+    warmaster_run_root = Path(args.warmaster_run_root)
+    iskandar_run_root = Path(args.iskandar_run_root)
     commands = brigade_commands(
         repo_root=repo_root,
         host=args.host,
-        workspace_root=Path(args.workspace_root),
-        warmaster_run_root=Path(args.warmaster_run_root),
-        iskandar_run_root=Path(args.iskandar_run_root),
+        workspace_root=workspace_root,
+        warmaster_run_root=warmaster_run_root,
+        iskandar_run_root=iskandar_run_root,
     )
+    plan = brigade_plan(
+        repo_root=repo_root,
+        host=args.host,
+        workspace_root=workspace_root,
+        warmaster_run_root=warmaster_run_root,
+        iskandar_run_root=iskandar_run_root,
+    )
+    if args.json:
+        print(json.dumps(plan, ensure_ascii=False, indent=2))
+        return 0
     if args.dry_run:
         for command in commands:
             print(f"{command.name}: {command.rendered()}")

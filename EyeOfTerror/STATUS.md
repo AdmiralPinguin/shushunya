@@ -26,6 +26,8 @@
   transport through startup flags, with per-request override.
 - `EyeOfTerror/start_brigade.py` can start the current service-separated
   Warmaster + Iskandar + Mechanicum stack, with a dry-run self-test.
+- The brigade launcher can emit a machine-readable startup plan with service
+  names, ports, commands, and runtime roots.
 - Warmaster Gateway can start local/HTTP execution in a background thread and expose progress through the ledger.
 - Warmaster Gateway exposes `GET /governors`, `GET /workers`, and
   `GET /workers?health=1`; worker listings are enriched with available

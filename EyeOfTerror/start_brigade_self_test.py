@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from start_brigade import brigade_commands
+from start_brigade import brigade_commands, brigade_plan
 
 
 def main() -> int:
@@ -29,6 +29,18 @@ def main() -> int:
     missing = [item for item in required if item not in rendered]
     if missing:
         raise AssertionError(f"brigade command plan missing entries: {missing}\n{rendered}")
+    plan = brigade_plan(
+        repo_root=repo_root,
+        host="127.0.0.1",
+        workspace_root=Path("runtime/test-work"),
+        warmaster_run_root=Path("runtime/test-warmaster-runs"),
+        iskandar_run_root=Path("runtime/test-iskandar-runs"),
+    )
+    if plan.get("mode") != "service-separated" or plan.get("ports", {}).get("warmaster_gateway") != 7000:
+        raise AssertionError(f"bad brigade JSON plan: {plan}")
+    service_names = {item.get("name") for item in plan.get("services", []) if isinstance(item, dict)}
+    if service_names != expected_names:
+        raise AssertionError(f"bad brigade service names in JSON plan: {plan}")
     print("[ok] EyeOfTerror brigade launcher")
     return 0
 
