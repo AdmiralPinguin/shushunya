@@ -41,6 +41,13 @@ def main() -> int:
     service_names = {item.get("name") for item in plan.get("services", []) if isinstance(item, dict)}
     if service_names != expected_names:
         raise AssertionError(f"bad brigade service names in JSON plan: {plan}")
+    worker_names = {item.get("name") for item in plan.get("mechanicum_workers", []) if isinstance(item, dict)}
+    required_workers = {"Lexmechanic", "AuspexBrowser", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon", "ReductorVerifier", "FabricatorFinalis"}
+    if not required_workers.issubset(worker_names):
+        raise AssertionError(f"brigade JSON plan missing workers: {required_workers - worker_names}")
+    worker_ports = plan.get("ports", {}).get("mechanicum_workers", [])
+    if worker_ports != [7002, 7003, 7004, 7005, 7006, 7007, 7009]:
+        raise AssertionError(f"bad worker port plan: {worker_ports}")
     print("[ok] EyeOfTerror brigade launcher")
     return 0
 

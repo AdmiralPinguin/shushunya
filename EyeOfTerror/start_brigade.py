@@ -39,6 +39,26 @@ def pythonpath(repo_root: Path) -> str:
     return os.pathsep.join([str(repo_root / "EyeOfTerror"), str(repo_root / "Mechanicum")])
 
 
+def worker_service_plan(repo_root: Path) -> list[dict[str, object]]:
+    path = repo_root / "Mechanicum" / "worker_services.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("worker_services.json must contain an object")
+    workers: list[dict[str, object]] = []
+    for name, item in sorted(payload.items(), key=lambda pair: (int(pair[1].get("port") or 0), pair[0]) if isinstance(pair[1], dict) else (0, pair[0])):
+        if not isinstance(item, dict):
+            continue
+        workers.append(
+            {
+                "name": str(name),
+                "port": int(item.get("port") or 0),
+                "module_path": str(item.get("module_path") or ""),
+                "module": str(item.get("module") or ""),
+            }
+        )
+    return workers
+
+
 def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster_run_root: Path, iskandar_run_root: Path) -> list[CommandSpec]:
     env = {"PYTHONPATH": pythonpath(repo_root)}
     return [
@@ -104,6 +124,7 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
 
 def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run_root: Path, iskandar_run_root: Path) -> dict[str, object]:
     commands = brigade_commands(repo_root, host, workspace_root, warmaster_run_root, iskandar_run_root)
+    workers = worker_service_plan(repo_root)
     return {
         "ok": True,
         "stack": "EyeOfTerror",
@@ -112,12 +133,13 @@ def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run
         "ports": {
             "warmaster_gateway": 7000,
             "iskandar_khayon": 7101,
-            "mechanicum_workers": "7002-7009 from Mechanicum/worker_services.json",
+            "mechanicum_workers": [worker["port"] for worker in workers],
         },
         "repo_root": str(repo_root),
         "workspace_root": str(workspace_root),
         "warmaster_run_root": str(warmaster_run_root),
         "iskandar_run_root": str(iskandar_run_root),
+        "mechanicum_workers": workers,
         "services": [command.to_dict() for command in commands],
     }
 

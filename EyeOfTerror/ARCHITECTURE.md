@@ -68,4 +68,5 @@ should prefer snapshots over many separate requests.
 Mechanicum worker supervisor, `IskandarKhayon` on `7101`, and Warmaster Gateway
 on `7000` with default HTTP governor transport. It is a lightweight launcher,
 not a durable service manager. `--json` exposes the startup plan for diagnostics
-and future admin clients.
+and future admin clients, including the individual Mechanicum worker services
+from `Mechanicum/worker_services.json`.
