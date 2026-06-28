@@ -62,8 +62,12 @@ Gateway endpoints:
 - `GET /runs/<task_id>/artifact_text?path=/work/...`
 - `POST /runs/<task_id>/execute_local`
 - `POST /runs/<task_id>/execute_http`
+- `POST /runs/<task_id>/execute_revision_local`
+- `POST /runs/<task_id>/execute_revision_http`
 - `POST /runs/<task_id>/start_local`
 - `POST /runs/<task_id>/start_http`
+- `POST /runs/<task_id>/start_revision_local`
+- `POST /runs/<task_id>/start_revision_http`
 - `POST /runs/<task_id>/cancel`
 - `POST /recover_stale`
 
@@ -81,6 +85,9 @@ counts in one response.
 `GET /runs/<task_id>/snapshot` is the preferred per-run polling endpoint for
 clients. It returns summary, process-local active state, cursor event updates,
 and artifact metadata in one response.
+
+Revision execution endpoints use a failed/blocked run's `revision_plan` and run
+only the requested rework steps, then `critic_review` and `finalize`.
 
 `GET /runs/<task_id>/worker_tasks` maps a Warmaster run to the task ids sent to
 Mechanicum workers. Add `?live=1` for a best-effort lookup against worker

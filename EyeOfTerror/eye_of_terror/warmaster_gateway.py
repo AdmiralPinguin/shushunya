@@ -334,6 +334,37 @@ def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: in
     return payload
 
 
+def revision_step_ids_from_run(run_dir: Path) -> list[str]:
+    ledger_path = run_dir / "task_ledger.json"
+    ledger, ledger_error = load_ledger_dict(ledger_path)
+    if ledger_error:
+        raise ValueError(f"ledger unavailable for revision execution: {ledger_error}")
+    result = ledger.get("result", {}) if isinstance(ledger.get("result"), dict) else {}
+    revision_plan = result.get("revision_plan") if isinstance(result.get("revision_plan"), dict) else {}
+    if not revision_plan.get("required"):
+        raise ValueError("run does not have a required revision_plan")
+    raw_steps = revision_plan.get("steps", [])
+    if not isinstance(raw_steps, list):
+        raise ValueError("revision_plan.steps must be a list")
+    requested: list[str] = []
+    for item in raw_steps:
+        if isinstance(item, dict):
+            step_id = str(item.get("step_id") or "").strip()
+            if step_id and step_id not in requested:
+                requested.append(step_id)
+    for final_step in ("critic_review", "finalize"):
+        if final_step not in requested:
+            requested.append(final_step)
+    available = {
+        path.stem
+        for path in ordered_dispatch_paths(run_dir)
+    }
+    missing = [step_id for step_id in requested if step_id not in available]
+    if missing:
+        raise ValueError(f"revision_plan references unknown dispatch steps: {missing}")
+    return requested
+
+
 def recover_stale_runs(run_root: Path) -> list[dict[str, Any]]:
     recovered: list[dict[str, Any]] = []
     if not run_root.exists():
@@ -521,8 +552,12 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/artifact_text?path=/work/...&max_bytes=1000",
             "POST /runs/{task_id}/execute_local",
             "POST /runs/{task_id}/execute_http",
+            "POST /runs/{task_id}/execute_revision_local",
+            "POST /runs/{task_id}/execute_revision_http",
             "POST /runs/{task_id}/start_local",
             "POST /runs/{task_id}/start_http",
+            "POST /runs/{task_id}/start_revision_local",
+            "POST /runs/{task_id}/start_revision_http",
             "POST /runs/{task_id}/cancel",
             "POST /recover_stale",
         ],
@@ -809,7 +844,17 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         },
                     )
                     return
-                if len(parts) == 3 and parts[0] == "runs" and parts[2] in {"execute_local", "execute_http", "start_local", "start_http"}:
+                execution_modes = {
+                    "execute_local",
+                    "execute_http",
+                    "start_local",
+                    "start_http",
+                    "execute_revision_local",
+                    "execute_revision_http",
+                    "start_revision_local",
+                    "start_revision_http",
+                }
+                if len(parts) == 3 and parts[0] == "runs" and parts[2] in execution_modes:
                     task_id = parts[1]
                     run_dir = run_root / task_id
                     if not run_dir.exists():
@@ -817,9 +862,11 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         return
                     ledger_path = run_dir / "task_ledger.json"
                     force = bool(payload.get("force"))
+                    revision_mode = "revision" in parts[2]
+                    revision_step_ids = revision_step_ids_from_run(run_dir) if revision_mode else None
                     if ledger_path.exists() and not force:
                         ledger = TaskLedger.load(ledger_path).to_dict()
-                        if ledger.get("status") == "completed":
+                        if ledger.get("status") == "completed" and not revision_mode:
                             response(
                                 self,
                                 409,
@@ -832,16 +879,19 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                             return
                     workspace_root = resolve_run_child_path(run_dir, str(payload.get("workspace_root") or ""), "work")
                     timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
-                    if parts[2] in {"execute_local", "start_local"}:
-                        executor = lambda: execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
+                    if parts[2] in {"execute_local", "start_local", "execute_revision_local", "start_revision_local"}:
+                        executor = lambda: execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec, step_ids=revision_step_ids)
                     else:
                         host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
                         http_workspace_root = workspace_root if "workspace_root" in payload else None
-                        executor = lambda: execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root)
+                        executor = lambda: execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root, step_ids=revision_step_ids)
                     if parts[2].startswith("start_"):
                         if ledger_path.exists():
                             try:
-                                TaskLedger.load(ledger_path).record_event("background_start_requested", {"mode": parts[2]})
+                                event_payload: dict[str, Any] = {"mode": parts[2]}
+                                if revision_step_ids:
+                                    event_payload["step_ids"] = revision_step_ids
+                                TaskLedger.load(ledger_path).record_event("background_start_requested", event_payload)
                             except Exception:
                                 pass
                         started = start_background(task_id, executor)
@@ -850,12 +900,12 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                             return
                         response(self, 202, {"ok": True, "task_id": task_id, "status": "started"})
                         return
-                    if parts[2] == "execute_local":
-                        summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
+                    if parts[2] in {"execute_local", "execute_revision_local"}:
+                        summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec, step_ids=revision_step_ids)
                     else:
                         host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
                         http_workspace_root = workspace_root if "workspace_root" in payload else None
-                        summary = execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root)
+                        summary = execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root, step_ids=revision_step_ids)
                     response(self, 200 if summary.get("ok") else 500, {"ok": bool(summary.get("ok")), "summary": summary})
                     return
                 response(self, 404, {"ok": False, "error": "not found"})

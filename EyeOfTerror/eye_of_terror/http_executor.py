@@ -58,9 +58,9 @@ def get_json(url: str, timeout_sec: int) -> dict[str, Any]:
     return decoded
 
 
-def preflight_workers(run_dir: Path, host: str, timeout_sec: int) -> list[dict[str, Any]]:
+def preflight_workers(run_dir: Path, host: str, timeout_sec: int, step_ids: list[str] | None = None) -> list[dict[str, Any]]:
     failures: list[dict[str, Any]] = []
-    for dispatch_path in ordered_dispatch_paths(run_dir):
+    for dispatch_path in ordered_dispatch_paths(run_dir, step_ids=step_ids):
         packet = load_json(dispatch_path)
         worker = str(packet.get("worker") or "")
         port = int(packet.get("port") or 0)
@@ -114,7 +114,13 @@ def run_step(dispatch_path: Path, host: str, timeout_sec: int) -> HttpStepResult
         return HttpStepResult(step_id, worker, port, False, {"ok": False, "error": str(exc)}, str(exc))
 
 
-def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800, workspace_root: Path | None = None) -> dict[str, Any]:
+def execute_run(
+    run_dir: Path,
+    host: str = "127.0.0.1",
+    timeout_sec: int = 1800,
+    workspace_root: Path | None = None,
+    step_ids: list[str] | None = None,
+) -> dict[str, Any]:
     contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
     ledger_path = run_dir / "task_ledger.json"
     ledger = (
@@ -134,7 +140,7 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800,
         ledger.set_result({"ok": False, "final_step": "", "artifacts": [], "status": "cancelled", "summary": "Execution cancelled before start."})
         ledger.set_status("cancelled")
         return summary
-    preflight_failures = preflight_workers(run_dir, host, timeout_sec)
+    preflight_failures = preflight_workers(run_dir, host, timeout_sec, step_ids=step_ids)
     if preflight_failures:
         summary = {
             "ok": False,
@@ -148,7 +154,7 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800,
         ledger.set_status("failed")
         return summary
     results: list[HttpStepResult] = []
-    for dispatch_path in ordered_dispatch_paths(run_dir):
+    for dispatch_path in ordered_dispatch_paths(run_dir, step_ids=step_ids):
         ledger = TaskLedger.load(ledger_path)
         if ledger.cancel_requested():
             break
@@ -173,6 +179,9 @@ def execute_run(run_dir: Path, host: str = "127.0.0.1", timeout_sec: int = 1800,
         "steps": [item.to_dict() for item in results],
         "cancelled": cancelled,
     }
+    if step_ids:
+        summary["step_ids"] = step_ids
+        summary["revision_execution"] = True
     if isinstance(final_payload, dict) and isinstance(final_payload.get("revision_plan"), dict):
         summary["revision_plan"] = final_payload["revision_plan"]
     report_path = run_dir / "http_execution_report.json"
@@ -200,8 +209,9 @@ def main() -> int:
     parser.add_argument("run_dir")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--timeout-sec", type=int, default=1800)
+    parser.add_argument("--step-id", action="append", default=[], help="Restrict execution to one or more dispatch step ids")
     args = parser.parse_args()
-    summary = execute_run(Path(args.run_dir), args.host, args.timeout_sec)
+    summary = execute_run(Path(args.run_dir), args.host, args.timeout_sec, step_ids=args.step_id or None)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary.get("ok") else 1
 

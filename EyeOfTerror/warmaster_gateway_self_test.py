@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import eye_of_terror.warmaster_gateway as warmaster_gateway
-from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, resolve_run_child_path, valid_task_id, validate_service_host
+from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, resolve_run_child_path, revision_step_ids_from_run, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
 
 
@@ -232,6 +232,13 @@ def main() -> int:
             run_dir = Path(task["run_dir"])
             if not (run_dir / "dispatch" / "source_discovery.json").exists():
                 raise AssertionError(f"gateway did not prepare run package: {task}")
+            try:
+                revision_step_ids_from_run(run_dir)
+            except ValueError as exc:
+                if "revision_plan" not in str(exc):
+                    raise
+            else:
+                raise AssertionError("run without a revision plan should not expose revision steps")
             run_status = request_json(base + "/runs/warmaster-test")
             if not run_status.get("ok") or run_status.get("task_id") != "warmaster-test" or not run_status.get("ledger"):
                 raise AssertionError(f"bad run status: {run_status}")
@@ -333,6 +340,35 @@ def main() -> int:
             forced = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30, "force": True}, timeout=60)
             if not forced.get("ok"):
                 raise AssertionError(f"forced rerun failed: {forced}")
+            ledger_path = run_dir / "task_ledger.json"
+            ledger_payload = json.loads(ledger_path.read_text(encoding="utf-8"))
+            ledger_payload.setdefault("result", {})["revision_plan"] = {
+                "required": True,
+                "steps": [
+                    {
+                        "step_id": "draft_reconstruction",
+                        "worker": "ScriptoriumDaemon",
+                        "reason": "test revision",
+                        "source": "self_test",
+                        "priority": "blocker",
+                    }
+                ],
+            }
+            write_json(ledger_path, ledger_payload)
+            revision_steps = revision_step_ids_from_run(run_dir)
+            if revision_steps != ["draft_reconstruction", "critic_review", "finalize"]:
+                raise AssertionError(f"bad revision step expansion: {revision_steps}")
+            revision_execution = request_json(
+                base + "/runs/warmaster-test/execute_revision_local",
+                {"timeout_sec": 30},
+                timeout=60,
+            )
+            if (
+                not revision_execution.get("ok")
+                or not revision_execution.get("summary", {}).get("revision_execution")
+                or revision_execution.get("summary", {}).get("step_ids") != revision_steps
+            ):
+                raise AssertionError(f"bad revision execution response: {revision_execution}")
             unsafe_task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-unsafe-workspace-test"},

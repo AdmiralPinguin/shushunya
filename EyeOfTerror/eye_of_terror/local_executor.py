@@ -84,18 +84,19 @@ def run_step(repo_root: Path, dispatch_path: Path, workspace_root: Path, timeout
     return StepResult(step_id, worker, completed.returncode, ok, payload, completed.stdout, completed.stderr)
 
 
-def ordered_dispatch_paths(run_dir: Path) -> list[Path]:
+def ordered_dispatch_paths(run_dir: Path, step_ids: list[str] | None = None) -> list[Path]:
     status = load_json(run_dir / "status.json")
     dispatch_dir = Path(str(status.get("dispatch_dir") or run_dir / "dispatch"))
     if not dispatch_dir.is_absolute():
         candidates = [dispatch_dir, run_dir / "dispatch", run_dir.parent / dispatch_dir]
         dispatch_dir = next((candidate for candidate in candidates if candidate.exists()), run_dir / "dispatch")
+    allowed = set(step_ids or [])
     paths: list[Path] = []
     for step in status.get("steps", []):
         if not isinstance(step, dict):
             continue
         step_id = str(step.get("step_id") or "")
-        if step_id:
+        if step_id and (not allowed or step_id in allowed):
             paths.append(dispatch_dir / f"{step_id}.json")
     return paths
 
@@ -110,7 +111,13 @@ def terminal_payload_allows_completion(payload: dict[str, Any]) -> bool:
     return True
 
 
-def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_sec: int = 1800) -> dict[str, Any]:
+def execute_run(
+    repo_root: Path,
+    run_dir: Path,
+    workspace_root: Path,
+    timeout_sec: int = 1800,
+    step_ids: list[str] | None = None,
+) -> dict[str, Any]:
     contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
     ledger_path = run_dir / "task_ledger.json"
     ledger = (
@@ -125,7 +132,7 @@ def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_se
     )
     ledger.set_status("running")
     results: list[StepResult] = []
-    for dispatch_path in ordered_dispatch_paths(run_dir):
+    for dispatch_path in ordered_dispatch_paths(run_dir, step_ids=step_ids):
         ledger = TaskLedger.load(ledger_path)
         if ledger.cancel_requested():
             break
@@ -150,6 +157,9 @@ def execute_run(repo_root: Path, run_dir: Path, workspace_root: Path, timeout_se
         "steps": [item.to_dict() for item in results],
         "cancelled": cancelled,
     }
+    if step_ids:
+        summary["step_ids"] = step_ids
+        summary["revision_execution"] = True
     if isinstance(final_payload, dict) and isinstance(final_payload.get("revision_plan"), dict):
         summary["revision_plan"] = final_payload["revision_plan"]
     report_path = run_dir / "execution_report.json"
@@ -178,8 +188,9 @@ def main() -> int:
     parser.add_argument("--workspace-root", default="runtime/eye-local-work")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--timeout-sec", type=int, default=1800)
+    parser.add_argument("--step-id", action="append", default=[], help="Restrict execution to one or more dispatch step ids")
     args = parser.parse_args()
-    summary = execute_run(Path(args.repo_root).resolve(), Path(args.run_dir), Path(args.workspace_root), args.timeout_sec)
+    summary = execute_run(Path(args.repo_root).resolve(), Path(args.run_dir), Path(args.workspace_root), args.timeout_sec, step_ids=args.step_id or None)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary.get("ok") else 1
 

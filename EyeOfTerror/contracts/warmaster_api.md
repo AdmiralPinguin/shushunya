@@ -35,8 +35,12 @@ GET  /runs/{task_id}/artifact_text?path=/work/...
 GET  /runs/{task_id}/artifact_text?path=/work/...&max_bytes=1000
 POST /runs/{task_id}/execute_local
 POST /runs/{task_id}/execute_http
+POST /runs/{task_id}/execute_revision_local
+POST /runs/{task_id}/execute_revision_http
 POST /runs/{task_id}/start_local
 POST /runs/{task_id}/start_http
+POST /runs/{task_id}/start_revision_local
+POST /runs/{task_id}/start_revision_http
 POST /runs/{task_id}/cancel
 POST /recover_stale
 ```
@@ -91,6 +95,10 @@ selected run directory. Relative paths are resolved below the run directory.
 
 If execution, cancellation, or live worker task endpoints accept `host`, it must
 be a loopback worker service host such as `127.0.0.1` or `localhost`.
+
+Revision execution endpoints use the current run ledger `revision_plan` and run
+only those dispatch steps, followed by `critic_review` and `finalize`. They must
+reject runs that do not have `revision_plan.required=true`.
 
 ## Rules
 
