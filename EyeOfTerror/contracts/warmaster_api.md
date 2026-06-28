@@ -171,7 +171,9 @@ same prepare sequence as `POST /orchestrate` and, by default, immediately follow
 with `POST /orchestrate_start` semantics when the prepared run is startable. It
 returns the prepare payload, start payload, trace, current orchestration state,
 and polling `next_action`. Set `auto_start=false` to stop after preparation
-while keeping the same response envelope.
+while keeping the same response envelope. With the default `reuse_existing=true`,
+repeating the same stable `task_id` returns the existing run orchestration state
+instead of treating reconnects or client retries as hard failures.
 
 `GET /runs/{task_id}/orchestration` is the read-only decision view for chat
 clients. It wraps the run snapshot with an orchestration `phase` such as
@@ -190,7 +192,8 @@ clients do not need to reimplement phase parsing.
   "governor_host": "optional-loopback-host",
   "run_mode": "local|http",
   "include_brigade_health": true,
-  "auto_start": true
+  "auto_start": true,
+  "reuse_existing": true
 }
 ```
 

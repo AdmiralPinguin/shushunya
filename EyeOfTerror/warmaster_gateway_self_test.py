@@ -760,6 +760,23 @@ def main() -> int:
                 or not any(item.get("type") == "background_start_requested" for item in orchestrated_run_events.get("events", []))
             ):
                 raise AssertionError(f"one-shot orchestration did not record prepare/start events: {orchestrated_run_events}")
+            orchestrated_retry = request_json(
+                base + "/orchestrate_run",
+                {
+                    "message": "Собери все известное о событиях Скалатракса.",
+                    "task_id": "warmaster-orchestrate-run-test",
+                    "run_mode": "local",
+                    "auto_start": False,
+                },
+            )
+            if (
+                not orchestrated_retry.get("ok")
+                or orchestrated_retry.get("phase") != "existing_run"
+                or not orchestrated_retry.get("reused_existing")
+                or orchestrated_retry.get("orchestration", {}).get("task_id") != "warmaster-orchestrate-run-test"
+                or orchestrated_retry.get("prepare", {}).get("task_preflight", {}).get("error_code") != "task_exists"
+            ):
+                raise AssertionError(f"one-shot orchestration retry did not reuse existing run: {orchestrated_retry}")
             task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},

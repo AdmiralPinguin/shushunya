@@ -1976,6 +1976,7 @@ def orchestrate_run_task(
     include_brigade_health: bool = False,
     auto_start: bool = True,
     force: bool = False,
+    reuse_existing: bool = True,
 ) -> dict[str, Any]:
     prepare_timeout_sec = max(1, min(int(timeout_sec), 7200))
     prepared = orchestrate_prepare_task(
@@ -1992,6 +1993,58 @@ def orchestrate_run_task(
     trace = list(prepared.get("trace") if isinstance(prepared.get("trace"), list) else [])
     run_task_id = str(prepared.get("task_id") or task_id or "")
     if not prepared.get("ok"):
+        task_preflight = prepared.get("task_preflight") if isinstance(prepared.get("task_preflight"), dict) else {}
+        if reuse_existing and task_preflight.get("error_code") == "task_exists" and task_id:
+            run_dir = run_root / task_id
+            state = orchestration_state(run_dir, event_limit=5, events_after=0) if run_dir.exists() else {}
+            decision = state.get("decision") if isinstance(state.get("decision"), dict) else {}
+            should_start = auto_start and (
+                bool(decision.get("can_start"))
+                or bool(decision.get("can_resume"))
+                or bool(decision.get("can_execute_revision"))
+                or force
+            )
+            if should_start:
+                started = orchestrate_start_run(
+                    run_root,
+                    task_id,
+                    run_mode=run_mode,
+                    host=host,
+                    timeout_sec=prepare_timeout_sec,
+                    force=force,
+                )
+                trace.append(
+                    {
+                        "stage": "orchestrate_start",
+                        "ok": bool(started.get("ok")),
+                        "task_id": task_id,
+                        "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else {},
+                    }
+                )
+                state = orchestration_state(run_dir, event_limit=5, events_after=0) if run_dir.exists() else {}
+                return {
+                    "ok": bool(started.get("ok")),
+                    "phase": "started" if started.get("ok") else "existing_run",
+                    "task_id": task_id,
+                    "run_mode": run_mode,
+                    "reused_existing": True,
+                    "trace": trace,
+                    "prepare": prepared,
+                    "start": started,
+                    "orchestration": state,
+                    "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else state.get("next_action", {}),
+                }
+            return {
+                "ok": True,
+                "phase": "existing_run",
+                "task_id": task_id,
+                "run_mode": run_mode,
+                "reused_existing": True,
+                "trace": trace,
+                "prepare": prepared,
+                "orchestration": state,
+                "next_action": state.get("next_action", {}) if isinstance(state, dict) else {},
+            }
         return {
             "ok": False,
             "phase": str(prepared.get("phase") or "prepare_failed"),
@@ -3266,6 +3319,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         include_brigade_health=include_brigade_health,
                         auto_start=auto_start,
                         force=bool(payload.get("force")),
+                        reuse_existing=bool(payload.get("reuse_existing", True)),
                     )
                     if submitted.get("ok") and submitted.get("phase") == "started":
                         response(self, 202, submitted)
