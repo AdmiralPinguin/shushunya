@@ -396,9 +396,13 @@ def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(artifacts, list):
         artifacts = []
     items: list[dict[str, Any]] = []
-    for artifact in artifacts:
-        sandbox_path = str(artifact)
-        item: dict[str, Any] = {"path": sandbox_path}
+    seen: set[str] = set()
+
+    def append_artifact(sandbox_path: str, source: str) -> None:
+        if sandbox_path in seen:
+            return
+        seen.add(sandbox_path)
+        item: dict[str, Any] = {"path": sandbox_path, "source": source}
         if workspace_root and sandbox_path.startswith("/work/"):
             host_path = Path(workspace_root) / sandbox_path.removeprefix("/work/")
             item["host_path"] = str(host_path)
@@ -408,6 +412,23 @@ def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
             item["exists"] = False
             item["bytes"] = 0
         items.append(item)
+
+    for artifact in artifacts:
+        sandbox_path = str(artifact)
+        append_artifact(sandbox_path, "result")
+        if workspace_root and sandbox_path.endswith("/final_manifest.json") and sandbox_path.startswith("/work/"):
+            manifest_path = Path(workspace_root) / sandbox_path.removeprefix("/work/")
+            if manifest_path.exists():
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    manifest = {}
+                files = manifest.get("files") if isinstance(manifest, dict) else []
+                for file_item in files if isinstance(files, list) else []:
+                    if isinstance(file_item, dict):
+                        package_path = str(file_item.get("path") or "")
+                        if package_path:
+                            append_artifact(package_path, "final_manifest")
     return {"workspace_root": workspace_root, "artifacts": items}
 
 

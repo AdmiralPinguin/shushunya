@@ -309,6 +309,9 @@ def main() -> int:
             artifacts = request_json(base + "/runs/warmaster-test/artifacts")
             if not artifacts.get("ok") or not artifacts.get("artifacts") or not artifacts["artifacts"][0].get("exists"):
                 raise AssertionError(f"bad artifacts response: {artifacts}")
+            artifact_paths = {item.get("path") for item in artifacts.get("artifacts", [])}
+            if "/work/skalathrax/reconstruction_ru.md" not in artifact_paths:
+                raise AssertionError(f"artifacts response did not expand final manifest package: {artifacts}")
             completed_snapshot = request_json(base + "/runs/warmaster-test/snapshot?events_after=0&event_limit=3")
             if (
                 not completed_snapshot.get("ok")
@@ -321,6 +324,9 @@ def main() -> int:
             text_artifact = request_json(base + f"/runs/warmaster-test/artifact_text?path={artifact_path}")
             if not text_artifact.get("ok") or "ready" not in text_artifact.get("text", ""):
                 raise AssertionError(f"bad artifact text response: {text_artifact}")
+            reconstruction_text = request_json(base + "/runs/warmaster-test/artifact_text?path=/work/skalathrax/reconstruction_ru.md")
+            if not reconstruction_text.get("ok") or "Реконструкция" not in reconstruction_text.get("text", ""):
+                raise AssertionError(f"bad expanded artifact text response: {reconstruction_text}")
             text_preview = request_json(base + f"/runs/warmaster-test/artifact_text?path={artifact_path}&max_bytes=8")
             if not text_preview.get("ok") or len(text_preview.get("text", "").encode("utf-8")) > 8:
                 raise AssertionError(f"bad artifact preview response: {text_preview}")
