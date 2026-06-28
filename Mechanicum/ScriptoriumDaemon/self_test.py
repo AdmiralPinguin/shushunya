@@ -16,6 +16,11 @@ def write_json(path: Path, payload: dict) -> None:
 def main() -> int:
     request = {
         "task_id": "test-skalathrax:draft_reconstruction",
+        "revision_context": {
+            "reasons": ["Draft does not visibly cover required event: Kharn burns shelters"],
+            "source_steps": ["critic_review"],
+            "priority": "blocker",
+        },
         "step": {
             "expected_artifacts": [
                 "/work/skalathrax/reconstruction_ru.md",
@@ -96,10 +101,14 @@ def main() -> int:
         for needle in required:
             if needle not in reconstruction:
                 raise AssertionError(f"missing reconstruction text: {needle}")
+        if "Фокус ревизии" not in reconstruction or "Kharn burns shelters" not in reconstruction:
+            raise AssertionError("reconstruction should expose revision context")
         if "Discovery status: playbook_matched" not in coverage or "Sources mapped: 1" not in coverage or "moon_parley" not in coverage:
             raise AssertionError("coverage report is incomplete")
         if "evidence=Kharn: Eater of Worlds: parley" not in coverage:
             raise AssertionError("coverage report should include event evidence")
+        if "Revision Context" not in coverage or "Source step: critic_review" not in coverage:
+            raise AssertionError("coverage report should expose revision context")
     print("[ok] ScriptoriumDaemon draft")
     return 0
 

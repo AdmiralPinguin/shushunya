@@ -78,7 +78,29 @@ def event_text(event: dict[str, Any], notes_by_id: dict[str, dict[str, Any]]) ->
     return f"{text}{suffix}"
 
 
-def build_reconstruction(source_map: dict[str, Any], notes: dict[str, Any], timeline: dict[str, Any]) -> str:
+def revision_context_lines(revision_context: dict[str, Any] | None, heading: str) -> list[str]:
+    if not revision_context:
+        return []
+    reasons = [str(item).strip() for item in revision_context.get("reasons", []) if str(item).strip()]
+    source_steps = [str(item).strip() for item in revision_context.get("source_steps", []) if str(item).strip()]
+    priority = str(revision_context.get("priority") or "").strip()
+    lines = [heading, ""]
+    if priority:
+        lines.append(f"- Priority: {priority}")
+    for reason in dict.fromkeys(reasons):
+        lines.append(f"- Reason: {reason}")
+    for source in dict.fromkeys(source_steps):
+        lines.append(f"- Source step: {source}")
+    lines.append("")
+    return lines
+
+
+def build_reconstruction(
+    source_map: dict[str, Any],
+    notes: dict[str, Any],
+    timeline: dict[str, Any],
+    revision_context: dict[str, Any] | None = None,
+) -> str:
     topic = str(timeline.get("topic") or notes.get("topic") or source_map.get("topic") or "задача")
     notes_by_id = {
         str(item.get("event_id")): item
@@ -96,6 +118,7 @@ def build_reconstruction(source_map: dict[str, Any], notes: dict[str, Any], time
         "Это рабочая реконструкция, собранная из извлеченных событий. Она отделяет прямой ход событий от последствий и не закрывает пробелы выдуманными деталями.",
         "",
     ]
+    lines.extend(revision_context_lines(revision_context, "## Фокус ревизии"))
     for phase, phase_events in by_phase.items():
         lines.append(f"## {PHASE_TITLES.get(phase, phase)}")
         lines.append("")
@@ -125,6 +148,7 @@ def build_coverage_report(
     source_snapshots: dict[str, Any],
     notes: dict[str, Any],
     timeline: dict[str, Any],
+    revision_context: dict[str, Any] | None = None,
 ) -> str:
     sources = [item for item in source_map.get("sources", []) if isinstance(item, dict)]
     snapshots = [item for item in source_snapshots.get("snapshots", []) if isinstance(item, dict)]
@@ -145,9 +169,9 @@ def build_coverage_report(
         f"- Direct events extracted: {len(notes.get('events', []))}",
         f"- Timeline events: {len(events)}",
         "",
-        "## Sources",
-        "",
     ]
+    lines.extend(revision_context_lines(revision_context, "## Revision Context"))
+    lines.extend(["## Sources", ""])
     for source in sources:
         title = source.get("title", "")
         source_class = source.get("source_class", source.get("type", ""))
@@ -203,8 +227,9 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         return {"ok": False, "worker": "ScriptoriumDaemon", "error": str(exc)}
 
-    reconstruction = build_reconstruction(source_map, notes, timeline)
-    coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline)
+    revision_context = request.get("revision_context") if isinstance(request.get("revision_context"), dict) else None
+    reconstruction = build_reconstruction(source_map, notes, timeline, revision_context)
+    coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, revision_context)
     for output_path, content in ((reconstruction_path, reconstruction), (coverage_path, coverage_report)):
         host_path = sandbox_path(workspace_root, output_path)
         host_path.parent.mkdir(parents=True, exist_ok=True)
