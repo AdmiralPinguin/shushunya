@@ -54,6 +54,8 @@
 - Warmaster run inspection endpoints tolerate corrupt `status.json` and
   `contract.json` files and return diagnostic JSON instead of crashing.
 - Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
+- Warmaster routing is driven by `route_terms` in the governor registry instead
+  of hardcoded per-governor keyword lists.
 - Warmaster Gateway can request cooperative cancellation through the task ledger,
   and best-effort forwards cancellation to HTTP worker task endpoints from the
   run dispatch package.

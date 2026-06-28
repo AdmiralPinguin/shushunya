@@ -40,6 +40,8 @@ user chat surface.
 Rules:
 
 - Active governors must have a service and stable port.
+- Governors declare `route_terms` in the registry; Warmaster routing should be
+  data-driven from that registry instead of hardcoded per governor.
 - Planned governors may have documentation but must not receive live tasks.
 - Prototype workers must be listed as runnable services.
 - Planned workers must not be listed as runnable services.
