@@ -10,6 +10,11 @@ from eye_of_terror.local_executor import execute_run, revision_contexts_from_res
 from eye_of_terror.pipeline import write_pipeline_run
 
 
+def write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     if terminal_payload_allows_completion({"ok": True, "status": "blocked"}):
         raise AssertionError("blocked terminal payload should not complete a run")
@@ -38,6 +43,47 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
+        missing_input_run = root / "missing-input-run"
+        missing_input_dispatch = missing_input_run / "dispatch"
+        write_json(
+            missing_input_run / "contract.json",
+            {"task_id": "missing-input-local", "goal": "test missing input", "assigned_governor": "IskandarKhayon"},
+        )
+        write_json(
+            missing_input_run / "status.json",
+            {
+                "task_id": "missing-input-local",
+                "governor": "IskandarKhayon",
+                "steps": [
+                    {
+                        "step_id": "fact_extraction",
+                        "worker": "NoosphericExtractor",
+                        "depends_on": ["source_acquisition"],
+                        "input_artifacts": ["/work/test/missing.json"],
+                        "expected_artifacts": ["/work/test/direct_event_notes.json"],
+                    }
+                ],
+                "dispatch_dir": str(missing_input_dispatch),
+            },
+        )
+        write_json(
+            missing_input_dispatch / "fact_extraction.json",
+            {
+                "step_id": "fact_extraction",
+                "worker": "NoosphericExtractor",
+                "request": {
+                    "task_id": "missing-input-local:fact_extraction",
+                    "input_artifacts": ["/work/test/missing.json"],
+                    "step": {"expected_artifacts": ["/work/test/direct_event_notes.json"]},
+                },
+            },
+        )
+        missing_summary = execute_run(repo_root, missing_input_run, root / "missing-work", timeout_sec=30)
+        if missing_summary.get("ok") or missing_summary.get("steps", [{}])[0].get("payload", {}).get("error") != "input artifact preflight failed":
+            raise AssertionError(f"local executor did not reject missing input artifacts: {missing_summary}")
+        missing_ledger = json.loads((missing_input_run / "task_ledger.json").read_text(encoding="utf-8"))
+        if missing_ledger.get("status") != "failed" or missing_ledger.get("steps", [{}])[0].get("status") != "failed":
+            raise AssertionError(f"missing input failure was not recorded durably: {missing_ledger}")
         run_dir = root / "run"
         work_dir = root / "work"
         plan = plan_lore_reconstruction("Собери все известное о событиях Скалатракса.", task_id="executor-test")

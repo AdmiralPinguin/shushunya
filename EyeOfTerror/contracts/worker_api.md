@@ -57,8 +57,8 @@ running on the selected port before sending work.
 `depends_on` entries and the dependency steps' `expected_artifacts`. Workers
 should treat these paths as required inputs for the step unless their own
 contract says a missing input is an explicit blocker. The shared Mechanicum
-runtime rejects missing or non-`/work/` input artifacts before calling the
-worker implementation.
+runtime and local EyeOfTerror executor reject missing or non-`/work/` input
+artifacts before calling the worker implementation.
 
 `revision_context` is optional. Orchestrators set it only when rerunning a
 worker from a failed or blocked run's `revision_plan`. Workers should treat it

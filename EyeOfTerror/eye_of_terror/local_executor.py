@@ -61,6 +61,35 @@ def parse_worker_stdout(stdout: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {"ok": False, "error": "worker stdout JSON is not an object"}
 
 
+def artifact_host_path(workspace_root: Path, artifact_path: str) -> Path:
+    if not artifact_path.startswith("/work/"):
+        raise ValueError(f"artifact path must start with /work/: {artifact_path}")
+    root = workspace_root.resolve()
+    host_path = (root / artifact_path.removeprefix("/work/")).resolve()
+    if not host_path.is_relative_to(root):
+        raise ValueError(f"artifact path escapes workspace root: {artifact_path}")
+    return host_path
+
+
+def input_artifact_errors(request: dict[str, Any], workspace_root: Path) -> list[dict[str, str]]:
+    input_artifacts = request.get("input_artifacts", [])
+    if not isinstance(input_artifacts, list):
+        return [{"path": "", "error": "input_artifacts must be a list"}]
+    errors: list[dict[str, str]] = []
+    for artifact in input_artifacts:
+        if not isinstance(artifact, str):
+            errors.append({"path": repr(artifact), "error": "input artifact path must be a string"})
+            continue
+        try:
+            host_path = artifact_host_path(workspace_root, artifact)
+        except ValueError as exc:
+            errors.append({"path": artifact, "error": str(exc)})
+            continue
+        if not host_path.exists():
+            errors.append({"path": artifact, "error": "input artifact does not exist"})
+    return errors
+
+
 def revision_contexts_from_result(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
     revision_plan = result.get("revision_plan") if isinstance(result.get("revision_plan"), dict) else {}
     contexts: dict[str, dict[str, Any]] = {}
@@ -111,6 +140,18 @@ def run_step(
     packet = load_json(dispatch_path)
     worker = str(packet.get("worker") or "")
     step_id = str(packet.get("step_id") or dispatch_path.stem)
+    request = packet.get("request") if isinstance(packet.get("request"), dict) else packet
+    artifact_errors = input_artifact_errors(request, workspace_root)
+    if artifact_errors:
+        payload = {
+            "ok": False,
+            "worker": worker,
+            "task_id": str(request.get("task_id") or ""),
+            "status": "failed",
+            "error": "input artifact preflight failed",
+            "input_artifact_errors": artifact_errors,
+        }
+        return StepResult(step_id, worker, 2, False, payload, "", payload["error"])
     if worker not in WORKER_COMMANDS:
         payload = {"ok": False, "error": f"no local command registered for worker: {worker}"}
         return StepResult(step_id, worker, 127, False, payload, "", payload["error"])
