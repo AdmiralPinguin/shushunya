@@ -19,6 +19,7 @@
     "assigned_governor": { "type": "string", "minLength": 1 },
     "required_artifacts": {
       "type": "array",
+      "uniqueItems": true,
       "items": { "type": "string", "pattern": "^/work/" }
     },
     "completion_criteria": {
@@ -42,10 +43,12 @@
           "purpose": { "type": "string", "minLength": 1 },
           "depends_on": {
             "type": "array",
+            "uniqueItems": true,
             "items": { "type": "string", "minLength": 1 }
           },
           "expected_artifacts": {
             "type": "array",
+            "uniqueItems": true,
             "items": { "type": "string", "pattern": "^/work/" }
           }
         }

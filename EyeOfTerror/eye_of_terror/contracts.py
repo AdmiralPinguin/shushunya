@@ -215,9 +215,14 @@ def validate_task_contract_payload(payload: dict[str, Any]) -> list[str]:
         errors.append("completion_criteria must not be empty")
     required_artifacts = payload.get("required_artifacts", [])
     if isinstance(required_artifacts, list):
+        seen_required_artifacts: set[str] = set()
         for artifact in required_artifacts:
             if not isinstance(artifact, str) or not artifact.startswith("/work/"):
                 errors.append(f"required artifact must be a /work path: {artifact!r}")
+                continue
+            if artifact in seen_required_artifacts:
+                errors.append(f"duplicate required artifact: {artifact}")
+            seen_required_artifacts.add(artifact)
     worker_plan = payload.get("worker_plan", [])
     if not isinstance(worker_plan, list) or not worker_plan:
         errors.append("worker_plan must be a non-empty list")
@@ -247,11 +252,15 @@ def validate_task_contract_payload(payload: dict[str, Any]) -> list[str]:
         depends_on = step.get("depends_on", [])
         if not isinstance(depends_on, list) or not all(isinstance(item, str) for item in depends_on):
             errors.append(f"worker_plan[{index}].depends_on must be a list of strings")
+        elif len(set(depends_on)) != len(depends_on):
+            errors.append(f"worker_plan[{index}].depends_on contains duplicates")
         expected_artifacts = step.get("expected_artifacts", [])
         if not isinstance(expected_artifacts, list):
             errors.append(f"worker_plan[{index}].expected_artifacts must be a list")
         elif any(not isinstance(item, str) or not item.startswith("/work/") for item in expected_artifacts):
             errors.append(f"worker_plan[{index}].expected_artifacts must contain /work paths")
+        elif len(set(expected_artifacts)) != len(expected_artifacts):
+            errors.append(f"worker_plan[{index}].expected_artifacts contains duplicates")
         elif isinstance(step_id, str):
             for artifact in expected_artifacts:
                 owner = expected_artifact_producers.get(artifact)

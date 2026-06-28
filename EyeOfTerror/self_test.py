@@ -33,8 +33,14 @@ def main() -> int:
         raise AssertionError("worker step schema and runtime validator constants disagree")
     if schema.get("properties", {}).get("required_artifacts", {}).get("items", {}).get("pattern") != "^/work/":
         raise AssertionError("task contract schema should require /work required_artifacts")
+    if schema.get("properties", {}).get("required_artifacts", {}).get("uniqueItems") is not True:
+        raise AssertionError("task contract schema should reject duplicate required_artifacts")
     if step_schema.get("properties", {}).get("expected_artifacts", {}).get("items", {}).get("pattern") != "^/work/":
         raise AssertionError("task contract schema should require /work expected_artifacts")
+    if step_schema.get("properties", {}).get("expected_artifacts", {}).get("uniqueItems") is not True:
+        raise AssertionError("task contract schema should reject duplicate expected_artifacts")
+    if step_schema.get("properties", {}).get("depends_on", {}).get("uniqueItems") is not True:
+        raise AssertionError("task contract schema should reject duplicate step dependencies")
     if step_schema.get("properties", {}).get("worker", {}).get("minLength") != 1:
         raise AssertionError("task contract schema should require non-empty worker names")
     print("[ok] task contract schema")
@@ -83,6 +89,18 @@ def main() -> int:
     broken_duplicate_output["worker_plan"][1]["expected_artifacts"] = broken_duplicate_output["worker_plan"][0]["expected_artifacts"]
     if not any("multiple producer" in error for error in validate_task_contract_payload(broken_duplicate_output)):
         raise AssertionError("task contract validator should reject duplicate artifact producers")
+    broken_duplicate_required = json.loads(json.dumps(payload))
+    broken_duplicate_required["required_artifacts"].append(broken_duplicate_required["required_artifacts"][0])
+    if not any("duplicate required artifact" in error for error in validate_task_contract_payload(broken_duplicate_required)):
+        raise AssertionError("task contract validator should reject duplicate required artifacts")
+    broken_duplicate_dependency = json.loads(json.dumps(payload))
+    broken_duplicate_dependency["worker_plan"][1]["depends_on"] = ["source_discovery", "source_discovery"]
+    if not any("depends_on contains duplicates" in error for error in validate_task_contract_payload(broken_duplicate_dependency)):
+        raise AssertionError("task contract validator should reject duplicate dependencies")
+    broken_duplicate_expected = json.loads(json.dumps(payload))
+    broken_duplicate_expected["worker_plan"][0]["expected_artifacts"].append(broken_duplicate_expected["worker_plan"][0]["expected_artifacts"][0])
+    if not any("expected_artifacts contains duplicates" in error for error in validate_task_contract_payload(broken_duplicate_expected)):
+        raise AssertionError("task contract validator should reject duplicate expected artifacts")
     if "/work/skalathrax/source_map.json" not in payload["required_artifacts"]:
         raise AssertionError(f"skalathrax artifacts not derived: {payload['required_artifacts']}")
     if "/work/skalathrax/source_snapshots.json" not in payload["required_artifacts"]:
