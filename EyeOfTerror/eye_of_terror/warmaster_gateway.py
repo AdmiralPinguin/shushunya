@@ -295,6 +295,8 @@ def verify_prepared_run_package(run_dir: Path, planned_contract: dict[str, Any],
             errors.append("prepared oversight does not match governor plan")
         if not status_error:
             errors.extend(validate_oversight_against_run(run_dir, prepared_oversight, status))
+    if not status_error:
+        errors.extend(run_dispatch_package_errors(run_dir, status))
     return errors
 
 
@@ -850,20 +852,14 @@ def run_package_action_errors(run_dir: Path) -> list[str]:
     if not (run_dir / "status.json").exists() or not (run_dir / "contract.json").exists():
         return []
     errors: list[str] = []
-    _status, status_error = load_json_object(run_dir / "status.json", "status")
+    status, status_error = load_json_object(run_dir / "status.json", "status")
     if status_error:
         errors.append(status_error)
     contract_payload = run_contract(run_dir)
     if not contract_payload.get("ok"):
         errors.append(str(contract_payload.get("error") or "contract unavailable"))
-    dispatch_payload = run_dispatch_packets(run_dir)
-    if not dispatch_payload.get("ok"):
-        errors.append(str(dispatch_payload.get("error") or "dispatch unavailable"))
-        return errors
-    dispatch_items = dispatch_payload.get("dispatch") if isinstance(dispatch_payload.get("dispatch"), list) else []
-    for item in dispatch_items:
-        if isinstance(item, dict) and not item.get("ok") and item.get("error"):
-            errors.append(str(item.get("error")))
+    if not status_error:
+        errors.extend(run_dispatch_package_errors(run_dir, status))
     return errors
 
 
@@ -895,11 +891,9 @@ def run_package_diagnostics(run_dir: Path) -> dict[str, Any]:
         errors.append(str(oversight_payload.get("error") or "oversight unavailable"))
     else:
         errors.extend(oversight_payload.get("validation", {}).get("errors", []) if isinstance(oversight_payload.get("validation"), dict) else [])
-    if not dispatch_payload.get("ok"):
-        errors.append(str(dispatch_payload.get("error") or "dispatch unavailable"))
+    if not status_error:
+        errors.extend(run_dispatch_package_errors(run_dir, status))
     dispatch_items = dispatch_payload.get("dispatch") if isinstance(dispatch_payload.get("dispatch"), list) else []
-    dispatch_errors = [str(item.get("error")) for item in dispatch_items if isinstance(item, dict) and not item.get("ok")]
-    errors.extend(error for error in dispatch_errors if error)
     contract = contract_payload.get("contract") if isinstance(contract_payload.get("contract"), dict) else {}
     return {
         "ok": not errors,
@@ -1025,6 +1019,37 @@ def run_dispatch_packets(run_dir: Path) -> dict[str, Any]:
             continue
         packets.append({"path": str(dispatch_path), "ok": isinstance(packet, dict), "packet": packet})
     return {"ok": True, "dispatch": packets}
+
+
+def run_dispatch_package_errors(run_dir: Path, status: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    dispatch_dir = run_dir / "dispatch"
+    if not dispatch_dir.exists():
+        return ["dispatch directory not found"]
+    steps = status.get("steps") if isinstance(status.get("steps"), list) else []
+    expected_names = {
+        f"{str(step.get('step_id') or '')}.json"
+        for step in steps
+        if isinstance(step, dict) and str(step.get("step_id") or "")
+    }
+    actual_names = {path.name for path in dispatch_dir.glob("*.json")}
+    for name in sorted(expected_names - actual_names):
+        errors.append(f"dispatch packet missing: {name}")
+    for name in sorted(actual_names - expected_names):
+        errors.append(f"unexpected dispatch packet: {name}")
+    dispatch_payload = run_dispatch_packets(run_dir)
+    if not dispatch_payload.get("ok"):
+        errors.append(str(dispatch_payload.get("error") or "dispatch unavailable"))
+        return errors
+    dispatch_items = dispatch_payload.get("dispatch") if isinstance(dispatch_payload.get("dispatch"), list) else []
+    for item in dispatch_items:
+        if not isinstance(item, dict):
+            continue
+        if not item.get("ok"):
+            path = str(item.get("path") or "")
+            detail = str(item.get("error") or "dispatch packet is not valid")
+            errors.append(f"{path}: {detail}" if path else detail)
+    return errors
 
 
 def run_worker_tasks(run_dir: Path, include_health: bool = False, host: str = "127.0.0.1") -> dict[str, Any]:

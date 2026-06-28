@@ -74,6 +74,8 @@
   returns oversight that does not match the task contract.
 - Warmaster verifies HTTP-governor prepared run packages before writing the
   Warmaster ledger.
+- Warmaster rejects HTTP-governor prepared runs with missing, unexpected, or
+  corrupt dispatch packets before ledger creation.
 - Warmaster cleans up unregistered HTTP-governor run directories when prepare
   fails before ledger creation.
 - Task contract runtime validation rejects non-string non-goals, completion

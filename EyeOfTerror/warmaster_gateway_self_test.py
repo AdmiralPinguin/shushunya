@@ -87,7 +87,10 @@ def make_bad_prepare_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
             elif self.path == "/prepare_run":
                 run_dir = Path(str(payload.get("run_dir") or run_root / plan.contract.task_id))
                 status = write_pipeline_run(plan.contract, run_dir, oversight=plan.to_dict()["oversight"])
-                (run_dir / "oversight.json").unlink()
+                if "bad-dispatch" in str(payload.get("task_id") or ""):
+                    (run_dir / "dispatch" / "source_discovery.json").write_text("{", encoding="utf-8")
+                else:
+                    (run_dir / "oversight.json").unlink()
                 body = {"ok": True, "status": status}
             else:
                 body = {"ok": False, "error": "not found"}
@@ -265,6 +268,19 @@ def main() -> int:
                     or (run_root / "warmaster-governor-bad-prepare-test").exists()
                 ):
                     raise AssertionError(f"Warmaster accepted invalid governor-prepared run package: {bad_prepared}")
+                bad_dispatch_prepared = warmaster_gateway.prepare_task_via_governor_service(
+                    "Собери все известное о событиях Скалатракса.",
+                    "warmaster-governor-bad-dispatch-test",
+                    run_root,
+                    BadPrepareGovernor(),
+                )
+                if (
+                    bad_dispatch_prepared.get("error_code") != "governor_prepare_invalid_run"
+                    or not any("source_discovery.json" in error for error in bad_dispatch_prepared.get("validation", {}).get("errors", []))
+                    or not bad_dispatch_prepared.get("cleanup", {}).get("removed")
+                    or (run_root / "warmaster-governor-bad-dispatch-test").exists()
+                ):
+                    raise AssertionError(f"Warmaster accepted invalid governor-prepared dispatch: {bad_dispatch_prepared}")
             finally:
                 bad_prepare_server.shutdown()
                 bad_prepare_thread.join(timeout=5)
