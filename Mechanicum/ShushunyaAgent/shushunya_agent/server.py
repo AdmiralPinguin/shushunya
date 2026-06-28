@@ -799,8 +799,7 @@ def missing_data_sources_from_result(result: dict[str, Any] | None) -> list[str]
     steps = (result or {}).get("steps")
     if not isinstance(steps, list):
         return []
-    paths: list[str] = []
-    seen: set[str] = set()
+    latest_missing: list[str] = []
     for step in steps:
         if not isinstance(step, dict):
             continue
@@ -810,12 +809,14 @@ def missing_data_sources_from_result(result: dict[str, Any] | None) -> list[str]
         missing = step_result.get("missing_data_sources")
         if not isinstance(missing, list):
             continue
+        latest_missing = []
+        seen: set[str] = set()
         for path in missing:
             path_text = str(path or "").strip()
             if path_text and path_text not in seen:
                 seen.add(path_text)
-                paths.append(path_text)
-    return paths[:10]
+                latest_missing.append(path_text)
+    return latest_missing[:10]
 
 
 def journal_data_source_state(task_id: str) -> tuple[list[str], list[str]]:

@@ -1323,6 +1323,16 @@ def main() -> int:
         )
     if "Все известные data sources уже прочитаны" not in json_all_read_continuation or "script file" not in json_all_read_continuation:
         raise AssertionError(f"json parse continuation did not use journal source state: {json_all_read_continuation}")
+    stale_missing = server.missing_data_sources_from_result(
+        {
+            "steps": [
+                {"result": {"missing_data_sources": ["/work/tickets.jsonl"]}},
+                {"result": {"missing_data_sources": []}},
+            ]
+        }
+    )
+    if stale_missing:
+        raise AssertionError(f"stale missing data source was not cleared: {stale_missing}")
     print("[ok] auto-continue journal data source state")
 
     loop_calls: list[tuple[str, dict]] = []
