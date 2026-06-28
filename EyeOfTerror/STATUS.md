@@ -70,6 +70,8 @@
 - Run progress separates waiting steps from ready and dependency-blocked steps.
 - Warmaster Gateway can prepare tasks through the local governor path or through
   the active governor's HTTP service.
+- Brigade launcher derives Warmaster and Iskandar service ports from
+  `EyeOfTerror/registry/ports.json`.
 - Warmaster rejects HTTP-governor task preparation when reachable governor
   `required_workers` are missing from the Mechanicum registry.
 - Warmaster rejects produced task contracts whose `worker_plan` references

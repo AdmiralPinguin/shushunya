@@ -68,8 +68,28 @@ def worker_service_plan(repo_root: Path, host: str) -> list[dict[str, object]]:
     return workers
 
 
+def registry_port(repo_root: Path, section: str, service_name: str, default: int) -> int:
+    path = repo_root / "EyeOfTerror" / "registry" / "ports.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return default
+    entries = payload.get(section) if isinstance(payload, dict) else {}
+    if not isinstance(entries, dict):
+        return default
+    for raw_port, item in entries.items():
+        if isinstance(item, dict) and item.get("name") == service_name:
+            try:
+                return int(raw_port)
+            except ValueError:
+                return default
+    return default
+
+
 def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster_run_root: Path, iskandar_run_root: Path) -> list[CommandSpec]:
     env = {"PYTHONPATH": pythonpath(repo_root)}
+    warmaster_port = registry_port(repo_root, "eye_of_terror", "WarmasterGateway", 7000)
+    iskandar_port = registry_port(repo_root, "eye_of_terror", "IskandarKhayon", 7101)
     return [
         CommandSpec(
             "mechanicum-workers",
@@ -94,9 +114,9 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
             "iskandar-khayon",
             "Inner Circle lore reconstruction governor",
             host,
-            7101,
+            iskandar_port,
             [],
-            f"http://{host}:7101/health",
+            f"http://{host}:{iskandar_port}/health",
             [
                 sys.executable,
                 "-m",
@@ -104,7 +124,7 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
                 "--host",
                 host,
                 "--port",
-                "7101",
+                str(iskandar_port),
                 "--default-run-root",
                 str(iskandar_run_root),
             ],
@@ -114,9 +134,9 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
             "warmaster-gateway",
             "user-facing orchestration gateway",
             host,
-            7000,
+            warmaster_port,
             ["mechanicum-workers", "iskandar-khayon"],
-            f"http://{host}:7000/health",
+            f"http://{host}:{warmaster_port}/health",
             [
                 sys.executable,
                 "-m",
@@ -124,7 +144,7 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
                 "--host",
                 host,
                 "--port",
-                "7000",
+                str(warmaster_port),
                 "--run-root",
                 str(warmaster_run_root),
                 "--governor-transport",
@@ -181,8 +201,8 @@ def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run
         "mode": "service-separated",
         "host": host,
         "ports": {
-            "warmaster_gateway": 7000,
-            "iskandar_khayon": 7101,
+            "warmaster_gateway": next((command.port for command in commands if command.name == "warmaster-gateway"), 7000),
+            "iskandar_khayon": next((command.port for command in commands if command.name == "iskandar-khayon"), 7101),
             "mechanicum_workers": [worker["port"] for worker in workers],
         },
         "repo_root": str(repo_root),

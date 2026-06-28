@@ -14,6 +14,7 @@ from start_brigade import (
     brigade_plan,
     command_start_order,
     port_preflight,
+    registry_port,
     startup_stages,
     supervise_processes,
     wait_for_urls,
@@ -48,6 +49,13 @@ def main() -> int:
     expected_names = {"mechanicum-workers", "iskandar-khayon", "warmaster-gateway"}
     if names != expected_names:
         raise AssertionError(f"brigade command names mismatch: {names}")
+    if registry_port(repo_root, "eye_of_terror", "WarmasterGateway", 0) != 7000 or registry_port(repo_root, "eye_of_terror", "IskandarKhayon", 0) != 7101:
+        raise AssertionError("brigade launcher did not read top-level ports from registry")
+    ports_by_name = {command.name: command.port for command in commands}
+    if ports_by_name.get("warmaster-gateway") != registry_port(repo_root, "eye_of_terror", "WarmasterGateway", 0):
+        raise AssertionError(f"warmaster command port drifted from registry: {ports_by_name}")
+    if ports_by_name.get("iskandar-khayon") != registry_port(repo_root, "eye_of_terror", "IskandarKhayon", 0):
+        raise AssertionError(f"iskandar command port drifted from registry: {ports_by_name}")
     required = [
         "--governor-transport http",
         "eye_of_terror.inner_circle.iskandar_service",
