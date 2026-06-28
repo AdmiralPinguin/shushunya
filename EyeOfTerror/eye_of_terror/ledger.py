@@ -14,6 +14,9 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+TERMINAL_STATUSES = {"completed", "failed", "cancelled", "corrupt"}
+
+
 @dataclass
 class TaskLedger:
     path: Path
@@ -61,6 +64,19 @@ class TaskLedger:
             except Exception:
                 current = {}
             if isinstance(current, dict):
+                current_status = str(current.get("status") or "")
+                new_status = str(self.data.get("status") or "")
+                terminal_preserved = current_status in TERMINAL_STATUSES and current_status != new_status
+                if terminal_preserved:
+                    self.data["status"] = current_status
+                    if isinstance(current.get("result"), dict):
+                        self.data["result"] = current["result"]
+                    if current.get("cancel_requested"):
+                        self.data["cancel_requested"] = True
+                        self.data["cancel_reason"] = current.get("cancel_reason", self.data.get("cancel_reason", ""))
+                    else:
+                        self.data.pop("cancel_requested", None)
+                        self.data.pop("cancel_reason", None)
                 if current.get("cancel_requested"):
                     self.data["cancel_requested"] = True
                     self.data["cancel_reason"] = current.get("cancel_reason", self.data.get("cancel_reason", ""))
@@ -98,11 +114,15 @@ class TaskLedger:
         self.data["status"] = status
         self.record_event("status_changed", {"status": status})
 
-    def request_cancel(self, reason: str = "") -> None:
+    def request_cancel(self, reason: str = "") -> bool:
+        if str(self.data.get("status") or "") in TERMINAL_STATUSES:
+            self.record_event("cancel_rejected", {"reason": reason, "status": str(self.data.get("status") or "")})
+            return False
         self.data["cancel_requested"] = True
         self.data["cancel_reason"] = reason
         self.data["status"] = "cancelling"
         self.record_event("cancel_requested", {"reason": reason})
+        return True
 
     def cancel_requested(self) -> bool:
         return bool(self.data.get("cancel_requested"))

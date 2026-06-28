@@ -196,6 +196,8 @@
   avoid partial JSON reads during background execution.
 - Task ledger saves merge concurrent event/step/cancel updates from stale
   in-process ledger instances.
+- Task ledger saves preserve terminal status/result and reject direct late
+  cancellation of terminal runs.
 - Warmaster run listing/state endpoints tolerate corrupt ledger files and report
   those runs as `corrupt` instead of dropping the whole API response.
 - Warmaster run inspection endpoints tolerate corrupt `status.json` and
