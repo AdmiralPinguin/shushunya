@@ -125,6 +125,8 @@
   dispatch packets, and ledger event history.
 - Warmaster exposes `GET /runs/{task_id}/package` for combined run-package
   diagnostics across contract, oversight, status, and dispatch files.
+- Warmaster action hints block start, resume, and revision actions when
+  run-package diagnostics fail and point clients to package inspection.
 - Warmaster Gateway exposes lightweight run summaries, progress counters, and
   worker task mappings for client polling/debugging.
 - Warmaster state and run-list responses expose recoverable interrupted runs

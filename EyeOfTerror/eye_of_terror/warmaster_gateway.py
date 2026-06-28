@@ -628,6 +628,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
     result = ledger.get("result", {}) if isinstance(ledger.get("result"), dict) else {}
     revision_plan = result.get("revision_plan") if isinstance(result.get("revision_plan"), dict) else {"required": False, "steps": []}
     revision_plan_errors = validate_revision_plan(run_dir, revision_plan)
+    package_errors = run_package_action_errors(run_dir)
     oversight_errors = run_oversight_validation_errors(run_dir, status)
     summary = {
         "task_id": ledger.get("task_id") or status.get("task_id") or run_dir.name,
@@ -640,13 +641,20 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "result": result,
         "revision_plan": revision_plan,
         "revision_plan_errors": revision_plan_errors,
+        "package_errors": package_errors,
         "oversight_errors": oversight_errors,
         "oversight_summary": run_oversight_summary(run_dir),
         "final_manifest_summary": final_manifest_summary(result),
         "progress": run_progress(status, ledger),
         "last_preflight": last_run_preflight(ledger),
     }
-    summary["actions"] = run_actions(str(summary["status"]), revision_plan, revision_plan_errors=revision_plan_errors, oversight_errors=oversight_errors)
+    summary["actions"] = run_actions(
+        str(summary["status"]),
+        revision_plan,
+        revision_plan_errors=revision_plan_errors,
+        package_errors=package_errors,
+        oversight_errors=oversight_errors,
+    )
     if status_error:
         summary["status_error"] = status_error
     if ledger_error and ledger_path.exists():
@@ -769,23 +777,25 @@ def run_actions(
     status: str,
     revision_plan: dict[str, Any],
     revision_plan_errors: list[str] | None = None,
+    package_errors: list[str] | None = None,
     oversight_errors: list[str] | None = None,
 ) -> dict[str, Any]:
     terminal_locked = status in {"completed", "running", "cancelling", "queued", "corrupt"}
     preflightable = status != "corrupt"
     revision_required = bool(revision_plan.get("required"))
     revision_valid = not (revision_plan_errors or [])
+    package_valid = not (package_errors or [])
     oversight_valid = not (oversight_errors or [])
     resume_required = status == "interrupted"
-    runnable = not terminal_locked and not revision_required and not resume_required and oversight_valid
-    revision_runnable = revision_required and revision_valid and oversight_valid and status not in {"running", "cancelling", "queued", "corrupt"}
+    runnable = not terminal_locked and not revision_required and not resume_required and package_valid and oversight_valid
+    revision_runnable = revision_required and revision_valid and package_valid and oversight_valid and status not in {"running", "cancelling", "queued", "corrupt"}
     actions = {
         "can_preflight_local": preflightable,
         "can_preflight_http": preflightable,
         "can_execute": runnable,
         "can_start": runnable,
         "can_cancel": status in {"running", "cancelling", "queued"},
-        "can_resume": status == "interrupted" and oversight_valid,
+        "can_resume": status == "interrupted" and package_valid and oversight_valid,
         "can_execute_revision": revision_runnable,
         "can_start_revision": revision_runnable,
         "force_required_for_rerun": status == "completed" and not revision_required,
@@ -796,6 +806,8 @@ def run_actions(
         next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {}, "reason": "run is already active"}
     elif status == "cancelling":
         next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {}, "reason": "cancellation is in progress"}
+    elif not package_valid:
+        next_action = {"kind": "inspect_package", "method": "GET", "endpoint": "GET /runs/{task_id}/package", "body": {}, "reason": "run package is incomplete or inconsistent"}
     elif not oversight_valid:
         next_action = {"kind": "inspect_oversight", "method": "GET", "endpoint": "GET /runs/{task_id}/oversight", "body": {}, "reason": "governor oversight is missing or inconsistent"}
     elif resume_required:
@@ -832,6 +844,27 @@ def run_oversight(run_dir: Path) -> dict[str, Any]:
     if error:
         return {"ok": False, "error": error, "error_code": "corrupt_oversight"}
     return {"ok": True, "oversight": payload}
+
+
+def run_package_action_errors(run_dir: Path) -> list[str]:
+    if not (run_dir / "status.json").exists() or not (run_dir / "contract.json").exists():
+        return []
+    errors: list[str] = []
+    _status, status_error = load_json_object(run_dir / "status.json", "status")
+    if status_error:
+        errors.append(status_error)
+    contract_payload = run_contract(run_dir)
+    if not contract_payload.get("ok"):
+        errors.append(str(contract_payload.get("error") or "contract unavailable"))
+    dispatch_payload = run_dispatch_packets(run_dir)
+    if not dispatch_payload.get("ok"):
+        errors.append(str(dispatch_payload.get("error") or "dispatch unavailable"))
+        return errors
+    dispatch_items = dispatch_payload.get("dispatch") if isinstance(dispatch_payload.get("dispatch"), list) else []
+    for item in dispatch_items:
+        if isinstance(item, dict) and not item.get("ok") and item.get("error"):
+            errors.append(str(item.get("error")))
+    return errors
 
 
 def run_oversight_diagnostics(run_dir: Path) -> dict[str, Any]:

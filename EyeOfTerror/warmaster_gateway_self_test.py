@@ -601,6 +601,28 @@ def main() -> int:
                     raise AssertionError(f"package diagnostics should reject bad oversight: {bad_package}")
             else:
                 raise AssertionError("package diagnostics should fail for inconsistent oversight")
+            bad_package_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bad-package-test"},
+            )
+            Path(bad_package_task["run_dir"], "dispatch", "source_discovery.json").write_text("{", encoding="utf-8")
+            bad_package_summary = request_json(base + "/runs/warmaster-bad-package-test/summary")
+            if (
+                not bad_package_summary.get("summary", {}).get("package_errors")
+                or bad_package_summary.get("summary", {}).get("actions", {}).get("can_start")
+                or bad_package_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "inspect_package"
+            ):
+                raise AssertionError(f"summary should block actions for inconsistent run package: {bad_package_summary}")
+            try:
+                request_json(base + "/runs/warmaster-bad-package-test/package")
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                broken_package = json.loads(exc.read().decode("utf-8"))
+                if broken_package.get("ok") or not broken_package.get("validation", {}).get("errors"):
+                    raise AssertionError(f"package diagnostics should reject corrupt dispatch: {broken_package}")
+            else:
+                raise AssertionError("package diagnostics should fail for corrupt dispatch")
             try:
                 request_json(base + "/runs/warmaster-bad-oversight-test/preflight_local", {"timeout_sec": 30})
             except urllib.error.HTTPError as exc:
