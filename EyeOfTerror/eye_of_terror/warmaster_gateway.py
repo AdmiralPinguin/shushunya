@@ -402,6 +402,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/contract",
             "GET /runs/{task_id}/dispatch",
             "GET /runs/{task_id}/worker_tasks",
+            "GET /runs/{task_id}/worker_tasks?live=1",
             "GET /runs/{task_id}/events",
             "GET /runs/{task_id}/artifacts",
             "GET /runs/{task_id}/artifact_text?path=/work/...",

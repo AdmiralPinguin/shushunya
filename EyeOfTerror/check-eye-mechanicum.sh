@@ -5,6 +5,7 @@ python3 EyeOfTerror/doctor.py --quiet
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/governors_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/routing_self_test.py
+PYTHONPATH=EyeOfTerror python3 EyeOfTerror/warmaster_api_contract_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ledger_self_test.py
 PYTHONPATH=Mechanicum/Lexmechanic python3 Mechanicum/Lexmechanic/self_test.py
 PYTHONPATH=Mechanicum/AuspexBrowser python3 Mechanicum/AuspexBrowser/self_test.py
