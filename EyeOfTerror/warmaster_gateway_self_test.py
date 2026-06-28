@@ -716,6 +716,7 @@ def main() -> int:
             orchestrated_state = request_json(base + "/runs/warmaster-orchestrate-test/orchestration?events_after=0")
             if (
                 orchestrated_state.get("phase") != "ready_to_start"
+                or not orchestrated_state.get("decision", {}).get("can_start")
                 or orchestrated_state.get("next_action", {}).get("kind") != "start"
                 or orchestrated_state.get("snapshot", {}).get("summary", {}).get("task_id") != "warmaster-orchestrate-test"
             ):
@@ -1227,6 +1228,7 @@ def main() -> int:
             completed_orchestration = request_json(base + "/runs/warmaster-test/orchestration?max_bytes=1000")
             if (
                 completed_orchestration.get("phase") != "completed"
+                or not completed_orchestration.get("decision", {}).get("can_inspect_final")
                 or completed_orchestration.get("final", {}).get("summary", {}).get("status") != "ready"
                 or completed_orchestration.get("next_action", {}).get("kind") != "inspect_final"
                 or completed_orchestration.get("snapshot", {}).get("summary", {}).get("status") != "completed"
@@ -1285,6 +1287,13 @@ def main() -> int:
                 or resume_actions.get("next_action", {}).get("method") != "POST"
             ):
                 raise AssertionError(f"interrupted run did not expose resume action: {resume_summary}")
+            resume_orchestration = request_json(base + "/runs/warmaster-resume-test/orchestration")
+            if (
+                resume_orchestration.get("phase") != "resume_required"
+                or not resume_orchestration.get("decision", {}).get("can_resume")
+                or resume_orchestration.get("decision", {}).get("recommended_kind") != "resume"
+            ):
+                raise AssertionError(f"interrupted run did not expose orchestration resume decision: {resume_orchestration}")
             resumed = request_json(base + "/runs/warmaster-resume-test/resume_local", {"timeout_sec": 30}, timeout=60)
             if not resumed.get("ok"):
                 raise AssertionError(f"resume execution failed: {resumed}")
@@ -1330,6 +1339,13 @@ def main() -> int:
                 or revision_plan_summary.get("workers") != ["ScriptoriumDaemon"]
             ):
                 raise AssertionError(f"summary did not expose revision action: {revision_summary}")
+            revision_orchestration = request_json(base + "/runs/warmaster-test/orchestration")
+            if (
+                revision_orchestration.get("phase") != "revision_required"
+                or not revision_orchestration.get("decision", {}).get("can_execute_revision")
+                or revision_orchestration.get("decision", {}).get("recommended_kind") != "execute_revision"
+            ):
+                raise AssertionError(f"revision-required run did not expose orchestration revision decision: {revision_orchestration}")
             failed_revision_task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-failed-revision-actions-test"},

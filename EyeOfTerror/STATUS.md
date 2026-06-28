@@ -75,6 +75,9 @@
 - Warmaster Gateway exposes `GET /runs/{task_id}/orchestration` as a read-only
   chat decision view with phase, snapshot, next action, and final package when
   completed.
+- Orchestration state exposes a stable `decision` object so clients can render
+  poll/start/resume/revision/final/diagnostic controls without parsing phase
+  strings.
 - Task preflight contract summaries expose planned worker steps, dependency
   edges, and expected artifacts.
 - Task preflight exposes compact governor oversight summaries and validation so

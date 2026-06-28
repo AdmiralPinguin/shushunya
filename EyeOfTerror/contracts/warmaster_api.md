@@ -169,7 +169,10 @@ background-start event, and returns an immediate `snapshot` plus a polling
 clients. It wraps the run snapshot with an orchestration `phase` such as
 `running`, `completed`, `ready_to_start`, `resume_required`,
 `revision_required`, or `needs_attention`, preserves the next safe action, and
-includes the bounded final package when the run has completed.
+includes the bounded final package when the run has completed. Its `decision`
+object exposes booleans such as `can_poll`, `can_start`, `can_resume`,
+`can_execute_revision`, `can_inspect_final`, and `can_inspect_diagnostics` so
+clients do not need to reimplement phase parsing.
 
 ```json
 {

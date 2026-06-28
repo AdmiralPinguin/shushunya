@@ -1652,6 +1652,8 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
     if snapshot.get("active") or status in {"running", "queued", "cancelling"}:
         phase = "running"
         next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/orchestration", "body": {"events_after": snapshot.get("event_cursor", {}).get("next", 0)}, "reason": "run is active"}
+    elif actions.get("can_start_revision"):
+        phase = "revision_required"
     elif status == "completed":
         phase = "completed"
         ledger_path = run_dir / "task_ledger.json"
@@ -1662,8 +1664,6 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
             final_payload = final_package(ledger, max_bytes=max_bytes)
         if final_payload.get("ok"):
             next_action = {"kind": "inspect_final", "method": "GET", "endpoint": "GET /runs/{task_id}/final", "body": {"max_bytes": max_bytes}, "reason": "run completed and final package is available"}
-    elif actions.get("can_start_revision"):
-        phase = "revision_required"
     elif actions.get("can_resume"):
         phase = "resume_required"
     elif actions.get("can_start"):
@@ -1672,12 +1672,23 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
         phase = "needs_attention"
     elif status == "created":
         phase = "ready_to_preflight"
+    decision = {
+        "can_poll": phase == "running",
+        "can_start": phase == "ready_to_start",
+        "can_resume": phase == "resume_required",
+        "can_execute_revision": phase == "revision_required",
+        "can_inspect_final": phase == "completed" and bool(final_payload.get("ok")),
+        "can_inspect_diagnostics": phase in {"needs_attention", "inspect", "ready_to_preflight"},
+        "recommended_kind": str(next_action.get("kind") or ""),
+        "recommended_endpoint": str(next_action.get("endpoint") or ""),
+    }
     return {
         "ok": True,
         "task_id": run_dir.name,
         "phase": phase,
         "status": status,
         "active": bool(snapshot.get("active")),
+        "decision": decision,
         "snapshot": snapshot,
         "final": final_payload,
         "next_action": next_action,
