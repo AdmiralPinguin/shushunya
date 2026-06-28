@@ -76,6 +76,9 @@ Clients should use:
 - `/runs/{task_id}/events` for ledger event history.
 - `/runs/{task_id}/events?after=N` for incremental client polling. Responses
   include `cursor.after`, `cursor.next`, and `cursor.total`.
+- `/runs/{task_id}/artifacts` for result artifact metadata. If the final result
+  is a `final_manifest.json`, the response should also expand manifest `files`
+  so clients can list and fetch the whole final package.
 - `/runs/{task_id}/contract` and `/runs/{task_id}/dispatch` for orchestration
   debugging.
 - `/runs/{task_id}/worker_tasks?live=1` when worker services are running and

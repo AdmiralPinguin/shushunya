@@ -45,6 +45,8 @@
 - Iskandar `prepare_run` constrains custom run output paths to its configured
   default run root.
 - Warmaster artifact text reads support bounded previews through `max_bytes`.
+- Warmaster artifact listings expand final manifest package files for client
+  display and artifact fetching.
 - Task ledgers, run packages, and executor reports are written atomically to
   avoid partial JSON reads during background execution.
 - Task ledger saves merge concurrent event/step/cancel updates from stale

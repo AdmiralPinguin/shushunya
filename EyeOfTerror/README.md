@@ -86,6 +86,10 @@ counts in one response.
 clients. It returns summary, process-local active state, cursor event updates,
 and artifact metadata in one response.
 
+`GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
+clients can fetch the final reconstruction, reports, and manifest through the
+same artifact text endpoint.
+
 Revision execution endpoints use a failed/blocked run's `revision_plan` and run
 only the requested rework steps, then `critic_review` and `finalize`. Revision
 reruns pass focused `revision_context` into the selected worker request; writer,
