@@ -66,8 +66,8 @@
   ports, module paths, and modules.
 - The startup plan exposes top-level service dependencies, dependency-ordered
   startup stages, and readiness URLs for future supervisors and admin clients.
-- The brigade launcher can wait for top-level readiness URLs after starting the
-  stack.
+- The brigade launcher can start services by dependency stage and wait for each
+  stage's readiness URLs before starting dependent services.
 - Launcher readiness covers Warmaster, Iskandar, and registered Mechanicum
   workers.
 - The brigade launcher fails fast when one managed process exits and terminates

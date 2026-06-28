@@ -8,7 +8,16 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from start_brigade import CommandSpec, brigade_commands, brigade_plan, port_preflight, startup_stages, supervise_processes, wait_for_urls
+from start_brigade import (
+    CommandSpec,
+    brigade_commands,
+    brigade_plan,
+    command_start_order,
+    port_preflight,
+    startup_stages,
+    supervise_processes,
+    wait_for_urls,
+)
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -72,6 +81,14 @@ def main() -> int:
         or "http://127.0.0.1:7000/health" not in stages[1].get("health_urls", [])
     ):
         raise AssertionError(f"bad brigade startup stages: {plan}")
+    if [command.name for command in command_start_order(commands, stages)] != ["iskandar-khayon", "mechanicum-workers", "warmaster-gateway"]:
+        raise AssertionError(f"bad command start order: {stages}")
+    try:
+        command_start_order(commands, [{"stage": 1, "services": ["warmaster-gateway"], "health_urls": []}])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("command start order should reject incomplete startup stages")
     try:
         startup_stages(
             [

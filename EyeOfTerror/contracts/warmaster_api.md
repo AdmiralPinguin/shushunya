@@ -82,6 +82,8 @@ best-effort `brigade_health`; plain `/state` stays lightweight for polling.
 history. The optional `host` query parameter must be loopback. The response
 includes `startup_stages` so admin clients can start dependency-free services
 first, wait for their health URLs, then start dependent services.
+`EyeOfTerror/start_brigade.py --wait-ready` uses these stages when launching the
+local stack.
 
 `GET /brigade_health` combines that topology with best-effort health checks for
 governors and workers. It also reports governor worker requirements when a

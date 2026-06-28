@@ -244,6 +244,51 @@ def terminate_processes(processes: list[subprocess.Popen[bytes]]) -> None:
             process.wait(timeout=10)
 
 
+def command_start_order(commands: list[CommandSpec], stages: list[dict[str, object]]) -> list[CommandSpec]:
+    by_name = {command.name: command for command in commands}
+    ordered: list[CommandSpec] = []
+    for stage in stages:
+        services = stage.get("services") if isinstance(stage.get("services"), list) else []
+        for service in services:
+            name = str(service)
+            if name not in by_name:
+                raise ValueError(f"startup stage references unknown service: {name}")
+            ordered.append(by_name[name])
+    if {command.name for command in ordered} != set(by_name):
+        missing = sorted(set(by_name) - {command.name for command in ordered})
+        raise ValueError(f"startup stages do not cover services: {missing}")
+    return ordered
+
+
+def start_process(command: CommandSpec, repo_root: Path) -> subprocess.Popen[bytes]:
+    return subprocess.Popen(command.command, cwd=repo_root, env={**os.environ, **command.env})
+
+
+def start_processes_by_stage(
+    commands: list[CommandSpec],
+    stages: list[dict[str, object]],
+    repo_root: Path,
+    ready_timeout_sec: float,
+) -> tuple[list[subprocess.Popen[bytes]], dict[str, object]]:
+    by_name = {command.name: command for command in commands}
+    processes: list[subprocess.Popen[bytes]] = []
+    readiness: list[dict[str, object]] = []
+    for stage in stages:
+        services = [str(service) for service in stage.get("services", []) if str(service)]
+        for service in services:
+            if service not in by_name:
+                terminate_processes(processes)
+                raise ValueError(f"startup stage references unknown service: {service}")
+            processes.append(start_process(by_name[service], repo_root))
+        urls = [str(url) for url in stage.get("health_urls", []) if str(url)]
+        result = wait_for_urls(urls, timeout_sec=ready_timeout_sec) if urls else {"ok": True, "ready": [], "pending": [], "timeout_sec": ready_timeout_sec}
+        readiness.append({"stage": stage.get("stage"), "services": services, **result})
+        if not result["ok"]:
+            terminate_processes(processes)
+            return processes, {"ok": False, "stages": readiness}
+    return processes, {"ok": True, "stages": readiness}
+
+
 def supervise_processes(processes: list[subprocess.Popen[bytes]], poll_interval_sec: float = 0.25) -> int:
     while True:
         for process in processes:
@@ -301,18 +346,16 @@ def main() -> int:
             print(json.dumps({"ok": False, "port_preflight": preflight}, ensure_ascii=False, indent=2), file=sys.stderr)
             return 1
 
-    processes = [
-        subprocess.Popen(command.command, cwd=repo_root, env={**os.environ, **command.env})
-        for command in commands
-    ]
+    stages = plan.get("startup_stages") if isinstance(plan.get("startup_stages"), list) else []
+    processes: list[subprocess.Popen[bytes]]
     try:
         if args.wait_ready:
-            urls = [str(url) for url in plan.get("readiness_urls", [])]
-            readiness = wait_for_urls(urls, timeout_sec=args.ready_timeout_sec)
+            processes, readiness = start_processes_by_stage(commands, stages, repo_root, args.ready_timeout_sec)
             if not readiness["ok"]:
                 print(json.dumps({"ok": False, "readiness": readiness}, ensure_ascii=False, indent=2), file=sys.stderr)
-                terminate_processes(processes)
                 return 1
+        else:
+            processes = [start_process(command, repo_root) for command in command_start_order(commands, stages)]
         return supervise_processes(processes)
     except KeyboardInterrupt:
         terminate_processes(processes)
