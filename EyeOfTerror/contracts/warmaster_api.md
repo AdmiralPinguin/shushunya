@@ -330,8 +330,10 @@ If execution, cancellation, or live worker task endpoints accept `host`, it must
 be a loopback worker service host such as `127.0.0.1` or `localhost`.
 
 Revision execution endpoints use the current run ledger `revision_plan` and run
-only those dispatch steps, followed by `critic_review` and `finalize`. They must
-reject runs that do not have `revision_plan.required=true`.
+only those dispatch steps, followed by the saved oversight
+`revision_policy.final_steps` (`critic_review` and `finalize` for Iskandar lore
+reconstruction runs). They must reject runs that do not have
+`revision_plan.required=true`.
 
 Resume execution endpoints run only `pending_step_ids` from an `interrupted`
 run package through the selected executor and must reject runs whose ledger

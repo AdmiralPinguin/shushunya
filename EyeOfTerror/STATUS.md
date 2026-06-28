@@ -247,6 +247,8 @@
   and focused revision context requirement.
 - Warmaster validates `revision_policy` against the run steps and exposes it in
   compact oversight summaries, so broken revision supervision blocks execution.
+- Revision execution appends final review steps from the saved oversight
+  `revision_policy.final_steps` instead of relying on hardcoded step names.
 - HTTP execution preflights all worker `/health` endpoints before running steps
   and rejects worker identity mismatches before dispatch.
 - Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.

@@ -1202,6 +1202,22 @@ def main() -> int:
             revision_steps = revision_step_ids_from_run(run_dir)
             if revision_steps != ["draft_reconstruction", "critic_review", "finalize"]:
                 raise AssertionError(f"bad revision step expansion: {revision_steps}")
+            policy_order_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-revision-policy-order-test"},
+            )
+            policy_order_dir = Path(policy_order_task["run_dir"])
+            policy_order_ledger_path = policy_order_dir / "task_ledger.json"
+            policy_order_ledger = json.loads(policy_order_ledger_path.read_text(encoding="utf-8"))
+            policy_order_ledger.setdefault("result", {})["revision_plan"] = ledger_payload["result"]["revision_plan"]
+            write_json(policy_order_ledger_path, policy_order_ledger)
+            policy_order_oversight_path = policy_order_dir / "oversight.json"
+            policy_order_oversight = json.loads(policy_order_oversight_path.read_text(encoding="utf-8"))
+            policy_order_oversight["revision_policy"]["final_steps"] = ["finalize", "critic_review"]
+            write_json(policy_order_oversight_path, policy_order_oversight)
+            policy_order_steps = revision_step_ids_from_run(policy_order_dir)
+            if policy_order_steps != ["draft_reconstruction", "finalize", "critic_review"]:
+                raise AssertionError(f"revision execution did not follow oversight policy order: {policy_order_steps}")
             revision_execution = request_json(
                 base + "/runs/warmaster-test/execute_revision_local",
                 {"timeout_sec": 30},

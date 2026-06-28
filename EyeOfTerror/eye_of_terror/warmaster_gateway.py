@@ -1497,7 +1497,12 @@ def revision_step_ids_from_run(run_dir: Path) -> list[str]:
             step_id = str(item.get("step_id") or "").strip()
             if step_id and step_id not in requested:
                 requested.append(step_id)
-    for final_step in ("critic_review", "finalize"):
+    oversight_payload = run_oversight(run_dir)
+    oversight = oversight_payload.get("oversight") if isinstance(oversight_payload.get("oversight"), dict) else {}
+    revision_policy = oversight.get("revision_policy") if isinstance(oversight.get("revision_policy"), dict) else {}
+    policy_final_steps = revision_policy.get("final_steps") if isinstance(revision_policy.get("final_steps"), list) else []
+    final_steps = [str(step_id) for step_id in policy_final_steps if isinstance(step_id, str) and step_id] or ["critic_review", "finalize"]
+    for final_step in final_steps:
         if final_step not in requested:
             requested.append(final_step)
     available = {
