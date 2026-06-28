@@ -795,6 +795,55 @@ def run_events(run_dir: Path, limit: int | None = None, after: int | None = None
     }
 
 
+def all_run_events(run_root: Path, limit: int | None = None, after: int | None = None) -> dict[str, Any]:
+    events: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    if not run_root.exists():
+        return {"ok": True, "events": [], "cursor": {"after": 0, "next": 0, "total": 0}, "errors": []}
+    for run_dir in run_root.iterdir():
+        if not run_dir.is_dir():
+            continue
+        ledger, ledger_error = load_ledger_dict(run_dir / "task_ledger.json")
+        if ledger_error:
+            errors.append({"task_id": run_dir.name, "error": ledger_error})
+            continue
+        task_id = str(ledger.get("task_id") or run_dir.name)
+        raw_events = ledger.get("events") if isinstance(ledger.get("events"), list) else []
+        for index, event in enumerate(raw_events):
+            if not isinstance(event, dict):
+                continue
+            events.append(
+                {
+                    "task_id": task_id,
+                    "event_index": index,
+                    "at": str(event.get("at") or ""),
+                    "type": str(event.get("type") or ""),
+                    "payload": event.get("payload") if isinstance(event.get("payload"), dict) else {},
+                }
+            )
+    events.sort(key=lambda item: (str(item.get("at") or ""), str(item.get("task_id") or ""), int(item.get("event_index") or 0)))
+    for index, event in enumerate(events):
+        event["global_index"] = index
+    total = len(events)
+    if after is not None:
+        start = max(0, min(after, total))
+        selected = events[start:]
+        if limit is not None and limit >= 0:
+            selected = selected[:limit]
+    elif limit is not None and limit >= 0:
+        start = max(0, total - limit)
+        selected = events[-limit:]
+    else:
+        start = 0
+        selected = events
+    return {
+        "ok": True,
+        "events": selected,
+        "cursor": {"after": start, "next": start + len(selected), "total": total},
+        "errors": errors,
+    }
+
+
 def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: int | None = None) -> dict[str, Any]:
     task_id = run_dir.name
     with ACTIVE_RUNS_LOCK:
@@ -1336,6 +1385,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "run_dispatch_read",
             "run_worker_task_read",
             "run_events_read",
+            "global_run_events_read",
             "local_execution",
             "http_worker_execution",
             "background_execution",
@@ -1374,6 +1424,9 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /governors?health=1",
             "GET /workers",
             "GET /workers?health=1",
+            "GET /events",
+            "GET /events?limit=20",
+            "GET /events?after=0",
             "POST /task_preflight",
             "POST /task",
             "GET /runs",
@@ -1653,6 +1706,14 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         "workers": worker_registry_snapshot(include_health=include_health),
                     },
                 )
+                return
+            if parsed.path == "/events":
+                query = parse_qs(parsed.query)
+                raw_limit = query.get("limit", [""])[0]
+                limit = parse_limit(raw_limit, default=MAX_LIST_LIMIT) if raw_limit else None
+                raw_after = query.get("after", [""])[0]
+                after = parse_nonnegative_int(raw_after, default=0) if raw_after else None
+                response(self, 200, all_run_events(run_root, limit=limit, after=after))
                 return
             parts = [part for part in parsed.path.split("/") if part]
             if parts == ["runs"]:

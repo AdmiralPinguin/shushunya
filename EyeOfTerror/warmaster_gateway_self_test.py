@@ -413,6 +413,17 @@ def main() -> int:
             )
             if not task.get("ok") or task.get("governor") != "IskandarKhayon":
                 raise AssertionError(f"bad task response: {task}")
+            global_events = request_json(base + "/events?limit=20")
+            if (
+                not global_events.get("ok")
+                or not any(item.get("task_id") == "warmaster-test" and item.get("type") == "task_created" for item in global_events.get("events", []))
+                or not all("global_index" in item for item in global_events.get("events", []))
+            ):
+                raise AssertionError(f"global run events did not expose task creation: {global_events}")
+            global_cursor = global_events.get("cursor", {})
+            next_global_events = request_json(base + f"/events?after={global_cursor.get('next', 0)}")
+            if next_global_events.get("cursor", {}).get("after") != global_cursor.get("next"):
+                raise AssertionError(f"global run event cursor did not advance from previous next: {next_global_events}")
             try:
                 request_json(
                     base + "/task",

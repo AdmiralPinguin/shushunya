@@ -113,6 +113,8 @@
   interrupted runs while reporting malformed run packages per item.
 - Warmaster Gateway supports cursor-based ledger event polling with
   `/runs/{task_id}/events?after=N`.
+- Warmaster Gateway exposes aggregate cursor-based run event polling through
+  `/events?after=N` for clients that need one feed across runs.
 - Warmaster Gateway exposes compact per-run snapshots for mobile/client
   polling through `/runs/{task_id}/snapshot`.
 - Warmaster Gateway exposes process-local active run snapshots through

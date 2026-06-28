@@ -21,6 +21,9 @@ GET  /governors
 GET  /governors?health=1
 GET  /workers
 GET  /workers?health=1
+GET  /events
+GET  /events?limit=20
+GET  /events?after=0
 POST /task_preflight
 POST /task
 GET  /runs
@@ -155,6 +158,8 @@ Clients should use:
 
 - `/runs` for a run list plus aggregate status and recoverable interrupted run
   summary.
+- `/events?after=N` for a compact aggregate run-event feed when the client
+  wants one polling cursor across all runs.
 - `/runs/{task_id}/summary` for lightweight polling.
 - `/runs/{task_id}/snapshot` for a compact polling view containing summary,
   process-local active state, cursor events, and artifact metadata.
@@ -165,6 +170,8 @@ Clients should use:
 - `/runs/{task_id}/events` for ledger event history.
 - `/runs/{task_id}/events?after=N` for incremental client polling. Responses
   include `cursor.after`, `cursor.next`, and `cursor.total`.
+Aggregate `/events` responses include the same cursor shape plus `task_id`,
+`event_index`, and `global_index` for each event.
 - `/runs/{task_id}/artifacts` for result artifact metadata. If the final result
   is a `final_manifest.json`, the response should also expand manifest `files`
   so clients can list and fetch the whole final package.
