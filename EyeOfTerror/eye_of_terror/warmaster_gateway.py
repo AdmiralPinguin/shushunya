@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
+from .contracts import validate_task_contract_payload
 from .inner_circle.iskandar import plan_lore_reconstruction
 from doctor import run_doctor
 from .http_executor import execute_run as execute_http_run
@@ -111,6 +112,16 @@ def prepare_task(message: str, task_id: str | None, run_root: Path) -> dict[str,
             "error_code": "task_exists",
             "task_id": plan.contract.task_id,
             "run_dir": str(run_dir),
+        }
+    validation_errors = validate_task_contract_payload(plan.contract.to_dict())
+    if validation_errors:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "governor produced invalid task contract",
+            "error_code": "invalid_task_contract",
+            "task_id": plan.contract.task_id,
+            "validation": {"ok": False, "errors": validation_errors},
         }
     status = write_pipeline_run(plan.contract, run_dir)
     TaskLedger.create(run_dir / "task_ledger.json", plan.contract.task_id, plan.contract.goal, governor)

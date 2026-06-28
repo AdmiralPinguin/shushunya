@@ -10,6 +10,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import eye_of_terror.warmaster_gateway as warmaster_gateway
 from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, resolve_run_child_path, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
 
@@ -81,6 +82,28 @@ def main() -> int:
             pass
         else:
             raise AssertionError("run child path resolver accepted path outside run_dir")
+        original_planner = warmaster_gateway.plan_lore_reconstruction
+        try:
+            class BadContract:
+                task_id = "bad-contract"
+
+                def to_dict(self) -> dict:
+                    return {
+                        "version": 1,
+                        "task_id": self.task_id,
+                        "kind": "research",
+                        "goal": "bad",
+                        "assigned_governor": "IskandarKhayon",
+                        "completion_criteria": ["done"],
+                        "worker_plan": [],
+                    }
+
+            warmaster_gateway.plan_lore_reconstruction = lambda _message, task_id=None: type("BadPlan", (), {"contract": BadContract()})()
+            bad_contract = warmaster_gateway.prepare_task("Собери все известное о событиях Скалатракса.", "bad-contract", run_root)
+            if bad_contract.get("error_code") != "invalid_task_contract" or (run_root / "bad-contract").exists():
+                raise AssertionError(f"Warmaster accepted an invalid task contract: {bad_contract}")
+        finally:
+            warmaster_gateway.plan_lore_reconstruction = original_planner
         bad_dispatch = Path(temp_dir) / "bad-dispatch" / "dispatch"
         bad_dispatch.mkdir(parents=True, exist_ok=True)
         (bad_dispatch / "broken.json").write_text("{", encoding="utf-8")
