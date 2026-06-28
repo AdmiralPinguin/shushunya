@@ -5018,6 +5018,56 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "when present, or build an exact replace_in_file from current_excerpt, then rerun the CLI JSON verification."
                     ),
                 }
+        if (
+            forced_supervisor_result is None
+            and swe_task
+            and pending_failed_cli_source_candidates
+            and pending_failed_cli_read_paths
+            and action_type in SWE_DIAGNOSTIC_ACTIONS
+        ):
+            suggested_action = None
+            if action_type == "python" and python_action_looks_like_source_replacement(action):
+                suggested_path = sorted(pending_failed_cli_read_paths)[0]
+                suggested_action = {
+                    "action": "write_file",
+                    "path": suggested_path,
+                    "content": str(action.get("code") or ""),
+                }
+            forced_supervisor_result = {
+                "ok": False,
+                "error": "swe failed cli repair source required by supervisor",
+                "candidate_source_paths": pending_failed_cli_source_candidates[:10],
+                "read_candidate_paths": sorted(pending_failed_cli_read_paths)[:10],
+                **({"suggested_action": suggested_action} if suggested_action else {}),
+                "instruction": (
+                    "A candidate source file for the failed CLI verification has already been read. "
+                    "Do not inspect more files or rerun CLI before a code change. Make a narrow edit to one of "
+                    "read_candidate_paths using write_file or replace_in_file, then rerun the CLI verification with "
+                    "JSON validation. Do not paste replacement source into action=python unless that Python code writes "
+                    "the file; use the suggested_action shape when present."
+                ),
+            }
+        if (
+            forced_supervisor_result is None
+            and swe_task
+            and pending_failed_cli_source_candidates
+            and action_type in SWE_DIAGNOSTIC_ACTIONS
+            and not (
+                action_type == "read_file"
+                and str(action.get("path") or "") in set(pending_failed_cli_source_candidates)
+            )
+        ):
+            forced_supervisor_result = {
+                "ok": False,
+                "error": "swe failed cli repair source required by supervisor",
+                "candidate_source_paths": pending_failed_cli_source_candidates[:10],
+                "instruction": (
+                    "The last CLI verification failed with a traceback and candidate_source_paths. "
+                    "Do not repeat discovery, rerun the same CLI command, or inspect unrelated files before a code change. "
+                    "Read exactly one candidate source file, make a narrow fix for the CLI failure, then rerun the CLI "
+                    "verification with JSON validation."
+                ),
+            }
         if repair_source_path:
             repair_violation = ""
             repair_path = str(action.get("path") or "")

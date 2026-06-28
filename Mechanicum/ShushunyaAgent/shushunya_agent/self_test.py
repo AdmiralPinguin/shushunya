@@ -4947,6 +4947,45 @@ def main() -> int:
         raise AssertionError(f"Failed CLI stale replace suggestion should rewrite the read source: {stale_cli_replace_payload}")
     print("[ok] SWE failed CLI stale replace suggests exact edit")
 
+    swe_failed_cli_repeated_diagnostic_stdout = io.StringIO()
+    swe_failed_cli_repeated_diagnostic_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-failed-cli-repeated-diagnostic-priority"),
+        json_output=True,
+        max_steps=5,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m package.cli /work/project/data.csv | python3 -c \\"import sys,json; json.load(sys.stdin)\\"","timeout":60}',
+            '{"action":"read_file","path":"/work/project/package/cli.py","max_bytes":20000,"offset":0}',
+            '{"action":"read_file","path":"/work/project/package/core.py","max_bytes":20000,"offset":0}',
+            '{"action":"read_file","path":"/work/project/package/core.py","max_bytes":20000,"offset":0}',
+            '{"action":"read_file","path":"/work/project/package/core.py","max_bytes":20000,"offset":0}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "Traceback (most recent call last):\n  File \"/work/project/package/cli.py\", line 12\nTypeError: Object of type datetime is not JSON serializable\n",
+    }), mock.patch.object(agent_runner, "file_tool", return_value={
+            "ok": True,
+            "path": "/work/project/package/cli.py",
+            "content": "print(json.dumps(payload))",
+    }), contextlib.redirect_stdout(swe_failed_cli_repeated_diagnostic_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(failed_cli_resume_task, swe_failed_cli_repeated_diagnostic_config)
+    repeated_diagnostic_payload = json.loads(swe_failed_cli_repeated_diagnostic_stdout.getvalue())
+    repeated_diagnostic_results = [step.get("result") or {} for step in repeated_diagnostic_payload.get("steps", [])]
+    if any(result.get("error") == "repeated identical action rejected by supervisor" for result in repeated_diagnostic_results):
+        raise AssertionError(f"Failed CLI repair guard should outrank repeated-action guard: {repeated_diagnostic_payload}")
+    if not any(
+        result.get("error") == "swe failed cli repair source required by supervisor"
+        and result.get("read_candidate_paths") == ["/work/project/package/cli.py"]
+        for result in repeated_diagnostic_results
+    ):
+        raise AssertionError(f"Failed CLI repeated diagnostics should keep requiring source edit: {repeated_diagnostic_payload}")
+    print("[ok] SWE failed CLI repair guard outranks repeated diagnostics")
+
     swe_resume_failed_cli_edit_stdout = io.StringIO()
     swe_resume_failed_cli_edit_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-resume-failed-cli-allows-source-edit"),
