@@ -105,6 +105,8 @@
   `contract.json` files and return diagnostic JSON instead of crashing.
 - Warmaster run summaries expose `actions` hints for start/cancel/resume and
   revision controls.
+- Warmaster action hints expose run preflight controls for local and HTTP
+  execution.
 - Warmaster progress summaries expose ordered planned/completed/failed/pending
   step ids, `next_step_id`, per-step state records, and artifact file status.
 - Warmaster exposes `GET /runs/{task_id}/steps/{step_id}` for focused step

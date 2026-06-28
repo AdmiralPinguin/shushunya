@@ -240,7 +240,12 @@ def main() -> int:
             required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout", "run_action_hints", "interrupted_run_resume", "http_governor_planning", "brigade_plan_snapshot", "brigade_health_snapshot"}
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
                 raise AssertionError(f"bad gateway capabilities response: {capabilities}")
-            if not capabilities.get("actions", {}).get("can_preflight_task") or "POST /task_preflight" not in capabilities.get("actions", {}).get("preferred_task_flow", []):
+            if (
+                not capabilities.get("actions", {}).get("can_preflight_task")
+                or not capabilities.get("actions", {}).get("can_preflight_runs")
+                or "POST /task_preflight" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
+                or "POST /runs/{task_id}/preflight_http" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
+            ):
                 raise AssertionError(f"gateway capabilities did not expose task action hints: {capabilities}")
             brigade_plan = request_json(base + "/brigade_plan")
             if (
@@ -412,6 +417,8 @@ def main() -> int:
                 not run_summary.get("ok")
                 or run_summary.get("summary", {}).get("task_id") != "warmaster-test"
                 or run_summary.get("summary", {}).get("revision_plan", {}).get("required")
+                or not run_summary.get("summary", {}).get("actions", {}).get("can_preflight_local")
+                or not run_summary.get("summary", {}).get("actions", {}).get("can_preflight_http")
                 or not run_summary.get("summary", {}).get("actions", {}).get("can_start")
                 or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "source_discovery"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("worker") != "Lexmechanic"

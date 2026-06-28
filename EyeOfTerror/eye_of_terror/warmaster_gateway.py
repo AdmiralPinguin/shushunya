@@ -509,9 +509,12 @@ def run_status_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
 def run_actions(status: str, revision_plan: dict[str, Any]) -> dict[str, Any]:
     terminal_locked = status in {"completed", "running", "cancelling", "queued", "corrupt"}
     runnable = not terminal_locked
+    preflightable = status != "corrupt"
     revision_required = bool(revision_plan.get("required"))
     revision_runnable = revision_required and status not in {"running", "cancelling", "queued", "corrupt"}
     return {
+        "can_preflight_local": preflightable,
+        "can_preflight_http": preflightable,
         "can_execute": runnable,
         "can_start": runnable,
         "can_cancel": status in {"running", "cancelling", "queued"},
@@ -1165,12 +1168,13 @@ def gateway_capabilities() -> dict[str, Any]:
 def gateway_actions() -> dict[str, Any]:
     return {
         "can_preflight_task": True,
+        "can_preflight_runs": True,
         "can_create_task": True,
         "can_start_runs": True,
         "can_resume_interrupted_runs": True,
         "can_execute_revisions": True,
         "can_cancel_runs": True,
-        "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/start_http"],
+        "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
         "diagnostics": ["GET /state?health=1", "GET /brigade_health", "GET /doctor"],
     }
 
