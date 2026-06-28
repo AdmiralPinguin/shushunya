@@ -329,6 +329,7 @@ def preflight_task(message: str, task_id: str | None, run_root: Path, governor_t
         "governor_transport": governor_transport,
         "task_id": resolved_task_id,
         "route": {"kind": route.kind, "governor": route.governor},
+        "contract_summary": contract_summary(contract),
         "validation": {"ok": not validation_errors, "errors": validation_errors},
         "missing_workers": missing_workers,
         "would_create_run_dir": str(run_dir) if resolved_task_id else "",
@@ -831,6 +832,27 @@ def missing_contract_workers(contract: dict[str, Any]) -> list[str]:
             if worker and worker not in required:
                 required.append(worker)
     return [worker for worker in required if worker not in available_workers]
+
+
+def contract_summary(contract: dict[str, Any]) -> dict[str, Any]:
+    worker_plan = contract.get("worker_plan") if isinstance(contract.get("worker_plan"), list) else []
+    steps = [
+        {
+            "step_id": str(step.get("step_id") or ""),
+            "worker": str(step.get("worker") or ""),
+            "expected_artifacts": len(step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []),
+        }
+        for step in worker_plan
+        if isinstance(step, dict)
+    ]
+    return {
+        "kind": str(contract.get("kind") or ""),
+        "goal": str(contract.get("goal") or ""),
+        "assigned_governor": str(contract.get("assigned_governor") or ""),
+        "steps": steps,
+        "step_count": len(steps),
+        "required_artifacts": len(contract.get("required_artifacts") if isinstance(contract.get("required_artifacts"), list) else []),
+    }
 
 
 def enrich_worker_metadata(worker: dict[str, Any]) -> dict[str, Any]:

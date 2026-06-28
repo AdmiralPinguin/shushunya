@@ -91,7 +91,8 @@ inside each governor runtime snapshot.
 `POST /task_preflight` accepts the same routing fields as `POST /task`, but does
 not write a run package or ledger. It returns the selected route, governor,
 contract validation result, missing worker references, and the run directory
-that would be created.
+that would be created. It also returns a compact `contract_summary` with planned
+step ids, workers, and artifact counts for client review.
 
 ```json
 {

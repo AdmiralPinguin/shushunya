@@ -345,7 +345,11 @@ def main() -> int:
                 base + "/task_preflight",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-preflight-test"},
             )
-            if not preflight.get("ok") or (run_root / "warmaster-preflight-test").exists():
+            if (
+                not preflight.get("ok")
+                or (run_root / "warmaster-preflight-test").exists()
+                or preflight.get("contract_summary", {}).get("steps", [{}])[0].get("worker") != "Lexmechanic"
+            ):
                 raise AssertionError(f"task preflight should not create a run: {preflight}")
             task = request_json(
                 base + "/task",

@@ -81,7 +81,8 @@ Client-facing gateway behavior is specified in
 `EyeOfTerror/contracts/warmaster_api.md`.
 
 `POST /task_preflight` checks routing, governor planning, contract validation,
-and worker availability without creating run history.
+worker availability, and the compact planned step summary without creating run
+history.
 
 `GET /workers` returns the static port registry enriched with available
 `Mechanicum/*/worker.json` metadata. Add `?health=1` to include a live

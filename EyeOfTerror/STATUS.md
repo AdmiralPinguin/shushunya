@@ -24,6 +24,7 @@
 - Warmaster Gateway can prepare Iskandar run packages, expose run status, execute local dev pipelines, and execute HTTP worker-service pipelines.
 - Warmaster Gateway exposes `POST /task_preflight` for routing, governor,
   contract, and worker checks without creating run history.
+- Task preflight returns a compact contract summary with planned worker steps.
 - Warmaster Gateway can prepare tasks through the local governor path or through
   the active governor's HTTP service.
 - Warmaster rejects HTTP-governor task preparation when reachable governor
