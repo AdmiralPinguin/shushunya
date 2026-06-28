@@ -3,6 +3,8 @@
 ## Working
 
 - Iskandar Khayon can build lore reconstruction task contracts and dispatch packets.
+- Dispatch packets propagate dependency output artifacts as worker
+  `input_artifacts`.
 - Iskandar Khayon exposes his required Mechanicum worker set through
   `/capabilities`.
 - Mechanicum prototype workers cover the current lore pipeline:

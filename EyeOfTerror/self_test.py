@@ -109,6 +109,15 @@ def main() -> int:
         raise AssertionError(f"dispatch packets target wrong ports: {[packet.port for packet in packets]}")
     if packets[2].request["task_id"] != "test-skalathrax:fact_extraction":
         raise AssertionError(f"dispatch task id is not stable: {packets[2].request}")
+    if packets[2].request["input_artifacts"] != ["/work/skalathrax/source_snapshots.json"]:
+        raise AssertionError(f"dependency input artifacts were not propagated: {packets[2].request}")
+    expected_draft_inputs = [
+        "/work/skalathrax/source_map.json",
+        "/work/skalathrax/direct_event_notes.json",
+        "/work/skalathrax/timeline.json",
+    ]
+    if packets[4].input_artifacts != expected_draft_inputs:
+        raise AssertionError(f"multi-dependency input artifacts were not propagated: {packets[4].to_dict()}")
     print("[ok] Iskandar dispatch packets")
 
     with tempfile.TemporaryDirectory() as temp_dir:

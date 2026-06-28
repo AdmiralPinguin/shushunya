@@ -42,7 +42,7 @@ running on the selected port before sending work.
 {
   "task_id": "stable-task-id",
   "contract": {},
-  "input_artifacts": [],
+  "input_artifacts": ["/work/example/source_map.json"],
   "output_schema": {},
   "max_runtime_sec": 1800,
   "revision_context": {
@@ -52,6 +52,11 @@ running on the selected port before sending work.
   }
 }
 ```
+
+`input_artifacts` is filled by the orchestrator from the dispatch step's
+`depends_on` entries and the dependency steps' `expected_artifacts`. Workers
+should treat these paths as required inputs for the step unless their own
+contract says a missing input is an explicit blocker.
 
 `revision_context` is optional. Orchestrators set it only when rerunning a
 worker from a failed or blocked run's `revision_plan`. Workers should treat it

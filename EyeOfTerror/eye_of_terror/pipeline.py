@@ -24,6 +24,7 @@ class DispatchPacket:
     port: int
     purpose: str
     depends_on: list[str]
+    input_artifacts: list[str]
     expected_artifacts: list[str]
     request: dict[str, Any]
 
@@ -35,6 +36,7 @@ class DispatchPacket:
             "port": self.port,
             "purpose": self.purpose,
             "depends_on": self.depends_on,
+            "input_artifacts": self.input_artifacts,
             "expected_artifacts": self.expected_artifacts,
             "request": self.request,
         }
@@ -43,15 +45,21 @@ class DispatchPacket:
 def build_dispatch_packets(contract: TaskContract) -> list[DispatchPacket]:
     packets: list[DispatchPacket] = []
     contract_payload = contract.to_dict()
+    artifacts_by_step = {step.step_id: step.expected_artifacts for step in contract.worker_plan}
     for step in contract.worker_plan:
         worker = worker_by_name(step.worker)
         if worker is None:
             raise ValueError(f"worker is not registered: {step.worker}")
+        input_artifacts = [
+            artifact
+            for dependency in step.depends_on
+            for artifact in artifacts_by_step.get(dependency, [])
+        ]
         request = {
             "task_id": f"{contract.task_id}:{step.step_id}",
             "contract": contract_payload,
             "step": step.to_dict(),
-            "input_artifacts": [],
+            "input_artifacts": input_artifacts,
             "output_schema": {},
             "max_runtime_sec": 1800,
         }
@@ -63,6 +71,7 @@ def build_dispatch_packets(contract: TaskContract) -> list[DispatchPacket]:
                 port=worker.port,
                 purpose=step.purpose,
                 depends_on=step.depends_on,
+                input_artifacts=input_artifacts,
                 expected_artifacts=step.expected_artifacts,
                 request=request,
             )
@@ -87,6 +96,7 @@ def pipeline_status(contract: TaskContract, packets: list[DispatchPacket]) -> di
                 "worker": packet.worker,
                 "port": packet.port,
                 "depends_on": packet.depends_on,
+                "input_artifacts": packet.input_artifacts,
                 "expected_artifacts": packet.expected_artifacts,
             }
             for packet in packets
