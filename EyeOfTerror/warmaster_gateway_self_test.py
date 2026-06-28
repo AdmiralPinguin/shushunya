@@ -463,6 +463,7 @@ def main() -> int:
                 or not run_summary.get("summary", {}).get("actions", {}).get("can_preflight_http")
                 or not run_summary.get("summary", {}).get("actions", {}).get("can_start")
                 or run_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "start"
+                or run_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("method") != "POST"
                 or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "source_discovery"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("worker") != "Lexmechanic"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("status") != "pending"
@@ -578,6 +579,7 @@ def main() -> int:
                 or not completed_snapshot.get("summary", {}).get("actions", {}).get("force_required_for_rerun")
                 or completed_snapshot.get("summary", {}).get("actions", {}).get("can_start")
                 or completed_snapshot.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "rerun_requires_force"
+                or completed_snapshot.get("summary", {}).get("actions", {}).get("next_action", {}).get("body", {}).get("force") is not True
                 or completed_snapshot.get("summary", {}).get("progress", {}).get("pending_step_ids")
             ):
                 raise AssertionError(f"bad completed run snapshot: {completed_snapshot}")
@@ -639,6 +641,7 @@ def main() -> int:
                 or resume_actions.get("can_start")
                 or resume_actions.get("can_execute")
                 or resume_actions.get("next_action", {}).get("kind") != "resume"
+                or resume_actions.get("next_action", {}).get("method") != "POST"
             ):
                 raise AssertionError(f"interrupted run did not expose resume action: {resume_summary}")
             resumed = request_json(base + "/runs/warmaster-resume-test/resume_local", {"timeout_sec": 30}, timeout=60)

@@ -604,23 +604,23 @@ def run_actions(status: str, revision_plan: dict[str, Any], revision_plan_errors
         "force_required_for_rerun": status == "completed" and not revision_required,
     }
     if status == "corrupt":
-        next_action = {"kind": "inspect", "endpoint": "GET /runs/{task_id}", "reason": "run state is corrupt"}
+        next_action = {"kind": "inspect", "method": "GET", "endpoint": "GET /runs/{task_id}", "body": {}, "reason": "run state is corrupt"}
     elif status in {"running", "queued"}:
-        next_action = {"kind": "poll", "endpoint": "GET /runs/{task_id}/snapshot", "reason": "run is already active"}
+        next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {}, "reason": "run is already active"}
     elif status == "cancelling":
-        next_action = {"kind": "poll", "endpoint": "GET /runs/{task_id}/snapshot", "reason": "cancellation is in progress"}
+        next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {}, "reason": "cancellation is in progress"}
     elif resume_required:
-        next_action = {"kind": "resume", "endpoint": "POST /runs/{task_id}/start_resume_http", "reason": "run is interrupted and has pending steps"}
+        next_action = {"kind": "resume", "method": "POST", "endpoint": "POST /runs/{task_id}/start_resume_http", "body": {}, "reason": "run is interrupted and has pending steps"}
     elif revision_required and not revision_valid:
-        next_action = {"kind": "inspect_revision", "endpoint": "GET /runs/{task_id}/summary", "reason": "revision_plan is invalid"}
+        next_action = {"kind": "inspect_revision", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "revision_plan is invalid"}
     elif revision_runnable:
-        next_action = {"kind": "execute_revision", "endpoint": "POST /runs/{task_id}/start_revision_http", "reason": "revision_plan requires selected steps to rerun"}
+        next_action = {"kind": "execute_revision", "method": "POST", "endpoint": "POST /runs/{task_id}/start_revision_http", "body": {}, "reason": "revision_plan requires selected steps to rerun"}
     elif actions["force_required_for_rerun"]:
-        next_action = {"kind": "rerun_requires_force", "endpoint": "POST /runs/{task_id}/start_http", "reason": "run already completed"}
+        next_action = {"kind": "rerun_requires_force", "method": "POST", "endpoint": "POST /runs/{task_id}/start_http", "body": {"force": True}, "reason": "run already completed"}
     elif runnable:
-        next_action = {"kind": "start", "endpoint": "POST /runs/{task_id}/start_http", "reason": "run is ready to execute"}
+        next_action = {"kind": "start", "method": "POST", "endpoint": "POST /runs/{task_id}/start_http", "body": {}, "reason": "run is ready to execute"}
     else:
-        next_action = {"kind": "inspect", "endpoint": "GET /runs/{task_id}/summary", "reason": f"no automatic action for status {status or 'unknown'}"}
+        next_action = {"kind": "inspect", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": f"no automatic action for status {status or 'unknown'}"}
     actions["next_action"] = next_action
     return actions
 

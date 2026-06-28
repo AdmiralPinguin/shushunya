@@ -160,10 +160,11 @@ invalid or references workers that do not match the run dispatch package;
 summaries expose these diagnostics as `revision_plan_errors`.
 
 `actions.next_action` gives chat clients and higher-level governors one
-recommended next operation with `kind`, `endpoint`, and `reason`. It must prefer
-resume for interrupted runs, revision execution for valid required revisions,
-revision inspection for invalid revision plans, polling for active runs, and
-force-gated rerun guidance for completed runs.
+recommended next operation with `kind`, `method`, `endpoint`, `body`, and
+`reason`. It must prefer resume for interrupted runs, revision execution for
+valid required revisions, revision inspection for invalid revision plans,
+polling for active runs, and force-gated rerun guidance for completed runs. When
+the recommendation is a completed-run rerun, `body.force` must be true.
 
 Run summaries also expose `last_preflight` when the ledger has a recorded run
 preflight. It contains the event timestamp, mode, selected steps, result, and
