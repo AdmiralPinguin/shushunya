@@ -962,6 +962,7 @@ def run_package_diagnostics(run_dir: Path) -> dict[str, Any]:
 def compact_oversight_summary(oversight: dict[str, Any]) -> dict[str, Any]:
     artifact_roles = oversight.get("artifact_roles") if isinstance(oversight.get("artifact_roles"), dict) else {}
     final_review = oversight.get("final_review") if isinstance(oversight.get("final_review"), dict) else {}
+    revision_policy = oversight.get("revision_policy") if isinstance(oversight.get("revision_policy"), dict) else {}
     quality_gates = oversight.get("quality_gates") if isinstance(oversight.get("quality_gates"), list) else []
     completion_criteria = oversight.get("completion_criteria") if isinstance(oversight.get("completion_criteria"), list) else []
     handoffs = oversight.get("handoffs") if isinstance(oversight.get("handoffs"), list) else []
@@ -983,6 +984,13 @@ def compact_oversight_summary(oversight: dict[str, Any]) -> dict[str, Any]:
             "requires_critic_approval_or_blockers": bool(final_review.get("requires_critic_approval_or_blockers")),
             "requires_gap_disclosure": bool(final_review.get("requires_gap_disclosure")),
             "requires_evidence_trace": bool(final_review.get("requires_evidence_trace")),
+        },
+        "revision_policy": {
+            "source_step": str(revision_policy.get("source_step") or ""),
+            "final_steps": revision_policy.get("final_steps", []) if isinstance(revision_policy.get("final_steps"), list) else [],
+            "requires_downstream_rerun": bool(revision_policy.get("requires_downstream_rerun")),
+            "requires_focused_context": bool(revision_policy.get("requires_focused_context")),
+            "requires_gap_disclosure": bool(revision_policy.get("requires_gap_disclosure")),
         },
     }
 
@@ -1029,6 +1037,33 @@ def validate_oversight_payload(contract: dict[str, Any], oversight: dict[str, An
         errors.append(f"oversight final artifact is not required by contract: {final_artifact}")
     elif final_artifact not in final_expected:
         errors.append(f"oversight final artifact is not produced by final step: {final_artifact}")
+    revision_policy = oversight.get("revision_policy") if isinstance(oversight.get("revision_policy"), dict) else {}
+    if not revision_policy:
+        errors.append("oversight revision_policy is required")
+    else:
+        source_step = str(revision_policy.get("source_step") or "")
+        if not source_step:
+            errors.append("oversight revision_policy.source_step is required")
+        elif source_step not in steps_by_id:
+            errors.append(f"oversight revision_policy.source_step references unknown step: {source_step}")
+        final_steps = revision_policy.get("final_steps")
+        if not isinstance(final_steps, list) or not final_steps:
+            errors.append("oversight revision_policy.final_steps must be a non-empty list")
+        else:
+            normalized_final_steps: list[str] = []
+            for index, step_id in enumerate(final_steps):
+                if not isinstance(step_id, str) or not step_id:
+                    errors.append(f"oversight revision_policy.final_steps[{index}] must be a non-empty string")
+                    continue
+                normalized_final_steps.append(step_id)
+                if step_id not in steps_by_id:
+                    errors.append(f"oversight revision_policy.final_steps[{index}] references unknown step: {step_id}")
+            for required_step in (str(final_review.get("critic_step") or ""), str(final_review.get("final_step") or "")):
+                if required_step and required_step not in normalized_final_steps:
+                    errors.append(f"oversight revision_policy.final_steps must include final_review step: {required_step}")
+        for field_name in ("requires_downstream_rerun", "requires_focused_context", "requires_gap_disclosure"):
+            if not isinstance(revision_policy.get(field_name), bool):
+                errors.append(f"oversight revision_policy.{field_name} must be a boolean")
     handoffs = oversight.get("handoffs") if isinstance(oversight.get("handoffs"), list) else []
     for index, handoff in enumerate(handoffs):
         if not isinstance(handoff, dict):

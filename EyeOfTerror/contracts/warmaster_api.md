@@ -262,8 +262,8 @@ inspection buttons or follow `actions.next_action` without hardcoded URLs.
 Run summaries include `oversight_summary` when the run package has
 `oversight.json`. It is a compact view of the governor's run-specific
 supervision plan: governor, kind, artifact role highlights, quality gate count,
-completion criteria count, handoff count, and final review requirements. Use
-`/runs/{task_id}/oversight` for the full oversight object.
+completion criteria count, handoff count, final review requirements, and
+revision policy. Use `/runs/{task_id}/oversight` for the full oversight object.
 
 Run summaries also expose `last_preflight` when the ledger has a recorded run
 preflight. It contains the event timestamp, mode, selected steps, result, and

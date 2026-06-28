@@ -96,9 +96,10 @@ against the Mechanicum registry before starting a task.
 source as concrete task contracts; clients can inspect step dependencies and
 expected artifacts before creating a run.
 `oversight` is the governor's task-class quality-control plan. It should expose
-artifact roles, worker handoffs, completion criteria, quality gates, and final
-review expectations so Warmaster and admin clients can inspect how the governor
-intends to supervise worker output.
+artifact roles, worker handoffs, completion criteria, quality gates, final
+review expectations, and revision policy so Warmaster and admin clients can
+inspect how the governor intends to supervise worker output and rerun focused
+rework when verification fails.
 
 ## POST /plan Request
 

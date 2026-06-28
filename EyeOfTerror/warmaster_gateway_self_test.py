@@ -685,6 +685,29 @@ def main() -> int:
                 or bad_oversight_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "inspect_oversight"
             ):
                 raise AssertionError(f"summary should block actions for inconsistent oversight: {bad_oversight_summary}")
+            bad_revision_policy_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bad-revision-policy-test"},
+            )
+            bad_revision_policy_path = Path(bad_revision_policy_task["run_dir"], "oversight.json")
+            bad_revision_policy_payload = json.loads(bad_revision_policy_path.read_text(encoding="utf-8"))
+            bad_revision_policy_payload["revision_policy"] = {
+                "source_step": "missing_critic",
+                "final_steps": ["finalize"],
+                "requires_downstream_rerun": "yes",
+                "requires_focused_context": True,
+                "requires_gap_disclosure": True,
+            }
+            write_json(bad_revision_policy_path, bad_revision_policy_payload)
+            bad_revision_policy_summary = request_json(base + "/runs/warmaster-bad-revision-policy-test/summary")
+            bad_revision_policy_errors = bad_revision_policy_summary.get("summary", {}).get("oversight_errors", [])
+            if (
+                not any("revision_policy.source_step" in error for error in bad_revision_policy_errors)
+                or not any("must include final_review step: critic_review" in error for error in bad_revision_policy_errors)
+                or not any("revision_policy.requires_downstream_rerun must be a boolean" in error for error in bad_revision_policy_errors)
+                or bad_revision_policy_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "inspect_oversight"
+            ):
+                raise AssertionError(f"summary should block bad revision policy: {bad_revision_policy_summary}")
             try:
                 request_json(base + "/runs/warmaster-bad-oversight-test/package")
             except urllib.error.HTTPError as exc:
@@ -843,6 +866,8 @@ def main() -> int:
                 not oversight.get("ok")
                 or not oversight.get("validation", {}).get("ok")
                 or oversight.get("summary", {}).get("final_review", {}).get("final_step") != "finalize"
+                or oversight.get("summary", {}).get("revision_policy", {}).get("source_step") != "critic_review"
+                or oversight.get("summary", {}).get("revision_policy", {}).get("requires_downstream_rerun") is not True
                 or oversight.get("oversight", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or oversight.get("oversight", {}).get("artifact_roles", {}).get("draft") != ["/work/skalathrax/reconstruction_ru.md"]
             ):
