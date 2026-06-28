@@ -1137,7 +1137,9 @@ def contract_summary(contract: dict[str, Any]) -> dict[str, Any]:
         {
             "step_id": str(step.get("step_id") or ""),
             "worker": str(step.get("worker") or ""),
-            "expected_artifacts": len(step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []),
+            "depends_on": step.get("depends_on") if isinstance(step.get("depends_on"), list) else [],
+            "expected_artifacts": step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else [],
+            "expected_artifact_count": len(step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []),
         }
         for step in worker_plan
         if isinstance(step, dict)

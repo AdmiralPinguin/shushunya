@@ -94,7 +94,8 @@ inside each governor runtime snapshot.
 not write a run package or ledger. It returns the selected route, governor,
 contract validation result, missing worker references, and the run directory
 that would be created. It also returns a compact `contract_summary` with planned
-step ids, workers, and artifact counts for client review.
+step ids, workers, dependency edges, expected artifact paths, and artifact
+counts for client review.
 
 ```json
 {
