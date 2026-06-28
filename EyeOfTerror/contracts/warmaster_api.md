@@ -27,6 +27,7 @@ GET  /events?after=0
 POST /task_preflight
 POST /orchestrate
 POST /orchestrate_start
+POST /orchestrate_run
 POST /task
 GET  /runs
 GET  /runs?limit=20
@@ -165,6 +166,13 @@ resume, or required revision execution from `summary.actions`, records the
 background-start event, and returns an immediate `snapshot` plus a polling
 `next_action`. Completed runs are not rerun unless `force=true` is explicit.
 
+`POST /orchestrate_run` is the one-shot chat submission helper. It performs the
+same prepare sequence as `POST /orchestrate` and, by default, immediately follows
+with `POST /orchestrate_start` semantics when the prepared run is startable. It
+returns the prepare payload, start payload, trace, current orchestration state,
+and polling `next_action`. Set `auto_start=false` to stop after preparation
+while keeping the same response envelope.
+
 `GET /runs/{task_id}/orchestration` is the read-only decision view for chat
 clients. It wraps the run snapshot with an orchestration `phase` such as
 `running`, `completed`, `ready_to_start`, `resume_required`,
@@ -181,7 +189,8 @@ clients do not need to reimplement phase parsing.
   "governor_transport": "local|http",
   "governor_host": "optional-loopback-host",
   "run_mode": "local|http",
-  "include_brigade_health": true
+  "include_brigade_health": true,
+  "auto_start": true
 }
 ```
 

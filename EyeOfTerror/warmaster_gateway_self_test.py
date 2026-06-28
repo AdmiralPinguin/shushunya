@@ -736,6 +736,30 @@ def main() -> int:
             orchestrated_start_events = request_json(base + "/runs/warmaster-orchestrate-test/events")
             if not any(item.get("type") == "background_start_requested" for item in orchestrated_start_events.get("events", [])):
                 raise AssertionError(f"orchestrated start did not record background start: {orchestrated_start_events}")
+            orchestrated_run = request_json(
+                base + "/orchestrate_run",
+                {
+                    "message": "Собери все известное о событиях Скалатракса.",
+                    "task_id": "warmaster-orchestrate-run-test",
+                    "run_mode": "local",
+                    "timeout_sec": 30,
+                },
+            )
+            if (
+                not orchestrated_run.get("ok")
+                or orchestrated_run.get("phase") != "started"
+                or [item.get("stage") for item in orchestrated_run.get("trace", [])] != ["task_preflight", "task", "run_preflight", "orchestrate_start"]
+                or orchestrated_run.get("start", {}).get("operation") != "start"
+                or orchestrated_run.get("next_action", {}).get("kind") != "poll"
+                or orchestrated_run.get("orchestration", {}).get("task_id") != "warmaster-orchestrate-run-test"
+            ):
+                raise AssertionError(f"one-shot orchestration did not prepare and start a run: {orchestrated_run}")
+            orchestrated_run_events = request_json(base + "/runs/warmaster-orchestrate-run-test/events")
+            if (
+                not any(item.get("type") == "run_preflight_recorded" for item in orchestrated_run_events.get("events", []))
+                or not any(item.get("type") == "background_start_requested" for item in orchestrated_run_events.get("events", []))
+            ):
+                raise AssertionError(f"one-shot orchestration did not record prepare/start events: {orchestrated_run_events}")
             task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},

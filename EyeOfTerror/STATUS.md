@@ -72,6 +72,9 @@
 - Warmaster Gateway exposes `POST /orchestrate_start` to safely start prepared
   runs in the background through run-summary action gates and return an
   immediate polling snapshot.
+- Warmaster Gateway exposes one-shot `POST /orchestrate_run` for chat clients
+  that should prepare a task and safely start it in the background through the
+  same orchestration gates.
 - Warmaster Gateway exposes `GET /runs/{task_id}/orchestration` as a read-only
   chat decision view with phase, snapshot, next action, and final package when
   completed.

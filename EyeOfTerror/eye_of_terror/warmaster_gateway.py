@@ -1964,6 +1964,83 @@ def orchestrate_prepare_task(
     }
 
 
+def orchestrate_run_task(
+    message: str,
+    task_id: str | None,
+    run_root: Path,
+    governor_transport: str = "local",
+    governor_host: str = "127.0.0.1",
+    run_mode: str = "http",
+    host: str = "127.0.0.1",
+    timeout_sec: int = 1800,
+    include_brigade_health: bool = False,
+    auto_start: bool = True,
+    force: bool = False,
+) -> dict[str, Any]:
+    prepare_timeout_sec = max(1, min(int(timeout_sec), 7200))
+    prepared = orchestrate_prepare_task(
+        message,
+        task_id,
+        run_root,
+        governor_transport=governor_transport,
+        governor_host=governor_host,
+        run_mode=run_mode,
+        host=host,
+        timeout_sec=min(prepare_timeout_sec, 300),
+        include_brigade_health=include_brigade_health,
+    )
+    trace = list(prepared.get("trace") if isinstance(prepared.get("trace"), list) else [])
+    run_task_id = str(prepared.get("task_id") or task_id or "")
+    if not prepared.get("ok"):
+        return {
+            "ok": False,
+            "phase": str(prepared.get("phase") or "prepare_failed"),
+            "task_id": run_task_id,
+            "trace": trace,
+            "prepare": prepared,
+            "next_action": prepared.get("next_action") if isinstance(prepared.get("next_action"), dict) else {},
+        }
+    if not auto_start:
+        return {
+            "ok": True,
+            "phase": "ready_to_start",
+            "task_id": run_task_id,
+            "trace": trace,
+            "prepare": prepared,
+            "next_action": prepared.get("next_action") if isinstance(prepared.get("next_action"), dict) else {},
+            "orchestration": orchestration_state(run_root / run_task_id, event_limit=5, events_after=0),
+        }
+    started = orchestrate_start_run(
+        run_root,
+        run_task_id,
+        run_mode=run_mode,
+        host=host,
+        timeout_sec=prepare_timeout_sec,
+        force=force,
+    )
+    trace.append(
+        {
+            "stage": "orchestrate_start",
+            "ok": bool(started.get("ok")),
+            "task_id": run_task_id,
+            "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else {},
+        }
+    )
+    run_dir = run_root / run_task_id
+    state = orchestration_state(run_dir, event_limit=5, events_after=0) if run_dir.exists() else {}
+    return {
+        "ok": bool(started.get("ok")),
+        "phase": "started" if started.get("ok") else "start_failed",
+        "task_id": run_task_id,
+        "run_mode": run_mode,
+        "trace": trace,
+        "prepare": prepared,
+        "start": started,
+        "orchestration": state,
+        "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else {},
+    }
+
+
 def revision_step_ids_from_run(run_dir: Path) -> list[str]:
     ledger_path = run_dir / "task_ledger.json"
     ledger, ledger_error = load_ledger_dict(ledger_path)
@@ -2483,6 +2560,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "task_routing",
             "task_preflight",
             "task_prepare_orchestration",
+            "task_submit_orchestration",
             "run_start_orchestration",
             "run_orchestration_state",
             "run_preparation",
@@ -2545,6 +2623,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "POST /task_preflight",
             "POST /orchestrate",
             "POST /orchestrate_start",
+            "POST /orchestrate_run",
             "POST /task",
             "GET /runs",
             "GET /runs?limit=20",
@@ -2597,6 +2676,7 @@ def gateway_actions() -> dict[str, Any]:
         "can_preflight_task": True,
         "can_orchestrate_prepare": True,
         "can_orchestrate_start": True,
+        "can_orchestrate_run": True,
         "can_preflight_runs": True,
         "can_create_task": True,
         "can_start_runs": True,
@@ -2610,6 +2690,7 @@ def gateway_actions() -> dict[str, Any]:
         "can_check_brigade_readiness": True,
         "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
         "prepare_task_flow": ["POST /orchestrate", "POST /orchestrate_start", "GET /runs/{task_id}/orchestration?events_after=0"],
+        "chat_task_flow": ["POST /orchestrate_run", "GET /runs/{task_id}/orchestration?events_after=0"],
         "polling": ["GET /events?after=0", "GET /runs/{task_id}/snapshot?events_after=0"],
         "maintenance": ["GET /recovery", "POST /recovery/start_resume_local", "POST /recovery/start_resume_http", "POST /recover_stale"],
         "run_inspection": [
@@ -3159,6 +3240,37 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         force=bool(payload.get("force")),
                     )
                     response(self, 202 if started.get("ok") else 409, started)
+                    return
+                if self.path == "/orchestrate_run":
+                    message = str(payload.get("message") or payload.get("task") or "").strip()
+                    if not message:
+                        response(self, 400, {"ok": False, "error": "message is required"})
+                        return
+                    task_id = str(payload.get("task_id") or "").strip() or None
+                    governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
+                    governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
+                    run_mode = str(payload.get("run_mode") or "http").strip() or "http"
+                    host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
+                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
+                    include_brigade_health = bool(payload.get("include_brigade_health"))
+                    auto_start = bool(payload.get("auto_start", True))
+                    submitted = orchestrate_run_task(
+                        message,
+                        task_id,
+                        run_root,
+                        governor_transport=governor_transport,
+                        governor_host=governor_host,
+                        run_mode=run_mode,
+                        host=host,
+                        timeout_sec=timeout_sec,
+                        include_brigade_health=include_brigade_health,
+                        auto_start=auto_start,
+                        force=bool(payload.get("force")),
+                    )
+                    if submitted.get("ok") and submitted.get("phase") == "started":
+                        response(self, 202, submitted)
+                    else:
+                        response(self, 200 if submitted.get("ok") else 409, submitted)
                     return
                 if self.path == "/task":
                     message = str(payload.get("message") or payload.get("task") or "").strip()
