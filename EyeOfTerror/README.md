@@ -140,6 +140,8 @@ the individual Mechanicum worker names, ports, modules, service dependencies,
 and readiness URLs.
 Use `--wait-ready` to wait for top-level health URLs after starting the stack;
 `--ready-timeout-sec` controls the readiness timeout.
+If one managed process exits, the launcher terminates the remaining managed
+processes and returns the first exit code.
 
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the

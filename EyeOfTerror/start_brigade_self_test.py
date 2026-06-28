@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from start_brigade import brigade_commands, brigade_plan, wait_for_urls
+from start_brigade import brigade_commands, brigade_plan, supervise_processes, wait_for_urls
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -81,6 +83,11 @@ def main() -> int:
     finally:
         server.shutdown()
         thread.join(timeout=5)
+    short = subprocess.Popen([sys.executable, "-c", "raise SystemExit(7)"])
+    long = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    code = supervise_processes([short, long], poll_interval_sec=0.05)
+    if code != 7 or long.poll() is None:
+        raise AssertionError(f"supervisor did not fail fast and terminate peers: code={code} long={long.poll()}")
     print("[ok] EyeOfTerror brigade launcher")
     return 0
 

@@ -184,6 +184,25 @@ def wait_for_urls(urls: list[str], timeout_sec: float, interval_sec: float = 0.2
     return {"ok": not pending, "ready": sorted(ready), "pending": sorted(pending), "timeout_sec": timeout_sec}
 
 
+def terminate_processes(processes: list[subprocess.Popen[bytes]]) -> None:
+    for process in processes:
+        if process.poll() is None:
+            process.terminate()
+    for process in processes:
+        if process.poll() is None:
+            process.wait(timeout=10)
+
+
+def supervise_processes(processes: list[subprocess.Popen[bytes]], poll_interval_sec: float = 0.25) -> int:
+    while True:
+        for process in processes:
+            code = process.poll()
+            if code is not None:
+                terminate_processes(processes)
+                return int(code)
+        time.sleep(poll_interval_sec)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Start the EyeOfTerror + Iskandar + Mechanicum service brigade.")
     parser.add_argument("--repo-root", default=".")
@@ -233,17 +252,11 @@ def main() -> int:
             readiness = wait_for_urls(urls, timeout_sec=args.ready_timeout_sec)
             if not readiness["ok"]:
                 print(json.dumps({"ok": False, "readiness": readiness}, ensure_ascii=False, indent=2), file=sys.stderr)
-                for process in processes:
-                    process.terminate()
-                for process in processes:
-                    process.wait(timeout=10)
+                terminate_processes(processes)
                 return 1
-        return max(process.wait() for process in processes)
+        return supervise_processes(processes)
     except KeyboardInterrupt:
-        for process in processes:
-            process.terminate()
-        for process in processes:
-            process.wait(timeout=10)
+        terminate_processes(processes)
         return 130
 
 
