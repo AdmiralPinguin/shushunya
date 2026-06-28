@@ -32,6 +32,8 @@
   ports, module paths, and modules.
 - The startup plan exposes top-level service dependencies and readiness URLs for
   future supervisors and admin clients.
+- The brigade launcher can wait for top-level readiness URLs after starting the
+  stack.
 - Warmaster Gateway can start local/HTTP execution in a background thread and expose progress through the ledger.
 - Warmaster Gateway exposes `GET /governors`, `GET /workers`, and
   `GET /workers?health=1`; worker listings are enriched with available

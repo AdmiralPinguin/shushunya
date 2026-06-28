@@ -1,9 +1,26 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from start_brigade import brigade_commands, brigade_plan
+from start_brigade import brigade_commands, brigade_plan, wait_for_urls
+
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def log_message(self, fmt: str, *args: object) -> None:
+        return
+
+    def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+        payload = {"ok": self.path == "/health"}
+        data = json.dumps(payload).encode("utf-8")
+        self.send_response(200 if payload["ok"] else 404)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
 
 def main() -> int:
@@ -54,6 +71,16 @@ def main() -> int:
     worker_ports = plan.get("ports", {}).get("mechanicum_workers", [])
     if worker_ports != [7002, 7003, 7004, 7005, 7006, 7007, 7009]:
         raise AssertionError(f"bad worker port plan: {worker_ports}")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        readiness = wait_for_urls([f"http://127.0.0.1:{server.server_port}/health"], timeout_sec=2.0)
+        if not readiness.get("ok"):
+            raise AssertionError(f"readiness helper did not observe health endpoint: {readiness}")
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
     print("[ok] EyeOfTerror brigade launcher")
     return 0
 

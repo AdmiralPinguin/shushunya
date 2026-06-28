@@ -6,6 +6,9 @@ import json
 import os
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -156,6 +159,31 @@ def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run
     }
 
 
+def url_is_ready(url: str, timeout_sec: float = 1.0) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_sec) as response:
+            if response.status >= 400:
+                return False
+            payload = json.loads(response.read().decode("utf-8"))
+        return bool(isinstance(payload, dict) and payload.get("ok"))
+    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return False
+
+
+def wait_for_urls(urls: list[str], timeout_sec: float, interval_sec: float = 0.25) -> dict[str, object]:
+    deadline = time.time() + timeout_sec
+    pending = set(urls)
+    ready: list[str] = []
+    while pending and time.time() <= deadline:
+        for url in list(pending):
+            if url_is_ready(url):
+                pending.remove(url)
+                ready.append(url)
+        if pending:
+            time.sleep(interval_sec)
+    return {"ok": not pending, "ready": sorted(ready), "pending": sorted(pending), "timeout_sec": timeout_sec}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Start the EyeOfTerror + Iskandar + Mechanicum service brigade.")
     parser.add_argument("--repo-root", default=".")
@@ -165,6 +193,8 @@ def main() -> int:
     parser.add_argument("--iskandar-run-root", default="runtime/iskandar-runs")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable startup plan and exit.")
+    parser.add_argument("--wait-ready", action="store_true", help="Wait for top-level service health URLs after starting.")
+    parser.add_argument("--ready-timeout-sec", type=float, default=30.0)
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
@@ -198,6 +228,16 @@ def main() -> int:
         for command in commands
     ]
     try:
+        if args.wait_ready:
+            urls = [command.health_url for command in commands if command.health_url]
+            readiness = wait_for_urls(urls, timeout_sec=args.ready_timeout_sec)
+            if not readiness["ok"]:
+                print(json.dumps({"ok": False, "readiness": readiness}, ensure_ascii=False, indent=2), file=sys.stderr)
+                for process in processes:
+                    process.terminate()
+                for process in processes:
+                    process.wait(timeout=10)
+                return 1
         return max(process.wait() for process in processes)
     except KeyboardInterrupt:
         for process in processes:

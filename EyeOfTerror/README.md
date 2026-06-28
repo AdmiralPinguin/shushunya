@@ -138,6 +138,8 @@ Use `--json` to print the same startup plan in a machine-readable form for
 diagnostics or future admin clients. The JSON includes top-level services and
 the individual Mechanicum worker names, ports, modules, service dependencies,
 and readiness URLs.
+Use `--wait-ready` to wait for top-level health URLs after starting the stack;
+`--ready-timeout-sec` controls the readiness timeout.
 
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the
