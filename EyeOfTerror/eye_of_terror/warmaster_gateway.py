@@ -1027,6 +1027,12 @@ def run_dispatch_package_errors(run_dir: Path, status: dict[str, Any]) -> list[s
     if not dispatch_dir.exists():
         return ["dispatch directory not found"]
     steps = status.get("steps") if isinstance(status.get("steps"), list) else []
+    task_id = str(status.get("task_id") or run_dir.name)
+    step_by_id = {
+        str(step.get("step_id") or ""): step
+        for step in steps
+        if isinstance(step, dict) and str(step.get("step_id") or "")
+    }
     expected_names = {
         f"{str(step.get('step_id') or '')}.json"
         for step in steps
@@ -1049,6 +1055,24 @@ def run_dispatch_package_errors(run_dir: Path, status: dict[str, Any]) -> list[s
             path = str(item.get("path") or "")
             detail = str(item.get("error") or "dispatch packet is not valid")
             errors.append(f"{path}: {detail}" if path else detail)
+            continue
+        path = Path(str(item.get("path") or ""))
+        packet = item.get("packet") if isinstance(item.get("packet"), dict) else {}
+        packet_step_id = str(packet.get("step_id") or "")
+        expected_step_id = path.stem
+        if packet_step_id != expected_step_id:
+            errors.append(f"dispatch step_id mismatch for {path.name}: expected {expected_step_id}, got {packet_step_id or 'missing'}")
+        expected_worker = str(step_by_id.get(expected_step_id, {}).get("worker") or "")
+        packet_worker = str(packet.get("worker") or "")
+        if expected_worker and packet_worker != expected_worker:
+            errors.append(f"dispatch worker mismatch for {expected_step_id}: expected {expected_worker}, got {packet_worker or 'missing'}")
+        packet_task_id = str(packet.get("task_id") or "")
+        if packet_task_id != task_id:
+            errors.append(f"dispatch task_id mismatch for {expected_step_id}: expected {task_id}, got {packet_task_id or 'missing'}")
+        request = packet.get("request") if isinstance(packet.get("request"), dict) else {}
+        request_task_id = str(request.get("task_id") or "")
+        if not request_task_id:
+            errors.append(f"dispatch request.task_id missing for {expected_step_id}")
     return errors
 
 

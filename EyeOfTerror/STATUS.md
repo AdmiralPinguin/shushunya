@@ -80,6 +80,8 @@
   Warmaster ledger.
 - Warmaster rejects HTTP-governor prepared runs with missing, unexpected, or
   corrupt dispatch packets before ledger creation.
+- Warmaster validates prepared dispatch packet step ids, workers, task ids, and
+  worker request task ids against the written run status.
 - Warmaster cleans up unregistered HTTP-governor run directories when prepare
   fails before ledger creation.
 - Task contract runtime validation rejects non-string non-goals, completion

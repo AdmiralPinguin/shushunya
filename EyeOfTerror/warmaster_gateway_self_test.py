@@ -89,6 +89,11 @@ def make_bad_prepare_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                 status = write_pipeline_run(plan.contract, run_dir, oversight=plan.to_dict()["oversight"])
                 if "bad-dispatch" in str(payload.get("task_id") or ""):
                     (run_dir / "dispatch" / "source_discovery.json").write_text("{", encoding="utf-8")
+                elif "bad-worker" in str(payload.get("task_id") or ""):
+                    dispatch_path = run_dir / "dispatch" / "source_discovery.json"
+                    packet = json.loads(dispatch_path.read_text(encoding="utf-8"))
+                    packet["worker"] = "Chronologis"
+                    write_json(dispatch_path, packet)
                 else:
                     (run_dir / "oversight.json").unlink()
                 body = {"ok": True, "status": status}
@@ -281,6 +286,19 @@ def main() -> int:
                     or (run_root / "warmaster-governor-bad-dispatch-test").exists()
                 ):
                     raise AssertionError(f"Warmaster accepted invalid governor-prepared dispatch: {bad_dispatch_prepared}")
+                bad_worker_prepared = warmaster_gateway.prepare_task_via_governor_service(
+                    "Собери все известное о событиях Скалатракса.",
+                    "warmaster-governor-bad-worker-test",
+                    run_root,
+                    BadPrepareGovernor(),
+                )
+                if (
+                    bad_worker_prepared.get("error_code") != "governor_prepare_invalid_run"
+                    or not any("dispatch worker mismatch" in error for error in bad_worker_prepared.get("validation", {}).get("errors", []))
+                    or not bad_worker_prepared.get("cleanup", {}).get("removed")
+                    or (run_root / "warmaster-governor-bad-worker-test").exists()
+                ):
+                    raise AssertionError(f"Warmaster accepted mismatched governor-prepared dispatch worker: {bad_worker_prepared}")
             finally:
                 bad_prepare_server.shutdown()
                 bad_prepare_thread.join(timeout=5)

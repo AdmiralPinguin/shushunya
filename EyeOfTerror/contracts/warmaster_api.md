@@ -161,8 +161,9 @@ that cannot later pass run preflight.
 For HTTP governor preparation, Warmaster verifies the written run package before
 creating the Warmaster ledger. If `contract.json`, `oversight.json`, or
 `status.json` is missing, corrupt, or differs from the governor's `/plan`
-response, or if dispatch packets are missing, unexpected, or corrupt, task
-creation fails with `error_code=governor_prepare_invalid_run`.
+response, or if dispatch packets are missing, unexpected, corrupt, or disagree
+with the written status step ids/workers, task creation fails with
+`error_code=governor_prepare_invalid_run`.
 When a governor prepare failure leaves an unregistered run directory without
 `task_ledger.json`, Warmaster attempts to remove that directory and reports the
 result in `cleanup`.
