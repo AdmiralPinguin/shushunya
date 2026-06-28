@@ -22,6 +22,11 @@ def documented_endpoints() -> set[str]:
     return endpoints
 
 
+def contract_text() -> str:
+    path = Path(__file__).resolve().parents[1] / "EyeOfTerror" / "contracts" / "worker_api.md"
+    return path.read_text(encoding="utf-8")
+
+
 def main() -> int:
     advertised = set(worker_api_endpoints())
     documented = documented_endpoints()
@@ -29,6 +34,8 @@ def main() -> int:
     extra = sorted(documented - advertised)
     if missing or extra:
         raise AssertionError(f"Worker API contract mismatch: missing={missing} extra={extra}")
+    if "worker mismatch" not in contract_text():
+        raise AssertionError("Worker API contract must document dispatch worker mismatch rejection")
     print("[ok] Worker API contract")
     return 0
 

@@ -65,6 +65,12 @@ worker from a failed or blocked run's `revision_plan`. Workers should treat it
 as focused correction context, not as user input, and should still validate all
 required source artifacts before reporting completion.
 
+When `/run` receives a full dispatch packet with a top-level `worker` field,
+the shared worker runtime must reject packets addressed to a different worker
+before calling the worker implementation with a `worker mismatch` error. This
+keeps direct service calls and misrouted dispatch packets from bypassing
+Warmaster preflight identity checks.
+
 ## GET /tasks/{task_id} Response
 
 ```json

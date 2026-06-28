@@ -56,6 +56,29 @@ def main() -> int:
             task = request_json(base + "/tasks/runtime-test")
             if not task.get("ok") or task["task"].get("status") != "completed" or not task["task"].get("created_at") or not task["task"].get("updated_at"):
                 raise AssertionError(f"bad task status response: {task}")
+            try:
+                request_json(
+                    base + "/run",
+                    {
+                        "worker": "Lexmechanic",
+                        "request": {
+                            "task_id": "wrong-worker-test",
+                            "input_artifacts": ["/work/test/source_map.json"],
+                            "step": {"expected_artifacts": ["/work/test/should_not_exist.json"]},
+                        },
+                    },
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                wrong_worker = json.loads(exc.read().decode("utf-8"))
+                if "worker mismatch" not in wrong_worker.get("error", ""):
+                    raise AssertionError(f"bad worker mismatch response: {wrong_worker}")
+            else:
+                raise AssertionError("worker runtime should reject packets addressed to another worker")
+            wrong_worker_task = request_json(base + "/tasks/wrong-worker-test")
+            if wrong_worker_task.get("task", {}).get("status") != "failed":
+                raise AssertionError(f"wrong-worker task did not fail durably: {wrong_worker_task}")
             task_list = request_json(base + "/tasks")
             if not task_list.get("ok") or not any(item.get("task_id") == "runtime-test" for item in task_list.get("tasks", [])):
                 raise AssertionError(f"bad task list response: {task_list}")

@@ -20,6 +20,8 @@
 - Worker services expose `GET /health`, `GET /capabilities`, `POST /run`,
   `GET /tasks`, `GET /tasks/{task_id}`, and
   `POST /tasks/{task_id}/cancel` through the shared runtime.
+- The shared worker runtime rejects dispatch packets addressed to a different
+  worker before calling worker code.
 - The shared worker runtime and local executor reject missing or invalid
   `input_artifacts` before calling worker code.
 - EyeOfTerror can execute dispatch packets through HTTP services with `eye_of_terror.http_executor`.
