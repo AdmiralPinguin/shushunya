@@ -10,6 +10,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKER_CONTRACT = "EyeOfTerror/contracts/worker_api.md"
 GOVERNOR_CONTRACT = "EyeOfTerror/contracts/governor_api.md"
+WARMASTER_CONTRACT = "EyeOfTerror/contracts/warmaster_api.md"
 VALID_WORKER_STATUSES = {"active", "prototype", "planned"}
 VALID_GOVERNOR_STATUSES = {"active", "planned"}
 
@@ -27,6 +28,7 @@ def require(condition: bool, message: str, errors: list[str]) -> None:
 
 
 def check_governors(errors: list[str]) -> int:
+    require((REPO_ROOT / WARMASTER_CONTRACT).exists(), f"Warmaster API contract missing: {WARMASTER_CONTRACT}", errors)
     require((REPO_ROOT / GOVERNOR_CONTRACT).exists(), f"governor API contract missing: {GOVERNOR_CONTRACT}", errors)
     registry = load_json(REPO_ROOT / "EyeOfTerror" / "registry" / "governors.json")
     port_registry = load_json(REPO_ROOT / "EyeOfTerror" / "registry" / "ports.json").get("eye_of_terror", {})

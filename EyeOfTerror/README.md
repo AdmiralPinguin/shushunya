@@ -62,6 +62,9 @@ Gateway endpoints:
 - `POST /runs/<task_id>/cancel`
 - `POST /recover_stale`
 
+Client-facing gateway behavior is specified in
+`EyeOfTerror/contracts/warmaster_api.md`.
+
 `GET /workers` returns the static port registry enriched with available
 `Mechanicum/*/worker.json` metadata. Add `?health=1` to include a live
 best-effort `/health` snapshot for each worker service.
