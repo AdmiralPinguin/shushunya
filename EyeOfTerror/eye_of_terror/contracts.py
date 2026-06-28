@@ -223,6 +223,7 @@ def validate_task_contract_payload(payload: dict[str, Any]) -> list[str]:
         errors.append("worker_plan must be a non-empty list")
         return errors
     seen_steps: set[str] = set()
+    expected_artifact_producers: dict[str, str] = {}
     for index, step in enumerate(worker_plan):
         if not isinstance(step, dict):
             errors.append(f"worker_plan[{index}] must be an object")
@@ -251,6 +252,12 @@ def validate_task_contract_payload(payload: dict[str, Any]) -> list[str]:
             errors.append(f"worker_plan[{index}].expected_artifacts must be a list")
         elif any(not isinstance(item, str) or not item.startswith("/work/") for item in expected_artifacts):
             errors.append(f"worker_plan[{index}].expected_artifacts must contain /work paths")
+        elif isinstance(step_id, str):
+            for artifact in expected_artifacts:
+                owner = expected_artifact_producers.get(artifact)
+                if owner and owner != step_id:
+                    errors.append(f"expected artifact has multiple producer steps: {artifact}")
+                expected_artifact_producers[artifact] = step_id
     for index, step in enumerate(worker_plan):
         if not isinstance(step, dict):
             continue
@@ -259,4 +266,8 @@ def validate_task_contract_payload(payload: dict[str, Any]) -> list[str]:
             for dependency in depends_on:
                 if isinstance(dependency, str) and dependency not in seen_steps:
                     errors.append(f"worker_plan[{index}] depends on unknown step: {dependency}")
+    if isinstance(required_artifacts, list):
+        for artifact in required_artifacts:
+            if isinstance(artifact, str) and artifact.startswith("/work/") and artifact not in expected_artifact_producers:
+                errors.append(f"required artifact is not produced by worker_plan: {artifact}")
     return errors

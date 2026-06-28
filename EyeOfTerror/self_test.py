@@ -69,6 +69,14 @@ def main() -> int:
     broken_text_list["quality_gates"] = ["source_map_created", 7]
     if not any("quality_gates[1]" in error for error in validate_task_contract_payload(broken_text_list)):
         raise AssertionError("task contract validator should reject non-string quality gates")
+    broken_required_artifact = json.loads(json.dumps(payload))
+    broken_required_artifact["required_artifacts"].append("/work/skalathrax/unproduced.json")
+    if not any("not produced" in error for error in validate_task_contract_payload(broken_required_artifact)):
+        raise AssertionError("task contract validator should reject required artifacts without producers")
+    broken_duplicate_output = json.loads(json.dumps(payload))
+    broken_duplicate_output["worker_plan"][1]["expected_artifacts"] = broken_duplicate_output["worker_plan"][0]["expected_artifacts"]
+    if not any("multiple producer" in error for error in validate_task_contract_payload(broken_duplicate_output)):
+        raise AssertionError("task contract validator should reject duplicate artifact producers")
     if "/work/skalathrax/source_map.json" not in payload["required_artifacts"]:
         raise AssertionError(f"skalathrax artifacts not derived: {payload['required_artifacts']}")
     if "/work/skalathrax/source_snapshots.json" not in payload["required_artifacts"]:
