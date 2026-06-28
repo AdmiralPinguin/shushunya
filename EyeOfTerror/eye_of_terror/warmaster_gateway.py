@@ -823,6 +823,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /health",
             "GET /capabilities",
             "GET /state",
+            "GET /state?health=1",
             "GET /doctor",
             "GET /brigade_plan",
             "GET /brigade_plan?host=127.0.0.1",
@@ -870,12 +871,12 @@ def gateway_capabilities() -> dict[str, Any]:
     }
 
 
-def gateway_state(run_root: Path, run_limit: int = 20) -> dict[str, Any]:
+def gateway_state(run_root: Path, run_limit: int = 20, include_health: bool = False, host: str = "127.0.0.1") -> dict[str, Any]:
     all_runs = list_runs(run_root)
     runs = all_runs[: parse_limit(str(run_limit), default=20)]
     with ACTIVE_RUNS_LOCK:
         process_active_runs = sorted(ACTIVE_RUNS)
-    return {
+    payload = {
         "ok": True,
         "gateway": "WarmasterGateway",
         "capabilities": gateway_capabilities(),
@@ -886,6 +887,9 @@ def gateway_state(run_root: Path, run_limit: int = 20) -> dict[str, Any]:
         "process_active_runs": process_active_runs,
         "runs": runs,
     }
+    if include_health:
+        payload["brigade_health"] = brigade_health_snapshot(host=host)
+    return payload
 
 
 def cancel_http_worker_tasks(run_dir: Path, host: str = "127.0.0.1", timeout_sec: float = 1.0) -> list[dict[str, Any]]:
@@ -965,7 +969,14 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 query = parse_qs(parsed.query)
                 raw_limit = query.get("run_limit", ["20"])[0]
                 run_limit = parse_limit(raw_limit, default=20)
-                response(self, 200, gateway_state(run_root, run_limit=run_limit))
+                include_health = query.get("health", ["0"])[0] in {"1", "true", "yes"}
+                host = query.get("host", ["127.0.0.1"])[0]
+                try:
+                    payload = gateway_state(run_root, run_limit=run_limit, include_health=include_health, host=host)
+                except ValueError as exc:
+                    response(self, 400, {"ok": False, "error": str(exc)})
+                    return
+                response(self, 200, payload)
                 return
             if parsed.path == "/doctor":
                 payload = run_doctor()

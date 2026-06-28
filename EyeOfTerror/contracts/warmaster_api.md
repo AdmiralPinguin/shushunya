@@ -10,6 +10,7 @@ inspection, cancellation, and service diagnostics.
 GET  /health
 GET  /capabilities
 GET  /state
+GET  /state?health=1
 GET  /doctor
 GET  /brigade_plan
 GET  /brigade_plan?host=127.0.0.1
@@ -69,6 +70,8 @@ Clients should call `GET /state` after startup or reconnect. The response
 contains gateway capabilities, governor registry, worker registry, run status
 counts, process-local active run ids, recent run summaries, and the expected
 service-separated brigade startup plan.
+Use `GET /state?health=1` for an admin/bootstrap snapshot that also includes
+best-effort `brigade_health`; plain `/state` stays lightweight for polling.
 
 `GET /brigade_plan` returns the same expected service topology without run
 history. The optional `host` query parameter must be loopback.

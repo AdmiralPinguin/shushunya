@@ -55,6 +55,8 @@ Rules:
 Clients should use:
 
 - `GET /state` after startup or reconnect.
+- `GET /state?health=1` for admin startup diagnostics when health checks are
+  worth the extra latency.
 - `GET /brigade_plan` for expected service topology diagnostics.
 - `GET /brigade_health` for expected topology plus best-effort service health.
 - `GET /runs/{task_id}/snapshot?events_after=N` for per-run polling.

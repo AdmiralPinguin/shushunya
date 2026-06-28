@@ -190,6 +190,11 @@ def main() -> int:
             state = request_json(base + "/state")
             if state.get("brigade_plan", {}).get("mode") != "service-separated":
                 raise AssertionError(f"state did not include brigade plan: {state}")
+            if "brigade_health" in state:
+                raise AssertionError(f"plain state should not include health checks: {state}")
+            state_with_health = request_json(base + "/state?health=1")
+            if state_with_health.get("brigade_health", {}).get("summary", {}).get("workers_total", 0) < 1:
+                raise AssertionError(f"state health did not include brigade health: {state_with_health}")
             doctor = request_json(base + "/doctor")
             if not doctor.get("ok") or "worker_manifests" not in doctor.get("checks", []) or doctor.get("counts", {}).get("worker_manifests", 0) < 1:
                 raise AssertionError(f"bad doctor response: {doctor}")
