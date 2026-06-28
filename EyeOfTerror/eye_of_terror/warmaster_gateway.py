@@ -1473,14 +1473,19 @@ def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
         if workspace_root and sandbox_path.endswith("/final_manifest.json") and sandbox_path.startswith("/work/"):
             manifest_path = Path(workspace_root) / sandbox_path.removeprefix("/work/")
             if manifest_path.exists():
+                manifest_error = ""
                 try:
                     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
+                except (OSError, json.JSONDecodeError) as exc:
                     manifest = {}
+                    manifest_error = str(exc)
                 if isinstance(manifest, dict):
                     for item in items:
                         if item.get("path") == sandbox_path:
-                            item["manifest_summary"] = compact_manifest_summary(manifest)
+                            if manifest_error:
+                                item["manifest_error"] = manifest_error
+                            else:
+                                item["manifest_summary"] = compact_manifest_summary(manifest)
                             break
                 files = manifest.get("files") if isinstance(manifest, dict) else []
                 for file_item in files if isinstance(files, list) else []:

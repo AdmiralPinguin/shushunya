@@ -175,6 +175,8 @@
   display and artifact fetching.
 - Final manifest artifact listings include compact manifest summaries with
   critic metrics, warnings, blockers, and revision focus for client display.
+- Final manifest artifact listings expose `manifest_error` when the manifest
+  exists but cannot be parsed.
 - Completed run summaries expose `final_manifest_summary` so clients can render
   final quality state without an extra artifact listing request.
 - Warmaster exposes `GET /runs/{task_id}/final` so clients and higher-level

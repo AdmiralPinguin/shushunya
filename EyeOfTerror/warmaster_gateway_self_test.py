@@ -849,6 +849,16 @@ def main() -> int:
                 or "critic_metrics" not in final_manifest_item.get("manifest_summary", {})
             ):
                 raise AssertionError(f"artifacts response did not expose final manifest summary: {artifacts}")
+            final_manifest_host_path = Path(final_manifest_item.get("host_path") or "")
+            original_manifest_text = final_manifest_host_path.read_text(encoding="utf-8")
+            try:
+                final_manifest_host_path.write_text("{", encoding="utf-8")
+                corrupt_artifacts = request_json(base + "/runs/warmaster-test/artifacts")
+                corrupt_manifest_item = next((item for item in corrupt_artifacts.get("artifacts", []) if item.get("path") == "/work/skalathrax/final_manifest.json"), {})
+                if not corrupt_manifest_item.get("manifest_error"):
+                    raise AssertionError(f"artifacts response did not expose corrupt final manifest error: {corrupt_artifacts}")
+            finally:
+                final_manifest_host_path.write_text(original_manifest_text, encoding="utf-8")
             completed_snapshot = request_json(base + "/runs/warmaster-test/snapshot?events_after=0&event_limit=3")
             if (
                 not completed_snapshot.get("ok")
