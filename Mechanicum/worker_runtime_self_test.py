@@ -36,6 +36,8 @@ def main() -> int:
             health = request_json(base + "/health")
             if not health.get("ok") or health.get("worker") != "NoosphericExtractor":
                 raise AssertionError(f"bad health response: {health}")
+            if "GET /tasks" not in health.get("endpoints", []):
+                raise AssertionError(f"health did not advertise worker API endpoints: {health}")
             capabilities = request_json(base + "/capabilities")
             if capabilities.get("worker") != "NoosphericExtractor" or not isinstance(capabilities.get("capabilities"), list):
                 raise AssertionError(f"bad capabilities response: {capabilities}")

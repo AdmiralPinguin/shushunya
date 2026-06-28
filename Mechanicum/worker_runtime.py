@@ -19,6 +19,17 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def worker_api_endpoints() -> list[str]:
+    return [
+        "GET /health",
+        "GET /capabilities",
+        "POST /run",
+        "GET /tasks",
+        "GET /tasks/{task_id}",
+        "POST /tasks/{task_id}/cancel",
+    ]
+
+
 def load_worker(module_path: Path, module_name: str) -> WorkerRun:
     if str(module_path) not in sys.path:
         sys.path.insert(0, str(module_path))
@@ -81,6 +92,7 @@ def make_handler(
             "metadata": worker_metadata,
             "capabilities": worker_metadata.get("capabilities", []),
             "api_contract": worker_metadata.get("api_contract", ""),
+            "endpoints": worker_api_endpoints(),
         }
 
     class WorkerHandler(BaseHTTPRequestHandler):
