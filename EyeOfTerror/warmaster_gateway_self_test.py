@@ -1092,6 +1092,10 @@ def main() -> int:
                 or not run_summary.get("summary", {}).get("actions", {}).get("can_start")
                 or run_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "start"
                 or run_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("method") != "POST"
+                or run_summary.get("phase") != "ready_to_start"
+                or not run_summary.get("decision", {}).get("can_start")
+                or run_summary.get("display", {}).get("headline") != "Run is ready to start"
+                or run_summary.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("quality_gate_count") != 6
                 or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "source_discovery"
@@ -1352,6 +1356,13 @@ def main() -> int:
                 or "Реконструкция" not in reconstruction_preview.get("preview", {}).get("text", "")
             ):
                 raise AssertionError(f"bad final package response: {final_package}")
+            completed_summary = request_json(base + "/runs/warmaster-test/summary")
+            if (
+                completed_summary.get("phase") != "completed"
+                or completed_summary.get("display", {}).get("headline") != "Run completed"
+                or completed_summary.get("client_action", {}).get("path") != "/runs/warmaster-test/final"
+            ):
+                raise AssertionError(f"completed summary did not expose orchestration envelope: {completed_summary}")
             completed_orchestration = request_json(base + "/runs/warmaster-test/orchestration?max_bytes=1000")
             if (
                 completed_orchestration.get("phase") != "completed"

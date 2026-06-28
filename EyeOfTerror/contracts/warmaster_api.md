@@ -329,6 +329,9 @@ true, ordinary `can_execute` and `can_start` are false; clients should use the
 revision actions instead. When a run is `interrupted`, ordinary `can_execute`
 and `can_start` are false; clients should use resume actions instead unless a
 required revision plan is present.
+`GET /runs/{task_id}/summary` also includes top-level `phase`, `decision`,
+`display`, `next_action`, and executable `client_action` fields derived from
+the same orchestration view used by run cards.
 Revision actions are false when the required `revision_plan` is structurally
 invalid or references workers that do not match the run dispatch package;
 summaries expose these diagnostics as `revision_plan_errors`.

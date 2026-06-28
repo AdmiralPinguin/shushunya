@@ -3452,7 +3452,22 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                     return
                 if len(parts) == 3 and parts[2] == "summary":
-                    response(self, 200, {"ok": True, "summary": run_summary(run_dir)})
+                    summary = run_summary(run_dir)
+                    view = orchestration_view_fields(summary, task_id=task_id)
+                    response(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "summary": summary,
+                            "phase": view.get("phase", ""),
+                            "status": view.get("status", ""),
+                            "decision": view.get("decision", {}),
+                            "display": view.get("display", {}),
+                            "next_action": view.get("next_action", {}),
+                            "client_action": view.get("client_action", {}),
+                        },
+                    )
                     return
                 if len(parts) == 3 and parts[2] == "snapshot":
                     query = parse_qs(parsed.query)

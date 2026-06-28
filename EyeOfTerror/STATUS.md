@@ -208,6 +208,9 @@
 - Warmaster Gateway exposes compact `orchestration_cards` in `/state` and
   `/runs` so chat/mobile clients can restore task history, controls, and status
   displays without parsing full run summaries.
+- Run summary responses expose the same top-level `phase`, `decision`,
+  `display`, `next_action`, and executable `client_action` fields as
+  orchestration views.
 - Orchestration cards and single-run orchestration states share the same
   phase/decision/display builder to keep list and detail views consistent.
 - Warmaster Gateway exposes gateway-level action hints for preflight, creation,
