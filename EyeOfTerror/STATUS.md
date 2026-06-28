@@ -115,6 +115,8 @@
 - Task preflight responses expose `actions.can_create_task` and
   `actions.next_action` so chat clients can continue without hardcoded flow
   rules.
+- HTTP task preflight and task creation responses expose top-level executable
+  `client_action` fields for the recommended next step.
 - Task routing failures also expose action hints that direct clients toward
   gateway capability inspection instead of attempting run creation.
 - Successful task creation responses expose action hints that recommend run

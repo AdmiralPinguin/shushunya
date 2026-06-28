@@ -981,6 +981,17 @@ def executable_client_action(task_id: str, action: dict[str, Any]) -> dict[str, 
     }
 
 
+def payload_with_client_action(payload: dict[str, Any], fallback_task_id: str = "") -> dict[str, Any]:
+    actions = payload.get("actions") if isinstance(payload.get("actions"), dict) else {}
+    next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+    if not next_action or isinstance(payload.get("client_action"), dict):
+        return payload
+    task_id = str(payload.get("task_id") or fallback_task_id or "")
+    enriched = dict(payload)
+    enriched["client_action"] = executable_client_action(task_id, next_action)
+    return enriched
+
+
 def orchestration_view_fields(
     summary: dict[str, Any],
     active: bool = False,
@@ -3636,6 +3647,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
                     prepared = prepare_task(message, task_id, run_root, governor_transport=governor_transport, governor_host=governor_host)
+                    prepared = payload_with_client_action(prepared, fallback_task_id=task_id or "")
                     response(self, 409 if prepared.get("error_code") == "task_exists" else (200 if prepared.get("ok") else 400), prepared)
                     return
                 if self.path == "/task_preflight":
@@ -3655,6 +3667,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         governor_host=governor_host,
                         include_brigade_health=include_brigade_health,
                     )
+                    preflight = payload_with_client_action(preflight, fallback_task_id=task_id or "")
                     response(self, 409 if preflight.get("error_code") == "task_exists" else (200 if preflight.get("ok") else 400), preflight)
                     return
                 if self.path == "/recover_stale":

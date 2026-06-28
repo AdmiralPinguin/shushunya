@@ -637,6 +637,7 @@ def main() -> int:
                     or rejected_preflight.get("governor") != "ForgeMasterGovernor"
                     or rejected_preflight.get("actions", {}).get("can_create_task")
                     or rejected_preflight.get("actions", {}).get("next_action", {}).get("kind") != "inspect_capabilities"
+                    or rejected_preflight.get("client_action", {}).get("path") != "/capabilities"
                 ):
                     raise AssertionError(f"bad unsupported preflight route response: {rejected_preflight}")
             else:
@@ -689,6 +690,7 @@ def main() -> int:
                 or preflight_action_body.get("task_id") != "warmaster-preflight-test"
                 or preflight.get("actions", {}).get("next_action", {}).get("kind") != "create_task"
                 or preflight.get("actions", {}).get("next_action", {}).get("method") != "POST"
+                or preflight.get("client_action", {}).get("path") != "/task"
             ):
                 raise AssertionError(f"task preflight should not create a run: {preflight}")
             if "brigade_readiness" in preflight:
@@ -815,6 +817,7 @@ def main() -> int:
                 or task.get("governor") != "IskandarKhayon"
                 or task.get("actions", {}).get("next_action", {}).get("kind") != "preflight_run"
                 or task.get("actions", {}).get("next_action", {}).get("endpoint") != "POST /runs/{task_id}/preflight_http"
+                or task.get("client_action", {}).get("path") != "/runs/warmaster-test/preflight_http"
             ):
                 raise AssertionError(f"bad task response: {task}")
             global_events = request_json(base + "/events?limit=20")
