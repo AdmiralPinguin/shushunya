@@ -30,17 +30,47 @@ POST /prepare_run
   "governor": "IskandarKhayon",
   "api_version": 1,
   "task_kinds": ["research", "lore_reconstruction"],
-  "required_workers": ["Lexmechanic", "NoosphericExtractor"],
+  "required_workers": [
+    "Lexmechanic",
+    "AuspexBrowser",
+    "NoosphericExtractor",
+    "Chronologis",
+    "ScriptoriumDaemon",
+    "ReductorVerifier",
+    "FabricatorFinalis"
+  ],
   "pipeline": {
     "kind": "lore_reconstruction",
-    "step_count": 2,
-    "required_workers": ["Lexmechanic", "NoosphericExtractor"],
+    "step_count": 7,
+    "required_workers": [
+      "Lexmechanic",
+      "AuspexBrowser",
+      "NoosphericExtractor",
+      "Chronologis",
+      "ScriptoriumDaemon",
+      "ReductorVerifier",
+      "FabricatorFinalis"
+    ],
     "steps": [
       {
         "step_id": "source_discovery",
         "worker": "Lexmechanic",
         "depends_on": [],
         "expected_artifacts": ["/work/capabilities/source_map.json"],
+        "expected_artifact_count": 1
+      },
+      {
+        "step_id": "source_acquisition",
+        "worker": "AuspexBrowser",
+        "depends_on": ["source_discovery"],
+        "expected_artifacts": ["/work/capabilities/source_snapshots.json"],
+        "expected_artifact_count": 1
+      },
+      {
+        "step_id": "finalize",
+        "worker": "FabricatorFinalis",
+        "depends_on": ["critic_review"],
+        "expected_artifacts": ["/work/capabilities/final_manifest.json"],
         "expected_artifact_count": 1
       }
     ]

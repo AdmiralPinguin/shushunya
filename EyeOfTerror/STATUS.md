@@ -64,6 +64,8 @@
   edges, and expected artifacts.
 - Task preflight exposes compact governor oversight summaries and validation so
   clients can inspect final review expectations before creating run history.
+- Governor API contract checks document the active Iskandar required worker
+  chain exposed through `/capabilities`.
 - Run progress exposes per-step input, expected, and produced artifact statuses.
 - Run progress exposes dependency readiness through ready, blocked, and
   dependency-status step hints for higher-level governors.
