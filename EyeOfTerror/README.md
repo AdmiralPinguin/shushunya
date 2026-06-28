@@ -66,6 +66,17 @@ Gateway endpoints:
 `Mechanicum/*/worker.json` metadata. Add `?health=1` to include a live
 best-effort `/health` snapshot for each worker service.
 
+`GET /state` is the preferred client bootstrap endpoint after an app restart.
+It returns gateway capabilities, governors, workers, recent runs, and run status
+counts in one response.
+
+`GET /runs/<task_id>/worker_tasks` maps a Warmaster run to the task ids sent to
+Mechanicum workers. Add `?live=1` for a best-effort lookup against worker
+runtime task endpoints.
+
+`GET /doctor` checks registry, manifest, and service consistency and is safe to
+call from an admin client.
+
 `POST /runs/<task_id>/cancel` marks the Warmaster ledger as cancelling and
 best-effort forwards cancellation to HTTP worker task endpoints from the run
 dispatch package.
