@@ -647,6 +647,8 @@ def main() -> int:
                 or completed_snapshot.get("summary", {}).get("actions", {}).get("can_start")
                 or completed_snapshot.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "rerun_requires_force"
                 or completed_snapshot.get("summary", {}).get("actions", {}).get("next_action", {}).get("body", {}).get("force") is not True
+                or completed_snapshot.get("summary", {}).get("final_manifest_summary", {}).get("status") != "ready"
+                or "critic_metrics" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
                 or completed_snapshot.get("summary", {}).get("progress", {}).get("pending_step_ids")
             ):
                 raise AssertionError(f"bad completed run snapshot: {completed_snapshot}")

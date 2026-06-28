@@ -163,6 +163,8 @@ Clients should use:
 - `/runs/{task_id}/summary` for lightweight polling.
 - `/runs/{task_id}/snapshot` for a compact polling view containing summary,
   process-local active state, cursor events, and artifact metadata.
+  Completed run summaries include `final_manifest_summary` when the final
+  artifact is available.
 - `/runs/{task_id}/steps/{step_id}` for one normalized step state from
   `summary.progress.step_states`.
 - `/runs/{task_id}/steps/{step_id}/artifacts` for expected and produced

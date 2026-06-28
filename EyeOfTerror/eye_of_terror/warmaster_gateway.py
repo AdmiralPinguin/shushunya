@@ -546,6 +546,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "result": result,
         "revision_plan": revision_plan,
         "revision_plan_errors": revision_plan_errors,
+        "final_manifest_summary": final_manifest_summary(result),
         "progress": run_progress(status, ledger),
         "last_preflight": last_run_preflight(ledger),
     }
@@ -1147,15 +1148,7 @@ def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(manifest, dict):
                     for item in items:
                         if item.get("path") == sandbox_path:
-                            item["manifest_summary"] = {
-                                "status": manifest.get("status", ""),
-                                "approved": bool(manifest.get("approved")),
-                                "critic_status": manifest.get("critic_status", ""),
-                                "critic_metrics": manifest.get("critic_metrics", {}),
-                                "revision_focus": manifest.get("revision_focus", {}),
-                                "warnings": manifest.get("warnings", []),
-                                "blockers": manifest.get("blockers", []),
-                            }
+                            item["manifest_summary"] = compact_manifest_summary(manifest)
                             break
                 files = manifest.get("files") if isinstance(manifest, dict) else []
                 for file_item in files if isinstance(files, list) else []:
@@ -1164,6 +1157,34 @@ def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
                         if package_path:
                             append_artifact(package_path, "final_manifest")
     return {"workspace_root": workspace_root, "artifacts": items}
+
+
+def compact_manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": manifest.get("status", ""),
+        "approved": bool(manifest.get("approved")),
+        "critic_status": manifest.get("critic_status", ""),
+        "critic_metrics": manifest.get("critic_metrics", {}),
+        "revision_focus": manifest.get("revision_focus", {}),
+        "warnings": manifest.get("warnings", []),
+        "blockers": manifest.get("blockers", []),
+    }
+
+
+def final_manifest_summary(result: dict[str, Any]) -> dict[str, Any]:
+    workspace_root = str(result.get("workspace_root") or "")
+    artifacts = result.get("artifacts") if isinstance(result.get("artifacts"), list) else []
+    manifest_artifact = next((str(path) for path in artifacts if str(path).endswith("/final_manifest.json")), "")
+    if not workspace_root or not manifest_artifact.startswith("/work/"):
+        return {}
+    manifest_path = Path(workspace_root) / manifest_artifact.removeprefix("/work/")
+    if not manifest_path.exists():
+        return {}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return compact_manifest_summary(manifest) if isinstance(manifest, dict) else {}
 
 
 def resolve_artifact(ledger: dict[str, Any], artifact_path: str) -> Path:
