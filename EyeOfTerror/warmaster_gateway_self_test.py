@@ -620,6 +620,25 @@ def main() -> int:
             revision_summary = request_json(base + "/runs/warmaster-test/summary")
             if not revision_summary.get("summary", {}).get("actions", {}).get("can_execute_revision"):
                 raise AssertionError(f"summary did not expose revision action: {revision_summary}")
+            failed_revision_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-failed-revision-actions-test"},
+            )
+            failed_revision_dir = Path(failed_revision_task["run_dir"])
+            failed_revision_ledger_path = failed_revision_dir / "task_ledger.json"
+            failed_revision_ledger = json.loads(failed_revision_ledger_path.read_text(encoding="utf-8"))
+            failed_revision_ledger["status"] = "failed"
+            failed_revision_ledger.setdefault("result", {})["revision_plan"] = ledger_payload["result"]["revision_plan"]
+            write_json(failed_revision_ledger_path, failed_revision_ledger)
+            failed_revision_summary = request_json(base + "/runs/warmaster-failed-revision-actions-test/summary")
+            failed_revision_actions = failed_revision_summary.get("summary", {}).get("actions", {})
+            if (
+                failed_revision_actions.get("can_start")
+                or failed_revision_actions.get("can_execute")
+                or not failed_revision_actions.get("can_start_revision")
+                or not failed_revision_actions.get("can_execute_revision")
+            ):
+                raise AssertionError(f"revision-required failed run exposed unsafe actions: {failed_revision_summary}")
             revision_steps = revision_step_ids_from_run(run_dir)
             if revision_steps != ["draft_reconstruction", "critic_review", "finalize"]:
                 raise AssertionError(f"bad revision step expansion: {revision_steps}")

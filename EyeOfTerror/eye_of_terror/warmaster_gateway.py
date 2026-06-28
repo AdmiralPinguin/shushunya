@@ -519,9 +519,9 @@ def last_run_preflight(ledger: dict[str, Any]) -> dict[str, Any]:
 
 def run_actions(status: str, revision_plan: dict[str, Any]) -> dict[str, Any]:
     terminal_locked = status in {"completed", "running", "cancelling", "queued", "corrupt"}
-    runnable = not terminal_locked
     preflightable = status != "corrupt"
     revision_required = bool(revision_plan.get("required"))
+    runnable = not terminal_locked and not revision_required
     revision_runnable = revision_required and status not in {"running", "cancelling", "queued", "corrupt"}
     return {
         "can_preflight_local": preflightable,

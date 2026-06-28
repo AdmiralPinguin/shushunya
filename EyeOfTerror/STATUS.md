@@ -106,6 +106,8 @@
   `contract.json` files and return diagnostic JSON instead of crashing.
 - Warmaster run summaries expose `actions` hints for start/cancel/resume and
   revision controls.
+- Warmaster action hints disable ordinary start/execute when a required
+  revision plan exists.
 - Warmaster action hints expose run preflight controls for local and HTTP
   execution.
 - Warmaster progress summaries expose ordered planned/completed/failed/pending
