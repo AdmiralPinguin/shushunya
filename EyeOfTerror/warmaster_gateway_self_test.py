@@ -12,7 +12,7 @@ from pathlib import Path
 
 import eye_of_terror.warmaster_gateway as warmaster_gateway
 from eye_of_terror.inner_circle.iskandar_service import make_handler as make_iskandar_handler
-from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, requested_step_ids_from_payload, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
+from eye_of_terror.warmaster_gateway import brigade_readiness_summary, cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, requested_step_ids_from_payload, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
 from eye_of_terror.pipeline import write_pipeline_run
@@ -132,6 +132,31 @@ def main() -> int:
         pass
     else:
         raise AssertionError("service host validator accepted non-loopback host")
+    readiness = brigade_readiness_summary(
+        governors=[
+            {"name": "IskandarKhayon", "status": "active", "runtime": {"reachable": False}},
+            {"name": "ForgeMasterGovernor", "status": "planned", "runtime": {"reachable": False}},
+        ],
+        workers=[
+            {"name": "Lexmechanic", "status": "prototype", "runtime": {"reachable": True}},
+            {"name": "OcularisRenderium", "status": "planned", "runtime": {"reachable": False}},
+        ],
+        requirements=[
+            {
+                "governor": "IskandarKhayon",
+                "satisfied": False,
+                "missing_workers": ["MissingWorker"],
+                "unavailable_workers": [{"name": "OcularisRenderium"}],
+            }
+        ],
+    )
+    if (
+        readiness.get("ready")
+        or readiness.get("blocker_count") != 3
+        or readiness.get("warning_count") != 2
+        or not any("IskandarKhayon" in blocker for blocker in readiness.get("blockers", []))
+    ):
+        raise AssertionError(f"bad brigade readiness summary: {readiness}")
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir) / "runs"
         try:
@@ -470,6 +495,9 @@ def main() -> int:
             if (
                 not brigade_health.get("ok")
                 or brigade_health.get("summary", {}).get("workers_total", 0) < 1
+                or "ready" not in brigade_health.get("summary", {})
+                or not isinstance(brigade_health.get("summary", {}).get("blockers"), list)
+                or not isinstance(brigade_health.get("summary", {}).get("warnings"), list)
                 or "workers" not in brigade_health.get("services", {})
             ):
                 raise AssertionError(f"bad brigade health response: {brigade_health}")

@@ -140,6 +140,9 @@
   through `GET /brigade_plan` and embeds it in `GET /state`.
 - Warmaster Gateway exposes `GET /brigade_health` for combined expected
   topology and best-effort governor/worker health.
+- Brigade health summary exposes `ready`, `blockers`, and `warnings` so
+  higher-level orchestrators can decide whether the service-separated brigade is
+  runnable without reinterpreting every service health payload.
 - Brigade health reports whether reachable governor `required_workers` are
   present and runnable in the Mechanicum registry.
 - Brigade health reports reachable governor pipeline summaries when governor

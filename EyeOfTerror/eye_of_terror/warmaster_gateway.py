@@ -1892,6 +1892,49 @@ def governor_pipeline_summaries(governors: list[dict[str, Any]]) -> list[dict[st
     return pipelines
 
 
+def brigade_readiness_summary(
+    governors: list[dict[str, Any]],
+    workers: list[dict[str, Any]],
+    requirements: list[dict[str, Any]],
+) -> dict[str, Any]:
+    blockers: list[str] = []
+    warnings: list[str] = []
+    for governor in governors:
+        name = str(governor.get("name") or "")
+        status = str(governor.get("status") or "")
+        reachable = bool(governor.get("runtime", {}).get("reachable")) if isinstance(governor.get("runtime"), dict) else False
+        if status == "planned":
+            warnings.append(f"Governor is planned and not runnable: {name}")
+        elif not reachable:
+            blockers.append(f"Governor is not reachable: {name}")
+    for worker in workers:
+        name = str(worker.get("name") or "")
+        status = str(worker.get("status") or "")
+        reachable = bool(worker.get("runtime", {}).get("reachable")) if isinstance(worker.get("runtime"), dict) else False
+        if status == "planned":
+            warnings.append(f"Worker is planned and not runnable: {name}")
+        elif not reachable:
+            blockers.append(f"Worker is not reachable: {name}")
+    for requirement in requirements:
+        governor_name = str(requirement.get("governor") or "")
+        if requirement.get("satisfied"):
+            continue
+        missing = requirement.get("missing_workers") if isinstance(requirement.get("missing_workers"), list) else []
+        unavailable = requirement.get("unavailable_workers") if isinstance(requirement.get("unavailable_workers"), list) else []
+        if missing:
+            blockers.append(f"Governor {governor_name} requires missing workers: {', '.join(str(item) for item in missing)}")
+        if unavailable:
+            names = [str(item.get("name") or item) for item in unavailable]
+            blockers.append(f"Governor {governor_name} requires unavailable workers: {', '.join(names)}")
+    return {
+        "ready": not blockers,
+        "blocker_count": len(blockers),
+        "warning_count": len(warnings),
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
 def brigade_plan_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
     host = validate_service_host(host)
     from start_brigade import brigade_plan  # Imported lazily to keep gateway boot independent from launcher tooling.
@@ -1914,6 +1957,7 @@ def brigade_health_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
     pipelines = governor_pipeline_summaries(governors)
     reachable_governors = sum(1 for item in governors if item.get("runtime", {}).get("reachable"))
     reachable_workers = sum(1 for item in workers if item.get("runtime", {}).get("reachable"))
+    readiness = brigade_readiness_summary(governors, workers, requirements)
     return {
         "ok": True,
         "gateway": "WarmasterGateway",
@@ -1926,12 +1970,17 @@ def brigade_health_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
         },
         "requirements": {"governor_workers": requirements, "governor_pipelines": pipelines},
         "summary": {
+            "ready": readiness["ready"],
             "governors_total": len(governors),
             "governors_reachable": reachable_governors,
             "workers_total": len(workers),
             "workers_reachable": reachable_workers,
             "governor_requirements_satisfied": all(item.get("satisfied") for item in requirements) if requirements else None,
             "governor_pipelines_available": len(pipelines),
+            "blocker_count": readiness["blocker_count"],
+            "warning_count": readiness["warning_count"],
+            "blockers": readiness["blockers"],
+            "warnings": readiness["warnings"],
         },
     }
 

@@ -108,7 +108,10 @@ local stack.
 `GET /brigade_health` combines that topology with best-effort health checks for
 governors and workers. It also reports governor worker requirements when a
 reachable governor exposes `required_workers` from `/capabilities`, and
-governor pipeline summaries when reachable governors expose `pipeline`.
+governor pipeline summaries when reachable governors expose `pipeline`. The
+compact `summary` includes `ready`, `blockers`, and `warnings`; planned services
+are warnings, while unreachable runnable services or unsatisfied governor worker
+requirements are blockers.
 
 `GET /governors?health=1` includes reachable governor `/capabilities` payloads
 inside each governor runtime snapshot.
