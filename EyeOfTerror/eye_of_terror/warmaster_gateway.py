@@ -86,7 +86,104 @@ def read_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     return payload
 
 
-def prepare_task(message: str, task_id: str | None, run_root: Path) -> dict[str, Any]:
+def post_json(url: str, payload: dict[str, Any], timeout_sec: float = 10.0) -> dict[str, Any]:
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    if not isinstance(result, dict):
+        raise ValueError("service response is not a JSON object")
+    return result
+
+
+def prepare_task_via_governor_service(message: str, task_id: str | None, run_root: Path, governor: Any, host: str = "127.0.0.1", port: int | None = None) -> dict[str, Any]:
+    host = validate_service_host(host)
+    service_port = int(port or governor.port)
+    base = f"http://{host}:{service_port}"
+    try:
+        plan = post_json(base + "/plan", {"task": message, "task_id": task_id or ""})
+    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": f"governor service unavailable: {exc}",
+            "error_code": "governor_service_unavailable",
+            "governor": governor.name,
+        }
+    if not plan.get("ok"):
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "governor service returned an invalid plan",
+            "error_code": "governor_plan_failed",
+            "governor": governor.name,
+            "plan": plan,
+        }
+    contract = plan.get("contract") if isinstance(plan.get("contract"), dict) else {}
+    service_task_id = str(contract.get("task_id") or "").strip()
+    if not service_task_id or not valid_task_id(service_task_id):
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "governor service returned an invalid task_id",
+            "error_code": "invalid_governor_task_id",
+            "governor": governor.name,
+            "task_id": service_task_id,
+        }
+    validation_errors = validate_task_contract_payload(contract)
+    if validation_errors:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "governor service produced invalid task contract",
+            "error_code": "invalid_task_contract",
+            "task_id": service_task_id,
+            "validation": {"ok": False, "errors": validation_errors},
+        }
+    run_dir = run_root / service_task_id
+    if run_dir.exists():
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "task_id already exists",
+            "error_code": "task_exists",
+            "task_id": service_task_id,
+            "run_dir": str(run_dir),
+        }
+    try:
+        prepared = post_json(base + "/prepare_run", {"task": message, "task_id": service_task_id, "run_dir": str(run_dir)})
+    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": f"governor service unavailable: {exc}",
+            "error_code": "governor_service_unavailable",
+            "governor": governor.name,
+            "task_id": service_task_id,
+        }
+    if not prepared.get("ok"):
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "governor service failed to prepare run",
+            "error_code": "governor_prepare_failed",
+            "governor": governor.name,
+            "task_id": service_task_id,
+            "response": prepared,
+        }
+    TaskLedger.create(run_dir / "task_ledger.json", service_task_id, str(contract.get("goal") or message), governor.name)
+    return {
+        "ok": True,
+        "gateway": "WarmasterGateway",
+        "governor": governor.name,
+        "governor_transport": "http",
+        "task_id": service_task_id,
+        "run_dir": str(run_dir),
+        "status": prepared.get("status", {}),
+    }
+
+
+def prepare_task(message: str, task_id: str | None, run_root: Path, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> dict[str, Any]:
     if task_id is not None and not valid_task_id(task_id):
         return {
             "ok": False,
@@ -102,6 +199,10 @@ def prepare_task(message: str, task_id: str | None, run_root: Path) -> dict[str,
     governor_ref = governor_by_name(governor)
     if governor_ref is None or not governor_ref.active():
         return {"ok": False, "gateway": "WarmasterGateway", "error": f"governor is not active: {governor}", "kind": route.kind}
+    if governor_transport == "http":
+        return prepare_task_via_governor_service(message, task_id, run_root, governor_ref, host=governor_host)
+    if governor_transport != "local":
+        return {"ok": False, "gateway": "WarmasterGateway", "error": "governor_transport must be local or http", "error_code": "invalid_governor_transport"}
     plan = plan_lore_reconstruction(message, task_id=task_id)
     run_dir = run_root / plan.contract.task_id
     if run_dir.exists():
@@ -654,6 +755,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "ledger_read",
             "artifact_listing",
             "artifact_text_read",
+            "http_governor_planning",
             "run_contract_read",
             "run_dispatch_read",
             "run_worker_task_read",
@@ -990,7 +1092,9 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         response(self, 400, {"ok": False, "error": "message is required"})
                         return
                     task_id = str(payload.get("task_id") or "").strip() or None
-                    prepared = prepare_task(message, task_id, run_root)
+                    governor_transport = str(payload.get("governor_transport") or "local").strip() or "local"
+                    governor_host = str(payload.get("governor_host") or "127.0.0.1").strip() or "127.0.0.1"
+                    prepared = prepare_task(message, task_id, run_root, governor_transport=governor_transport, governor_host=governor_host)
                     response(self, 409 if prepared.get("error_code") == "task_exists" else (200 if prepared.get("ok") else 400), prepared)
                     return
                 if self.path == "/recover_stale":

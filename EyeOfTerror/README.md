@@ -109,6 +109,11 @@ On startup, Warmaster Gateway marks stale `running` or `cancelling` ledgers as
 calling a maintenance endpoint. Pass `--no-recover-stale-on-start` to disable
 that behavior for diagnostics.
 
+`POST /task` defaults to in-process governor planning. Passing
+`governor_transport: "http"` makes Warmaster call the selected active governor
+service on its registry port, keeping the planning boundary compatible with
+future Inner Circle services.
+
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the
 same artifact text endpoint.

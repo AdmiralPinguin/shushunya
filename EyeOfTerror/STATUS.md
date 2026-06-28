@@ -20,6 +20,8 @@
 - The end-to-end HTTP pipeline test reaches a `ready` final manifest for the Skalathrax test task.
 - Local and HTTP executors write `task_ledger.json` with task status, step status, artifacts, and event history.
 - Warmaster Gateway can prepare Iskandar run packages, expose run status, execute local dev pipelines, and execute HTTP worker-service pipelines.
+- Warmaster Gateway can prepare tasks through the local governor path or through
+  the active governor's HTTP service.
 - Warmaster Gateway can start local/HTTP execution in a background thread and expose progress through the ledger.
 - Warmaster Gateway exposes `GET /governors`, `GET /workers`, and
   `GET /workers?health=1`; worker listings are enriched with available

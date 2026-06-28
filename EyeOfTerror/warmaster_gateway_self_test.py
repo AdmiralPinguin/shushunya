@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import eye_of_terror.warmaster_gateway as warmaster_gateway
+from eye_of_terror.inner_circle.iskandar_service import make_handler as make_iskandar_handler
 from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
 
@@ -110,6 +111,30 @@ def main() -> int:
         bad_cancel = cancel_http_worker_tasks(bad_dispatch.parent)
         if not bad_cancel or bad_cancel[0].get("ok"):
             raise AssertionError(f"bad dispatch cancel fan-out should report failure: {bad_cancel}")
+        iskandar_server = ThreadingHTTPServer(("127.0.0.1", 0), make_iskandar_handler(run_root))
+        iskandar_thread = threading.Thread(target=iskandar_server.serve_forever, daemon=True)
+        iskandar_thread.start()
+        try:
+            class ServiceGovernor:
+                name = "IskandarKhayon"
+                port = iskandar_server.server_port
+
+            service_prepared = warmaster_gateway.prepare_task_via_governor_service(
+                "Собери все известное о событиях Скалатракса.",
+                "warmaster-governor-http-test",
+                run_root,
+                ServiceGovernor(),
+            )
+            if (
+                not service_prepared.get("ok")
+                or service_prepared.get("governor_transport") != "http"
+                or not (Path(service_prepared["run_dir"]) / "dispatch" / "source_discovery.json").exists()
+                or not (Path(service_prepared["run_dir"]) / "task_ledger.json").exists()
+            ):
+                raise AssertionError(f"bad http governor preparation: {service_prepared}")
+        finally:
+            iskandar_server.shutdown()
+            iskandar_thread.join(timeout=5)
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(run_root))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -121,7 +146,7 @@ def main() -> int:
             if not health.get("ok"):
                 raise AssertionError(f"bad health: {health}")
             capabilities = request_json(base + "/capabilities")
-            required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout", "run_action_hints", "interrupted_run_resume"}
+            required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout", "run_action_hints", "interrupted_run_resume", "http_governor_planning"}
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
                 raise AssertionError(f"bad gateway capabilities response: {capabilities}")
             doctor = request_json(base + "/doctor")

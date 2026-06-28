@@ -66,7 +66,9 @@ counts, process-local active run ids, and recent run summaries.
 ```json
 {
   "message": "User task text",
-  "task_id": "optional-stable-id"
+  "task_id": "optional-stable-id",
+  "governor_transport": "local|http",
+  "governor_host": "optional-loopback-host"
 }
 ```
 
@@ -75,6 +77,11 @@ must return a conflict instead of overwriting the run history.
 
 If provided, `task_id` must match `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}` and must
 not contain `..`.
+
+`governor_transport` defaults to `local`. When set to `http`, Warmaster calls
+the selected active governor service on its registry port and writes the
+Warmaster ledger after the governor prepares the run package. `governor_host`
+must be loopback.
 
 ## Run Inspection
 
