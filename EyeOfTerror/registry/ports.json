@@ -10,6 +10,16 @@
       "name": "IskandarKhayon",
       "role": "lore research and reconstruction governor",
       "path": "EyeOfTerror/InnerCircle/IskandarKhayon"
+    },
+    "7102": {
+      "name": "CogitatorCodewrightGovernor",
+      "role": "code task governor",
+      "path": "EyeOfTerror/InnerCircle/CogitatorCodewright"
+    },
+    "7103": {
+      "name": "ForgeMasterGovernor",
+      "role": "image generation governor",
+      "path": "EyeOfTerror/InnerCircle/ForgeMasterGovernor"
     }
   },
   "mechanicum": {

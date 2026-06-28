@@ -27,8 +27,8 @@ def main() -> int:
         if owner != ref.name:
             raise AssertionError(f"governor port collision on {ref.port}: {owner} and {ref.name}")
         port_entry = port_governors.get(ref.port)
-        if ref.active() and not port_entry:
-            raise AssertionError(f"active governor missing from ports.json: {ref.name}")
+        if not port_entry:
+            raise AssertionError(f"governor missing from ports.json: {ref.name}")
         if port_entry and port_entry.get("name") != ref.name:
             raise AssertionError(f"governor registry and ports.json disagree for {ref.name}: {port_entry}")
         if ref.active() and not ref.service:

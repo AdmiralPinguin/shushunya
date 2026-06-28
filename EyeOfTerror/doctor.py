@@ -56,6 +56,14 @@ def check_governors(errors: list[str]) -> int:
             if service:
                 require(importlib.util.find_spec(service) is not None, f"active governor {name} service is not importable: {service}", errors)
     if isinstance(port_registry, dict):
+        registry_ports = set(governor_ports)
+        port_registry_ports = {
+            int(raw_port)
+            for raw_port, item in port_registry.items()
+            if isinstance(item, dict) and int(raw_port) >= 7101
+        }
+        for port in sorted(registry_ports - port_registry_ports):
+            require(False, f"governor {governor_ports[port]} missing from port registry on {port}", errors)
         for raw_port, item in port_registry.items():
             if not isinstance(item, dict):
                 continue
