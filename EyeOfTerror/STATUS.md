@@ -75,6 +75,8 @@
 - HTTP execution preflights all worker `/health` endpoints before running steps
   and rejects worker identity mismatches before dispatch.
 - Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.
+- Warmaster Gateway performs stale run recovery on normal startup, with an
+  opt-out flag for diagnostics.
 - Warmaster Gateway exposes explicit local/HTTP resume endpoints for
   pending steps in `interrupted` run packages and records resume requests in
   the ledger.

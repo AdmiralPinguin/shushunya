@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import eye_of_terror.warmaster_gateway as warmaster_gateway
-from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
+from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
 
 
@@ -546,6 +546,21 @@ def main() -> int:
         finally:
             server.shutdown()
             thread.join(timeout=5)
+        startup_run = warmaster_gateway.prepare_task(
+            "Собери все известное о событиях Скалатракса.",
+            "warmaster-startup-recover-test",
+            run_root,
+        )
+        if not startup_run.get("ok"):
+            raise AssertionError(f"bad startup recovery task: {startup_run}")
+        startup_ledger_path = Path(startup_run["run_dir"]) / "task_ledger.json"
+        TaskLedger.load(startup_ledger_path).set_status("running")
+        recovered_on_start = prepare_run_root(run_root)
+        if not any(item.get("task_id") == "warmaster-startup-recover-test" and item.get("status") == "interrupted" for item in recovered_on_start):
+            raise AssertionError(f"startup recovery did not report interrupted run: {recovered_on_start}")
+        startup_ledger_after = TaskLedger.load(startup_ledger_path).to_dict()
+        if startup_ledger_after.get("status") != "interrupted":
+            raise AssertionError(f"startup recovery did not persist interrupted status: {startup_ledger_after}")
     print("[ok] Warmaster gateway")
     return 0
 

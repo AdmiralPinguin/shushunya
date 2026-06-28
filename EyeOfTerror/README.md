@@ -104,6 +104,11 @@ same progress model.
 `GET /runs/<task_id>/steps/<step_id>/artifacts` returns the expected and
 produced artifact status for that worker step only.
 
+On startup, Warmaster Gateway marks stale `running` or `cancelling` ledgers as
+`interrupted`, so clients can resume runs after a gateway restart without first
+calling a maintenance endpoint. Pass `--no-recover-stale-on-start` to disable
+that behavior for diagnostics.
+
 `GET /runs/<task_id>/artifacts` expands `final_manifest.json` package files so
 clients can fetch the final reconstruction, reports, and manifest through the
 same artifact text endpoint.

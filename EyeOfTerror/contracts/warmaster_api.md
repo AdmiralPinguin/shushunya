@@ -51,6 +51,10 @@ POST /runs/{task_id}/cancel
 POST /recover_stale
 ```
 
+On normal server startup, Warmaster creates the run root and marks stale
+`running`/`cancelling` ledgers as `interrupted`. Operators can disable this with
+`--no-recover-stale-on-start` for diagnostics.
+
 ## Client Bootstrap
 
 Clients should call `GET /state` after startup or reconnect. The response
@@ -132,6 +136,9 @@ Resume execution endpoints run only `pending_step_ids` from an `interrupted`
 run package through the selected executor and must reject runs whose ledger
 status is not `interrupted`. They record `resume_execution_requested` before
 dispatch so clients can audit manual recovery.
+
+Manual `POST /recover_stale` remains available for diagnostics and maintenance,
+but clients should not need to call it after a normal gateway restart.
 
 When a revision rerun reaches the writer, the executor passes a focused
 `revision_context` from the previous `revision_plan`. Writer artifacts should

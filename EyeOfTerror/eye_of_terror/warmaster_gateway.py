@@ -517,6 +517,13 @@ def recover_stale_runs(run_root: Path) -> list[dict[str, Any]]:
     return recovered
 
 
+def prepare_run_root(run_root: Path, recover_stale_on_start: bool = True) -> list[dict[str, Any]]:
+    run_root.mkdir(parents=True, exist_ok=True)
+    if not recover_stale_on_start:
+        return []
+    return recover_stale_runs(run_root)
+
+
 def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
     result = ledger.get("result", {}) if isinstance(ledger.get("result"), dict) else {}
     workspace_root = str(result.get("workspace_root") or "")
@@ -657,6 +664,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "cooperative_cancellation",
             "worker_cancel_fanout",
             "stale_run_recovery",
+            "startup_stale_run_recovery",
             "interrupted_run_resume",
             "governor_registry",
             "governor_health_snapshot",
@@ -1106,8 +1114,8 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
     return WarmasterHandler
 
 
-def serve(host: str, port: int, run_root: Path) -> None:
-    run_root.mkdir(parents=True, exist_ok=True)
+def serve(host: str, port: int, run_root: Path, recover_stale_on_start: bool = True) -> None:
+    prepare_run_root(run_root, recover_stale_on_start=recover_stale_on_start)
     server = ThreadingHTTPServer((host, port), make_handler(run_root))
     server.serve_forever()
 
@@ -1117,8 +1125,9 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7000)
     parser.add_argument("--run-root", default="runtime/warmaster-runs")
+    parser.add_argument("--no-recover-stale-on-start", action="store_true")
     args = parser.parse_args()
-    serve(args.host, args.port, Path(args.run_root))
+    serve(args.host, args.port, Path(args.run_root), recover_stale_on_start=not args.no_recover_stale_on_start)
     return 0
 
 
