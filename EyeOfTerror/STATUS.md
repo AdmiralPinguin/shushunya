@@ -20,6 +20,8 @@
 - Worker services expose `GET /health`, `GET /capabilities`, `POST /run`,
   `GET /tasks`, `GET /tasks/{task_id}`, and
   `POST /tasks/{task_id}/cancel` through the shared runtime.
+- The shared worker runtime rejects missing or invalid `input_artifacts` before
+  calling worker code.
 - EyeOfTerror can execute dispatch packets through HTTP services with `eye_of_terror.http_executor`.
 - The end-to-end HTTP pipeline test reaches a `ready` final manifest for the Skalathrax test task.
 - Local and HTTP executors write `task_ledger.json` with task status, step status, artifacts, and event history.

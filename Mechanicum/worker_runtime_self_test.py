@@ -46,6 +46,7 @@ def main() -> int:
                 {
                     "request": {
                         "task_id": "runtime-test",
+                        "input_artifacts": ["/work/test/source_map.json"],
                         "step": {"expected_artifacts": ["/work/test/direct_event_notes.json"]},
                     }
                 },
@@ -58,6 +59,28 @@ def main() -> int:
             task_list = request_json(base + "/tasks")
             if not task_list.get("ok") or not any(item.get("task_id") == "runtime-test" for item in task_list.get("tasks", [])):
                 raise AssertionError(f"bad task list response: {task_list}")
+            try:
+                request_json(
+                    base + "/run",
+                    {
+                        "request": {
+                            "task_id": "missing-input-test",
+                            "input_artifacts": ["/work/test/missing.json"],
+                            "step": {"expected_artifacts": ["/work/test/should_not_exist.json"]},
+                        }
+                    },
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                missing_input = json.loads(exc.read().decode("utf-8"))
+                if missing_input.get("error") != "input artifact preflight failed":
+                    raise AssertionError(f"bad missing input response: {missing_input}")
+            else:
+                raise AssertionError("worker runtime should reject missing input artifacts")
+            missing_input_task = request_json(base + "/tasks/missing-input-test")
+            if missing_input_task.get("task", {}).get("status") != "failed":
+                raise AssertionError(f"missing input task did not fail durably: {missing_input_task}")
             cancelled = request_json(base + "/tasks/cancel-before-start/cancel", {})
             if not cancelled.get("ok") or not cancelled["task"].get("cancel_requested") or not cancelled["task"].get("cancel_reason"):
                 raise AssertionError(f"bad task cancel response: {cancelled}")
