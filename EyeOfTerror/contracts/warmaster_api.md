@@ -179,7 +179,8 @@ commands, HTTP worker health failures, and input artifact failures. Full-run
 preflight treats artifacts produced by earlier selected steps as satisfiable by
 the same run; restricted preflight can accept `step_ids` and then requires
 unselected dependency artifacts to already exist when a `workspace_root` is
-provided.
+provided. Each run preflight records a compact `run_preflight_recorded` ledger
+event with mode, selected steps, result, and failure counts.
 
 If execution endpoints accept `workspace_root`, that path must stay inside the
 selected run directory. Relative paths are resolved below the run directory.

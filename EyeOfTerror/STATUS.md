@@ -28,6 +28,7 @@
 - Warmaster Gateway can prepare Iskandar run packages, expose run status, execute local dev pipelines, and execute HTTP worker-service pipelines.
 - Warmaster Gateway can preflight existing run packages before local or HTTP
   execution without starting workers.
+- Run preflight records compact audit events in the task ledger.
 - Warmaster Gateway exposes `POST /task_preflight` for routing, governor,
   contract, and worker checks without creating run history.
 - Task preflight returns a compact contract summary with planned worker steps.

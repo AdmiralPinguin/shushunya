@@ -402,6 +402,14 @@ def main() -> int:
                     raise AssertionError(f"restricted run preflight should require existing inputs: {blocked_preflight}")
             else:
                 raise AssertionError("restricted local run preflight should fail before dependency artifacts exist")
+            preflight_events = request_json(base + "/runs/warmaster-test/events")
+            recorded_preflights = [
+                item
+                for item in preflight_events.get("events", [])
+                if item.get("type") == "run_preflight_recorded"
+            ]
+            if len(recorded_preflights) < 2 or recorded_preflights[-1].get("payload", {}).get("input_failures") != 1:
+                raise AssertionError(f"run preflight was not recorded in ledger events: {preflight_events}")
             try:
                 revision_step_ids_from_run(run_dir)
             except ValueError as exc:

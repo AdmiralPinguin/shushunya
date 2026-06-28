@@ -760,6 +760,22 @@ def run_execution_preflight(
     }
 
 
+def record_run_preflight_event(run_dir: Path, preflight: dict[str, Any]) -> None:
+    ledger_path = run_dir / "task_ledger.json"
+    if not ledger_path.exists():
+        return
+    payload = {
+        "mode": str(preflight.get("mode") or ""),
+        "ok": bool(preflight.get("ok")),
+        "step_ids": preflight.get("step_ids") if isinstance(preflight.get("step_ids"), list) else [],
+        "dispatch_errors": len(preflight.get("dispatch_errors") if isinstance(preflight.get("dispatch_errors"), list) else []),
+        "input_failures": len(preflight.get("input_failures") if isinstance(preflight.get("input_failures"), list) else []),
+        "missing_local_commands": len(preflight.get("missing_local_commands") if isinstance(preflight.get("missing_local_commands"), list) else []),
+        "worker_preflight_failures": len(preflight.get("worker_preflight_failures") if isinstance(preflight.get("worker_preflight_failures"), list) else []),
+    }
+    TaskLedger.load(ledger_path).record_event("run_preflight_recorded", payload)
+
+
 def revision_step_ids_from_run(run_dir: Path) -> list[str]:
     ledger_path = run_dir / "task_ledger.json"
     ledger, ledger_error = load_ledger_dict(ledger_path)
@@ -1610,6 +1626,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                                 timeout_sec=timeout_sec,
                                 step_ids=restricted_step_ids,
                             )
+                        record_run_preflight_event(run_dir, preflight)
                         response(self, 200 if preflight.get("ok") else 409, preflight)
                         return
                     if parts[2] in {"execute_local", "start_local", "execute_revision_local", "start_revision_local", "resume_local", "start_resume_local"}:
