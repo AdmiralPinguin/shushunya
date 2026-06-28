@@ -253,8 +253,8 @@
 EyeOfTerror/check-eye-mechanicum.sh
 ```
 
-This runs contract tests, worker self-tests, local executor tests, service tests,
-and the end-to-end HTTP worker pipeline.
+This runs contract tests, worker self-tests, ShushunyaAgent offline self-test,
+local executor tests, service tests, and the end-to-end HTTP worker pipeline.
 
 Optional live discovery smoke:
 

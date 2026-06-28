@@ -20,6 +20,7 @@ PYTHONPATH=Mechanicum python3 Mechanicum/worker_runtime_self_test.py
 PYTHONPATH=Mechanicum python3 Mechanicum/worker_api_contract_self_test.py
 PYTHONPATH=Mechanicum python3 Mechanicum/worker_services_self_test.py
 PYTHONPATH=Mechanicum python3 Mechanicum/start_all_workers_self_test.py
+Mechanicum/ShushunyaAgent/scripts/check-agent-offline.sh
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/iskandar_service_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/warmaster_gateway_self_test.py
 PYTHONPATH=EyeOfTerror:Mechanicum python3 EyeOfTerror/warmaster_http_execution_self_test.py
