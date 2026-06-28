@@ -130,6 +130,8 @@
 - Warmaster action hints block start, resume, and revision actions when
   run-package diagnostics fail and point clients to package inspection.
 - Warmaster capabilities expose preferred run-inspection endpoints for clients.
+- Warmaster action hints prefer required revision execution over ordinary
+  interrupted-run resume.
 - Warmaster Gateway exposes lightweight run summaries, progress counters, and
   worker task mappings for client polling/debugging.
 - Warmaster state and run-list responses expose recoverable interrupted runs

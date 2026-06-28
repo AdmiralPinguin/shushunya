@@ -994,6 +994,24 @@ def main() -> int:
                 or not failed_revision_actions.get("can_execute_revision")
             ):
                 raise AssertionError(f"revision-required failed run exposed unsafe actions: {failed_revision_summary}")
+            interrupted_revision_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-interrupted-revision-actions-test"},
+            )
+            interrupted_revision_dir = Path(interrupted_revision_task["run_dir"])
+            interrupted_revision_ledger_path = interrupted_revision_dir / "task_ledger.json"
+            interrupted_revision_ledger = json.loads(interrupted_revision_ledger_path.read_text(encoding="utf-8"))
+            interrupted_revision_ledger["status"] = "interrupted"
+            interrupted_revision_ledger.setdefault("result", {})["revision_plan"] = ledger_payload["result"]["revision_plan"]
+            write_json(interrupted_revision_ledger_path, interrupted_revision_ledger)
+            interrupted_revision_summary = request_json(base + "/runs/warmaster-interrupted-revision-actions-test/summary")
+            interrupted_revision_actions = interrupted_revision_summary.get("summary", {}).get("actions", {})
+            if (
+                interrupted_revision_actions.get("can_resume")
+                or not interrupted_revision_actions.get("can_start_revision")
+                or interrupted_revision_actions.get("next_action", {}).get("kind") != "execute_revision"
+            ):
+                raise AssertionError(f"revision-required interrupted run should prefer revision action: {interrupted_revision_summary}")
             invalid_revision_task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-invalid-revision-plan-test"},

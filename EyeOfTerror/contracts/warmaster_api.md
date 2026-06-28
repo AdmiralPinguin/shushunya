@@ -223,7 +223,8 @@ Run summaries include an `actions` object with client-facing booleans:
 instead of duplicating Warmaster status rules. When `revision_plan.required` is
 true, ordinary `can_execute` and `can_start` are false; clients should use the
 revision actions instead. When a run is `interrupted`, ordinary `can_execute`
-and `can_start` are false; clients should use resume actions instead.
+and `can_start` are false; clients should use resume actions instead unless a
+required revision plan is present.
 Revision actions are false when the required `revision_plan` is structurally
 invalid or references workers that do not match the run dispatch package;
 summaries expose these diagnostics as `revision_plan_errors`.
@@ -236,10 +237,10 @@ non-empty; `actions.next_action.kind=inspect_oversight` points clients to
 
 `actions.next_action` gives chat clients and higher-level governors one
 recommended next operation with `kind`, `method`, `endpoint`, `body`, and
-`reason`. It must prefer resume for interrupted runs, revision execution for
-valid required revisions, package inspection for invalid run packages,
-oversight inspection for invalid governor oversight, revision inspection for
-invalid revision plans, polling for active runs, and
+`reason`. It must prefer package inspection for invalid run packages, oversight
+inspection for invalid governor oversight, revision inspection for invalid
+revision plans, revision execution for valid required revisions, resume for
+interrupted runs without a required revision plan, polling for active runs, and
 force-gated rerun guidance for completed runs. When the recommendation is a
 completed-run rerun, `body.force` must be true.
 

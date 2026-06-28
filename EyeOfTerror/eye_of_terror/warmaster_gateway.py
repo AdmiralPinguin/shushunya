@@ -795,7 +795,7 @@ def run_actions(
         "can_execute": runnable,
         "can_start": runnable,
         "can_cancel": status in {"running", "cancelling", "queued"},
-        "can_resume": status == "interrupted" and package_valid and oversight_valid,
+        "can_resume": status == "interrupted" and not revision_required and package_valid and oversight_valid,
         "can_execute_revision": revision_runnable,
         "can_start_revision": revision_runnable,
         "force_required_for_rerun": status == "completed" and not revision_required,
@@ -810,12 +810,12 @@ def run_actions(
         next_action = {"kind": "inspect_package", "method": "GET", "endpoint": "GET /runs/{task_id}/package", "body": {}, "reason": "run package is incomplete or inconsistent"}
     elif not oversight_valid:
         next_action = {"kind": "inspect_oversight", "method": "GET", "endpoint": "GET /runs/{task_id}/oversight", "body": {}, "reason": "governor oversight is missing or inconsistent"}
-    elif resume_required:
-        next_action = {"kind": "resume", "method": "POST", "endpoint": "POST /runs/{task_id}/start_resume_http", "body": {}, "reason": "run is interrupted and has pending steps"}
     elif revision_required and not revision_valid:
         next_action = {"kind": "inspect_revision", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "revision_plan is invalid"}
     elif revision_runnable:
         next_action = {"kind": "execute_revision", "method": "POST", "endpoint": "POST /runs/{task_id}/start_revision_http", "body": {}, "reason": "revision_plan requires selected steps to rerun"}
+    elif resume_required:
+        next_action = {"kind": "resume", "method": "POST", "endpoint": "POST /runs/{task_id}/start_resume_http", "body": {}, "reason": "run is interrupted and has pending steps"}
     elif actions["force_required_for_rerun"]:
         next_action = {"kind": "rerun_requires_force", "method": "POST", "endpoint": "POST /runs/{task_id}/start_http", "body": {"force": True}, "reason": "run already completed"}
     elif runnable:
