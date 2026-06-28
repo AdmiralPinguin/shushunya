@@ -72,6 +72,8 @@
   the active governor's HTTP service.
 - Brigade launcher derives Warmaster and Iskandar service ports from
   `EyeOfTerror/registry/ports.json`.
+- Brigade launcher rejects incomplete `Mechanicum/worker_services.json` entries
+  instead of silently omitting workers from the startup plan.
 - Warmaster rejects HTTP-governor task preparation when reachable governor
   `required_workers` are missing from the Mechanicum registry.
 - Warmaster rejects produced task contracts whose `worker_plan` references

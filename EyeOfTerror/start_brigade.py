@@ -55,14 +55,23 @@ def worker_service_plan(repo_root: Path, host: str) -> list[dict[str, object]]:
     workers: list[dict[str, object]] = []
     for name, item in sorted(payload.items(), key=lambda pair: (int(pair[1].get("port") or 0), pair[0]) if isinstance(pair[1], dict) else (0, pair[0])):
         if not isinstance(item, dict):
-            continue
+            raise ValueError(f"worker service entry must be an object: {name}")
+        port = int(item.get("port") or 0)
+        module_path = str(item.get("module_path") or "")
+        module = str(item.get("module") or "")
+        if port <= 0:
+            raise ValueError(f"worker service entry has invalid port: {name}")
+        if not module_path:
+            raise ValueError(f"worker service entry is missing module_path: {name}")
+        if not module:
+            raise ValueError(f"worker service entry is missing module: {name}")
         workers.append(
             {
                 "name": str(name),
-                "port": int(item.get("port") or 0),
-                "module_path": str(item.get("module_path") or ""),
-                "module": str(item.get("module") or ""),
-                "health_url": f"http://{host}:{int(item.get('port') or 0)}/health",
+                "port": port,
+                "module_path": module_path,
+                "module": module,
+                "health_url": f"http://{host}:{port}/health",
             }
         )
     return workers
