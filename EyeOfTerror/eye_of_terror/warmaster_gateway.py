@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ACTIVE_RUNS: set[str] = set()
 ACTIVE_RUNS_LOCK = threading.Lock()
 MAX_LIST_LIMIT = 200
+MAX_ARTIFACT_TEXT_BYTES = 500000
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
@@ -432,6 +433,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/events",
             "GET /runs/{task_id}/artifacts",
             "GET /runs/{task_id}/artifact_text?path=/work/...",
+            "GET /runs/{task_id}/artifact_text?path=/work/...&max_bytes=1000",
             "POST /runs/{task_id}/execute_local",
             "POST /runs/{task_id}/execute_http",
             "POST /runs/{task_id}/start_local",
@@ -631,12 +633,14 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         return
                     query = parse_qs(parsed.query)
                     artifact_path = query.get("path", [""])[0]
+                    raw_max_bytes = query.get("max_bytes", [""])[0]
+                    max_bytes = parse_limit(raw_max_bytes, default=MAX_ARTIFACT_TEXT_BYTES, maximum=MAX_ARTIFACT_TEXT_BYTES) if raw_max_bytes else MAX_ARTIFACT_TEXT_BYTES
                     ledger, ledger_error = load_ledger_dict(ledger_path)
                     if ledger_error:
                         response(self, 500, {"ok": False, "error": ledger_error, "task_id": task_id})
                         return
                     try:
-                        payload = artifact_text(ledger, artifact_path)
+                        payload = artifact_text(ledger, artifact_path, max_bytes=max_bytes)
                     except ValueError as exc:
                         response(self, 400, {"ok": False, "error": str(exc)})
                         return

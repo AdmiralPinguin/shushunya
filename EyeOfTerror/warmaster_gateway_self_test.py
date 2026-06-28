@@ -219,6 +219,9 @@ def main() -> int:
             text_artifact = request_json(base + f"/runs/warmaster-test/artifact_text?path={artifact_path}")
             if not text_artifact.get("ok") or "ready" not in text_artifact.get("text", ""):
                 raise AssertionError(f"bad artifact text response: {text_artifact}")
+            text_preview = request_json(base + f"/runs/warmaster-test/artifact_text?path={artifact_path}&max_bytes=8")
+            if not text_preview.get("ok") or len(text_preview.get("text", "").encode("utf-8")) > 8:
+                raise AssertionError(f"bad artifact preview response: {text_preview}")
             event_types = [event.get("type") for event in ledger["ledger"].get("events", [])]
             if event_types.count("task_created") != 1:
                 raise AssertionError(f"ledger should preserve original task_created event: {ledger}")

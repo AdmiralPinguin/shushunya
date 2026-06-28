@@ -28,6 +28,7 @@ GET  /runs/{task_id}/worker_tasks?live=1
 GET  /runs/{task_id}/events
 GET  /runs/{task_id}/artifacts
 GET  /runs/{task_id}/artifact_text?path=/work/...
+GET  /runs/{task_id}/artifact_text?path=/work/...&max_bytes=1000
 POST /runs/{task_id}/execute_local
 POST /runs/{task_id}/execute_http
 POST /runs/{task_id}/start_local
