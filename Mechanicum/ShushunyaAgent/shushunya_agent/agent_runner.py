@@ -4507,7 +4507,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     explicit_workspace = explicit_workspace_from_task(original_task)
     expected_cli_modules: set[str] = set(cli_modules_from_task(classification_task_text))
     expected_cli_modules.update(cli_modules_from_text_paths(classification_task_text, explicit_workspace))
+    expected_cli_modules.update(cli_modules_from_listing_text(classification_task_text, explicit_workspace))
     expected_cli_input_paths: set[str] = set(cli_input_paths_from_task(classification_task_text, explicit_workspace))
+    expected_cli_input_paths.update(cli_input_paths_from_listing_text(classification_task_text, explicit_workspace))
     if swe_requires_cli_verification and explicit_workspace:
         expected_cli_modules.update(cli_modules_from_workspace(explicit_workspace))
     data_source_path_list = data_source_paths_from_task(original_task, explicit_workspace, required_artifact_path_list)

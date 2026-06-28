@@ -4874,6 +4874,45 @@ def main() -> int:
         raise AssertionError(f"SWE CLI gate did not reject archive proposal after test pass: {swe_resume_cli_archive_payload}")
     print("[ok] SWE CLI pending blocks archive memory")
 
+    swe_resume_listing_cli_stdout = io.StringIO()
+    swe_resume_listing_cli_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-resume-listing-cli-contract"),
+        json_output=True,
+        max_steps=1,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    resume_listing_cli_task = (
+        "Продолжи выполнение той же задачи по task journal.\n\n"
+        "Resume context from previous agent task journal:\n"
+        "[{\"type\":\"start\",\"task\":\"Исправь Python-проект. CLI должен печатать валидный JSON.\\n\\n"
+        "Рабочий каталог для этой задачи: /work/project\"},"
+        "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":true,"
+        "\"stdout\":\".:\\njobs.csv\\nscheduler\\n\\n./scheduler:\\n__init__.py\\ncli.py\\ncore.py\\n\"}},"
+        "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":true,"
+        "\"passing_tests\":[\"tests/test_core.py::test_core\"],\"failing_tests\":[]}}]"
+    )
+    with mock.patch.object(agent_runner, "chat", return_value=(
+            '{"action":"shell","cmd":"cd /work/project && python3 -m scheduler.cli jobs.csv | '
+            'python3 -c \\"import sys,json; json.load(sys.stdin)\\"","timeout":60}'
+    )), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": True,
+            "returncode": 0,
+            "stdout": "{}\n",
+            "stderr": "",
+    }) as mocked_resume_listing_shell, \
+            contextlib.redirect_stdout(swe_resume_listing_cli_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(resume_listing_cli_task, swe_resume_listing_cli_config)
+    swe_resume_listing_cli_payload = json.loads(swe_resume_listing_cli_stdout.getvalue())
+    listing_cli_results = [step.get("result") or {} for step in swe_resume_listing_cli_payload.get("steps", [])]
+    if not mocked_resume_listing_shell.called:
+        raise AssertionError(f"SWE resume listing CLI contract did not run shell verification: {swe_resume_listing_cli_payload}")
+    if any(result.get("error") == "swe cli verification required by supervisor" for result in listing_cli_results):
+        raise AssertionError(f"SWE resume listing CLI contract was not restored: {swe_resume_listing_cli_payload}")
+    print("[ok] SWE resume listing restores CLI contract")
+
     swe_resume_no_tests_stdout = io.StringIO()
     swe_resume_no_tests_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-resume-cli-no-tests-allows-python"),
