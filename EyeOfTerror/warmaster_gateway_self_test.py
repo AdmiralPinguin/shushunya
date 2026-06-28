@@ -12,7 +12,7 @@ from pathlib import Path
 
 import eye_of_terror.warmaster_gateway as warmaster_gateway
 from eye_of_terror.inner_circle.iskandar_service import make_handler as make_iskandar_handler
-from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
+from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, requested_step_ids_from_payload, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
 
 
@@ -65,6 +65,14 @@ def main() -> int:
         raise AssertionError("limit parser did not clamp values")
     if parse_nonnegative_int("42", default=0) != 42 or parse_nonnegative_int("bad", default=7) != 7:
         raise AssertionError("nonnegative integer parser returned an unexpected value")
+    if requested_step_ids_from_payload({"step_ids": [" source_discovery "]}) != ["source_discovery"]:
+        raise AssertionError("step id parser did not normalize requested step ids")
+    try:
+        requested_step_ids_from_payload({"step_ids": ["source_discovery", "source_discovery"]})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("step id parser accepted duplicate requested step ids")
     if not valid_task_id("valid-task_1.2") or valid_task_id("../escape") or valid_task_id("x" * 129):
         raise AssertionError("task id validator accepted an unsafe value")
     if validate_service_host("localhost") != "localhost":
@@ -243,6 +251,7 @@ def main() -> int:
                 "worker_cancel_fanout",
                 "run_action_hints",
                 "run_execution_preflight",
+                "restricted_step_execution",
                 "interrupted_run_resume",
                 "http_governor_planning",
                 "brigade_plan_snapshot",
@@ -253,6 +262,7 @@ def main() -> int:
             if (
                 not capabilities.get("actions", {}).get("can_preflight_task")
                 or not capabilities.get("actions", {}).get("can_preflight_runs")
+                or not capabilities.get("actions", {}).get("can_execute_step_subsets")
                 or "POST /task_preflight" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
                 or "POST /runs/{task_id}/preflight_http" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
             ):
@@ -412,6 +422,16 @@ def main() -> int:
                     raise AssertionError(f"restricted run preflight should require existing inputs: {blocked_preflight}")
             else:
                 raise AssertionError("restricted local run preflight should fail before dependency artifacts exist")
+            try:
+                request_json(base + "/runs/warmaster-test/execute_local", {"step_ids": ["missing_step"], "timeout_sec": 30}, timeout=60)
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                unknown_step = json.loads(exc.read().decode("utf-8"))
+                if "unknown run steps" not in unknown_step.get("error", ""):
+                    raise AssertionError(f"bad unknown step rejection: {unknown_step}")
+            else:
+                raise AssertionError("execution should reject unknown requested step ids")
             preflight_events = request_json(base + "/runs/warmaster-test/events")
             recorded_preflights = [
                 item
@@ -515,6 +535,27 @@ def main() -> int:
             limited_run_list = request_json(base + "/runs?limit=1")
             if not limited_run_list.get("ok") or len(limited_run_list.get("runs", [])) != 1 or limited_run_list.get("run_summary", {}).get("total", 0) < 2:
                 raise AssertionError(f"bad limited run list: {limited_run_list}")
+            restricted_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-restricted-test"},
+            )
+            restricted_run_dir = Path(restricted_task["run_dir"])
+            restricted = request_json(
+                base + "/runs/warmaster-restricted-test/execute_local",
+                {"step_ids": ["source_discovery"], "timeout_sec": 30},
+                timeout=60,
+            )
+            if not restricted.get("ok") or not restricted.get("summary", {}).get("partial_execution"):
+                raise AssertionError(f"restricted execution did not report partial success: {restricted}")
+            restricted_ledger = request_json(base + "/runs/warmaster-restricted-test/ledger")
+            if restricted_ledger.get("ledger", {}).get("status") != "interrupted":
+                raise AssertionError(f"restricted execution should leave pending work interrupted: {restricted_ledger}")
+            restricted_pending = resume_step_ids_from_run(restricted_run_dir)
+            if not restricted_pending or restricted_pending[0] != "source_acquisition" or "source_discovery" in restricted_pending:
+                raise AssertionError(f"restricted execution did not expose resumable pending steps: {restricted_pending}")
+            restricted_resumed = request_json(base + "/runs/warmaster-restricted-test/resume_local", {"timeout_sec": 30}, timeout=60)
+            if not restricted_resumed.get("ok"):
+                raise AssertionError(f"restricted run did not resume cleanly: {restricted_resumed}")
             executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
             if not executed.get("ok"):
                 raise AssertionError(f"bad local execution: {executed}")

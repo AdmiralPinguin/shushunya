@@ -163,8 +163,11 @@ def execute_run(
         ledger.set_result({"ok": False, "final_step": "", "artifacts": [], "status": "preflight_failed", "summary": "Worker preflight failed."})
         ledger.set_status("failed")
         return summary
+    all_dispatch_paths = ordered_dispatch_paths(run_dir)
+    selected_dispatch_paths = ordered_dispatch_paths(run_dir, step_ids=step_ids)
+    partial_execution = bool(step_ids) and [path.stem for path in selected_dispatch_paths] != [path.stem for path in all_dispatch_paths]
     results: list[HttpStepResult] = []
-    for dispatch_path in ordered_dispatch_paths(run_dir, step_ids=step_ids):
+    for dispatch_path in selected_dispatch_paths:
         ledger = TaskLedger.load(ledger_path)
         if ledger.cancel_requested():
             break
@@ -192,6 +195,7 @@ def execute_run(
     if step_ids:
         summary["step_ids"] = step_ids
         summary["execution_mode"] = execution_mode
+        summary["partial_execution"] = partial_execution
         if execution_mode == "revision":
             summary["revision_execution"] = True
         if execution_mode == "resume":
@@ -207,12 +211,12 @@ def execute_run(
                 "final_step": results[-1].step_id if results else "",
                 "artifacts": final_payload.get("artifacts", []),
                 "workspace_root": str(workspace_root) if workspace_root is not None else "",
-                "status": "cancelled" if cancelled else final_payload.get("status", ""),
-                "summary": "Execution cancelled before next step." if cancelled else final_payload.get("summary", ""),
+                "status": "cancelled" if cancelled else ("interrupted" if summary["ok"] and partial_execution else final_payload.get("status", "")),
+                "summary": "Execution cancelled before next step." if cancelled else ("Partial execution completed; pending steps remain." if summary["ok"] and partial_execution else final_payload.get("summary", "")),
                 "revision_plan": final_payload.get("revision_plan", {}),
             }
         )
-    ledger.set_status("completed" if summary["ok"] else ("cancelled" if cancelled else "failed"))
+    ledger.set_status("interrupted" if summary["ok"] and partial_execution else ("completed" if summary["ok"] else ("cancelled" if cancelled else "failed")))
     return summary
 
 

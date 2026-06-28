@@ -29,6 +29,8 @@
 - Warmaster Gateway can preflight existing run packages before local or HTTP
   execution without starting workers.
 - Warmaster capabilities advertise run execution preflight support.
+- Warmaster local and HTTP execution can run validated step subsets without
+  marking the whole run completed while downstream steps remain pending.
 - Run preflight records compact audit events in the task ledger.
 - Warmaster Gateway exposes `POST /task_preflight` for routing, governor,
   contract, and worker checks without creating run history.

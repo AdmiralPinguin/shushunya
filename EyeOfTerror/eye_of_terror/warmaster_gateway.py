@@ -44,6 +44,23 @@ def parse_nonnegative_int(raw_value: str, default: int) -> int:
     return max(0, int(raw_value))
 
 
+def requested_step_ids_from_payload(payload: dict[str, Any]) -> list[str]:
+    if "step_ids" not in payload:
+        return []
+    raw_step_ids = payload.get("step_ids")
+    if not isinstance(raw_step_ids, list):
+        raise ValueError("step_ids must be a list of non-empty strings")
+    step_ids: list[str] = []
+    for index, item in enumerate(raw_step_ids):
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"step_ids[{index}] must be a non-empty string")
+        step_id = item.strip()
+        if step_id in step_ids:
+            raise ValueError(f"step_ids contains duplicate step: {step_id}")
+        step_ids.append(step_id)
+    return step_ids
+
+
 def valid_task_id(task_id: str) -> bool:
     return bool(TASK_ID_RE.fullmatch(task_id)) and ".." not in task_id
 
@@ -823,6 +840,27 @@ def run_execution_preflight(
     }
 
 
+def planned_step_ids_from_run(run_dir: Path) -> list[str]:
+    status = load_json_file(run_dir / "status.json")
+    steps = status.get("steps") if isinstance(status.get("steps"), list) else []
+    return [
+        str(step.get("step_id") or "")
+        for step in steps
+        if isinstance(step, dict) and str(step.get("step_id") or "")
+    ]
+
+
+def validate_requested_step_ids(run_dir: Path, requested: list[str], allowed: list[str] | None = None) -> None:
+    available = planned_step_ids_from_run(run_dir)
+    unknown = [step_id for step_id in requested if step_id not in available]
+    if unknown:
+        raise ValueError(f"step_ids reference unknown run steps: {unknown}")
+    if allowed is not None:
+        blocked = [step_id for step_id in requested if step_id not in allowed]
+        if blocked:
+            raise ValueError(f"step_ids are not valid for this execution mode: {blocked}")
+
+
 def record_run_preflight_event(run_dir: Path, preflight: dict[str, Any]) -> None:
     ledger_path = run_dir / "task_ledger.json"
     if not ledger_path.exists():
@@ -1191,6 +1229,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "run_action_hints",
             "run_step_artifact_read",
             "run_execution_preflight",
+            "restricted_step_execution",
             "doctor",
         ],
         "endpoints": [
@@ -1256,6 +1295,7 @@ def gateway_actions() -> dict[str, Any]:
         "can_start_runs": True,
         "can_resume_interrupted_runs": True,
         "can_execute_revisions": True,
+        "can_execute_step_subsets": True,
         "can_cancel_runs": True,
         "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
         "diagnostics": ["GET /state?health=1", "GET /brigade_health", "GET /doctor"],
@@ -1659,17 +1699,13 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             return
                         if resume_mode:
                             ledger.record_event("resume_execution_requested", {"mode": parts[2]})
-                    requested_preflight_steps = payload.get("step_ids") if preflight_mode and isinstance(payload.get("step_ids"), list) else []
-                    preflight_step_ids = [
-                        str(item).strip()
-                        for item in requested_preflight_steps
-                        if isinstance(item, str) and str(item).strip()
-                    ]
-                    restricted_step_ids = (
-                        preflight_step_ids
-                        if preflight_step_ids
-                        else (revision_step_ids_from_run(run_dir) if revision_mode else (resume_step_ids_from_run(run_dir) if resume_mode else None))
-                    )
+                    requested_step_ids = requested_step_ids_from_payload(payload)
+                    mode_step_ids = revision_step_ids_from_run(run_dir) if revision_mode else (resume_step_ids_from_run(run_dir) if resume_mode else None)
+                    if requested_step_ids:
+                        validate_requested_step_ids(run_dir, requested_step_ids, allowed=mode_step_ids)
+                        restricted_step_ids = requested_step_ids
+                    else:
+                        restricted_step_ids = mode_step_ids
                     workspace_root = resolve_run_child_path(run_dir, str(payload.get("workspace_root") or ""), "work")
                     timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
                     execution_mode = "revision" if revision_mode else ("resume" if resume_mode else "full")
