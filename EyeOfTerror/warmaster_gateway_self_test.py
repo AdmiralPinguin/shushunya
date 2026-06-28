@@ -261,7 +261,8 @@ def main() -> int:
                 )
                 if (
                     bad_prepared.get("error_code") != "governor_prepare_invalid_run"
-                    or (run_root / "warmaster-governor-bad-prepare-test" / "task_ledger.json").exists()
+                    or not bad_prepared.get("cleanup", {}).get("removed")
+                    or (run_root / "warmaster-governor-bad-prepare-test").exists()
                 ):
                     raise AssertionError(f"Warmaster accepted invalid governor-prepared run package: {bad_prepared}")
             finally:

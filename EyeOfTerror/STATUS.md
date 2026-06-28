@@ -70,6 +70,8 @@
   returns oversight that does not match the task contract.
 - Warmaster verifies HTTP-governor prepared run packages before writing the
   Warmaster ledger.
+- Warmaster cleans up unregistered HTTP-governor run directories when prepare
+  fails before ledger creation.
 - Task contract runtime validation rejects non-string non-goals, completion
   criteria, and quality gates.
 - Task contract runtime validation requires every required artifact to have one

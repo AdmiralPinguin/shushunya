@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import threading
 import urllib.error
 import urllib.request
@@ -218,6 +219,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "task_id": service_task_id,
         }
     if not prepared.get("ok"):
+        cleanup = cleanup_unregistered_run_dir(run_root, run_dir)
         return {
             "ok": False,
             "gateway": "WarmasterGateway",
@@ -226,10 +228,12 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "governor": governor.name,
             "task_id": service_task_id,
             "response": prepared,
+            "cleanup": cleanup,
         }
     planned_oversight = plan.get("oversight") if isinstance(plan.get("oversight"), dict) else {}
     package_errors = verify_prepared_run_package(run_dir, contract, planned_oversight)
     if package_errors:
+        cleanup = cleanup_unregistered_run_dir(run_root, run_dir)
         return {
             "ok": False,
             "gateway": "WarmasterGateway",
@@ -238,6 +242,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "governor": governor.name,
             "task_id": service_task_id,
             "validation": {"ok": False, "errors": package_errors},
+            "cleanup": cleanup,
         }
     TaskLedger.create(run_dir / "task_ledger.json", service_task_id, str(contract.get("goal") or message), governor.name)
     return {
@@ -291,6 +296,22 @@ def verify_prepared_run_package(run_dir: Path, planned_contract: dict[str, Any],
         if not status_error:
             errors.extend(validate_oversight_against_run(run_dir, prepared_oversight, status))
     return errors
+
+
+def cleanup_unregistered_run_dir(run_root: Path, run_dir: Path) -> dict[str, Any]:
+    root = run_root.resolve()
+    target = run_dir.resolve()
+    if target != root and root not in target.parents:
+        return {"attempted": False, "removed": False, "reason": "run_dir is outside run_root"}
+    if not target.exists():
+        return {"attempted": False, "removed": False, "reason": "run_dir does not exist"}
+    if (target / "task_ledger.json").exists():
+        return {"attempted": False, "removed": False, "reason": "ledger exists"}
+    try:
+        shutil.rmtree(target)
+    except OSError as exc:
+        return {"attempted": True, "removed": False, "error": str(exc)}
+    return {"attempted": True, "removed": True}
 
 
 def prepare_task(message: str, task_id: str | None, run_root: Path, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> dict[str, Any]:
