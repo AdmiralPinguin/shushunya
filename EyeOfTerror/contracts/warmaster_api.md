@@ -175,8 +175,8 @@ Clients should use:
 - `/runs/{task_id}/events?after=N` for incremental client polling. Responses
   include `cursor.after`, `cursor.next`, and `cursor.total`.
 Aggregate `/events` responses include the same cursor shape plus `task_id`,
-`run_status`, `governor`, `run_updated_at`, `event_index`, and `global_index`
-for each event.
+`run_status`, `governor`, `run_updated_at`, `event_index`, `global_index`,
+`run_next_action`, and `run_final_manifest_summary` for each event.
 - `/runs/{task_id}/artifacts` for result artifact metadata. If the final result
   is a `final_manifest.json`, the response should also expand manifest `files`
   so clients can list and fetch the whole final package. The final manifest

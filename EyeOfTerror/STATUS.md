@@ -117,6 +117,9 @@
   `/events?after=N` for clients that need one feed across runs.
 - Aggregate run events include run status, governor, run update time, per-run
   event index, and global index for client-side list updates.
+- Aggregate run events include the current `run_next_action` and
+  `run_final_manifest_summary` so polling clients can update controls and final
+  quality state without fetching every run summary.
 - Warmaster Gateway exposes compact per-run snapshots for mobile/client
   polling through `/runs/{task_id}/snapshot`.
 - Warmaster Gateway exposes process-local active run snapshots through

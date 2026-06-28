@@ -689,6 +689,21 @@ def main() -> int:
                 or "Реконструкция" not in reconstruction_preview.get("preview", {}).get("text", "")
             ):
                 raise AssertionError(f"bad final package response: {final_package}")
+            completed_global_events = request_json(base + "/events?limit=200")
+            completed_result_event = next(
+                (
+                    item
+                    for item in completed_global_events.get("events", [])
+                    if item.get("task_id") == "warmaster-test" and item.get("type") == "result_recorded"
+                ),
+                {},
+            )
+            if (
+                completed_result_event.get("run_status") != "completed"
+                or completed_result_event.get("run_next_action", {}).get("kind") != "rerun_requires_force"
+                or completed_result_event.get("run_final_manifest_summary", {}).get("status") != "ready"
+            ):
+                raise AssertionError(f"global run events did not expose completed run action state: {completed_global_events}")
             text_preview = request_json(base + f"/runs/warmaster-test/artifact_text?path={artifact_path}&max_bytes=8")
             if not text_preview.get("ok") or len(text_preview.get("text", "").encode("utf-8")) > 8:
                 raise AssertionError(f"bad artifact preview response: {text_preview}")

@@ -812,6 +812,10 @@ def all_run_events(run_root: Path, limit: int | None = None, after: int | None =
         run_status = str(ledger.get("status") or "")
         governor = str(ledger.get("governor") or "")
         run_updated_at = str(ledger.get("updated_at") or "")
+        summary = run_summary(run_dir)
+        actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
+        next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+        manifest_summary = summary.get("final_manifest_summary") if isinstance(summary.get("final_manifest_summary"), dict) else {}
         raw_events = ledger.get("events") if isinstance(ledger.get("events"), list) else []
         for index, event in enumerate(raw_events):
             if not isinstance(event, dict):
@@ -825,6 +829,8 @@ def all_run_events(run_root: Path, limit: int | None = None, after: int | None =
                     "event_index": index,
                     "at": str(event.get("at") or ""),
                     "type": str(event.get("type") or ""),
+                    "run_next_action": next_action,
+                    "run_final_manifest_summary": manifest_summary,
                     "payload": event.get("payload") if isinstance(event.get("payload"), dict) else {},
                 }
             )
