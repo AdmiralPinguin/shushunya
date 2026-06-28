@@ -62,6 +62,8 @@ Clients should use:
   governor worker requirement diagnostics.
 - `GET /events?after=N` for one aggregate event cursor across all runs.
 - `GET /runs/{task_id}/snapshot?events_after=N` for per-run polling.
+- `GET /recovery` for interrupted-run recovery queues and readiness
+  diagnostics.
 - `POST /runs/{task_id}/cancel` for cancellation.
 - `GET /doctor` for admin diagnostics.
 
