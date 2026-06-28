@@ -3881,7 +3881,10 @@ def main() -> int:
     })
     if (
         enriched_type_mismatch.get("type_mismatches") != [{"operator": "+", "left_type": "datetime.datetime", "right_type": "float"}]
+        or not enriched_type_mismatch.get("type_mismatch_repairs")
+        or "timedelta" not in str(enriched_type_mismatch.get("type_mismatch_repairs") or "")
         or "type_mismatches" not in str(enriched_type_mismatch.get("supervisor_instruction") or "")
+        or "timedelta" not in str(enriched_type_mismatch.get("supervisor_instruction") or "")
         or "traceback line" not in str(enriched_type_mismatch.get("supervisor_instruction") or "")
     ):
         raise AssertionError(f"pytest fallback type mismatch hint missing from model result: {enriched_type_mismatch}")

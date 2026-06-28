@@ -2139,6 +2139,20 @@ def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
         enriched["missing_symbols"] = missing_symbols[:10]
     if type_mismatches:
         enriched["type_mismatches"] = type_mismatches[:10]
+    type_mismatch_repairs: list[str] = []
+    for mismatch in type_mismatches:
+        operator = mismatch.get("operator", "")
+        types = {mismatch.get("left_type", ""), mismatch.get("right_type", "")}
+        if operator == "+" and "datetime.datetime" in types and ("float" in types or "int" in types):
+            repair = (
+                "datetime.datetime cannot be added to int/float durations directly; "
+                "convert numeric durations to datetime.timedelta (for example timedelta(minutes=duration_min)) "
+                "and import timedelta from datetime if needed."
+            )
+            if repair not in type_mismatch_repairs:
+                type_mismatch_repairs.append(repair)
+    if type_mismatch_repairs:
+        enriched["type_mismatch_repairs"] = type_mismatch_repairs[:5]
     if failing:
         missing_symbol_instruction = (
             " The failure includes missing_symbols="
@@ -2150,6 +2164,12 @@ def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
         type_mismatch_instruction = (
             " The failure includes type_mismatches="
             + json.dumps(type_mismatches[:10], ensure_ascii=False)
+            + (
+                " Suggested repair: "
+                + " ".join(type_mismatch_repairs[:5])
+                if type_mismatch_repairs
+                else ""
+            )
             + ". Before changing unrelated logic, fix the incompatible operation named by the traceback line so both operands have compatible types, then rerun the full test/fallback set."
             if type_mismatches
             else ""
