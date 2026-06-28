@@ -292,7 +292,8 @@ Clients should use:
 - `/runs/{task_id}/events` for ledger event history.
 - `/runs/{task_id}/events?after=N` for incremental client polling. Responses
   include `cursor.after`, `cursor.next`, `cursor.total`, `display_events`, and
-  executable `run_client_action`.
+  executable `run_client_action`, plus the standard run detail `phase`,
+  `decision`, `display`, `next_action`, and executable `client_action`.
 Aggregate `/events` responses include the same cursor shape plus `task_id`,
 `run_status`, `governor`, `run_updated_at`, `event_index`, `global_index`,
 `run_next_action`, executable `run_client_action`, and
@@ -302,11 +303,16 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
   so clients can list and fetch the whole final package. The final manifest
   artifact item includes `manifest_summary` with status, critic status, critic
   metrics, revision focus, warnings, and blockers, or `manifest_error` when the
-  manifest exists but cannot be parsed.
+  manifest exists but cannot be parsed. The response includes the standard run
+  detail client-view fields.
 - `/runs/{task_id}/final` for a completed final package in one response:
   manifest summary, full manifest object, deliverable path, package files, and
   bounded text previews. `max_bytes` limits each file preview and is clamped by
-  the same artifact text maximum.
+  the same artifact text maximum. The response includes the standard run detail
+  client-view fields.
+- `/runs/{task_id}/artifact_text` and `/runs/{task_id}/worker_tasks` include the
+  same run detail client-view fields so artifact and worker-task screens can
+  render the current run state without a follow-up summary request.
 - `/runs/{task_id}/package` for run-package diagnostics across
   `contract.json`, `oversight.json`, `status.json`, and dispatch packets. The
   response also includes `run_summary`, `phase`, `decision`, `display`,

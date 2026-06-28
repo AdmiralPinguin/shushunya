@@ -272,6 +272,10 @@
 - Per-run event and snapshot polling responses expose executable
   `run_client_action` so task detail screens can update controls without
   rebuilding actions from summaries.
+- Run events, worker-task mappings, artifacts, artifact text, and final package
+  endpoints expose the standard run detail `phase`, `decision`, `display`,
+  `next_action`, and executable `client_action` fields for standalone client
+  screens.
 - Aggregate run events include run status, governor, run update time, per-run
   event index, and global index for client-side list updates.
 - Aggregate run events include the current `run_next_action` and

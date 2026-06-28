@@ -3549,8 +3549,10 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     try:
                         payload = run_worker_tasks(run_dir, include_health=include_live, host=host)
                     except ValueError as exc:
-                        response(self, 400, {"ok": False, "error": str(exc)})
+                        payload = payload_with_run_view({"ok": False, "error": str(exc), "task_id": task_id}, run_dir, task_id)
+                        response(self, 400, payload)
                         return
+                    payload = payload_with_run_view(payload, run_dir, task_id)
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 if len(parts) == 3 and parts[2] == "events":
@@ -3560,39 +3562,48 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     raw_after = query.get("after", [""])[0]
                     after = parse_nonnegative_int(raw_after, default=0) if raw_after else None
                     payload = run_events(run_dir, limit=limit, after=after)
+                    payload = payload_with_run_view(payload, run_dir, task_id)
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 if len(parts) == 3 and parts[2] == "artifacts":
                     if not ledger_path.exists():
-                        response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
+                        payload = payload_with_run_view({"ok": False, "error": "ledger not found", "task_id": task_id}, run_dir, task_id)
+                        response(self, 404, payload)
                         return
                     ledger, ledger_error = load_ledger_dict(ledger_path)
                     if ledger_error:
-                        response(self, 500, {"ok": False, "error": ledger_error, "task_id": task_id})
+                        payload = payload_with_run_view({"ok": False, "error": ledger_error, "task_id": task_id}, run_dir, task_id)
+                        response(self, 500, payload)
                         return
-                    response(self, 200, {"ok": True, "task_id": task_id, **artifact_status(ledger)})
+                    payload = payload_with_run_view({"ok": True, "task_id": task_id, **artifact_status(ledger)}, run_dir, task_id)
+                    response(self, 200, payload)
                     return
                 if len(parts) == 3 and parts[2] == "final":
                     if not ledger_path.exists():
-                        response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
+                        payload = payload_with_run_view({"ok": False, "error": "ledger not found", "task_id": task_id}, run_dir, task_id)
+                        response(self, 404, payload)
                         return
                     query = parse_qs(parsed.query)
                     raw_max_bytes = query.get("max_bytes", [""])[0]
                     max_bytes = parse_limit(raw_max_bytes, default=20000, maximum=MAX_ARTIFACT_TEXT_BYTES) if raw_max_bytes else 20000
                     ledger, ledger_error = load_ledger_dict(ledger_path)
                     if ledger_error:
-                        response(self, 500, {"ok": False, "error": ledger_error, "task_id": task_id})
+                        payload = payload_with_run_view({"ok": False, "error": ledger_error, "task_id": task_id}, run_dir, task_id)
+                        response(self, 500, payload)
                         return
                     try:
                         payload = final_package(ledger, max_bytes=max_bytes)
                     except ValueError as exc:
-                        response(self, 400, {"ok": False, "error": str(exc), "task_id": task_id})
+                        payload = payload_with_run_view({"ok": False, "error": str(exc), "task_id": task_id}, run_dir, task_id)
+                        response(self, 400, payload)
                         return
-                    response(self, 200 if payload.get("ok") else 404, {"task_id": task_id, **payload})
+                    payload = payload_with_run_view({"task_id": task_id, **payload}, run_dir, task_id)
+                    response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 if len(parts) == 3 and parts[2] == "artifact_text":
                     if not ledger_path.exists():
-                        response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
+                        payload = payload_with_run_view({"ok": False, "error": "ledger not found", "task_id": task_id}, run_dir, task_id)
+                        response(self, 404, payload)
                         return
                     query = parse_qs(parsed.query)
                     artifact_path = query.get("path", [""])[0]
@@ -3600,13 +3611,16 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     max_bytes = parse_limit(raw_max_bytes, default=MAX_ARTIFACT_TEXT_BYTES, maximum=MAX_ARTIFACT_TEXT_BYTES) if raw_max_bytes else MAX_ARTIFACT_TEXT_BYTES
                     ledger, ledger_error = load_ledger_dict(ledger_path)
                     if ledger_error:
-                        response(self, 500, {"ok": False, "error": ledger_error, "task_id": task_id})
+                        payload = payload_with_run_view({"ok": False, "error": ledger_error, "task_id": task_id}, run_dir, task_id)
+                        response(self, 500, payload)
                         return
                     try:
                         payload = artifact_text(ledger, artifact_path, max_bytes=max_bytes)
                     except ValueError as exc:
-                        response(self, 400, {"ok": False, "error": str(exc)})
+                        payload = payload_with_run_view({"ok": False, "error": str(exc), "task_id": task_id}, run_dir, task_id)
+                        response(self, 400, payload)
                         return
+                    payload = payload_with_run_view(payload, run_dir, task_id)
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return
                 status, status_error = load_json_object(status_path, "status") if status_path.exists() else ({}, "")

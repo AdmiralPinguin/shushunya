@@ -1225,6 +1225,9 @@ def main() -> int:
                 not worker_tasks.get("ok")
                 or not worker_tasks.get("worker_tasks")
                 or worker_tasks["worker_tasks"][0].get("task_id") != "warmaster-test:source_discovery"
+                or worker_tasks.get("phase") != "ready_to_start"
+                or worker_tasks.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
+                or not worker_tasks.get("display", {}).get("headline")
             ):
                 raise AssertionError(f"bad worker task mapping: {worker_tasks}")
             try:
@@ -1243,6 +1246,9 @@ def main() -> int:
                 or len(events.get("events", [])) != 1
                 or len(events.get("display_events", [])) != 1
                 or events.get("run_client_action", {}).get("path") != "/runs/warmaster-test/start_http"
+                or events.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
+                or events.get("phase") != "ready_to_start"
+                or not events.get("display", {}).get("headline")
                 or events.get("cursor", {}).get("next") != events.get("cursor", {}).get("total")
             ):
                 raise AssertionError(f"bad run events: {events}")
@@ -1336,7 +1342,14 @@ def main() -> int:
             if ledger_after_late_cancel.get("ledger", {}).get("status") != "completed":
                 raise AssertionError(f"late cancel rewrote completed run state: {ledger_after_late_cancel}")
             artifacts = request_json(base + "/runs/warmaster-test/artifacts")
-            if not artifacts.get("ok") or not artifacts.get("artifacts") or not artifacts["artifacts"][0].get("exists"):
+            if (
+                not artifacts.get("ok")
+                or not artifacts.get("artifacts")
+                or not artifacts["artifacts"][0].get("exists")
+                or artifacts.get("phase") != "completed"
+                or artifacts.get("client_action", {}).get("path") != "/runs/warmaster-test/final"
+                or not artifacts.get("display", {}).get("headline")
+            ):
                 raise AssertionError(f"bad artifacts response: {artifacts}")
             artifact_paths = {item.get("path") for item in artifacts.get("artifacts", [])}
             if "/work/skalathrax/reconstruction_ru.md" not in artifact_paths:
@@ -1353,7 +1366,12 @@ def main() -> int:
                 final_manifest_host_path.write_text("{", encoding="utf-8")
                 corrupt_artifacts = request_json(base + "/runs/warmaster-test/artifacts")
                 corrupt_manifest_item = next((item for item in corrupt_artifacts.get("artifacts", []) if item.get("path") == "/work/skalathrax/final_manifest.json"), {})
-                if not corrupt_manifest_item.get("manifest_error"):
+                if (
+                    not corrupt_manifest_item.get("manifest_error")
+                    or corrupt_artifacts.get("phase") != "completed"
+                    or corrupt_artifacts.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
+                    or corrupt_artifacts.get("client_action", {}).get("body", {}).get("force") is not True
+                ):
                     raise AssertionError(f"artifacts response did not expose corrupt final manifest error: {corrupt_artifacts}")
             finally:
                 final_manifest_host_path.write_text(original_manifest_text, encoding="utf-8")
@@ -1390,7 +1408,13 @@ def main() -> int:
                 raise AssertionError(f"bad final step artifacts endpoint: {final_step_artifacts}")
             artifact_path = artifacts["artifacts"][0]["path"]
             text_artifact = request_json(base + f"/runs/warmaster-test/artifact_text?path={artifact_path}")
-            if not text_artifact.get("ok") or "ready" not in text_artifact.get("text", ""):
+            if (
+                not text_artifact.get("ok")
+                or "ready" not in text_artifact.get("text", "")
+                or text_artifact.get("phase") != "completed"
+                or text_artifact.get("client_action", {}).get("path") != "/runs/warmaster-test/final"
+                or not text_artifact.get("display", {}).get("headline")
+            ):
                 raise AssertionError(f"bad artifact text response: {text_artifact}")
             reconstruction_text = request_json(base + "/runs/warmaster-test/artifact_text?path=/work/skalathrax/reconstruction_ru.md")
             if not reconstruction_text.get("ok") or "Реконструкция" not in reconstruction_text.get("text", ""):
@@ -1406,6 +1430,9 @@ def main() -> int:
                 or final_package.get("deliverable") != "/work/skalathrax/reconstruction_ru.md"
                 or final_package.get("manifest", {}).get("status") != "ready"
                 or "Реконструкция" not in reconstruction_preview.get("preview", {}).get("text", "")
+                or final_package.get("phase") != "completed"
+                or final_package.get("client_action", {}).get("path") != "/runs/warmaster-test/final"
+                or not final_package.get("display", {}).get("headline")
             ):
                 raise AssertionError(f"bad final package response: {final_package}")
             completed_summary = request_json(base + "/runs/warmaster-test/summary")
