@@ -83,6 +83,8 @@
   preflight before execution.
 - Rejected task creation responses expose action hints for existing-run,
   brigade, governor, capability, or preflight diagnostics.
+- Task preflight action bodies preserve governor transport fields so clients
+  following `next_action` keep the intended local or HTTP planning boundary.
 - Governor API contract checks document the active Iskandar required worker
   chain exposed through `/capabilities`.
 - Iskandar `/plan` resolves worker metadata and reports planned workers as

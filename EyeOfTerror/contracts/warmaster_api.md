@@ -139,6 +139,10 @@ diagnostics after validation failures.
 creation and rejected creation attempts. Successful creation recommends run
 preflight before execution, while rejected creation attempts point clients to
 existing-run, brigade, governor, capability, or preflight diagnostics.
+When task preflight is run with explicit or default HTTP governor transport,
+its `create_task` and retry action bodies preserve `governor_transport` and
+`governor_host` so clients can follow `actions.next_action` without switching
+planning boundaries.
 
 ```json
 {

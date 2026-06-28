@@ -493,17 +493,37 @@ def created_task_actions(task_id: str) -> dict[str, Any]:
     }
 
 
-def task_preflight_actions(ok: bool, error_code: str, task_id: str, include_brigade_health: bool = False) -> dict[str, Any]:
+def task_preflight_body(task_id: str, include_brigade_health: bool = False, governor_transport: str = "", governor_host: str = "") -> dict[str, Any]:
+    body = {"message": "<same message>", "task_id": task_id} if task_id else {"message": "<same message>"}
+    if governor_transport:
+        body["governor_transport"] = governor_transport
+    if governor_host:
+        body["governor_host"] = governor_host
+    if include_brigade_health:
+        body["include_brigade_health"] = True
+    return body
+
+
+def task_preflight_actions(
+    ok: bool,
+    error_code: str,
+    task_id: str,
+    include_brigade_health: bool = False,
+    governor_transport: str = "",
+    governor_host: str = "",
+) -> dict[str, Any]:
     actions = {
         "can_create_task": ok,
         "can_check_brigade_readiness": True,
     }
+    retry_body = task_preflight_body(task_id, include_brigade_health, governor_transport, governor_host)
+    create_body = task_preflight_body(task_id, False, governor_transport, governor_host)
     if ok:
         next_action = {
             "kind": "create_task",
             "method": "POST",
             "endpoint": "POST /task",
-            "body": {"message": "<same message>", "task_id": task_id} if task_id else {"message": "<same message>"},
+            "body": create_body,
             "reason": "task preflight passed",
         }
     elif error_code == "task_exists":
@@ -551,7 +571,7 @@ def task_preflight_actions(ok: bool, error_code: str, task_id: str, include_brig
             "kind": "inspect_preflight",
             "method": "POST",
             "endpoint": "POST /task_preflight",
-            "body": {"include_brigade_health": True},
+            "body": retry_body,
             "reason": error_code or "task preflight failed",
         }
     else:
@@ -559,7 +579,7 @@ def task_preflight_actions(ok: bool, error_code: str, task_id: str, include_brig
             "kind": "inspect_preflight",
             "method": "POST",
             "endpoint": "POST /task_preflight",
-            "body": {},
+            "body": retry_body,
             "reason": error_code or "task preflight failed",
         }
     actions["next_action"] = next_action
@@ -581,7 +601,7 @@ def preflight_task(
             "error": "invalid task_id",
             "error_code": "invalid_task_id",
             "task_id": task_id,
-            "actions": task_preflight_actions(False, "invalid_task_id", task_id or "", include_brigade_health),
+            "actions": task_preflight_actions(False, "invalid_task_id", task_id or "", include_brigade_health, governor_transport, governor_host),
         }
     route = route_message(message)
     if not route.ok:
@@ -594,7 +614,7 @@ def preflight_task(
             "error": f"governor is not active: {route.governor}",
             "error_code": "governor_inactive",
             "kind": route.kind,
-            "actions": task_preflight_actions(False, "governor_inactive", task_id or "", include_brigade_health),
+            "actions": task_preflight_actions(False, "governor_inactive", task_id or "", include_brigade_health, governor_transport, governor_host),
         }
     if governor_transport not in {"local", "http"}:
         return {
@@ -602,7 +622,7 @@ def preflight_task(
             "gateway": "WarmasterGateway",
             "error": "governor_transport must be local or http",
             "error_code": "invalid_governor_transport",
-            "actions": task_preflight_actions(False, "invalid_governor_transport", task_id or "", include_brigade_health),
+            "actions": task_preflight_actions(False, "invalid_governor_transport", task_id or "", include_brigade_health, governor_transport, governor_host),
         }
     if governor_transport == "http":
         host = validate_service_host(governor_host)
@@ -629,6 +649,8 @@ def preflight_task(
                         "governor_workers_unavailable" if availability["unavailable_workers"] and not availability["missing_workers"] else "governor_workers_missing",
                         task_id or "",
                         include_brigade_health,
+                        governor_transport,
+                        governor_host,
                     ),
                 }
         try:
@@ -640,7 +662,7 @@ def preflight_task(
                 "error": f"governor service unavailable: {exc}",
                 "error_code": "governor_service_unavailable",
                 "governor": governor_ref.name,
-                "actions": task_preflight_actions(False, "governor_service_unavailable", task_id or "", include_brigade_health),
+                "actions": task_preflight_actions(False, "governor_service_unavailable", task_id or "", include_brigade_health, governor_transport, governor_host),
             }
         contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else {}
         oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else {}
@@ -659,7 +681,7 @@ def preflight_task(
             "error_code": "task_exists",
             "task_id": resolved_task_id,
             "run_dir": str(run_dir),
-            "actions": task_preflight_actions(False, "task_exists", resolved_task_id, include_brigade_health),
+            "actions": task_preflight_actions(False, "task_exists", resolved_task_id, include_brigade_health, governor_transport, governor_host),
         }
     validation_errors = validate_task_contract_payload(contract)
     availability = {"ok": True, "missing_workers": [], "unavailable_workers": []}
@@ -692,7 +714,7 @@ def preflight_task(
         "worker_availability": availability,
         "would_create_run_dir": str(run_dir) if resolved_task_id else "",
         "error_code": error_code,
-        "actions": task_preflight_actions(ok, error_code, resolved_task_id, include_brigade_health),
+        "actions": task_preflight_actions(ok, error_code, resolved_task_id, include_brigade_health, governor_transport, governor_host),
     }
     if include_brigade_health:
         payload["brigade_readiness"] = compact_brigade_readiness(host=governor_host)

@@ -430,6 +430,18 @@ def main() -> int:
                 )
                 if service_task.get("governor_transport") != "http" or not service_task.get("ok"):
                     raise AssertionError(f"gateway did not use default http governor transport: {service_task}")
+                service_preflight = request_json(
+                    gateway_base + "/task_preflight",
+                    {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-default-http-preflight-test"},
+                )
+                service_preflight_body = service_preflight.get("actions", {}).get("next_action", {}).get("body", {})
+                if (
+                    not service_preflight.get("ok")
+                    or service_preflight.get("governor_transport") != "http"
+                    or service_preflight_body.get("governor_transport") != "http"
+                    or service_preflight_body.get("task_id") != "warmaster-default-http-preflight-test"
+                ):
+                    raise AssertionError(f"http governor task preflight did not preserve creation action transport: {service_preflight}")
             finally:
                 gateway_server.shutdown()
                 gateway_thread.join(timeout=5)
