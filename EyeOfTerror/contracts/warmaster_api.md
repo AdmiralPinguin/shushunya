@@ -153,6 +153,11 @@ Run summaries include an `actions` object with client-facing booleans:
 `force_required_for_rerun`. Clients should use these hints for button state
 instead of duplicating Warmaster status rules.
 
+Run summaries also expose `last_preflight` when the ledger has a recorded run
+preflight. It contains the event timestamp, mode, selected steps, result, and
+failure counters so clients do not have to parse the full event stream for the
+latest startup check.
+
 Run summaries also include ordered progress hints:
 `planned_step_ids`, `completed_step_ids`, `failed_step_ids`,
 `pending_step_ids`, `next_step_id`, and `step_states`. These are derived from

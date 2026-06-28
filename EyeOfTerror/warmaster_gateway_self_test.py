@@ -410,6 +410,10 @@ def main() -> int:
             ]
             if len(recorded_preflights) < 2 or recorded_preflights[-1].get("payload", {}).get("input_failures") != 1:
                 raise AssertionError(f"run preflight was not recorded in ledger events: {preflight_events}")
+            post_preflight_summary = request_json(base + "/runs/warmaster-test/summary")
+            last_preflight = post_preflight_summary.get("summary", {}).get("last_preflight", {})
+            if last_preflight.get("ok") or last_preflight.get("input_failures") != 1 or last_preflight.get("mode") != "local":
+                raise AssertionError(f"run summary did not expose last preflight: {post_preflight_summary}")
             try:
                 revision_step_ids_from_run(run_dir)
             except ValueError as exc:

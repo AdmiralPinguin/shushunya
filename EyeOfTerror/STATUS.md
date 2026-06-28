@@ -110,6 +110,8 @@
   execution.
 - Warmaster progress summaries expose ordered planned/completed/failed/pending
   step ids, `next_step_id`, per-step state records, and artifact file status.
+- Warmaster run summaries expose the latest run preflight result as
+  `last_preflight`.
 - Warmaster exposes `GET /runs/{task_id}/steps/{step_id}` for focused step
   inspection.
 - Warmaster exposes `GET /runs/{task_id}/steps/{step_id}/artifacts` for
