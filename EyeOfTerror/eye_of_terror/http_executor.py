@@ -134,6 +134,8 @@ def execute_run(
         )
     )
     ledger.set_status("running")
+    if step_ids:
+        ledger.record_event("revision_execution_started", {"step_ids": step_ids, "mode": "http"})
     if ledger.cancel_requested():
         summary = {"ok": False, "run_dir": str(run_dir), "host": host, "steps": [], "cancelled": True}
         write_json_atomic(run_dir / "http_execution_report.json", summary)

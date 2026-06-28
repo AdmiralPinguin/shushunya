@@ -369,6 +369,17 @@ def main() -> int:
                 or revision_execution.get("summary", {}).get("step_ids") != revision_steps
             ):
                 raise AssertionError(f"bad revision execution response: {revision_execution}")
+            revision_ledger = request_json(base + "/runs/warmaster-test/ledger")
+            revision_event = next(
+                (
+                    event
+                    for event in revision_ledger.get("ledger", {}).get("events", [])
+                    if event.get("type") == "revision_execution_started"
+                ),
+                None,
+            )
+            if not revision_event or revision_event.get("payload", {}).get("step_ids") != revision_steps:
+                raise AssertionError(f"revision execution event missing from ledger: {revision_ledger}")
             unsafe_task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-unsafe-workspace-test"},

@@ -131,6 +131,8 @@ def execute_run(
         )
     )
     ledger.set_status("running")
+    if step_ids:
+        ledger.record_event("revision_execution_started", {"step_ids": step_ids, "mode": "local"})
     results: list[StepResult] = []
     for dispatch_path in ordered_dispatch_paths(run_dir, step_ids=step_ids):
         ledger = TaskLedger.load(ledger_path)
