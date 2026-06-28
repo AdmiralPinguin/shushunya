@@ -36,6 +36,8 @@
   `Mechanicum/*/worker.json` metadata.
 - Warmaster Gateway exposes `GET /state` as a client bootstrap snapshot with
   capabilities, governors, workers, and recent runs.
+- Warmaster Gateway exposes the expected service-separated brigade topology
+  through `GET /brigade_plan` and embeds it in `GET /state`.
 - Warmaster Gateway exposes `GET /doctor` for registry and manifest diagnostics.
 - Warmaster Gateway exposes focused run inspection endpoints for contract,
   dispatch packets, and ledger event history.

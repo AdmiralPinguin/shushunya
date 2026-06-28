@@ -11,6 +11,8 @@ GET  /health
 GET  /capabilities
 GET  /state
 GET  /doctor
+GET  /brigade_plan
+GET  /brigade_plan?host=127.0.0.1
 GET  /governors
 GET  /governors?health=1
 GET  /workers
@@ -63,7 +65,11 @@ Operators can choose the default governor planning boundary with
 
 Clients should call `GET /state` after startup or reconnect. The response
 contains gateway capabilities, governor registry, worker registry, run status
-counts, process-local active run ids, and recent run summaries.
+counts, process-local active run ids, recent run summaries, and the expected
+service-separated brigade startup plan.
+
+`GET /brigade_plan` returns the same expected service topology without run
+history. The optional `host` query parameter must be loopback.
 
 ## Task Creation
 

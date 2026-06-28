@@ -118,6 +118,10 @@ Warmaster Gateway can also be started with `--governor-transport http` and
 `--governor-host 127.0.0.1` so ordinary client task submissions use governor
 services by default.
 
+`GET /brigade_plan` and `GET /state` expose the expected service-separated
+brigade topology, including Warmaster, Iskandar, and registered Mechanicum
+workers.
+
 Start the current service-separated brigade with:
 
 ```bash

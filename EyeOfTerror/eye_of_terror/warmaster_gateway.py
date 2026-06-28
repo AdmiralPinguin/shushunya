@@ -742,6 +742,19 @@ def governor_registry_snapshot(include_health: bool = False, host: str = "127.0.
     return governors
 
 
+def brigade_plan_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
+    host = validate_service_host(host)
+    from start_brigade import brigade_plan  # Imported lazily to keep gateway boot independent from launcher tooling.
+
+    return brigade_plan(
+        repo_root=REPO_ROOT,
+        host=host,
+        workspace_root=Path("runtime/mechanicum-work"),
+        warmaster_run_root=Path("runtime/warmaster-runs"),
+        iskandar_run_root=Path("runtime/iskandar-runs"),
+    )
+
+
 def gateway_capabilities() -> dict[str, Any]:
     return {
         "ok": True,
@@ -772,6 +785,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "governor_health_snapshot",
             "worker_registry",
             "worker_health_snapshot",
+            "brigade_plan_snapshot",
             "state_snapshot",
             "process_active_run_snapshot",
             "run_action_hints",
@@ -783,6 +797,8 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /capabilities",
             "GET /state",
             "GET /doctor",
+            "GET /brigade_plan",
+            "GET /brigade_plan?host=127.0.0.1",
             "GET /governors",
             "GET /governors?health=1",
             "GET /workers",
@@ -836,6 +852,7 @@ def gateway_state(run_root: Path, run_limit: int = 20) -> dict[str, Any]:
         "capabilities": gateway_capabilities(),
         "governors": governor_registry_snapshot(),
         "workers": worker_registry_snapshot(),
+        "brigade_plan": brigade_plan_snapshot(),
         "run_summary": run_status_summary(all_runs),
         "process_active_runs": process_active_runs,
         "runs": runs,
@@ -924,6 +941,16 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
             if parsed.path == "/doctor":
                 payload = run_doctor()
                 response(self, 200 if payload.get("ok") else 500, payload)
+                return
+            if parsed.path == "/brigade_plan":
+                query = parse_qs(parsed.query)
+                host = query.get("host", ["127.0.0.1"])[0]
+                try:
+                    payload = brigade_plan_snapshot(host=host)
+                except ValueError as exc:
+                    response(self, 400, {"ok": False, "error": str(exc)})
+                    return
+                response(self, 200, payload)
                 return
             if parsed.path == "/governors":
                 query = parse_qs(parsed.query)

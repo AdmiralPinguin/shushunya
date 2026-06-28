@@ -170,9 +170,19 @@ def main() -> int:
             if not health.get("ok"):
                 raise AssertionError(f"bad health: {health}")
             capabilities = request_json(base + "/capabilities")
-            required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout", "run_action_hints", "interrupted_run_resume", "http_governor_planning"}
+            required_capabilities = {"background_execution", "worker_registry", "worker_cancel_fanout", "run_action_hints", "interrupted_run_resume", "http_governor_planning", "brigade_plan_snapshot"}
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
                 raise AssertionError(f"bad gateway capabilities response: {capabilities}")
+            brigade_plan = request_json(base + "/brigade_plan")
+            if (
+                not brigade_plan.get("ok")
+                or brigade_plan.get("ports", {}).get("warmaster_gateway") != 7000
+                or not any(item.get("name") == "Lexmechanic" for item in brigade_plan.get("mechanicum_workers", []))
+            ):
+                raise AssertionError(f"bad brigade plan response: {brigade_plan}")
+            state = request_json(base + "/state")
+            if state.get("brigade_plan", {}).get("mode") != "service-separated":
+                raise AssertionError(f"state did not include brigade plan: {state}")
             doctor = request_json(base + "/doctor")
             if not doctor.get("ok") or "worker_manifests" not in doctor.get("checks", []) or doctor.get("counts", {}).get("worker_manifests", 0) < 1:
                 raise AssertionError(f"bad doctor response: {doctor}")
