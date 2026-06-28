@@ -147,11 +147,15 @@ clients can omit this field and still use the service-separated path.
 
 For HTTP governor planning, Warmaster reads reachable governor capabilities and
 rejects the task with `error_code=governor_workers_missing` when
-`required_workers` are absent from the Mechanicum registry.
+`required_workers` are absent from the Mechanicum registry. If all unknown
+workers are known but `planned` and not runnable, the response uses
+`error_code=governor_workers_unavailable` and includes `unavailable_workers`.
 
 For every planning path, Warmaster rejects a produced task contract with
 `error_code=contract_workers_missing` when `worker_plan` references workers that
-are absent from the Mechanicum registry.
+are absent from the Mechanicum registry. If all unresolved workers are known but
+`planned` and not runnable, the response uses
+`error_code=contract_workers_unavailable` and includes `unavailable_workers`.
 
 For every planning path, Warmaster rejects task creation with
 `error_code=invalid_oversight` when the governor plan omits oversight or the

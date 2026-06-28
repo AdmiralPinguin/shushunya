@@ -195,6 +195,64 @@ def main() -> int:
         finally:
             warmaster_gateway.plan_lore_reconstruction = original_planner
         try:
+            class PlannedWorkerContract:
+                task_id = "planned-worker-contract"
+                goal = "planned worker"
+
+                def to_dict(self) -> dict:
+                    return {
+                        "version": 1,
+                        "task_id": self.task_id,
+                        "kind": "research",
+                        "goal": self.goal,
+                        "assigned_governor": "IskandarKhayon",
+                        "completion_criteria": ["done"],
+                        "worker_plan": [
+                            {
+                                "step_id": "render",
+                                "worker": "OcularisRenderium",
+                                "purpose": "prove planned worker availability preflight",
+                            }
+                        ],
+                    }
+
+            class PlannedWorkerPlan:
+                contract = PlannedWorkerContract()
+
+                def to_dict(self) -> dict:
+                    return {
+                        "ok": True,
+                        "contract": self.contract.to_dict(),
+                        "validation": {"ok": True, "errors": []},
+                        "oversight": {
+                            "governor": "IskandarKhayon",
+                            "requires_gap_disclosure": True,
+                            "final_review": {"required_artifacts": [], "quality_gates": []},
+                        },
+                    }
+
+            warmaster_gateway.plan_lore_reconstruction = lambda _message, task_id=None: PlannedWorkerPlan()
+            planned_worker_contract = warmaster_gateway.prepare_task(
+                "Собери все известное о событиях Скалатракса.",
+                "planned-worker-contract",
+                run_root,
+            )
+            if (
+                planned_worker_contract.get("error_code") != "contract_workers_unavailable"
+                or not planned_worker_contract.get("unavailable_workers")
+                or (run_root / "planned-worker-contract").exists()
+            ):
+                raise AssertionError(f"Warmaster accepted a contract with a planned worker: {planned_worker_contract}")
+            planned_worker_preflight = warmaster_gateway.preflight_task(
+                "Собери все известное о событиях Скалатракса.",
+                "planned-worker-contract",
+                run_root,
+            )
+            if planned_worker_preflight.get("error_code") != "contract_workers_unavailable" or not planned_worker_preflight.get("worker_availability", {}).get("unavailable_workers"):
+                raise AssertionError(f"Warmaster preflight missed planned worker availability: {planned_worker_preflight}")
+        finally:
+            warmaster_gateway.plan_lore_reconstruction = original_planner
+        try:
             good_plan = original_planner("Собери все известное о событиях Скалатракса.", task_id="missing-oversight-contract")
 
             class MissingOversightPlan:

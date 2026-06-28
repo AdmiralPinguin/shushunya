@@ -134,17 +134,18 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
         payload = capabilities.get("capabilities") if isinstance(capabilities.get("capabilities"), dict) else {}
         required_workers = required_workers_from_capabilities(payload)
     if required_workers:
-        available_workers = {worker.name for worker in worker_refs()}
-        missing_workers = [worker for worker in required_workers if worker not in available_workers]
-        if missing_workers:
+        availability = worker_availability(required_workers)
+        if not availability["ok"]:
             return {
                 "ok": False,
                 "gateway": "WarmasterGateway",
-                "error": "governor required workers are missing from Mechanicum registry",
-                "error_code": "governor_workers_missing",
+                "error": "governor required workers are missing or unavailable in Mechanicum registry",
+                "error_code": "governor_workers_unavailable" if availability["unavailable_workers"] and not availability["missing_workers"] else "governor_workers_missing",
                 "governor": governor.name,
                 "required_workers": required_workers,
-                "missing_workers": missing_workers,
+                "missing_workers": availability["missing_workers"],
+                "unavailable_workers": availability["unavailable_workers"],
+                "worker_availability": availability,
             }
     if not plan.get("ok"):
         return {
@@ -176,16 +177,18 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "task_id": service_task_id,
             "validation": {"ok": False, "errors": validation_errors},
         }
-    missing_workers = missing_contract_workers(contract)
-    if missing_workers:
+    availability = worker_availability(contract_required_workers(contract))
+    if not availability["ok"]:
         return {
             "ok": False,
             "gateway": "WarmasterGateway",
-            "error": "governor task contract references missing Mechanicum workers",
-            "error_code": "contract_workers_missing",
+            "error": "governor task contract references missing or unavailable Mechanicum workers",
+            "error_code": "contract_workers_unavailable" if availability["unavailable_workers"] and not availability["missing_workers"] else "contract_workers_missing",
             "task_id": service_task_id,
             "governor": governor.name,
-            "missing_workers": missing_workers,
+            "missing_workers": availability["missing_workers"],
+            "unavailable_workers": availability["unavailable_workers"],
+            "worker_availability": availability,
         }
     oversight_errors = plan_oversight_errors(contract, plan)
     if oversight_errors:
@@ -358,16 +361,18 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "validation": {"ok": False, "errors": validation_errors},
         }
     contract_payload = plan.contract.to_dict()
-    missing_workers = missing_contract_workers(contract_payload)
-    if missing_workers:
+    availability = worker_availability(contract_required_workers(contract_payload))
+    if not availability["ok"]:
         return {
             "ok": False,
             "gateway": "WarmasterGateway",
-            "error": "governor task contract references missing Mechanicum workers",
-            "error_code": "contract_workers_missing",
+            "error": "governor task contract references missing or unavailable Mechanicum workers",
+            "error_code": "contract_workers_unavailable" if availability["unavailable_workers"] and not availability["missing_workers"] else "contract_workers_missing",
             "task_id": plan.contract.task_id,
             "governor": governor,
-            "missing_workers": missing_workers,
+            "missing_workers": availability["missing_workers"],
+            "unavailable_workers": availability["unavailable_workers"],
+            "worker_availability": availability,
         }
     plan_payload = plan.to_dict()
     oversight_errors = plan_oversight_errors(contract_payload, plan_payload)
@@ -412,16 +417,18 @@ def preflight_task(message: str, task_id: str | None, run_root: Path, governor_t
         if capabilities.get("ok"):
             payload = capabilities.get("capabilities") if isinstance(capabilities.get("capabilities"), dict) else {}
             required_workers = required_workers_from_capabilities(payload)
-            missing_required = [worker for worker in required_workers if worker not in {item.name for item in worker_refs()}]
-            if missing_required:
+            availability = worker_availability(required_workers)
+            if not availability["ok"]:
                 return {
                     "ok": False,
                     "gateway": "WarmasterGateway",
-                    "error": "governor required workers are missing from Mechanicum registry",
-                    "error_code": "governor_workers_missing",
+                    "error": "governor required workers are missing or unavailable in Mechanicum registry",
+                    "error_code": "governor_workers_unavailable" if availability["unavailable_workers"] and not availability["missing_workers"] else "governor_workers_missing",
                     "governor": governor_ref.name,
                     "required_workers": required_workers,
-                    "missing_workers": missing_required,
+                    "missing_workers": availability["missing_workers"],
+                    "unavailable_workers": availability["unavailable_workers"],
+                    "worker_availability": availability,
                 }
         try:
             plan_payload = post_json(base + "/plan", {"task": message, "task_id": task_id or ""})
@@ -439,12 +446,20 @@ def preflight_task(message: str, task_id: str | None, run_root: Path, governor_t
     if resolved_task_id and run_dir.exists():
         return {"ok": False, "gateway": "WarmasterGateway", "error": "task_id already exists", "error_code": "task_exists", "task_id": resolved_task_id, "run_dir": str(run_dir)}
     validation_errors = validate_task_contract_payload(contract)
-    missing_workers = [] if validation_errors else missing_contract_workers(contract)
+    availability = {"ok": True, "missing_workers": [], "unavailable_workers": []}
+    if not validation_errors:
+        availability = worker_availability(contract_required_workers(contract))
+    missing_workers = list(availability["missing_workers"])
+    unavailable_workers = list(availability["unavailable_workers"])
     oversight_errors = [] if validation_errors else plan_oversight_errors(contract, {"oversight": oversight})
-    ok = not validation_errors and not missing_workers and not oversight_errors
+    ok = not validation_errors and not missing_workers and not unavailable_workers and not oversight_errors
     error_code = ""
     if not ok:
-        error_code = "contract_workers_missing" if missing_workers else ("invalid_oversight" if oversight_errors else "invalid_task_contract")
+        error_code = (
+            "contract_workers_missing"
+            if missing_workers
+            else ("contract_workers_unavailable" if unavailable_workers else ("invalid_oversight" if oversight_errors else "invalid_task_contract"))
+        )
     return {
         "ok": ok,
         "gateway": "WarmasterGateway",
@@ -457,6 +472,8 @@ def preflight_task(message: str, task_id: str | None, run_root: Path, governor_t
         "oversight_validation": {"ok": not oversight_errors, "errors": oversight_errors},
         "validation": {"ok": not validation_errors, "errors": validation_errors},
         "missing_workers": missing_workers,
+        "unavailable_workers": unavailable_workers,
+        "worker_availability": availability,
         "would_create_run_dir": str(run_dir) if resolved_task_id else "",
         "error_code": error_code,
     }
@@ -1652,8 +1669,39 @@ def required_workers_from_capabilities(payload: dict[str, Any]) -> list[str]:
     return [str(worker) for worker in raw_required if str(worker)]
 
 
-def missing_contract_workers(contract: dict[str, Any]) -> list[str]:
-    available_workers = {worker.name for worker in worker_refs()}
+def worker_availability(required_workers: list[str]) -> dict[str, Any]:
+    enriched_workers = {str(worker.get("name") or ""): worker for worker in worker_registry_snapshot(include_health=False)}
+    missing: list[str] = []
+    unavailable: list[dict[str, Any]] = []
+    available: list[str] = []
+    for worker in required_workers:
+        entry = enriched_workers.get(worker)
+        if entry is None:
+            missing.append(worker)
+            continue
+        status = str(entry.get("status") or "")
+        if status == "planned":
+            unavailable.append(
+                {
+                    "name": worker,
+                    "status": status,
+                    "port": entry.get("port"),
+                    "role": entry.get("role", ""),
+                    "path": entry.get("path", ""),
+                }
+            )
+            continue
+        available.append(worker)
+    return {
+        "ok": not missing and not unavailable,
+        "required_workers": required_workers,
+        "available_workers": available,
+        "missing_workers": missing,
+        "unavailable_workers": unavailable,
+    }
+
+
+def contract_required_workers(contract: dict[str, Any]) -> list[str]:
     worker_plan = contract.get("worker_plan") if isinstance(contract.get("worker_plan"), list) else []
     required = []
     for step in worker_plan:
@@ -1661,7 +1709,11 @@ def missing_contract_workers(contract: dict[str, Any]) -> list[str]:
             worker = str(step.get("worker") or "")
             if worker and worker not in required:
                 required.append(worker)
-    return [worker for worker in required if worker not in available_workers]
+    return required
+
+
+def missing_contract_workers(contract: dict[str, Any]) -> list[str]:
+    return list(worker_availability(contract_required_workers(contract))["missing_workers"])
 
 
 def contract_summary(contract: dict[str, Any]) -> dict[str, Any]:
@@ -1729,7 +1781,6 @@ def governor_registry_snapshot(include_health: bool = False, host: str = "127.0.
 
 
 def governor_worker_requirements(governors: list[dict[str, Any]], workers: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    worker_names = {str(worker.get("name") or "") for worker in workers}
     requirements: list[dict[str, Any]] = []
     for governor in governors:
         runtime = governor.get("runtime") if isinstance(governor.get("runtime"), dict) else {}
@@ -1738,13 +1789,15 @@ def governor_worker_requirements(governors: list[dict[str, Any]], workers: list[
         required_workers = required_workers_from_capabilities(capabilities)
         if not required_workers:
             continue
-        missing = [worker for worker in required_workers if worker not in worker_names]
+        availability = worker_availability(required_workers)
         requirements.append(
             {
                 "governor": str(governor.get("name") or ""),
                 "required_workers": required_workers,
-                "missing_workers": missing,
-                "satisfied": not missing,
+                "missing_workers": availability["missing_workers"],
+                "unavailable_workers": availability["unavailable_workers"],
+                "worker_availability": availability,
+                "satisfied": bool(availability["ok"]),
             }
         )
     return requirements

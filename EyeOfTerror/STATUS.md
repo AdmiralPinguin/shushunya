@@ -79,9 +79,11 @@
 - Brigade launcher rejects incomplete `Mechanicum/worker_services.json` entries
   instead of silently omitting workers from the startup plan.
 - Warmaster rejects HTTP-governor task preparation when reachable governor
-  `required_workers` are missing from the Mechanicum registry.
+  `required_workers` are missing or known-but-planned in the Mechanicum
+  registry.
 - Warmaster rejects produced task contracts whose `worker_plan` references
-  workers absent from the Mechanicum registry.
+  missing or planned Mechanicum workers, preserving `unavailable_workers`
+  details for clients.
 - Warmaster rejects task creation when the selected governor omits oversight or
   returns oversight that does not match the task contract.
 - Warmaster verifies HTTP-governor prepared run packages before writing the
@@ -135,7 +137,7 @@
 - Warmaster Gateway exposes `GET /brigade_health` for combined expected
   topology and best-effort governor/worker health.
 - Brigade health reports whether reachable governor `required_workers` are
-  present in the Mechanicum registry.
+  present and runnable in the Mechanicum registry.
 - Brigade health reports reachable governor pipeline summaries when governor
   services expose them.
 - Warmaster Gateway keeps plain `GET /state` lightweight and embeds brigade
