@@ -45,7 +45,27 @@ def load_json(path: Path) -> dict[str, Any]:
 
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temp_path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp_path, path)
+
+
+def summarize_results(results: list[RunResult]) -> dict[str, Any]:
+    by_agent: dict[str, dict[str, Any]] = {}
+    for result in results:
+        item = by_agent.setdefault(result.agent, {"total": 0, "passed": 0, "failed": 0, "duration_sec": 0.0})
+        item["total"] += 1
+        item["passed" if result.ok else "failed"] += 1
+        item["duration_sec"] = round(float(item["duration_sec"]) + result.duration_sec, 3)
+    for item in by_agent.values():
+        total = int(item["total"])
+        item["pass_rate"] = round(float(item["passed"]) / total, 3) if total else 0.0
+    return {
+        "total": len(results),
+        "passed": sum(1 for item in results if item.ok),
+        "failed": sum(1 for item in results if not item.ok),
+        "by_agent": by_agent,
+    }
 
 
 def write_report(path: Path, run_id: str, suite: dict[str, Any], model: dict[str, Any], results: list[RunResult], partial: bool) -> None:
@@ -56,6 +76,7 @@ def write_report(path: Path, run_id: str, suite: dict[str, Any], model: dict[str
             "suite": suite["suite"],
             "partial": partial,
             "model": model,
+            "summary": summarize_results(results),
             "results": [item.__dict__ for item in results],
         },
     )

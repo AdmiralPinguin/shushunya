@@ -38,3 +38,11 @@ Run a small tournament:
 Reports are written to `reports/`, raw run logs to `runs/`, and per-agent task
 workspaces to `workspaces/`.
 
+Reports are written atomically and include a `summary` block with per-agent
+totals, pass counts, fail counts, duration, and pass rate.
+
+Runner self-test:
+
+```bash
+./scripts/run_arena_self_test.py
+```
