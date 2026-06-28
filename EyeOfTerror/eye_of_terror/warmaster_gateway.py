@@ -156,9 +156,24 @@ def load_json_object(path: Path, label: str) -> tuple[dict[str, Any], str]:
     return payload, ""
 
 
+def sandbox_artifact_file_status(workspace_root: str, sandbox_path: str) -> dict[str, Any]:
+    item: dict[str, Any] = {"path": sandbox_path}
+    if workspace_root and sandbox_path.startswith("/work/"):
+        host_path = Path(workspace_root) / sandbox_path.removeprefix("/work/")
+        item["host_path"] = str(host_path)
+        item["exists"] = host_path.exists()
+        item["bytes"] = host_path.stat().st_size if host_path.exists() else 0
+    else:
+        item["exists"] = False
+        item["bytes"] = 0
+    return item
+
+
 def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]:
     planned_steps = status.get("steps", [])
     ledger_steps = ledger.get("steps", [])
+    result = ledger.get("result", {}) if isinstance(ledger.get("result"), dict) else {}
+    workspace_root = str(result.get("workspace_root") or "")
     if not isinstance(planned_steps, list):
         planned_steps = []
     if not isinstance(ledger_steps, list):
@@ -205,14 +220,18 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
             continue
         recorded = ledger_by_step.get(step_id, {})
         recorded_status = str(recorded.get("status") or "")
+        expected_artifacts = planned.get("expected_artifacts") if isinstance(planned.get("expected_artifacts"), list) else []
+        artifacts = recorded.get("artifacts") if isinstance(recorded.get("artifacts"), list) else []
         step_states.append(
             {
                 "step_id": step_id,
                 "worker": str(planned.get("worker") or recorded.get("worker") or ""),
                 "status": recorded_status or "pending",
                 "depends_on": planned.get("depends_on") if isinstance(planned.get("depends_on"), list) else [],
-                "expected_artifacts": planned.get("expected_artifacts") if isinstance(planned.get("expected_artifacts"), list) else [],
-                "artifacts": recorded.get("artifacts") if isinstance(recorded.get("artifacts"), list) else [],
+                "expected_artifacts": expected_artifacts,
+                "expected_artifact_status": [sandbox_artifact_file_status(workspace_root, str(path)) for path in expected_artifacts],
+                "artifacts": artifacts,
+                "artifact_status": [sandbox_artifact_file_status(workspace_root, str(path)) for path in artifacts],
                 "summary": str(recorded.get("summary") or ""),
                 "recorded": bool(recorded),
             }
@@ -493,15 +512,8 @@ def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
         if sandbox_path in seen:
             return
         seen.add(sandbox_path)
-        item: dict[str, Any] = {"path": sandbox_path, "source": source}
-        if workspace_root and sandbox_path.startswith("/work/"):
-            host_path = Path(workspace_root) / sandbox_path.removeprefix("/work/")
-            item["host_path"] = str(host_path)
-            item["exists"] = host_path.exists()
-            item["bytes"] = host_path.stat().st_size if host_path.exists() else 0
-        else:
-            item["exists"] = False
-            item["bytes"] = 0
+        item = sandbox_artifact_file_status(workspace_root, sandbox_path)
+        item["source"] = source
         items.append(item)
 
     for artifact in artifacts:

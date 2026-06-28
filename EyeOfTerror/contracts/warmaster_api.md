@@ -102,7 +102,9 @@ Run summaries also include ordered progress hints:
 `pending_step_ids`, `next_step_id`, and `step_states`. These are derived from
 the run package and ledger records, so clients can display restart/resume
 position, worker ownership, expected artifacts, produced artifacts, and per-step
-summaries without parsing dispatch packets.
+summaries without parsing dispatch packets. Step states include
+`expected_artifact_status` and `artifact_status` entries with `exists`, `bytes`,
+and `host_path` when a run workspace is known.
 
 ## Cancellation
 

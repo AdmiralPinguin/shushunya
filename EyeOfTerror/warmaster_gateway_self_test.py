@@ -337,6 +337,10 @@ def main() -> int:
             final_state = completed_snapshot.get("summary", {}).get("progress", {}).get("step_states", [])[-1]
             if final_state.get("step_id") != "finalize" or "/work/skalathrax/final_manifest.json" not in final_state.get("artifacts", []):
                 raise AssertionError(f"completed progress did not expose final step artifacts: {completed_snapshot}")
+            final_expected = final_state.get("expected_artifact_status", [{}])[0]
+            final_actual = final_state.get("artifact_status", [{}])[0]
+            if not final_expected.get("exists") or not final_actual.get("exists") or final_actual.get("bytes", 0) <= 0:
+                raise AssertionError(f"completed progress did not expose artifact file status: {completed_snapshot}")
             final_step_state = request_json(base + "/runs/warmaster-test/steps/finalize")
             if "/work/skalathrax/final_manifest.json" not in final_step_state.get("step", {}).get("artifacts", []):
                 raise AssertionError(f"bad final step state endpoint: {final_step_state}")

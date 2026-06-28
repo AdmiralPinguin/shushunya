@@ -96,7 +96,8 @@ resume, and revision execution.
 
 Run progress exposes ordered step ids, completed/failed/pending step ids,
 `next_step_id`, and `step_states` for client progress displays and future
-partial resume logic.
+partial resume logic. Step states include file status for expected and produced
+artifacts when a run workspace is known.
 
 `GET /runs/<task_id>/steps/<step_id>` returns one normalized step state from the
 same progress model.

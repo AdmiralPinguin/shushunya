@@ -58,7 +58,7 @@
 - Warmaster run summaries expose `actions` hints for start/cancel/resume and
   revision controls.
 - Warmaster progress summaries expose ordered planned/completed/failed/pending
-  step ids, `next_step_id`, and per-step state records.
+  step ids, `next_step_id`, per-step state records, and artifact file status.
 - Warmaster exposes `GET /runs/{task_id}/steps/{step_id}` for focused step
   inspection.
 - Warmaster routing rejects unsupported code/image/general tasks until a matching governor exists.
