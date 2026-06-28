@@ -8,6 +8,10 @@ source reconstruction, translation, and long-form synthesis tasks.
 He is a brigade leader, not a low-level worker. He should coordinate Mechanicum
 workers and decide whether their outputs are good enough.
 
+His service capabilities expose the required Mechanicum worker set for the lore
+reconstruction pipeline, so Warmaster/admin clients can compare requirements
+against the worker registry before execution.
+
 ## Responsibilities
 
 1. Convert the user's request into a task contract.
@@ -44,4 +48,3 @@ Lexmechanic
 The Battle of Skalathrax task is the first training case. A shallow wiki summary
 is considered a failure. A pass requires source coverage, direct event notes,
 timeline, reconstruction, coverage report, and critic review.
-

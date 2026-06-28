@@ -30,10 +30,15 @@ POST /prepare_run
   "governor": "IskandarKhayon",
   "api_version": 1,
   "task_kinds": ["research", "lore_reconstruction"],
+  "required_workers": ["Lexmechanic", "NoosphericExtractor"],
   "capabilities": ["lore_reconstruction_planning", "dispatch_packet_preparation"],
   "endpoints": ["GET /health", "GET /capabilities", "POST /plan", "POST /prepare_run"]
 }
 ```
+
+`required_workers` is ordered by the governor's normal pipeline dependency
+shape, so an orchestrator or admin client can compare the governor requirements
+against the Mechanicum registry before starting a task.
 
 ## POST /plan Request
 

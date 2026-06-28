@@ -44,6 +44,8 @@ def main() -> int:
             capabilities = request_json(base + "/capabilities")
             if "dispatch_packet_preparation" not in capabilities.get("capabilities", []):
                 raise AssertionError(f"bad capabilities: {capabilities}")
+            if capabilities.get("required_workers", [])[0] != "Lexmechanic" or "FabricatorFinalis" not in capabilities.get("required_workers", []):
+                raise AssertionError(f"capabilities did not expose required workers: {capabilities}")
             plan = request_json(base + "/plan", {"task": "Собери события Скалатракса", "task_id": "iskandar-http-test"})
             if not plan.get("ok") or plan["contract"]["assigned_governor"] != "IskandarKhayon":
                 raise AssertionError(f"bad plan: {plan}")

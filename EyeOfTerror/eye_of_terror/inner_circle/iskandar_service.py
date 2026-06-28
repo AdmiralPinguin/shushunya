@@ -10,6 +10,17 @@ from .iskandar import plan_lore_reconstruction
 from ..pipeline import write_pipeline_run
 
 
+REQUIRED_WORKERS = [
+    "Lexmechanic",
+    "AuspexBrowser",
+    "NoosphericExtractor",
+    "Chronologis",
+    "ScriptoriumDaemon",
+    "ReductorVerifier",
+    "FabricatorFinalis",
+]
+
+
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
     data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     handler.send_response(status)
@@ -36,6 +47,7 @@ def service_capabilities() -> dict[str, Any]:
         "governor": "IskandarKhayon",
         "api_version": 1,
         "task_kinds": ["research", "lore_reconstruction"],
+        "required_workers": REQUIRED_WORKERS,
         "capabilities": [
             "lore_reconstruction_planning",
             "worker_plan_resolution",
