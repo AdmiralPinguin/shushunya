@@ -66,6 +66,8 @@ def main() -> int:
     health_urls = plan.get("health_urls", {})
     if health_urls.get("warmaster-gateway") != "http://127.0.0.1:7000/health" or health_urls.get("iskandar-khayon") != "http://127.0.0.1:7101/health":
         raise AssertionError(f"bad brigade health URLs: {plan}")
+    if health_urls.get("Lexmechanic") != "http://127.0.0.1:7002/health":
+        raise AssertionError(f"bad worker health URLs: {plan}")
     worker_names = {item.get("name") for item in plan.get("mechanicum_workers", []) if isinstance(item, dict)}
     required_workers = {"Lexmechanic", "AuspexBrowser", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon", "ReductorVerifier", "FabricatorFinalis"}
     if not required_workers.issubset(worker_names):
@@ -73,6 +75,8 @@ def main() -> int:
     worker_ports = plan.get("ports", {}).get("mechanicum_workers", [])
     if worker_ports != [7002, 7003, 7004, 7005, 7006, 7007, 7009]:
         raise AssertionError(f"bad worker port plan: {worker_ports}")
+    if "http://127.0.0.1:7002/health" not in plan.get("readiness_urls", []):
+        raise AssertionError(f"worker readiness URL missing from plan: {plan}")
     server = ThreadingHTTPServer(("127.0.0.1", 0), HealthHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

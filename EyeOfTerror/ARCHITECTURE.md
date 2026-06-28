@@ -74,6 +74,7 @@ on `7000` with default HTTP governor transport. It is a lightweight launcher,
 not a durable service manager. `--json` exposes the startup plan for diagnostics
 and future admin clients, including the individual Mechanicum worker services
 from `Mechanicum/worker_services.json`, top-level service dependencies, and
-readiness URLs. `--wait-ready` turns those URLs into a startup readiness gate.
+readiness URLs. `--wait-ready` turns Warmaster, governor, and worker health URLs
+into a startup readiness gate.
 The launcher fails fast if any managed top-level process exits and terminates
 the remaining managed processes.

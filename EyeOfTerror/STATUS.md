@@ -34,6 +34,8 @@
   future supervisors and admin clients.
 - The brigade launcher can wait for top-level readiness URLs after starting the
   stack.
+- Launcher readiness covers Warmaster, Iskandar, and registered Mechanicum
+  workers.
 - The brigade launcher fails fast when one managed process exits and terminates
   the remaining managed processes.
 - Warmaster Gateway can start local/HTTP execution in a background thread and expose progress through the ledger.

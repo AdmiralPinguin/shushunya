@@ -46,7 +46,7 @@ def pythonpath(repo_root: Path) -> str:
     return os.pathsep.join([str(repo_root / "EyeOfTerror"), str(repo_root / "Mechanicum")])
 
 
-def worker_service_plan(repo_root: Path) -> list[dict[str, object]]:
+def worker_service_plan(repo_root: Path, host: str) -> list[dict[str, object]]:
     path = repo_root / "Mechanicum" / "worker_services.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -61,6 +61,7 @@ def worker_service_plan(repo_root: Path) -> list[dict[str, object]]:
                 "port": int(item.get("port") or 0),
                 "module_path": str(item.get("module_path") or ""),
                 "module": str(item.get("module") or ""),
+                "health_url": f"http://{host}:{int(item.get('port') or 0)}/health",
             }
         )
     return workers
@@ -137,7 +138,9 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
 
 def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run_root: Path, iskandar_run_root: Path) -> dict[str, object]:
     commands = brigade_commands(repo_root, host, workspace_root, warmaster_run_root, iskandar_run_root)
-    workers = worker_service_plan(repo_root)
+    workers = worker_service_plan(repo_root, host)
+    top_level_health_urls = {command.name: command.health_url for command in commands if command.health_url}
+    worker_health_urls = {str(worker["name"]): str(worker["health_url"]) for worker in workers if worker.get("health_url")}
     return {
         "ok": True,
         "stack": "EyeOfTerror",
@@ -155,7 +158,8 @@ def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run
         "mechanicum_workers": workers,
         "services": [command.to_dict() for command in commands],
         "dependencies": {command.name: command.depends_on for command in commands},
-        "health_urls": {command.name: command.health_url for command in commands if command.health_url},
+        "health_urls": {**top_level_health_urls, **worker_health_urls},
+        "readiness_urls": list(top_level_health_urls.values()) + list(worker_health_urls.values()),
     }
 
 
@@ -248,7 +252,7 @@ def main() -> int:
     ]
     try:
         if args.wait_ready:
-            urls = [command.health_url for command in commands if command.health_url]
+            urls = [str(url) for url in plan.get("readiness_urls", [])]
             readiness = wait_for_urls(urls, timeout_sec=args.ready_timeout_sec)
             if not readiness["ok"]:
                 print(json.dumps({"ok": False, "readiness": readiness}, ensure_ascii=False, indent=2), file=sys.stderr)

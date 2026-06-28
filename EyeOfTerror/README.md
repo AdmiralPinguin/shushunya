@@ -139,7 +139,8 @@ diagnostics or future admin clients. The JSON includes top-level services and
 the individual Mechanicum worker names, ports, modules, service dependencies,
 and readiness URLs.
 Use `--wait-ready` to wait for top-level health URLs after starting the stack;
-`--ready-timeout-sec` controls the readiness timeout.
+`--ready-timeout-sec` controls the readiness timeout. Readiness covers
+Warmaster, Iskandar, and registered Mechanicum worker health URLs.
 If one managed process exits, the launcher terminates the remaining managed
 processes and returns the first exit code.
 
