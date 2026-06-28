@@ -65,6 +65,9 @@ POST /prepare_run
 }
 ```
 
+If a governor accepts `run_dir`, it must keep that path inside its configured
+default run root. Relative paths are resolved below the default root.
+
 ## Rules
 
 - Governors decide which workers are needed and in what sequence.

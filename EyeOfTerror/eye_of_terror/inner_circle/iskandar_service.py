@@ -53,6 +53,17 @@ def service_capabilities() -> dict[str, Any]:
     }
 
 
+def resolve_run_dir(default_run_root: Path, requested: str, task_id: str) -> Path:
+    root = default_run_root.resolve()
+    candidate = Path(requested) if requested else root / task_id
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    resolved = candidate.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError("run_dir must stay inside the default run root")
+    return resolved
+
+
 def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
     class IskandarHandler(BaseHTTPRequestHandler):
         server_version = "IskandarKhayon/0.1"
@@ -85,11 +96,13 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                     response(self, 200, plan.to_dict())
                     return
                 if self.path == "/prepare_run":
-                    run_dir = Path(str(payload.get("run_dir") or default_run_root / plan.contract.task_id))
+                    run_dir = resolve_run_dir(default_run_root, str(payload.get("run_dir") or ""), plan.contract.task_id)
                     status = write_pipeline_run(plan.contract, run_dir)
                     response(self, 200, {"ok": status["ok"], "governor": "IskandarKhayon", "status": status})
                     return
                 response(self, 404, {"ok": False, "error": "not found"})
+            except ValueError as exc:
+                response(self, 400, {"ok": False, "governor": "IskandarKhayon", "error": str(exc)})
             except Exception as exc:  # noqa: BLE001 - service boundary records planning failures.
                 response(self, 500, {"ok": False, "governor": "IskandarKhayon", "error": str(exc)})
 
