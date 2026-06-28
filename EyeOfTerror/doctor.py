@@ -67,6 +67,8 @@ def check_port_registry(errors: list[str]) -> None:
 
 def check_worker_manifests(errors: list[str]) -> None:
     require((REPO_ROOT / WORKER_CONTRACT).exists(), f"worker API contract missing: {WORKER_CONTRACT}", errors)
+    port_registry = load_json(REPO_ROOT / "EyeOfTerror" / "registry" / "ports.json").get("mechanicum", {})
+    manifest_ports: dict[int, dict[str, Any]] = {}
     seen_ports: dict[int, str] = {}
     for metadata_path in sorted((REPO_ROOT / "Mechanicum").glob("*/worker.json")):
         metadata = load_json(metadata_path)
@@ -81,6 +83,18 @@ def check_worker_manifests(errors: list[str]) -> None:
         require(metadata.get("api_contract") == WORKER_CONTRACT, f"worker {name} has wrong api_contract", errors)
         owner = seen_ports.setdefault(port, name)
         require(owner == name, f"worker manifest port collision on {port}: {owner} and {name}", errors)
+        manifest_ports[port] = {"name": name, "path": str(metadata_path.parent.relative_to(REPO_ROOT))}
+    if isinstance(port_registry, dict):
+        for raw_port, item in port_registry.items():
+            if not isinstance(item, dict):
+                continue
+            port = int(raw_port)
+            if port not in manifest_ports:
+                require(False, f"Mechanicum port {port} has no worker manifest", errors)
+                continue
+            manifest = manifest_ports[port]
+            require(manifest["name"] == item.get("name"), f"port registry and worker manifest name mismatch on {port}", errors)
+            require(manifest["path"] == item.get("path"), f"port registry and worker manifest path mismatch on {port}", errors)
 
 
 def check_worker_services(errors: list[str]) -> None:
