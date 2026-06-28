@@ -20,6 +20,7 @@ GET  /runs
 GET  /runs?limit=20
 GET  /runs/{task_id}
 GET  /runs/{task_id}/summary
+GET  /runs/{task_id}/active
 GET  /runs/{task_id}/ledger
 GET  /runs/{task_id}/contract
 GET  /runs/{task_id}/dispatch

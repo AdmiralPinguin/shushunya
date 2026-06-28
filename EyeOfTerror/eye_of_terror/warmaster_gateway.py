@@ -435,6 +435,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs?limit=20",
             "GET /runs/{task_id}",
             "GET /runs/{task_id}/summary",
+            "GET /runs/{task_id}/active",
             "GET /runs/{task_id}/ledger",
             "GET /runs/{task_id}/contract",
             "GET /runs/{task_id}/dispatch",
@@ -599,6 +600,11 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 if len(parts) == 3 and parts[2] == "summary":
                     response(self, 200, {"ok": True, "summary": run_summary(run_dir)})
+                    return
+                if len(parts) == 3 and parts[2] == "active":
+                    with ACTIVE_RUNS_LOCK:
+                        active = task_id in ACTIVE_RUNS
+                    response(self, 200, {"ok": True, "task_id": task_id, "active": active})
                     return
                 if len(parts) == 3 and parts[2] == "ledger":
                     if not ledger_path.exists():
