@@ -826,6 +826,18 @@ def main() -> int:
         }
     ):
         raise AssertionError("nested CLI failure detector missed empty stdout/FileNotFoundError wrapper")
+    if not agent_runner.python_result_printed_nested_cli_failure(
+        {
+            "ok": True,
+            "stdout": "Valid JSON\n",
+            "stderr": (
+                "Traceback (most recent call last):\n"
+                "TypeError: Object of type datetime is not JSON serializable\n"
+                "json.decoder.JSONDecodeError: Expecting value\n"
+            ),
+        }
+    ):
+        raise AssertionError("nested CLI failure detector missed masked traceback stderr")
     semantic_task = "CLI должен вернуть scheduled_count, owners и rejected reason в JSON."
     if agent_runner.action_is_cli_verification(
         "python",
@@ -4719,6 +4731,42 @@ def main() -> int:
     if len(swe_cli_requires_verify_payload.get("steps", [])) != 5:
         raise AssertionError(f"SWE CLI verification should run after rejected final: {swe_cli_requires_verify_payload}")
     print("[ok] SWE final requires CLI verification after edit")
+
+    swe_cli_masking_stdout = io.StringIO()
+    swe_cli_masking_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-cli-masking-rejected"),
+        json_output=True,
+        max_steps=1,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    masking_task = (
+        "Продолжи выполнение той же задачи по task journal.\n\n"
+        "Resume context from previous agent task journal:\n"
+        "[{\"type\":\"start\",\"task\":\"Исправь Python-проект. CLI должен печатать валидный JSON; "
+        "проверь python3 -m package.cli data.csv.\\n\\nРабочий каталог для этой задачи: /work/project\"},"
+        "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":true,"
+        "\"passing_tests\":[\"tests/test_core.py::test_core\"],\"failing_tests\":[]}},"
+        "{\"type\":\"tool_result\",\"action\":\"shell\",\"result\":{\"ok\":true,"
+        "\"stdout\":\".:\\ndata.csv\\npackage\\n\\n./package:\\ncli.py\\n\"}}]"
+    )
+    with mock.patch.object(agent_runner, "chat", return_value=(
+            '{"action":"shell","cmd":"cd /work/project && python3 -m package.cli /work/project/data.csv | '
+            "python3 -c 'import sys,json; print(\\\"Valid JSON\\\")' || "
+            "(python3 -m package.cli /work/project/data.csv | python3 -c 'import sys,json; json.load(sys.stdin)')"
+            '","timeout":60}'
+    )), mock.patch.object(agent_runner, "run_shell", return_value={"ok": True, "returncode": 0}) as mocked_masking_shell, \
+            contextlib.redirect_stdout(swe_cli_masking_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(masking_task, swe_cli_masking_config)
+    swe_cli_masking_payload = json.loads(swe_cli_masking_stdout.getvalue())
+    masking_results = [step.get("result") or {} for step in swe_cli_masking_payload.get("steps", [])]
+    if mocked_masking_shell.called:
+        raise AssertionError(f"Masking CLI verification should be rejected before shell execution: {swe_cli_masking_payload}")
+    if not any(result.get("error") == "swe cli verification masking rejected by supervisor" for result in masking_results):
+        raise AssertionError(f"Masking CLI verification rejection missing: {swe_cli_masking_payload}")
+    print("[ok] SWE CLI verification masking rejected")
 
     swe_failed_cli_repair_stdout = io.StringIO()
     swe_failed_cli_repair_config = AgentConfig(

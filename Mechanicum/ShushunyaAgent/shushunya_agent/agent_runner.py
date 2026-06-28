@@ -1273,6 +1273,7 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe edit before test diagnostic rejected by supervisor",
     "swe cli verification required by supervisor",
     "swe failed cli repair source required by supervisor",
+    "swe cli verification masking rejected by supervisor",
     "swe test diagnostic inspection stall rejected by supervisor",
     "swe syntax edit loop rejected by supervisor",
     "swe repeated failing-test file read rejected by supervisor",
@@ -1934,6 +1935,7 @@ def python_result_printed_nested_cli_failure(result: dict[str, Any]) -> bool:
     return any(
         marker in output
         for marker in (
+            "traceback (most recent call last)",
             "cli_failed: true",
             "json_valid: false",
             "cli_json_valid: false",
@@ -1947,6 +1949,8 @@ def python_result_printed_nested_cli_failure(result: dict[str, Any]) -> bool:
             "return code: 1",
             "can't open file",
             "filenotfounderror",
+            "typeerror:",
+            "json.decoder.jsondecodeerror",
             "jsondecodeerror",
         )
     )
@@ -5651,6 +5655,33 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "Do not repeat discovery, rerun the same CLI command, or inspect unrelated files before a code change. "
                         "Read exactly one candidate source file, make a narrow fix for the CLI failure, then rerun the CLI "
                         "verification with JSON validation."
+                    ),
+                }
+            elif (
+                swe_task
+                and action_type == "shell"
+                and "||" in str(action.get("cmd") or "")
+                and action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe cli verification masking rejected by supervisor",
+                    "instruction": (
+                        "Do not use shell fallbacks like || in CLI verification. They can mask a failing CLI command and still return 0. "
+                        "Run one direct CLI command with stdout piped into json.load/json.loads validation so any CLI or JSON failure "
+                        "propagates as a non-zero result."
+                    ),
+                    **(
+                        {
+                            "suggested_action": suggested_cli_verification_action(
+                                explicit_workspace,
+                                expected_cli_modules,
+                                expected_cli_input_paths,
+                                int(action.get("timeout") or SHELL_TIMEOUT),
+                            )
+                        }
+                        if expected_cli_modules
+                        else {}
                     ),
                 }
             elif (
