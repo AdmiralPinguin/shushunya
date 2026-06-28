@@ -251,8 +251,9 @@ stronger interruption mechanism.
 
 `POST /runs/{task_id}/preflight_local` and
 `POST /runs/{task_id}/preflight_http` inspect an existing run package without
-executing workers. They report unreadable dispatch packets, missing local worker
-commands, HTTP worker health failures, and input artifact failures. Full-run
+executing workers. They report missing or corrupt governor oversight,
+unreadable dispatch packets, missing local worker commands, HTTP worker health
+failures, and input artifact failures. Full-run
 preflight treats artifacts produced by earlier selected steps as satisfiable by
 the same run; restricted preflight can accept `step_ids` and then requires
 unselected dependency artifacts to already exist when a `workspace_root` is

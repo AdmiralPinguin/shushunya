@@ -463,8 +463,27 @@ def main() -> int:
             if not (run_dir / "dispatch" / "source_discovery.json").exists():
                 raise AssertionError(f"gateway did not prepare run package: {task}")
             run_preflight = request_json(base + "/runs/warmaster-test/preflight_local", {"timeout_sec": 30})
-            if not run_preflight.get("ok") or run_preflight.get("step_ids", [])[0] != "source_discovery":
+            if (
+                not run_preflight.get("ok")
+                or run_preflight.get("step_ids", [])[0] != "source_discovery"
+                or run_preflight.get("oversight_summary", {}).get("final_review", {}).get("final_step") != "finalize"
+            ):
                 raise AssertionError(f"bad local run preflight: {run_preflight}")
+            missing_oversight_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-missing-oversight-test"},
+            )
+            Path(missing_oversight_task["run_dir"], "oversight.json").unlink()
+            try:
+                request_json(base + "/runs/warmaster-missing-oversight-test/preflight_local", {"timeout_sec": 30})
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                missing_oversight = json.loads(exc.read().decode("utf-8"))
+                if missing_oversight.get("ok") or not missing_oversight.get("oversight_errors"):
+                    raise AssertionError(f"run preflight should reject missing oversight: {missing_oversight}")
+            else:
+                raise AssertionError("run preflight should fail when oversight.json is missing")
             try:
                 request_json(base + "/runs/warmaster-test/preflight_local", {"step_ids": ["fact_extraction"], "timeout_sec": 30})
             except urllib.error.HTTPError as exc:

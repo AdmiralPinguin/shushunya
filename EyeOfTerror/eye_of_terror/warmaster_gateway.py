@@ -994,6 +994,10 @@ def run_execution_preflight(
     input_failures: list[dict[str, Any]] = []
     step_checks: list[dict[str, Any]] = []
     missing_local_commands: list[dict[str, Any]] = []
+    oversight_errors: list[str] = []
+    oversight_payload = run_oversight(run_dir)
+    if not oversight_payload.get("ok"):
+        oversight_errors.append(str(oversight_payload.get("error") or "oversight unavailable"))
     for dispatch_path in ordered_dispatch_paths(run_dir, step_ids=step_ids):
         try:
             packet = load_json_file(dispatch_path)
@@ -1040,7 +1044,7 @@ def run_execution_preflight(
         )
     worker_failures = preflight_http_workers(run_dir, host, timeout_sec, step_ids=step_ids) if mode == "http" else []
     return {
-        "ok": not dispatch_errors and not input_failures and not missing_local_commands and not worker_failures,
+        "ok": not dispatch_errors and not input_failures and not missing_local_commands and not worker_failures and not oversight_errors,
         "task_id": run_dir.name,
         "mode": mode,
         "run_dir": str(run_dir),
@@ -1049,6 +1053,8 @@ def run_execution_preflight(
         "step_ids": order,
         "steps": step_checks,
         "dispatch_errors": dispatch_errors,
+        "oversight_errors": oversight_errors,
+        "oversight_summary": run_oversight_summary(run_dir) if not oversight_errors else {},
         "input_failures": input_failures,
         "missing_local_commands": missing_local_commands,
         "worker_preflight_failures": worker_failures,
@@ -1085,6 +1091,7 @@ def record_run_preflight_event(run_dir: Path, preflight: dict[str, Any]) -> None
         "ok": bool(preflight.get("ok")),
         "step_ids": preflight.get("step_ids") if isinstance(preflight.get("step_ids"), list) else [],
         "dispatch_errors": len(preflight.get("dispatch_errors") if isinstance(preflight.get("dispatch_errors"), list) else []),
+        "oversight_errors": len(preflight.get("oversight_errors") if isinstance(preflight.get("oversight_errors"), list) else []),
         "input_failures": len(preflight.get("input_failures") if isinstance(preflight.get("input_failures"), list) else []),
         "missing_local_commands": len(preflight.get("missing_local_commands") if isinstance(preflight.get("missing_local_commands"), list) else []),
         "worker_preflight_failures": len(preflight.get("worker_preflight_failures") if isinstance(preflight.get("worker_preflight_failures"), list) else []),
