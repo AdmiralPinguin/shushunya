@@ -1479,10 +1479,12 @@ def gateway_actions() -> dict[str, Any]:
         "can_resume_interrupted_runs": True,
         "can_list_recoverable_runs": True,
         "can_bulk_start_recoverable_runs": True,
+        "can_poll_global_events": True,
         "can_execute_revisions": True,
         "can_execute_step_subsets": True,
         "can_cancel_runs": True,
         "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
+        "polling": ["GET /events?after=0", "GET /runs/{task_id}/snapshot?events_after=0"],
         "maintenance": ["GET /recovery", "POST /recovery/start_resume_local", "POST /recovery/start_resume_http", "POST /recover_stale"],
         "diagnostics": ["GET /state?health=1", "GET /brigade_health", "GET /doctor"],
     }

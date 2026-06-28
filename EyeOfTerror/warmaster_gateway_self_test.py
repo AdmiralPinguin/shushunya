@@ -272,8 +272,10 @@ def main() -> int:
                 or not capabilities.get("actions", {}).get("can_execute_step_subsets")
                 or not capabilities.get("actions", {}).get("can_list_recoverable_runs")
                 or not capabilities.get("actions", {}).get("can_bulk_start_recoverable_runs")
+                or not capabilities.get("actions", {}).get("can_poll_global_events")
                 or "POST /task_preflight" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
                 or "POST /runs/{task_id}/preflight_http" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
+                or "GET /events?after=0" not in capabilities.get("actions", {}).get("polling", [])
                 or "GET /recovery" not in capabilities.get("actions", {}).get("maintenance", [])
                 or "POST /recovery/start_resume_local" not in capabilities.get("actions", {}).get("maintenance", [])
             ):
