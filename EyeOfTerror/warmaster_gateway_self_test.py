@@ -620,6 +620,23 @@ def main() -> int:
                 or not preflight.get("oversight_validation", {}).get("ok")
             ):
                 raise AssertionError(f"task preflight should not create a run: {preflight}")
+            if "brigade_readiness" in preflight:
+                raise AssertionError(f"default task preflight should stay lightweight: {preflight}")
+            preflight_with_readiness = request_json(
+                base + "/task_preflight",
+                {
+                    "message": "Собери все известное о событиях Скалатракса.",
+                    "task_id": "warmaster-preflight-readiness-test",
+                    "include_brigade_health": True,
+                },
+            )
+            if (
+                not preflight_with_readiness.get("ok")
+                or "brigade_readiness" not in preflight_with_readiness
+                or not isinstance(preflight_with_readiness.get("brigade_readiness", {}).get("blockers"), list)
+                or not isinstance(preflight_with_readiness.get("brigade_readiness", {}).get("warnings"), list)
+            ):
+                raise AssertionError(f"task preflight did not expose compact brigade readiness: {preflight_with_readiness}")
             task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},

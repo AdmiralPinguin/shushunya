@@ -398,7 +398,26 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
     }
 
 
-def preflight_task(message: str, task_id: str | None, run_root: Path, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> dict[str, Any]:
+def compact_brigade_readiness(host: str = "127.0.0.1") -> dict[str, Any]:
+    health = brigade_health_snapshot(host=host)
+    summary = health.get("summary") if isinstance(health.get("summary"), dict) else {}
+    return {
+        "ready": bool(summary.get("ready")),
+        "blocker_count": int(summary.get("blocker_count") or 0),
+        "warning_count": int(summary.get("warning_count") or 0),
+        "blockers": summary.get("blockers") if isinstance(summary.get("blockers"), list) else [],
+        "warnings": summary.get("warnings") if isinstance(summary.get("warnings"), list) else [],
+    }
+
+
+def preflight_task(
+    message: str,
+    task_id: str | None,
+    run_root: Path,
+    governor_transport: str = "local",
+    governor_host: str = "127.0.0.1",
+    include_brigade_health: bool = False,
+) -> dict[str, Any]:
     if task_id is not None and not valid_task_id(task_id):
         return {"ok": False, "gateway": "WarmasterGateway", "error": "invalid task_id", "error_code": "invalid_task_id", "task_id": task_id}
     route = route_message(message)
@@ -460,7 +479,7 @@ def preflight_task(message: str, task_id: str | None, run_root: Path, governor_t
             if missing_workers
             else ("contract_workers_unavailable" if unavailable_workers else ("invalid_oversight" if oversight_errors else "invalid_task_contract"))
         )
-    return {
+    payload = {
         "ok": ok,
         "gateway": "WarmasterGateway",
         "governor": governor_ref.name,
@@ -477,6 +496,9 @@ def preflight_task(message: str, task_id: str | None, run_root: Path, governor_t
         "would_create_run_dir": str(run_dir) if resolved_task_id else "",
         "error_code": error_code,
     }
+    if include_brigade_health:
+        payload["brigade_readiness"] = compact_brigade_readiness(host=governor_host)
+    return payload
 
 
 def load_ledger_dict(ledger_path: Path) -> tuple[dict[str, Any], str]:
@@ -2534,7 +2556,15 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     task_id = str(payload.get("task_id") or "").strip() or None
                     governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
-                    preflight = preflight_task(message, task_id, run_root, governor_transport=governor_transport, governor_host=governor_host)
+                    include_brigade_health = bool(payload.get("include_brigade_health"))
+                    preflight = preflight_task(
+                        message,
+                        task_id,
+                        run_root,
+                        governor_transport=governor_transport,
+                        governor_host=governor_host,
+                        include_brigade_health=include_brigade_health,
+                    )
                     response(self, 409 if preflight.get("error_code") == "task_exists" else (200 if preflight.get("ok") else 400), preflight)
                     return
                 if self.path == "/recover_stale":

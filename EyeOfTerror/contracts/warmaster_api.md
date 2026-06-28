@@ -128,13 +128,17 @@ step ids, workers, dependency edges, expected artifact paths, and artifact
 counts for client review. When the governor exposes oversight, task preflight
 also returns `oversight_summary` and `oversight_validation` so clients can
 inspect final review expectations before creating a run package.
+Set `include_brigade_health=true` to include compact `brigade_readiness`
+(`ready`, blocker/warning counts, blockers, and warnings) in the preflight
+response without fetching the full `/brigade_health` service payload.
 
 ```json
 {
   "message": "User task text",
   "task_id": "optional-stable-id",
   "governor_transport": "local|http",
-  "governor_host": "optional-loopback-host"
+  "governor_host": "optional-loopback-host",
+  "include_brigade_health": true
 }
 ```
 
