@@ -2105,6 +2105,8 @@ def orchestrate_run_task(
                     "prepare": prepared,
                     "start": started,
                     "orchestration": state,
+                    "decision": state.get("decision", {}) if isinstance(state, dict) else {},
+                    "display": state.get("display", {}) if isinstance(state, dict) else {},
                     "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else state.get("next_action", {}),
                 }
             return {
@@ -2116,6 +2118,8 @@ def orchestrate_run_task(
                 "trace": trace,
                 "prepare": prepared,
                 "orchestration": state,
+                "decision": state.get("decision", {}) if isinstance(state, dict) else {},
+                "display": state.get("display", {}) if isinstance(state, dict) else {},
                 "next_action": state.get("next_action", {}) if isinstance(state, dict) else {},
             }
         return {
@@ -2127,6 +2131,7 @@ def orchestrate_run_task(
             "next_action": prepared.get("next_action") if isinstance(prepared.get("next_action"), dict) else {},
         }
     if not auto_start:
+        state = orchestration_state(run_root / run_task_id, event_limit=5, events_after=0)
         return {
             "ok": True,
             "phase": "ready_to_start",
@@ -2134,7 +2139,9 @@ def orchestrate_run_task(
             "trace": trace,
             "prepare": prepared,
             "next_action": prepared.get("next_action") if isinstance(prepared.get("next_action"), dict) else {},
-            "orchestration": orchestration_state(run_root / run_task_id, event_limit=5, events_after=0),
+            "orchestration": state,
+            "decision": state.get("decision", {}),
+            "display": state.get("display", {}),
         }
     started = orchestrate_start_run(
         run_root,
@@ -2163,6 +2170,8 @@ def orchestrate_run_task(
         "prepare": prepared,
         "start": started,
         "orchestration": state,
+        "decision": state.get("decision", {}) if isinstance(state, dict) else {},
+        "display": state.get("display", {}) if isinstance(state, dict) else {},
         "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else {},
     }
 

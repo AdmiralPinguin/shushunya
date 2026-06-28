@@ -754,6 +754,8 @@ def main() -> int:
                 or orchestrated_run.get("start", {}).get("operation") != "start"
                 or orchestrated_run.get("next_action", {}).get("kind") != "poll"
                 or orchestrated_run.get("orchestration", {}).get("task_id") != "warmaster-orchestrate-run-test"
+                or "headline" not in orchestrated_run.get("display", {})
+                or not isinstance(orchestrated_run.get("decision"), dict)
             ):
                 raise AssertionError(f"one-shot orchestration did not prepare and start a run: {orchestrated_run}")
             orchestrated_run_events = request_json(base + "/runs/warmaster-orchestrate-run-test/events")
@@ -777,6 +779,8 @@ def main() -> int:
                 or not orchestrated_retry.get("reused_existing")
                 or orchestrated_retry.get("orchestration", {}).get("task_id") != "warmaster-orchestrate-run-test"
                 or "headline" not in orchestrated_retry.get("orchestration", {}).get("display", {})
+                or "headline" not in orchestrated_retry.get("display", {})
+                or not isinstance(orchestrated_retry.get("decision"), dict)
                 or orchestrated_retry.get("prepare", {}).get("task_preflight", {}).get("error_code") != "task_exists"
             ):
                 raise AssertionError(f"one-shot orchestration retry did not reuse existing run: {orchestrated_retry}")

@@ -78,6 +78,9 @@
 - One-shot orchestration reuses existing runs for repeated stable `task_id`
   submissions by default, so reconnects can restore state without creating
   duplicate history or surfacing task-id conflicts as user-facing failures.
+- One-shot orchestration responses copy `decision` and `display` to the top
+  level so chat/mobile clients can render the immediate response without
+  traversing the nested orchestration state.
 - Warmaster Gateway exposes `GET /runs/{task_id}/orchestration` as a read-only
   chat decision view with phase, snapshot, next action, and final package when
   completed.
