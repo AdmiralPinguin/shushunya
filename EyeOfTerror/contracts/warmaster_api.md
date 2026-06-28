@@ -125,6 +125,11 @@ For every planning path, Warmaster rejects a produced task contract with
 `error_code=contract_workers_missing` when `worker_plan` references workers that
 are absent from the Mechanicum registry.
 
+When routing terms match a planned but inactive governor, task creation and task
+preflight return `error_code=governor_inactive`, the matched `governor`, `kind`,
+and a compact `route` object. When no route matches, they return
+`error_code=no_supported_governor`.
+
 ## Run Inspection
 
 Clients should use:

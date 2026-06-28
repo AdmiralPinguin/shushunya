@@ -349,10 +349,25 @@ def main() -> int:
                 if exc.code != 400:
                     raise
                 rejected = json.loads(exc.read().decode("utf-8"))
-                if rejected.get("kind") != "code":
+                if (
+                    rejected.get("kind") != "code"
+                    or rejected.get("error_code") != "governor_inactive"
+                    or rejected.get("governor") != "CogitatorCodewrightGovernor"
+                    or rejected.get("route", {}).get("governor") != "CogitatorCodewrightGovernor"
+                ):
                     raise AssertionError(f"bad unsupported route response: {rejected}")
             else:
                 raise AssertionError("unsupported code task should be rejected until a code governor exists")
+            try:
+                request_json(base + "/task_preflight", {"message": "сделай рисовалку stable diffusion", "task_id": "unsupported-image"})
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                rejected_preflight = json.loads(exc.read().decode("utf-8"))
+                if rejected_preflight.get("error_code") != "governor_inactive" or rejected_preflight.get("governor") != "ForgeMasterGovernor":
+                    raise AssertionError(f"bad unsupported preflight route response: {rejected_preflight}")
+            else:
+                raise AssertionError("unsupported image preflight should be rejected until an image governor exists")
             try:
                 request_json(
                     base + "/task",

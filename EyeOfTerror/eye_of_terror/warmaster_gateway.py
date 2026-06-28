@@ -229,6 +229,19 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
     }
 
 
+def route_failure_payload(route: Any) -> dict[str, Any]:
+    error_code = "governor_inactive" if route.governor else "no_supported_governor"
+    return {
+        "ok": False,
+        "gateway": "WarmasterGateway",
+        "error": route.reason,
+        "error_code": error_code,
+        "kind": route.kind,
+        "governor": route.governor,
+        "route": {"kind": route.kind, "governor": route.governor, "ok": route.ok, "reason": route.reason},
+    }
+
+
 def prepare_task(message: str, task_id: str | None, run_root: Path, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> dict[str, Any]:
     if task_id is not None and not valid_task_id(task_id):
         return {
@@ -240,7 +253,7 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
         }
     route = route_message(message)
     if not route.ok:
-        return {"ok": False, "gateway": "WarmasterGateway", "error": route.reason, "kind": route.kind}
+        return route_failure_payload(route)
     governor = route.governor
     governor_ref = governor_by_name(governor)
     if governor_ref is None or not governor_ref.active():
@@ -299,7 +312,7 @@ def preflight_task(message: str, task_id: str | None, run_root: Path, governor_t
         return {"ok": False, "gateway": "WarmasterGateway", "error": "invalid task_id", "error_code": "invalid_task_id", "task_id": task_id}
     route = route_message(message)
     if not route.ok:
-        return {"ok": False, "gateway": "WarmasterGateway", "error": route.reason, "kind": route.kind}
+        return route_failure_payload(route)
     governor_ref = governor_by_name(route.governor)
     if governor_ref is None or not governor_ref.active():
         return {"ok": False, "gateway": "WarmasterGateway", "error": f"governor is not active: {route.governor}", "kind": route.kind}
