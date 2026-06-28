@@ -6,6 +6,8 @@ It is not a worker and should not execute long specialist work directly. Its
 job is to accept user chat/tasks, pick the right Inner Circle governor, track
 the task state, and return status/results to the user.
 
+See `EyeOfTerror/ARCHITECTURE.md` for the layer boundaries and registry rules.
+
 ## Ports
 
 | Port | Service | Role |
@@ -48,11 +50,14 @@ Gateway endpoints:
 - `GET /runs`
 - `GET /runs/<task_id>`
 - `GET /runs/<task_id>/summary`
+- `GET /runs/<task_id>/snapshot`
+- `GET /runs/<task_id>/active`
 - `GET /runs/<task_id>/ledger`
 - `GET /runs/<task_id>/contract`
 - `GET /runs/<task_id>/dispatch`
 - `GET /runs/<task_id>/worker_tasks`
 - `GET /runs/<task_id>/events`
+- `GET /runs/<task_id>/events?after=N`
 - `GET /runs/<task_id>/artifacts`
 - `GET /runs/<task_id>/artifact_text?path=/work/...`
 - `POST /runs/<task_id>/execute_local`
@@ -72,6 +77,10 @@ best-effort `/health` snapshot for each worker service.
 `GET /state` is the preferred client bootstrap endpoint after an app restart.
 It returns gateway capabilities, governors, workers, recent runs, and run status
 counts in one response.
+
+`GET /runs/<task_id>/snapshot` is the preferred per-run polling endpoint for
+clients. It returns summary, process-local active state, cursor event updates,
+and artifact metadata in one response.
 
 `GET /runs/<task_id>/worker_tasks` maps a Warmaster run to the task ids sent to
 Mechanicum workers. Add `?live=1` for a best-effort lookup against worker
