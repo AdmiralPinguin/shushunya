@@ -269,6 +269,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   source types and ranking reasons.
 - `NoosphericExtractor` uses data playbooks when available and falls back to
   low-confidence generic evidence leads from fetched source snapshots.
+- `NoosphericExtractor` preserves `render_required` source snapshots as explicit
+  gaps so downstream timeline, draft, and critic artifacts do not hide browser
+  render needs.
 - `Chronologis` and `ScriptoriumDaemon` preserve generic evidence-lead and
   low-confidence metadata through timeline and coverage artifacts.
 - `ReductorVerifier` and `FabricatorFinalis` carry evidence-lead risk metrics

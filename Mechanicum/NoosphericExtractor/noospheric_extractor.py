@@ -77,8 +77,13 @@ def snapshot_evidence(event_id: str, snapshots: dict[str, Any]) -> list[dict[str
 def snapshot_gaps(snapshots: dict[str, Any]) -> list[str]:
     gaps: list[str] = []
     for snapshot in snapshots.get("snapshots", []):
-        if isinstance(snapshot, dict) and not snapshot.get("ok"):
-            title = snapshot.get("source_title") or snapshot.get("requested_url") or "unknown source"
+        if not isinstance(snapshot, dict):
+            continue
+        title = snapshot.get("source_title") or snapshot.get("requested_url") or "unknown source"
+        if snapshot.get("render_required"):
+            reason = snapshot.get("render_reason") or "JavaScript-rendered page needs browser rendering"
+            gaps.append(f"Source requires browser render for {title}: {reason}")
+        if not snapshot.get("ok"):
             error = snapshot.get("error") or "fetch failed"
             gaps.append(f"Source snapshot unavailable for {title}: {error}")
     for skipped in snapshots.get("skipped", []):

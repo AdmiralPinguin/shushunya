@@ -42,6 +42,13 @@ def main() -> int:
                             "ok": False,
                             "error": "HTTP Error 403: Forbidden",
                         },
+                        {
+                            "source_title": "Scripted Archive",
+                            "ok": True,
+                            "render_required": True,
+                            "render_reason": "low extracted text with SPA/runtime markers",
+                            "text_excerpt": "",
+                        },
                     ],
                     "skipped": [{"source_title": "Kharn: Eater of Worlds", "reason": "no public URL in source map"}],
                 }
@@ -62,6 +69,8 @@ def main() -> int:
             raise AssertionError("moon parley should include snapshot evidence")
         if not any("HTTP Error 403" in gap for gap in data.get("gaps", [])):
             raise AssertionError("snapshot fetch failures should be reported as gaps")
+        if not any("requires browser render" in gap for gap in data.get("gaps", [])):
+            raise AssertionError("render-required snapshots should be reported as gaps")
         generic_root = Path(temp_dir) / "generic"
         generic_root.mkdir(parents=True, exist_ok=True)
         (generic_root / "source_map.json").write_text(
