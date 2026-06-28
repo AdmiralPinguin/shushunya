@@ -294,6 +294,31 @@ def run_events(run_dir: Path, limit: int | None = None, after: int | None = None
     }
 
 
+def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: int | None = None) -> dict[str, Any]:
+    task_id = run_dir.name
+    with ACTIVE_RUNS_LOCK:
+        active = task_id in ACTIVE_RUNS
+    payload: dict[str, Any] = {
+        "ok": True,
+        "task_id": task_id,
+        "summary": run_summary(run_dir),
+        "active": active,
+    }
+    events_payload = run_events(run_dir, limit=event_limit, after=events_after)
+    payload["events"] = events_payload.get("events", [])
+    payload["event_cursor"] = events_payload.get("cursor", {"after": 0, "next": 0, "total": 0})
+    if not events_payload.get("ok"):
+        payload["events_error"] = events_payload.get("error", "events unavailable")
+    ledger_path = run_dir / "task_ledger.json"
+    ledger, ledger_error = load_ledger_dict(ledger_path)
+    if ledger_error:
+        payload["artifacts_error"] = ledger_error
+        payload["artifacts"] = []
+    else:
+        payload.update(artifact_status(ledger))
+    return payload
+
+
 def recover_stale_runs(run_root: Path) -> list[dict[str, Any]]:
     recovered: list[dict[str, Any]] = []
     if not run_root.exists():
@@ -466,6 +491,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs?limit=20",
             "GET /runs/{task_id}",
             "GET /runs/{task_id}/summary",
+            "GET /runs/{task_id}/snapshot",
             "GET /runs/{task_id}/active",
             "GET /runs/{task_id}/ledger",
             "GET /runs/{task_id}/contract",
@@ -632,6 +658,14 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 if len(parts) == 3 and parts[2] == "summary":
                     response(self, 200, {"ok": True, "summary": run_summary(run_dir)})
+                    return
+                if len(parts) == 3 and parts[2] == "snapshot":
+                    query = parse_qs(parsed.query)
+                    raw_event_limit = query.get("event_limit", [""])[0]
+                    event_limit = parse_limit(raw_event_limit, default=MAX_LIST_LIMIT) if raw_event_limit else None
+                    raw_events_after = query.get("events_after", [""])[0]
+                    events_after = parse_nonnegative_int(raw_events_after, default=0) if raw_events_after else None
+                    response(self, 200, run_snapshot(run_dir, event_limit=event_limit, events_after=events_after))
                     return
                 if len(parts) == 3 and parts[2] == "active":
                     with ACTIVE_RUNS_LOCK:

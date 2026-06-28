@@ -215,6 +215,14 @@ def main() -> int:
             run_summary = request_json(base + "/runs/warmaster-test/summary")
             if not run_summary.get("ok") or run_summary.get("summary", {}).get("task_id") != "warmaster-test":
                 raise AssertionError(f"bad run summary: {run_summary}")
+            snapshot = request_json(base + "/runs/warmaster-test/snapshot?events_after=0&event_limit=1")
+            if (
+                not snapshot.get("ok")
+                or snapshot.get("summary", {}).get("task_id") != "warmaster-test"
+                or snapshot.get("active")
+                or snapshot.get("event_cursor", {}).get("next") != 1
+            ):
+                raise AssertionError(f"bad run snapshot: {snapshot}")
             run_active = request_json(base + "/runs/warmaster-test/active")
             if not run_active.get("ok") or run_active.get("active"):
                 raise AssertionError(f"bad run active response: {run_active}")
@@ -266,6 +274,9 @@ def main() -> int:
             artifacts = request_json(base + "/runs/warmaster-test/artifacts")
             if not artifacts.get("ok") or not artifacts.get("artifacts") or not artifacts["artifacts"][0].get("exists"):
                 raise AssertionError(f"bad artifacts response: {artifacts}")
+            completed_snapshot = request_json(base + "/runs/warmaster-test/snapshot?events_after=0&event_limit=3")
+            if not completed_snapshot.get("ok") or not completed_snapshot.get("artifacts") or completed_snapshot.get("summary", {}).get("status") != "completed":
+                raise AssertionError(f"bad completed run snapshot: {completed_snapshot}")
             artifact_path = artifacts["artifacts"][0]["path"]
             text_artifact = request_json(base + f"/runs/warmaster-test/artifact_text?path={artifact_path}")
             if not text_artifact.get("ok") or "ready" not in text_artifact.get("text", ""):
