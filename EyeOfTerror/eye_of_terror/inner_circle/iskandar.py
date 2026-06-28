@@ -10,6 +10,45 @@ from ..pipeline import build_dispatch_packets, pipeline_status, write_pipeline_r
 from ..registry import worker_by_name
 
 
+def oversight_plan(contract: TaskContract) -> dict[str, Any]:
+    artifacts_by_role = {
+        "source_map": [artifact for artifact in contract.required_artifacts if artifact.endswith("/source_map.json")],
+        "source_snapshots": [artifact for artifact in contract.required_artifacts if artifact.endswith("/source_snapshots.json")],
+        "evidence_notes": [artifact for artifact in contract.required_artifacts if artifact.endswith("/direct_event_notes.json")],
+        "timeline": [artifact for artifact in contract.required_artifacts if artifact.endswith("/timeline.json")],
+        "draft": [artifact for artifact in contract.required_artifacts if artifact.endswith("/reconstruction_ru.md")],
+        "coverage": [artifact for artifact in contract.required_artifacts if artifact.endswith("/coverage_report.md")],
+        "critic": [artifact for artifact in contract.required_artifacts if artifact.endswith("/critic_report.json")],
+        "final": [artifact for artifact in contract.required_artifacts if artifact.endswith("/final_manifest.json")],
+    }
+    handoffs = [
+        {
+            "from_step": step.step_id,
+            "to_steps": [candidate.step_id for candidate in contract.worker_plan if step.step_id in candidate.depends_on],
+            "artifacts": step.expected_artifacts,
+        }
+        for step in contract.worker_plan
+    ]
+    return {
+        "governor": contract.assigned_governor,
+        "kind": "lore_reconstruction_oversight",
+        "quality_gates": contract.quality_gates,
+        "completion_criteria": contract.completion_criteria,
+        "non_goals": contract.non_goals,
+        "artifact_roles": artifacts_by_role,
+        "handoffs": handoffs,
+        "final_review": {
+            "critic_step": "critic_review",
+            "final_step": "finalize",
+            "final_artifact": artifacts_by_role["final"][0] if artifacts_by_role["final"] else "",
+            "deliverable_role": "draft",
+            "requires_critic_approval_or_blockers": True,
+            "requires_gap_disclosure": True,
+            "requires_evidence_trace": True,
+        },
+    }
+
+
 @dataclass
 class IskandarPlan:
     contract: TaskContract
@@ -32,6 +71,7 @@ class IskandarPlan:
             "validation": {"ok": not validation_errors, "errors": validation_errors},
             "resolved_workers": resolved_workers,
             "missing_workers": missing_workers,
+            "oversight": oversight_plan(self.contract),
         }
 
 

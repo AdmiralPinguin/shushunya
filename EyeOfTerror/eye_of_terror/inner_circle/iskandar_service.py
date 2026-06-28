@@ -6,8 +6,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from ..contracts import lore_worker_plan
-from .iskandar import plan_lore_reconstruction
+from ..contracts import build_lore_reconstruction_contract, lore_worker_plan
+from .iskandar import oversight_plan, plan_lore_reconstruction
 from ..pipeline import write_pipeline_run
 
 
@@ -38,6 +38,11 @@ def pipeline_summary() -> dict[str, Any]:
     }
 
 
+def oversight_template() -> dict[str, Any]:
+    contract = build_lore_reconstruction_contract("capabilities", task_id="capabilities")
+    return oversight_plan(contract)
+
+
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
     data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     handler.send_response(status)
@@ -66,10 +71,12 @@ def service_capabilities() -> dict[str, Any]:
         "task_kinds": ["research", "lore_reconstruction"],
         "required_workers": required_workers(),
         "pipeline": pipeline_summary(),
+        "oversight": oversight_template(),
         "capabilities": [
             "lore_reconstruction_planning",
             "worker_plan_resolution",
             "dispatch_packet_preparation",
+            "oversight_plan",
             "source_research_coordination",
             "timeline_coordination",
             "writer_verifier_finalizer_coordination",

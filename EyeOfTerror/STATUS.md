@@ -9,6 +9,9 @@
   `/capabilities`.
 - Iskandar Khayon exposes a compact pipeline summary through `/capabilities`
   so Warmaster/admin clients can inspect steps before task creation.
+- Iskandar Khayon exposes an oversight plan through `/capabilities` and
+  `/plan`, including artifact roles, handoffs, quality gates, completion
+  criteria, and final review expectations.
 - Mechanicum prototype workers cover the current lore pipeline:
   - `Lexmechanic`
   - `AuspexBrowser`

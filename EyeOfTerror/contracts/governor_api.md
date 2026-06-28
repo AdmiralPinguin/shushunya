@@ -45,7 +45,16 @@ POST /prepare_run
       }
     ]
   },
-  "capabilities": ["lore_reconstruction_planning", "dispatch_packet_preparation"],
+  "oversight": {
+    "governor": "IskandarKhayon",
+    "kind": "lore_reconstruction_oversight",
+    "quality_gates": [],
+    "completion_criteria": [],
+    "artifact_roles": {},
+    "handoffs": [],
+    "final_review": {}
+  },
+  "capabilities": ["lore_reconstruction_planning", "dispatch_packet_preparation", "oversight_plan"],
   "endpoints": ["GET /health", "GET /capabilities", "POST /plan", "POST /prepare_run"]
 }
 ```
@@ -56,6 +65,10 @@ against the Mechanicum registry before starting a task.
 `pipeline` is a compact task-class plan summary built from the same worker plan
 source as concrete task contracts; clients can inspect step dependencies and
 expected artifacts before creating a run.
+`oversight` is the governor's task-class quality-control plan. It should expose
+artifact roles, worker handoffs, completion criteria, quality gates, and final
+review expectations so Warmaster and admin clients can inspect how the governor
+intends to supervise worker output.
 
 ## POST /plan Request
 
@@ -73,7 +86,7 @@ expected artifacts before creating a run.
   "ok": true,
   "contract": {},
   "validation": {},
-  "summary": "..."
+  "oversight": {}
 }
 ```
 

@@ -10,7 +10,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from eye_of_terror.contracts import build_lore_reconstruction_contract
-from eye_of_terror.inner_circle.iskandar_service import make_handler, pipeline_summary, required_workers, resolve_run_dir
+from eye_of_terror.inner_circle.iskandar_service import make_handler, oversight_template, pipeline_summary, required_workers, resolve_run_dir
 
 
 def request_json(url: str, payload: dict | None = None) -> dict:
@@ -42,6 +42,14 @@ def main() -> int:
         or pipeline.get("steps", [])[1].get("expected_artifacts") != ["/work/capabilities/source_snapshots.json"]
     ):
         raise AssertionError(f"bad Iskandar pipeline summary: {pipeline}")
+    oversight = oversight_template()
+    if (
+        oversight.get("final_review", {}).get("critic_step") != "critic_review"
+        or oversight.get("final_review", {}).get("requires_evidence_trace") is not True
+        or not oversight.get("artifact_roles", {}).get("final", [])[0].endswith("/final_manifest.json")
+        or not any(item.get("from_step") == "critic_review" and item.get("to_steps") == ["finalize"] for item in oversight.get("handoffs", []))
+    ):
+        raise AssertionError(f"bad Iskandar oversight template: {oversight}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         if resolve_run_dir(root / "runs", "child", "task").resolve() != (root / "runs" / "child").resolve():
@@ -62,12 +70,22 @@ def main() -> int:
             if capabilities.get("required_workers", [])[0] != "Lexmechanic" or "FabricatorFinalis" not in capabilities.get("required_workers", []):
                 raise AssertionError(f"capabilities did not expose required workers: {capabilities}")
             if (
+                "oversight_plan" not in capabilities.get("capabilities", [])
+                or capabilities.get("oversight", {}).get("final_review", {}).get("final_step") != "finalize"
+            ):
+                raise AssertionError(f"capabilities did not expose oversight plan: {capabilities}")
+            if (
                 capabilities.get("pipeline", {}).get("step_count") != len(contract_workers)
                 or capabilities.get("pipeline", {}).get("steps", [])[0].get("step_id") != "source_discovery"
             ):
                 raise AssertionError(f"capabilities did not expose pipeline summary: {capabilities}")
             plan = request_json(base + "/plan", {"task": "Собери события Скалатракса", "task_id": "iskandar-http-test"})
-            if not plan.get("ok") or plan["contract"]["assigned_governor"] != "IskandarKhayon":
+            if (
+                not plan.get("ok")
+                or plan["contract"]["assigned_governor"] != "IskandarKhayon"
+                or plan.get("oversight", {}).get("artifact_roles", {}).get("critic") != ["/work/skalathrax/critic_report.json"]
+                or plan.get("oversight", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
+            ):
                 raise AssertionError(f"bad plan: {plan}")
             run_dir = root / "runs" / "custom-run"
             prepared = request_json(
