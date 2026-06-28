@@ -70,6 +70,13 @@ def main() -> int:
             if capabilities.get("required_workers", [])[0] != "Lexmechanic" or "FabricatorFinalis" not in capabilities.get("required_workers", []):
                 raise AssertionError(f"capabilities did not expose required workers: {capabilities}")
             if (
+                capabilities.get("worker_availability", {}).get("ok") is not True
+                or capabilities.get("worker_availability", {}).get("missing_workers")
+                or capabilities.get("worker_availability", {}).get("unavailable_workers")
+                or capabilities.get("worker_availability", {}).get("resolved_workers", {}).get("Lexmechanic", {}).get("status") != "prototype"
+            ):
+                raise AssertionError(f"capabilities did not expose worker availability: {capabilities}")
+            if (
                 "oversight_plan" not in capabilities.get("capabilities", [])
                 or capabilities.get("oversight", {}).get("final_review", {}).get("final_step") != "finalize"
             ):

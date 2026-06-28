@@ -64,12 +64,19 @@ def payload_from(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 
 def service_capabilities() -> dict[str, Any]:
+    capability_plan = plan_lore_reconstruction("capabilities", task_id="capabilities").to_dict()
     return {
         "ok": True,
         "governor": "IskandarKhayon",
         "api_version": 1,
         "task_kinds": ["research", "lore_reconstruction"],
         "required_workers": required_workers(),
+        "worker_availability": {
+            "ok": not capability_plan.get("missing_workers") and not capability_plan.get("unavailable_workers"),
+            "missing_workers": capability_plan.get("missing_workers", []),
+            "unavailable_workers": capability_plan.get("unavailable_workers", []),
+            "resolved_workers": capability_plan.get("resolved_workers", {}),
+        },
         "pipeline": pipeline_summary(),
         "oversight": oversight_template(),
         "capabilities": [
