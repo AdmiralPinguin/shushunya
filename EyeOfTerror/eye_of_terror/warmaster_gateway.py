@@ -692,6 +692,11 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         http_workspace_root = Path(str(payload["workspace_root"])) if "workspace_root" in payload else None
                         executor = lambda: execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root)
                     if parts[2].startswith("start_"):
+                        if ledger_path.exists():
+                            try:
+                                TaskLedger.load(ledger_path).record_event("background_start_requested", {"mode": parts[2]})
+                            except Exception:
+                                pass
                         started = start_background(task_id, executor)
                         if not started:
                             response(self, 409, {"ok": False, "error": "run already active", "task_id": task_id})

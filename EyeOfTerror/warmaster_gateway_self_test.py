@@ -227,6 +227,9 @@ def main() -> int:
                 time.sleep(0.2)
             else:
                 raise AssertionError(f"background run did not complete: {background_ledger}")
+            background_events = [event.get("type") for event in background_ledger["ledger"].get("events", [])]
+            if "background_start_requested" not in background_events:
+                raise AssertionError(f"background start event missing: {background_ledger}")
             cancel_task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-cancel-test"},

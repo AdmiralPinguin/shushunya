@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -54,7 +56,7 @@ class TaskLedger:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.data["updated_at"] = now_iso()
-        tmp_path = self.path.with_name(f".{self.path.name}.tmp")
+        tmp_path = self.path.with_name(f".{self.path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         tmp_path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         tmp_path.replace(self.path)
 
