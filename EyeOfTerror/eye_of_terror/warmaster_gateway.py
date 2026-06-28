@@ -186,6 +186,16 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "governor": governor.name,
             "missing_workers": missing_workers,
         }
+    oversight_errors = plan_oversight_errors(contract, plan)
+    if oversight_errors:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "governor service produced invalid oversight",
+            "error_code": "invalid_oversight",
+            "task_id": service_task_id,
+            "oversight_validation": {"ok": False, "errors": oversight_errors},
+        }
     run_dir = run_root / service_task_id
     if run_dir.exists():
         return {
@@ -242,6 +252,13 @@ def route_failure_payload(route: Any) -> dict[str, Any]:
     }
 
 
+def plan_oversight_errors(contract: dict[str, Any], plan_payload: dict[str, Any]) -> list[str]:
+    oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else {}
+    if not oversight:
+        return ["governor plan did not include oversight"]
+    return validate_oversight_payload(contract, oversight, {"steps": contract_summary(contract).get("steps", [])})
+
+
 def prepare_task(message: str, task_id: str | None, run_root: Path, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> dict[str, Any]:
     if task_id is not None and not valid_task_id(task_id):
         return {
@@ -296,6 +313,16 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "missing_workers": missing_workers,
         }
     plan_payload = plan.to_dict()
+    oversight_errors = plan_oversight_errors(contract_payload, plan_payload)
+    if oversight_errors:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "governor produced invalid oversight",
+            "error_code": "invalid_oversight",
+            "task_id": plan.contract.task_id,
+            "oversight_validation": {"ok": False, "errors": oversight_errors},
+        }
     oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else None
     status = write_pipeline_run(plan.contract, run_dir, oversight=oversight)
     TaskLedger.create(run_dir / "task_ledger.json", plan.contract.task_id, plan.contract.goal, governor)
@@ -356,12 +383,7 @@ def preflight_task(message: str, task_id: str | None, run_root: Path, governor_t
         return {"ok": False, "gateway": "WarmasterGateway", "error": "task_id already exists", "error_code": "task_exists", "task_id": resolved_task_id, "run_dir": str(run_dir)}
     validation_errors = validate_task_contract_payload(contract)
     missing_workers = [] if validation_errors else missing_contract_workers(contract)
-    oversight_errors: list[str] = []
-    if not oversight and not validation_errors:
-        oversight_errors.append("governor plan did not include oversight")
-    elif oversight and not validation_errors:
-        status_stub = {"steps": contract_summary(contract).get("steps", [])}
-        oversight_errors = validate_oversight_payload(contract, oversight, status_stub)
+    oversight_errors = [] if validation_errors else plan_oversight_errors(contract, {"oversight": oversight})
     ok = not validation_errors and not missing_workers and not oversight_errors
     error_code = ""
     if not ok:

@@ -152,6 +152,11 @@ For every planning path, Warmaster rejects a produced task contract with
 `error_code=contract_workers_missing` when `worker_plan` references workers that
 are absent from the Mechanicum registry.
 
+For every planning path, Warmaster rejects task creation with
+`error_code=invalid_oversight` when the governor plan omits oversight or the
+oversight does not match the task contract. This prevents creating run packages
+that cannot later pass run preflight.
+
 When routing terms match a planned but inactive governor, task creation and task
 preflight return `error_code=governor_inactive`, the matched `governor`, `kind`,
 and a compact `route` object. When no route matches, they return

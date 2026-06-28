@@ -66,6 +66,8 @@
   `required_workers` are missing from the Mechanicum registry.
 - Warmaster rejects produced task contracts whose `worker_plan` references
   workers absent from the Mechanicum registry.
+- Warmaster rejects task creation when the selected governor omits oversight or
+  returns oversight that does not match the task contract.
 - Task contract runtime validation rejects non-string non-goals, completion
   criteria, and quality gates.
 - Task contract runtime validation requires every required artifact to have one

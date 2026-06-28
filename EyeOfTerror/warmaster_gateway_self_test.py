@@ -145,6 +145,25 @@ def main() -> int:
                 raise AssertionError(f"Warmaster accepted a contract with a missing worker: {missing_worker_contract}")
         finally:
             warmaster_gateway.plan_lore_reconstruction = original_planner
+        try:
+            good_plan = original_planner("Собери все известное о событиях Скалатракса.", task_id="missing-oversight-contract")
+
+            class MissingOversightPlan:
+                contract = good_plan.contract
+
+                def to_dict(self) -> dict:
+                    return {"ok": True, "contract": self.contract.to_dict(), "validation": {"ok": True, "errors": []}}
+
+            warmaster_gateway.plan_lore_reconstruction = lambda _message, task_id=None: MissingOversightPlan()
+            missing_oversight_contract = warmaster_gateway.prepare_task(
+                "Собери все известное о событиях Скалатракса.",
+                "missing-oversight-contract",
+                run_root,
+            )
+            if missing_oversight_contract.get("error_code") != "invalid_oversight" or (run_root / "missing-oversight-contract").exists():
+                raise AssertionError(f"Warmaster accepted a plan without oversight: {missing_oversight_contract}")
+        finally:
+            warmaster_gateway.plan_lore_reconstruction = original_planner
         bad_dispatch = Path(temp_dir) / "bad-dispatch" / "dispatch"
         bad_dispatch.mkdir(parents=True, exist_ok=True)
         (bad_dispatch / "broken.json").write_text("{", encoding="utf-8")
