@@ -10,7 +10,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from eye_of_terror.contracts import build_lore_reconstruction_contract
-from eye_of_terror.inner_circle.iskandar_service import make_handler, required_workers, resolve_run_dir
+from eye_of_terror.inner_circle.iskandar_service import make_handler, pipeline_summary, required_workers, resolve_run_dir
 
 
 def request_json(url: str, payload: dict | None = None) -> dict:
@@ -34,6 +34,14 @@ def main() -> int:
     ]
     if required_workers() != contract_workers:
         raise AssertionError(f"Iskandar required workers drifted from contract plan: {required_workers()}")
+    pipeline = pipeline_summary()
+    if (
+        pipeline.get("step_count") != len(contract_workers)
+        or pipeline.get("steps", [])[0].get("worker") != "Lexmechanic"
+        or pipeline.get("steps", [])[1].get("depends_on") != ["source_discovery"]
+        or pipeline.get("steps", [])[1].get("expected_artifacts") != ["/work/capabilities/source_snapshots.json"]
+    ):
+        raise AssertionError(f"bad Iskandar pipeline summary: {pipeline}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         if resolve_run_dir(root / "runs", "child", "task").resolve() != (root / "runs" / "child").resolve():
@@ -53,6 +61,11 @@ def main() -> int:
                 raise AssertionError(f"bad capabilities: {capabilities}")
             if capabilities.get("required_workers", [])[0] != "Lexmechanic" or "FabricatorFinalis" not in capabilities.get("required_workers", []):
                 raise AssertionError(f"capabilities did not expose required workers: {capabilities}")
+            if (
+                capabilities.get("pipeline", {}).get("step_count") != len(contract_workers)
+                or capabilities.get("pipeline", {}).get("steps", [])[0].get("step_id") != "source_discovery"
+            ):
+                raise AssertionError(f"capabilities did not expose pipeline summary: {capabilities}")
             plan = request_json(base + "/plan", {"task": "Собери события Скалатракса", "task_id": "iskandar-http-test"})
             if not plan.get("ok") or plan["contract"]["assigned_governor"] != "IskandarKhayon":
                 raise AssertionError(f"bad plan: {plan}")

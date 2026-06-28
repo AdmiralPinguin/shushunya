@@ -7,6 +7,8 @@
   `input_artifacts`.
 - Iskandar Khayon exposes his required Mechanicum worker set through
   `/capabilities`.
+- Iskandar Khayon exposes a compact pipeline summary through `/capabilities`
+  so Warmaster/admin clients can inspect steps before task creation.
 - Mechanicum prototype workers cover the current lore pipeline:
   - `Lexmechanic`
   - `AuspexBrowser`

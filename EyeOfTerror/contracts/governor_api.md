@@ -31,6 +31,20 @@ POST /prepare_run
   "api_version": 1,
   "task_kinds": ["research", "lore_reconstruction"],
   "required_workers": ["Lexmechanic", "NoosphericExtractor"],
+  "pipeline": {
+    "kind": "lore_reconstruction",
+    "step_count": 2,
+    "required_workers": ["Lexmechanic", "NoosphericExtractor"],
+    "steps": [
+      {
+        "step_id": "source_discovery",
+        "worker": "Lexmechanic",
+        "depends_on": [],
+        "expected_artifacts": ["/work/capabilities/source_map.json"],
+        "expected_artifact_count": 1
+      }
+    ]
+  },
   "capabilities": ["lore_reconstruction_planning", "dispatch_packet_preparation"],
   "endpoints": ["GET /health", "GET /capabilities", "POST /plan", "POST /prepare_run"]
 }
@@ -39,6 +53,9 @@ POST /prepare_run
 `required_workers` is ordered by the governor's normal pipeline dependency
 shape, so an orchestrator or admin client can compare the governor requirements
 against the Mechanicum registry before starting a task.
+`pipeline` is a compact task-class plan summary built from the same worker plan
+source as concrete task contracts; clients can inspect step dependencies and
+expected artifacts before creating a run.
 
 ## POST /plan Request
 

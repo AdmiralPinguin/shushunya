@@ -19,6 +19,25 @@ def required_workers() -> list[str]:
     return workers
 
 
+def pipeline_summary() -> dict[str, Any]:
+    steps = [step.to_dict() for step in lore_worker_plan("capabilities")]
+    return {
+        "kind": "lore_reconstruction",
+        "step_count": len(steps),
+        "required_workers": required_workers(),
+        "steps": [
+            {
+                "step_id": step["step_id"],
+                "worker": step["worker"],
+                "depends_on": step["depends_on"],
+                "expected_artifacts": step["expected_artifacts"],
+                "expected_artifact_count": len(step["expected_artifacts"]),
+            }
+            for step in steps
+        ],
+    }
+
+
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
     data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     handler.send_response(status)
@@ -46,6 +65,7 @@ def service_capabilities() -> dict[str, Any]:
         "api_version": 1,
         "task_kinds": ["research", "lore_reconstruction"],
         "required_workers": required_workers(),
+        "pipeline": pipeline_summary(),
         "capabilities": [
             "lore_reconstruction_planning",
             "worker_plan_resolution",

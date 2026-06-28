@@ -11,6 +11,8 @@ workers and decide whether their outputs are good enough.
 His service capabilities expose the required Mechanicum worker set for the lore
 reconstruction pipeline, so Warmaster/admin clients can compare requirements
 against the worker registry before execution.
+They also expose a compact pipeline summary with step dependencies and expected
+artifacts, built from the same worker-plan source used for concrete contracts.
 
 ## Responsibilities
 
