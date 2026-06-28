@@ -399,7 +399,17 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
 
 
 def compact_brigade_readiness(host: str = "127.0.0.1") -> dict[str, Any]:
-    health = brigade_health_snapshot(host=host)
+    try:
+        health = brigade_health_snapshot(host=host)
+    except Exception as exc:  # noqa: BLE001 - task preflight should not crash on optional readiness diagnostics.
+        return {
+            "ready": False,
+            "blocker_count": 1,
+            "warning_count": 0,
+            "blockers": [f"Brigade readiness unavailable: {exc}"],
+            "warnings": [],
+            "error": str(exc),
+        }
     summary = health.get("summary") if isinstance(health.get("summary"), dict) else {}
     return {
         "ready": bool(summary.get("ready")),

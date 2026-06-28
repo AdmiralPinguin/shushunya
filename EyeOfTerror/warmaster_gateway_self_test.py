@@ -12,7 +12,7 @@ from pathlib import Path
 
 import eye_of_terror.warmaster_gateway as warmaster_gateway
 from eye_of_terror.inner_circle.iskandar_service import make_handler as make_iskandar_handler
-from eye_of_terror.warmaster_gateway import brigade_readiness_summary, cancel_http_worker_tasks, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, requested_step_ids_from_payload, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
+from eye_of_terror.warmaster_gateway import brigade_readiness_summary, cancel_http_worker_tasks, compact_brigade_readiness, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, requested_step_ids_from_payload, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
 from eye_of_terror.pipeline import write_pipeline_run
@@ -157,6 +157,9 @@ def main() -> int:
         or not any("IskandarKhayon" in blocker for blocker in readiness.get("blockers", []))
     ):
         raise AssertionError(f"bad brigade readiness summary: {readiness}")
+    invalid_readiness = compact_brigade_readiness(host="example.com")
+    if invalid_readiness.get("ready") or not invalid_readiness.get("error") or invalid_readiness.get("blocker_count") != 1:
+        raise AssertionError(f"compact readiness should fail soft on invalid host: {invalid_readiness}")
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir) / "runs"
         try:

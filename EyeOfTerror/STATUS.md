@@ -68,6 +68,8 @@
   clients can inspect final review expectations before creating run history.
 - Task preflight can optionally include compact `brigade_readiness` when clients
   set `include_brigade_health=true`.
+- Optional task-preflight brigade readiness fails soft as a diagnostic payload
+  instead of crashing the preflight response.
 - Governor API contract checks document the active Iskandar required worker
   chain exposed through `/capabilities`.
 - Iskandar `/plan` resolves worker metadata and reports planned workers as
