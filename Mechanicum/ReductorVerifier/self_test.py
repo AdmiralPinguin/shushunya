@@ -101,8 +101,15 @@ def main() -> int:
             raise AssertionError(f"expected missing evidence to fail: {report}")
         revision_steps = report.get("revision_plan", {}).get("steps", [])
         revision_workers = {step.get("worker") for step in revision_steps}
-        if not {"AuspexBrowser", "NoosphericExtractor", "ScriptoriumDaemon"}.issubset(revision_workers):
+        if not {"AuspexBrowser", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
             raise AssertionError(f"missing evidence review did not produce source rework plan: {report}")
+        source_acquisition_index = next(
+            index for index, step in enumerate(revision_steps) if step.get("step_id") == "source_acquisition"
+        )
+        timeline_index = next(index for index, step in enumerate(revision_steps) if step.get("step_id") == "timeline")
+        draft_index = next(index for index, step in enumerate(revision_steps) if step.get("step_id") == "draft_reconstruction")
+        if not source_acquisition_index < timeline_index < draft_index:
+            raise AssertionError(f"revision dependencies are not ordered downstream: {report}")
     print("[ok] ReductorVerifier review")
     return 0
 

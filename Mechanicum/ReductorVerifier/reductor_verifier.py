@@ -32,6 +32,36 @@ ARTIFACT_REWORK_TARGETS = {
     "coverage_report.md": ("draft_reconstruction", "ScriptoriumDaemon"),
 }
 
+REVISION_DEPENDENCIES = {
+    "source_discovery": [
+        ("source_acquisition", "AuspexBrowser"),
+        ("fact_extraction", "NoosphericExtractor"),
+        ("timeline", "Chronologis"),
+        ("draft_reconstruction", "ScriptoriumDaemon"),
+    ],
+    "source_acquisition": [
+        ("fact_extraction", "NoosphericExtractor"),
+        ("timeline", "Chronologis"),
+        ("draft_reconstruction", "ScriptoriumDaemon"),
+    ],
+    "fact_extraction": [
+        ("timeline", "Chronologis"),
+        ("draft_reconstruction", "ScriptoriumDaemon"),
+    ],
+    "timeline": [
+        ("draft_reconstruction", "ScriptoriumDaemon"),
+    ],
+}
+
+REVISION_STEP_ORDER = [
+    "source_discovery",
+    "source_acquisition",
+    "fact_extraction",
+    "timeline",
+    "draft_reconstruction",
+    "critic_review",
+]
+
 
 def sandbox_path(workspace_root: Path, path: str) -> Path:
     if not path.startswith("/work/"):
@@ -90,17 +120,50 @@ def revision_focus_from_artifacts(reconstruction: str, coverage: str) -> dict[st
 
 
 def add_revision_step(steps: list[dict[str, str]], step_id: str, worker: str, reason: str, source: str) -> None:
-    candidate = {
-        "step_id": step_id,
-        "worker": worker,
-        "reason": reason,
-        "source": source,
-        "priority": "blocker",
-    }
-    key = (candidate["step_id"], candidate["worker"], candidate["reason"])
-    existing = {(item.get("step_id"), item.get("worker"), item.get("reason")) for item in steps}
-    if key not in existing:
-        steps.append(candidate)
+    for item in steps:
+        if item.get("step_id") != step_id or item.get("worker") != worker:
+            continue
+        existing_reasons = [part.strip() for part in item.get("reason", "").split(" | ") if part.strip()]
+        if reason and reason not in existing_reasons:
+            existing_reasons.append(reason)
+            item["reason"] = " | ".join(existing_reasons[:6])
+        existing_sources = [part.strip() for part in item.get("source", "").split(",") if part.strip()]
+        if source and source not in existing_sources:
+            existing_sources.append(source)
+            item["source"] = ",".join(existing_sources)
+        return
+    steps.append(
+        {
+            "step_id": step_id,
+            "worker": worker,
+            "reason": reason,
+            "source": source,
+            "priority": "blocker",
+        }
+    )
+
+
+def expand_revision_dependencies(steps: list[dict[str, str]]) -> None:
+    index = 0
+    while index < len(steps):
+        item = steps[index]
+        step_id = item.get("step_id", "")
+        reason = item.get("reason", "")
+        source = item.get("source", "")
+        for dependent_step_id, dependent_worker in REVISION_DEPENDENCIES.get(step_id, []):
+            add_revision_step(
+                steps,
+                dependent_step_id,
+                dependent_worker,
+                f"Depends on revised step {step_id}",
+                source or "revision_dependency",
+            )
+        index += 1
+
+
+def sort_revision_steps(steps: list[dict[str, str]]) -> list[dict[str, str]]:
+    order = {step_id: index for index, step_id in enumerate(REVISION_STEP_ORDER)}
+    return sorted(steps, key=lambda item: (order.get(item.get("step_id", ""), len(order)), item.get("step_id", "")))
 
 
 def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifacts: list[str]) -> dict[str, Any]:
@@ -129,6 +192,8 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
         else:
             add_revision_step(steps, "critic_review", "ReductorVerifier", message, "critic_finding")
+    expand_revision_dependencies(steps)
+    steps = sort_revision_steps(steps)
     return {
         "required": bool(steps),
         "steps": steps,

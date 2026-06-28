@@ -237,6 +237,9 @@
 - Warmaster revision execution uses `revision_plan` to rerun focused worker
   steps, passes `revision_context` into those reruns, and preserves the observed
   `revision_focus` through writer, critic, and final manifest artifacts.
+- `ReductorVerifier` expands revision plans through downstream pipeline
+  dependencies, so source/fact/timeline fixes also rerun the dependent draft
+  and review path instead of leaving stale derived artifacts.
 - HTTP execution preflights all worker `/health` endpoints before running steps
   and rejects worker identity mismatches before dispatch.
 - Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.
