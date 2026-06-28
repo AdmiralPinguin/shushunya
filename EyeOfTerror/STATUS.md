@@ -75,6 +75,8 @@
   rules.
 - Task routing failures also expose action hints that direct clients toward
   gateway capability inspection instead of attempting run creation.
+- Successful task creation responses expose action hints that recommend run
+  preflight before execution.
 - Governor API contract checks document the active Iskandar required worker
   chain exposed through `/capabilities`.
 - Iskandar `/plan` resolves worker metadata and reports planned workers as

@@ -338,6 +338,7 @@ def main() -> int:
                 or service_prepared.get("governor_transport") != "http"
                 or not (Path(service_prepared["run_dir"]) / "dispatch" / "source_discovery.json").exists()
                 or not (Path(service_prepared["run_dir"]) / "task_ledger.json").exists()
+                or service_prepared.get("actions", {}).get("next_action", {}).get("kind") != "preflight_run"
             ):
                 raise AssertionError(f"bad http governor preparation: {service_prepared}")
             bad_prepare_server = ThreadingHTTPServer(("127.0.0.1", 0), make_bad_prepare_handler(run_root))
@@ -652,7 +653,12 @@ def main() -> int:
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},
             )
-            if not task.get("ok") or task.get("governor") != "IskandarKhayon":
+            if (
+                not task.get("ok")
+                or task.get("governor") != "IskandarKhayon"
+                or task.get("actions", {}).get("next_action", {}).get("kind") != "preflight_run"
+                or task.get("actions", {}).get("next_action", {}).get("endpoint") != "POST /runs/{task_id}/preflight_http"
+            ):
                 raise AssertionError(f"bad task response: {task}")
             global_events = request_json(base + "/events?limit=20")
             warmaster_event = next(
@@ -681,7 +687,10 @@ def main() -> int:
                 if exc.code != 409:
                     raise
                 duplicate = json.loads(exc.read().decode("utf-8"))
-                if duplicate.get("error_code") != "task_exists":
+                if (
+                    duplicate.get("error_code") != "task_exists"
+                    or duplicate.get("actions", {}).get("next_action", {}).get("kind") != "inspect_existing_run"
+                ):
                     raise AssertionError(f"bad duplicate task response: {duplicate}")
             else:
                 raise AssertionError("duplicate task_id should not overwrite an existing run")

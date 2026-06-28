@@ -209,6 +209,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
             "error_code": "task_exists",
             "task_id": service_task_id,
             "run_dir": str(run_dir),
+            "actions": task_preflight_actions(False, "task_exists", service_task_id),
         }
     try:
         prepared = post_json(base + "/prepare_run", {"task": message, "task_id": service_task_id, "run_dir": str(run_dir)})
@@ -256,6 +257,7 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
         "task_id": service_task_id,
         "run_dir": str(run_dir),
         "status": prepared.get("status", {}),
+        "actions": created_task_actions(service_task_id),
     }
 
 
@@ -360,6 +362,7 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "error_code": "task_exists",
             "task_id": plan.contract.task_id,
             "run_dir": str(run_dir),
+            "actions": task_preflight_actions(False, "task_exists", plan.contract.task_id),
         }
     validation_errors = validate_task_contract_payload(plan.contract.to_dict())
     if validation_errors:
@@ -406,6 +409,7 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
         "task_id": plan.contract.task_id,
         "run_dir": str(run_dir),
         "status": status,
+        "actions": created_task_actions(plan.contract.task_id),
     }
 
 
@@ -428,6 +432,25 @@ def compact_brigade_readiness(host: str = "127.0.0.1") -> dict[str, Any]:
         "warning_count": int(summary.get("warning_count") or 0),
         "blockers": summary.get("blockers") if isinstance(summary.get("blockers"), list) else [],
         "warnings": summary.get("warnings") if isinstance(summary.get("warnings"), list) else [],
+    }
+
+
+def created_task_actions(task_id: str) -> dict[str, Any]:
+    return {
+        "can_preflight_run": True,
+        "can_start_run": False,
+        "next_action": {
+            "kind": "preflight_run",
+            "method": "POST",
+            "endpoint": "POST /runs/{task_id}/preflight_http",
+            "body": {},
+            "reason": "run package was created and should be preflighted before execution",
+        },
+        "run_summary": {
+            "method": "GET",
+            "endpoint": "GET /runs/{task_id}/summary",
+            "body": {},
+        },
     }
 
 
