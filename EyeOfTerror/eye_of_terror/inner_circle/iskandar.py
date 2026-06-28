@@ -10,6 +10,18 @@ from ..pipeline import build_dispatch_packets, pipeline_status, write_pipeline_r
 from ..registry import worker_by_name
 
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def worker_metadata(path: str) -> dict[str, Any]:
+    metadata_path = REPO_ROOT / path / "worker.json"
+    try:
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def oversight_plan(contract: TaskContract) -> dict[str, Any]:
     artifacts_by_role = {
         "source_map": [artifact for artifact in contract.required_artifacts if artifact.endswith("/source_map.json")],
@@ -57,20 +69,37 @@ class IskandarPlan:
         contract = self.contract.to_dict()
         validation_errors = validate_task_contract_payload(contract)
         missing_workers: list[str] = []
+        unavailable_workers: list[dict[str, Any]] = []
         resolved_workers: dict[str, Any] = {}
         for step in self.contract.worker_plan:
             worker = worker_by_name(step.worker)
             if worker is None:
                 missing_workers.append(step.worker)
             else:
-                resolved_workers[step.worker] = worker.to_dict()
+                worker_payload = worker.to_dict()
+                metadata = worker_metadata(worker.path)
+                if metadata:
+                    worker_payload["status"] = metadata.get("status", "")
+                    worker_payload["capabilities"] = metadata.get("capabilities", [])
+                resolved_workers[step.worker] = worker_payload
+                if metadata.get("status") == "planned" and step.worker not in {item.get("name") for item in unavailable_workers}:
+                    unavailable_workers.append(
+                        {
+                            "name": step.worker,
+                            "status": "planned",
+                            "port": worker.port,
+                            "role": worker.role,
+                            "path": worker.path,
+                        }
+                    )
         return {
-            "ok": not missing_workers and not validation_errors,
+            "ok": not missing_workers and not unavailable_workers and not validation_errors,
             "governor": "IskandarKhayon",
             "contract": contract,
             "validation": {"ok": not validation_errors, "errors": validation_errors},
             "resolved_workers": resolved_workers,
             "missing_workers": missing_workers,
+            "unavailable_workers": unavailable_workers,
             "oversight": oversight_plan(self.contract),
         }
 

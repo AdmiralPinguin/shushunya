@@ -68,6 +68,8 @@
   clients can inspect final review expectations before creating run history.
 - Governor API contract checks document the active Iskandar required worker
   chain exposed through `/capabilities`.
+- Iskandar `/plan` resolves worker metadata and reports planned workers as
+  `unavailable_workers` instead of marking the plan runnable.
 - Run progress exposes per-step input, expected, and produced artifact statuses.
 - Run progress exposes dependency readiness through ready, blocked, and
   dependency-status step hints for higher-level governors.

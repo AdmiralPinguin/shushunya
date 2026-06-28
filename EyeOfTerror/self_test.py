@@ -138,8 +138,10 @@ def main() -> int:
     print("[ok] lore reconstruction contract")
 
     plan = plan_lore_reconstruction(task, task_id="test-skalathrax").to_dict()
-    if not plan["ok"] or plan["missing_workers"]:
+    if not plan["ok"] or plan["missing_workers"] or plan.get("unavailable_workers"):
         raise AssertionError(f"Iskandar plan did not resolve workers: {json.dumps(plan, ensure_ascii=False)}")
+    if plan.get("resolved_workers", {}).get("Lexmechanic", {}).get("status") != "prototype":
+        raise AssertionError(f"Iskandar plan should expose worker metadata: {plan.get('resolved_workers')}")
     if not plan.get("validation", {}).get("ok"):
         raise AssertionError(f"Iskandar plan failed contract validation: {plan.get('validation')}")
     if "Do not deliver a shallow wiki summary" not in " ".join(plan["contract"]["non_goals"]):
