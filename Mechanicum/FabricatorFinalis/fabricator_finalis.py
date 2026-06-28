@@ -122,6 +122,7 @@ def build_manifest(workspace_root: Path, manifest_path: str) -> dict[str, Any]:
         "warnings": critic.get("warnings", []),
         "blockers": critic.get("findings", []) + [{"severity": "blocker", "message": f"Missing package file: {path}"} for path in missing],
         "revision_plan": revision_plan,
+        "revision_focus": critic.get("revision_focus", {"present": False}),
     }
 
 

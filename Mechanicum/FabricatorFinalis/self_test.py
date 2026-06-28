@@ -26,9 +26,18 @@ def main() -> int:
             "source_snapshots.json",
             "direct_event_notes.json",
             "timeline.json",
-            "critic_report.json",
         ]:
             write(base / filename, json.dumps({"approved": True, "status": "passed_with_warnings"}))
+        write(
+            base / "critic_report.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "passed_with_warnings",
+                    "revision_focus": {"present": True, "coverage_items": ["Source step: critic_review"]},
+                }
+            ),
+        )
         write(base / "reconstruction_ru.md", "# draft\n")
         write(base / "coverage_report.md", "# coverage\n")
         result = run(request, root)
@@ -39,6 +48,8 @@ def main() -> int:
             raise AssertionError(f"expected ready manifest: {manifest}")
         if manifest.get("revision_plan", {}).get("required"):
             raise AssertionError(f"ready manifest should not require revision: {manifest}")
+        if not manifest.get("revision_focus", {}).get("present"):
+            raise AssertionError(f"ready manifest should carry revision focus: {manifest}")
         (base / "timeline.json").unlink()
         write(
             base / "critic_report.json",
