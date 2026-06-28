@@ -194,7 +194,8 @@
 - Direct background run start responses expose polling `next_action` and
   executable `client_action` fields.
 - Synchronous run execution responses expose post-execution `run_summary`,
-  `next_action`, and executable `client_action` fields.
+  `phase`, `decision`, `display`, `next_action`, and executable
+  `client_action` fields.
 - Warmaster Gateway exposes `GET /governors`, `GET /workers`, and
   `GET /workers?health=1`; worker listings are enriched with available
   `Mechanicum/*/worker.json` metadata.

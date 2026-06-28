@@ -1221,6 +1221,9 @@ def main() -> int:
             if (
                 not restricted.get("ok")
                 or not restricted.get("summary", {}).get("partial_execution")
+                or restricted.get("phase") != "resume_required"
+                or not restricted.get("decision", {}).get("can_resume")
+                or restricted.get("display", {}).get("headline") != "Run can be resumed"
                 or restricted.get("next_action", {}).get("kind") != "resume"
                 or restricted.get("client_action", {}).get("path") != "/runs/warmaster-restricted-test/start_resume_http"
             ):
@@ -1244,6 +1247,9 @@ def main() -> int:
             executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
             if (
                 not executed.get("ok")
+                or executed.get("phase") != "completed"
+                or not executed.get("decision", {}).get("can_inspect_final")
+                or executed.get("display", {}).get("headline") != "Run completed"
                 or executed.get("next_action", {}).get("kind") != "inspect_final"
                 or executed.get("client_action", {}).get("path") != "/runs/warmaster-test/final"
             ):
@@ -1425,6 +1431,8 @@ def main() -> int:
             resumed = request_json(base + "/runs/warmaster-resume-test/resume_local", {"timeout_sec": 30}, timeout=60)
             if (
                 not resumed.get("ok")
+                or resumed.get("phase") != "completed"
+                or resumed.get("display", {}).get("headline") != "Run completed"
                 or resumed.get("next_action", {}).get("kind") != "inspect_final"
                 or resumed.get("client_action", {}).get("path") != "/runs/warmaster-resume-test/final"
             ):
