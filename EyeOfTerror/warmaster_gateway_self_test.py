@@ -10,7 +10,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, valid_task_id
+from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, resolve_run_child_path, valid_task_id
 from eye_of_terror.ledger import TaskLedger
 
 
@@ -65,6 +65,12 @@ def main() -> int:
         raise AssertionError("task id validator accepted an unsafe value")
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir) / "runs"
+        try:
+            resolve_run_child_path(run_root / "x", str(Path(temp_dir) / "escape"), "work")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("run child path resolver accepted path outside run_dir")
         bad_dispatch = Path(temp_dir) / "bad-dispatch" / "dispatch"
         bad_dispatch.mkdir(parents=True, exist_ok=True)
         (bad_dispatch / "broken.json").write_text("{", encoding="utf-8")
@@ -229,6 +235,26 @@ def main() -> int:
             forced = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30, "force": True}, timeout=60)
             if not forced.get("ok"):
                 raise AssertionError(f"forced rerun failed: {forced}")
+            unsafe_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-unsafe-workspace-test"},
+            )
+            if not unsafe_task.get("ok"):
+                raise AssertionError(f"bad unsafe workspace task response: {unsafe_task}")
+            try:
+                request_json(
+                    base + "/runs/warmaster-unsafe-workspace-test/execute_local",
+                    {"timeout_sec": 30, "workspace_root": str(Path(temp_dir) / "outside-work")},
+                    timeout=60,
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                unsafe_workspace = json.loads(exc.read().decode("utf-8"))
+                if "path must stay inside run_dir" not in unsafe_workspace.get("error", ""):
+                    raise AssertionError(f"bad unsafe workspace response: {unsafe_workspace}")
+            else:
+                raise AssertionError("execute_local should reject workspace_root outside run_dir")
             background_task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-background-test"},

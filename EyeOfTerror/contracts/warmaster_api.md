@@ -75,6 +75,11 @@ best-effort forwards cancellation to HTTP worker task endpoints from the run
 dispatch package. Cancellation is cooperative unless a worker implements a
 stronger interruption mechanism.
 
+## Execution Paths
+
+If execution endpoints accept `workspace_root`, that path must stay inside the
+selected run directory. Relative paths are resolved below the run directory.
+
 ## Rules
 
 - Warmaster must not do specialist worker jobs directly.

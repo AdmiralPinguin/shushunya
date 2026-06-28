@@ -39,6 +39,17 @@ def valid_task_id(task_id: str) -> bool:
     return bool(TASK_ID_RE.fullmatch(task_id)) and ".." not in task_id
 
 
+def resolve_run_child_path(run_dir: Path, requested: str, default_name: str) -> Path:
+    root = run_dir.resolve()
+    candidate = Path(requested) if requested else root / default_name
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    resolved = candidate.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError(f"path must stay inside run_dir: {default_name}")
+    return resolved
+
+
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
     data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     handler.send_response(status)
@@ -701,13 +712,13 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                                 },
                             )
                             return
-                    workspace_root = Path(str(payload.get("workspace_root") or run_dir / "work"))
+                    workspace_root = resolve_run_child_path(run_dir, str(payload.get("workspace_root") or ""), "work")
                     timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
                     if parts[2] in {"execute_local", "start_local"}:
                         executor = lambda: execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
                     else:
                         host = str(payload.get("host") or "127.0.0.1")
-                        http_workspace_root = Path(str(payload["workspace_root"])) if "workspace_root" in payload else None
+                        http_workspace_root = workspace_root if "workspace_root" in payload else None
                         executor = lambda: execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root)
                     if parts[2].startswith("start_"):
                         if ledger_path.exists():
@@ -725,11 +736,13 @@ def make_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
                         summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec)
                     else:
                         host = str(payload.get("host") or "127.0.0.1")
-                        http_workspace_root = Path(str(payload["workspace_root"])) if "workspace_root" in payload else None
+                        http_workspace_root = workspace_root if "workspace_root" in payload else None
                         summary = execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root)
                     response(self, 200 if summary.get("ok") else 500, {"ok": bool(summary.get("ok")), "summary": summary})
                     return
                 response(self, 404, {"ok": False, "error": "not found"})
+            except ValueError as exc:
+                response(self, 400, {"ok": False, "gateway": "WarmasterGateway", "error": str(exc)})
             except Exception as exc:  # noqa: BLE001 - gateway boundary records routing failures.
                 response(self, 500, {"ok": False, "gateway": "WarmasterGateway", "error": str(exc)})
 
