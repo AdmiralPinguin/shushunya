@@ -2220,6 +2220,12 @@ def failed_cli_source_candidates_from_text(text: str) -> list[str]:
     return list(dict.fromkeys(candidates))[:10]
 
 
+def failed_cli_read_source_candidates_from_text(text: str, candidates: list[str]) -> list[str]:
+    if not candidates or '"content"' not in (text or ""):
+        return []
+    return [path for path in candidates if path in text]
+
+
 def pytest_result_sets(result: dict[str, Any]) -> tuple[set[str], set[str]]:
     passing = {
         str(item)
@@ -4621,6 +4627,9 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     swe_cli_verified_after_edit = False
     swe_cli_verification_attempted_after_edit = False
     pending_failed_cli_source_candidates: list[str] = failed_cli_source_candidates_from_text(original_task)
+    pending_failed_cli_read_paths: set[str] = set(
+        failed_cli_read_source_candidates_from_text(original_task, pending_failed_cli_source_candidates)
+    )
     swe_syntax_error_cycles = 0
     last_swe_syntax_error = ""
     last_required_artifact_hint = ""
@@ -5640,6 +5649,23 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             elif (
                 swe_task
                 and pending_failed_cli_source_candidates
+                and pending_failed_cli_read_paths
+                and action_type in SWE_DIAGNOSTIC_ACTIONS
+            ):
+                result = {
+                    "ok": False,
+                    "error": "swe failed cli repair source required by supervisor",
+                    "candidate_source_paths": pending_failed_cli_source_candidates[:10],
+                    "read_candidate_paths": sorted(pending_failed_cli_read_paths)[:10],
+                    "instruction": (
+                        "A candidate source file for the failed CLI verification has already been read. "
+                        "Do not inspect more files or rerun CLI before a code change. Make a narrow edit to one of "
+                        "read_candidate_paths, then rerun the CLI verification with JSON validation."
+                    ),
+                }
+            elif (
+                swe_task
+                and pending_failed_cli_source_candidates
                 and action_type in SWE_DIAGNOSTIC_ACTIONS
                 and not (
                     action_type == "read_file"
@@ -6116,6 +6142,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             swe_cli_verified_after_edit = False
             swe_cli_verification_attempted_after_edit = False
             pending_failed_cli_source_candidates = []
+            pending_failed_cli_read_paths = set()
             if swe_task and action_type in SWE_EDIT_ACTIONS:
                 last_successful_swe_edit_path = path
                 if swe_requires_cli_verification:
@@ -6140,6 +6167,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             swe_cli_verified_after_edit = False
             swe_cli_verification_attempted_after_edit = False
             pending_failed_cli_source_candidates = []
+            pending_failed_cli_read_paths = set()
             last_successful_swe_edit_path = python_written_code_paths[0]
             if swe_requires_cli_verification:
                 last_cli_required_swe_edit_path = python_written_code_paths[0]
@@ -6224,6 +6252,23 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "This read_file loaded a likely source file from candidate_source_paths for the current failing_tests. "
                 "Do not read or list more files before the first fix unless this file clearly cannot contain the bug. "
                 "Use this content for a narrow write_file/replace_in_file edit, then run the full test/fallback again."
+            )
+        elif (
+            swe_task
+            and pending_failed_cli_source_candidates
+            and action_type == "read_file"
+            and isinstance(result, dict)
+            and result.get("ok") is True
+            and str(action.get("path") or result.get("path") or "") in set(pending_failed_cli_source_candidates)
+        ):
+            read_path = str(action.get("path") or result.get("path") or "")
+            pending_failed_cli_read_paths.add(read_path)
+            result = dict(result)
+            result["candidate_source_paths"] = pending_failed_cli_source_candidates[:10]
+            result["supervisor_instruction"] = (
+                "This read_file loaded a likely source file for the failed CLI verification. "
+                "Do not inspect more files before the fix. Make a narrow edit to this file, then rerun the CLI "
+                "verification with JSON validation."
             )
         elif action_type == "bundle_text_files" and isinstance(result, dict) and result.get("ok") is True:
             verified_text_paths.discard(str(action.get("output_txt") or ""))

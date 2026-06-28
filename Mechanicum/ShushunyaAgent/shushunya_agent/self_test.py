@@ -4817,6 +4817,48 @@ def main() -> int:
         raise AssertionError(f"Failed CLI repair should allow reading traceback source: {swe_failed_cli_repair_payload}")
     print("[ok] SWE failed CLI traceback narrows repair source")
 
+    swe_failed_cli_read_then_list_stdout = io.StringIO()
+    swe_failed_cli_read_then_list_config = AgentConfig(
+        task_id=safe_task_id("self-test-swe-failed-cli-read-then-edit"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+        shell_enabled=True,
+    )
+    with mock.patch.object(agent_runner, "chat", side_effect=[
+            '{"action":"shell","cmd":"cd /work/project && python3 -m package.cli /work/project/data.csv | python3 -c \\"import sys,json; json.load(sys.stdin)\\"","timeout":60}',
+            '{"action":"read_file","path":"/work/project/package/cli.py","max_bytes":20000,"offset":0}',
+            '{"action":"list_files","path":"/work/project","max_depth":3,"limit":100,"offset":0}',
+    ]), mock.patch.object(agent_runner, "run_shell", return_value={
+            "ok": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": (
+                "Traceback (most recent call last):\n"
+                "  File \"/work/project/package/cli.py\", line 12, in <module>\n"
+                "TypeError: Object of type datetime is not JSON serializable\n"
+            ),
+    }), mock.patch.object(agent_runner, "file_tool", return_value={
+            "ok": True,
+            "path": "/work/project/package/cli.py",
+            "content": "print(json.dumps(payload))",
+    }) as mocked_failed_cli_read_file, \
+            contextlib.redirect_stdout(swe_failed_cli_read_then_list_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        run_agent(failed_cli_resume_task, swe_failed_cli_read_then_list_config)
+    swe_failed_cli_read_then_list_payload = json.loads(swe_failed_cli_read_then_list_stdout.getvalue())
+    read_then_list_results = [step.get("result") or {} for step in swe_failed_cli_read_then_list_payload.get("steps", [])]
+    if not any((call.args[1] if len(call.args) > 1 else {}).get("path") == "/work/project/package/cli.py" for call in mocked_failed_cli_read_file.call_args_list):
+        raise AssertionError(f"Failed CLI source read should reach file_tool: {swe_failed_cli_read_then_list_payload}")
+    if not any(
+        result.get("error") == "swe failed cli repair source required by supervisor"
+        and result.get("read_candidate_paths") == ["/work/project/package/cli.py"]
+        for result in read_then_list_results
+    ):
+        raise AssertionError(f"After reading failed CLI source, further discovery should require edit: {swe_failed_cli_read_then_list_payload}")
+    print("[ok] SWE failed CLI source read requires edit next")
+
     swe_resume_failed_cli_edit_stdout = io.StringIO()
     swe_resume_failed_cli_edit_config = AgentConfig(
         task_id=safe_task_id("self-test-swe-resume-failed-cli-allows-source-edit"),
