@@ -2053,6 +2053,7 @@ def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
         if isinstance(item, str) and item
     ] if isinstance(payload, dict) else []
     missing_symbols: list[str] = []
+    type_mismatches: list[dict[str, str]] = []
     failures = payload.get("failures", []) if isinstance(payload, dict) else []
     if isinstance(failures, list):
         for item in failures:
@@ -2063,18 +2064,38 @@ def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
                 symbol = match.group(1)
                 if symbol not in missing_symbols:
                     missing_symbols.append(symbol)
+            for match in re.finditer(
+                r"TypeError: unsupported operand type\(s\) for ([^:]+): ['\"]([^'\"]+)['\"] and ['\"]([^'\"]+)['\"]",
+                traceback_text,
+            ):
+                mismatch = {
+                    "operator": match.group(1).strip(),
+                    "left_type": match.group(2).strip(),
+                    "right_type": match.group(3).strip(),
+                }
+                if mismatch not in type_mismatches:
+                    type_mismatches.append(mismatch)
     enriched["passing_tests"] = passing[:20]
     enriched["failing_tests"] = failing[:20]
     if source_hints:
         enriched["candidate_source_paths"] = source_hints[:20]
     if missing_symbols:
         enriched["missing_symbols"] = missing_symbols[:10]
+    if type_mismatches:
+        enriched["type_mismatches"] = type_mismatches[:10]
     if failing:
         missing_symbol_instruction = (
             " The failure includes missing_symbols="
             + json.dumps(missing_symbols[:10], ensure_ascii=False)
             + ". Before changing unrelated logic, define or import the missing symbol in the edited source file, then rerun the full test/fallback set."
             if missing_symbols
+            else ""
+        )
+        type_mismatch_instruction = (
+            " The failure includes type_mismatches="
+            + json.dumps(type_mismatches[:10], ensure_ascii=False)
+            + ". Before changing unrelated logic, fix the incompatible operation named by the traceback line so both operands have compatible types, then rerun the full test/fallback set."
+            if type_mismatches
             else ""
         )
         enriched["supervisor_instruction"] = (
@@ -2087,6 +2108,7 @@ def enrich_pytest_fallback_result(result: dict[str, Any]) -> dict[str, Any]:
             )
             + "Run pytest/fallback again after the edit and final only when all tests pass."
             + missing_symbol_instruction
+            + type_mismatch_instruction
         )
     elif passing:
         enriched["supervisor_instruction"] = "The pytest fallback ran existing tests and all discovered tests passed."

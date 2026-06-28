@@ -3760,6 +3760,30 @@ def main() -> int:
         raise AssertionError(f"pytest fallback source hints missing from model result: {enriched_source_hints}")
     print("[ok] pytest fallback includes source hints and missing symbols")
 
+    enriched_type_mismatch = agent_runner.enrich_pytest_fallback_result({
+        "ok": False,
+        "stdout": json.dumps({
+            "results": [{"ok": False, "file": "tests/test_time.py", "test": "test_window"}],
+            "failures": [{
+                "test": "test_window",
+                "traceback": (
+                    "Traceback (most recent call last):\n"
+                    "  File \"/work/project/scheduler/core.py\", line 25, in build_schedule\n"
+                    "    job_end = job['start'] + (job['duration_min'] * 60 / 1440)\n"
+                    "TypeError: unsupported operand type(s) for +: 'datetime.datetime' and 'float'\n"
+                ),
+            }],
+            "source_hints": ["/work/project/scheduler/core.py"],
+        }),
+    })
+    if (
+        enriched_type_mismatch.get("type_mismatches") != [{"operator": "+", "left_type": "datetime.datetime", "right_type": "float"}]
+        or "type_mismatches" not in str(enriched_type_mismatch.get("supervisor_instruction") or "")
+        or "traceback line" not in str(enriched_type_mismatch.get("supervisor_instruction") or "")
+    ):
+        raise AssertionError(f"pytest fallback type mismatch hint missing from model result: {enriched_type_mismatch}")
+    print("[ok] pytest fallback includes type mismatch hints")
+
     compacted_fallback_result = agent_runner.result_for_model("shell", {
         "ok": False,
         "stdout": "",
