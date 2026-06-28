@@ -123,6 +123,8 @@
 - Warmaster Gateway exposes `GET /doctor` for registry and manifest diagnostics.
 - Warmaster Gateway exposes focused run inspection endpoints for contract,
   dispatch packets, and ledger event history.
+- Warmaster exposes `GET /runs/{task_id}/package` for combined run-package
+  diagnostics across contract, oversight, status, and dispatch files.
 - Warmaster Gateway exposes lightweight run summaries, progress counters, and
   worker task mappings for client polling/debugging.
 - Warmaster state and run-list responses expose recoverable interrupted runs

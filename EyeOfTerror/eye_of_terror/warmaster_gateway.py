@@ -848,6 +848,43 @@ def run_oversight_diagnostics(run_dir: Path) -> dict[str, Any]:
     }
 
 
+def run_package_diagnostics(run_dir: Path) -> dict[str, Any]:
+    status, status_error = load_json_object(run_dir / "status.json", "status")
+    contract_payload = run_contract(run_dir)
+    oversight_payload = run_oversight_diagnostics(run_dir)
+    dispatch_payload = run_dispatch_packets(run_dir)
+    errors: list[str] = []
+    if status_error:
+        errors.append(status_error)
+    if not contract_payload.get("ok"):
+        errors.append(str(contract_payload.get("error") or "contract unavailable"))
+    if not oversight_payload.get("ok"):
+        errors.append(str(oversight_payload.get("error") or "oversight unavailable"))
+    else:
+        errors.extend(oversight_payload.get("validation", {}).get("errors", []) if isinstance(oversight_payload.get("validation"), dict) else [])
+    if not dispatch_payload.get("ok"):
+        errors.append(str(dispatch_payload.get("error") or "dispatch unavailable"))
+    dispatch_items = dispatch_payload.get("dispatch") if isinstance(dispatch_payload.get("dispatch"), list) else []
+    dispatch_errors = [str(item.get("error")) for item in dispatch_items if isinstance(item, dict) and not item.get("ok")]
+    errors.extend(error for error in dispatch_errors if error)
+    contract = contract_payload.get("contract") if isinstance(contract_payload.get("contract"), dict) else {}
+    return {
+        "ok": not errors,
+        "task_id": run_dir.name,
+        "run_dir": str(run_dir),
+        "validation": {"ok": not errors, "errors": errors},
+        "files": {
+            "contract": (run_dir / "contract.json").exists(),
+            "oversight": (run_dir / "oversight.json").exists(),
+            "status": (run_dir / "status.json").exists(),
+            "dispatch_dir": (run_dir / "dispatch").exists(),
+        },
+        "contract_summary": contract_summary(contract) if contract else {},
+        "oversight_summary": oversight_payload.get("summary", {}) if isinstance(oversight_payload.get("summary"), dict) else {},
+        "dispatch_count": len(dispatch_items),
+    }
+
+
 def compact_oversight_summary(oversight: dict[str, Any]) -> dict[str, Any]:
     artifact_roles = oversight.get("artifact_roles") if isinstance(oversight.get("artifact_roles"), dict) else {}
     final_review = oversight.get("final_review") if isinstance(oversight.get("final_review"), dict) else {}
@@ -1706,6 +1743,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "final_package_read",
             "http_governor_planning",
             "run_contract_read",
+            "run_package_diagnostics",
             "run_oversight_read",
             "run_dispatch_read",
             "run_worker_task_read",
@@ -1763,6 +1801,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/steps/{step_id}",
             "GET /runs/{task_id}/steps/{step_id}/artifacts",
             "GET /runs/{task_id}/ledger",
+            "GET /runs/{task_id}/package",
             "GET /runs/{task_id}/contract",
             "GET /runs/{task_id}/oversight",
             "GET /runs/{task_id}/dispatch",
@@ -2104,6 +2143,10 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         response(self, 500, {"ok": False, "error": ledger_error, "task_id": task_id})
                         return
                     response(self, 200, {"ok": True, "ledger": ledger})
+                    return
+                if len(parts) == 3 and parts[2] == "package":
+                    payload = run_package_diagnostics(run_dir)
+                    response(self, 200 if payload.get("ok") else 409, payload)
                     return
                 if len(parts) == 3 and parts[2] == "contract":
                     payload = run_contract(run_dir)

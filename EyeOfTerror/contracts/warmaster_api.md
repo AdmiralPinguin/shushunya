@@ -35,6 +35,7 @@ GET  /runs/{task_id}/active
 GET  /runs/{task_id}/steps/{step_id}
 GET  /runs/{task_id}/steps/{step_id}/artifacts
 GET  /runs/{task_id}/ledger
+GET  /runs/{task_id}/package
 GET  /runs/{task_id}/contract
 GET  /runs/{task_id}/oversight
 GET  /runs/{task_id}/dispatch
@@ -202,6 +203,8 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
   manifest summary, full manifest object, deliverable path, package files, and
   bounded text previews. `max_bytes` limits each file preview and is clamped by
   the same artifact text maximum.
+- `/runs/{task_id}/package` for run-package diagnostics across
+  `contract.json`, `oversight.json`, `status.json`, and dispatch packets.
 - `/runs/{task_id}/contract` and `/runs/{task_id}/dispatch` for orchestration
   debugging.
 - `/runs/{task_id}/oversight` for the immutable governor oversight plan saved

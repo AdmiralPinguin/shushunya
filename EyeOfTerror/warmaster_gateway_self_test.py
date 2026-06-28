@@ -345,6 +345,7 @@ def main() -> int:
                 "http_governor_planning",
                 "brigade_plan_snapshot",
                 "brigade_health_snapshot",
+                "run_package_diagnostics",
                 "run_oversight_read",
             }
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
@@ -591,6 +592,16 @@ def main() -> int:
             ):
                 raise AssertionError(f"summary should block actions for inconsistent oversight: {bad_oversight_summary}")
             try:
+                request_json(base + "/runs/warmaster-bad-oversight-test/package")
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                bad_package = json.loads(exc.read().decode("utf-8"))
+                if bad_package.get("ok") or not bad_package.get("validation", {}).get("errors"):
+                    raise AssertionError(f"package diagnostics should reject bad oversight: {bad_package}")
+            else:
+                raise AssertionError("package diagnostics should fail for inconsistent oversight")
+            try:
                 request_json(base + "/runs/warmaster-bad-oversight-test/preflight_local", {"timeout_sec": 30})
             except urllib.error.HTTPError as exc:
                 if exc.code != 409:
@@ -702,6 +713,15 @@ def main() -> int:
             contract = request_json(base + "/runs/warmaster-test/contract")
             if not contract.get("ok") or contract["contract"].get("task_id") != "warmaster-test":
                 raise AssertionError(f"bad run contract: {contract}")
+            package = request_json(base + "/runs/warmaster-test/package")
+            if (
+                not package.get("ok")
+                or not package.get("validation", {}).get("ok")
+                or package.get("contract_summary", {}).get("step_count") != 7
+                or package.get("dispatch_count") != 7
+                or not package.get("files", {}).get("oversight")
+            ):
+                raise AssertionError(f"bad run package diagnostics: {package}")
             oversight = request_json(base + "/runs/warmaster-test/oversight")
             if (
                 not oversight.get("ok")
