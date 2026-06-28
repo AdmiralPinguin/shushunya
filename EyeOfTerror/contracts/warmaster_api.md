@@ -54,6 +54,9 @@ counts, and recent run summaries.
 Task ids are durable run identifiers. Creating a task with an existing `task_id`
 must return a conflict instead of overwriting the run history.
 
+If provided, `task_id` must match `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}` and must
+not contain `..`.
+
 ## Run Inspection
 
 Clients should use:

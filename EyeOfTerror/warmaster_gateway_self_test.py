@@ -10,7 +10,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit
+from eye_of_terror.warmaster_gateway import cancel_http_worker_tasks, make_handler, parse_limit, valid_task_id
 from eye_of_terror.ledger import TaskLedger
 
 
@@ -61,6 +61,8 @@ def make_cancel_handler(calls: list[str]) -> type[BaseHTTPRequestHandler]:
 def main() -> int:
     if parse_limit("999999", default=20) != 200 or parse_limit("bad", default=20) != 20:
         raise AssertionError("limit parser did not clamp values")
+    if not valid_task_id("valid-task_1.2") or valid_task_id("../escape") or valid_task_id("x" * 129):
+        raise AssertionError("task id validator accepted an unsafe value")
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir) / "runs"
         bad_dispatch = Path(temp_dir) / "bad-dispatch" / "dispatch"
@@ -122,6 +124,19 @@ def main() -> int:
                     raise AssertionError(f"bad unsupported route response: {rejected}")
             else:
                 raise AssertionError("unsupported code task should be rejected until a code governor exists")
+            try:
+                request_json(
+                    base + "/task",
+                    {"message": "Собери все известное о событиях Скалатракса.", "task_id": "../escape"},
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                invalid_task = json.loads(exc.read().decode("utf-8"))
+                if invalid_task.get("error_code") != "invalid_task_id":
+                    raise AssertionError(f"bad invalid task_id response: {invalid_task}")
+            else:
+                raise AssertionError("unsafe task_id should be rejected")
             task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},

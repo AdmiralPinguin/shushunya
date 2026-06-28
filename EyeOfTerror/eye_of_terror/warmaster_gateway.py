@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -25,12 +26,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ACTIVE_RUNS: set[str] = set()
 ACTIVE_RUNS_LOCK = threading.Lock()
 MAX_LIST_LIMIT = 200
+TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 def parse_limit(raw_value: str, default: int, maximum: int = MAX_LIST_LIMIT) -> int:
     if not raw_value.isdigit():
         return default
     return max(0, min(int(raw_value), maximum))
+
+
+def valid_task_id(task_id: str) -> bool:
+    return bool(TASK_ID_RE.fullmatch(task_id)) and ".." not in task_id
 
 
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -54,6 +60,14 @@ def read_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 
 def prepare_task(message: str, task_id: str | None, run_root: Path) -> dict[str, Any]:
+    if task_id is not None and not valid_task_id(task_id):
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "task_id must match [A-Za-z0-9][A-Za-z0-9_.-]{0,127} and must not contain '..'",
+            "error_code": "invalid_task_id",
+            "task_id": task_id,
+        }
     route = route_message(message)
     if not route.ok:
         return {"ok": False, "gateway": "WarmasterGateway", "error": route.reason, "kind": route.kind}
