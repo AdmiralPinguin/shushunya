@@ -80,6 +80,8 @@
   capabilities, governors, workers, and recent runs.
 - Warmaster Gateway exposes gateway-level action hints for preflight, creation,
   start, resume, revision, cancellation, and diagnostics.
+- Run action hints include `next_action` with a recommended endpoint and reason
+  for chat clients and higher-level governors.
 - Warmaster Gateway exposes the expected service-separated brigade topology
   through `GET /brigade_plan` and embeds it in `GET /state`.
 - Warmaster Gateway exposes `GET /brigade_health` for combined expected

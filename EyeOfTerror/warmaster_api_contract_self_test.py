@@ -35,7 +35,7 @@ def main() -> int:
     if missing or extra:
         raise AssertionError(f"Warmaster API contract mismatch: missing={missing} extra={extra}")
     text = contract_text()
-    for required in ("step_ids", "partial_execution=true", "interrupted"):
+    for required in ("step_ids", "partial_execution=true", "interrupted", "actions.next_action"):
         if required not in text:
             raise AssertionError(f"Warmaster API contract missing restricted execution rule: {required}")
     print("[ok] Warmaster API contract")

@@ -462,6 +462,7 @@ def main() -> int:
                 or not run_summary.get("summary", {}).get("actions", {}).get("can_preflight_local")
                 or not run_summary.get("summary", {}).get("actions", {}).get("can_preflight_http")
                 or not run_summary.get("summary", {}).get("actions", {}).get("can_start")
+                or run_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "start"
                 or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "source_discovery"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("worker") != "Lexmechanic"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("status") != "pending"
@@ -576,6 +577,7 @@ def main() -> int:
                 or completed_snapshot.get("revision_plan", {}).get("required")
                 or not completed_snapshot.get("summary", {}).get("actions", {}).get("force_required_for_rerun")
                 or completed_snapshot.get("summary", {}).get("actions", {}).get("can_start")
+                or completed_snapshot.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "rerun_requires_force"
                 or completed_snapshot.get("summary", {}).get("progress", {}).get("pending_step_ids")
             ):
                 raise AssertionError(f"bad completed run snapshot: {completed_snapshot}")
@@ -636,6 +638,7 @@ def main() -> int:
                 not resume_actions.get("can_resume")
                 or resume_actions.get("can_start")
                 or resume_actions.get("can_execute")
+                or resume_actions.get("next_action", {}).get("kind") != "resume"
             ):
                 raise AssertionError(f"interrupted run did not expose resume action: {resume_summary}")
             resumed = request_json(base + "/runs/warmaster-resume-test/resume_local", {"timeout_sec": 30}, timeout=60)
@@ -722,6 +725,7 @@ def main() -> int:
                 not invalid_revision_summary.get("summary", {}).get("revision_plan_errors")
                 or invalid_revision_actions.get("can_start_revision")
                 or invalid_revision_actions.get("can_execute_revision")
+                or invalid_revision_actions.get("next_action", {}).get("kind") != "inspect_revision"
             ):
                 raise AssertionError(f"invalid revision plan exposed revision actions: {invalid_revision_summary}")
             try:

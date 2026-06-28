@@ -592,7 +592,7 @@ def run_actions(status: str, revision_plan: dict[str, Any], revision_plan_errors
     resume_required = status == "interrupted"
     runnable = not terminal_locked and not revision_required and not resume_required
     revision_runnable = revision_required and revision_valid and status not in {"running", "cancelling", "queued", "corrupt"}
-    return {
+    actions = {
         "can_preflight_local": preflightable,
         "can_preflight_http": preflightable,
         "can_execute": runnable,
@@ -603,6 +603,26 @@ def run_actions(status: str, revision_plan: dict[str, Any], revision_plan_errors
         "can_start_revision": revision_runnable,
         "force_required_for_rerun": status == "completed" and not revision_required,
     }
+    if status == "corrupt":
+        next_action = {"kind": "inspect", "endpoint": "GET /runs/{task_id}", "reason": "run state is corrupt"}
+    elif status in {"running", "queued"}:
+        next_action = {"kind": "poll", "endpoint": "GET /runs/{task_id}/snapshot", "reason": "run is already active"}
+    elif status == "cancelling":
+        next_action = {"kind": "poll", "endpoint": "GET /runs/{task_id}/snapshot", "reason": "cancellation is in progress"}
+    elif resume_required:
+        next_action = {"kind": "resume", "endpoint": "POST /runs/{task_id}/start_resume_http", "reason": "run is interrupted and has pending steps"}
+    elif revision_required and not revision_valid:
+        next_action = {"kind": "inspect_revision", "endpoint": "GET /runs/{task_id}/summary", "reason": "revision_plan is invalid"}
+    elif revision_runnable:
+        next_action = {"kind": "execute_revision", "endpoint": "POST /runs/{task_id}/start_revision_http", "reason": "revision_plan requires selected steps to rerun"}
+    elif actions["force_required_for_rerun"]:
+        next_action = {"kind": "rerun_requires_force", "endpoint": "POST /runs/{task_id}/start_http", "reason": "run already completed"}
+    elif runnable:
+        next_action = {"kind": "start", "endpoint": "POST /runs/{task_id}/start_http", "reason": "run is ready to execute"}
+    else:
+        next_action = {"kind": "inspect", "endpoint": "GET /runs/{task_id}/summary", "reason": f"no automatic action for status {status or 'unknown'}"}
+    actions["next_action"] = next_action
+    return actions
 
 
 def run_contract(run_dir: Path) -> dict[str, Any]:
