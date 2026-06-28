@@ -603,7 +603,8 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
         ]
         if missing_literals:
             path = str(payload.get("path") or "")
-            if path.strip().lower().endswith(".json"):
+            lowered_path = path.strip().lower()
+            if lowered_path.endswith(".json"):
                 payload["supervisor_instruction"] = (
                     "must_contain failures are exact literal substring checks, but this target is JSON. "
                     "Do not rewrite valid JSON just to match pseudo text like key=value. "
@@ -624,6 +625,26 @@ def result_for_model(action_type: str, result: dict[str, Any], config: AgentConf
                             "    data = json.load(f)\n"
                             "print(data)\n"
                             "# Add assertions for the required JSON fields and values here.\n"
+                        ),
+                        "timeout": 60,
+                    }
+            elif lowered_path.endswith((".csv", ".tsv")):
+                delimiter = "\\t" if lowered_path.endswith(".tsv") else ","
+                payload["supervisor_instruction"] = (
+                    "must_contain failures are exact literal substring checks, but this target is a structured table. "
+                    "Do not append verification marker text to CSV/TSV because it corrupts rows. Regenerate the complete "
+                    "valid table with write_file or python, preserving the required header, delimiter, row values, and row order. "
+                    "Then verify it with a python action using csv.DictReader assertions."
+                )
+                if path:
+                    payload["suggested_python_csv_check_action"] = {
+                        "action": "python",
+                        "code": (
+                            "import csv\n"
+                            f"with open({path!r}, newline='', encoding='utf-8') as f:\n"
+                            f"    rows = list(csv.DictReader(f, delimiter={delimiter!r}))\n"
+                            "print(rows)\n"
+                            "# Add assertions for required header, row values, and ordering here.\n"
                         ),
                         "timeout": 60,
                     }

@@ -2537,6 +2537,21 @@ def main() -> int:
         raise AssertionError(f"JSON verify payload should suggest verification without literals: {json_verify_payload}")
     if (json_verify_payload.get("suggested_python_json_check_action") or {}).get("action") != "python":
         raise AssertionError(f"JSON verify payload missed suggested python check: {json_verify_payload}")
+    csv_verify_payload = result_for_model(
+        "verify_text_file",
+        {
+            "ok": False,
+            "path": "/work/alerts.csv",
+            "failures": [{"check": "must_contain", "pattern": "C3 high_risk"}],
+        },
+        config,
+    )
+    if "suggested_append_file_action" in csv_verify_payload:
+        raise AssertionError(f"CSV verify payload should not suggest append_file markers: {csv_verify_payload}")
+    if "corrupts rows" not in csv_verify_payload.get("supervisor_instruction", ""):
+        raise AssertionError(f"CSV verify payload missed structured table guidance: {csv_verify_payload}")
+    if (csv_verify_payload.get("suggested_python_csv_check_action") or {}).get("action") != "python":
+        raise AssertionError(f"CSV verify payload missed suggested python csv check: {csv_verify_payload}")
     python_syntax_payload = result_for_model(
         "python",
         {"ok": False, "stdout": "SyntaxError: invalid syntax", "stderr": "", "returncode": 1},
