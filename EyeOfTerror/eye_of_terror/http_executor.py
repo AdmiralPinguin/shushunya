@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .local_executor import ordered_dispatch_paths
+from .local_executor import ordered_dispatch_paths, revision_contexts_from_result
 from .ledger import TaskLedger
 from .pipeline import write_json_atomic
 
@@ -93,11 +93,16 @@ def terminal_payload_allows_completion(payload: dict[str, Any]) -> bool:
     return True
 
 
-def run_step(dispatch_path: Path, host: str, timeout_sec: int) -> HttpStepResult:
+def run_step(dispatch_path: Path, host: str, timeout_sec: int, revision_context: dict[str, Any] | None = None) -> HttpStepResult:
     packet = load_json(dispatch_path)
     step_id = str(packet.get("step_id") or dispatch_path.stem)
     worker = str(packet.get("worker") or "")
     port = int(packet.get("port") or 0)
+    if revision_context:
+        packet = dict(packet)
+        request = dict(packet.get("request") if isinstance(packet.get("request"), dict) else {})
+        request["revision_context"] = revision_context
+        packet["request"] = request
     url = f"http://{host}:{port}/run"
     try:
         payload = post_json(url, packet, timeout_sec)
@@ -134,6 +139,7 @@ def execute_run(
         )
     )
     ledger.set_status("running")
+    revision_contexts = revision_contexts_from_result(ledger.data.get("result", {}) if isinstance(ledger.data.get("result"), dict) else {})
     if step_ids:
         ledger.record_event("revision_execution_started", {"step_ids": step_ids, "mode": "http"})
     if ledger.cancel_requested():
@@ -160,7 +166,7 @@ def execute_run(
         ledger = TaskLedger.load(ledger_path)
         if ledger.cancel_requested():
             break
-        result = run_step(dispatch_path, host, timeout_sec)
+        result = run_step(dispatch_path, host, timeout_sec, revision_context=revision_contexts.get(dispatch_path.stem))
         results.append(result)
         ledger.record_step(
             result.step_id,

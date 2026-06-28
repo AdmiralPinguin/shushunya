@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,53 @@ def parse_worker_stdout(stdout: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {"ok": False, "error": "worker stdout JSON is not an object"}
 
 
-def run_step(repo_root: Path, dispatch_path: Path, workspace_root: Path, timeout_sec: int) -> StepResult:
+def revision_contexts_from_result(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    revision_plan = result.get("revision_plan") if isinstance(result.get("revision_plan"), dict) else {}
+    contexts: dict[str, dict[str, Any]] = {}
+    for item in revision_plan.get("steps", []) if isinstance(revision_plan.get("steps"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        step_id = str(item.get("step_id") or "").strip()
+        if not step_id:
+            continue
+        contexts.setdefault(step_id, {"reasons": [], "source_steps": []})
+        context = contexts[step_id]
+        reason = str(item.get("reason") or "").strip()
+        if reason:
+            context["reasons"].append(reason)
+        source = str(item.get("source") or "").strip()
+        if source:
+            context["source_steps"].append(source)
+        context["priority"] = str(item.get("priority") or "blocker")
+    return contexts
+
+
+def write_revision_dispatch(dispatch_path: Path, packet: dict[str, Any], revision_context: dict[str, Any]) -> Path:
+    enriched = dict(packet)
+    request = dict(enriched.get("request") if isinstance(enriched.get("request"), dict) else {})
+    request["revision_context"] = revision_context
+    enriched["request"] = request
+    handle = tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        prefix=f".{dispatch_path.stem}.revision.",
+        suffix=".json",
+        dir=str(dispatch_path.parent),
+        delete=False,
+    )
+    with handle:
+        json.dump(enriched, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    return Path(handle.name)
+
+
+def run_step(
+    repo_root: Path,
+    dispatch_path: Path,
+    workspace_root: Path,
+    timeout_sec: int,
+    revision_context: dict[str, Any] | None = None,
+) -> StepResult:
     packet = load_json(dispatch_path)
     worker = str(packet.get("worker") or "")
     step_id = str(packet.get("step_id") or dispatch_path.stem)
@@ -70,15 +117,24 @@ def run_step(repo_root: Path, dispatch_path: Path, workspace_root: Path, timeout
     pythonpath, script = WORKER_COMMANDS[worker]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(repo_root / pythonpath)
-    completed = subprocess.run(
-        [sys.executable, str(repo_root / script), str(dispatch_path), "--workspace-root", str(workspace_root)],
-        cwd=repo_root,
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=timeout_sec,
-        check=False,
-    )
+    execution_dispatch_path = dispatch_path
+    temp_dispatch_path: Path | None = None
+    if revision_context:
+        temp_dispatch_path = write_revision_dispatch(dispatch_path, packet, revision_context)
+        execution_dispatch_path = temp_dispatch_path
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(repo_root / script), str(execution_dispatch_path), "--workspace-root", str(workspace_root)],
+            cwd=repo_root,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=timeout_sec,
+            check=False,
+        )
+    finally:
+        if temp_dispatch_path is not None:
+            temp_dispatch_path.unlink(missing_ok=True)
     payload = parse_worker_stdout(completed.stdout)
     ok = completed.returncode == 0 and bool(payload.get("ok"))
     return StepResult(step_id, worker, completed.returncode, ok, payload, completed.stdout, completed.stderr)
@@ -131,6 +187,7 @@ def execute_run(
         )
     )
     ledger.set_status("running")
+    revision_contexts = revision_contexts_from_result(ledger.data.get("result", {}) if isinstance(ledger.data.get("result"), dict) else {})
     if step_ids:
         ledger.record_event("revision_execution_started", {"step_ids": step_ids, "mode": "local"})
     results: list[StepResult] = []
@@ -138,7 +195,7 @@ def execute_run(
         ledger = TaskLedger.load(ledger_path)
         if ledger.cancel_requested():
             break
-        result = run_step(repo_root, dispatch_path, workspace_root, timeout_sec)
+        result = run_step(repo_root, dispatch_path, workspace_root, timeout_sec, revision_context=revision_contexts.get(dispatch_path.stem))
         results.append(result)
         ledger.record_step(
             result.step_id,

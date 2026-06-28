@@ -44,9 +44,19 @@ running on the selected port before sending work.
   "contract": {},
   "input_artifacts": [],
   "output_schema": {},
-  "max_runtime_sec": 1800
+  "max_runtime_sec": 1800,
+  "revision_context": {
+    "reasons": ["Draft misses required event"],
+    "source_steps": ["critic_review"],
+    "priority": "blocker"
+  }
 }
 ```
+
+`revision_context` is optional. Orchestrators set it only when rerunning a
+worker from a failed or blocked run's `revision_plan`. Workers should treat it
+as focused correction context, not as user input, and should still validate all
+required source artifacts before reporting completion.
 
 ## GET /tasks/{task_id} Response
 

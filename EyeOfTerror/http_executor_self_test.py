@@ -4,10 +4,10 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from eye_of_terror.http_executor import execute_run, terminal_payload_allows_completion
+from eye_of_terror.http_executor import execute_run, run_step, terminal_payload_allows_completion
 
 import sys
 
@@ -30,6 +30,31 @@ def patch_dispatch_ports(run_dir: Path, ports_by_worker: dict[str, int]) -> None
         if isinstance(packet, dict) and packet.get("worker") in ports_by_worker:
             packet["port"] = ports_by_worker[str(packet["worker"])]
             write_json(dispatch_path, packet)
+
+
+class CaptureRunHandler(BaseHTTPRequestHandler):
+    captured_payload: dict | None = None
+
+    def do_POST(self) -> None:
+        length = int(self.headers.get("content-length") or 0)
+        body = self.rfile.read(length)
+        type(self).captured_payload = json.loads(body.decode("utf-8"))
+        response = {
+            "ok": True,
+            "worker": "CaptureWorker",
+            "task_id": "capture-test",
+            "status": "completed",
+            "artifacts": [],
+        }
+        encoded = json.dumps(response).encode("utf-8")
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
 
 
 def main() -> int:
@@ -89,6 +114,34 @@ def main() -> int:
             summary = execute_run(run_dir, timeout_sec=1)
             if summary.get("ok") or not summary.get("preflight_failures"):
                 raise AssertionError(f"expected preflight failure: {summary}")
+            capture_dispatch = root / "capture.json"
+            capture_server = ThreadingHTTPServer(("127.0.0.1", 0), CaptureRunHandler)
+            capture_thread = threading.Thread(target=capture_server.serve_forever, daemon=True)
+            capture_thread.start()
+            try:
+                write_json(
+                    capture_dispatch,
+                    {
+                        "step_id": "capture_step",
+                        "worker": "CaptureWorker",
+                        "port": capture_server.server_port,
+                        "request": {"task_id": "capture-test"},
+                    },
+                )
+                captured = run_step(
+                    capture_dispatch,
+                    "127.0.0.1",
+                    5,
+                    revision_context={"reasons": ["Needs focused rewrite"], "source_steps": ["critic_review"], "priority": "blocker"},
+                )
+                if not captured.ok:
+                    raise AssertionError(captured)
+                context = (CaptureRunHandler.captured_payload or {}).get("request", {}).get("revision_context")
+                if context is None or context.get("reasons") != ["Needs focused rewrite"]:
+                    raise AssertionError(f"HTTP executor did not forward revision_context: {CaptureRunHandler.captured_payload}")
+            finally:
+                capture_server.shutdown()
+                capture_thread.join(timeout=5)
             wrong_server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler("WrongWorker", work, run_worker))
             wrong_thread = threading.Thread(target=wrong_server.serve_forever, daemon=True)
             wrong_thread.start()

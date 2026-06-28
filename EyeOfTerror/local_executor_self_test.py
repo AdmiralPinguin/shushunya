@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
-from eye_of_terror.local_executor import execute_run, terminal_payload_allows_completion
+from eye_of_terror.local_executor import execute_run, revision_contexts_from_result, terminal_payload_allows_completion
 from eye_of_terror.pipeline import write_pipeline_run
 
 
@@ -17,6 +17,24 @@ def main() -> int:
         raise AssertionError("required revision plan should not complete a run")
     if not terminal_payload_allows_completion({"ok": True, "status": "ready", "revision_plan": {"required": False}}):
         raise AssertionError("ready terminal payload should complete a run")
+    revision_contexts = revision_contexts_from_result(
+        {
+            "revision_plan": {
+                "required": True,
+                "steps": [
+                    {
+                        "step_id": "draft_reconstruction",
+                        "worker": "ScriptoriumDaemon",
+                        "reason": "Draft misses required event",
+                        "source": "critic_finding",
+                        "priority": "blocker",
+                    }
+                ],
+            }
+        }
+    )
+    if revision_contexts.get("draft_reconstruction", {}).get("reasons") != ["Draft misses required event"]:
+        raise AssertionError(f"bad revision context mapping: {revision_contexts}")
     repo_root = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
