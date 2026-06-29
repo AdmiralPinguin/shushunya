@@ -104,6 +104,9 @@ file path, function name, and safe return literal:
 Проверь `python -m unittest test_module.py`.
 ```
 
+This mode blocks instead of appending when the target Python file already
+defines the requested function name.
+
 For small multi-file tasks, Ceraxia can synthesize a patch spec from a JSON
 file list:
 

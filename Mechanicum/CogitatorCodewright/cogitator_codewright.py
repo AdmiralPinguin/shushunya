@@ -268,6 +268,7 @@ def infer_add_function_patch_spec(request: dict[str, Any]) -> dict[str, Any]:
                     "type": "append",
                     "path": match.group("path").strip(),
                     "content": content,
+                    "python_function_name": function_name,
                 }
             ],
             "verification_commands": verification_commands_from_natural_goal(goal),
@@ -423,6 +424,12 @@ def apply_patch_operation(repo_root: Path, operation: dict[str, Any]) -> dict[st
                 "changed": False,
                 "idempotent": True,
             }
+        function_name = str(operation.get("python_function_name") or "").strip()
+        if function_name:
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", function_name):
+                raise ValueError("append operation python_function_name must be a valid identifier")
+            if re.search(rf"^\s*def\s+{re.escape(function_name)}\s*\(", current, flags=re.MULTILINE):
+                raise ValueError(f"append operation would duplicate existing function: {function_name}")
         separator = "" if current.endswith("\n") or not current else "\n"
         path.write_text(f"{current}{separator}{content}", encoding="utf-8")
     else:

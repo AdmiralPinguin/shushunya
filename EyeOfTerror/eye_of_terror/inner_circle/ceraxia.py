@@ -161,6 +161,7 @@ def patch_contract_capabilities() -> dict[str, Any]:
             "verification commands run without a shell and must match the allowlist",
             "natural language replace inference requires explicit backtick-delimited path, old text, and new text",
             "natural language add-function inference requires explicit backtick-delimited path, function name, and safe return literal",
+            "natural language add-function inference blocks duplicate Python function definitions",
         ],
         "repair_loops": [
             "expected_colon_py_compile",

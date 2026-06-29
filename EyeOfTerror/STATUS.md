@@ -578,7 +578,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   text, then routes it through the same atomic patch and verifier path.
 - `FerrumPatchwright` can infer a narrow natural-language function append when
   the task gives explicit target path, function name, and safe return literal,
-  then verifies through the same allowlisted command path.
+  then verifies through the same allowlisted command path; duplicate existing
+  Python function definitions are blocked instead of appended.
 - `write_file` patch operations are idempotent when the target already has the
   requested content, so repeated Ceraxia runs can prove the same desired state
   without requiring unsafe overwrite flags.

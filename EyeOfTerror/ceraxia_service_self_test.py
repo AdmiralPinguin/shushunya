@@ -62,6 +62,7 @@ def main() -> int:
         or "operation batches are atomic and roll back earlier mutations on failure" not in patch_contract.get("safety_gates", [])
         or "natural language replace inference requires explicit backtick-delimited path, old text, and new text" not in patch_contract.get("safety_gates", [])
         or "natural language add-function inference requires explicit backtick-delimited path, function name, and safe return literal" not in patch_contract.get("safety_gates", [])
+        or "natural language add-function inference blocks duplicate Python function definitions" not in patch_contract.get("safety_gates", [])
         or "python -m unittest" not in patch_contract.get("verification_allowlist", [])
         or "python_symbol_extraction" not in patch_contract.get("repository_intelligence", [])
         or "append" not in patch_contract.get("operation_types", [])
