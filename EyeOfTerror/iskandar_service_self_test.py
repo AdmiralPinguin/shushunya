@@ -132,6 +132,12 @@ def main() -> int:
             prepared_oversight = json.loads((run_dir / "oversight.json").read_text(encoding="utf-8"))
             if prepared_oversight.get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json":
                 raise AssertionError(f"prepare_run wrote bad oversight: {prepared_oversight}")
+            prepared_fact_dispatch = json.loads((run_dir / "dispatch" / "fact_extraction.json").read_text(encoding="utf-8"))
+            if (
+                prepared_fact_dispatch.get("request", {}).get("quality_expectations", {}).get("step_quality", {}).get("step_id") != "fact_extraction"
+                or prepared_fact_dispatch.get("request", {}).get("quality_expectations", {}).get("final_review", {}).get("final_step") != "finalize"
+            ):
+                raise AssertionError(f"prepare_run did not write dispatch quality expectations: {prepared_fact_dispatch}")
             try:
                 request_json(
                     base + "/prepare_run",

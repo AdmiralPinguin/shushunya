@@ -207,6 +207,15 @@ def main() -> int:
         written_oversight = json.loads((Path(temp_dir) / "oversight.json").read_text(encoding="utf-8"))
         if written_oversight.get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json":
             raise AssertionError(f"pipeline run wrote bad oversight: {written_oversight}")
+        fact_dispatch = json.loads((Path(temp_dir) / "dispatch" / "fact_extraction.json").read_text(encoding="utf-8"))
+        fact_expectations = fact_dispatch.get("request", {}).get("quality_expectations", {})
+        if (
+            fact_expectations.get("step_quality", {}).get("step_id") != "fact_extraction"
+            or fact_expectations.get("step_quality", {}).get("worker") != "NoosphericExtractor"
+            or fact_expectations.get("final_review", {}).get("critic_step") != "critic_review"
+            or fact_expectations.get("revision_policy", {}).get("source_step") != "critic_review"
+        ):
+            raise AssertionError(f"dispatch packet did not include step quality expectations: {fact_dispatch}")
         if (
             written_oversight.get("revision_policy", {}).get("source_step") != "critic_review"
             or written_oversight.get("revision_policy", {}).get("final_steps") != ["critic_review", "finalize"]

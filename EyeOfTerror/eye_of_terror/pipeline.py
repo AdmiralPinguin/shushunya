@@ -42,7 +42,24 @@ class DispatchPacket:
         }
 
 
-def build_dispatch_packets(contract: TaskContract) -> list[DispatchPacket]:
+def quality_expectations_for_step(oversight: dict[str, Any] | None, step_id: str) -> dict[str, Any]:
+    if not isinstance(oversight, dict):
+        return {}
+    matrix = oversight.get("step_quality_matrix") if isinstance(oversight.get("step_quality_matrix"), list) else []
+    step_quality = next((item for item in matrix if isinstance(item, dict) and item.get("step_id") == step_id), {})
+    expectations: dict[str, Any] = {}
+    if step_quality:
+        expectations["step_quality"] = step_quality
+    final_review = oversight.get("final_review") if isinstance(oversight.get("final_review"), dict) else {}
+    if final_review:
+        expectations["final_review"] = final_review
+    revision_policy = oversight.get("revision_policy") if isinstance(oversight.get("revision_policy"), dict) else {}
+    if revision_policy:
+        expectations["revision_policy"] = revision_policy
+    return expectations
+
+
+def build_dispatch_packets(contract: TaskContract, oversight: dict[str, Any] | None = None) -> list[DispatchPacket]:
     packets: list[DispatchPacket] = []
     contract_payload = contract.to_dict()
     artifacts_by_step = {step.step_id: step.expected_artifacts for step in contract.worker_plan}
@@ -63,6 +80,9 @@ def build_dispatch_packets(contract: TaskContract) -> list[DispatchPacket]:
             "output_schema": {},
             "max_runtime_sec": 1800,
         }
+        quality_expectations = quality_expectations_for_step(oversight, step.step_id)
+        if quality_expectations:
+            request["quality_expectations"] = quality_expectations
         packets.append(
             DispatchPacket(
                 task_id=contract.task_id,
@@ -115,7 +135,7 @@ def write_pipeline_run(contract: TaskContract, run_dir: Path, oversight: dict[st
     run_dir.mkdir(parents=True, exist_ok=True)
     dispatch_dir = run_dir / "dispatch"
     dispatch_dir.mkdir(parents=True, exist_ok=True)
-    packets = build_dispatch_packets(contract)
+    packets = build_dispatch_packets(contract, oversight=oversight)
     current_packet_names = {f"{packet.step_id}.json" for packet in packets}
     for stale_packet in dispatch_dir.glob("*.json"):
         if stale_packet.name not in current_packet_names:

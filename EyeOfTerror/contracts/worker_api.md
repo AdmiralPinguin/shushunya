@@ -75,6 +75,19 @@ running on the selected port before sending work.
     "reasons": ["Draft misses required event"],
     "source_steps": ["critic_review"],
     "priority": "blocker"
+  },
+  "quality_expectations": {
+    "step_quality": {
+      "step_id": "fact_extraction",
+      "worker": "NoosphericExtractor",
+      "required_inputs": ["/work/example/source_snapshots.json"],
+      "expected_artifacts": ["/work/example/direct_event_notes.json"],
+      "checks": ["facts include confidence labels and source references"],
+      "blockers": ["missing expected artifact"],
+      "revision_targets": ["fact_extraction", "timeline", "draft_reconstruction", "critic_review", "finalize"]
+    },
+    "final_review": {},
+    "revision_policy": {}
   }
 }
 ```
@@ -93,6 +106,11 @@ orchestrators can poll, cancel, and audit every worker step through `/tasks`.
 worker from a failed or blocked run's `revision_plan`. Workers should treat it
 as focused correction context, not as user input, and should still validate all
 required source artifacts before reporting completion.
+
+`quality_expectations` is optional but should be included by governors that have
+an oversight plan. It gives the worker the relevant per-step checks, blockers,
+revision targets, final review requirements, and revision policy before work
+starts, so quality control is not only a post-run inspection.
 
 When `/run` receives a full dispatch packet with a top-level `worker` field,
 the shared worker runtime must reject packets addressed to a different worker

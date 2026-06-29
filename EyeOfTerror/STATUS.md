@@ -5,6 +5,8 @@
 - Iskandar Khayon can build lore reconstruction task contracts and dispatch packets.
 - Dispatch packets propagate dependency output artifacts as worker
   `input_artifacts`.
+- Dispatch packets written with governor oversight propagate per-step
+  `quality_expectations` into worker requests.
 - Iskandar Khayon exposes his required Mechanicum worker set through
   `/capabilities`.
 - Iskandar Khayon exposes a compact pipeline summary through `/capabilities`
