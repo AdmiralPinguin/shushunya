@@ -200,13 +200,25 @@ def patch_scope_evidence(workspace_root: Path, output_path: str, changed_files: 
 def patch_scope_review(scope: dict[str, Any]) -> dict[str, Any]:
     in_map = [str(item) for item in scope.get("changed_files_in_repo_map", [])] if isinstance(scope.get("changed_files_in_repo_map"), list) else []
     outside_map = [str(item) for item in scope.get("changed_files_outside_repo_map", [])] if isinstance(scope.get("changed_files_outside_repo_map"), list) else []
+    evidence = scope.get("evidence") if isinstance(scope.get("evidence"), list) else []
+    source_without_linked_tests = [
+        str(item.get("path"))
+        for item in evidence
+        if (
+            isinstance(item, dict)
+            and str(item.get("path") or "").endswith(".py")
+            and not test_like_path(str(item.get("path") or ""))
+            and not item.get("linked_tests")
+        )
+    ]
     total = len(in_map) + len(outside_map)
     return {
-        "status": "needs_attention" if outside_map else "covered",
+        "status": "needs_attention" if outside_map or source_without_linked_tests else "covered",
         "changed_file_count": total,
         "mapped_changed_file_count": len(in_map),
         "unmapped_changed_file_count": len(outside_map),
         "unmapped_changed_files": outside_map,
+        "source_without_linked_tests": source_without_linked_tests[:12],
     }
 
 
@@ -1385,6 +1397,14 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             {
                 "severity": "warning",
                 "message": f"Changed file(s) outside ranked repo map should be manually checked for scope drift: {files}",
+            }
+        )
+    if scope_review.get("source_without_linked_tests"):
+        files = ", ".join(scope_review.get("source_without_linked_tests", [])[:5])
+        review_warnings.append(
+            {
+                "severity": "warning",
+                "message": f"Changed source file(s) have no static linked tests in repo map; verify coverage manually: {files}",
             }
         )
     if patch.get("status") != "applied":

@@ -238,7 +238,11 @@ def main() -> int:
         if "sample.py" not in scope.get("changed_files_in_repo_map", []):
             raise AssertionError(f"final manifest should preserve patch scope evidence: {final}")
         scope_review = final.get("patch_scope_review", {})
-        if scope_review.get("status") != "covered" or scope_review.get("mapped_changed_file_count") != 1:
+        if (
+            scope_review.get("status") != "needs_attention"
+            or scope_review.get("mapped_changed_file_count") != 1
+            or "sample.py" not in scope_review.get("source_without_linked_tests", [])
+        ):
             raise AssertionError(f"final manifest should preserve patch scope review: {final}")
         repair_state = final.get("repair_loop_state", {})
         if (
@@ -426,6 +430,8 @@ def main() -> int:
             if isinstance(item, dict)
         ):
             raise AssertionError(f"final manifest should link changed source files to tests: {final}")
+        if final.get("patch_scope_review", {}).get("status") != "covered":
+            raise AssertionError(f"linked source/test patch should have covered scope review: {final}")
         survey = json.loads((root / "work" / "code" / "repo_survey.json").read_text(encoding="utf-8"))
         if survey.get("role_policy", {}).get("authority") != "read_only_repository_mapping":
             raise AssertionError(f"repository survey should preserve its read-only role policy: {survey}")
