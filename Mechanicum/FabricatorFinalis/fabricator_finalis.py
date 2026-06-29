@@ -93,6 +93,33 @@ def merge_revision_plan(critic: dict[str, Any], missing: list[str]) -> dict[str,
     return {"required": bool(steps), "steps": steps}
 
 
+def add_unique_revision_step(steps: list[dict[str, Any]], step_id: str, worker: str, reason: str, source: str) -> None:
+    for item in steps:
+        if item.get("step_id") == step_id and item.get("worker") == worker and item.get("reason") == reason:
+            return
+    steps.append(
+        {
+            "step_id": step_id,
+            "worker": worker,
+            "reason": reason,
+            "source": source,
+            "priority": "blocker",
+        }
+    )
+
+
+def add_required_event_revision_steps(revision_plan: dict[str, Any], event_review: dict[str, Any]) -> dict[str, Any]:
+    if event_review.get("required_events_covered") is not False:
+        return revision_plan
+    steps = list(revision_plan.get("steps", []) if isinstance(revision_plan.get("steps"), list) else [])
+    missing_events = ", ".join(str(item) for item in event_review.get("missing_required_events", [])[:8])
+    reason = f"Missing required direct events in timeline: {missing_events}"
+    add_unique_revision_step(steps, "fact_extraction", "NoosphericExtractor", reason, "final_readiness")
+    add_unique_revision_step(steps, "timeline", "Chronologis", reason, "final_readiness")
+    add_unique_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", reason, "final_readiness")
+    return {"required": True, "steps": steps}
+
+
 def quality_expectation_summary(request: dict[str, Any]) -> dict[str, Any]:
     expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
     step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
@@ -191,6 +218,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     corpus_requirements = comprehensive_depth.get("corpus_requirements") if isinstance(comprehensive_depth.get("corpus_requirements"), dict) else {}
     status = "ready" if approved and not missing and not quality_blockers and not readiness_blockers else "blocked"
     revision_plan = merge_revision_plan(critic, missing)
+    revision_plan = add_required_event_revision_steps(revision_plan, event_review)
     if quality_blockers:
         revision_plan = {
             "required": True,

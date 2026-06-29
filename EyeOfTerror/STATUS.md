@@ -483,8 +483,12 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   package completeness, quality expectations, and source coverage.
 - `FabricatorFinalis` blocks final readiness when critic metrics explicitly
   report source coverage as not extraction-ready, even if approval was set.
-- Warmaster compact final-manifest summaries expose readiness checks and
-  warning/blocker/file counts for client displays.
+- `FabricatorFinalis` also blocks final readiness when required event playbook
+  events are absent from the timeline, and emits a downstream revision plan for
+  extraction, timeline, and draft regeneration.
+- Warmaster compact final-manifest summaries expose readiness checks,
+  event-review coverage, corpus requirements, and warning/blocker/file counts
+  for client displays.
 - `ReductorVerifier` preserves worker `quality_expectations` in critic reports
   and blocks approval when they contradict the current step request.
 - `ReductorVerifier` performs generic direct-event coverage checks from

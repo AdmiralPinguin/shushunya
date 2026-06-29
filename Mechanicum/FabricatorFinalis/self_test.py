@@ -102,6 +102,9 @@ def main() -> int:
             or "golden_absolute" not in json.dumps(manifest)
         ):
             raise AssertionError(f"missing required event should block final readiness: {manifest}")
+        revision_workers = {step.get("worker") for step in manifest.get("revision_plan", {}).get("steps", [])}
+        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
+            raise AssertionError(f"missing required event should produce downstream revision plan: {manifest}")
         write(
             base / "critic_report.json",
             json.dumps(
