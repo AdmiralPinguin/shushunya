@@ -1802,6 +1802,84 @@ def main() -> int:
                 or incomplete_downstream_summary.get("summary", {}).get("actions", {}).get("can_execute_revision")
             ):
                 raise AssertionError(f"incomplete downstream revision plan was accepted: {incomplete_downstream_summary}")
+            corpus_revision_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-corpus-revision-plan-test"},
+            )
+            corpus_revision_dir = Path(corpus_revision_task["run_dir"])
+            corpus_revision_ledger_path = corpus_revision_dir / "task_ledger.json"
+            corpus_revision_ledger = json.loads(corpus_revision_ledger_path.read_text(encoding="utf-8"))
+            corpus_revision_ledger["status"] = "failed"
+            corpus_revision_ledger.setdefault("result", {})["revision_plan"] = {
+                "required": True,
+                "steps": [
+                    {
+                        "step_id": "corpus_ingestion",
+                        "worker": "CorpusIngestor",
+                        "reason": "local primary corpus must be indexed before source discovery",
+                        "source": "self_test",
+                        "priority": "blocker",
+                    },
+                    {
+                        "step_id": "source_discovery",
+                        "worker": "Lexmechanic",
+                        "reason": "source map must include indexed local primary texts",
+                        "source": "self_test",
+                        "priority": "blocker",
+                    },
+                    {
+                        "step_id": "source_acquisition",
+                        "worker": "AuspexBrowser",
+                        "reason": "local sources must be snapshotted before extraction",
+                        "source": "self_test",
+                        "priority": "blocker",
+                    },
+                    {
+                        "step_id": "fact_extraction",
+                        "worker": "NoosphericExtractor",
+                        "reason": "facts must be extracted from the revised source set",
+                        "source": "self_test",
+                        "priority": "blocker",
+                    },
+                    {
+                        "step_id": "timeline",
+                        "worker": "Chronologis",
+                        "reason": "timeline must be rebuilt from revised evidence",
+                        "source": "self_test",
+                        "priority": "blocker",
+                    },
+                    {
+                        "step_id": "draft_reconstruction",
+                        "worker": "ScriptoriumDaemon",
+                        "reason": "draft must be rebuilt from revised timeline",
+                        "source": "self_test",
+                        "priority": "blocker",
+                    },
+                ],
+            }
+            write_json(corpus_revision_ledger_path, corpus_revision_ledger)
+            corpus_revision_summary = request_json(base + "/runs/warmaster-corpus-revision-plan-test/summary")
+            corpus_revision_plan_summary = corpus_revision_summary.get("summary", {}).get("revision_plan_summary", {})
+            if (
+                not corpus_revision_summary.get("summary", {}).get("actions", {}).get("can_execute_revision")
+                or not corpus_revision_plan_summary.get("valid")
+                or corpus_revision_plan_summary.get("step_ids", [None])[0] != "corpus_ingestion"
+                or "CorpusIngestor" not in corpus_revision_plan_summary.get("workers", [])
+                or corpus_revision_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "execute_revision"
+            ):
+                raise AssertionError(f"corpus-first revision plan was not executable: {corpus_revision_summary}")
+            corpus_revision_steps = revision_step_ids_from_run(corpus_revision_dir)
+            if corpus_revision_steps != [
+                "corpus_ingestion",
+                "source_discovery",
+                "source_acquisition",
+                "fact_extraction",
+                "timeline",
+                "draft_reconstruction",
+                "critic_review",
+                "finalize",
+            ]:
+                raise AssertionError(f"bad corpus-first revision step expansion: {corpus_revision_steps}")
             revision_steps = revision_step_ids_from_run(run_dir)
             if revision_steps != ["draft_reconstruction", "critic_review", "finalize"]:
                 raise AssertionError(f"bad revision step expansion: {revision_steps}")
