@@ -1422,6 +1422,8 @@ def main() -> int:
             if (
                 final_manifest_item.get("manifest_summary", {}).get("status") != "ready"
                 or "critic_metrics" not in final_manifest_item.get("manifest_summary", {})
+                or "readiness_checks" not in final_manifest_item.get("manifest_summary", {})
+                or final_manifest_item.get("manifest_summary", {}).get("file_count", 0) < 1
             ):
                 raise AssertionError(f"artifacts response did not expose final manifest summary: {artifacts}")
             final_manifest_host_path = Path(final_manifest_item.get("host_path") or "")
@@ -1451,6 +1453,8 @@ def main() -> int:
                 or completed_snapshot.get("summary", {}).get("actions", {}).get("next_action", {}).get("body", {}).get("force") is not True
                 or completed_snapshot.get("summary", {}).get("final_manifest_summary", {}).get("status") != "ready"
                 or "critic_metrics" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
+                or "readiness_checks" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
+                or "blocker_count" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
                 or completed_snapshot.get("summary", {}).get("progress", {}).get("pending_step_ids")
             ):
                 raise AssertionError(f"bad completed run snapshot: {completed_snapshot}")

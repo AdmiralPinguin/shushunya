@@ -2767,14 +2767,21 @@ def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
 
 
 def compact_manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:
+    warnings = manifest.get("warnings", []) if isinstance(manifest.get("warnings"), list) else []
+    blockers = manifest.get("blockers", []) if isinstance(manifest.get("blockers"), list) else []
+    files = manifest.get("files", []) if isinstance(manifest.get("files"), list) else []
     return {
         "status": manifest.get("status", ""),
         "approved": bool(manifest.get("approved")),
         "critic_status": manifest.get("critic_status", ""),
         "critic_metrics": manifest.get("critic_metrics", {}),
+        "readiness_checks": manifest.get("readiness_checks", {}) if isinstance(manifest.get("readiness_checks"), dict) else {},
         "revision_focus": manifest.get("revision_focus", {}),
-        "warnings": manifest.get("warnings", []),
-        "blockers": manifest.get("blockers", []),
+        "warning_count": len(warnings),
+        "blocker_count": len(blockers),
+        "file_count": len(files),
+        "warnings": warnings,
+        "blockers": blockers,
     }
 
 
