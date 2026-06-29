@@ -48,6 +48,24 @@ def main() -> int:
             ],
         }
 
+    def noisy_playbook_search(query: str, limit: int) -> dict:
+        return {
+            "ok": True,
+            "source": "fake",
+            "results": [
+                {
+                    "title": "Chaos Artefacts",
+                    "url": "https://wh40k.lexicanum.com/wiki/Axe_of_Blind_Fury",
+                    "snippet": "A general artefact page without the requested battle.",
+                },
+                {
+                    "title": "Black Library - Weakness of Others, The (eShort)",
+                    "url": "https://www.blacklibrary.com/warhammer-40000/quick-reads/the-weakness-of-others-ebook.html",
+                    "snippet": "The Weakness of Others is a known source from the playbook.",
+                },
+            ],
+        }
+
     discovered = source_map_for_contract({"goal": "unknown topic"}, fake_search)
     if not discovered["sources"] or discovered["sources"][0].get("discovery_method") != "live_search":
         raise AssertionError(f"live discovery should create classified source candidates: {discovered['sources']}")
@@ -158,6 +176,10 @@ def main() -> int:
         urls = [source.get("url") for source in live_playbook.get("sources", []) if source.get("url")]
         if len(urls) != len(set(urls)):
             raise AssertionError(f"source dedupe should collapse duplicate live/playbook URLs: {live_playbook.get('sources')}")
+        noisy = source_map_for_contract({"goal": "Собери события Скалатракса"}, noisy_playbook_search)
+        noisy_titles = {source.get("title") for source in noisy.get("sources", [])}
+        if "Chaos Artefacts" in noisy_titles or "Black Library - Weakness of Others, The (eShort)" not in noisy_titles:
+            raise AssertionError(f"playbook live discovery should filter irrelevant same-domain noise: {noisy.get('sources')}")
     print("[ok] Lexmechanic source map")
     return 0
 

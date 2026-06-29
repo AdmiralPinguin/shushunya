@@ -291,11 +291,26 @@ def flatten_discovery_results(discovery_rounds: list[dict[str, Any]]) -> list[di
     return flattened
 
 
-def classified_live_sources(discovery_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def relevant_live_result(result: dict[str, Any], relevance_terms: list[str] | None) -> bool:
+    if not relevance_terms:
+        return True
+    haystack = " ".join(
+        [
+            str(result.get("title") or ""),
+            str(result.get("url") or ""),
+            str(result.get("snippet") or ""),
+        ]
+    ).lower()
+    return any(term.lower() in haystack for term in relevance_terms if term)
+
+
+def classified_live_sources(discovery_results: list[dict[str, Any]], relevance_terms: list[str] | None = None) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for discovery in discovery_results:
         for result in discovery.get("results", []):
             if not isinstance(result, dict):
+                continue
+            if not relevant_live_result(result, relevance_terms):
                 continue
             candidate = classify_discovered_result(result)
             if candidate:
@@ -360,7 +375,14 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
     ]
     discovery_rounds = run_discovery_rounds(rounds, searcher)
     discovery_results = flatten_discovery_results(discovery_rounds)
-    live_candidates = classified_live_sources(discovery_results)
+    relevance_terms = None
+    if playbooks:
+        relevance_terms = [topic] + [
+            str(source.get("title") or "")
+            for source in sources
+            if isinstance(source, dict) and source.get("title")
+        ]
+    live_candidates = classified_live_sources(discovery_results, relevance_terms)
     sources = rank_sources(dedupe_sources(sources + live_candidates))
     coverage = source_coverage(sources, discovery_results, playbooks)
     if sources and not coverage["ready_for_extraction"]:
