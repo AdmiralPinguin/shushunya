@@ -52,9 +52,11 @@ def matching_playbooks(goal: str) -> list[dict[str, Any]]:
 
 def dedupe_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[str] = set()
     for source in sources:
-        key = (str(source.get("title") or ""), str(source.get("url") or ""))
+        url = str(source.get("url") or "").strip().lower()
+        title = " ".join(str(source.get("title") or "").split()).lower()
+        key = url or title
         if key in seen:
             continue
         seen.add(key)
@@ -213,6 +215,11 @@ def search_rounds(goal: str, playbooks: list[dict[str, Any]]) -> list[dict[str, 
                 "purpose": "secondary summaries for chronology and named-entity cross-checking",
                 "queries": [f"{goal} Lexicanum", f"{goal} Warhammer wiki", f"{goal} chronology"],
             },
+            {
+                "round": "language_probe",
+                "purpose": "find Russian and English variants of the same topic",
+                "queries": [f"{goal} русский", f"{goal} English", f"{goal} перевод"],
+            },
         ]
     return [
         {"round": "primary_probe", "purpose": "find primary or publication-level sources", "queries": [f"{goal} primary source", f"{goal} novel", f"{goal} book"]},
@@ -331,7 +338,7 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
             if isinstance(source, dict)
         ]
     )
-    rounds = search_rounds(goal, playbooks)
+    rounds = search_rounds(topic, playbooks)
     search_queries = [query for round_plan in rounds for query in round_plan.get("queries", []) if isinstance(query, str)]
     coverage_gaps = [
         str(gap)

@@ -92,6 +92,8 @@ def main() -> int:
             raise AssertionError(f"source map lacks required source candidates: {titles}")
         if data.get("matched_playbooks") != ["skalathrax_sources"]:
             raise AssertionError(f"wrong matched playbooks: {data.get('matched_playbooks')}")
+        if data.get("topic") != "Skalathrax" or "Максимально" in data.get("topic", ""):
+            raise AssertionError(f"playbook source map should use normalized topic: {data.get('topic')}")
         if data.get("discovery_status") != "playbook_matched":
             raise AssertionError(f"wrong discovery status: {data.get('discovery_status')}")
         if not data.get("coverage_gaps"):
@@ -148,6 +150,14 @@ def main() -> int:
         weak_map = json.loads((Path(temp_dir) / "weak" / "source_map.json").read_text(encoding="utf-8"))
         if weak_map.get("source_coverage", {}).get("ready_for_extraction"):
             raise AssertionError(f"weak source map should record failed source coverage: {weak_map}")
+        long_goal = "Максимально полно реконструируй непосредственные события Скалатракса " + ("очень длинное задание " * 20)
+        live_playbook = source_map_for_contract({"goal": long_goal}, fake_search)
+        live_queries = [query for round_plan in live_playbook.get("discovery_rounds", []) for query in round_plan.get("queries", [])]
+        if any("очень длинное задание" in query for query in live_queries):
+            raise AssertionError(f"live discovery queries should use normalized topic, not full prompt: {live_queries}")
+        urls = [source.get("url") for source in live_playbook.get("sources", []) if source.get("url")]
+        if len(urls) != len(set(urls)):
+            raise AssertionError(f"source dedupe should collapse duplicate live/playbook URLs: {live_playbook.get('sources')}")
     print("[ok] Lexmechanic source map")
     return 0
 
