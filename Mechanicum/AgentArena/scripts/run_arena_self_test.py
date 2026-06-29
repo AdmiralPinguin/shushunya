@@ -130,6 +130,9 @@ def main() -> int:
             raise AssertionError(f"bad arena artifact report analysis: {analysis}")
         if analysis.get("failure_reasons", {}).get("agent_exit") != 1 or analysis.get("failure_reasons", {}).get("post_run_checks") != 1:
             raise AssertionError(f"bad arena failure reason analysis: {analysis}")
+        post_check_failures = [item for item in analysis["recent_failures"] if item.get("failure_reason") == "post_run_checks"]
+        if not post_check_failures or post_check_failures[0].get("failed_checks", [{}])[0].get("path") != "report.md":
+            raise AssertionError(f"bad arena failed check summary: {analysis}")
     print("[ok] AgentArena runner")
     return 0
 

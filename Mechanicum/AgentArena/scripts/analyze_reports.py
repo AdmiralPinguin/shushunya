@@ -83,6 +83,23 @@ def add_artifact_stat(stats: dict[str, Any], suite: str, agent: str, orchestrati
             item["missing_output_writes"] += 1
 
 
+def summarize_failed_check(check: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "type": check.get("type", "unknown"),
+        "path": check.get("path", ""),
+    }
+    for key in ("exit_code", "error"):
+        if check.get(key) not in (None, ""):
+            summary[key] = check.get(key)
+    if check.get("text"):
+        summary["text"] = str(check["text"])[:160]
+    if check.get("command"):
+        summary["command"] = str(check["command"])[:240]
+    if check.get("output"):
+        summary["output_tail"] = str(check["output"])[-500:]
+    return summary
+
+
 def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
     stats: dict[str, Any] = {}
     orchestration_stats: dict[str, Any] = {}
@@ -127,6 +144,7 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
                         "exit_code": result.get("exit_code"),
                         "failure_reason": reason,
                         "failed_check_count": len(failed_checks),
+                        "failed_checks": [summarize_failed_check(check) for check in failed_checks[:5]],
                         "error": result.get("error", ""),
                     }
                 )
