@@ -108,7 +108,7 @@ def main() -> int:
                         "ok": False,
                         "duration_sec": 3.0,
                         "exit_code": 0,
-                        "checks": [{"type": "file_contains", "path": "report.md", "ok": False}],
+                        "checks": [{"type": "file_contains", "path": "report.md", "ok": False, "output": "AssertionError"}],
                         "orchestration": {
                             "style": "artifact_reads_before_writes",
                             "ok": False,
@@ -132,6 +132,8 @@ def main() -> int:
             raise AssertionError(f"bad arena failure reason analysis: {analysis}")
         if analysis.get("failed_check_types", {}).get("file_contains") != 1:
             raise AssertionError(f"bad arena failed check type aggregation: {analysis}")
+        if analysis.get("failed_check_symptoms", {}).get("assertion_error") != 1:
+            raise AssertionError(f"bad arena failed check symptom aggregation: {analysis}")
         post_check_failures = [item for item in analysis["recent_failures"] if item.get("failure_reason") == "post_run_checks"]
         if not post_check_failures or post_check_failures[0].get("failed_checks", [{}])[0].get("path") != "report.md":
             raise AssertionError(f"bad arena failed check summary: {analysis}")

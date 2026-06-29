@@ -52,6 +52,8 @@ before output artifacts were written.
 Recent failure entries include compact failed-check summaries for quick triage.
 The analyzer also aggregates failed check types, which helps distinguish
 artifact/content mistakes from command-level verification failures.
+It also reports common failed-check symptoms such as JSON decode, assertion,
+type, import, module, and syntax errors.
 
 Runner self-test:
 

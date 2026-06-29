@@ -100,12 +100,31 @@ def summarize_failed_check(check: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def failed_check_symptoms(check: dict[str, Any]) -> list[str]:
+    text = "\n".join(str(check.get(key) or "") for key in ("error", "output", "command"))
+    symptoms: list[str] = []
+    markers = {
+        "json_decode_error": "JSONDecodeError",
+        "assertion_error": "AssertionError",
+        "type_error": "TypeError",
+        "import_error": "ImportError",
+        "module_not_found": "ModuleNotFoundError",
+        "syntax_error": "SyntaxError",
+        "missing_output": "Expecting value",
+    }
+    for symptom, marker in markers.items():
+        if marker in text and symptom not in symptoms:
+            symptoms.append(symptom)
+    return symptoms
+
+
 def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
     stats: dict[str, Any] = {}
     orchestration_stats: dict[str, Any] = {}
     artifact_stats: dict[str, Any] = {}
     failure_reasons: dict[str, int] = {}
     failed_check_types: dict[str, int] = {}
+    failed_check_symptom_counts: dict[str, int] = {}
     failures: list[dict[str, Any]] = []
     loaded = 0
     for path in report_paths:
@@ -128,6 +147,8 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
                 for check in failed_checks:
                     check_type = str(check.get("type") or "unknown")
                     failed_check_types[check_type] = failed_check_types.get(check_type, 0) + 1
+                    for symptom in failed_check_symptoms(check):
+                        failed_check_symptom_counts[symptom] = failed_check_symptom_counts.get(symptom, 0) + 1
                 exit_failed = result.get("exit_code") not in (0, None)
                 checks_failed = bool(failed_checks)
                 if exit_failed and checks_failed:
@@ -171,6 +192,7 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
         "artifact_quality": artifact_rows,
         "failure_reasons": failure_reasons,
         "failed_check_types": dict(sorted(failed_check_types.items(), key=lambda item: (-item[1], item[0]))),
+        "failed_check_symptoms": dict(sorted(failed_check_symptom_counts.items(), key=lambda item: (-item[1], item[0]))),
         "recent_failures": failures[:20],
     }
 
