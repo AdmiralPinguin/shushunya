@@ -733,6 +733,27 @@ def load_corpus_sources(request: dict[str, Any], workspace_root: Path) -> tuple[
     return source_items, payload if isinstance(payload, dict) else {}
 
 
+def corpus_diagnostics(corpus_index: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(corpus_index, dict):
+        return {"provided": False}
+    summary = corpus_index.get("summary") if isinstance(corpus_index.get("summary"), dict) else {}
+    skipped = corpus_index.get("skipped") if isinstance(corpus_index.get("skipped"), list) else []
+    non_matching = corpus_index.get("non_matching") if isinstance(corpus_index.get("non_matching"), list) else []
+    gaps = corpus_index.get("gaps") if isinstance(corpus_index.get("gaps"), list) else []
+    return {
+        "provided": True,
+        "corpus_root": str(corpus_index.get("corpus_root") or ""),
+        "summary": summary,
+        "gap_count": len(gaps),
+        "gaps": [str(item) for item in gaps[:10]],
+        "skipped_count": len(skipped),
+        "skipped_sample": [item for item in skipped[:10] if isinstance(item, dict)],
+        "non_matching_count": int(summary.get("sources_non_matching") or len(non_matching)),
+        "non_matching_sample_count": len(non_matching),
+        "non_matching_sample": [item for item in non_matching[:10] if isinstance(item, dict)],
+    }
+
+
 def source_map_for_contract(
     contract: dict[str, Any],
     searcher: SearchFn | None = None,
@@ -818,6 +839,7 @@ def source_map_for_contract(
         "cached_source_candidates": cached_sources,
         "local_corpus_candidates": corpus_candidates,
         "corpus_summary": corpus_summary,
+        "corpus_diagnostics": corpus_diagnostics(corpus_index),
         "corpus_requirements": corpus_requirements,
         "source_cache": {
             "enabled": bool(source_cache_path(topic)),

@@ -148,7 +148,15 @@ def main() -> int:
         corpus_index.write_text(
             json.dumps(
                 {
-                    "summary": {"sources_matched": 1},
+                    "corpus_root": "/tmp/Corpus",
+                    "summary": {"sources_matched": 1, "sources_non_matching": 36, "non_matching_sample_count": 30},
+                    "non_matching": [
+                        {
+                            "corpus_relative_path": "unrelated-00.txt",
+                            "reason": "no task relevance terms matched filename, path, or text sample",
+                        }
+                    ],
+                    "skipped": [{"path": "/tmp/Corpus/broken.epub", "reason": "not a zip file"}],
                     "sources": [
                         {
                             "title": "Local Skalathrax Primary",
@@ -177,6 +185,14 @@ def main() -> int:
             raise AssertionError(f"local corpus source should be ranked as local primary: {corpus_map.get('sources')}")
         if corpus_map.get("source_coverage", {}).get("local_corpus_source_count") != 1:
             raise AssertionError(f"local corpus coverage was not counted: {corpus_map.get('source_coverage')}")
+        diagnostics = corpus_map.get("corpus_diagnostics", {})
+        if (
+            not diagnostics.get("provided")
+            or diagnostics.get("non_matching_count") != 36
+            or diagnostics.get("non_matching_sample", [{}])[0].get("corpus_relative_path") != "unrelated-00.txt"
+            or diagnostics.get("skipped_sample", [{}])[0].get("path") != "/tmp/Corpus/broken.epub"
+        ):
+            raise AssertionError(f"source map should preserve compact corpus diagnostics: {diagnostics}")
         if corpus_map.get("corpus_requirements", {}).get("required"):
             raise AssertionError(f"local corpus primary should not create missing primary requirements for generic task: {corpus_map.get('corpus_requirements')}")
         generic_request = {
