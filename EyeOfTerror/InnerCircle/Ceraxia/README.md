@@ -26,6 +26,10 @@ implementations.
 Each worker's `worker.json` exposes a `role_contract` with its owned step,
 authority boundary, expected artifact names, and next handoff. The registry
 self-test checks those contracts for the active six-worker code brigade.
+Ceraxia also writes a per-step `role_policy` into the oversight quality matrix
+and dispatch requests. Worker artifacts preserve that policy, so final packages
+can prove whether a step was read-only, allowed scoped source mutation, or
+limited to allowlisted verification and narrow repairs.
 
 `LogisRepository` records Python symbol summaries for scanned `.py` files and
 suggests safe verification commands from discovered test files. `MagosStrategos`

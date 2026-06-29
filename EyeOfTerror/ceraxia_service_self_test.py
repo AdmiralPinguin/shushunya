@@ -55,6 +55,17 @@ def main() -> int:
         or "multi_file_json_marker" not in oversight.get("patch_contract", {}).get("synthesis_modes", [])
     ):
         raise AssertionError(f"bad Ceraxia oversight template: {oversight}")
+    role_by_step = {
+        item.get("step_id"): item.get("role_policy", {})
+        for item in oversight.get("step_quality_matrix", [])
+        if isinstance(item, dict)
+    }
+    if (
+        role_by_step.get("implementation", {}).get("authority") != "scoped_source_mutation_from_patch_contract_or_safe_inference"
+        or role_by_step.get("implementation", {}).get("may_mutate_source") is not True
+        or role_by_step.get("code_review", {}).get("may_mutate_source") is not False
+    ):
+        raise AssertionError(f"bad Ceraxia role policies: {oversight}")
     local_plan = plan_code_task("почини python приложение", task_id="ceraxia-local-plan-test").to_dict()
     patch_contract = local_plan.get("patch_contract", {})
     if (
@@ -73,7 +84,7 @@ def main() -> int:
     ferrum_contract = local_plan.get("resolved_workers", {}).get("FerrumPatchwright", {}).get("role_contract", {})
     if (
         ferrum_contract.get("owned_step") != "implementation"
-        or ferrum_contract.get("authority") != "scoped_source_mutation_from_explicit_patch_contract"
+        or ferrum_contract.get("authority") != "scoped_source_mutation_from_patch_contract_or_safe_inference"
     ):
         raise AssertionError(f"Ceraxia plan should expose worker role contracts: {local_plan}")
     with tempfile.TemporaryDirectory() as temp_dir:

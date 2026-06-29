@@ -7,7 +7,7 @@
   "capabilities": ["code_review", "scope_review", "test_evidence_review", "revision_plan_authoring"],
   "role_contract": {
     "owned_step": "code_review",
-    "authority": "readiness_judgement_and_revision_plan",
+    "authority": "read_only_package_review_and_revision_ordering",
     "expected_artifacts": ["code_review.json"],
     "handoff_to": ["SealwrightFinalis"]
   }

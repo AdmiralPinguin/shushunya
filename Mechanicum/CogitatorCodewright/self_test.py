@@ -8,11 +8,33 @@ from pathlib import Path
 from cogitator_codewright import run
 
 
+def role_policy(step_id: str) -> dict:
+    policies = {
+        "repository_survey": {"role": "repository_mapper", "authority": "read_only_repository_mapping", "may_mutate_source": False},
+        "change_planning": {"role": "change_strategist", "authority": "scoped_plan_from_repository_evidence", "may_mutate_source": False},
+        "implementation": {
+            "role": "patchwright",
+            "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+            "may_mutate_source": True,
+        },
+        "verification": {"role": "verifier", "authority": "allowlisted_verification_and_narrow_repairs", "may_mutate_source": True},
+        "code_review": {"role": "critic", "authority": "read_only_package_review_and_revision_ordering", "may_mutate_source": False},
+        "finalize": {"role": "final_packager", "authority": "read_only_final_manifest_packaging", "may_mutate_source": False},
+    }
+    return policies[step_id]
+
+
 def request(step_id: str, artifact: str, *, goal: str = "почини python приложение", target_repo_root: Path | None = None) -> dict:
     payload = {
         "task_id": f"ceraxia-test:{step_id}",
         "goal": goal,
         "step": {"step_id": step_id, "expected_artifacts": [artifact]},
+        "quality_expectations": {
+            "step_quality": {
+                "step_id": step_id,
+                "role_policy": role_policy(step_id),
+            }
+        },
     }
     if target_repo_root is not None:
         payload["target_repo_root"] = str(target_repo_root)
@@ -212,6 +234,14 @@ def main() -> int:
             raise AssertionError(f"final manifest should preserve changed file metadata: {final}")
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"final manifest should preserve verification evidence: {final}")
+        role_policies = final.get("role_policies", {})
+        if (
+            role_policies.get("implementation", {}).get("authority")
+            != "scoped_source_mutation_from_patch_contract_or_safe_inference"
+            or role_policies.get("verification", {}).get("authority") != "allowlisted_verification_and_narrow_repairs"
+            or role_policies.get("finalize", {}).get("may_mutate_source") is not False
+        ):
+            raise AssertionError(f"final manifest should preserve role policy evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
@@ -246,6 +276,8 @@ def main() -> int:
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"inferred replace final manifest should preserve verification evidence: {final}")
         survey = json.loads((root / "work" / "code" / "repo_survey.json").read_text(encoding="utf-8"))
+        if survey.get("role_policy", {}).get("authority") != "read_only_repository_mapping":
+            raise AssertionError(f"repository survey should preserve its read-only role policy: {survey}")
         symbol_paths = {item.get("path") for item in survey.get("python_symbols", []) if isinstance(item, dict)}
         if not {"sample.py", "test_sample.py"}.issubset(symbol_paths):
             raise AssertionError(f"repository survey should include Python symbol summaries: {survey}")

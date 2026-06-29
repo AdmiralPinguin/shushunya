@@ -7,7 +7,7 @@
   "capabilities": ["change_planning", "scope_control", "risk_mapping", "verification_suggestion"],
   "role_contract": {
     "owned_step": "change_planning",
-    "authority": "implementation_strategy_without_mutation",
+    "authority": "scoped_plan_from_repository_evidence",
     "expected_artifacts": ["change_plan.md"],
     "handoff_to": ["FerrumPatchwright"]
   }

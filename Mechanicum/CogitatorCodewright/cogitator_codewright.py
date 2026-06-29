@@ -89,6 +89,13 @@ def request_goal(request: dict[str, Any]) -> str:
     return str(request.get("goal") or request.get("task") or contract.get("goal") or "")
 
 
+def role_policy_from_request(request: dict[str, Any]) -> dict[str, Any]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
+    role_policy = step_quality.get("role_policy") if isinstance(step_quality.get("role_policy"), dict) else {}
+    return role_policy
+
+
 def output_path_from_request(request: dict[str, Any]) -> str:
     step = request.get("step") if isinstance(request.get("step"), dict) else {}
     expected = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
@@ -909,6 +916,7 @@ def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
 def run_repository_survey(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     goal = request_goal(request)
     survey = repo_survey(target_repo_root(request), goal)
+    survey["role_policy"] = role_policy_from_request(request)
     write_json(workspace_root, output_path, survey)
     return {
         "ok": True,
@@ -924,6 +932,7 @@ def run_repository_survey(request: dict[str, Any], workspace_root: Path, output_
 def run_change_planning(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
     goal = request_goal(request) or str(survey.get("goal") or "")
+    role_policy = role_policy_from_request(request)
     candidates = survey.get("candidate_files") if isinstance(survey.get("candidate_files"), list) else []
     tests = survey.get("test_files") if isinstance(survey.get("test_files"), list) else []
     symbols = survey.get("python_symbols") if isinstance(survey.get("python_symbols"), list) else []
@@ -963,6 +972,15 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             "## Implementation Policy",
             "- Produce an auditable patch manifest before mutating source files.",
             "- Require verification commands or explicit blockers before final readiness.",
+            "",
+            "## Role Policy",
+            f"- role: {role_policy.get('role', '')}",
+            f"- authority: {role_policy.get('authority', '')}",
+            f"- may_mutate_source: {role_policy.get('may_mutate_source', False)}",
+            *[
+                f"- required_evidence: {item}"
+                for item in (role_policy.get("required_evidence") if isinstance(role_policy.get("required_evidence"), list) else [])
+            ],
         ]
     )
     write_text(workspace_root, output_path, content + "\n")
@@ -979,6 +997,7 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
 
 def run_implementation(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     plan = read_text_optional(workspace_root, sibling_artifact(output_path, "change_plan.md"))
+    role_policy = role_policy_from_request(request)
     blockers: list[str] = []
     changed_files: list[dict[str, Any]] = []
     rolled_back_files: list[dict[str, Any]] = []
@@ -1010,6 +1029,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
             "return focused revision steps on failure",
         ],
         "plan_excerpt": plan[:3000],
+        "role_policy": role_policy,
         "patch_spec_present": bool(patch_spec),
         "patch_source": str(patch_spec.get("source") or "explicit_json_patch") if patch_spec else "",
         "diagnostics": patch_spec.get("diagnostics", {}) if isinstance(patch_spec.get("diagnostics"), dict) else {},
@@ -1041,6 +1061,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
 
 def run_verification(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
+    role_policy = role_policy_from_request(request)
     blockers = [str(item) for item in patch.get("blockers", [])] if isinstance(patch.get("blockers"), list) else []
     executed: list[dict[str, Any]] = []
     repo_root = target_repo_root(request)
@@ -1126,6 +1147,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
     report = {
         "status": "blocked" if blockers else "passed",
         "task_id": request.get("task_id"),
+        "role_policy": role_policy,
         "commands": [
             "python -m py_compile <changed .py files>",
             "git diff --check",
@@ -1151,6 +1173,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
 def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
+    role_policy = role_policy_from_request(request)
     blockers = verification.get("blockers") if isinstance(verification.get("blockers"), list) else []
     warnings = verification.get("warnings") if isinstance(verification.get("warnings"), list) else []
     if patch.get("status") != "applied":
@@ -1160,6 +1183,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     review = {
         "status": "blocked" if blockers else "passed",
         "approved": not blockers,
+        "role_policy": role_policy,
         "findings": [
             {"severity": "blocker", "message": str(item)}
             for item in blockers
@@ -1211,10 +1235,18 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
     review = load_json_optional(workspace_root, sibling_artifact(output_path, "code_review.json"))
+    role_policy = role_policy_from_request(request)
     status = "blocked" if review.get("approved") is False else "ready"
     manifest = {
         "status": status,
         "approved": review.get("approved") is True,
+        "role_policy": role_policy,
+        "role_policies": {
+            "implementation": patch.get("role_policy", {}),
+            "verification": verification.get("role_policy", {}),
+            "code_review": review.get("role_policy", {}),
+            "finalize": role_policy,
+        },
         "deliverables": [
             sibling_artifact(output_path, "repo_survey.json"),
             sibling_artifact(output_path, "change_plan.md"),

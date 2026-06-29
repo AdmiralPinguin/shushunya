@@ -92,6 +92,63 @@ def step_quality_checks(step_id: str) -> list[str]:
     return checks_by_step.get(step_id, ["expected artifacts exist and satisfy the step purpose"])
 
 
+def step_role_policy(step_id: str) -> dict[str, Any]:
+    policies = {
+        "repository_survey": {
+            "role": "repository_mapper",
+            "authority": "read_only_repository_mapping",
+            "may_mutate_source": False,
+            "required_evidence": ["repo_root", "dominant_extensions", "test_files", "python_symbols"],
+            "forbidden_actions": ["source_mutation", "verification_claim_without_artifacts"],
+        },
+        "change_planning": {
+            "role": "change_strategist",
+            "authority": "scoped_plan_from_repository_evidence",
+            "may_mutate_source": False,
+            "required_evidence": ["candidate_files", "test_surface", "implementation_policy"],
+            "forbidden_actions": ["source_mutation", "claiming_tests_passed_without_execution"],
+        },
+        "implementation": {
+            "role": "patchwright",
+            "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+            "may_mutate_source": True,
+            "required_evidence": ["patch_source", "operation_count", "changed_files", "rollback"],
+            "forbidden_actions": ["shell_execution", "unsafe_overwrite", "duplicate_function_append"],
+        },
+        "verification": {
+            "role": "verifier",
+            "authority": "allowlisted_verification_and_narrow_repairs",
+            "may_mutate_source": True,
+            "required_evidence": ["verification_executed", "verification_blockers", "verification_repairs"],
+            "forbidden_actions": ["shell_execution", "unallowlisted_command", "broad_unscoped_rewrite"],
+        },
+        "code_review": {
+            "role": "critic",
+            "authority": "read_only_package_review_and_revision_ordering",
+            "may_mutate_source": False,
+            "required_evidence": ["review_status", "findings", "revision_plan"],
+            "forbidden_actions": ["source_mutation", "approving_without_verification_evidence"],
+        },
+        "finalize": {
+            "role": "final_packager",
+            "authority": "read_only_final_manifest_packaging",
+            "may_mutate_source": False,
+            "required_evidence": ["deliverables", "verification_summary", "next_safe_action"],
+            "forbidden_actions": ["source_mutation", "hiding_blockers"],
+        },
+    }
+    return policies.get(
+        step_id,
+        {
+            "role": "generic_worker",
+            "authority": "artifact_generation_only",
+            "may_mutate_source": False,
+            "required_evidence": ["expected_artifacts"],
+            "forbidden_actions": ["unscoped_source_mutation"],
+        },
+    )
+
+
 def step_quality_matrix(contract: TaskContract) -> list[dict[str, Any]]:
     final_steps = ["code_review", "finalize"]
     matrix: list[dict[str, Any]] = []
@@ -113,6 +170,7 @@ def step_quality_matrix(contract: TaskContract) -> list[dict[str, Any]]:
                 ],
                 "expected_artifacts": step.expected_artifacts,
                 "checks": step_quality_checks(step.step_id),
+                "role_policy": step_role_policy(step.step_id),
                 "blockers": [
                     "missing expected artifact",
                     "artifact contradicts the task contract",

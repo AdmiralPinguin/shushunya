@@ -7,7 +7,7 @@
   "capabilities": ["patch_manifest", "implementation_handoff", "changed_file_intent", "atomic_patch_apply"],
   "role_contract": {
     "owned_step": "implementation",
-    "authority": "scoped_source_mutation_from_explicit_patch_contract",
+    "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
     "expected_artifacts": ["patch_manifest.json"],
     "handoff_to": ["OrdinatusVerifier"]
   }

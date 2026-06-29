@@ -33,6 +33,19 @@ CERAXIA_PATCH:
         workers = [step.get("worker") for step in prepared.get("status", {}).get("steps", [])]
         if workers != ["LogisRepository", "MagosStrategos", "FerrumPatchwright", "OrdinatusVerifier", "JudicatorCodicis", "SealwrightFinalis"]:
             raise AssertionError(f"Ceraxia pipeline workers drifted: {workers}")
+        dispatch_path = run_root / task_id / "dispatch" / "implementation.json"
+        dispatch = json.loads(dispatch_path.read_text(encoding="utf-8"))
+        role_policy = (
+            dispatch.get("request", {})
+            .get("quality_expectations", {})
+            .get("step_quality", {})
+            .get("role_policy", {})
+        )
+        if (
+            role_policy.get("authority") != "scoped_source_mutation_from_patch_contract_or_safe_inference"
+            or role_policy.get("may_mutate_source") is not True
+        ):
+            raise AssertionError(f"Ceraxia dispatch should carry implementation role policy: {dispatch}")
         result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia patch pipeline did not complete: {result}")
@@ -49,6 +62,8 @@ CERAXIA_PATCH:
             raise AssertionError(f"Ceraxia final manifest lacks changed file evidence: {manifest}")
         if manifest.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"Ceraxia final manifest lacks verification evidence: {manifest}")
+        if manifest.get("role_policies", {}).get("verification", {}).get("authority") != "allowlisted_verification_and_narrow_repairs":
+            raise AssertionError(f"Ceraxia final manifest should preserve role policies: {manifest}")
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
         target_repo = temp_root / "repo"

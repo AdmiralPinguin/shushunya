@@ -549,6 +549,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - Ceraxia task plans preserve worker `role_contract` metadata in
   `resolved_workers`, so Warmaster and future clients can inspect each worker's
   authority boundary from the plan payload.
+- Ceraxia oversight now carries per-step `role_policy` metadata with authority,
+  source-mutation permission, required evidence, and forbidden actions. Dispatch
+  requests pass this policy to workers, and code worker artifacts preserve it
+  through patch, verification, review, and final manifests.
 - `LogisRepository` now records Python symbol summaries and suggested unittest
   verification commands, and `MagosStrategos` carries those sections into the
   change plan for downstream patch planning.

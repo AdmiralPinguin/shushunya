@@ -1812,6 +1812,15 @@ def validate_oversight_payload(contract: dict[str, Any], oversight: dict[str, An
             checks = item.get("checks")
             if not isinstance(checks, list) or not checks or any(not isinstance(check, str) or not check for check in checks):
                 errors.append(f"oversight step_quality_matrix[{index}].checks must be non-empty strings")
+            role_policy = item.get("role_policy")
+            if role_policy is not None:
+                if not isinstance(role_policy, dict):
+                    errors.append(f"oversight step_quality_matrix[{index}].role_policy must be an object")
+                    role_policy = {}
+                if not isinstance(role_policy.get("authority"), str) or not role_policy.get("authority"):
+                    errors.append(f"oversight step_quality_matrix[{index}].role_policy.authority is required")
+                if not isinstance(role_policy.get("may_mutate_source"), bool):
+                    errors.append(f"oversight step_quality_matrix[{index}].role_policy.may_mutate_source must be a boolean")
             blockers = item.get("blockers")
             if not isinstance(blockers, list) or not blockers or any(not isinstance(blocker, str) or not blocker for blocker in blockers):
                 errors.append(f"oversight step_quality_matrix[{index}].blockers must be non-empty strings")
