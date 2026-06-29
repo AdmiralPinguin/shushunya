@@ -105,6 +105,7 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
     orchestration_stats: dict[str, Any] = {}
     artifact_stats: dict[str, Any] = {}
     failure_reasons: dict[str, int] = {}
+    failed_check_types: dict[str, int] = {}
     failures: list[dict[str, Any]] = []
     loaded = 0
     for path in report_paths:
@@ -124,6 +125,9 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
             if not ok:
                 checks = result.get("checks") if isinstance(result.get("checks"), list) else []
                 failed_checks = [check for check in checks if isinstance(check, dict) and check.get("ok") is not True]
+                for check in failed_checks:
+                    check_type = str(check.get("type") or "unknown")
+                    failed_check_types[check_type] = failed_check_types.get(check_type, 0) + 1
                 exit_failed = result.get("exit_code") not in (0, None)
                 checks_failed = bool(failed_checks)
                 if exit_failed and checks_failed:
@@ -166,6 +170,7 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
         "orchestration_quality": orchestration_rows,
         "artifact_quality": artifact_rows,
         "failure_reasons": failure_reasons,
+        "failed_check_types": dict(sorted(failed_check_types.items(), key=lambda item: (-item[1], item[0]))),
         "recent_failures": failures[:20],
     }
 

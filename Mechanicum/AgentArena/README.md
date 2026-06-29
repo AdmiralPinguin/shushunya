@@ -50,6 +50,8 @@ before output artifacts were written.
 `analyze_reports.py` classifies failures as `agent_exit`, `post_run_checks`,
 `both`, or `unknown`, so bad artifacts are separated from runtime crashes.
 Recent failure entries include compact failed-check summaries for quick triage.
+The analyzer also aggregates failed check types, which helps distinguish
+artifact/content mistakes from command-level verification failures.
 
 Runner self-test:
 
