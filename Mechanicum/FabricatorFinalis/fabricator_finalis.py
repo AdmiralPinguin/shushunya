@@ -6,6 +6,7 @@ from typing import Any
 
 
 PACKAGE_FILES = [
+    "corpus_index.json",
     "source_map.json",
     "source_snapshots.json",
     "direct_event_notes.json",
@@ -16,6 +17,7 @@ PACKAGE_FILES = [
 ]
 
 ARTIFACT_REWORK_TARGETS = {
+    "corpus_index.json": ("corpus_ingestion", "CorpusIngestor"),
     "source_map.json": ("source_discovery", "Lexmechanic"),
     "source_snapshots.json": ("source_acquisition", "AuspexBrowser"),
     "direct_event_notes.json": ("fact_extraction", "NoosphericExtractor"),

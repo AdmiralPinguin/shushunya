@@ -24,6 +24,7 @@ EVENT_TEXT_MARKERS = {
 }
 
 ARTIFACT_REWORK_TARGETS = {
+    "corpus_index.json": ("corpus_ingestion", "CorpusIngestor"),
     "source_map.json": ("source_discovery", "Lexmechanic"),
     "source_snapshots.json": ("source_acquisition", "AuspexBrowser"),
     "direct_event_notes.json": ("fact_extraction", "NoosphericExtractor"),
@@ -33,6 +34,13 @@ ARTIFACT_REWORK_TARGETS = {
 }
 
 REVISION_DEPENDENCIES = {
+    "corpus_ingestion": [
+        ("source_discovery", "Lexmechanic"),
+        ("source_acquisition", "AuspexBrowser"),
+        ("fact_extraction", "NoosphericExtractor"),
+        ("timeline", "Chronologis"),
+        ("draft_reconstruction", "ScriptoriumDaemon"),
+    ],
     "source_discovery": [
         ("source_acquisition", "AuspexBrowser"),
         ("fact_extraction", "NoosphericExtractor"),
@@ -54,6 +62,7 @@ REVISION_DEPENDENCIES = {
 }
 
 REVISION_STEP_ORDER = [
+    "corpus_ingestion",
     "source_discovery",
     "source_acquisition",
     "fact_extraction",
@@ -114,7 +123,7 @@ def inaccessible_primary_titles(source_map: dict[str, Any]) -> list[str]:
         source_class = str(source.get("source_class") or source.get("type") or "").lower()
         if "primary" not in source_class and str(source.get("type") or "").lower() not in {"novel", "short_story", "book"}:
             continue
-        if not str(source.get("url") or "").strip():
+        if not str(source.get("url") or "").strip() and not str(source.get("local_path") or "").strip():
             titles.append(str(source.get("title") or "untitled primary source"))
     return titles
 
@@ -167,7 +176,7 @@ def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, An
         findings.append(
             {
                 "severity": "blocker",
-                "message": f"Comprehensive task lacks accessible primary text URLs for: {joined}.",
+                "message": f"Comprehensive task lacks accessible primary text URLs or local corpus files for: {joined}.",
             }
         )
     metrics = {
@@ -315,7 +324,12 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
         elif "comprehensive task has too few mapped sources" in lowered or "comprehensive task has too few live-discovered" in lowered:
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
-        elif "comprehensive task has too few direct-evidence sources" in lowered or "comprehensive task lacks accessible primary text" in lowered:
+        elif "comprehensive task has too few direct-evidence sources" in lowered:
+            add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
+            add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+            add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
+        elif "comprehensive task lacks accessible primary text" in lowered:
+            add_revision_step(steps, "corpus_ingestion", "CorpusIngestor", message, "critic_finding")
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
@@ -382,7 +396,8 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
     source_snapshots_path = sibling_artifact(critic_path, "source_snapshots.json")
     notes_path = sibling_artifact(critic_path, "direct_event_notes.json")
     timeline_path = sibling_artifact(critic_path, "timeline.json")
-    required_paths = [reconstruction_path, coverage_path, source_path, source_snapshots_path, notes_path, timeline_path]
+    corpus_path = sibling_artifact(critic_path, "corpus_index.json")
+    required_paths = [corpus_path, reconstruction_path, coverage_path, source_path, source_snapshots_path, notes_path, timeline_path]
     missing_artifacts = [path for path in required_paths if not artifact_exists(workspace_root, path)]
     if missing_artifacts:
         findings = [{"severity": "blocker", "message": f"Missing artifact: {path}"} for path in missing_artifacts]

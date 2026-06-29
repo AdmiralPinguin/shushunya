@@ -38,6 +38,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         base = root / "skalathrax"
+        write_json(base / "corpus_index.json", {"summary": {"sources_matched": 0}, "sources": [], "gaps": []})
         write_json(
             base / "source_map.json",
             {
@@ -131,6 +132,9 @@ def main() -> int:
         report_text = json.dumps(report)
         if "Comprehensive draft is too short" not in report_text or "lacks accessible primary text" not in report_text:
             raise AssertionError(f"comprehensive depth blockers missing: {report}")
+        revision_workers = {step.get("worker") for step in report.get("revision_plan", {}).get("steps", [])}
+        if "CorpusIngestor" not in revision_workers:
+            raise AssertionError(f"missing primary corpus blocker should route through CorpusIngestor: {report}")
         write_json(
             base / "source_map.json",
             {
@@ -238,6 +242,7 @@ def main() -> int:
             "task_id": "generic:critic_review",
             "step": {"step_id": "critic_review", "expected_artifacts": ["/work/generic/critic_report.json"]},
         }
+        write_json(generic_base / "corpus_index.json", {"summary": {"sources_matched": 0}, "sources": [], "gaps": []})
         write_json(generic_base / "source_map.json", {"topic": "Armageddon conflict", "discovery_status": "needs_live_discovery", "sources": []})
         write_json(generic_base / "source_snapshots.json", {"snapshots": [], "skipped": []})
         write_json(generic_base / "direct_event_notes.json", {"events": [], "gaps": []})

@@ -118,6 +118,8 @@ def source_coverage_lines(source_map: dict[str, Any], heading: str) -> list[str]
         return []
     lines = [heading, ""]
     lines.append(f"- Source count: {coverage.get('source_count', 0)}")
+    if coverage.get("local_corpus_source_count") is not None:
+        lines.append(f"- Local corpus sources: {coverage.get('local_corpus_source_count', 0)}")
     lines.append(f"- Official or primary support: {'yes' if coverage.get('has_official') or coverage.get('has_primary_or_publication') else 'no'}")
     lines.append(f"- Secondary cross-check: {'yes' if coverage.get('has_secondary_crosscheck') else 'no'}")
     lines.append(f"- Ready for extraction: {'yes' if coverage.get('ready_for_extraction') else 'no'}")

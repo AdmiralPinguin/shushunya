@@ -33,6 +33,7 @@ def main() -> int:
         root = Path(temp_dir)
         base = root / "skalathrax"
         for filename in [
+            "corpus_index.json",
             "source_map.json",
             "source_snapshots.json",
             "direct_event_notes.json",
