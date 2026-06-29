@@ -96,6 +96,16 @@ def source_type(source: dict[str, Any]) -> str:
         return "curated_wiki"
     if host.endswith("fandom.com"):
         return "community_wiki"
+    if host.endswith("reddit.com"):
+        return "community_excerpt"
+    if host.endswith("miraheze.org") or "1d6chan" in host:
+        return "community_wiki_low"
+    if host.endswith("goodreads.com") or host.endswith("amazon.com"):
+        return "catalog_or_review"
+    if any(domain in host for domain in ["wargamer.com", "belloflostsouls.net", "wordpress.com", "blogspot.com"]):
+        return "review_or_blog"
+    if host.endswith("youtube.com") or host.endswith("youtu.be"):
+        return "video_or_transcript_lead"
     if "official" in source_class:
         return "official_secondary"
     if "wiki" in kind or "wiki" in source_class:
@@ -116,6 +126,11 @@ def ranked_source(source: dict[str, Any]) -> dict[str, Any]:
         "curated_wiki": 62,
         "wiki": 52,
         "community_wiki": 42,
+        "community_excerpt": 40,
+        "review_or_blog": 34,
+        "catalog_or_review": 32,
+        "video_or_transcript_lead": 28,
+        "community_wiki_low": 25,
         "unclassified": 20,
     }.get(kind, 20)
     reliability_score = {
@@ -201,6 +216,66 @@ def classify_discovered_result(result: dict[str, Any]) -> dict[str, Any] | None:
             "expected_use": "live-discovered official publication or product lead; verify narrative detail elsewhere",
             "discovery_method": "live_search",
         }
+    if host.endswith("reddit.com"):
+        return {
+            "title": title,
+            "type": "discussion_excerpt",
+            "language": "unknown",
+            "url": url,
+            "reliability": "medium",
+            "direct_event_detail_level": "medium",
+            "source_class": "community_excerpt",
+            "expected_use": "public discussion or excerpt lead; verify against official sources before narrative use",
+            "discovery_method": "live_search",
+        }
+    if host.endswith("miraheze.org") or "1d6chan" in host:
+        return {
+            "title": title,
+            "type": "wiki",
+            "language": "unknown",
+            "url": url,
+            "reliability": "low",
+            "direct_event_detail_level": "medium",
+            "source_class": "community_wiki_low",
+            "expected_use": "low-reliability lore summary; use only for lead discovery and disagreement checks",
+            "discovery_method": "live_search",
+        }
+    if host.endswith("goodreads.com") or host.endswith("amazon.com"):
+        return {
+            "title": title,
+            "type": "catalog_or_review",
+            "language": "unknown",
+            "url": url,
+            "reliability": "medium",
+            "direct_event_detail_level": "low",
+            "source_class": "catalog_or_review",
+            "expected_use": "publication metadata or review lead; not direct event authority",
+            "discovery_method": "live_search",
+        }
+    if any(domain in host for domain in ["wargamer.com", "belloflostsouls.net", "wordpress.com", "blogspot.com"]):
+        return {
+            "title": title,
+            "type": "review_or_blog",
+            "language": "unknown",
+            "url": url,
+            "reliability": "medium-low",
+            "direct_event_detail_level": "low",
+            "source_class": "review_or_blog",
+            "expected_use": "review or lore article lead; use for source discovery and comparison only",
+            "discovery_method": "live_search",
+        }
+    if host.endswith("youtube.com") or host.endswith("youtu.be"):
+        return {
+            "title": title,
+            "type": "video_or_transcript_lead",
+            "language": "unknown",
+            "url": url,
+            "reliability": "medium-low",
+            "direct_event_detail_level": "low",
+            "source_class": "video_or_transcript_lead",
+            "expected_use": "video metadata or transcript lead; requires transcript extraction before narrative use",
+            "discovery_method": "live_search",
+        }
     return None
 
 
@@ -263,7 +338,32 @@ def playbook_source_title_queries(playbooks: list[dict[str, Any]]) -> list[str]:
     return queries
 
 
-def search_rounds(goal: str, playbooks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def deep_context_queries(goal: str, playbooks: list[dict[str, Any]]) -> list[str]:
+    queries = [
+        f"{goal} excerpt",
+        f"{goal} sources",
+        f"{goal} reddit excerpt",
+        f"{goal} lore discussion",
+    ]
+    for playbook in playbooks:
+        for source in playbook.get("sources", []):
+            if not isinstance(source, dict):
+                continue
+            title = " ".join(str(source.get("title") or "").split())
+            if not title:
+                continue
+            queries.extend([f'"{title}" excerpt', f'"{title}" review', f'"{title}" {goal}'])
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for query in queries:
+        key = query.lower()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(query)
+    return deduped
+
+
+def search_rounds(goal: str, playbooks: list[dict[str, Any]], depth_profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     playbook_queries = [
         str(query)
         for playbook in playbooks
@@ -272,6 +372,7 @@ def search_rounds(goal: str, playbooks: list[dict[str, Any]]) -> list[dict[str, 
     ]
     if playbook_queries:
         title_queries = playbook_source_title_queries(playbooks)
+        depth_profile = depth_profile or {}
         rounds = [
             {"round": "playbook_seed", "purpose": "known high-value queries from matched source playbooks", "queries": playbook_queries},
         ]
@@ -281,6 +382,14 @@ def search_rounds(goal: str, playbooks: list[dict[str, Any]]) -> list[dict[str, 
                     "round": "source_title_probe",
                     "purpose": "official catalog or publication pages for named primary sources",
                     "queries": title_queries,
+                }
+            )
+        if depth_profile.get("mode") == "comprehensive":
+            rounds.append(
+                {
+                    "round": "deep_context_probe",
+                    "purpose": "public excerpts, reviews, discussions, and tertiary leads for exhaustive source mapping",
+                    "queries": deep_context_queries(goal, playbooks),
                 }
             )
         rounds.extend(
@@ -473,7 +582,7 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
         ]
     )
     depth_profile = depth_profile_for_goal(goal, playbooks)
-    rounds = search_rounds(topic, playbooks)
+    rounds = search_rounds(topic, playbooks, depth_profile)
     search_queries = [query for round_plan in rounds for query in round_plan.get("queries", []) if isinstance(query, str)]
     coverage_gaps = [
         str(gap)

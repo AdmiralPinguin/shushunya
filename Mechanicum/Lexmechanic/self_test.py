@@ -32,6 +32,16 @@ def main() -> int:
                     "url": "https://warhammer40k.fandom.com/wiki/Candidate",
                     "snippet": "community source",
                 },
+                {
+                    "title": "[Excerpt] Candidate battle",
+                    "url": "https://www.reddit.com/r/40kLore/comments/example/excerpt_candidate/",
+                    "snippet": "public excerpt discussion for the requested battle",
+                },
+                {
+                    "title": "Candidate book review",
+                    "url": "https://example.wordpress.com/2015/01/03/candidate-book-review/",
+                    "snippet": "review lead",
+                },
             ],
         }
 
@@ -76,6 +86,13 @@ def main() -> int:
     community = next((source for source in discovered["sources"] if source.get("source_class") == "community_wiki"), {})
     if community.get("source_type") != "community_wiki" or community.get("source_rank", 0) >= discovered["sources"][0].get("source_rank", 0):
         raise AssertionError(f"community wiki should be classified and ranked below official sources: {discovered['sources']}")
+    reddit = next((source for source in discovered["sources"] if source.get("source_class") == "community_excerpt"), {})
+    curated = next((source for source in discovered["sources"] if source.get("source_class") == "secondary_wiki"), {})
+    if reddit.get("source_type") != "community_excerpt" or reddit.get("source_rank", 0) >= curated.get("source_rank", 0):
+        raise AssertionError(f"reddit excerpt leads should be classified below curated sources: {discovered['sources']}")
+    blog = next((source for source in discovered["sources"] if source.get("source_class") == "review_or_blog"), {})
+    if blog.get("source_type") != "review_or_blog":
+        raise AssertionError(f"review/blog leads should be classified: {discovered['sources']}")
     if classify_discovered_result({"title": "Bad", "url": "https://example.com/nope"}) is not None:
         raise AssertionError("unknown domains must not become source candidates")
     if not discovered["discovery_results"] or discovered["discovery_results"][0]["provider"] != "fake":
@@ -179,6 +196,8 @@ def main() -> int:
             raise AssertionError(f"live discovery queries should use normalized topic, not full prompt: {live_queries}")
         if not any('"Kharn: Eater of Worlds" Black Library' == query for query in live_queries):
             raise AssertionError(f"playbook discovery should probe named primary sources: {live_queries}")
+        if not any("reddit excerpt" in query for query in live_queries):
+            raise AssertionError(f"comprehensive playbook discovery should probe public excerpt/discussion leads: {live_queries}")
         urls = [source.get("url") for source in live_playbook.get("sources", []) if source.get("url")]
         if len(urls) != len(set(urls)):
             raise AssertionError(f"source dedupe should collapse duplicate live/playbook URLs: {live_playbook.get('sources')}")
