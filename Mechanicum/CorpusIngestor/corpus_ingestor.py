@@ -14,6 +14,7 @@ from xml.etree import ElementTree
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CORPUS_ROOT = REPO_ROOT / "Corpus"
+LEXMECHANIC_PLAYBOOK_DIR = REPO_ROOT / "Mechanicum" / "Lexmechanic" / "playbooks"
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".html", ".htm", ".xhtml", ".fb2", ".epub"}
 MAX_SCAN_BYTES = 25_000_000
 MAX_TEXT_CHARS = 250_000
@@ -133,9 +134,43 @@ def relevance_tokens(text: str) -> set[str]:
     return {token for token in re.findall(r"[a-zа-я0-9]+", text.lower()) if len(token) > 2 and token not in stopwords}
 
 
+def matching_source_playbooks(goal: str) -> list[dict[str, Any]]:
+    playbooks: list[dict[str, Any]] = []
+    lowered = goal.lower()
+    if not LEXMECHANIC_PLAYBOOK_DIR.exists():
+        return playbooks
+    for path in sorted(LEXMECHANIC_PLAYBOOK_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        terms = [str(term).lower() for term in payload.get("match_terms", []) if term]
+        if any(term in lowered for term in terms):
+            playbooks.append(payload)
+    return playbooks
+
+
+def source_playbook_terms(goal: str) -> set[str]:
+    terms: set[str] = set()
+    for playbook in matching_source_playbooks(goal):
+        terms.update(relevance_tokens(str(playbook.get("topic") or "")))
+        for source in playbook.get("sources", []):
+            if not isinstance(source, dict):
+                continue
+            source_class = str(source.get("source_class") or source.get("type") or "").lower()
+            source_kind = str(source.get("type") or "").lower()
+            if "primary" in source_class or source_kind in {"novel", "short_story", "book"}:
+                terms.update(relevance_tokens(str(source.get("title") or "")))
+    return terms
+
+
 def contract_terms(contract: dict[str, Any]) -> set[str]:
-    terms = set(relevance_tokens(str(contract.get("goal") or "")))
-    lowered = str(contract.get("goal") or "").lower()
+    goal = str(contract.get("goal") or "")
+    terms = set(relevance_tokens(goal))
+    terms.update(source_playbook_terms(goal))
+    lowered = goal.lower()
     expansions = {
         "скалатрак": "skalathrax",
         "skalathrax": "скалатракс",

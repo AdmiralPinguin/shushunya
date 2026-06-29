@@ -24,7 +24,7 @@ def main() -> int:
             archive.writestr(
                 "chapter.xhtml",
                 "<html><head><title>Kharn</title></head><body><p>"
-                + ("Skalathrax primary EPUB text about Kharn and shelters. " * 6)
+                + ("Primary EPUB text about Kharn and the World Eaters shelters. " * 6)
                 + "</p></body></html>",
             )
         (corpus_root / "irrelevant.txt").write_text("A short note about another topic " * 8, encoding="utf-8")
@@ -36,7 +36,7 @@ def main() -> int:
                 raise AssertionError(f"corpus scan should match only relevant local text: {index}")
             if index.get("summary", {}).get("sources_non_matching") != 1 or not index.get("non_matching"):
                 raise AssertionError(f"corpus scan should expose non-matching local files: {index}")
-            source = index["sources"][0]
+            source = next((item for item in index["sources"] if item.get("corpus_relative_path") == "skalathrax-notes.txt"), {})
             if source.get("source_class") != "local_primary_candidate" or not source.get("local_path"):
                 raise AssertionError(f"local source metadata is wrong: {source}")
             if "skalathrax" not in source.get("matched_terms", []):
@@ -44,6 +44,8 @@ def main() -> int:
             epub_source = next((item for item in index["sources"] if item.get("corpus_relative_path") == "kharn-eater-of-worlds.epub"), {})
             if epub_source.get("type") != "book" or epub_source.get("text_chars", 0) < 50:
                 raise AssertionError(f"EPUB corpus source was not extracted as book text: {epub_source}")
+            if "kharn" not in epub_source.get("matched_terms", []) or "skalathrax" in epub_source.get("matched_terms", []):
+                raise AssertionError(f"EPUB should match through source playbook title terms, not only topic text: {epub_source}")
             request = {
                 "task_id": "test:corpus_ingestion",
                 "contract": {"goal": "Скалатракс"},
