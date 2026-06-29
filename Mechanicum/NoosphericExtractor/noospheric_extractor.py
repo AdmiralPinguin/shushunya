@@ -139,7 +139,17 @@ def events_from_playbook(playbook: dict[str, Any], source_titles: set[str]) -> l
         event = {
             key: value
             for key, value in raw_event.items()
-            if key in {"event_id", "summary", "phase", "confidence", "source_refs"}
+            if key
+            in {
+                "event_id",
+                "summary",
+                "narrative_ru",
+                "phase",
+                "confidence",
+                "source_refs",
+                "required_for_review",
+                "review_label",
+            }
         }
         if event.get("source_refs") == ["__ALL_SOURCE_TITLES__"]:
             event["source_refs"] = sorted(source_titles)

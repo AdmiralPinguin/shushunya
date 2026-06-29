@@ -65,6 +65,8 @@ def main() -> int:
         if not required.issubset(event_ids):
             raise AssertionError(f"missing key Skalathrax events: {required - event_ids}")
         moon = next(event for event in data["events"] if event.get("event_id") == "moon_parley")
+        if "луне Скалатракса" not in moon.get("narrative_ru", "") or moon.get("review_label") != "moon parley":
+            raise AssertionError(f"playbook narrative and review metadata should be preserved in event notes: {moon}")
         if not moon.get("evidence_snapshots"):
             raise AssertionError("moon parley should include snapshot evidence")
         if "parlay on a moon" not in moon["evidence_snapshots"][0].get("excerpt", ""):
