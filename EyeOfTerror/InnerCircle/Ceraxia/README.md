@@ -23,6 +23,10 @@ The named workers currently share the same execution core, which keeps the
 protocol stable while their internals are split into stronger specialized
 implementations.
 
+Each worker's `worker.json` exposes a `role_contract` with its owned step,
+authority boundary, expected artifact names, and next handoff. The registry
+self-test checks those contracts for the active six-worker code brigade.
+
 `FerrumPatchwright` can apply explicit patch operations embedded in the task:
 
 ```text

@@ -8,6 +8,14 @@ from start_worker import load_services
 
 
 REQUIRED_METADATA_KEYS = {"name", "port", "role", "status", "capabilities", "api_contract"}
+CERAXIA_ROLE_CONTRACTS = {
+    "LogisRepository": ("repository_survey", "MagosStrategos"),
+    "MagosStrategos": ("change_planning", "FerrumPatchwright"),
+    "FerrumPatchwright": ("implementation", "OrdinatusVerifier"),
+    "OrdinatusVerifier": ("verification", "JudicatorCodicis"),
+    "JudicatorCodicis": ("code_review", "SealwrightFinalis"),
+    "SealwrightFinalis": ("finalize", ""),
+}
 
 
 def load_worker_metadata(path: Path) -> dict:
@@ -27,6 +35,25 @@ def load_worker_metadata(path: Path) -> dict:
         raise AssertionError(f"worker metadata capabilities must be non-empty strings: {path}")
     if payload["api_contract"] != "EyeOfTerror/contracts/worker_api.md":
         raise AssertionError(f"worker metadata points to wrong API contract: {path}")
+    if payload["name"] in CERAXIA_ROLE_CONTRACTS:
+        role_contract = payload.get("role_contract")
+        if not isinstance(role_contract, dict):
+            raise AssertionError(f"Ceraxia worker metadata must include role_contract: {path}")
+        expected_step, expected_handoff = CERAXIA_ROLE_CONTRACTS[payload["name"]]
+        if role_contract.get("owned_step") != expected_step:
+            raise AssertionError(f"Ceraxia worker role_contract has wrong owned_step: {path}")
+        handoff_to = role_contract.get("handoff_to")
+        if not isinstance(handoff_to, list) or not all(isinstance(item, str) for item in handoff_to):
+            raise AssertionError(f"Ceraxia worker role_contract handoff_to must be a string list: {path}")
+        if expected_handoff and handoff_to != [expected_handoff]:
+            raise AssertionError(f"Ceraxia worker role_contract has wrong handoff_to: {path}")
+        if not expected_handoff and handoff_to:
+            raise AssertionError(f"Ceraxia final worker should not hand off further: {path}")
+        expected_artifacts = role_contract.get("expected_artifacts")
+        if not isinstance(expected_artifacts, list) or not all(isinstance(item, str) and item for item in expected_artifacts):
+            raise AssertionError(f"Ceraxia worker role_contract expected_artifacts must be non-empty strings: {path}")
+        if not isinstance(role_contract.get("authority"), str) or not role_contract.get("authority"):
+            raise AssertionError(f"Ceraxia worker role_contract authority must be a non-empty string: {path}")
     return payload
 
 

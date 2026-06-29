@@ -4,5 +4,11 @@
   "port": 7020,
   "role": "code final handoff packager",
   "api_contract": "EyeOfTerror/contracts/worker_api.md",
-  "capabilities": ["final_handoff", "deliverable_manifest", "blocker_packaging"]
+  "capabilities": ["final_handoff", "deliverable_manifest", "blocker_packaging"],
+  "role_contract": {
+    "owned_step": "finalize",
+    "authority": "final_manifest_packaging_without_hiding_blockers",
+    "expected_artifacts": ["final_manifest.json"],
+    "handoff_to": []
+  }
 }

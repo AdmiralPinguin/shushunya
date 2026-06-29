@@ -4,5 +4,11 @@
   "port": 7015,
   "role": "code repository surveyor",
   "api_contract": "EyeOfTerror/contracts/worker_api.md",
-  "capabilities": ["repository_survey", "entrypoint_detection", "test_surface_mapping"]
+  "capabilities": ["repository_survey", "entrypoint_detection", "test_surface_mapping"],
+  "role_contract": {
+    "owned_step": "repository_survey",
+    "authority": "read_only_repository_mapping",
+    "expected_artifacts": ["repo_survey.json"],
+    "handoff_to": ["MagosStrategos"]
+  }
 }

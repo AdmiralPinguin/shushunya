@@ -543,6 +543,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   `SealwrightFinalis` on ports 7015-7020. They currently share the
   `CogitatorCodewright` execution core while preserving separate worker
   identities, contracts, ports, and review handoffs.
+- Ceraxia's six active code workers expose machine-readable `role_contract`
+  metadata with owned step, authority boundary, expected artifacts, and next
+  handoff; the worker registry self-test enforces those contracts.
 - Ceraxia final manifests no longer report `ready` when no source files were
   mutated. The prototype now emits `blocked` with
   `next_safe_action=handoff_to_patch_worker` until a real patch/apply worker
