@@ -35,6 +35,19 @@ def main() -> int:
             ],
         }
 
+    def weak_search(query: str, limit: int) -> dict:
+        return {
+            "ok": True,
+            "source": "fake",
+            "results": [
+                {
+                    "title": "Only Community Candidate",
+                    "url": "https://warhammer40k.fandom.com/wiki/Only_Community_Candidate",
+                    "snippet": "community source",
+                }
+            ],
+        }
+
     discovered = source_map_for_contract({"goal": "unknown topic"}, fake_search)
     if not discovered["sources"] or discovered["sources"][0].get("discovery_method") != "live_search":
         raise AssertionError(f"live discovery should create classified source candidates: {discovered['sources']}")
@@ -119,6 +132,22 @@ def main() -> int:
             or not (Path(temp_dir) / "blocked" / "source_map.json").exists()
         ):
             raise AssertionError(f"generic source discovery without live search should block with diagnostics: {blocked_result}")
+        weak_request = {
+            "task_id": "test-weak:source_discovery",
+            "contract": {"goal": "Собери историю сомнительной битвы."},
+            "step": {"expected_artifacts": ["/work/weak/source_map.json"]},
+        }
+        weak_result = run(weak_request, Path(temp_dir), searcher=weak_search)
+        if (
+            weak_result.get("ok")
+            or weak_result.get("status") != "blocked"
+            or "not extraction-ready" not in weak_result.get("summary", "")
+            or not (Path(temp_dir) / "weak" / "source_map.json").exists()
+        ):
+            raise AssertionError(f"weak source discovery should block before downstream work: {weak_result}")
+        weak_map = json.loads((Path(temp_dir) / "weak" / "source_map.json").read_text(encoding="utf-8"))
+        if weak_map.get("source_coverage", {}).get("ready_for_extraction"):
+            raise AssertionError(f"weak source map should record failed source coverage: {weak_map}")
     print("[ok] Lexmechanic source map")
     return 0
 

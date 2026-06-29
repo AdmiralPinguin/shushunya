@@ -446,6 +446,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   diagnostics, including whether the source set is ready for extraction.
 - `Lexmechanic` blocks source discovery early when no source candidates are
   available, while still writing source-map diagnostics for recovery.
+- `Lexmechanic` also blocks early when candidates exist but source coverage is
+  not extraction-ready, preventing weak source sets from flowing downstream.
 - `NoosphericExtractor` uses data playbooks when available and falls back to
   low-confidence generic evidence leads from fetched source snapshots.
 - `NoosphericExtractor` preserves `render_required` source snapshots as explicit

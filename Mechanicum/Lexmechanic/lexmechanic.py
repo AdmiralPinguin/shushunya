@@ -395,13 +395,20 @@ def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(source_map, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     source_count = len(source_map["sources"])
-    if source_count == 0:
+    source_coverage = source_map.get("source_coverage") if isinstance(source_map.get("source_coverage"), dict) else {}
+    if source_count == 0 or not source_coverage.get("ready_for_extraction"):
+        if source_count == 0:
+            summary = "Source discovery found no source candidates."
+            reason = "Source discovery found no source candidates; enable live discovery or add a source playbook."
+        else:
+            summary = "Source discovery found candidates, but source coverage is not extraction-ready."
+            reason = "Source coverage lacks official/primary evidence or secondary cross-checking; expand discovery before extraction."
         return {
             "ok": False,
             "worker": "Lexmechanic",
             "task_id": request.get("task_id"),
             "status": "blocked",
-            "summary": "Source discovery found no source candidates.",
+            "summary": summary,
             "artifacts": [output_path],
             "gaps": source_map["coverage_gaps"],
             "revision_plan": {
@@ -410,7 +417,7 @@ def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None
                     {
                         "step_id": "source_discovery",
                         "worker": "Lexmechanic",
-                        "reason": "Source discovery found no source candidates; enable live discovery or add a source playbook.",
+                        "reason": reason,
                         "source": "source_discovery",
                         "priority": "blocker",
                     }
