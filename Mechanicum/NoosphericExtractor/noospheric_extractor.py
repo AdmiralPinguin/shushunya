@@ -172,10 +172,21 @@ def extract_events(source_map: dict[str, Any], source_snapshots: dict[str, Any] 
         if isinstance(event, dict):
             if "evidence_snapshots" not in event:
                 event["evidence_snapshots"] = snapshot_evidence(str(event.get("event_id") or ""), source_snapshots)
+            event["evidence_status"] = "snapshot_matched" if event.get("evidence_snapshots") else "missing_snapshot_evidence"
+    events_with_evidence = sum(1 for event in events if isinstance(event, dict) and event.get("evidence_snapshots"))
+    low_confidence_events = sum(1 for event in events if isinstance(event, dict) and str(event.get("confidence") or "").lower() == "low")
+    source_coverage = source_map.get("source_coverage") if isinstance(source_map.get("source_coverage"), dict) else {}
     return {
         "topic": topic,
         "events": events,
         "extraction_method": extraction_method,
+        "summary": {
+            "event_count": len(events),
+            "events_with_evidence": events_with_evidence,
+            "events_missing_evidence": max(0, len(events) - events_with_evidence),
+            "low_confidence_events": low_confidence_events,
+            "source_coverage_ready": source_coverage.get("ready_for_extraction") if source_coverage else None,
+        },
         "gaps": [
             "Extractor needs direct source text for exact wording and chapter-level evidence.",
             "Events marked medium confidence require confirmation from official narrative text.",

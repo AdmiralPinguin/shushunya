@@ -67,6 +67,8 @@ def main() -> int:
         moon = next(event for event in data["events"] if event.get("event_id") == "moon_parley")
         if not moon.get("evidence_snapshots"):
             raise AssertionError("moon parley should include snapshot evidence")
+        if moon.get("evidence_status") != "snapshot_matched" or data.get("summary", {}).get("events_with_evidence", 0) < 1:
+            raise AssertionError(f"event evidence status should be summarized: {data}")
         if not any("HTTP Error 403" in gap for gap in data.get("gaps", [])):
             raise AssertionError("snapshot fetch failures should be reported as gaps")
         if not any("requires browser render" in gap for gap in data.get("gaps", [])):
@@ -108,6 +110,7 @@ def main() -> int:
             or generic_events[0].get("extraction_method") != "generic_snapshot_lead"
             or generic_events[0].get("confidence") != "low"
             or "first clash began" not in generic_events[0].get("summary", "")
+            or generic_data.get("summary", {}).get("low_confidence_events") != 1
         ):
             raise AssertionError(f"generic fallback should create low-confidence evidence leads: {generic_data}")
     print("[ok] NoosphericExtractor event notes")
