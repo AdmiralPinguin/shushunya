@@ -38,7 +38,8 @@ record a blocker instead of editing source under a read-only policy.
 commands, applied repairs, blocked repairs, and the next safe action for the
 reviewer or governor. When failed command output includes Python traceback
 frames inside the target repo, the state also records `candidate_source_paths`
-for focused revision.
+for focused revision. If a failed command has no useful source traceback,
+Ceraxia falls back to ranked source files from `repo_survey.json`.
 
 `LogisRepository` records Python symbol summaries for scanned `.py` files and
 suggests safe verification commands from discovered test files. `MagosStrategos`

@@ -15,7 +15,7 @@ MECHANICUM_ROOT = Path(__file__).resolve().parents[1]
 if str(MECHANICUM_ROOT) not in sys.path:
     sys.path.insert(0, str(MECHANICUM_ROOT))
 
-from common.swe_guardrails import build_repo_map, python_module_name, source_candidates_from_traceback_text  # noqa: E402
+from common.swe_guardrails import build_repo_map, python_module_name, source_candidates_from_traceback_text, test_like_path  # noqa: E402
 
 
 EXCLUDED_DIRS = {
@@ -104,6 +104,20 @@ def role_policy_from_request(request: dict[str, Any]) -> dict[str, Any]:
 
 def role_policy_allows_source_mutation(role_policy: dict[str, Any]) -> bool:
     return not role_policy or role_policy.get("may_mutate_source") is not False
+
+
+def ranked_source_candidates_from_survey(workspace_root: Path, output_path: str) -> list[str]:
+    survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
+    repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
+    ranked_files = repo_map.get("ranked_files") if isinstance(repo_map.get("ranked_files"), list) else []
+    candidates: list[str] = []
+    for item in ranked_files:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        if path.endswith(".py") and not test_like_path(path) and path not in candidates:
+            candidates.append(path)
+    return candidates[:20]
 
 
 def output_path_from_request(request: dict[str, Any]) -> str:
@@ -1105,6 +1119,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
     repairs: list[dict[str, Any]] = []
     blocked_repairs: list[dict[str, Any]] = []
     candidate_source_paths: list[str] = []
+    ranked_survey_sources = ranked_source_candidates_from_survey(workspace_root, output_path)
     repairs_allowed = role_policy_allows_source_mutation(role_policy)
     if patch.get("status") == "applied":
         py_files = [
@@ -1125,6 +1140,9 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
             )
             if completed.returncode != 0:
                 for candidate in source_candidates_from_traceback_text(completed.stderr, repo_root):
+                    if candidate not in candidate_source_paths:
+                        candidate_source_paths.append(candidate)
+                for candidate in ranked_survey_sources:
                     if candidate not in candidate_source_paths:
                         candidate_source_paths.append(candidate)
                 repaired_any = False
@@ -1176,6 +1194,9 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
             if result.get("returncode") != 0:
                 output = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
                 for candidate in source_candidates_from_traceback_text(output, repo_root):
+                    if candidate not in candidate_source_paths:
+                        candidate_source_paths.append(candidate)
+                for candidate in ranked_survey_sources:
                     if candidate not in candidate_source_paths:
                         candidate_source_paths.append(candidate)
                 if not repairs_allowed:

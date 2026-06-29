@@ -312,6 +312,36 @@ def main() -> int:
         root = Path(temp_dir)
         target_repo = root / "repo"
         target_repo.mkdir()
+        (target_repo / "sample.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+        work = root / "work"
+        (work / "code").mkdir(parents=True)
+        (work / "code" / "repo_survey.json").write_text(
+            json.dumps({"repo_map": {"ranked_files": [{"path": "sample.py", "score": 10}, {"path": "test_sample.py", "score": 4}]}}) + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "patch_manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "applied",
+                    "changed_files": [{"path": "sample.py", "changed": True}],
+                    "verification_commands": ["python -m py_compile missing_file.py"],
+                    "warnings": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        payload = request("verification", "/work/code/verification_report.json", target_repo_root=target_repo)
+        result = run(payload, work)
+        if not result.get("ok"):
+            raise AssertionError(f"verification with repo-map fallback should write a report: {result}")
+        repair_state = json.loads((work / "code" / "repair_loop_state.json").read_text(encoding="utf-8"))
+        if repair_state.get("candidate_source_paths") != ["sample.py"]:
+            raise AssertionError(f"verification should fall back to repo-map source candidates: {repair_state}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
         sample = target_repo / "sample.py"
         sample.write_text("def value():\n    return 1\n", encoding="utf-8")
         final = run_pipeline(root / "work", goal=forbidden_verify_goal(), target_repo_root=target_repo)

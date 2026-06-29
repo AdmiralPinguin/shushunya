@@ -564,6 +564,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `repair_loop_state.json` now exposes `candidate_source_paths` extracted from
   Python traceback frames inside the target repository, giving later repair
   cycles focused source files instead of generic rediscovery.
+- When failed verification output does not expose useful source traceback
+  frames, `OrdinatusVerifier` falls back to ranked source files from the
+  `LogisRepository` repo map.
 - `LogisRepository` now records Python symbol summaries and suggested unittest
   verification commands, and `MagosStrategos` carries those sections into the
   change plan for downstream patch planning.
