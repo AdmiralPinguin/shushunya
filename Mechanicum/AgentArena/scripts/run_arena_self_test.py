@@ -28,7 +28,8 @@ def main() -> int:
             task_id="b",
             ok=False,
             duration_sec=2.0,
-            checks=[],
+            checks=[{"type": "file_contains", "path": "report.md", "ok": False}],
+            exit_code=0,
             orchestration={
                 "ok": False,
                 "failing_diagnostic_steps": [],
@@ -43,6 +44,8 @@ def main() -> int:
         raise AssertionError(f"bad arena summary totals: {summary}")
     if summary["by_agent"]["shushunya"]["pass_rate"] != 0.5:
         raise AssertionError(f"bad arena per-agent summary: {summary}")
+    if summary.get("failure_reasons", {}).get("post_run_checks") != 1 or summary.get("failed_check_types", {}).get("file_contains") != 1:
+        raise AssertionError(f"bad arena direct summary failure counters: {summary}")
     quality = summary.get("orchestration_quality", {}).get("shushunya", {})
     if quality.get("chain_pass_rate") != 0.5 or quality.get("missing_failing_diagnostic") != 1:
         raise AssertionError(f"bad arena orchestration quality summary: {summary}")

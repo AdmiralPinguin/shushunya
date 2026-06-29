@@ -50,15 +50,37 @@ def write_json(path: Path, value: Any) -> None:
     os.replace(temp_path, path)
 
 
+def run_result_failure_reason(result: RunResult) -> str:
+    failed_checks = [check for check in result.checks if isinstance(check, dict) and check.get("ok") is not True]
+    exit_failed = result.exit_code not in (0, None)
+    checks_failed = bool(failed_checks)
+    if exit_failed and checks_failed:
+        return "both"
+    if checks_failed:
+        return "post_run_checks"
+    if exit_failed:
+        return "agent_exit"
+    return "unknown"
+
+
 def summarize_results(results: list[RunResult]) -> dict[str, Any]:
     by_agent: dict[str, dict[str, Any]] = {}
     orchestration_quality: dict[str, dict[str, Any]] = {}
     artifact_quality: dict[str, dict[str, Any]] = {}
+    failure_reasons: dict[str, int] = {}
+    failed_check_types: dict[str, int] = {}
     for result in results:
         item = by_agent.setdefault(result.agent, {"total": 0, "passed": 0, "failed": 0, "duration_sec": 0.0})
         item["total"] += 1
         item["passed" if result.ok else "failed"] += 1
         item["duration_sec"] = round(float(item["duration_sec"]) + result.duration_sec, 3)
+        if not result.ok:
+            reason = run_result_failure_reason(result)
+            failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+            for check in result.checks:
+                if isinstance(check, dict) and check.get("ok") is not True:
+                    check_type = str(check.get("type") or "unknown")
+                    failed_check_types[check_type] = failed_check_types.get(check_type, 0) + 1
         if isinstance(result.orchestration, dict) and result.orchestration.get("style") == "artifact_reads_before_writes":
             quality = artifact_quality.setdefault(
                 result.agent,
@@ -112,6 +134,8 @@ def summarize_results(results: list[RunResult]) -> dict[str, Any]:
         "by_agent": by_agent,
         "orchestration_quality": orchestration_quality,
         "artifact_quality": artifact_quality,
+        "failure_reasons": dict(sorted(failure_reasons.items(), key=lambda item: (-item[1], item[0]))),
+        "failed_check_types": dict(sorted(failed_check_types.items(), key=lambda item: (-item[1], item[0]))),
     }
 
 
