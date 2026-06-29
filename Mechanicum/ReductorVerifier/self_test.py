@@ -156,6 +156,40 @@ def main() -> int:
         draft_index = next(index for index, step in enumerate(revision_steps) if step.get("step_id") == "draft_reconstruction")
         if not source_acquisition_index < timeline_index < draft_index:
             raise AssertionError(f"revision dependencies are not ordered downstream: {report}")
+        write_json(
+            base / "source_map.json",
+            {
+                "discovery_status": "playbook_matched",
+                "sources": [{"title": "Community summary", "source_class": "community_wiki", "source_type": "community_wiki"}],
+                "source_coverage": {
+                    "source_count": 1,
+                    "has_primary_or_publication": False,
+                    "has_official": False,
+                    "has_secondary_crosscheck": True,
+                    "ready_for_extraction": False,
+                },
+            },
+        )
+        write_json(
+            base / "direct_event_notes.json",
+            {
+                "events": [
+                    {"event_id": item, "evidence_snapshots": [{"source_title": "Community summary"}]}
+                    for item in events
+                ],
+                "gaps": [],
+            },
+        )
+        write_json(base / "timeline.json", {"timeline": [{"event_id": item} for item in events], "gaps": []})
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on source coverage pass: {result}")
+        report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
+        if report.get("approved") or "Source coverage is not extraction-ready" not in json.dumps(report):
+            raise AssertionError(f"weak source coverage should block approval: {report}")
+        revision_workers = {step.get("worker") for step in report.get("revision_plan", {}).get("steps", [])}
+        if not {"Lexmechanic", "AuspexBrowser", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
+            raise AssertionError(f"weak source coverage did not produce full upstream revision plan: {report}")
         generic_base = root / "generic"
         generic_request = {
             "task_id": "generic:critic_review",

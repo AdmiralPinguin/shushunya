@@ -451,6 +451,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `NoosphericExtractor` preserves `render_required` source snapshots as explicit
   gaps so downstream timeline, draft, and critic artifacts do not hide browser
   render needs.
+- `ReductorVerifier` uses `source_coverage` diagnostics as source arbitration:
+  weak source sets block approval and trigger source-discovery/downstream
+  revision instead of passing as warnings.
 - `Chronologis` and `ScriptoriumDaemon` preserve generic evidence-lead and
   low-confidence metadata through timeline and coverage artifacts.
 - `ReductorVerifier` and `FabricatorFinalis` carry evidence-lead risk metrics

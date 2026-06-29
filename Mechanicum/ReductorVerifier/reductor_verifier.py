@@ -217,6 +217,9 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
         elif "source discovery did not find" in lowered:
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+        elif "source set is not extraction-ready" in lowered or "source coverage is not extraction-ready" in lowered:
+            add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
+            add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
         else:
             add_revision_step(steps, "critic_review", "ReductorVerifier", message, "critic_finding")
     expand_revision_dependencies(steps)
@@ -332,6 +335,9 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
         warnings.append({"severity": "warning", "message": "No secondary wiki/source summary is listed for cross-checking."})
     if source_map.get("discovery_status") == "needs_live_discovery":
         findings.append({"severity": "blocker", "message": "Source discovery did not find concrete sources."})
+    source_coverage = source_map.get("source_coverage") if isinstance(source_map.get("source_coverage"), dict) else {}
+    if source_coverage and not source_coverage.get("ready_for_extraction"):
+        findings.append({"severity": "blocker", "message": "Source coverage is not extraction-ready: official/primary evidence and secondary cross-checking are both required."})
     if "## Gaps" not in coverage or "Что еще надо проверить" not in reconstruction:
         findings.append({"severity": "blocker", "message": "Draft package does not expose coverage gaps clearly."})
 
@@ -371,6 +377,7 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
             "timeline_events": len(timeline_event_ids),
             "generic_evidence_leads": generic_evidence_leads,
             "low_confidence_events": low_confidence_events,
+            "source_coverage_ready": bool(source_coverage.get("ready_for_extraction")) if source_coverage else None,
             "draft_chars": len(reconstruction),
         },
     }
