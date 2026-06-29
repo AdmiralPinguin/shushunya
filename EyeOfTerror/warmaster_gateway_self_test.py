@@ -1757,6 +1757,34 @@ def main() -> int:
                     raise
             else:
                 raise AssertionError("invalid revision plan should not produce revision step ids")
+            incomplete_downstream_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-incomplete-downstream-revision-test"},
+            )
+            incomplete_downstream_dir = Path(incomplete_downstream_task["run_dir"])
+            incomplete_downstream_ledger_path = incomplete_downstream_dir / "task_ledger.json"
+            incomplete_downstream_ledger = json.loads(incomplete_downstream_ledger_path.read_text(encoding="utf-8"))
+            incomplete_downstream_ledger["status"] = "failed"
+            incomplete_downstream_ledger.setdefault("result", {})["revision_plan"] = {
+                "required": True,
+                "steps": [
+                    {
+                        "step_id": "source_discovery",
+                        "worker": "Lexmechanic",
+                        "reason": "source map needs revision",
+                        "source": "self_test",
+                        "priority": "blocker",
+                    }
+                ],
+            }
+            write_json(incomplete_downstream_ledger_path, incomplete_downstream_ledger)
+            incomplete_downstream_summary = request_json(base + "/runs/warmaster-incomplete-downstream-revision-test/summary")
+            incomplete_downstream_errors = incomplete_downstream_summary.get("summary", {}).get("revision_plan_errors", [])
+            if (
+                not any("missing downstream rerun steps" in error for error in incomplete_downstream_errors)
+                or incomplete_downstream_summary.get("summary", {}).get("actions", {}).get("can_execute_revision")
+            ):
+                raise AssertionError(f"incomplete downstream revision plan was accepted: {incomplete_downstream_summary}")
             revision_steps = revision_step_ids_from_run(run_dir)
             if revision_steps != ["draft_reconstruction", "critic_review", "finalize"]:
                 raise AssertionError(f"bad revision step expansion: {revision_steps}")

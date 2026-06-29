@@ -492,7 +492,10 @@ only those dispatch steps, followed by the saved oversight
 `revision_policy.final_steps` (`critic_review` and `finalize` for Iskandar lore
 reconstruction runs). They must reject runs that do not have
 `revision_plan.required=true` and must reject revision steps outside the saved
-oversight `revision_policy.allowed_steps`.
+oversight `revision_policy.allowed_steps`. When
+`revision_policy.requires_downstream_rerun=true`, Warmaster also rejects
+revision plans that rerun an upstream dispatch step without its non-final
+dependent steps.
 
 Resume execution endpoints run only `pending_step_ids` from an `interrupted`
 run package through the selected executor and must reject runs whose ledger

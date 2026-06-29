@@ -1267,6 +1267,32 @@ def dispatch_workers_by_step(run_dir: Path) -> dict[str, str]:
     return workers
 
 
+def dispatch_dependencies_by_step(run_dir: Path) -> dict[str, list[str]]:
+    dependencies: dict[str, list[str]] = {}
+    for dispatch_path in ordered_dispatch_paths(run_dir):
+        packet = load_json_file(dispatch_path)
+        step_id = str(packet.get("step_id") or dispatch_path.stem)
+        depends_on = packet.get("depends_on") if isinstance(packet.get("depends_on"), list) else []
+        dependencies[step_id] = [str(dependency) for dependency in depends_on if isinstance(dependency, str) and dependency]
+    return dependencies
+
+
+def downstream_revision_steps(step_id: str, dependencies_by_step: dict[str, list[str]], final_steps: set[str]) -> list[str]:
+    downstream: list[str] = []
+    seen: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for candidate_step_id, dependencies in dependencies_by_step.items():
+            if candidate_step_id in seen or candidate_step_id in final_steps:
+                continue
+            if step_id in dependencies or any(dependency in seen for dependency in dependencies):
+                seen.add(candidate_step_id)
+                downstream.append(candidate_step_id)
+                changed = True
+    return downstream
+
+
 def validate_revision_plan(run_dir: Path, revision_plan: dict[str, Any]) -> list[str]:
     if not revision_plan.get("required"):
         return []
@@ -1277,7 +1303,13 @@ def validate_revision_plan(run_dir: Path, revision_plan: dict[str, Any]) -> list
         workers_by_step = dispatch_workers_by_step(run_dir)
     except Exception as exc:  # noqa: BLE001 - summaries should report invalid run packages instead of crashing.
         return [f"revision dispatch unavailable: {exc}"]
+    try:
+        dependencies_by_step = dispatch_dependencies_by_step(run_dir)
+    except Exception as exc:  # noqa: BLE001 - summaries should report invalid run packages instead of crashing.
+        return [f"revision dispatch dependencies unavailable: {exc}"]
     allowed_steps: set[str] = set(workers_by_step)
+    final_steps: set[str] = set()
+    requires_downstream_rerun = False
     oversight_payload = run_oversight(run_dir)
     if oversight_payload.get("ok"):
         oversight = oversight_payload.get("oversight") if isinstance(oversight_payload.get("oversight"), dict) else {}
@@ -1285,8 +1317,12 @@ def validate_revision_plan(run_dir: Path, revision_plan: dict[str, Any]) -> list
         policy_allowed_steps = revision_policy.get("allowed_steps") if isinstance(revision_policy.get("allowed_steps"), list) else []
         if policy_allowed_steps:
             allowed_steps = {str(step_id) for step_id in policy_allowed_steps if isinstance(step_id, str) and step_id}
+        policy_final_steps = revision_policy.get("final_steps") if isinstance(revision_policy.get("final_steps"), list) else []
+        final_steps = {str(step_id) for step_id in policy_final_steps if isinstance(step_id, str) and step_id}
+        requires_downstream_rerun = bool(revision_policy.get("requires_downstream_rerun"))
     errors: list[str] = []
     seen: set[str] = set()
+    requested: set[str] = set()
     for index, item in enumerate(raw_steps):
         if not isinstance(item, dict):
             errors.append(f"revision_plan.steps[{index}] must be an object")
@@ -1299,6 +1335,7 @@ def validate_revision_plan(run_dir: Path, revision_plan: dict[str, Any]) -> list
         if step_id in seen:
             errors.append(f"revision_plan references duplicate step: {step_id}")
         seen.add(step_id)
+        requested.add(step_id)
         expected_worker = workers_by_step.get(step_id)
         if expected_worker is None:
             errors.append(f"revision_plan references unknown dispatch step: {step_id}")
@@ -1311,6 +1348,15 @@ def validate_revision_plan(run_dir: Path, revision_plan: dict[str, Any]) -> list
         for field_name in ("reason", "source", "priority"):
             if field_name in item and not isinstance(item.get(field_name), str):
                 errors.append(f"revision_plan.steps[{index}].{field_name} must be a string")
+    if requires_downstream_rerun:
+        for step_id in sorted(requested):
+            missing_downstream = [
+                downstream_step_id
+                for downstream_step_id in downstream_revision_steps(step_id, dependencies_by_step, final_steps)
+                if downstream_step_id not in requested
+            ]
+            if missing_downstream:
+                errors.append(f"revision_plan step {step_id} is missing downstream rerun steps: {missing_downstream}")
     return errors
 
 
