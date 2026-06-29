@@ -303,12 +303,36 @@ def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(source_map, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    source_count = len(source_map["sources"])
+    if source_count == 0:
+        return {
+            "ok": False,
+            "worker": "Lexmechanic",
+            "task_id": request.get("task_id"),
+            "status": "blocked",
+            "summary": "Source discovery found no source candidates.",
+            "artifacts": [output_path],
+            "gaps": source_map["coverage_gaps"],
+            "revision_plan": {
+                "required": True,
+                "steps": [
+                    {
+                        "step_id": "source_discovery",
+                        "worker": "Lexmechanic",
+                        "reason": "Source discovery found no source candidates; enable live discovery or add a source playbook.",
+                        "source": "source_discovery",
+                        "priority": "blocker",
+                    }
+                ],
+            },
+            "confidence": "low",
+        }
     return {
         "ok": True,
         "worker": "Lexmechanic",
         "task_id": request.get("task_id"),
         "status": "completed",
-        "summary": f"Source map written with {len(source_map['sources'])} source candidates.",
+        "summary": f"Source map written with {source_count} source candidates.",
         "artifacts": [output_path],
         "gaps": source_map["coverage_gaps"],
         "confidence": "medium",

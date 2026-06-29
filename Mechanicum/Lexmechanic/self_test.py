@@ -96,6 +96,19 @@ def main() -> int:
             raise AssertionError(f"generic fallback should record discovery results: {generic}")
         if not any("live source discovery" in gap for gap in generic.get("coverage_gaps", [])):
             raise AssertionError(f"generic fallback should demand live discovery: {generic}")
+        blocked_request = {
+            "task_id": "test-blocked:source_discovery",
+            "contract": {"goal": "Собери историю неизвестной битвы без источников."},
+            "step": {"expected_artifacts": ["/work/blocked/source_map.json"]},
+        }
+        blocked_result = run(blocked_request, Path(temp_dir), searcher=False)
+        if (
+            blocked_result.get("ok")
+            or blocked_result.get("status") != "blocked"
+            or not blocked_result.get("revision_plan", {}).get("required")
+            or not (Path(temp_dir) / "blocked" / "source_map.json").exists()
+        ):
+            raise AssertionError(f"generic source discovery without live search should block with diagnostics: {blocked_result}")
     print("[ok] Lexmechanic source map")
     return 0
 

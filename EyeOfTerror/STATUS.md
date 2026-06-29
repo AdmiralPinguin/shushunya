@@ -431,6 +431,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `Lexmechanic` uses source playbooks plus optional live discovery; allowlisted live results can become source candidates.
 - `Lexmechanic` ranks source candidates and labels live discovery results with
   source types and ranking reasons.
+- `Lexmechanic` blocks source discovery early when no source candidates are
+  available, while still writing source-map diagnostics for recovery.
 - `NoosphericExtractor` uses data playbooks when available and falls back to
   low-confidence generic evidence leads from fetched source snapshots.
 - `NoosphericExtractor` preserves `render_required` source snapshots as explicit
