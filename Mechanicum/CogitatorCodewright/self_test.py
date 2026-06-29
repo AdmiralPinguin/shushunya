@@ -97,6 +97,18 @@ CERAXIA_VERIFY: python -m py_compile repair_me.py
 """
 
 
+def repair_assertion_goal() -> str:
+    return """создай python файл и исправь по unittest если тест покажет ожидаемое значение
+
+CERAXIA_CREATE_FILE: sample.py
+CERAXIA_FILE_CONTENT:
+def value():
+    return 1
+
+CERAXIA_VERIFY: python -m unittest test_sample.py
+"""
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -152,6 +164,25 @@ def main() -> int:
             raise AssertionError(f"expected-colon repair should produce ready final manifest: {final}")
         if "def repaired_value():\n" not in repaired.read_text(encoding="utf-8"):
             raise AssertionError("expected-colon repair did not update the source file")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "test_sample.py").write_text(
+            "import unittest\nfrom sample import value\n\n"
+            "class ValueTest(unittest.TestCase):\n"
+            "    def test_value(self):\n"
+            "        self.assertEqual(value(), 2)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=repair_assertion_goal(), target_repo_root=target_repo)
+        sample = target_repo / "sample.py"
+        if final.get("status") != "ready" or final.get("verification_summary", {}).get("repair_count") != 1:
+            raise AssertionError(f"assertion repair should produce ready final manifest: {final}")
+        if "return 2" not in sample.read_text(encoding="utf-8"):
+            raise AssertionError("assertion repair did not update the return value")
     print("[ok] CogitatorCodewright code artifacts")
     return 0
 

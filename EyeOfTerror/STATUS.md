@@ -569,6 +569,13 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   reports `SyntaxError: expected ':'` for a changed Python file, it can add the
   missing colon, rerun verification, and expose the repair through
   `verification_repairs` and `verification_summary.repair_count`.
+- `OrdinatusVerifier` can also repair a narrow test mismatch pattern:
+  `AssertionError: A != B` may update exactly one `return A` in a changed Python
+  file to `return B`, rerun the failed allowlisted command, and record the
+  repair evidence.
+- Python repair writes invalidate matching `__pycache__` entries before
+  re-running verification, so repeated checks do not accidentally read stale
+  bytecode.
 - The pipeline records inaccessible primary books as `corpus_requirements`;
   operators must provide legitimate local text files when full primary evidence
   is required.

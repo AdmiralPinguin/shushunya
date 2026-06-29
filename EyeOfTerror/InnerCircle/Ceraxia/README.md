@@ -70,3 +70,8 @@ The first verifier repair loop is intentionally narrow: when `py_compile`
 reports `SyntaxError: expected ':'` for a changed Python file, Ceraxia can add
 the missing colon to the failing line, rerun verification, and record the repair
 in the final manifest.
+
+Ceraxia can also repair a narrow unittest/pytest value mismatch:
+`AssertionError: 1 != 2` can update exactly one `return 1` in a changed Python
+file to `return 2`, rerun the failed verification command, and preserve the
+repair evidence.

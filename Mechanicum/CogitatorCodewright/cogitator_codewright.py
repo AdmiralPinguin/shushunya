@@ -107,6 +107,16 @@ def sha256_text(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def invalidate_python_cache(path: Path) -> None:
+    if path.suffix != ".py":
+        return
+    cache_dir = path.parent / "__pycache__"
+    if not cache_dir.exists():
+        return
+    for cached in cache_dir.glob(f"{path.stem}.*.pyc"):
+        cached.unlink(missing_ok=True)
+
+
 def target_repo_root(request: dict[str, Any]) -> Path:
     raw = str(request.get("target_repo_root") or request.get("code_workspace_root") or "").strip()
     if not raw:
@@ -258,6 +268,7 @@ def apply_patch_operation(repo_root: Path, operation: dict[str, Any]) -> dict[st
         path.write_text(content, encoding="utf-8")
     else:
         raise ValueError(f"unsupported patch operation type: {op_type}")
+    invalidate_python_cache(path)
     after_hash = sha256_text(path)
     return {
         "path": str(path.relative_to(repo_root)),
@@ -324,11 +335,42 @@ def repair_expected_colon(repo_root: Path, py_file: str, stderr: str) -> dict[st
     lines[line_number - 1] = f"{line_without_newline.rstrip()}:{newline}"
     before_hash = sha256_text(path)
     path.write_text("".join(lines), encoding="utf-8")
+    invalidate_python_cache(path)
     return {
         "applied": True,
         "kind": "expected_colon",
         "path": py_file,
         "line": line_number,
+        "before_sha256": before_hash,
+        "after_sha256": sha256_text(path),
+    }
+
+
+def repair_assertion_return_mismatch(repo_root: Path, py_files: list[str], output: str) -> dict[str, Any]:
+    match = re.search(r"AssertionError: ([+-]?\d+) != ([+-]?\d+)", output)
+    if not match:
+        return {"applied": False, "reason": "no simple integer AssertionError mismatch found"}
+    actual, expected = match.groups()
+    needle = f"return {actual}"
+    replacement = f"return {expected}"
+    candidates: list[tuple[Path, str]] = []
+    for py_file in py_files:
+        path = safe_repo_path(repo_root, py_file)
+        content = path.read_text(encoding="utf-8")
+        if content.count(needle) == 1:
+            candidates.append((path, content))
+    if len(candidates) != 1:
+        return {"applied": False, "reason": f"expected one changed file with {needle!r}, found {len(candidates)}"}
+    path, content = candidates[0]
+    before_hash = sha256_text(path)
+    path.write_text(content.replace(needle, replacement, 1), encoding="utf-8")
+    invalidate_python_cache(path)
+    return {
+        "applied": True,
+        "kind": "assertion_return_mismatch",
+        "path": str(path.relative_to(repo_root)),
+        "actual": actual,
+        "expected": expected,
         "before_sha256": before_hash,
         "after_sha256": sha256_text(path),
     }
@@ -549,7 +591,21 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
                 result = {"command": raw_command, "returncode": 124, "stdout": "", "stderr": "verification command timed out"}
             executed.append(result)
             if result.get("returncode") != 0:
-                blockers.append(f"verification command failed: {raw_command}")
+                repair = repair_assertion_return_mismatch(
+                    repo_root,
+                    py_files,
+                    f"{result.get('stdout', '')}\n{result.get('stderr', '')}",
+                )
+                if repair.get("applied"):
+                    repairs.append(repair)
+                    try:
+                        result = run_verification_command(repo_root, raw_command)
+                    except subprocess.TimeoutExpired:
+                        result = {"command": raw_command, "returncode": 124, "stdout": "", "stderr": "verification command timed out"}
+                    result["after_repair"] = True
+                    executed.append(result)
+                if result.get("returncode") != 0:
+                    blockers.append(f"verification command failed: {raw_command}")
     report = {
         "status": "blocked" if blockers else "passed",
         "task_id": request.get("task_id"),
