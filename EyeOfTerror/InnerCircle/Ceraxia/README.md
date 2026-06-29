@@ -85,7 +85,13 @@ natural-language-inferred patches. Test-inferred patches also expose
 or actual values used to derive the patch.
 Patch and final manifests also expose `patch_scope_evidence`, linking changed
 files back to the repo map score/reasons where possible and listing changed
-files that were outside the survey map.
+files that were outside the survey map. The same evidence includes static
+test/source links when `LogisRepository` can derive them from Python imports.
+`JudicatorCodicis` turns that evidence into `patch_scope_review`: mapped
+changes pass as covered, unmapped files or source files without linked tests are
+reported as warnings for manual review. Final packages preserve
+`recommended_read_order` and `patch_scope_review` so the governor can inspect
+scope and test evidence without reopening every intermediate artifact.
 
 Verification commands run without a shell and must match Ceraxia's allowlist:
 `pytest`, `python -m pytest`, `python -m unittest`, or
