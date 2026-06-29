@@ -155,6 +155,19 @@ def patch_scope_evidence(workspace_root: Path, output_path: str, changed_files: 
     }
 
 
+def patch_scope_review(scope: dict[str, Any]) -> dict[str, Any]:
+    in_map = [str(item) for item in scope.get("changed_files_in_repo_map", [])] if isinstance(scope.get("changed_files_in_repo_map"), list) else []
+    outside_map = [str(item) for item in scope.get("changed_files_outside_repo_map", [])] if isinstance(scope.get("changed_files_outside_repo_map"), list) else []
+    total = len(in_map) + len(outside_map)
+    return {
+        "status": "needs_attention" if outside_map else "covered",
+        "changed_file_count": total,
+        "mapped_changed_file_count": len(in_map),
+        "unmapped_changed_file_count": len(outside_map),
+        "unmapped_changed_files": outside_map,
+    }
+
+
 def output_path_from_request(request: dict[str, Any]) -> str:
     step = request.get("step") if isinstance(request.get("step"), dict) else {}
     expected = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
@@ -1317,6 +1330,20 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     role_policy = role_policy_from_request(request)
     blockers = verification.get("blockers") if isinstance(verification.get("blockers"), list) else []
     warnings = verification.get("warnings") if isinstance(verification.get("warnings"), list) else []
+    scope = patch.get("patch_scope_evidence") if isinstance(patch.get("patch_scope_evidence"), dict) else {}
+    scope_review = patch_scope_review(scope)
+    review_warnings = [
+        {"severity": "warning", "message": str(item)}
+        for item in warnings
+    ]
+    if scope_review.get("unmapped_changed_file_count", 0):
+        files = ", ".join(scope_review.get("unmapped_changed_files", [])[:5])
+        review_warnings.append(
+            {
+                "severity": "warning",
+                "message": f"Changed file(s) outside ranked repo map should be manually checked for scope drift: {files}",
+            }
+        )
     if patch.get("status") != "applied":
         blockers = [*blockers, "Patch manifest was not applied."]
     if verification.get("status") != "passed":
@@ -1326,15 +1353,13 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "approved": not blockers,
         "role_policy": role_policy,
         "repair_loop_status": repair_state.get("status", "unknown"),
+        "patch_scope_review": scope_review,
         "findings": [
             {"severity": "blocker", "message": str(item)}
             for item in blockers
         ],
         "warnings": [
-            *[
-                {"severity": "warning", "message": str(item)}
-                for item in warnings
-            ],
+            *review_warnings,
             {
                 "severity": "warning",
                 "message": "Ceraxia currently supports only explicit patch operations; autonomous code synthesis is not enabled yet.",
@@ -1414,6 +1439,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             "blocker_count": len(verification.get("blockers", [])) if isinstance(verification.get("blockers"), list) else 0,
         },
         "review_status": review.get("status", "unknown"),
+        "patch_scope_review": review.get("patch_scope_review", {}),
         "blockers": [item.get("message") for item in review.get("findings", []) if isinstance(item, dict)],
         "next_safe_action": "handoff_to_patch_worker" if status == "blocked" else "inspect_final_package",
         "summary": "Ceraxia code task package finalized.",

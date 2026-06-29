@@ -237,6 +237,9 @@ def main() -> int:
         scope = final.get("patch_scope_evidence", {})
         if "sample.py" not in scope.get("changed_files_in_repo_map", []):
             raise AssertionError(f"final manifest should preserve patch scope evidence: {final}")
+        scope_review = final.get("patch_scope_review", {})
+        if scope_review.get("status") != "covered" or scope_review.get("mapped_changed_file_count") != 1:
+            raise AssertionError(f"final manifest should preserve patch scope review: {final}")
         repair_state = final.get("repair_loop_state", {})
         if (
             repair_state.get("status") != "passed"
@@ -341,6 +344,48 @@ def main() -> int:
         repair_state = json.loads((work / "code" / "repair_loop_state.json").read_text(encoding="utf-8"))
         if repair_state.get("candidate_source_paths") != ["sample.py"]:
             raise AssertionError(f"verification should fall back to repo-map source candidates: {repair_state}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "sample.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+        work = root / "work"
+        (work / "code").mkdir(parents=True)
+        (work / "code" / "patch_manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "applied",
+                    "changed_files": [{"path": "unexpected.py", "changed": True}],
+                    "patch_scope_evidence": {
+                        "changed_files_in_repo_map": [],
+                        "changed_files_outside_repo_map": ["unexpected.py"],
+                        "evidence": [{"path": "unexpected.py", "in_repo_map": False}],
+                    },
+                    "verification_commands": [],
+                    "warnings": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "verification_report.json").write_text(
+            json.dumps({"status": "passed", "blockers": [], "warnings": [], "executed": []}) + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "repair_loop_state.json").write_text(
+            json.dumps({"status": "passed", "next_action": "continue_to_code_review"}) + "\n",
+            encoding="utf-8",
+        )
+        payload = request("code_review", "/work/code/code_review.json", target_repo_root=target_repo)
+        result = run(payload, work)
+        if not result.get("ok"):
+            raise AssertionError(f"scope-aware review should write a report: {result}")
+        review = json.loads((work / "code" / "code_review.json").read_text(encoding="utf-8"))
+        if review.get("patch_scope_review", {}).get("status") != "needs_attention":
+            raise AssertionError(f"code review should flag unmapped changed files: {review}")
+        warning_text = "\n".join(str(item.get("message", "")) for item in review.get("warnings", []) if isinstance(item, dict))
+        if "unexpected.py" not in warning_text:
+            raise AssertionError(f"code review should explain scope drift warning: {review}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
