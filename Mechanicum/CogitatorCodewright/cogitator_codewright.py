@@ -174,10 +174,10 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
 def run_implementation(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     plan = read_text_optional(workspace_root, sibling_artifact(output_path, "change_plan.md"))
     manifest = {
-        "status": "ready_for_code_agent",
+        "status": "handoff_required",
         "mode": "auditable_handoff",
         "task_id": request.get("task_id"),
-        "summary": "Ceraxia prepared implementation intent; source mutation is reserved for a dedicated patch/apply worker or Codex handoff.",
+        "summary": "Ceraxia prepared implementation intent, but no source files were mutated by this worker.",
         "intended_actions": [
             "read concrete target files before editing",
             "apply minimal scoped patch",
@@ -186,9 +186,11 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         ],
         "plan_excerpt": plan[:3000],
         "changed_files": [],
-        "blockers": [],
+        "blockers": [
+            "Direct source mutation is not enabled for this worker yet; hand off to a patch/apply worker before claiming the code task complete.",
+        ],
         "warnings": [
-            "Direct source mutation is intentionally deferred to a dedicated patch/apply worker in this first Ceraxia skeleton.",
+            "The current package is an auditable implementation handoff, not a completed code change.",
         ],
     }
     write_json(workspace_root, output_path, manifest)
@@ -197,7 +199,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": "completed",
-        "summary": "Patch manifest written as auditable handoff.",
+        "summary": "Patch manifest written as auditable handoff; source mutation remains blocked.",
         "artifacts": [output_path],
         "confidence": "medium",
     }
@@ -206,7 +208,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
 def run_verification(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     report = {
-        "status": "ready",
+        "status": "blocked" if patch.get("blockers") else "ready",
         "task_id": request.get("task_id"),
         "commands": [
             "./EyeOfTerror/check-eye-mechanicum.sh",
@@ -215,7 +217,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         "executed": [],
         "blockers": patch.get("blockers", []),
         "warnings": patch.get("warnings", []),
-        "summary": "Verification commands are identified; execution awaits real source mutation.",
+        "summary": "Verification commands are identified; execution awaits real source mutation." if patch.get("blockers") else "Verification commands are identified.",
     }
     write_json(workspace_root, output_path, report)
     return {

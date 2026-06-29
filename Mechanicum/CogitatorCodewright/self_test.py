@@ -34,8 +34,8 @@ def main() -> int:
             if not (root / artifact.removeprefix("/work/")).exists():
                 raise AssertionError(f"{step_id} did not write {artifact}")
         final = json.loads((root / "code" / "final_manifest.json").read_text(encoding="utf-8"))
-        if final.get("status") != "ready" or final.get("next_safe_action") != "inspect_final_package":
-            raise AssertionError(f"final manifest should expose ready handoff package: {final}")
+        if final.get("status") != "blocked" or final.get("next_safe_action") != "handoff_to_patch_worker":
+            raise AssertionError(f"final manifest should refuse code completion without source mutation: {final}")
     print("[ok] CogitatorCodewright code artifacts")
     return 0
 

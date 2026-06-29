@@ -543,6 +543,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   `SealwrightFinalis` on ports 7015-7020. They currently share the
   `CogitatorCodewright` execution core while preserving separate worker
   identities, contracts, ports, and review handoffs.
+- Ceraxia final manifests no longer report `ready` when no source files were
+  mutated. The prototype now emits `blocked` with
+  `next_safe_action=handoff_to_patch_worker` until a real patch/apply worker
+  executes and verifies the code change.
 - The pipeline records inaccessible primary books as `corpus_requirements`;
   operators must provide legitimate local text files when full primary evidence
   is required.
