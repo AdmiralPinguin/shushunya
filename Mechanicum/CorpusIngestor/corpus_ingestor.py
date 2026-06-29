@@ -88,7 +88,8 @@ def fb2_to_text(value: str) -> str:
 
 def read_epub(path: Path) -> str:
     if extract_epub_text is not None:
-        return clean_text(str(extract_epub_text(path.read_bytes())))
+        _title, text = extract_epub_text(path.read_bytes())
+        return clean_text(str(text))
     parts: list[str] = []
     with zipfile.ZipFile(path) as archive:
         for name in sorted(archive.namelist()):
