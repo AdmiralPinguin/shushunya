@@ -98,6 +98,8 @@ def summarize_results(results: list[RunResult]) -> dict[str, Any]:
                     "missing_failing_diagnostic": 0,
                     "missing_edit": 0,
                     "missing_verification_after_edit": 0,
+                    "supervisor_rejections": 0,
+                    "cli_verification_runs": 0,
                 },
             )
             quality["tracked"] += 1
@@ -111,6 +113,8 @@ def summarize_results(results: list[RunResult]) -> dict[str, Any]:
                     quality["missing_edit"] += 1
                 if not result.orchestration.get("verified_after_last_edit"):
                     quality["missing_verification_after_edit"] += 1
+            quality["supervisor_rejections"] += len(result.orchestration.get("supervisor_rejection_steps") or [])
+            quality["cli_verification_runs"] += len(result.orchestration.get("cli_verification_steps") or [])
     for item in by_agent.values():
         total = int(item["total"])
         runnable_total = total - int(item.get("unavailable", 0))
@@ -362,6 +366,13 @@ def task_looks_like_code_repair(task: dict[str, Any]) -> bool:
     return any(marker in prompt for marker in ("pytest", "тест", "tests/", "python-проект", "python project"))
 
 
+def looks_like_cli_verification_command(command: str) -> bool:
+    lowered = command.lower()
+    invokes_module = "python -m " in lowered or "python3 -m " in lowered
+    validates_json = "json.load" in lowered or "json.loads" in lowered
+    return invokes_module and (validates_json or ".cli" in lowered or " cli" in lowered)
+
+
 def path_matches_suffix(path: str, suffix: str) -> bool:
     normalized_path = path.replace("\\", "/").rstrip("/")
     normalized_suffix = suffix.replace("\\", "/").strip("/")
@@ -468,7 +479,9 @@ def analyze_shushunya_orchestration(log_path: Path, task: dict[str, Any]) -> dic
     edit_steps: list[int] = []
     failing_diagnostic_steps: list[int] = []
     passing_verification_steps: list[int] = []
+    cli_verification_steps: list[int] = []
     repair_mode_steps: list[int] = []
+    supervisor_rejection_steps: list[int] = []
     verified_after_last_edit = False
     for item in steps:
         if not isinstance(item, dict):
@@ -480,8 +493,12 @@ def analyze_shushunya_orchestration(log_path: Path, task: dict[str, Any]) -> dic
         seq = int(item.get("_seq") or step)
         if item.get("mode") == "swe_repair":
             repair_mode_steps.append(seq)
+        if result.get("ok") is False and str(result.get("error") or "").lower().find("supervisor") >= 0:
+            supervisor_rejection_steps.append(seq)
         if action_type in {"write_file", "append_file", "replace_in_file"} and result.get("ok") is True:
             edit_steps.append(seq)
+        if action_type == "shell" and result.get("ok") is True and looks_like_cli_verification_command(str(action.get("cmd") or "")):
+            cli_verification_steps.append(seq)
         failing_tests = result.get("failing_tests") if isinstance(result.get("failing_tests"), list) else []
         passing_tests = result.get("passing_tests") if isinstance(result.get("passing_tests"), list) else []
         if failing_tests:
@@ -501,6 +518,8 @@ def analyze_shushunya_orchestration(log_path: Path, task: dict[str, Any]) -> dic
         "edit_steps": edit_steps,
         "repair_mode_steps": repair_mode_steps,
         "passing_verification_steps": passing_verification_steps,
+        "cli_verification_steps": cli_verification_steps,
+        "supervisor_rejection_steps": supervisor_rejection_steps,
         "verified_after_last_edit": verified_after_last_edit,
     }
 

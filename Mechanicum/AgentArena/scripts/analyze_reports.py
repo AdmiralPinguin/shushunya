@@ -48,6 +48,8 @@ def add_orchestration_stat(stats: dict[str, Any], suite: str, agent: str, orches
             "missing_failing_diagnostic": 0,
             "missing_edit": 0,
             "missing_verification_after_edit": 0,
+            "supervisor_rejections": 0,
+            "cli_verification_runs": 0,
         },
     )
     item["tracked"] += 1
@@ -61,6 +63,8 @@ def add_orchestration_stat(stats: dict[str, Any], suite: str, agent: str, orches
             item["missing_edit"] += 1
         if not orchestration.get("verified_after_last_edit"):
             item["missing_verification_after_edit"] += 1
+    item["supervisor_rejections"] += len(orchestration.get("supervisor_rejection_steps") or [])
+    item["cli_verification_runs"] += len(orchestration.get("cli_verification_steps") or [])
 
 
 def add_artifact_stat(stats: dict[str, Any], suite: str, agent: str, orchestration: dict[str, Any]) -> None:

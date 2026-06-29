@@ -46,7 +46,8 @@ Per-agent rows also expose `unavailable`, `runnable_total`, and
 quality.
 For Shushunya task journals the summary also includes
 `orchestration_quality`: whether code-repair runs showed a failing diagnostic,
-performed an edit, and verified after the last edit. `analyze_reports.py`
+performed an edit, verified after the last edit, followed CLI verification
+prompts, and recovered from supervisor rejections. `analyze_reports.py`
 aggregates the same chain-quality metrics across recent reports.
 For data/artifact tasks with seeded input files and checked output files,
 reports also include `artifact_quality`, which records whether inputs were read

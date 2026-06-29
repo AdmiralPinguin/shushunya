@@ -6,7 +6,7 @@ from pathlib import Path
 
 from analyze_reports import analyze_reports, format_markdown
 from report_metrics import failure_reason
-from run_arena import RunResult, analyze_artifact_orchestration, summarize_results, write_json
+from run_arena import RunResult, analyze_artifact_orchestration, analyze_shushunya_orchestration, summarize_results, write_json
 
 
 def main() -> int:
@@ -24,6 +24,8 @@ def main() -> int:
                 "failing_diagnostic_steps": [1],
                 "edit_steps": [2],
                 "verified_after_last_edit": True,
+                "cli_verification_steps": [3],
+                "supervisor_rejection_steps": [4],
             },
         ),
         RunResult(
@@ -57,6 +59,8 @@ def main() -> int:
     quality = summary.get("orchestration_quality", {}).get("shushunya", {})
     if quality.get("chain_pass_rate") != 0.5 or quality.get("missing_failing_diagnostic") != 1:
         raise AssertionError(f"bad arena orchestration quality summary: {summary}")
+    if quality.get("cli_verification_runs") != 1 or quality.get("supervisor_rejections") != 1:
+        raise AssertionError(f"bad arena orchestration CLI/rejection summary: {summary}")
     artifact_ok = analyze_artifact_orchestration(
         [
             {"_seq": 1, "action": {"action": "read_file", "path": "/work/input.csv"}, "result": {"ok": True}},
@@ -82,6 +86,27 @@ def main() -> int:
         leftovers = list(Path(temp_dir).glob("*.tmp"))
         if leftovers:
             raise AssertionError(f"arena write_json left temp files: {leftovers}")
+        journal_log = Path(temp_dir) / "journal-log.json"
+        write_json(
+            journal_log,
+            {
+                "journal": {
+                    "events": [
+                        {"type": "action", "step": 1, "action": {"action": "shell", "cmd": "python3 -m pytest -q"}},
+                        {"type": "tool_result", "step": 1, "result": {"ok": False, "failing_tests": ["tests/test_x.py::test_x"]}},
+                        {"type": "action", "step": 2, "action": {"action": "write_file", "path": "/work/app.py"}},
+                        {"type": "tool_result", "step": 2, "result": {"ok": True}},
+                        {"type": "action", "step": 3, "action": {"action": "read_file", "path": "/work/app.py"}},
+                        {"type": "tool_result", "step": 3, "result": {"ok": False, "error": "swe cli verification required by supervisor"}},
+                        {"type": "action", "step": 4, "action": {"action": "shell", "cmd": "python3 -m app.cli input.csv | python3 -c 'import sys,json; json.load(sys.stdin)'"}},
+                        {"type": "tool_result", "step": 4, "result": {"ok": True}},
+                    ]
+                }
+            },
+        )
+        orchestration = analyze_shushunya_orchestration(journal_log, {"seed_files": {"tests/test_x.py": ""}})
+        if orchestration.get("cli_verification_steps") != [4] or orchestration.get("supervisor_rejection_steps") != [3]:
+            raise AssertionError(f"bad arena CLI/rejection orchestration analysis: {orchestration}")
         report = Path(temp_dir) / "report.json"
         write_json(
             report,
