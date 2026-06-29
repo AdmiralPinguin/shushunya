@@ -18,6 +18,8 @@ def main() -> int:
     ranked = repo_map.get("ranked_files", [])
     if not ranked or ranked[0].get("path") != "sample.py":
         raise AssertionError(f"imported source should outrank the test file: {repo_map}")
+    if repo_map.get("recommended_read_order", [])[0].get("path") != "sample.py":
+        raise AssertionError(f"repo map should expose recommended read order: {repo_map}")
     traceback = (
         'Traceback (most recent call last):\n'
         '  File "/tmp/repo/pkg/core.py", line 2, in run\n'

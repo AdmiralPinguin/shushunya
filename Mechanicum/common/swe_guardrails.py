@@ -112,12 +112,22 @@ def build_repo_map(
     test_files: list[str],
     python_symbols: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    ranked = ranked_repo_files(goal, candidate_files, test_files, python_symbols)
+    read_order: list[dict[str, Any]] = []
+    for item in ranked:
+        path = str(item.get("path") or "")
+        if not path:
+            continue
+        phase = "inspect_test" if test_like_path(path) else "inspect_source"
+        read_order.append({"path": path, "phase": phase, "reason": ", ".join(str(reason) for reason in item.get("reasons", [])[:3])})
     return {
-        "ranked_files": ranked_repo_files(goal, candidate_files, test_files, python_symbols),
+        "ranked_files": ranked,
         "test_source_links": test_source_links(python_symbols),
+        "recommended_read_order": read_order[:30],
         "notes": [
             "ranked_files combines goal filename matches, symbol matches, test surfaces, and test-to-source imports",
             "test_source_links are derived from static Python imports and are advisory, not proof of coverage",
+            "recommended_read_order lists files to inspect before patch planning or source mutation",
         ],
     }
 

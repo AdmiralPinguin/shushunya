@@ -43,7 +43,9 @@ Ceraxia falls back to ranked source files from `repo_survey.json`.
 
 `LogisRepository` records Python symbol summaries for scanned `.py` files and
 suggests safe verification commands from discovered test files. `MagosStrategos`
-includes those symbol and verification sections in the change plan.
+includes those symbol and verification sections in the change plan. The repo
+map also includes `recommended_read_order`, a ranked source/test inspection
+sequence that patch workers should consume before mutation.
 
 `FerrumPatchwright` can apply explicit patch operations embedded in the task:
 

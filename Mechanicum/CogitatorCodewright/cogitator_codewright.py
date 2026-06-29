@@ -966,6 +966,7 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
     repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
     ranked_files = repo_map.get("ranked_files") if isinstance(repo_map.get("ranked_files"), list) else []
     test_source_links = repo_map.get("test_source_links") if isinstance(repo_map.get("test_source_links"), list) else []
+    read_order = repo_map.get("recommended_read_order") if isinstance(repo_map.get("recommended_read_order"), list) else []
     symbol_lines: list[str] = []
     for item in symbols[:20]:
         if not isinstance(item, dict):
@@ -988,6 +989,11 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             continue
         sources = ", ".join(str(path) for path in item.get("source_paths", [])[:8]) if isinstance(item.get("source_paths"), list) else ""
         link_lines.append(f"- {item.get('test_path')} -> {sources}")
+    read_order_lines: list[str] = []
+    for item in read_order[:20]:
+        if not isinstance(item, dict):
+            continue
+        read_order_lines.append(f"- {item.get('phase')}: {item.get('path')} ({item.get('reason')})")
     content = "\n".join(
         [
             "# Ceraxia Change Plan",
@@ -1006,6 +1012,9 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             "",
             "## Test Source Links",
             *link_lines,
+            "",
+            "## Recommended Read Order",
+            *read_order_lines,
             "",
             "## Test Surface",
             *[f"- {item}" for item in tests[:30]],

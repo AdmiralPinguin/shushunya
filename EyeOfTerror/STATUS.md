@@ -567,6 +567,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - When failed verification output does not expose useful source traceback
   frames, `OrdinatusVerifier` falls back to ranked source files from the
   `LogisRepository` repo map.
+- `LogisRepository` repo maps now include `recommended_read_order`, and
+  `MagosStrategos` carries it into `change_plan.md` so patch workers have an
+  explicit inspect-before-mutate sequence.
 - `LogisRepository` now records Python symbol summaries and suggested unittest
   verification commands, and `MagosStrategos` carries those sections into the
   change plan for downstream patch planning.

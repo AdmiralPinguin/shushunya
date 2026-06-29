@@ -390,12 +390,15 @@ def main() -> int:
         ranked_paths = [item.get("path") for item in repo_map.get("ranked_files", []) if isinstance(item, dict)]
         if "sample.py" not in ranked_paths[:3]:
             raise AssertionError(f"repository survey should rank imported source files near the top: {survey}")
+        if repo_map.get("recommended_read_order", [])[0].get("path") != "sample.py":
+            raise AssertionError(f"repository survey should expose recommended read order: {survey}")
         plan_text = (root / "work" / "code" / "change_plan.md").read_text(encoding="utf-8")
         if (
             "## Python Symbol Surface" not in plan_text
             or "## Suggested Verification" not in plan_text
             or "## Ranked Repo Map" not in plan_text
             or "## Test Source Links" not in plan_text
+            or "## Recommended Read Order" not in plan_text
         ):
             raise AssertionError(f"change plan should include repo-map, symbol, and verification sections: {plan_text}")
     with tempfile.TemporaryDirectory() as temp_dir:
