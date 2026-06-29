@@ -490,6 +490,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   timeline summaries.
 - `ScriptoriumDaemon` exposes source-coverage readiness in the reader-facing
   reconstruction and machine-readable coverage report.
+- `ScriptoriumDaemon` marks primary evidence inline in reconstruction evidence
+  excerpts, reports primary event-evidence counts per source, and carries
+  `primary_evidence` rows into coverage reports.
 - `ScriptoriumDaemon` matches evidence source names fuzzily against source-map
   titles and local corpus paths, so local primary files still show direct
   evidence coverage when filenames differ from canonical book titles.

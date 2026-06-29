@@ -79,8 +79,19 @@ def main() -> int:
                         "evidence_snapshots": [
                             {
                                 "source_title": "Kharn Eater Worlds local",
+                                "source_class": "local_primary_candidate",
+                                "source_type": "local_primary",
                                 "matched_markers": "parley",
                                 "excerpt": "Kharn convinced the officers to parley on a moon of Skalathrax before the fighting spread.",
+                                "is_primary_source": True,
+                            }
+                        ],
+                        "primary_evidence_snapshots": [
+                            {
+                                "source_title": "Kharn Eater Worlds local",
+                                "matched_markers": "parley",
+                                "excerpt": "Kharn convinced the officers to parley on a moon of Skalathrax before the fighting spread.",
+                                "is_primary_source": True,
                             }
                         ],
                     }
@@ -125,18 +136,20 @@ def main() -> int:
                 raise AssertionError(f"missing reconstruction text: {needle}")
         if "Фокус ревизии" not in reconstruction or "Kharn burns shelters" not in reconstruction:
             raise AssertionError("reconstruction should expose revision context")
-        if "Kharn Eater Worlds local; markers: parley" not in reconstruction:
+        if "Kharn Eater Worlds local [primary]; markers: parley" not in reconstruction:
             raise AssertionError("reconstruction should expose evidence excerpts")
         if "Надёжность источников" not in reconstruction or "Ready for extraction: no" not in coverage:
             raise AssertionError("draft package should expose source coverage readiness")
         if "Источники и доступность" not in reconstruction or "availability=fetched" not in reconstruction:
             raise AssertionError("reconstruction should include source inventory and availability")
-        if "direct_evidence=matched 1 event marker(s)" not in reconstruction:
+        if "direct_evidence=matched 1 event marker(s); primary matched 1" not in reconstruction:
             raise AssertionError("reconstruction should disclose source-level direct evidence coverage")
         if "Discovery status: playbook_matched" not in coverage or "Sources mapped: 1" not in coverage or "moon_parley" not in coverage:
             raise AssertionError("coverage report is incomplete")
         if "evidence=Kharn Eater Worlds local: parley" not in coverage:
             raise AssertionError("coverage report should include event evidence")
+        if "primary_evidence=Kharn Eater Worlds local: parley" not in coverage:
+            raise AssertionError("coverage report should include primary event evidence")
         if "excerpts=Kharn convinced the officers" not in coverage:
             raise AssertionError("coverage report should include evidence excerpts")
         if "evidence_lead_1" not in coverage or "method=generic_snapshot_lead" not in coverage or "evidence_lead=true" not in coverage:

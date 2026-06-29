@@ -107,8 +107,9 @@ def event_evidence_lines(event: dict[str, Any], notes_by_id: dict[str, dict[str,
             continue
         source_title = str(item.get("source_title") or "source")
         markers = str(item.get("matched_markers") or "")
+        primary_text = " [primary]" if item.get("is_primary_source") else ""
         marker_text = f"; markers: {markers}" if markers else ""
-        lines.append(f"> {source_title}{marker_text}: {excerpt}")
+        lines.append(f"> {source_title}{primary_text}{marker_text}: {excerpt}")
     return lines
 
 
@@ -153,7 +154,7 @@ def source_coverage_lines(source_map: dict[str, Any], heading: str) -> list[str]
     return lines
 
 
-def evidence_counts_by_source(notes: dict[str, Any]) -> dict[str, int]:
+def evidence_counts_by_source(notes: dict[str, Any], primary_only: bool = False) -> dict[str, int]:
     counts: dict[str, int] = defaultdict(int)
     for event in notes.get("events", []):
         if not isinstance(event, dict):
@@ -161,6 +162,8 @@ def evidence_counts_by_source(notes: dict[str, Any]) -> dict[str, int]:
         evidence = event.get("evidence_snapshots") if isinstance(event.get("evidence_snapshots"), list) else []
         for item in evidence:
             if not isinstance(item, dict):
+                continue
+            if primary_only and not item.get("is_primary_source"):
                 continue
             source_title = str(item.get("source_title") or "")
             if source_title:
@@ -203,6 +206,7 @@ def source_inventory_lines(source_map: dict[str, Any], source_snapshots: dict[st
         return []
     lines = ["## Источники и доступность", ""]
     evidence_counts = evidence_counts_by_source(notes or {})
+    primary_evidence_counts = evidence_counts_by_source(notes or {}, primary_only=True)
     fetched_by_title = {
         str(item.get("source_title") or ""): item
         for item in source_snapshots.get("snapshots", [])
@@ -227,8 +231,11 @@ def source_inventory_lines(source_map: dict[str, Any], source_snapshots: dict[st
         else:
             availability = "not requested"
         evidence_count = evidence_count_for_source(source, evidence_counts)
+        primary_evidence_count = evidence_count_for_source(source, primary_evidence_counts)
         if evidence_count:
             direct_evidence = f"matched {evidence_count} event marker(s)"
+            if primary_evidence_count:
+                direct_evidence += f"; primary matched {primary_evidence_count}"
         elif snapshot and snapshot.get("ok"):
             direct_evidence = "no direct event markers"
         elif skipped:
@@ -355,19 +362,25 @@ def build_coverage_report(
             for item in note.get("evidence_snapshots", [])
             if isinstance(item, dict)
         )
+        primary_evidence = "; ".join(
+            f"{item.get('source_title')}: {item.get('matched_markers')}"
+            for item in note.get("primary_evidence_snapshots", [])
+            if isinstance(item, dict)
+        )
         excerpts = " || ".join(
             " ".join(str(item.get("excerpt") or "").split())[:220]
             for item in note.get("evidence_snapshots", [])
             if isinstance(item, dict) and item.get("excerpt")
         )
         evidence_text = f" | evidence={evidence}" if evidence else " | evidence=missing"
+        primary_text = f" | primary_evidence={primary_evidence}" if primary_evidence else ""
         excerpt_text = f" | excerpts={excerpts}" if excerpts else ""
         method = str(event.get("extraction_method") or note.get("extraction_method") or "")
         method_text = f" | method={method}" if method else ""
         lead_text = " | evidence_lead=true" if event.get("evidence_lead") or method == "generic_snapshot_lead" else ""
         lines.append(
             f"- {event.get('event_id')} | phase={event.get('phase')} | "
-            f"confidence={event.get('confidence')} | refs={refs}{method_text}{lead_text}{evidence_text}{excerpt_text}"
+            f"confidence={event.get('confidence')} | refs={refs}{method_text}{lead_text}{evidence_text}{primary_text}{excerpt_text}"
         )
     return "\n".join(lines).rstrip() + "\n"
 
