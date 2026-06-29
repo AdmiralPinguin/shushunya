@@ -139,9 +139,84 @@ def extract_json_after_marker(text: str, marker: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def marker_value(text: str, marker: str) -> str:
+    marker_at = text.find(marker)
+    if marker_at < 0:
+        return ""
+    return text[marker_at + len(marker):].strip().splitlines()[0].strip()
+
+
+def marker_block(text: str, marker: str) -> str:
+    marker_at = text.find(marker)
+    if marker_at < 0:
+        return ""
+    block = text[marker_at + len(marker):]
+    stop_markers = [
+        "\nCERAXIA_TARGET_REPO:",
+        "\nCERAXIA_PATCH:",
+        "\nCERAXIA_CREATE_FILE:",
+        "\nCERAXIA_FILE_CONTENT:",
+        "\nCERAXIA_REPLACE_IN_FILE:",
+        "\nCERAXIA_OLD:",
+        "\nCERAXIA_NEW:",
+        "\nCERAXIA_VERIFY:",
+    ]
+    stop_positions = [pos for marker_item in stop_markers if (pos := block.find(marker_item)) >= 0]
+    if stop_positions:
+        block = block[: min(stop_positions)]
+    return block.strip("\n")
+
+
+def verification_commands_from_markers(goal: str) -> list[str]:
+    commands: list[str] = []
+    for line in goal.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("CERAXIA_VERIFY:"):
+            command = stripped.removeprefix("CERAXIA_VERIFY:").strip()
+            if command:
+                commands.append(command)
+    return commands
+
+
+def synthesized_patch_spec_from_markers(goal: str) -> dict[str, Any]:
+    create_path = marker_value(goal, "CERAXIA_CREATE_FILE:")
+    if create_path:
+        content = marker_block(goal, "CERAXIA_FILE_CONTENT:")
+        return {
+            "source": "marker_synthesis",
+            "operations": [
+                {
+                    "type": "write_file",
+                    "path": create_path,
+                    "content": content,
+                }
+            ],
+            "verification_commands": verification_commands_from_markers(goal),
+        }
+    replace_path = marker_value(goal, "CERAXIA_REPLACE_IN_FILE:")
+    if replace_path:
+        old = marker_block(goal, "CERAXIA_OLD:")
+        new = marker_block(goal, "CERAXIA_NEW:")
+        return {
+            "source": "marker_synthesis",
+            "operations": [
+                {
+                    "type": "replace",
+                    "path": replace_path,
+                    "old": old,
+                    "new": new,
+                }
+            ],
+            "verification_commands": verification_commands_from_markers(goal),
+        }
+    return {}
+
+
 def patch_spec_from_request(request: dict[str, Any]) -> dict[str, Any]:
     goal = request_goal(request)
     payload = extract_json_after_marker(goal, "CERAXIA_PATCH:")
+    if not payload:
+        payload = synthesized_patch_spec_from_markers(goal)
     if not payload:
         return {}
     if isinstance(payload.get("ceraxia_patch"), dict):

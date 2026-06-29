@@ -557,6 +557,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   (`pytest`, `python -m pytest`, `python -m unittest`, or
   `python -m py_compile ...`). Disallowed commands block final readiness instead
   of running through a shell.
+- `FerrumPatchwright` can synthesize patch specs from simpler task markers:
+  `CERAXIA_CREATE_FILE`/`CERAXIA_FILE_CONTENT` and
+  `CERAXIA_REPLACE_IN_FILE`/`CERAXIA_OLD`/`CERAXIA_NEW`, plus repeated
+  `CERAXIA_VERIFY` lines for allowlisted verification commands.
 - The pipeline records inaccessible primary books as `corpus_requirements`;
   operators must provide legitimate local text files when full primary evidence
   is required.

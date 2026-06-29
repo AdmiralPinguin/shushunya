@@ -73,6 +73,18 @@ CERAXIA_PATCH:
 """
 
 
+def create_file_goal() -> str:
+    return """создай python файл
+
+CERAXIA_CREATE_FILE: generated.py
+CERAXIA_FILE_CONTENT:
+def generated_value():
+    return 42
+
+CERAXIA_VERIFY: python -m py_compile generated.py
+"""
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -102,6 +114,16 @@ def main() -> int:
         final = run_pipeline(root / "work", goal=forbidden_verify_goal(), target_repo_root=target_repo)
         if final.get("status") != "blocked" or final.get("approved"):
             raise AssertionError(f"forbidden verification command should block final readiness: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        final = run_pipeline(root / "work", goal=create_file_goal(), target_repo_root=target_repo)
+        generated = target_repo / "generated.py"
+        if final.get("status") != "ready" or not generated.exists():
+            raise AssertionError(f"marker-synthesized create file task should be ready: {final}")
+        if "return 42" not in generated.read_text(encoding="utf-8"):
+            raise AssertionError("marker-synthesized create file task wrote wrong content")
     print("[ok] CogitatorCodewright code artifacts")
     return 0
 

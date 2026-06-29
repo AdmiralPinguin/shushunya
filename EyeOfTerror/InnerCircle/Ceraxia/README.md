@@ -43,3 +43,25 @@ instead of claiming the code task is complete.
 Verification commands run without a shell and must match Ceraxia's allowlist:
 `pytest`, `python -m pytest`, `python -m unittest`, or
 `python -m py_compile ...`.
+
+For simple tasks, Ceraxia can synthesize the patch spec from markers:
+
+```text
+CERAXIA_CREATE_FILE: generated.py
+CERAXIA_FILE_CONTENT:
+def generated_value():
+    return 42
+
+CERAXIA_VERIFY: python -m py_compile generated.py
+```
+
+or:
+
+```text
+CERAXIA_REPLACE_IN_FILE: module.py
+CERAXIA_OLD:
+return 1
+CERAXIA_NEW:
+return 2
+CERAXIA_VERIFY: python -m py_compile module.py
+```

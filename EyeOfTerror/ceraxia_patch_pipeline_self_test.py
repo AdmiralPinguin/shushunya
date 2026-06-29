@@ -47,6 +47,34 @@ CERAXIA_PATCH:
         changed = manifest.get("changed_files", [])
         if not changed or changed[0].get("path") != "sample.py" or not changed[0].get("changed"):
             raise AssertionError(f"Ceraxia final manifest lacks changed file evidence: {manifest}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_root = Path(temp_dir)
+        target_repo = temp_root / "repo"
+        target_repo.mkdir()
+        task = f"""создай python файл
+CERAXIA_TARGET_REPO: {target_repo}
+CERAXIA_CREATE_FILE: generated.py
+CERAXIA_FILE_CONTENT:
+def generated_value():
+    return 42
+
+CERAXIA_VERIFY: python -m py_compile generated.py
+"""
+        run_root = temp_root / "runs"
+        task_id = "ceraxia-marker-create-pipeline"
+        prepared = prepare_task(task, task_id, run_root, governor_transport="local")
+        if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
+            raise AssertionError(f"Ceraxia marker task did not prepare correctly: {prepared}")
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        if not result.get("ok") or result.get("phase") != "completed":
+            raise AssertionError(f"Ceraxia marker pipeline did not complete: {result}")
+        manifests = list((run_root / task_id / "work").rglob("final_manifest.json"))
+        manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+        generated = target_repo / "generated.py"
+        if manifest.get("status") != "ready" or not generated.exists():
+            raise AssertionError(f"Ceraxia marker final manifest should be ready: {manifest}")
+        if "return 42" not in generated.read_text(encoding="utf-8"):
+            raise AssertionError("Ceraxia marker pipeline wrote wrong file content")
     print("[ok] Ceraxia explicit patch pipeline")
     return 0
 
