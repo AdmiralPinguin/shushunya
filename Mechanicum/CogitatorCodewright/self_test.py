@@ -337,9 +337,25 @@ def main() -> int:
             raise AssertionError(f"repository survey should include Python symbol summaries: {survey}")
         if "python -m unittest discover" not in survey.get("suggested_verification_commands", []):
             raise AssertionError(f"repository survey should suggest Python unittest discovery: {survey}")
+        repo_map = survey.get("repo_map", {})
+        links = repo_map.get("test_source_links", [])
+        if not any(
+            item.get("test_path") == "test_sample.py" and "sample.py" in item.get("source_paths", [])
+            for item in links
+            if isinstance(item, dict)
+        ):
+            raise AssertionError(f"repository survey should link tests to imported source files: {survey}")
+        ranked_paths = [item.get("path") for item in repo_map.get("ranked_files", []) if isinstance(item, dict)]
+        if "sample.py" not in ranked_paths[:3]:
+            raise AssertionError(f"repository survey should rank imported source files near the top: {survey}")
         plan_text = (root / "work" / "code" / "change_plan.md").read_text(encoding="utf-8")
-        if "## Python Symbol Surface" not in plan_text or "## Suggested Verification" not in plan_text:
-            raise AssertionError(f"change plan should include symbol and verification sections: {plan_text}")
+        if (
+            "## Python Symbol Surface" not in plan_text
+            or "## Suggested Verification" not in plan_text
+            or "## Ranked Repo Map" not in plan_text
+            or "## Test Source Links" not in plan_text
+        ):
+            raise AssertionError(f"change plan should include repo-map, symbol, and verification sections: {plan_text}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

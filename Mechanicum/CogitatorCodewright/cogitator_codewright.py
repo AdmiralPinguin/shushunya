@@ -11,6 +11,12 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+MECHANICUM_ROOT = Path(__file__).resolve().parents[1]
+if str(MECHANICUM_ROOT) not in sys.path:
+    sys.path.insert(0, str(MECHANICUM_ROOT))
+
+from common.swe_guardrails import build_repo_map, python_module_name  # noqa: E402
+
 
 EXCLUDED_DIRS = {
     ".git",
@@ -857,6 +863,7 @@ def python_file_summary(repo_root: Path, path: Path) -> dict[str, Any]:
             imports.extend(f"{module}.{alias.name}" if module else alias.name for alias in node.names)
     return {
         "path": rel,
+        "module": python_module_name(rel),
         "functions": functions[:40],
         "classes": classes[:40],
         "imports": imports[:40],
@@ -911,6 +918,7 @@ def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
         "test_files": test_files[:80],
         "python_symbols": python_symbols,
         "suggested_verification_commands": suggested_verification_commands(test_files),
+        "repo_map": build_repo_map(goal, candidate_files[:80], test_files[:80], python_symbols),
         "config_files": config_files[:40],
         "excluded_dirs": sorted(EXCLUDED_DIRS),
         "summary": f"Surveyed {total_files} files; found {len(test_files)} test-like files and {len(candidate_files)} goal-matching candidates.",
@@ -941,6 +949,9 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
     tests = survey.get("test_files") if isinstance(survey.get("test_files"), list) else []
     symbols = survey.get("python_symbols") if isinstance(survey.get("python_symbols"), list) else []
     suggested_commands = survey.get("suggested_verification_commands") if isinstance(survey.get("suggested_verification_commands"), list) else []
+    repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
+    ranked_files = repo_map.get("ranked_files") if isinstance(repo_map.get("ranked_files"), list) else []
+    test_source_links = repo_map.get("test_source_links") if isinstance(repo_map.get("test_source_links"), list) else []
     symbol_lines: list[str] = []
     for item in symbols[:20]:
         if not isinstance(item, dict):
@@ -951,6 +962,18 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
         skipped = str(item.get("skipped") or "")
         detail = skipped or f"functions=[{functions}] classes=[{classes}]"
         symbol_lines.append(f"- {path}: {detail}")
+    ranked_lines: list[str] = []
+    for item in ranked_files[:20]:
+        if not isinstance(item, dict):
+            continue
+        reasons = ", ".join(str(reason) for reason in item.get("reasons", [])[:4]) if isinstance(item.get("reasons"), list) else ""
+        ranked_lines.append(f"- {item.get('path')}: score={item.get('score')} reasons=[{reasons}]")
+    link_lines: list[str] = []
+    for item in test_source_links[:20]:
+        if not isinstance(item, dict):
+            continue
+        sources = ", ".join(str(path) for path in item.get("source_paths", [])[:8]) if isinstance(item.get("source_paths"), list) else ""
+        link_lines.append(f"- {item.get('test_path')} -> {sources}")
     content = "\n".join(
         [
             "# Ceraxia Change Plan",
@@ -963,6 +986,12 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             "",
             "## Candidate Files",
             *[f"- {item}" for item in candidates[:30]],
+            "",
+            "## Ranked Repo Map",
+            *ranked_lines,
+            "",
+            "## Test Source Links",
+            *link_lines,
             "",
             "## Test Surface",
             *[f"- {item}" for item in tests[:30]],
