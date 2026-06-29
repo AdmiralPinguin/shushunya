@@ -79,6 +79,12 @@ def inferred_replace_goal() -> str:
 """
 
 
+def inferred_add_function_goal() -> str:
+    return """почини python приложение: в файле `sample.py` добавь функцию `value`, возвращающую `42`.
+Проверь `python -m unittest test_sample.py`.
+"""
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -242,6 +248,28 @@ def main() -> int:
         plan_text = (root / "work" / "code" / "change_plan.md").read_text(encoding="utf-8")
         if "## Python Symbol Surface" not in plan_text or "## Suggested Verification" not in plan_text:
             raise AssertionError(f"change plan should include symbol and verification sections: {plan_text}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        sample = target_repo / "sample.py"
+        sample.write_text("", encoding="utf-8")
+        (target_repo / "test_sample.py").write_text(
+            "import unittest\nfrom sample import value\n\n"
+            "class ValueTest(unittest.TestCase):\n"
+            "    def test_value(self):\n"
+            "        self.assertEqual(value(), 42)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=inferred_add_function_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready":
+            raise AssertionError(f"inferred add-function task should be ready: {final}")
+        if "def value():\n    return 42\n" not in sample.read_text(encoding="utf-8"):
+            raise AssertionError("inferred add-function task did not append the target function")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 2:
+            raise AssertionError(f"inferred add-function final manifest should preserve verification evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

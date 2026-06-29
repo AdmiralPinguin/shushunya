@@ -137,13 +137,14 @@ def patch_contract_capabilities() -> dict[str, Any]:
             "CERAXIA_NEW",
             "CERAXIA_VERIFY",
         ],
-        "operation_types": ["replace", "write_file"],
+        "operation_types": ["replace", "write_file", "append"],
         "synthesis_modes": [
             "explicit_json_patch",
             "single_file_create_marker",
             "single_file_replace_marker",
             "multi_file_json_marker",
             "natural_language_simple_replace",
+            "natural_language_add_function",
         ],
         "verification_allowlist": [
             "pytest",
@@ -159,6 +160,7 @@ def patch_contract_capabilities() -> dict[str, Any]:
             "operation batches are atomic and roll back earlier mutations on failure",
             "verification commands run without a shell and must match the allowlist",
             "natural language replace inference requires explicit backtick-delimited path, old text, and new text",
+            "natural language add-function inference requires explicit backtick-delimited path, function name, and safe return literal",
         ],
         "repair_loops": [
             "expected_colon_py_compile",

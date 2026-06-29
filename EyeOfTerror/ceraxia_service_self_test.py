@@ -61,8 +61,10 @@ def main() -> int:
         "CERAXIA_FILES" not in patch_contract.get("input_markers", [])
         or "operation batches are atomic and roll back earlier mutations on failure" not in patch_contract.get("safety_gates", [])
         or "natural language replace inference requires explicit backtick-delimited path, old text, and new text" not in patch_contract.get("safety_gates", [])
+        or "natural language add-function inference requires explicit backtick-delimited path, function name, and safe return literal" not in patch_contract.get("safety_gates", [])
         or "python -m unittest" not in patch_contract.get("verification_allowlist", [])
         or "python_symbol_extraction" not in patch_contract.get("repository_intelligence", [])
+        or "append" not in patch_contract.get("operation_types", [])
     ):
         raise AssertionError(f"bad Ceraxia local patch contract: {patch_contract}")
     ferrum_contract = local_plan.get("resolved_workers", {}).get("FerrumPatchwright", {}).get("role_contract", {})
@@ -100,6 +102,7 @@ def main() -> int:
                 or plan.get("actions", {}).get("next_action", {}).get("kind") != "prepare_run"
                 or "explicit_json_patch" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or "natural_language_simple_replace" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
+                or "natural_language_add_function" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or plan.get("resolved_workers", {}).get("FerrumPatchwright", {}).get("role_contract", {}).get("owned_step") != "implementation"
             ):
                 raise AssertionError(f"bad plan: {plan}")

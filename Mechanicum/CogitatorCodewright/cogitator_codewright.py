@@ -239,6 +239,42 @@ def infer_simple_replace_patch_spec(request: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def safe_return_literal(raw: str) -> str:
+    value = raw.strip()
+    if re.fullmatch(r"[+-]?\d+", value) or value in {"True", "False", "None"}:
+        return value
+    if re.fullmatch(r"'[^'\\]*(?:\\.[^'\\]*)*'", value) or re.fullmatch(r'"[^"\\]*(?:\\.[^"\\]*)*"', value):
+        return value
+    raise ValueError(f"unsupported inferred return literal: {raw}")
+
+
+def infer_add_function_patch_spec(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    patterns = [
+        r"(?:в\s+файле|в|in)\s+`(?P<path>[^`]+)`.*?(?:добавь|add).*?(?:функц\w*|function)\s+`(?P<function>[A-Za-z_][A-Za-z0-9_]*)`.*?(?:возвращ\w*|return(?:ing)?)\s+`(?P<literal>[^`]+)`",
+        r"(?:добавь|add).*?(?:функц\w*|function)\s+`(?P<function>[A-Za-z_][A-Za-z0-9_]*)`.*?(?:в\s+файле|в|in)\s+`(?P<path>[^`]+)`.*?(?:возвращ\w*|return(?:ing)?)\s+`(?P<literal>[^`]+)`",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, goal, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        function_name = match.group("function")
+        literal = safe_return_literal(match.group("literal"))
+        content = f"\n\ndef {function_name}():\n    return {literal}\n"
+        return {
+            "source": "natural_language_add_function",
+            "operations": [
+                {
+                    "type": "append",
+                    "path": match.group("path").strip(),
+                    "content": content,
+                }
+            ],
+            "verification_commands": verification_commands_from_natural_goal(goal),
+        }
+    return {}
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -321,6 +357,8 @@ def patch_spec_from_request(request: dict[str, Any]) -> dict[str, Any]:
     if not payload:
         payload = infer_simple_replace_patch_spec(request)
     if not payload:
+        payload = infer_add_function_patch_spec(request)
+    if not payload:
         return {}
     if isinstance(payload.get("ceraxia_patch"), dict):
         payload = payload["ceraxia_patch"]
@@ -368,6 +406,25 @@ def apply_patch_operation(repo_root: Path, operation: dict[str, Any]) -> dict[st
             raise ValueError(f"write_file target exists and overwrite is false: {operation.get('path')}")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+    elif op_type == "append":
+        if not before_exists:
+            raise ValueError(f"append target does not exist: {operation.get('path')}")
+        content = operation.get("content")
+        if not isinstance(content, str) or content == "":
+            raise ValueError("append operation requires non-empty string content")
+        current = path.read_text(encoding="utf-8")
+        if content in current:
+            return {
+                "path": str(path.relative_to(repo_root)),
+                "operation": op_type,
+                "created": False,
+                "before_sha256": before_hash,
+                "after_sha256": before_hash,
+                "changed": False,
+                "idempotent": True,
+            }
+        separator = "" if current.endswith("\n") or not current else "\n"
+        path.write_text(f"{current}{separator}{content}", encoding="utf-8")
     else:
         raise ValueError(f"unsupported patch operation type: {op_type}")
     invalidate_python_cache(path)

@@ -96,6 +96,14 @@ task when the target path, old text, and new text are explicit code spans:
 Проверь `python -m py_compile module.py`.
 ```
 
+Ceraxia can infer one narrow function append when the task provides an explicit
+file path, function name, and safe return literal:
+
+```text
+В файле `module.py` добавь функцию `value`, возвращающую `42`.
+Проверь `python -m unittest test_module.py`.
+```
+
 For small multi-file tasks, Ceraxia can synthesize a patch spec from a JSON
 file list:
 
