@@ -218,12 +218,17 @@
   phase/decision/display builder to keep list and detail views consistent.
 - Warmaster Gateway exposes gateway-level action hints for preflight, creation,
   start, resume, revision, cancellation, and diagnostics.
+- Warmaster capabilities expose compact registry summaries, display text, and
+  an executable state-inspection `client_action` for client bootstrap screens.
 - Run action hints include `next_action` with a recommended endpoint and reason
   for chat clients and higher-level governors.
 - Warmaster Gateway exposes the expected service-separated brigade topology
   through `GET /brigade_plan` and embeds it in `GET /state`.
 - Warmaster Gateway exposes `GET /brigade_health` for combined expected
   topology and best-effort governor/worker health.
+- Governor and worker registry endpoints expose compact `summary` and `display`
+  fields, including reachable/unreachable counts when health checks are
+  requested.
 - Brigade health summary exposes `ready`, `blockers`, and `warnings` so
   higher-level orchestrators can decide whether the service-separated brigade is
   runnable without reinterpreting every service health payload.

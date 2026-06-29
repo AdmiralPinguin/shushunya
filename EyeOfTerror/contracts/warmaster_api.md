@@ -94,7 +94,9 @@ history after a client reconnect. `state.actions` and
 `capabilities.actions` expose client-facing gateway action hints, including the
 preferred task flow: preflight, create, then start. `can_check_brigade_readiness`
 means clients can use `GET /brigade_health` summary fields to decide whether
-the service-separated brigade is runnable.
+the service-separated brigade is runnable. `GET /capabilities` also includes a
+compact registry `summary`, `display`, and executable `client_action` pointing
+clients to the current state snapshot.
 Clients can call `GET /recovery` when they only need the recoverable interrupted
 run list without a full bootstrap snapshot. Each candidate reports
 `resume_ready`, `resume_errors`, pending step ids, and executable
@@ -126,8 +128,10 @@ compact `summary` includes `ready`, `blockers`, and `warnings`; planned services
 are warnings, while unreachable runnable services or unsatisfied governor worker
 requirements are blockers.
 
-`GET /governors?health=1` includes reachable governor `/capabilities` payloads
-inside each governor runtime snapshot.
+`GET /governors` and `GET /workers` include compact `summary` and `display`
+fields for registry screens. `GET /governors?health=1` includes reachable
+governor `/capabilities` payloads inside each governor runtime snapshot, and
+health-checked registry summaries include reachable/unreachable counts.
 
 ## Task Creation
 

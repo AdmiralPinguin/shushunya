@@ -530,6 +530,10 @@ def main() -> int:
                 or "GET /runs/{task_id}/oversight" not in capabilities.get("actions", {}).get("run_inspection", [])
                 or "final_package_read" not in capabilities.get("capabilities", [])
                 or "POST /recovery/start_resume_local" not in capabilities.get("actions", {}).get("maintenance", [])
+                or capabilities.get("summary", {}).get("governors", {}).get("active", 0) < 1
+                or capabilities.get("summary", {}).get("workers", {}).get("active", 0) < 1
+                or capabilities.get("display", {}).get("headline") != "Warmaster Gateway capabilities"
+                or capabilities.get("client_action", {}).get("path") != "/state"
             ):
                 raise AssertionError(f"gateway capabilities did not expose task action hints: {capabilities}")
             brigade_plan = request_json(base + "/brigade_plan")
@@ -594,13 +598,28 @@ def main() -> int:
             else:
                 raise AssertionError("corrupt contract endpoint should return a diagnostic error")
             governors = request_json(base + "/governors")
-            if not governors.get("ok") or not any(item.get("name") == "IskandarKhayon" for item in governors.get("governors", [])):
+            if (
+                not governors.get("ok")
+                or not any(item.get("name") == "IskandarKhayon" for item in governors.get("governors", []))
+                or governors.get("summary", {}).get("active", 0) < 1
+                or governors.get("display", {}).get("headline") != "Governor registry"
+            ):
                 raise AssertionError(f"bad governors response: {governors}")
             governor_health = request_json(base + "/governors?health=1")
-            if not governor_health.get("health_checked") or not all("runtime" in item for item in governor_health.get("governors", [])):
+            if (
+                not governor_health.get("health_checked")
+                or not all("runtime" in item for item in governor_health.get("governors", []))
+                or "reachable" not in governor_health.get("summary", {})
+                or governor_health.get("display", {}).get("headline") != "Governor registry"
+            ):
                 raise AssertionError(f"bad governor health response: {governor_health}")
             workers = request_json(base + "/workers")
-            if not workers.get("ok") or not any(item.get("name") == "Lexmechanic" for item in workers.get("workers", [])):
+            if (
+                not workers.get("ok")
+                or not any(item.get("name") == "Lexmechanic" for item in workers.get("workers", []))
+                or workers.get("summary", {}).get("active", 0) < 1
+                or workers.get("display", {}).get("headline") != "Worker registry"
+            ):
                 raise AssertionError(f"bad workers response: {workers}")
             lexmechanic = next(item for item in workers["workers"] if item.get("name") == "Lexmechanic")
             if not lexmechanic.get("metadata_available") or "web_search" not in lexmechanic.get("capabilities", []):
@@ -609,7 +628,12 @@ def main() -> int:
             if not shushunya.get("metadata_available") or shushunya.get("status") != "active":
                 raise AssertionError(f"general worker metadata is missing: {shushunya}")
             worker_health = request_json(base + "/workers?health=1")
-            if not worker_health.get("health_checked") or not all("runtime" in item for item in worker_health.get("workers", [])):
+            if (
+                not worker_health.get("health_checked")
+                or not all("runtime" in item for item in worker_health.get("workers", []))
+                or "reachable" not in worker_health.get("summary", {})
+                or worker_health.get("display", {}).get("headline") != "Worker registry"
+            ):
                 raise AssertionError(f"bad worker health response: {worker_health}")
             try:
                 request_json(base + "/task", {"message": "почини python приложение", "task_id": "unsupported-code"})

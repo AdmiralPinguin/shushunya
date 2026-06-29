@@ -2781,6 +2781,60 @@ def governor_registry_snapshot(include_health: bool = False, host: str = "127.0.
     return governors
 
 
+def registry_summary(items: list[dict[str, Any]], include_health: bool = False) -> dict[str, Any]:
+    by_status: dict[str, int] = {}
+    reachable = 0
+    metadata_available = 0
+    names: list[str] = []
+    for item in items:
+        name = str(item.get("name") or "")
+        if name:
+            names.append(name)
+        status = str(item.get("status") or "unknown")
+        by_status[status] = by_status.get(status, 0) + 1
+        if item.get("metadata_available"):
+            metadata_available += 1
+        runtime = item.get("runtime") if isinstance(item.get("runtime"), dict) else {}
+        if runtime.get("reachable"):
+            reachable += 1
+    summary = {
+        "total": len(items),
+        "active": by_status.get("active", 0),
+        "prototype": by_status.get("prototype", 0),
+        "planned": by_status.get("planned", 0),
+        "by_status": by_status,
+        "names": names,
+    }
+    if metadata_available:
+        summary["metadata_available"] = metadata_available
+    if include_health:
+        summary["reachable"] = reachable
+        summary["unreachable"] = len(items) - reachable
+    return summary
+
+
+def registry_display(kind: str, summary: dict[str, Any], include_health: bool = False) -> dict[str, Any]:
+    total = int(summary.get("total") or 0)
+    active = int(summary.get("active") or 0)
+    planned = int(summary.get("planned") or 0)
+    reachable = int(summary.get("reachable") or 0)
+    if include_health:
+        detail = f"{reachable}/{total} reachable, {active} active, {planned} planned"
+        severity = "info" if reachable == total else "warning"
+    else:
+        detail = f"{active} active, {planned} planned"
+        severity = "info"
+    return {
+        "headline": f"{kind} registry",
+        "detail": detail,
+        "severity": severity,
+        "total": total,
+        "active": active,
+        "planned": planned,
+        "reachable": reachable if include_health else None,
+    }
+
+
 def governor_worker_requirements(governors: list[dict[str, Any]], workers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     requirements: list[dict[str, Any]] = []
     for governor in governors:
@@ -2916,11 +2970,26 @@ def brigade_health_snapshot(host: str = "127.0.0.1") -> dict[str, Any]:
 
 
 def gateway_capabilities() -> dict[str, Any]:
+    governors = governor_registry_snapshot()
+    workers = worker_registry_snapshot()
+    actions = gateway_actions()
+    next_action = {"kind": "inspect_state", "method": "GET", "endpoint": "GET /state", "body": {}, "reason": "inspect current gateway state"}
     return {
         "ok": True,
         "gateway": "WarmasterGateway",
         "api_version": 1,
-        "actions": gateway_actions(),
+        "actions": actions,
+        "summary": {
+            "governors": registry_summary(governors),
+            "workers": registry_summary(workers),
+        },
+        "display": {
+            "headline": "Warmaster Gateway capabilities",
+            "detail": f"{len(governors)} governors, {len(workers)} workers, {len(actions.get('preferred_task_flow', []))} preferred task-flow steps",
+            "severity": "info",
+        },
+        "next_action": next_action,
+        "client_action": executable_client_action("", next_action),
         "capabilities": [
             "task_routing",
             "task_preflight",
@@ -3392,26 +3461,34 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
             if parsed.path == "/governors":
                 query = parse_qs(parsed.query)
                 include_health = query.get("health", ["0"])[0] in {"1", "true", "yes"}
+                governors = governor_registry_snapshot(include_health=include_health)
+                summary = registry_summary(governors, include_health=include_health)
                 response(
                     self,
                     200,
                     {
                         "ok": True,
                         "health_checked": include_health,
-                        "governors": governor_registry_snapshot(include_health=include_health),
+                        "summary": summary,
+                        "display": registry_display("Governor", summary, include_health=include_health),
+                        "governors": governors,
                     },
                 )
                 return
             if parsed.path == "/workers":
                 query = parse_qs(parsed.query)
                 include_health = query.get("health", ["0"])[0] in {"1", "true", "yes"}
+                workers = worker_registry_snapshot(include_health=include_health)
+                summary = registry_summary(workers, include_health=include_health)
                 response(
                     self,
                     200,
                     {
                         "ok": True,
                         "health_checked": include_health,
-                        "workers": worker_registry_snapshot(include_health=include_health),
+                        "summary": summary,
+                        "display": registry_display("Worker", summary, include_health=include_health),
+                        "workers": workers,
                     },
                 )
                 return
