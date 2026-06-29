@@ -8,7 +8,7 @@ from typing import Any
 
 from ..contracts import build_code_task_contract, code_worker_plan
 from ..pipeline import write_pipeline_run
-from .ceraxia import executable_client_action, oversight_plan, payload_with_plan_view, plan_code_task
+from .ceraxia import executable_client_action, oversight_plan, patch_contract_capabilities, payload_with_plan_view, plan_code_task
 
 
 def required_workers() -> list[str]:
@@ -87,6 +87,7 @@ def service_capabilities() -> dict[str, Any]:
             "resolved_workers": capability_plan.get("resolved_workers", {}),
         },
         "pipeline": pipeline,
+        "patch_contract": patch_contract_capabilities(),
         "oversight": oversight,
         "summary": {
             "pipeline_kind": str(pipeline.get("kind") or ""),

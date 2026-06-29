@@ -570,6 +570,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - Ceraxia applies patch operation batches atomically: if one operation fails,
   earlier file mutations in that batch are rolled back before the task is
   reported as blocked.
+- Ceraxia exposes a machine-readable `patch_contract` through service
+  capabilities, task plans, and oversight packages, including supported markers,
+  operation types, verification allowlist, safety gates, and repair loops.
 - Ceraxia final manifests preserve verification evidence through
   `verification_executed`, `verification_blockers`, and
   `verification_summary`, so the caller can see which commands proved or

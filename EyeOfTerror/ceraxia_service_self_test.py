@@ -10,6 +10,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from eye_of_terror.contracts import build_code_task_contract
+from eye_of_terror.inner_circle.ceraxia import plan_code_task
 from eye_of_terror.inner_circle.ceraxia_service import make_handler, oversight_template, pipeline_summary, required_workers, resolve_run_dir
 
 
@@ -51,8 +52,17 @@ def main() -> int:
         or oversight.get("final_review", {}).get("critic_step") != "code_review"
         or oversight.get("revision_policy", {}).get("final_steps") != ["code_review", "finalize"]
         or len(oversight.get("step_quality_matrix", [])) != 6
+        or "multi_file_json_marker" not in oversight.get("patch_contract", {}).get("synthesis_modes", [])
     ):
         raise AssertionError(f"bad Ceraxia oversight template: {oversight}")
+    local_plan = plan_code_task("почини python приложение", task_id="ceraxia-local-plan-test").to_dict()
+    patch_contract = local_plan.get("patch_contract", {})
+    if (
+        "CERAXIA_FILES" not in patch_contract.get("input_markers", [])
+        or "operation batches are atomic and roll back earlier mutations on failure" not in patch_contract.get("safety_gates", [])
+        or "python -m unittest" not in patch_contract.get("verification_allowlist", [])
+    ):
+        raise AssertionError(f"bad Ceraxia local patch contract: {patch_contract}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         if resolve_run_dir(root / "runs", "child", "task").resolve() != (root / "runs" / "child").resolve():
@@ -70,6 +80,7 @@ def main() -> int:
                 capabilities.get("governor") != "Ceraxia"
                 or capabilities.get("summary", {}).get("step_count") != 6
                 or capabilities.get("worker_availability", {}).get("ok") is not True
+                or "write_file" not in capabilities.get("patch_contract", {}).get("operation_types", [])
             ):
                 raise AssertionError(f"bad capabilities: {capabilities}")
             plan = request_json(base + "/plan", {"task": "почини python приложение", "task_id": "ceraxia-http-test"})
@@ -79,6 +90,7 @@ def main() -> int:
                 or plan.get("pipeline", {}).get("step_count") != 6
                 or plan.get("phase") != "plan_ready"
                 or plan.get("actions", {}).get("next_action", {}).get("kind") != "prepare_run"
+                or "explicit_json_patch" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
             ):
                 raise AssertionError(f"bad plan: {plan}")
             run_dir = root / "runs" / "custom-run"

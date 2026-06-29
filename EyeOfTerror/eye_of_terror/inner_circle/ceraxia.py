@@ -124,6 +124,49 @@ def step_quality_matrix(contract: TaskContract) -> list[dict[str, Any]]:
     return matrix
 
 
+def patch_contract_capabilities() -> dict[str, Any]:
+    return {
+        "input_markers": [
+            "CERAXIA_TARGET_REPO",
+            "CERAXIA_PATCH",
+            "CERAXIA_FILES",
+            "CERAXIA_CREATE_FILE",
+            "CERAXIA_FILE_CONTENT",
+            "CERAXIA_REPLACE_IN_FILE",
+            "CERAXIA_OLD",
+            "CERAXIA_NEW",
+            "CERAXIA_VERIFY",
+        ],
+        "operation_types": ["replace", "write_file"],
+        "synthesis_modes": [
+            "explicit_json_patch",
+            "single_file_create_marker",
+            "single_file_replace_marker",
+            "multi_file_json_marker",
+        ],
+        "verification_allowlist": [
+            "pytest",
+            "python -m pytest",
+            "python -m unittest",
+            "python -m py_compile",
+        ],
+        "safety_gates": [
+            "target paths must be relative and stay inside the target repository",
+            "excluded runtime, cache, model, build, and VCS directories cannot be patched",
+            "write_file requires overwrite=true when existing content differs",
+            "write_file is idempotent when existing content already matches",
+            "operation batches are atomic and roll back earlier mutations on failure",
+            "verification commands run without a shell and must match the allowlist",
+        ],
+        "repair_loops": [
+            "expected_colon_py_compile",
+            "assertion_return_mismatch_literal",
+            "name_error_return_literal",
+            "import_error_missing_function_literal",
+        ],
+    }
+
+
 def oversight_plan(contract: TaskContract) -> dict[str, Any]:
     planned_step_ids = [step.step_id for step in contract.worker_plan]
     artifacts_by_role = {
@@ -192,6 +235,7 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
                 "final package files exist and are readable",
             ],
         },
+        "patch_contract": patch_contract_capabilities(),
     }
 
 
@@ -297,6 +341,7 @@ class CeraxiaPlan:
             "contract": contract,
             "validation": {"ok": not validation_errors, "errors": validation_errors},
             "pipeline": pipeline_status(self.contract, build_dispatch_packets(self.contract)),
+            "patch_contract": patch_contract_capabilities(),
             "resolved_workers": resolved_workers,
             "missing_workers": missing_workers,
             "unavailable_workers": unavailable_workers,

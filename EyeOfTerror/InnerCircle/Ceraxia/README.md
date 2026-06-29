@@ -48,6 +48,11 @@ Patch operation batches are atomic. If any operation in a batch fails,
 Ceraxia restores every file touched earlier in the batch and reports the task
 as blocked instead of leaving a partial code change behind.
 
+The governor exposes the same machine-readable `patch_contract` through
+`/capabilities`, `/plan`, and the saved oversight plan. It lists supported
+markers, patch operation types, verification allowlist entries, safety gates,
+and narrow repair loops for Warmaster and client-side planning.
+
 Verification commands run without a shell and must match Ceraxia's allowlist:
 `pytest`, `python -m pytest`, `python -m unittest`, or
 `python -m py_compile ...`.
