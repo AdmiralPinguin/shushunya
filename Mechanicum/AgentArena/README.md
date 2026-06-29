@@ -70,4 +70,5 @@ Summarize recent reports:
 
 ```bash
 ./scripts/analyze_reports.py --limit 30
+./scripts/analyze_reports.py --limit 30 --markdown
 ```

@@ -163,16 +163,50 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
     }
 
 
+def format_markdown(analysis: dict[str, Any]) -> str:
+    lines = [
+        "# AgentArena Report Summary",
+        "",
+        f"- reports: {analysis.get('reports', 0)}",
+        "",
+        "## Agents",
+        "",
+        "| suite | agent | passed | failed | unavailable | runnable pass rate |",
+        "| --- | --- | ---: | ---: | ---: | ---: |",
+    ]
+    for row in analysis.get("stats", []):
+        if not isinstance(row, dict):
+            continue
+        pass_rate = row.get("runnable_pass_rate")
+        pass_rate_text = "n/a" if pass_rate is None else str(pass_rate)
+        lines.append(
+            f"| {row.get('suite', '')} | {row.get('agent', '')} | {row.get('passed', 0)} | "
+            f"{row.get('failed', 0)} | {row.get('unavailable', 0)} | {pass_rate_text} |"
+        )
+    lines.extend(["", "## Failure Reasons", ""])
+    for reason, count in analysis.get("failure_reasons", {}).items():
+        lines.append(f"- {reason}: {count}")
+    lines.extend(["", "## Failed Check Symptoms", ""])
+    for symptom, count in analysis.get("failed_check_symptoms", {}).items():
+        lines.append(f"- {symptom}: {count}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Summarize AgentArena report pass rates.")
     parser.add_argument("--limit", type=int, default=30, help="Analyze the newest N reports.")
     parser.add_argument("--suite", default="", help="Optional suite name filter.")
+    parser.add_argument("--markdown", action="store_true", help="Print a compact Markdown summary instead of JSON.")
     args = parser.parse_args()
     paths = sorted(REPORTS.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
     if args.suite:
         paths = [path for path in paths if path.name.endswith(f"-{args.suite}.json")]
     paths = paths[: max(0, args.limit)]
-    print(json.dumps(analyze_reports(paths), ensure_ascii=False, indent=2))
+    analysis = analyze_reports(paths)
+    if args.markdown:
+        print(format_markdown(analysis), end="")
+    else:
+        print(json.dumps(analysis, ensure_ascii=False, indent=2))
     return 0
 
 

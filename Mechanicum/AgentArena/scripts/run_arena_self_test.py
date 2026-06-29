@@ -4,7 +4,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from analyze_reports import analyze_reports
+from analyze_reports import analyze_reports, format_markdown
 from report_metrics import failure_reason
 from run_arena import RunResult, analyze_artifact_orchestration, summarize_results, write_json
 
@@ -148,6 +148,9 @@ def main() -> int:
         post_check_failures = [item for item in analysis["recent_failures"] if item.get("failure_reason") == "post_run_checks"]
         if not post_check_failures or post_check_failures[0].get("failed_checks", [{}])[0].get("path") != "report.md":
             raise AssertionError(f"bad arena failed check summary: {analysis}")
+        markdown = format_markdown(analysis)
+        if "| smoke | shushunya |" not in markdown or "## Failure Reasons" not in markdown:
+            raise AssertionError(f"bad arena markdown summary: {markdown}")
     print("[ok] AgentArena runner")
     return 0
 
