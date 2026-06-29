@@ -168,6 +168,35 @@ def evidence_counts_by_source(notes: dict[str, Any]) -> dict[str, int]:
     return dict(counts)
 
 
+def source_match_tokens(text: str) -> set[str]:
+    stopwords = {"the", "and", "for", "with", "warhammer", "black", "library", "ebook", "novel", "local"}
+    return {token for token in "".join(char.lower() if char.isalnum() else " " for char in text).split() if len(token) > 2 and token not in stopwords}
+
+
+def evidence_count_for_source(source: dict[str, Any], evidence_counts: dict[str, int]) -> int:
+    title = str(source.get("title") or "")
+    if evidence_counts.get(title):
+        return evidence_counts[title]
+    source_tokens = source_match_tokens(
+        " ".join(
+            [
+                title,
+                str(source.get("local_path") or ""),
+                str(source.get("corpus_relative_path") or ""),
+            ]
+        )
+    )
+    if not source_tokens:
+        return 0
+    required = min(2, len(source_tokens))
+    total = 0
+    for evidence_title, count in evidence_counts.items():
+        evidence_tokens = source_match_tokens(evidence_title)
+        if evidence_tokens and len(source_tokens & evidence_tokens) >= required:
+            total += count
+    return total
+
+
 def source_inventory_lines(source_map: dict[str, Any], source_snapshots: dict[str, Any], notes: dict[str, Any] | None = None) -> list[str]:
     sources = [item for item in source_map.get("sources", []) if isinstance(item, dict)]
     if not sources:
@@ -197,7 +226,7 @@ def source_inventory_lines(source_map: dict[str, Any], source_snapshots: dict[st
             availability = f"not fetched: {skipped.get('reason') or 'skipped'}"
         else:
             availability = "not requested"
-        evidence_count = evidence_counts.get(title, 0)
+        evidence_count = evidence_count_for_source(source, evidence_counts)
         if evidence_count:
             direct_evidence = f"matched {evidence_count} event marker(s)"
         elif snapshot and snapshot.get("ok"):
