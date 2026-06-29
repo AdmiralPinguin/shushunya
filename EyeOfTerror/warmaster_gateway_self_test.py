@@ -1948,6 +1948,51 @@ def main() -> int:
             )
             if not revision_event or revision_event.get("payload", {}).get("step_ids") != revision_steps:
                 raise AssertionError(f"revision execution event missing from ledger: {revision_ledger}")
+            loop_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-research-loop-test"},
+            )
+            if not loop_task.get("ok"):
+                raise AssertionError(f"bad research loop task response: {loop_task}")
+            loop_result = request_json(
+                base + "/runs/warmaster-research-loop-test/research_loop_local",
+                {"timeout_sec": 30, "max_revision_cycles": 2},
+                timeout=90,
+            )
+            if (
+                not loop_result.get("ok")
+                or loop_result.get("phase") != "completed"
+                or not loop_result.get("cycles")
+                or loop_result.get("run_summary", {}).get("status") != "completed"
+                or loop_result.get("decision", {}).get("can_inspect_final") is not True
+            ):
+                raise AssertionError(f"research loop did not complete a ready run: {loop_result}")
+            loop_ledger = request_json(base + "/runs/warmaster-research-loop-test/ledger")
+            loop_events = [event.get("type") for event in loop_ledger.get("ledger", {}).get("events", [])]
+            if "research_loop_started" not in loop_events or "research_loop_finished" not in loop_events:
+                raise AssertionError(f"research loop events missing from ledger: {loop_ledger}")
+            repeated_loop_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-research-loop-repeat-test"},
+            )
+            repeated_loop_dir = Path(repeated_loop_task["run_dir"])
+            repeated_loop_ledger_path = repeated_loop_dir / "task_ledger.json"
+            repeated_loop_ledger = json.loads(repeated_loop_ledger_path.read_text(encoding="utf-8"))
+            repeated_loop_ledger["status"] = "failed"
+            repeated_loop_ledger.setdefault("result", {})["revision_plan"] = ledger_payload["result"]["revision_plan"]
+            write_json(repeated_loop_ledger_path, repeated_loop_ledger)
+            try:
+                repeated_result = request_json(
+                    base + "/runs/warmaster-research-loop-repeat-test/research_loop_local",
+                    {"timeout_sec": 30, "max_revision_cycles": 0},
+                    timeout=60,
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 409:
+                    raise
+                repeated_result = json.loads(exc.read().decode("utf-8"))
+            if repeated_result.get("ok") or repeated_result.get("stop_reason") != "revision_cycle_limit":
+                raise AssertionError(f"research loop did not honor revision cycle limit: {repeated_result}")
             unsafe_task = request_json(
                 base + "/task",
                 {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-unsafe-workspace-test"},

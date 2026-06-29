@@ -67,6 +67,10 @@ POST /runs/{task_id}/start_revision_local
 POST /runs/{task_id}/start_revision_http
 POST /runs/{task_id}/start_resume_local
 POST /runs/{task_id}/start_resume_http
+POST /runs/{task_id}/research_loop_local
+POST /runs/{task_id}/research_loop_http
+POST /runs/{task_id}/start_research_loop_local
+POST /runs/{task_id}/start_research_loop_http
 POST /recovery/start_resume_local
 POST /recovery/start_resume_http
 POST /runs/{task_id}/cancel
@@ -459,6 +463,15 @@ Direct background start endpoints such as `POST /runs/{task_id}/start_local`,
 `POST /runs/{task_id}/start_http`, `POST /runs/{task_id}/start_revision_*`, and
 `POST /runs/{task_id}/start_resume_*` return a polling `next_action` and
 executable `client_action` when a run starts or is already active.
+Research loop endpoints run the current package through start, resume, and
+revision decisions until the final package is ready or a bounded stop condition
+is hit. `research_loop_local` and `research_loop_http` are synchronous;
+`start_research_loop_local` and `start_research_loop_http` run in the
+background and return polling actions. Request bodies may include
+`max_revision_cycles` from `0` to `8`, `timeout_sec`, `host`, and
+`allow_resume`. The loop records `research_loop_*` ledger events and stops on
+completion, invalid revision plans, execution failure, repeated revision-plan
+fingerprints, or the revision cycle limit.
 Synchronous execution endpoints such as `POST /runs/{task_id}/execute_local`,
 `POST /runs/{task_id}/execute_http`, `POST /runs/{task_id}/resume_*`, and
 `POST /runs/{task_id}/execute_revision_*` include the post-execution

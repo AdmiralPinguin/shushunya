@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -1405,6 +1406,7 @@ def run_actions(
     resume_required = status == "interrupted"
     runnable = not terminal_locked and not revision_required and not resume_required and package_valid and oversight_valid
     revision_runnable = revision_required and revision_valid and package_valid and oversight_valid and status not in {"running", "cancelling", "queued", "corrupt"}
+    loop_runnable = runnable or revision_runnable or (resume_required and package_valid and oversight_valid)
     actions = {
         "can_preflight_local": preflightable,
         "can_preflight_http": preflightable,
@@ -1414,6 +1416,8 @@ def run_actions(
         "can_resume": status == "interrupted" and not revision_required and package_valid and oversight_valid,
         "can_execute_revision": revision_runnable,
         "can_start_revision": revision_runnable,
+        "can_research_loop": loop_runnable,
+        "can_start_research_loop": loop_runnable,
         "force_required_for_rerun": status == "completed" and not revision_required,
     }
     if status == "corrupt":
@@ -2673,6 +2677,218 @@ def revision_step_ids_from_run(run_dir: Path) -> list[str]:
     return requested
 
 
+def revision_plan_fingerprint(summary: dict[str, Any]) -> str:
+    revision_summary = summary.get("revision_plan_summary") if isinstance(summary.get("revision_plan_summary"), dict) else {}
+    revision_plan = summary.get("revision_plan") if isinstance(summary.get("revision_plan"), dict) else {}
+    payload = {
+        "status": str(summary.get("status") or ""),
+        "required": bool(revision_summary.get("required") or revision_plan.get("required")),
+        "valid": bool(revision_summary.get("valid")),
+        "step_ids": revision_summary.get("step_ids") if isinstance(revision_summary.get("step_ids"), list) else [],
+        "workers": revision_summary.get("workers") if isinstance(revision_summary.get("workers"), list) else [],
+        "errors": revision_summary.get("errors") if isinstance(revision_summary.get("errors"), list) else [],
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def record_research_loop_event(run_dir: Path, event_type: str, payload: dict[str, Any]) -> None:
+    ledger_path = run_dir / "task_ledger.json"
+    if not ledger_path.exists():
+        return
+    try:
+        TaskLedger.load(ledger_path).record_event(event_type, payload)
+    except Exception:
+        pass
+
+
+def execute_run_cycle(
+    run_dir: Path,
+    run_mode: str,
+    host: str,
+    timeout_sec: int,
+    operation: str,
+) -> dict[str, Any]:
+    workspace_root = resolve_run_child_path(run_dir, "", "work")
+    step_ids: list[str] | None = None
+    execution_mode = "full"
+    if operation == "revision":
+        step_ids = revision_step_ids_from_run(run_dir)
+        execution_mode = "revision"
+    elif operation == "resume":
+        step_ids = resume_step_ids_from_run(run_dir)
+        execution_mode = "resume"
+    if run_mode == "local":
+        return execute_local_run(
+            REPO_ROOT,
+            run_dir,
+            workspace_root,
+            timeout_sec=timeout_sec,
+            step_ids=step_ids,
+            execution_mode=execution_mode,
+        )
+    return execute_http_run(
+        run_dir,
+        host=host,
+        timeout_sec=timeout_sec,
+        workspace_root=None,
+        step_ids=step_ids,
+        execution_mode=execution_mode,
+    )
+
+
+def research_loop_run(
+    run_root: Path,
+    task_id: str,
+    run_mode: str = "local",
+    host: str = "127.0.0.1",
+    timeout_sec: int = 1800,
+    max_revision_cycles: int = 3,
+    allow_resume: bool = True,
+    claim_active: bool = True,
+) -> dict[str, Any]:
+    if run_mode not in {"local", "http"}:
+        raise ValueError("run_mode must be local or http")
+    host = validate_service_host(host)
+    timeout_sec = max(1, min(int(timeout_sec), 7200))
+    max_revision_cycles = max(0, min(int(max_revision_cycles), 8))
+    run_dir = run_root / task_id
+    if not run_dir.exists():
+        return {"ok": False, "phase": "missing_run", "task_id": task_id, "error": "run not found"}
+    if claim_active:
+        with ACTIVE_RUNS_LOCK:
+            if task_id in ACTIVE_RUNS:
+                return {
+                    "ok": False,
+                    "phase": "already_active",
+                    "task_id": task_id,
+                    "error": "run already active",
+                    "snapshot": run_snapshot(run_dir, event_limit=5, events_after=0),
+                }
+            ACTIVE_RUNS.add(task_id)
+    cycles: list[dict[str, Any]] = []
+    seen_revision_fingerprints: set[str] = set()
+    revision_cycles = 0
+    stop_reason = "unknown"
+    try:
+        record_research_loop_event(
+            run_dir,
+            "research_loop_started",
+            {
+                "mode": f"research_loop_{run_mode}",
+                "max_revision_cycles": max_revision_cycles,
+                "allow_resume": allow_resume,
+            },
+        )
+        while True:
+            summary = run_summary(run_dir)
+            actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
+            status = str(summary.get("status") or "")
+            cycle: dict[str, Any] = {
+                "index": len(cycles),
+                "status": status,
+                "next_action": actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {},
+            }
+            if actions.get("can_start"):
+                operation = "full"
+            elif allow_resume and actions.get("can_resume"):
+                operation = "resume"
+            elif actions.get("can_execute_revision"):
+                if revision_cycles >= max_revision_cycles:
+                    stop_reason = "revision_cycle_limit"
+                    cycle["stop_reason"] = stop_reason
+                    cycles.append(cycle)
+                    break
+                fingerprint = revision_plan_fingerprint(summary)
+                if fingerprint in seen_revision_fingerprints:
+                    stop_reason = "repeated_revision_plan"
+                    cycle["stop_reason"] = stop_reason
+                    cycles.append(cycle)
+                    break
+                seen_revision_fingerprints.add(fingerprint)
+                revision_cycles += 1
+                operation = "revision"
+                cycle["revision_cycle"] = revision_cycles
+                cycle["revision_fingerprint"] = fingerprint
+            elif status == "completed":
+                stop_reason = "completed"
+                cycle["stop_reason"] = stop_reason
+                cycles.append(cycle)
+                break
+            elif bool(summary.get("revision_plan_summary", {}).get("required")) and not actions.get("can_execute_revision"):
+                stop_reason = "invalid_revision"
+                cycle["stop_reason"] = stop_reason
+                cycles.append(cycle)
+                break
+            else:
+                stop_reason = "needs_attention"
+                cycle["stop_reason"] = stop_reason
+                cycles.append(cycle)
+                break
+            cycle["operation"] = operation
+            record_research_loop_event(
+                run_dir,
+                "research_loop_cycle_started",
+                {"cycle": len(cycles), "operation": operation, "revision_cycle": revision_cycles},
+            )
+            execution = execute_run_cycle(run_dir, run_mode, host, timeout_sec, operation)
+            cycle["execution_ok"] = bool(execution.get("ok"))
+            cycle["execution_status"] = str(execution.get("status") or "")
+            cycle["execution_mode"] = str(execution.get("mode") or operation)
+            if isinstance(execution.get("step_ids"), list):
+                cycle["step_ids"] = execution.get("step_ids")
+            cycles.append(cycle)
+            record_research_loop_event(
+                run_dir,
+                "research_loop_cycle_finished",
+                {
+                    "cycle": cycle["index"],
+                    "operation": operation,
+                    "ok": bool(execution.get("ok")),
+                    "status": str(execution.get("status") or ""),
+                    "step_ids": cycle.get("step_ids", []),
+                },
+            )
+            if not execution.get("ok"):
+                stop_reason = "execution_failed"
+                break
+        final_summary = run_summary(run_dir)
+        final_view = orchestration_view_fields(final_summary, task_id=task_id)
+        ok = stop_reason == "completed" or (
+            str(final_summary.get("status") or "") == "completed"
+            and not bool(final_summary.get("revision_plan_summary", {}).get("required"))
+        )
+        record_research_loop_event(
+            run_dir,
+            "research_loop_finished",
+            {
+                "ok": ok,
+                "stop_reason": stop_reason,
+                "cycles": len(cycles),
+                "revision_cycles": revision_cycles,
+                "final_status": str(final_summary.get("status") or ""),
+            },
+        )
+        return {
+            "ok": ok,
+            "phase": "completed" if ok else stop_reason,
+            "task_id": task_id,
+            "run_mode": run_mode,
+            "stop_reason": stop_reason,
+            "cycles": cycles,
+            "revision_cycles": revision_cycles,
+            "max_revision_cycles": max_revision_cycles,
+            "run_summary": final_summary,
+            "decision": final_view.get("decision", {}),
+            "display": final_view.get("display", {}),
+            "next_action": final_view.get("next_action", {}),
+            "client_action": final_view.get("client_action", {}),
+        }
+    finally:
+        if claim_active:
+            with ACTIVE_RUNS_LOCK:
+                ACTIVE_RUNS.discard(task_id)
+
+
 def resume_step_ids_from_run(run_dir: Path) -> list[str]:
     status, status_error = load_json_object(run_dir / "status.json", "status")
     if status_error:
@@ -3273,6 +3489,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "run_step_artifact_read",
             "run_execution_preflight",
             "restricted_step_execution",
+            "research_revision_loop",
             "recoverable_run_listing",
             "doctor",
         ],
@@ -3337,6 +3554,10 @@ def gateway_capabilities() -> dict[str, Any]:
             "POST /runs/{task_id}/start_revision_http",
             "POST /runs/{task_id}/start_resume_local",
             "POST /runs/{task_id}/start_resume_http",
+            "POST /runs/{task_id}/research_loop_local",
+            "POST /runs/{task_id}/research_loop_http",
+            "POST /runs/{task_id}/start_research_loop_local",
+            "POST /runs/{task_id}/start_research_loop_http",
             "POST /recovery/start_resume_local",
             "POST /recovery/start_resume_http",
             "POST /runs/{task_id}/cancel",
@@ -3360,12 +3581,14 @@ def gateway_actions() -> dict[str, Any]:
         "can_bulk_start_recoverable_runs": True,
         "can_poll_global_events": True,
         "can_execute_revisions": True,
+        "can_run_research_loops": True,
         "can_execute_step_subsets": True,
         "can_cancel_runs": True,
         "can_check_brigade_readiness": True,
         "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
         "prepare_task_flow": ["POST /orchestrate", "POST /orchestrate_start", "GET /runs/{task_id}/orchestration?events_after=0"],
         "chat_task_flow": ["POST /orchestrate_run", "GET /runs/{task_id}/orchestration?events_after=0"],
+        "research_loop_flow": ["POST /orchestrate", "POST /runs/{task_id}/start_research_loop_http", "GET /runs/{task_id}/orchestration?events_after=0"],
         "polling": ["GET /events?after=0", "GET /runs/{task_id}/snapshot?events_after=0"],
         "maintenance": ["GET /recovery", "POST /recovery/start_resume_local", "POST /recovery/start_resume_http", "POST /recover_stale"],
         "run_inspection": [
@@ -4136,6 +4359,85 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             "client_action": executable_client_action(task_id, poll_action),
                         },
                     )
+                    return
+                research_loop_modes = {
+                    "research_loop_local",
+                    "research_loop_http",
+                    "start_research_loop_local",
+                    "start_research_loop_http",
+                }
+                if len(parts) == 3 and parts[0] == "runs" and parts[2] in research_loop_modes:
+                    task_id = parts[1]
+                    run_dir = run_root / task_id
+                    if not run_dir.exists():
+                        response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
+                        return
+                    run_mode = "local" if parts[2].endswith("_local") else "http"
+                    host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
+                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
+                    raw_max_revision_cycles = payload.get("max_revision_cycles", 3)
+                    max_revision_cycles = max(0, min(int(raw_max_revision_cycles), 8))
+                    allow_resume = bool(payload.get("allow_resume", True))
+                    if parts[2].startswith("start_"):
+                        executor = lambda: research_loop_run(
+                            run_root,
+                            task_id,
+                            run_mode=run_mode,
+                            host=host,
+                            timeout_sec=timeout_sec,
+                            max_revision_cycles=max_revision_cycles,
+                            allow_resume=allow_resume,
+                            claim_active=False,
+                        )
+                        record_research_loop_event(
+                            run_dir,
+                            "research_loop_background_requested",
+                            {
+                                "mode": parts[2],
+                                "max_revision_cycles": max_revision_cycles,
+                                "allow_resume": allow_resume,
+                            },
+                        )
+                        started = start_background(task_id, executor)
+                        if not started:
+                            poll_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "run is already active"}
+                            response(
+                                self,
+                                409,
+                                {
+                                    "ok": False,
+                                    "error": "run already active",
+                                    "task_id": task_id,
+                                    "next_action": poll_action,
+                                    "client_action": executable_client_action(task_id, poll_action),
+                                },
+                            )
+                            return
+                        poll_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "research loop started in background"}
+                        response(
+                            self,
+                            202,
+                            {
+                                "ok": True,
+                                "task_id": task_id,
+                                "status": "started",
+                                "operation": "research_loop",
+                                "run_mode": run_mode,
+                                "next_action": poll_action,
+                                "client_action": executable_client_action(task_id, poll_action),
+                            },
+                        )
+                        return
+                    loop_result = research_loop_run(
+                        run_root,
+                        task_id,
+                        run_mode=run_mode,
+                        host=host,
+                        timeout_sec=timeout_sec,
+                        max_revision_cycles=max_revision_cycles,
+                        allow_resume=allow_resume,
+                    )
+                    response(self, 200 if loop_result.get("ok") else 409, loop_result)
                     return
                 execution_modes = {
                     "preflight_local",
