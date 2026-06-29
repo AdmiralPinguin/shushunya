@@ -54,6 +54,8 @@ def executable_client_action(action: dict[str, Any]) -> dict[str, Any]:
 def worker_display(worker_name: str, status: str, detail: str = "") -> dict[str, Any]:
     severity = "info"
     headline = f"{worker_name} is ready"
+    if status == "task_list":
+        headline = f"{worker_name} task history"
     if status in {"running", "cancelling"}:
         headline = f"{worker_name} task is running"
     elif status in {"completed", "ready", "passed", "passed_with_warnings"}:
@@ -70,6 +72,8 @@ def worker_display(worker_name: str, status: str, detail: str = "") -> dict[str,
 
 
 def worker_next_action(task_id: str, status: str) -> dict[str, Any]:
+    if status == "task_list":
+        return {"kind": "inspect_tasks", "method": "GET", "endpoint": "GET /tasks", "body": {}, "reason": "inspect worker task history"}
     if not task_id:
         return {"kind": "inspect_capabilities", "method": "GET", "endpoint": "GET /capabilities", "body": {}, "reason": "inspect worker capabilities"}
     if status in {"running", "queued", "cancelling"}:
@@ -230,10 +234,10 @@ def make_handler(
                         "ok": True,
                         "worker": worker_name,
                         "summary": {"total": len(task_list), "by_status": by_status},
-                        "display": worker_display(worker_name, "available", f"{len(task_list)} recorded tasks"),
                         "tasks": task_list,
                     },
                     worker_name,
+                    status="task_list",
                 )
                 response(self, 200, payload)
                 return

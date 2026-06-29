@@ -37,6 +37,8 @@
 - Worker runtime responses expose compact task `summary`, `phase`, `decision`,
   `display`, `next_action`, and executable `client_action` fields for
   Warmaster/admin worker-state screens.
+- Worker task-list responses use a dedicated `task_list` phase and executable
+  `/tasks` client action for worker task-history screens.
 - The shared worker runtime rejects `/run` requests without `task_id` so every
   worker step remains pollable and cancellable.
 - The shared worker runtime rejects late cancellation of terminal worker tasks

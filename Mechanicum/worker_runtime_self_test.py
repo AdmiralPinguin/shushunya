@@ -138,8 +138,9 @@ def main() -> int:
                 not task_list.get("ok")
                 or not any(item.get("task_id") == "runtime-test" for item in task_list.get("tasks", []))
                 or task_list.get("summary", {}).get("total", 0) < 1
-                or task_list.get("display", {}).get("headline") != "NoosphericExtractor is ready"
-                or task_list.get("client_action", {}).get("path") != "/capabilities"
+                or task_list.get("display", {}).get("headline") != "NoosphericExtractor task history"
+                or task_list.get("client_action", {}).get("path") != "/tasks"
+                or task_list.get("decision", {}).get("recommended_kind") != "inspect_tasks"
             ):
                 raise AssertionError(f"bad task list response: {task_list}")
             try:

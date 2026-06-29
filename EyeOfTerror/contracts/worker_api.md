@@ -135,11 +135,12 @@ Warmaster preflight identity checks.
 }
 ```
 
-`GET /tasks` includes a compact `summary` by status plus a `display` object for
-worker task-list screens. `GET /tasks/{task_id}`, `/run`, and cancellation
-responses include `phase`, `decision`, `display`, `next_action`, and executable
-`client_action` fields so Warmaster or an admin client can render worker state
-without interpreting raw task dictionaries.
+`GET /tasks` includes a compact `summary` by status plus a `task_list` phase,
+`display` headline for worker task-history screens, and an executable
+`client_action` pointing back to `/tasks`. `GET /tasks/{task_id}`, `/run`, and
+cancellation responses include `phase`, `decision`, `display`, `next_action`,
+and executable `client_action` fields so Warmaster or an admin client can render
+worker state without interpreting raw task dictionaries.
 
 ## POST /tasks/{task_id}/cancel
 
