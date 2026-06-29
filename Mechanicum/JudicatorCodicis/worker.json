@@ -1,0 +1,8 @@
+{
+  "name": "JudicatorCodicis",
+  "status": "prototype",
+  "port": 7019,
+  "role": "code review critic",
+  "api_contract": "EyeOfTerror/contracts/worker_api.md",
+  "capabilities": ["code_review", "scope_review", "test_evidence_review"]
+}

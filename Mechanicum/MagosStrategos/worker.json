@@ -1,0 +1,8 @@
+{
+  "name": "MagosStrategos",
+  "status": "prototype",
+  "port": 7016,
+  "role": "code change planner",
+  "api_contract": "EyeOfTerror/contracts/worker_api.md",
+  "capabilities": ["change_planning", "scope_control", "risk_mapping"]
+}

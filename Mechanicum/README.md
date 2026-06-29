@@ -23,6 +23,12 @@ from governors and return structured outputs.
 | 7012 | OcularisRenderium | Planned JavaScript render/screenshot worker |
 | 7013 | CorpusIngestor | Local corpus indexer |
 | 7014 | CogitatorCodewright | Code worker |
+| 7015 | LogisRepository | Code repository surveyor |
+| 7016 | MagosStrategos | Code change planner |
+| 7017 | FerrumPatchwright | Code patch manifest builder |
+| 7018 | OrdinatusVerifier | Code verification planner |
+| 7019 | JudicatorCodicis | Code review critic |
+| 7020 | SealwrightFinalis | Code final handoff packager |
 
 ## Current Rule
 

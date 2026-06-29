@@ -535,6 +535,14 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   it consumes `source_snapshots.json`, writes `rendered_snapshots.json`, uses
   optional Playwright rendering when enabled, and otherwise records structured
   browser-runtime gaps instead of hiding render needs.
+- `Ceraxia` runs as the active code governor on port 7104. Code tasks are now
+  routed to a named six-worker Mechanicum brigade instead of the disabled
+  legacy `CogitatorCodewrightGovernor`.
+- The Ceraxia code brigade uses `LogisRepository`, `MagosStrategos`,
+  `FerrumPatchwright`, `OrdinatusVerifier`, `JudicatorCodicis`, and
+  `SealwrightFinalis` on ports 7015-7020. They currently share the
+  `CogitatorCodewright` execution core while preserving separate worker
+  identities, contracts, ports, and review handoffs.
 - The pipeline records inaccessible primary books as `corpus_requirements`;
   operators must provide legitimate local text files when full primary evidence
   is required.
@@ -552,4 +560,6 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - Add more playbooks only when they are task-class patterns, not one-off hacks.
 - Add durable background execution recovery and stronger interruption for
   already-running worker calls where the underlying worker supports it.
-- Add code and image governors instead of routing unsupported task classes to Iskandar.
+- Split Ceraxia's shared code-worker core into deeper implementations that can
+  apply patches, run task-specific tests, and feed failed-test repair loops.
+- Add an image governor instead of routing unsupported image tasks to Iskandar.

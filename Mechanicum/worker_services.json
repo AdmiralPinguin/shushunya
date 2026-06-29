@@ -19,6 +19,36 @@
     "module_path": "Mechanicum/CogitatorCodewright",
     "module": "cogitator_codewright"
   },
+  "LogisRepository": {
+    "port": 7015,
+    "module_path": "Mechanicum/LogisRepository",
+    "module": "logis_repository"
+  },
+  "MagosStrategos": {
+    "port": 7016,
+    "module_path": "Mechanicum/MagosStrategos",
+    "module": "magos_strategos"
+  },
+  "FerrumPatchwright": {
+    "port": 7017,
+    "module_path": "Mechanicum/FerrumPatchwright",
+    "module": "ferrum_patchwright"
+  },
+  "OrdinatusVerifier": {
+    "port": 7018,
+    "module_path": "Mechanicum/OrdinatusVerifier",
+    "module": "ordinatus_verifier"
+  },
+  "JudicatorCodicis": {
+    "port": 7019,
+    "module_path": "Mechanicum/JudicatorCodicis",
+    "module": "judicator_codicis"
+  },
+  "SealwrightFinalis": {
+    "port": 7020,
+    "module_path": "Mechanicum/SealwrightFinalis",
+    "module": "sealwright_finalis"
+  },
   "OcularisRenderium": {
     "port": 7012,
     "module_path": "Mechanicum/OcularisRenderium",

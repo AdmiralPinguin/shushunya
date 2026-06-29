@@ -1,0 +1,8 @@
+{
+  "name": "SealwrightFinalis",
+  "status": "prototype",
+  "port": 7020,
+  "role": "code final handoff packager",
+  "api_contract": "EyeOfTerror/contracts/worker_api.md",
+  "capabilities": ["final_handoff", "deliverable_manifest", "blocker_packaging"]
+}

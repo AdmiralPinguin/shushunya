@@ -24,6 +24,13 @@ EXCLUDED_DIRS = {
 }
 
 
+WORKER_NAME = "CogitatorCodewright"
+
+
+def worker_name() -> str:
+    return WORKER_NAME
+
+
 def sandbox_path(workspace_root: Path, path: str) -> Path:
     if not path.startswith("/work/"):
         raise ValueError(f"unsupported sandbox path: {path}")
@@ -117,7 +124,7 @@ def run_repository_survey(request: dict[str, Any], workspace_root: Path, output_
     write_json(workspace_root, output_path, survey)
     return {
         "ok": True,
-        "worker": "CogitatorCodewright",
+        "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": "completed",
         "summary": survey["summary"],
@@ -155,7 +162,7 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
     write_text(workspace_root, output_path, content + "\n")
     return {
         "ok": True,
-        "worker": "CogitatorCodewright",
+        "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": "completed",
         "summary": "Code change plan written.",
@@ -187,7 +194,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
     write_json(workspace_root, output_path, manifest)
     return {
         "ok": True,
-        "worker": "CogitatorCodewright",
+        "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": "completed",
         "summary": "Patch manifest written as auditable handoff.",
@@ -213,7 +220,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
     write_json(workspace_root, output_path, report)
     return {
         "ok": True,
-        "worker": "CogitatorCodewright",
+        "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": "completed",
         "summary": "Verification report written.",
@@ -248,14 +255,14 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "steps": [
                 {
                     "step_id": "implementation",
-                    "worker": "CogitatorCodewright",
+                    "worker": "FerrumPatchwright",
                     "reason": "Enable or hand off to a source mutation worker before claiming implementation complete.",
                     "source": "code_review",
                     "priority": "blocker",
                 },
                 {
                     "step_id": "verification",
-                    "worker": "CogitatorCodewright",
+                    "worker": "OrdinatusVerifier",
                     "reason": "Run concrete verification after source mutation.",
                     "source": "code_review",
                     "priority": "blocker",
@@ -266,7 +273,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     write_json(workspace_root, output_path, review)
     return {
         "ok": True,
-        "worker": "CogitatorCodewright",
+        "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": "needs_revision" if blockers else "passed_with_warnings",
         "summary": f"Code review written with {len(blockers)} blocker(s).",
@@ -298,7 +305,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
     write_json(workspace_root, output_path, manifest)
     return {
         "ok": True,
-        "worker": "CogitatorCodewright",
+        "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": status,
         "summary": manifest["summary"],
@@ -322,7 +329,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     }
     handler = handlers.get(step_id)
     if handler is None:
-        return {"ok": False, "worker": "CogitatorCodewright", "error": f"unsupported step_id: {step_id}"}
+        return {"ok": False, "worker": worker_name(), "error": f"unsupported step_id: {step_id}"}
     return handler(request, workspace_root, output_path)
 
 

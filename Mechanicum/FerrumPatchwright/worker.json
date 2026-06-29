@@ -1,0 +1,8 @@
+{
+  "name": "FerrumPatchwright",
+  "status": "prototype",
+  "port": 7017,
+  "role": "code patch manifest builder",
+  "api_contract": "EyeOfTerror/contracts/worker_api.md",
+  "capabilities": ["patch_manifest", "implementation_handoff", "changed_file_intent"]
+}

@@ -94,6 +94,36 @@
       "name": "CogitatorCodewright",
       "role": "code task worker",
       "path": "Mechanicum/CogitatorCodewright"
+    },
+    "7015": {
+      "name": "LogisRepository",
+      "role": "code repository surveyor",
+      "path": "Mechanicum/LogisRepository"
+    },
+    "7016": {
+      "name": "MagosStrategos",
+      "role": "code change planner",
+      "path": "Mechanicum/MagosStrategos"
+    },
+    "7017": {
+      "name": "FerrumPatchwright",
+      "role": "code patch manifest builder",
+      "path": "Mechanicum/FerrumPatchwright"
+    },
+    "7018": {
+      "name": "OrdinatusVerifier",
+      "role": "code verification planner",
+      "path": "Mechanicum/OrdinatusVerifier"
+    },
+    "7019": {
+      "name": "JudicatorCodicis",
+      "role": "code review critic",
+      "path": "Mechanicum/JudicatorCodicis"
+    },
+    "7020": {
+      "name": "SealwrightFinalis",
+      "role": "code final handoff packager",
+      "path": "Mechanicum/SealwrightFinalis"
     }
   }
 }

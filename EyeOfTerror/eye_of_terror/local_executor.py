@@ -24,6 +24,12 @@ WORKER_COMMANDS = {
     "ReductorVerifier": ("Mechanicum/ReductorVerifier", "Mechanicum/ReductorVerifier/reductor_verifier.py"),
     "FabricatorFinalis": ("Mechanicum/FabricatorFinalis", "Mechanicum/FabricatorFinalis/fabricator_finalis.py"),
     "CogitatorCodewright": ("Mechanicum/CogitatorCodewright", "Mechanicum/CogitatorCodewright/cogitator_codewright.py"),
+    "LogisRepository": ("Mechanicum/LogisRepository", "Mechanicum/LogisRepository/logis_repository.py"),
+    "MagosStrategos": ("Mechanicum/MagosStrategos", "Mechanicum/MagosStrategos/magos_strategos.py"),
+    "FerrumPatchwright": ("Mechanicum/FerrumPatchwright", "Mechanicum/FerrumPatchwright/ferrum_patchwright.py"),
+    "OrdinatusVerifier": ("Mechanicum/OrdinatusVerifier", "Mechanicum/OrdinatusVerifier/ordinatus_verifier.py"),
+    "JudicatorCodicis": ("Mechanicum/JudicatorCodicis", "Mechanicum/JudicatorCodicis/judicator_codicis.py"),
+    "SealwrightFinalis": ("Mechanicum/SealwrightFinalis", "Mechanicum/SealwrightFinalis/sealwright_finalis.py"),
 }
 
 

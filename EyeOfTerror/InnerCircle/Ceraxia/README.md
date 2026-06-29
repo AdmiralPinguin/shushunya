@@ -9,15 +9,17 @@ handoff packaging.
 ## Default Worker Pipeline
 
 ```text
-CogitatorCodewright(repository_survey)
-  -> CogitatorCodewright(change_planning)
-  -> CogitatorCodewright(implementation)
-  -> CogitatorCodewright(verification)
-  -> CogitatorCodewright(code_review)
-  -> CogitatorCodewright(finalize)
+LogisRepository(repository_survey)
+  -> MagosStrategos(change_planning)
+  -> FerrumPatchwright(implementation)
+  -> OrdinatusVerifier(verification)
+  -> JudicatorCodicis(code_review)
+  -> SealwrightFinalis(finalize)
 ```
 
 ## Current Boundary
 
-The first prototype produces auditable coding artifacts and a safe handoff. A
-future patch/apply worker should take over direct repository mutation.
+The first prototype produces auditable coding artifacts and a safe handoff.
+The named workers currently share the same execution core, which keeps the
+protocol stable while their internals are split into stronger specialized
+implementations.

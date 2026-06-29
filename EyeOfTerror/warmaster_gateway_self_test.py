@@ -642,7 +642,8 @@ def main() -> int:
                 or code_task.get("status", {}).get("governor") != "Ceraxia"
                 or code_task.get("status", {}).get("step_count") != 6
                 or code_task.get("status", {}).get("steps", [])[0].get("step_id") != "repository_survey"
-                or code_task.get("status", {}).get("steps", [])[0].get("port") != 7014
+                or code_task.get("status", {}).get("steps", [])[0].get("worker") != "LogisRepository"
+                or code_task.get("status", {}).get("steps", [])[0].get("port") != 7015
                 or code_task.get("actions", {}).get("next_action", {}).get("kind") != "preflight_run"
             ):
                 raise AssertionError(f"code route should create a Ceraxia run: {code_task}")

@@ -26,7 +26,15 @@ def main() -> int:
         step.worker
         for step in build_code_task_contract("почини python приложение", task_id="ceraxia-service-test").worker_plan
     ]
-    if required_workers() != ["CogitatorCodewright"] or set(contract_workers) != {"CogitatorCodewright"}:
+    expected_workers = [
+        "LogisRepository",
+        "MagosStrategos",
+        "FerrumPatchwright",
+        "OrdinatusVerifier",
+        "JudicatorCodicis",
+        "SealwrightFinalis",
+    ]
+    if required_workers() != expected_workers or contract_workers != expected_workers:
         raise AssertionError(f"Ceraxia required workers drifted from contract plan: {required_workers()} {contract_workers}")
     pipeline = pipeline_summary()
     if (
