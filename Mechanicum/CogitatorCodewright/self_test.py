@@ -85,6 +85,26 @@ CERAXIA_VERIFY: python -m py_compile generated.py
 """
 
 
+def multi_file_goal() -> str:
+    return """создай несколько python файлов и проверь их вместе
+
+CERAXIA_FILES:
+{
+  "files": [
+    {
+      "path": "calc.py",
+      "content": "def add(left, right):\\n    return left + right\\n"
+    },
+    {
+      "path": "test_calc.py",
+      "content": "import unittest\\nfrom calc import add\\n\\nclass CalcTest(unittest.TestCase):\\n    def test_add(self):\\n        self.assertEqual(add(2, 3), 5)\\n\\nif __name__ == '__main__':\\n    unittest.main()\\n"
+    }
+  ],
+  "verification_commands": ["python -m unittest test_calc.py"]
+}
+"""
+
+
 def repair_colon_goal() -> str:
     return """создай python файл и исправь если проверка найдет синтаксис
 
@@ -176,6 +196,20 @@ def main() -> int:
             raise AssertionError("marker-synthesized create file task wrote wrong content")
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"marker final manifest should preserve verification evidence: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        final = run_pipeline(root / "work", goal=multi_file_goal(), target_repo_root=target_repo)
+        calc = target_repo / "calc.py"
+        test_calc = target_repo / "test_calc.py"
+        if final.get("status") != "ready" or not calc.exists() or not test_calc.exists():
+            raise AssertionError(f"multi-file marker task should be ready: {final}")
+        changed_paths = {item.get("path") for item in final.get("changed_files", []) if isinstance(item, dict)}
+        if changed_paths != {"calc.py", "test_calc.py"}:
+            raise AssertionError(f"multi-file marker should preserve both changed files: {final}")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 2:
+            raise AssertionError(f"multi-file final manifest should preserve verification evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

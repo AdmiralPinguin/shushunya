@@ -66,6 +66,26 @@ return 2
 CERAXIA_VERIFY: python -m py_compile module.py
 ```
 
+For small multi-file tasks, Ceraxia can synthesize a patch spec from a JSON
+file list:
+
+```text
+CERAXIA_FILES:
+{
+  "files": [
+    {
+      "path": "calc.py",
+      "content": "def add(left, right):\n    return left + right\n"
+    },
+    {
+      "path": "test_calc.py",
+      "content": "import unittest\nfrom calc import add\n\nclass CalcTest(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n"
+    }
+  ],
+  "verification_commands": ["python -m unittest test_calc.py"]
+}
+```
+
 The first verifier repair loop is intentionally narrow: when `py_compile`
 reports `SyntaxError: expected ':'` for a changed Python file, Ceraxia can add
 the missing colon to the failing line, rerun verification, and record the repair

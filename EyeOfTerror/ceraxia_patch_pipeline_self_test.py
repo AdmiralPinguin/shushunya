@@ -83,6 +83,44 @@ CERAXIA_VERIFY: python -m py_compile generated.py
         temp_root = Path(temp_dir)
         target_repo = temp_root / "repo"
         target_repo.mkdir()
+        task = f"""создай несколько python файлов и проверь их вместе
+CERAXIA_TARGET_REPO: {target_repo}
+CERAXIA_FILES:
+{{
+  "files": [
+    {{
+      "path": "calc.py",
+      "content": "def add(left, right):\\n    return left + right\\n"
+    }},
+    {{
+      "path": "test_calc.py",
+      "content": "import unittest\\nfrom calc import add\\n\\nclass CalcTest(unittest.TestCase):\\n    def test_add(self):\\n        self.assertEqual(add(2, 3), 5)\\n\\nif __name__ == '__main__':\\n    unittest.main()\\n"
+    }}
+  ],
+  "verification_commands": ["python -m unittest test_calc.py"]
+}}
+"""
+        run_root = temp_root / "runs"
+        task_id = "ceraxia-multi-file-marker-pipeline"
+        prepared = prepare_task(task, task_id, run_root, governor_transport="local")
+        if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
+            raise AssertionError(f"Ceraxia multi-file task did not prepare correctly: {prepared}")
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        if not result.get("ok") or result.get("phase") != "completed":
+            raise AssertionError(f"Ceraxia multi-file pipeline did not complete: {result}")
+        manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        changed_paths = {item.get("path") for item in manifest.get("changed_files", []) if isinstance(item, dict)}
+        if manifest.get("status") != "ready" or changed_paths != {"calc.py", "test_calc.py"}:
+            raise AssertionError(f"Ceraxia multi-file final manifest should be ready with both files: {manifest}")
+        if not (target_repo / "calc.py").exists() or not (target_repo / "test_calc.py").exists():
+            raise AssertionError("Ceraxia multi-file pipeline did not write both target files")
+        if manifest.get("verification_summary", {}).get("executed_count", 0) < 2:
+            raise AssertionError(f"Ceraxia multi-file manifest lacks verification evidence: {manifest}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_root = Path(temp_dir)
+        target_repo = temp_root / "repo"
+        target_repo.mkdir()
         task = f"""создай python файл и исправь если py_compile найдет простую синтаксическую ошибку
 CERAXIA_TARGET_REPO: {target_repo}
 CERAXIA_CREATE_FILE: repair_me.py

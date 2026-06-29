@@ -146,7 +146,8 @@ def extract_json_after_marker(text: str, marker: str) -> dict[str, Any]:
     try:
         payload, _ = decoder.raw_decode(payload_text)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"CERAXIA_PATCH JSON is invalid: {exc}") from exc
+        label = marker.rstrip(":")
+        raise ValueError(f"{label} JSON is invalid: {exc}") from exc
     return payload if isinstance(payload, dict) else {}
 
 
@@ -165,6 +166,7 @@ def marker_block(text: str, marker: str) -> str:
     stop_markers = [
         "\nCERAXIA_TARGET_REPO:",
         "\nCERAXIA_PATCH:",
+        "\nCERAXIA_FILES:",
         "\nCERAXIA_CREATE_FILE:",
         "\nCERAXIA_FILE_CONTENT:",
         "\nCERAXIA_REPLACE_IN_FILE:",
@@ -189,7 +191,47 @@ def verification_commands_from_markers(goal: str) -> list[str]:
     return commands
 
 
+def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
+    payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
+    if not payload:
+        return {}
+    files = payload.get("files")
+    if not isinstance(files, list) or not files:
+        raise ValueError("CERAXIA_FILES must contain a non-empty files list")
+    operations: list[dict[str, Any]] = []
+    for index, item in enumerate(files):
+        if not isinstance(item, dict):
+            raise ValueError(f"CERAXIA_FILES item {index} must be an object")
+        path = item.get("path")
+        content = item.get("content")
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError(f"CERAXIA_FILES item {index} requires a non-empty string path")
+        if not isinstance(content, str):
+            raise ValueError(f"CERAXIA_FILES item {index} requires string content")
+        operation: dict[str, Any] = {
+            "type": "write_file",
+            "path": path,
+            "content": content,
+        }
+        if "overwrite" in item:
+            operation["overwrite"] = bool(item.get("overwrite"))
+        operations.append(operation)
+    verification_commands = payload.get("verification_commands", [])
+    if verification_commands is None:
+        verification_commands = []
+    if not isinstance(verification_commands, list) or not all(isinstance(item, str) for item in verification_commands):
+        raise ValueError("CERAXIA_FILES verification_commands must be a list of strings")
+    return {
+        "source": "multi_file_marker_synthesis",
+        "operations": operations,
+        "verification_commands": verification_commands,
+    }
+
+
 def synthesized_patch_spec_from_markers(goal: str) -> dict[str, Any]:
+    multi_file = patch_spec_from_multi_file_marker(goal)
+    if multi_file:
+        return multi_file
     create_path = marker_value(goal, "CERAXIA_CREATE_FILE:")
     if create_path:
         content = marker_block(goal, "CERAXIA_FILE_CONTENT:")

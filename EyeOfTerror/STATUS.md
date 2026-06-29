@@ -561,6 +561,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   `CERAXIA_CREATE_FILE`/`CERAXIA_FILE_CONTENT` and
   `CERAXIA_REPLACE_IN_FILE`/`CERAXIA_OLD`/`CERAXIA_NEW`, plus repeated
   `CERAXIA_VERIFY` lines for allowlisted verification commands.
+- `FerrumPatchwright` can synthesize multi-file code tasks from
+  `CERAXIA_FILES` JSON, preserving every written file in the patch manifest
+  and running shared verification through the same allowlisted verifier path.
 - Ceraxia final manifests preserve verification evidence through
   `verification_executed`, `verification_blockers`, and
   `verification_summary`, so the caller can see which commands proved or
