@@ -9,14 +9,26 @@ from typing import Any
 PLAYBOOK_DIR = Path(__file__).resolve().parent / "playbooks"
 
 
-def load_playbook(name: str) -> dict[str, Any]:
-    payload = json.loads((PLAYBOOK_DIR / name).read_text(encoding="utf-8"))
+def load_playbook(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise ValueError(f"playbook must be an object: {name}")
+        raise ValueError(f"playbook must be an object: {path.name}")
     return payload
 
 
-EVENT_PLAYBOOKS = [load_playbook("skalathrax_events.json")]
+def load_event_playbooks() -> list[dict[str, Any]]:
+    playbooks: list[dict[str, Any]] = []
+    if not PLAYBOOK_DIR.exists():
+        return playbooks
+    for path in sorted(PLAYBOOK_DIR.glob("*.json")):
+        try:
+            playbooks.append(load_playbook(path))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    return playbooks
+
+
+EVENT_PLAYBOOKS = load_event_playbooks()
 
 
 def sandbox_path(workspace_root: Path, path: str) -> Path:
