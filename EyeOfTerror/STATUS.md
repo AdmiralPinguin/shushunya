@@ -390,10 +390,13 @@
 - Warmaster run summaries and snapshots expose `revision_plan_summary` for
   compact client/governor decisions about required revision work.
 - `IskandarKhayon` oversight plans include a `revision_policy` describing the
-  critic source step, required final review steps, downstream rerun requirement,
-  and focused revision context requirement.
+  critic source step, allowed revision steps, required final review steps,
+  downstream rerun requirement, and focused revision context requirement.
 - Warmaster validates `revision_policy` against the run steps and exposes it in
   compact oversight summaries, so broken revision supervision blocks execution.
+- Warmaster rejects revision plans that reference steps outside
+  `revision_policy.allowed_steps`, so a governor's review policy constrains
+  actual revision execution instead of remaining informational metadata.
 - Warmaster validates oversight `step_quality_matrix` entries against run steps,
   workers, artifacts, checks, blockers, and revision targets, so broken per-step
   supervision blocks execution.

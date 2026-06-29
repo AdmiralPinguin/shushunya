@@ -87,7 +87,14 @@ running on the selected port before sending work.
       "revision_targets": ["fact_extraction", "timeline", "draft_reconstruction", "critic_review", "finalize"]
     },
     "final_review": {},
-    "revision_policy": {}
+    "revision_policy": {
+      "source_step": "critic_review",
+      "final_steps": ["critic_review", "finalize"],
+      "allowed_steps": ["source_discovery", "source_acquisition", "fact_extraction", "timeline", "draft_reconstruction", "critic_review", "finalize"],
+      "requires_downstream_rerun": true,
+      "requires_focused_context": true,
+      "requires_gap_disclosure": true
+    }
   }
 }
 ```
@@ -111,6 +118,9 @@ required source artifacts before reporting completion.
 an oversight plan. It gives the worker the relevant per-step checks, blockers,
 revision targets, final review requirements, and revision policy before work
 starts, so quality control is not only a post-run inspection.
+`revision_policy.allowed_steps` is the governor-approved set of steps a
+revision plan may rerun; Warmaster rejects revision plans that reference steps
+outside it.
 The shared worker runtime rejects requests whose `step_quality` targets a
 different worker, a different step, different expected artifacts, or omits
 non-empty checks, blockers, or revision targets.

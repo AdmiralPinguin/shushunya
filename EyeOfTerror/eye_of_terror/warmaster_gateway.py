@@ -1277,6 +1277,14 @@ def validate_revision_plan(run_dir: Path, revision_plan: dict[str, Any]) -> list
         workers_by_step = dispatch_workers_by_step(run_dir)
     except Exception as exc:  # noqa: BLE001 - summaries should report invalid run packages instead of crashing.
         return [f"revision dispatch unavailable: {exc}"]
+    allowed_steps: set[str] = set(workers_by_step)
+    oversight_payload = run_oversight(run_dir)
+    if oversight_payload.get("ok"):
+        oversight = oversight_payload.get("oversight") if isinstance(oversight_payload.get("oversight"), dict) else {}
+        revision_policy = oversight.get("revision_policy") if isinstance(oversight.get("revision_policy"), dict) else {}
+        policy_allowed_steps = revision_policy.get("allowed_steps") if isinstance(revision_policy.get("allowed_steps"), list) else []
+        if policy_allowed_steps:
+            allowed_steps = {str(step_id) for step_id in policy_allowed_steps if isinstance(step_id, str) and step_id}
     errors: list[str] = []
     seen: set[str] = set()
     for index, item in enumerate(raw_steps):
@@ -1294,6 +1302,8 @@ def validate_revision_plan(run_dir: Path, revision_plan: dict[str, Any]) -> list
         expected_worker = workers_by_step.get(step_id)
         if expected_worker is None:
             errors.append(f"revision_plan references unknown dispatch step: {step_id}")
+        elif step_id not in allowed_steps:
+            errors.append(f"revision_plan step is not allowed by oversight revision_policy: {step_id}")
         if not worker:
             errors.append(f"revision_plan.steps[{index}].worker must be a non-empty string")
         elif expected_worker is not None and worker != expected_worker:
@@ -1581,6 +1591,7 @@ def compact_oversight_summary(oversight: dict[str, Any]) -> dict[str, Any]:
         "revision_policy": {
             "source_step": str(revision_policy.get("source_step") or ""),
             "final_steps": revision_policy.get("final_steps", []) if isinstance(revision_policy.get("final_steps"), list) else [],
+            "allowed_steps": revision_policy.get("allowed_steps", []) if isinstance(revision_policy.get("allowed_steps"), list) else [],
             "requires_downstream_rerun": bool(revision_policy.get("requires_downstream_rerun")),
             "requires_focused_context": bool(revision_policy.get("requires_focused_context")),
             "requires_gap_disclosure": bool(revision_policy.get("requires_gap_disclosure")),
@@ -1654,6 +1665,23 @@ def validate_oversight_payload(contract: dict[str, Any], oversight: dict[str, An
             for required_step in (str(final_review.get("critic_step") or ""), str(final_review.get("final_step") or "")):
                 if required_step and required_step not in normalized_final_steps:
                     errors.append(f"oversight revision_policy.final_steps must include final_review step: {required_step}")
+        allowed_steps = revision_policy.get("allowed_steps")
+        if not isinstance(allowed_steps, list) or not allowed_steps:
+            errors.append("oversight revision_policy.allowed_steps must be a non-empty list")
+        else:
+            normalized_allowed_steps: list[str] = []
+            for index, step_id in enumerate(allowed_steps):
+                if not isinstance(step_id, str) or not step_id:
+                    errors.append(f"oversight revision_policy.allowed_steps[{index}] must be a non-empty string")
+                    continue
+                if step_id in normalized_allowed_steps:
+                    errors.append(f"oversight revision_policy.allowed_steps has duplicate step: {step_id}")
+                normalized_allowed_steps.append(step_id)
+                if step_id not in steps_by_id:
+                    errors.append(f"oversight revision_policy.allowed_steps[{index}] references unknown step: {step_id}")
+            for required_step in (str(final_review.get("critic_step") or ""), str(final_review.get("final_step") or "")):
+                if required_step and required_step not in normalized_allowed_steps:
+                    errors.append(f"oversight revision_policy.allowed_steps must include final_review step: {required_step}")
         for field_name in ("requires_downstream_rerun", "requires_focused_context", "requires_gap_disclosure"):
             if not isinstance(revision_policy.get(field_name), bool):
                 errors.append(f"oversight revision_policy.{field_name} must be a boolean")

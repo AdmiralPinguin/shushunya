@@ -1776,6 +1776,27 @@ def main() -> int:
             policy_order_steps = revision_step_ids_from_run(policy_order_dir)
             if policy_order_steps != ["draft_reconstruction", "finalize", "critic_review"]:
                 raise AssertionError(f"revision execution did not follow oversight policy order: {policy_order_steps}")
+            policy_allowed_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-revision-policy-allowed-test"},
+            )
+            policy_allowed_dir = Path(policy_allowed_task["run_dir"])
+            policy_allowed_ledger_path = policy_allowed_dir / "task_ledger.json"
+            policy_allowed_ledger = json.loads(policy_allowed_ledger_path.read_text(encoding="utf-8"))
+            policy_allowed_ledger["status"] = "failed"
+            policy_allowed_ledger.setdefault("result", {})["revision_plan"] = ledger_payload["result"]["revision_plan"]
+            write_json(policy_allowed_ledger_path, policy_allowed_ledger)
+            policy_allowed_oversight_path = policy_allowed_dir / "oversight.json"
+            policy_allowed_oversight = json.loads(policy_allowed_oversight_path.read_text(encoding="utf-8"))
+            policy_allowed_oversight["revision_policy"]["allowed_steps"] = ["critic_review", "finalize"]
+            write_json(policy_allowed_oversight_path, policy_allowed_oversight)
+            policy_allowed_summary = request_json(base + "/runs/warmaster-revision-policy-allowed-test/summary")
+            policy_allowed_errors = policy_allowed_summary.get("summary", {}).get("revision_plan_errors", [])
+            if (
+                not any("not allowed by oversight revision_policy" in error for error in policy_allowed_errors)
+                or policy_allowed_summary.get("summary", {}).get("actions", {}).get("can_execute_revision")
+            ):
+                raise AssertionError(f"revision policy allowed_steps did not block disallowed revision: {policy_allowed_summary}")
             revision_execution = request_json(
                 base + "/runs/warmaster-test/execute_revision_local",
                 {"timeout_sec": 30},

@@ -133,6 +133,7 @@ def step_quality_matrix(contract: TaskContract) -> list[dict[str, Any]]:
 
 
 def oversight_plan(contract: TaskContract) -> dict[str, Any]:
+    planned_step_ids = [step.step_id for step in contract.worker_plan]
     artifacts_by_role = {
         "source_map": [artifact for artifact in contract.required_artifacts if artifact.endswith("/source_map.json")],
         "source_snapshots": [artifact for artifact in contract.required_artifacts if artifact.endswith("/source_snapshots.json")],
@@ -172,6 +173,7 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
         "revision_policy": {
             "source_step": "critic_review",
             "final_steps": ["critic_review", "finalize"],
+            "allowed_steps": planned_step_ids,
             "requires_downstream_rerun": True,
             "requires_focused_context": True,
             "requires_gap_disclosure": True,
