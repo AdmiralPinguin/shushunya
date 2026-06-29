@@ -26,9 +26,13 @@ def main() -> int:
             index = scan_corpus({"goal": "Максимально полно реконструируй события Скалатракса"})
             if index.get("summary", {}).get("sources_matched") != 1:
                 raise AssertionError(f"corpus scan should match only relevant local text: {index}")
+            if index.get("summary", {}).get("sources_non_matching") != 1 or not index.get("non_matching"):
+                raise AssertionError(f"corpus scan should expose non-matching local files: {index}")
             source = index["sources"][0]
             if source.get("source_class") != "local_primary_candidate" or not source.get("local_path"):
                 raise AssertionError(f"local source metadata is wrong: {source}")
+            if "skalathrax" not in source.get("matched_terms", []):
+                raise AssertionError(f"local source should expose matched relevance terms: {source}")
             request = {
                 "task_id": "test:corpus_ingestion",
                 "contract": {"goal": "Скалатракс"},

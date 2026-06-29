@@ -165,7 +165,7 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def corpus_source(path: Path, corpus_root: Path, text: str, source_kind: str, score: int) -> dict[str, Any]:
+def corpus_source(path: Path, corpus_root: Path, text: str, source_kind: str, score: int, matched_terms: set[str]) -> dict[str, Any]:
     extension_type = {
         "local_epub": "book",
         "local_fb2": "book",
@@ -181,6 +181,7 @@ def corpus_source(path: Path, corpus_root: Path, text: str, source_kind: str, sc
         "sha256": file_sha256(path),
         "text_chars": min(len(text), MAX_TEXT_CHARS),
         "relevance_score": score,
+        "matched_terms": sorted(matched_terms),
         "reliability": "user-provided",
         "direct_event_detail_level": "unknown",
         "source_class": "local_primary_candidate",
@@ -194,6 +195,7 @@ def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> di
     terms = contract_terms(contract)
     sources: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    non_matching: list[dict[str, Any]] = []
     files_scanned = 0
     if not root.exists():
         return {
@@ -201,10 +203,12 @@ def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> di
             "corpus_root": str(root),
             "sources": [],
             "skipped": [],
+            "non_matching": [],
             "summary": {
                 "corpus_exists": False,
                 "files_scanned": 0,
                 "sources_matched": 0,
+                "sources_non_matching": 0,
                 "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
             },
             "gaps": [f"Local corpus directory does not exist: {root}"],
@@ -220,13 +224,22 @@ def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> di
             continue
         haystack = " ".join([path.name, str(path.relative_to(root)), text[:5000]]).lower()
         haystack_tokens = relevance_tokens(haystack)
-        score = len(terms & haystack_tokens)
+        matched_terms = terms & haystack_tokens
+        score = len(matched_terms)
         if terms and score == 0:
+            if len(non_matching) < 30:
+                non_matching.append(
+                    {
+                        "corpus_relative_path": str(path.relative_to(root)),
+                        "text_chars": min(len(text), MAX_TEXT_CHARS),
+                        "reason": "no task relevance terms matched filename, path, or text sample",
+                    }
+                )
             continue
         if len(text.strip()) < 100:
             skipped.append({"path": str(path), "reason": "text extraction produced too little text"})
             continue
-        sources.append(corpus_source(path, root, text, source_kind, score))
+        sources.append(corpus_source(path, root, text, source_kind, score, matched_terms))
     sources.sort(key=lambda item: (int(item.get("relevance_score") or 0), int(item.get("text_chars") or 0)), reverse=True)
     gaps: list[str] = []
     if not sources:
@@ -236,10 +249,12 @@ def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> di
         "corpus_root": str(root),
         "sources": sources,
         "skipped": skipped,
+        "non_matching": non_matching,
         "summary": {
             "corpus_exists": True,
             "files_scanned": files_scanned,
             "sources_matched": len(sources),
+            "sources_non_matching": len(non_matching),
             "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
         },
         "gaps": gaps,
