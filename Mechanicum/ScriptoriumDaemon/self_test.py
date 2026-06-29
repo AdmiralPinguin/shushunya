@@ -60,7 +60,8 @@ def main() -> int:
                         "final_url": "https://example.com",
                         "title": "source",
                     }
-                ]
+                ],
+                "skipped": [{"source_title": "Missing Book", "reason": "no public URL in source map"}],
             },
         )
         write_json(
@@ -128,6 +129,8 @@ def main() -> int:
             raise AssertionError("reconstruction should expose evidence excerpts")
         if "Надёжность источников" not in reconstruction or "Ready for extraction: no" not in coverage:
             raise AssertionError("draft package should expose source coverage readiness")
+        if "Источники и доступность" not in reconstruction or "availability=fetched" not in reconstruction:
+            raise AssertionError("reconstruction should include source inventory and availability")
         if "Discovery status: playbook_matched" not in coverage or "Sources mapped: 1" not in coverage or "moon_parley" not in coverage:
             raise AssertionError("coverage report is incomplete")
         if "evidence=Kharn: Eater of Worlds: parley" not in coverage:

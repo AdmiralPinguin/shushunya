@@ -128,8 +128,43 @@ def source_coverage_lines(source_map: dict[str, Any], heading: str) -> list[str]
     return lines
 
 
+def source_inventory_lines(source_map: dict[str, Any], source_snapshots: dict[str, Any]) -> list[str]:
+    sources = [item for item in source_map.get("sources", []) if isinstance(item, dict)]
+    if not sources:
+        return []
+    lines = ["## Источники и доступность", ""]
+    fetched_by_title = {
+        str(item.get("source_title") or ""): item
+        for item in source_snapshots.get("snapshots", [])
+        if isinstance(item, dict)
+    }
+    skipped_by_title = {
+        str(item.get("source_title") or ""): item
+        for item in source_snapshots.get("skipped", [])
+        if isinstance(item, dict)
+    }
+    for source in sources:
+        title = str(source.get("title") or "untitled")
+        source_class = str(source.get("source_class") or source.get("type") or "unknown")
+        reliability = str(source.get("reliability") or "unknown")
+        expected_use = str(source.get("expected_use") or "")
+        snapshot = fetched_by_title.get(title)
+        skipped = skipped_by_title.get(title)
+        if snapshot:
+            availability = "fetched" if snapshot.get("ok") else f"failed: {snapshot.get('error') or 'fetch failed'}"
+        elif skipped:
+            availability = f"not fetched: {skipped.get('reason') or 'skipped'}"
+        else:
+            availability = "not requested"
+        use_text = f" | use={expected_use}" if expected_use else ""
+        lines.append(f"- {title} | class={source_class} | reliability={reliability} | availability={availability}{use_text}")
+    lines.append("")
+    return lines
+
+
 def build_reconstruction(
     source_map: dict[str, Any],
+    source_snapshots: dict[str, Any],
     notes: dict[str, Any],
     timeline: dict[str, Any],
     revision_context: dict[str, Any] | None = None,
@@ -153,6 +188,7 @@ def build_reconstruction(
     ]
     lines.extend(revision_context_lines(revision_context, "## Фокус ревизии"))
     lines.extend(source_coverage_lines(source_map, "## Надёжность источников"))
+    lines.extend(source_inventory_lines(source_map, source_snapshots))
     for phase, phase_events in by_phase.items():
         lines.append(f"## {PHASE_TITLES.get(phase, phase)}")
         lines.append("")
@@ -276,7 +312,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         return {"ok": False, "worker": "ScriptoriumDaemon", "error": str(exc)}
 
     revision_context = request.get("revision_context") if isinstance(request.get("revision_context"), dict) else None
-    reconstruction = build_reconstruction(source_map, notes, timeline, revision_context)
+    reconstruction = build_reconstruction(source_map, source_snapshots, notes, timeline, revision_context)
     coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, revision_context)
     for output_path, content in ((reconstruction_path, reconstruction), (coverage_path, coverage_report)):
         host_path = sandbox_path(workspace_root, output_path)
