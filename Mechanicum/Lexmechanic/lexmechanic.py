@@ -33,6 +33,23 @@ def load_playbook(name: str) -> dict[str, Any]:
 
 SOURCE_PLAYBOOKS = [load_playbook("skalathrax_sources.json")]
 LIVE_DISCOVERY_ENABLED = os.environ.get("LEXMECHANIC_LIVE_DISCOVERY", "0").strip().lower() in {"1", "true", "yes", "on"}
+STRONG_COMPREHENSIVE_GOAL_TERMS = [
+    "максимально полно",
+    "до последней",
+    "не ограничивай объем",
+    "full reconstruction",
+    "complete reconstruction",
+    "exhaustive",
+]
+WEAK_COMPREHENSIVE_GOAL_TERMS = [
+    "вся доступная",
+    "все доступные",
+    "все известн",
+    "all available",
+    "all known",
+    "не краткая справка",
+    "исследовательская реконструкция",
+]
 
 
 def sandbox_path(workspace_root: Path, path: str) -> Path:
@@ -196,6 +213,35 @@ def generic_search_queries(goal: str) -> list[str]:
     ]
 
 
+def depth_profile_for_goal(goal: str, playbooks: list[dict[str, Any]]) -> dict[str, Any]:
+    lowered = goal.lower()
+    weak_hits = [term for term in WEAK_COMPREHENSIVE_GOAL_TERMS if term in lowered]
+    comprehensive = any(term in lowered for term in STRONG_COMPREHENSIVE_GOAL_TERMS) or len(weak_hits) >= 2
+    if comprehensive:
+        return {
+            "mode": "comprehensive",
+            "reason": "goal requests maximal or exhaustive coverage",
+            "query_budget": 28 if playbooks else 24,
+            "per_query_limit": 8,
+            "per_round_query_limit": 8,
+            "min_source_count": 24 if playbooks else 12,
+            "min_live_candidate_count": 8 if playbooks else 6,
+            "min_direct_evidence_sources": 6,
+            "min_draft_chars": 60000,
+        }
+    return {
+        "mode": "standard",
+        "reason": "default research depth",
+        "query_budget": 10,
+        "per_query_limit": 5,
+        "per_round_query_limit": 4,
+        "min_source_count": 1,
+        "min_live_candidate_count": 0,
+        "min_direct_evidence_sources": 1,
+        "min_draft_chars": 0,
+    }
+
+
 def playbook_source_title_queries(playbooks: list[dict[str, Any]]) -> list[str]:
     queries: list[str] = []
     seen: set[str] = set()
@@ -269,11 +315,11 @@ def default_search(query: str, limit: int) -> dict[str, Any]:
     return web_search(SearchConfig(), query, limit)
 
 
-def run_discovery_queries(search_queries: list[str], searcher: SearchFn | None, limit: int = 5) -> list[dict[str, Any]]:
+def run_discovery_queries(search_queries: list[str], searcher: SearchFn | None, limit: int = 5, query_limit: int = 4) -> list[dict[str, Any]]:
     if searcher is None:
         return []
     results: list[dict[str, Any]] = []
-    for query in search_queries[:4]:
+    for query in search_queries[:query_limit]:
         try:
             payload = searcher(query, limit)
         except Exception as exc:  # noqa: BLE001 - discovery failures are recorded as source-map data.
@@ -290,7 +336,13 @@ def run_discovery_queries(search_queries: list[str], searcher: SearchFn | None, 
     return results
 
 
-def run_discovery_rounds(rounds: list[dict[str, Any]], searcher: SearchFn | None, limit: int = 5, query_budget: int = 10) -> list[dict[str, Any]]:
+def run_discovery_rounds(
+    rounds: list[dict[str, Any]],
+    searcher: SearchFn | None,
+    limit: int = 5,
+    query_budget: int = 10,
+    per_round_query_limit: int = 4,
+) -> list[dict[str, Any]]:
     if searcher is None:
         return []
     results: list[dict[str, Any]] = []
@@ -301,6 +353,7 @@ def run_discovery_rounds(rounds: list[dict[str, Any]], searcher: SearchFn | None
             [str(query) for query in queries if query][: max(0, query_budget - used_queries)],
             searcher,
             limit,
+            per_round_query_limit,
         )
         used_queries += len(round_results)
         results.append(
@@ -419,6 +472,7 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
             if isinstance(source, dict)
         ]
     )
+    depth_profile = depth_profile_for_goal(goal, playbooks)
     rounds = search_rounds(topic, playbooks)
     search_queries = [query for round_plan in rounds for query in round_plan.get("queries", []) if isinstance(query, str)]
     coverage_gaps = [
@@ -439,7 +493,13 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
         "A pass requires at least one reliable primary or official source candidate.",
         "Secondary summaries can guide discovery but must not become sole evidence.",
     ]
-    discovery_rounds = run_discovery_rounds(rounds, searcher)
+    discovery_rounds = run_discovery_rounds(
+        rounds,
+        searcher,
+        limit=int(depth_profile.get("per_query_limit") or 5),
+        query_budget=int(depth_profile.get("query_budget") or 10),
+        per_round_query_limit=int(depth_profile.get("per_round_query_limit") or 4),
+    )
     discovery_results = flatten_discovery_results(discovery_rounds)
     relevance_terms = None
     if playbooks:
@@ -458,6 +518,7 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
         "original_goal": goal,
         "sources": sources,
         "search_queries": search_queries,
+        "depth_profile": depth_profile,
         "discovery_rounds": discovery_rounds,
         "discovery_status": discovery_status,
         "discovery_results": discovery_results,

@@ -141,14 +141,19 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     quality_blockers = quality_expectation_blockers(request)
     critic_metrics = critic.get("metrics", {}) if isinstance(critic.get("metrics"), dict) else {}
     source_coverage_ready = critic_metrics.get("source_coverage_ready")
+    comprehensive_depth = critic_metrics.get("comprehensive_depth") if isinstance(critic_metrics.get("comprehensive_depth"), dict) else {}
+    comprehensive_depth_ready = comprehensive_depth.get("passed") if comprehensive_depth.get("mode") == "comprehensive" else True
     readiness_blockers: list[dict[str, str]] = []
     if source_coverage_ready is False:
         readiness_blockers.append({"severity": "blocker", "message": "Final package source coverage is not extraction-ready."})
+    if comprehensive_depth_ready is False:
+        readiness_blockers.append({"severity": "blocker", "message": "Final package does not satisfy comprehensive depth requirements."})
     readiness_checks = {
         "critic_approved": approved,
         "package_complete": not missing,
         "quality_expectations_ok": not quality_blockers,
         "source_coverage_ready": source_coverage_ready,
+        "comprehensive_depth_ready": comprehensive_depth_ready,
     }
     status = "ready" if approved and not missing and not quality_blockers and not readiness_blockers else "blocked"
     revision_plan = merge_revision_plan(critic, missing)

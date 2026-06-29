@@ -91,6 +91,101 @@ def artifact_exists(workspace_root: Path, path: str) -> bool:
     return sandbox_path(workspace_root, path).exists()
 
 
+def direct_evidence_source_count(notes: dict[str, Any]) -> int:
+    sources: set[str] = set()
+    for event in notes.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        evidence = event.get("evidence_snapshots") if isinstance(event.get("evidence_snapshots"), list) else []
+        for item in evidence:
+            if not isinstance(item, dict):
+                continue
+            source_title = str(item.get("source_title") or "")
+            if source_title:
+                sources.add(source_title)
+    return len(sources)
+
+
+def inaccessible_primary_titles(source_map: dict[str, Any]) -> list[str]:
+    titles: list[str] = []
+    for source in source_map.get("sources", []):
+        if not isinstance(source, dict):
+            continue
+        source_class = str(source.get("source_class") or source.get("type") or "").lower()
+        if "primary" not in source_class and str(source.get("type") or "").lower() not in {"novel", "short_story", "book"}:
+            continue
+        if not str(source.get("url") or "").strip():
+            titles.append(str(source.get("title") or "untitled primary source"))
+    return titles
+
+
+def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, Any], reconstruction: str) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    depth_profile = source_map.get("depth_profile") if isinstance(source_map.get("depth_profile"), dict) else {}
+    if depth_profile.get("mode") != "comprehensive":
+        return [], {"mode": str(depth_profile.get("mode") or "standard"), "passed": True}
+    source_coverage = source_map.get("source_coverage") if isinstance(source_map.get("source_coverage"), dict) else {}
+    source_count = int(source_coverage.get("source_count") or len(source_map.get("sources", [])))
+    live_candidate_count = int(source_coverage.get("live_candidate_count") or 0)
+    evidence_source_count = direct_evidence_source_count(notes)
+    draft_chars = len(reconstruction)
+    min_source_count = int(depth_profile.get("min_source_count") or 0)
+    min_live_candidate_count = int(depth_profile.get("min_live_candidate_count") or 0)
+    min_direct_evidence_sources = int(depth_profile.get("min_direct_evidence_sources") or 0)
+    min_draft_chars = int(depth_profile.get("min_draft_chars") or 0)
+    missing_primary = inaccessible_primary_titles(source_map)
+    findings: list[dict[str, str]] = []
+    if source_count < min_source_count:
+        findings.append(
+            {
+                "severity": "blocker",
+                "message": f"Comprehensive task has too few mapped sources: {source_count}/{min_source_count}.",
+            }
+        )
+    if live_candidate_count < min_live_candidate_count:
+        findings.append(
+            {
+                "severity": "blocker",
+                "message": f"Comprehensive task has too few live-discovered source candidates: {live_candidate_count}/{min_live_candidate_count}.",
+            }
+        )
+    if evidence_source_count < min_direct_evidence_sources:
+        findings.append(
+            {
+                "severity": "blocker",
+                "message": f"Comprehensive task has too few direct-evidence sources: {evidence_source_count}/{min_direct_evidence_sources}.",
+            }
+        )
+    if draft_chars < min_draft_chars:
+        findings.append(
+            {
+                "severity": "blocker",
+                "message": f"Comprehensive draft is too short for requested depth: {draft_chars}/{min_draft_chars} chars.",
+            }
+        )
+    if missing_primary:
+        joined = ", ".join(missing_primary[:6])
+        findings.append(
+            {
+                "severity": "blocker",
+                "message": f"Comprehensive task lacks accessible primary text URLs for: {joined}.",
+            }
+        )
+    metrics = {
+        "mode": "comprehensive",
+        "passed": not findings,
+        "source_count": source_count,
+        "min_source_count": min_source_count,
+        "live_candidate_count": live_candidate_count,
+        "min_live_candidate_count": min_live_candidate_count,
+        "direct_evidence_source_count": evidence_source_count,
+        "min_direct_evidence_sources": min_direct_evidence_sources,
+        "draft_chars": draft_chars,
+        "min_draft_chars": min_draft_chars,
+        "inaccessible_primary_count": len(missing_primary),
+    }
+    return findings, metrics
+
+
 def text_contains_markers(text: str, markers: list[str]) -> bool:
     lowered = text.lower()
     return all(marker.lower() in lowered for marker in markers)
@@ -217,6 +312,17 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
         elif "source discovery did not find" in lowered:
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+        elif "comprehensive task has too few mapped sources" in lowered or "comprehensive task has too few live-discovered" in lowered:
+            add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
+            add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+        elif "comprehensive task has too few direct-evidence sources" in lowered or "comprehensive task lacks accessible primary text" in lowered:
+            add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
+            add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+            add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
+        elif "comprehensive draft is too short" in lowered:
+            add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
+            add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
         elif "source set is not extraction-ready" in lowered or "source coverage is not extraction-ready" in lowered:
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
@@ -290,6 +396,7 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
         }
 
     source_map = load_json(workspace_root, source_path)
+    source_snapshots = load_json(workspace_root, source_snapshots_path)
     notes = load_json(workspace_root, notes_path)
     timeline = load_json(workspace_root, timeline_path)
     reconstruction = read_text(workspace_root, reconstruction_path)
@@ -340,6 +447,8 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
         findings.append({"severity": "blocker", "message": "Source coverage is not extraction-ready: official/primary evidence and secondary cross-checking are both required."})
     if "## Gaps" not in coverage or "Что еще надо проверить" not in reconstruction:
         findings.append({"severity": "blocker", "message": "Draft package does not expose coverage gaps clearly."})
+    comprehensive_findings, comprehensive_metrics = comprehensive_depth_findings(source_map, notes, reconstruction)
+    findings.extend(comprehensive_findings)
 
     notes_gaps = [str(item) for item in notes.get("gaps", []) if item]
     timeline_gaps = [str(item) for item in timeline.get("gaps", []) if item]
@@ -379,6 +488,8 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
             "low_confidence_events": low_confidence_events,
             "source_coverage_ready": bool(source_coverage.get("ready_for_extraction")) if source_coverage else None,
             "draft_chars": len(reconstruction),
+            "comprehensive_depth": comprehensive_metrics,
+            "snapshot_count": len(source_snapshots.get("snapshots", [])),
         },
     }
 

@@ -91,6 +91,8 @@ def main() -> int:
             raise AssertionError(f"expected approved with warnings: {report}")
         if not report.get("revision_focus", {}).get("present"):
             raise AssertionError(f"expected verifier to record revision focus: {report}")
+        if report.get("metrics", {}).get("comprehensive_depth", {}).get("passed") is not True:
+            raise AssertionError(f"standard task should not fail comprehensive depth checks: {report}")
         if report.get("metrics", {}).get("generic_evidence_leads") != 1 or "generic low-confidence evidence lead" not in json.dumps(report):
             raise AssertionError(f"expected verifier to warn about generic evidence leads: {report}")
         if (
@@ -98,6 +100,47 @@ def main() -> int:
             or report.get("quality_expectations", {}).get("revision_targets") != ["critic_review", "finalize"]
         ):
             raise AssertionError(f"expected verifier to preserve quality expectations: {report}")
+        write_json(
+            base / "source_map.json",
+            {
+                "discovery_status": "playbook_matched",
+                "depth_profile": {
+                    "mode": "comprehensive",
+                    "min_source_count": 24,
+                    "min_live_candidate_count": 8,
+                    "min_direct_evidence_sources": 6,
+                    "min_draft_chars": 60000,
+                },
+                "source_coverage": {
+                    "source_count": 2,
+                    "live_candidate_count": 0,
+                    "ready_for_extraction": True,
+                },
+                "sources": [
+                    {"title": "Kharn: Eater of Worlds", "type": "novel", "url": "", "source_class": "official_primary_narrative"},
+                    {"title": "Lexicanum: Battle of Skalathrax", "source_class": "secondary_wiki"},
+                ],
+            },
+        )
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on comprehensive depth pass: {result}")
+        report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
+        if report.get("approved") or report.get("metrics", {}).get("comprehensive_depth", {}).get("passed"):
+            raise AssertionError(f"comprehensive under-depth result should block approval: {report}")
+        report_text = json.dumps(report)
+        if "Comprehensive draft is too short" not in report_text or "lacks accessible primary text" not in report_text:
+            raise AssertionError(f"comprehensive depth blockers missing: {report}")
+        write_json(
+            base / "source_map.json",
+            {
+                "discovery_status": "playbook_matched",
+                "sources": [
+                    {"title": "Kharn: Eater of Worlds", "source_class": "official_primary_narrative"},
+                    {"title": "Lexicanum: Battle of Skalathrax", "source_class": "secondary_wiki"},
+                ],
+            },
+        )
         bad_quality_request = json.loads(json.dumps(request))
         bad_quality_request["quality_expectations"]["step_quality"]["expected_artifacts"] = ["/work/skalathrax/wrong.json"]
         result = run(bad_quality_request, root)

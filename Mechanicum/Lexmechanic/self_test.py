@@ -170,6 +170,10 @@ def main() -> int:
             raise AssertionError(f"weak source map should record failed source coverage: {weak_map}")
         long_goal = "Максимально полно реконструируй непосредственные события Скалатракса " + ("очень длинное задание " * 20)
         live_playbook = source_map_for_contract({"goal": long_goal}, fake_search)
+        if live_playbook.get("depth_profile", {}).get("mode") != "comprehensive":
+            raise AssertionError(f"maximal prompt should enable comprehensive depth profile: {live_playbook.get('depth_profile')}")
+        if live_playbook.get("depth_profile", {}).get("query_budget", 0) <= 10:
+            raise AssertionError(f"comprehensive depth should expand query budget: {live_playbook.get('depth_profile')}")
         live_queries = [query for round_plan in live_playbook.get("discovery_rounds", []) for query in round_plan.get("queries", [])]
         if any("очень длинное задание" in query for query in live_queries):
             raise AssertionError(f"live discovery queries should use normalized topic, not full prompt: {live_queries}")

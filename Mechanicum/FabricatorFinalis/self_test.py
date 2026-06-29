@@ -66,6 +66,8 @@ def main() -> int:
             raise AssertionError(f"ready manifest should carry critic metrics: {manifest}")
         if manifest.get("readiness_checks", {}).get("source_coverage_ready") is not True:
             raise AssertionError(f"ready manifest should carry source coverage readiness: {manifest}")
+        if manifest.get("readiness_checks", {}).get("comprehensive_depth_ready") is not True:
+            raise AssertionError(f"standard ready manifest should pass comprehensive depth readiness: {manifest}")
         if manifest.get("quality_expectations", {}).get("check_count") != 1:
             raise AssertionError(f"ready manifest should carry quality expectations: {manifest}")
         write(
@@ -85,6 +87,26 @@ def main() -> int:
         manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
         if manifest.get("status") != "blocked" or "source coverage is not extraction-ready" not in json.dumps(manifest):
             raise AssertionError(f"weak source coverage should block final readiness: {manifest}")
+        write(
+            base / "critic_report.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "passed_with_warnings",
+                    "metrics": {
+                        "source_coverage_ready": True,
+                        "comprehensive_depth": {"mode": "comprehensive", "passed": False},
+                    },
+                    "revision_focus": {"present": True},
+                }
+            ),
+        )
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on weak comprehensive depth: {result}")
+        manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
+        if manifest.get("status") != "blocked" or "comprehensive depth" not in json.dumps(manifest):
+            raise AssertionError(f"weak comprehensive depth should block final readiness: {manifest}")
         write(
             base / "critic_report.json",
             json.dumps(
