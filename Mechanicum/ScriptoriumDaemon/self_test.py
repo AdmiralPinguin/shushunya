@@ -131,6 +131,8 @@ def main() -> int:
             raise AssertionError("draft package should expose source coverage readiness")
         if "Источники и доступность" not in reconstruction or "availability=fetched" not in reconstruction:
             raise AssertionError("reconstruction should include source inventory and availability")
+        if "direct_evidence=matched 1 event marker(s)" not in reconstruction:
+            raise AssertionError("reconstruction should disclose source-level direct evidence coverage")
         if "Discovery status: playbook_matched" not in coverage or "Sources mapped: 1" not in coverage or "moon_parley" not in coverage:
             raise AssertionError("coverage report is incomplete")
         if "evidence=Kharn: Eater of Worlds: parley" not in coverage:

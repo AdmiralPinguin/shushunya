@@ -128,11 +128,27 @@ def source_coverage_lines(source_map: dict[str, Any], heading: str) -> list[str]
     return lines
 
 
-def source_inventory_lines(source_map: dict[str, Any], source_snapshots: dict[str, Any]) -> list[str]:
+def evidence_counts_by_source(notes: dict[str, Any]) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    for event in notes.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        evidence = event.get("evidence_snapshots") if isinstance(event.get("evidence_snapshots"), list) else []
+        for item in evidence:
+            if not isinstance(item, dict):
+                continue
+            source_title = str(item.get("source_title") or "")
+            if source_title:
+                counts[source_title] += 1
+    return dict(counts)
+
+
+def source_inventory_lines(source_map: dict[str, Any], source_snapshots: dict[str, Any], notes: dict[str, Any] | None = None) -> list[str]:
     sources = [item for item in source_map.get("sources", []) if isinstance(item, dict)]
     if not sources:
         return []
     lines = ["## Источники и доступность", ""]
+    evidence_counts = evidence_counts_by_source(notes or {})
     fetched_by_title = {
         str(item.get("source_title") or ""): item
         for item in source_snapshots.get("snapshots", [])
@@ -156,8 +172,20 @@ def source_inventory_lines(source_map: dict[str, Any], source_snapshots: dict[st
             availability = f"not fetched: {skipped.get('reason') or 'skipped'}"
         else:
             availability = "not requested"
+        evidence_count = evidence_counts.get(title, 0)
+        if evidence_count:
+            direct_evidence = f"matched {evidence_count} event marker(s)"
+        elif snapshot and snapshot.get("ok"):
+            direct_evidence = "no direct event markers"
+        elif skipped:
+            direct_evidence = "unavailable"
+        else:
+            direct_evidence = "not checked"
         use_text = f" | use={expected_use}" if expected_use else ""
-        lines.append(f"- {title} | class={source_class} | reliability={reliability} | availability={availability}{use_text}")
+        lines.append(
+            f"- {title} | class={source_class} | reliability={reliability} | "
+            f"availability={availability} | direct_evidence={direct_evidence}{use_text}"
+        )
     lines.append("")
     return lines
 
@@ -188,7 +216,7 @@ def build_reconstruction(
     ]
     lines.extend(revision_context_lines(revision_context, "## Фокус ревизии"))
     lines.extend(source_coverage_lines(source_map, "## Надёжность источников"))
-    lines.extend(source_inventory_lines(source_map, source_snapshots))
+    lines.extend(source_inventory_lines(source_map, source_snapshots, notes))
     for phase, phase_events in by_phase.items():
         lines.append(f"## {PHASE_TITLES.get(phase, phase)}")
         lines.append("")
