@@ -276,6 +276,73 @@ def infer_add_function_patch_spec(request: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def test_paths_from_goal(goal: str) -> list[str]:
+    paths: list[str] = []
+    for match in re.finditer(r"`([^`]+\.py)`", goal):
+        path = match.group(1).strip()
+        lowered = path.lower()
+        if "test" in lowered and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def infer_missing_function_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    candidates: list[dict[str, str]] = []
+    for test_path in test_paths_from_goal(goal):
+        path = safe_repo_path(repo_root, test_path)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        imports = re.findall(r"^\s*from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", text, flags=re.MULTILINE)
+        for module_name, function_name in imports:
+            expected_values = re.findall(
+                rf"assertEqual\(\s*{re.escape(function_name)}\(\)\s*,\s*([+-]?\d+|True|False|None|'[^'\\]*(?:\\.[^'\\]*)*'|\"[^\"\\]*(?:\\.[^\"\\]*)*\")\s*\)",
+                text,
+            )
+            if len(expected_values) != 1:
+                continue
+            module_path = f"{module_name.replace('.', '/')}.py"
+            source_path = safe_repo_path(repo_root, module_path)
+            if not source_path.exists():
+                continue
+            current = source_path.read_text(encoding="utf-8")
+            if re.search(rf"^\s*def\s+{re.escape(function_name)}\s*\(", current, flags=re.MULTILINE):
+                continue
+            candidates.append(
+                {
+                    "test_path": test_path,
+                    "module_path": module_path,
+                    "function_name": function_name,
+                    "literal": safe_return_literal(expected_values[0]),
+                }
+            )
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred missing function requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    function_name = candidate["function_name"]
+    content = f"\n\ndef {function_name}():\n    return {candidate['literal']}\n"
+    commands = verification_commands_from_natural_goal(goal)
+    if not commands:
+        test_module = candidate["test_path"][:-3].replace("/", ".")
+        commands = [f"python -m unittest {test_module}"]
+    return {
+        "source": "test_inferred_missing_function",
+        "operations": [
+            {
+                "type": "append",
+                "path": candidate["module_path"],
+                "content": content,
+                "python_function_name": function_name,
+            }
+        ],
+        "verification_commands": commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -359,6 +426,8 @@ def patch_spec_from_request(request: dict[str, Any]) -> dict[str, Any]:
         payload = infer_simple_replace_patch_spec(request)
     if not payload:
         payload = infer_add_function_patch_spec(request)
+    if not payload:
+        payload = infer_missing_function_from_tests(request)
     if not payload:
         return {}
     if isinstance(payload.get("ceraxia_patch"), dict):

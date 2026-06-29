@@ -85,6 +85,10 @@ def inferred_add_function_goal() -> str:
 """
 
 
+def test_inferred_missing_function_goal() -> str:
+    return "почини тест `test_sample.py`."
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -285,6 +289,28 @@ def main() -> int:
             raise AssertionError(f"inferred add-function duplicate should block final readiness: {final}")
         if sample.read_text(encoding="utf-8").count("def value(") != 1:
             raise AssertionError("inferred add-function duplicate guard allowed duplicate function")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        sample = target_repo / "sample.py"
+        sample.write_text("", encoding="utf-8")
+        (target_repo / "test_sample.py").write_text(
+            "import unittest\nfrom sample import value\n\n"
+            "class ValueTest(unittest.TestCase):\n"
+            "    def test_value(self):\n"
+            "        self.assertEqual(value(), 42)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=test_inferred_missing_function_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready":
+            raise AssertionError(f"test-inferred missing function task should be ready: {final}")
+        if final.get("patch_source") != "test_inferred_missing_function" or final.get("operation_count") != 1:
+            raise AssertionError(f"test-inferred missing function should expose patch audit fields: {final}")
+        if "def value():\n    return 42\n" not in sample.read_text(encoding="utf-8"):
+            raise AssertionError("test-inferred missing function task did not append the target function")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

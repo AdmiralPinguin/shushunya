@@ -580,6 +580,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   the task gives explicit target path, function name, and safe return literal,
   then verifies through the same allowlisted command path; duplicate existing
   Python function definitions are blocked instead of appended.
+- `FerrumPatchwright` can infer one missing Python function from a named
+  unittest file when the file contains exactly one safe import/assertEqual
+  literal candidate and the target module already exists.
 - `write_file` patch operations are idempotent when the target already has the
   requested content, so repeated Ceraxia runs can prove the same desired state
   without requiring unsafe overwrite flags.

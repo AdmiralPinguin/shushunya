@@ -142,6 +142,41 @@ CERAXIA_TARGET_REPO: {target_repo}
         temp_root = Path(temp_dir)
         target_repo = temp_root / "repo"
         target_repo.mkdir()
+        sample = target_repo / "sample.py"
+        sample.write_text("", encoding="utf-8")
+        (target_repo / "test_sample.py").write_text(
+            "import unittest\nfrom sample import value\n\n"
+            "class ValueTest(unittest.TestCase):\n"
+            "    def test_value(self):\n"
+            "        self.assertEqual(value(), 42)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        task = f"""почини python приложение
+CERAXIA_TARGET_REPO: {target_repo}
+Почини тест `test_sample.py`.
+"""
+        run_root = temp_root / "runs"
+        task_id = "ceraxia-test-inferred-missing-function-pipeline"
+        prepared = prepare_task(task, task_id, run_root, governor_transport="local")
+        if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
+            raise AssertionError(f"Ceraxia test-inferred task did not prepare correctly: {prepared}")
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        if not result.get("ok") or result.get("phase") != "completed":
+            raise AssertionError(f"Ceraxia test-inferred pipeline did not complete: {result}")
+        manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("status") != "ready":
+            raise AssertionError(f"Ceraxia test-inferred manifest should be ready: {manifest}")
+        if manifest.get("patch_source") != "test_inferred_missing_function" or manifest.get("operation_count") != 1:
+            raise AssertionError(f"Ceraxia test-inferred manifest should expose patch audit fields: {manifest}")
+        if "def value():\n    return 42\n" not in sample.read_text(encoding="utf-8"):
+            raise AssertionError("Ceraxia test-inferred pipeline did not append the target function")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_root = Path(temp_dir)
+        target_repo = temp_root / "repo"
+        target_repo.mkdir()
         task = f"""создай python файл
 CERAXIA_TARGET_REPO: {target_repo}
 CERAXIA_CREATE_FILE: generated.py

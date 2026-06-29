@@ -111,6 +111,15 @@ file path, function name, and safe return literal:
 This mode blocks instead of appending when the target Python file already
 defines the requested function name.
 
+For very small unittest repairs, Ceraxia can infer a missing function from a
+test file when the task names the test path, the test has exactly one
+`from module import function` plus one `assertEqual(function(), literal)`, and
+the target module file already exists:
+
+```text
+Почини тест `test_module.py`.
+```
+
 For small multi-file tasks, Ceraxia can synthesize a patch spec from a JSON
 file list:
 
