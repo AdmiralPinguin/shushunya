@@ -78,6 +78,22 @@ def main() -> int:
     )
     if artifact_bad.get("ok") is not False or artifact_bad.get("missing_input_reads") != ["input.csv"]:
         raise AssertionError(f"bad artifact orchestration failure analysis: {artifact_bad}")
+    artifact_python = analyze_artifact_orchestration(
+        [
+            {
+                "_seq": 1,
+                "action": {
+                    "action": "python",
+                    "code": "open('input.csv').read()\nopen('report.md', 'w').write('ok')\nopen('audit.json', mode='w').write('{}')\n",
+                },
+                "result": {"ok": True},
+            }
+        ],
+        {"seed_files": {"input.csv": "x"}, "checks": [{"path": "report.md"}, {"path": "audit.json"}]},
+        "unit",
+    )
+    if artifact_python.get("ok") is not True or sorted(artifact_python.get("written_output_paths", [])) != ["audit.json", "report.md"]:
+        raise AssertionError(f"bad python artifact orchestration analysis: {artifact_python}")
     with tempfile.TemporaryDirectory() as temp_dir:
         path = Path(temp_dir) / "report.json"
         write_json(path, {"ok": True})

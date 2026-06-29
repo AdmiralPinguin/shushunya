@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import shlex
@@ -379,6 +380,48 @@ def path_matches_suffix(path: str, suffix: str) -> bool:
     return normalized_path == normalized_suffix or normalized_path.endswith("/" + normalized_suffix)
 
 
+def python_code_file_accesses(code: str) -> dict[str, list[str]]:
+    accesses: dict[str, list[str]] = {"reads": [], "writes": []}
+
+    def add(kind: str, path: str) -> None:
+        normalized = path.replace("\\", "/")
+        if normalized and normalized not in accesses[kind]:
+            accesses[kind].append(normalized)
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return accesses
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "open" and node.args:
+            path_arg = node.args[0]
+            if not isinstance(path_arg, ast.Constant) or not isinstance(path_arg.value, str):
+                continue
+            mode = "r"
+            if len(node.args) > 1 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
+                mode = node.args[1].value
+            for keyword in node.keywords:
+                if keyword.arg == "mode" and isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str):
+                    mode = keyword.value.value
+            if any(marker in mode for marker in ("w", "a", "x", "+")):
+                add("writes", path_arg.value)
+            else:
+                add("reads", path_arg.value)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            method = node.func.attr
+            if method not in {"write_text", "write_bytes", "read_text", "read_bytes"}:
+                continue
+            receiver = node.func.value
+            path = ""
+            if isinstance(receiver, ast.Call) and isinstance(receiver.func, ast.Name) and receiver.func.id == "Path" and receiver.args:
+                arg = receiver.args[0]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    path = arg.value
+            if path:
+                add("writes" if method.startswith("write_") else "reads", path)
+    return accesses
+
+
 def analyze_artifact_orchestration(steps: list[dict[str, Any]], task: dict[str, Any], source: str) -> dict[str, Any]:
     input_paths = sorted(str(path) for path in task.get("seed_files", {}) if path)
     output_paths = sorted(
@@ -413,6 +456,14 @@ def analyze_artifact_orchestration(steps: list[dict[str, Any]], task: dict[str, 
             for input_path in input_paths:
                 if path_matches_suffix(path, input_path):
                     read_inputs.setdefault(input_path, seq)
+        if action_type == "python" and result.get("ok") is True:
+            accesses = python_code_file_accesses(str(action.get("code") or ""))
+            for input_path in input_paths:
+                if any(path_matches_suffix(candidate, input_path) for candidate in accesses["reads"]):
+                    read_inputs.setdefault(input_path, seq)
+            for output_path in output_paths:
+                if any(path_matches_suffix(candidate, output_path) for candidate in accesses["writes"]):
+                    output_writes.setdefault(output_path, seq)
         if action_type in {"write_file", "write_files", "append_file", "replace_in_file"} and result.get("ok") is True:
             for output_path in output_paths:
                 if any(path_matches_suffix(candidate, output_path) for candidate in action_paths):

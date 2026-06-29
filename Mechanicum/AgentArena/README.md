@@ -51,7 +51,9 @@ prompts, and recovered from supervisor rejections. `analyze_reports.py`
 aggregates the same chain-quality metrics across recent reports.
 For data/artifact tasks with seeded input files and checked output files,
 reports also include `artifact_quality`, which records whether inputs were read
-before output artifacts were written.
+before output artifacts were written. The artifact analyzer counts direct file
+write tools and simple Python file IO (`open(..., "w")`, `Path(...).write_text`)
+so data tasks that generate files from scripts are measured correctly.
 `analyze_reports.py` classifies failures as `agent_unavailable`, `agent_exit`,
 `post_run_checks`, `both`, or `unknown`, so missing runtimes, bad artifacts,
 and runtime crashes are separated.
