@@ -46,13 +46,24 @@ def reddit_old_url(url: str) -> str:
     return urlunparse((parsed.scheme or "https", "old.reddit.com", parsed.path, parsed.params, parsed.query, parsed.fragment))
 
 
-def fetch_with_fallbacks(source: dict[str, Any], fetcher: FetchFn, max_bytes: int) -> dict[str, Any]:
+def source_fetch_limit(source: dict[str, Any], source_map: dict[str, Any], default_max_bytes: int) -> int:
+    url = str(source.get("url") or "").lower()
+    depth_profile = source_map.get("depth_profile") if isinstance(source_map.get("depth_profile"), dict) else {}
+    if url.endswith(".epub") or "application/epub" in str(source.get("content_type") or "").lower():
+        return max(default_max_bytes, 1000000)
+    if depth_profile.get("mode") == "comprehensive":
+        return max(default_max_bytes, 1000000)
+    return default_max_bytes
+
+
+def fetch_with_fallbacks(source: dict[str, Any], source_map: dict[str, Any], fetcher: FetchFn, max_bytes: int) -> dict[str, Any]:
     url = str(source.get("url") or "").strip()
-    result = fetcher(url, max_bytes)
+    limit = source_fetch_limit(source, source_map, max_bytes)
+    result = fetcher(url, limit)
     text = str(result.get("text") or "")
     old_url = reddit_old_url(url)
     if old_url and result.get("ok") and len(text.strip()) < 200 and "reddit" in text.lower() and "verification" in text.lower():
-        fallback = fetcher(old_url, max_bytes)
+        fallback = fetcher(old_url, limit)
         if fallback.get("ok") and len(str(fallback.get("text") or "")) > len(text):
             fallback["fallback_from_url"] = url
             fallback["fallback_reason"] = "reddit verification page"
@@ -94,7 +105,7 @@ def collect_snapshots(source_map: dict[str, Any], fetcher: FetchFn = default_fet
             skipped.append({"source_title": source.get("title", ""), "reason": "no public URL in source map"})
             continue
         try:
-            result = fetch_with_fallbacks(source, fetcher, max_bytes)
+            result = fetch_with_fallbacks(source, source_map, fetcher, max_bytes)
         except Exception as exc:  # noqa: BLE001 - network failures are data for this worker.
             result = {"ok": False, "error": str(exc)}
         snapshots.append(compact_snapshot(source, result))

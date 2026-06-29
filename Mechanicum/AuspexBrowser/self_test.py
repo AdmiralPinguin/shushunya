@@ -68,6 +68,32 @@ def main() -> int:
         raise AssertionError(f"reddit fallback did not use old reddit: {snapshots['snapshots'][1]}")
     if snapshots["snapshots"][1].get("fallback_reason") != "reddit verification page":
         raise AssertionError(f"reddit fallback reason missing: {snapshots['snapshots'][1]}")
+    fetch_limits: list[int] = []
+
+    def limit_fetch(url: str, max_bytes: int) -> dict:
+        fetch_limits.append(max_bytes)
+        return {
+            "ok": True,
+            "url": url,
+            "status": 200,
+            "content_type": "application/epub+zip",
+            "title": "EPUB",
+            "text": "Extract text",
+            "bytes_read": max_bytes,
+            "truncated": False,
+            "is_binary": False,
+        }
+
+    collect_snapshots(
+        {
+            "topic": "test",
+            "depth_profile": {"mode": "comprehensive"},
+            "sources": [{"title": "Extract", "source_class": "official_primary_extract", "url": "https://example.com/extract.epub"}],
+        },
+        limit_fetch,
+    )
+    if fetch_limits != [1000000]:
+        raise AssertionError(f"comprehensive EPUB fetch should use expanded byte limit: {fetch_limits}")
 
     request = {
         "task_id": "test:source_acquisition",
