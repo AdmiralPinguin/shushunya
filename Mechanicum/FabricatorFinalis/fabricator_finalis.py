@@ -141,13 +141,16 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     quality_blockers = quality_expectation_blockers(request)
     critic_metrics = critic.get("metrics", {}) if isinstance(critic.get("metrics"), dict) else {}
     source_coverage_ready = critic_metrics.get("source_coverage_ready")
+    readiness_blockers: list[dict[str, str]] = []
+    if source_coverage_ready is False:
+        readiness_blockers.append({"severity": "blocker", "message": "Final package source coverage is not extraction-ready."})
     readiness_checks = {
         "critic_approved": approved,
         "package_complete": not missing,
         "quality_expectations_ok": not quality_blockers,
         "source_coverage_ready": source_coverage_ready,
     }
-    status = "ready" if approved and not missing and not quality_blockers else "blocked"
+    status = "ready" if approved and not missing and not quality_blockers and not readiness_blockers else "blocked"
     revision_plan = merge_revision_plan(critic, missing)
     if quality_blockers:
         revision_plan = {
@@ -172,7 +175,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "critic_metrics": critic_metrics,
         "readiness_checks": readiness_checks,
         "warnings": critic.get("warnings", []),
-        "blockers": critic.get("findings", []) + [{"severity": "blocker", "message": f"Missing package file: {path}"} for path in missing] + quality_blockers,
+        "blockers": critic.get("findings", []) + [{"severity": "blocker", "message": f"Missing package file: {path}"} for path in missing] + quality_blockers + readiness_blockers,
         "revision_plan": revision_plan,
         "revision_focus": critic.get("revision_focus", {"present": False}),
         "quality_expectations": quality_expectation_summary(request),

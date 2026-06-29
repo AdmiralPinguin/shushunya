@@ -468,6 +468,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   into critic reports and final manifests.
 - `FabricatorFinalis` writes explicit readiness checks for critic approval,
   package completeness, quality expectations, and source coverage.
+- `FabricatorFinalis` blocks final readiness when critic metrics explicitly
+  report source coverage as not extraction-ready, even if approval was set.
 - Warmaster compact final-manifest summaries expose readiness checks and
   warning/blocker/file counts for client displays.
 - `ReductorVerifier` preserves worker `quality_expectations` in critic reports

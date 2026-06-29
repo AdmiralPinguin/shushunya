@@ -68,6 +68,34 @@ def main() -> int:
             raise AssertionError(f"ready manifest should carry source coverage readiness: {manifest}")
         if manifest.get("quality_expectations", {}).get("check_count") != 1:
             raise AssertionError(f"ready manifest should carry quality expectations: {manifest}")
+        write(
+            base / "critic_report.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "passed_with_warnings",
+                    "metrics": {"source_coverage_ready": False},
+                    "revision_focus": {"present": True},
+                }
+            ),
+        )
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on weak source coverage: {result}")
+        manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
+        if manifest.get("status") != "blocked" or "source coverage is not extraction-ready" not in json.dumps(manifest):
+            raise AssertionError(f"weak source coverage should block final readiness: {manifest}")
+        write(
+            base / "critic_report.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "passed_with_warnings",
+                    "metrics": {"generic_evidence_leads": 1, "low_confidence_events": 1, "source_coverage_ready": True},
+                    "revision_focus": {"present": True, "coverage_items": ["Source step: critic_review"]},
+                }
+            ),
+        )
         bad_quality_request = json.loads(json.dumps(request))
         bad_quality_request["quality_expectations"]["step_quality"]["expected_artifacts"] = ["/work/skalathrax/wrong.json"]
         result = run(bad_quality_request, root)
