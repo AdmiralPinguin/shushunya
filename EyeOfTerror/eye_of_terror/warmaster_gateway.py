@@ -840,6 +840,8 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
         expected_artifacts = planned.get("expected_artifacts") if isinstance(planned.get("expected_artifacts"), list) else []
         artifacts = recorded.get("artifacts") if isinstance(recorded.get("artifacts"), list) else []
         depends_on = planned.get("depends_on") if isinstance(planned.get("depends_on"), list) else []
+        details = recorded.get("details") if isinstance(recorded.get("details"), dict) else {}
+        worker_view = details.get("worker_view") if isinstance(details.get("worker_view"), dict) else {}
         dependency_status = [
             {
                 "step_id": str(dependency),
@@ -874,6 +876,7 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
                 "artifact_status": [sandbox_artifact_file_status(workspace_root, str(path)) for path in artifacts],
                 "summary": str(recorded.get("summary") or ""),
                 "recorded": bool(recorded),
+                "worker_view": worker_view,
             }
         )
     return {

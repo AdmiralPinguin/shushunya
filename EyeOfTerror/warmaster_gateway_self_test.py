@@ -1591,8 +1591,34 @@ def main() -> int:
                 raise AssertionError(f"bad partial resume task response: {partial_resume}")
             partial_run_dir = Path(partial_resume["run_dir"])
             partial_ledger = TaskLedger.load(partial_run_dir / "task_ledger.json")
-            partial_ledger.record_step("source_discovery", "Lexmechanic", "completed", ["/work/skalathrax/source_map.json"], "done")
+            partial_ledger.record_step(
+                "source_discovery",
+                "Lexmechanic",
+                "completed",
+                ["/work/skalathrax/source_map.json"],
+                "done",
+                {
+                    "worker_view": {
+                        "display": {"headline": "Lexmechanic task completed", "severity": "info"},
+                        "client_action": {"kind": "inspect_task", "method": "GET", "path": "/tasks/warmaster-partial-resume-test", "body": {}},
+                    }
+                },
+            )
             partial_ledger.set_status("interrupted")
+            partial_summary = request_json(base + "/runs/warmaster-partial-resume-test/summary")
+            partial_source_state = next(
+                (
+                    item
+                    for item in partial_summary.get("summary", {}).get("progress", {}).get("step_states", [])
+                    if item.get("step_id") == "source_discovery"
+                ),
+                {},
+            )
+            if (
+                partial_source_state.get("worker_view", {}).get("display", {}).get("headline") != "Lexmechanic task completed"
+                or partial_source_state.get("worker_view", {}).get("client_action", {}).get("path") != "/tasks/warmaster-partial-resume-test"
+            ):
+                raise AssertionError(f"run progress did not expose worker view state: {partial_summary}")
             partial_steps = resume_step_ids_from_run(partial_run_dir)
             if partial_steps[:2] != ["source_acquisition", "fact_extraction"] or "source_discovery" in partial_steps:
                 raise AssertionError(f"partial resume did not skip completed steps: {partial_steps}")

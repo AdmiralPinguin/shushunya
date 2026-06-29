@@ -412,7 +412,9 @@ states include
 `depends_on`, `dependency_status`, `dependencies_ready`, `dependencies_blocked`,
 `input_artifacts`, `expected_artifacts`, and produced `artifacts`; each artifact
 set also has status entries with `exists`, `bytes`, and `host_path` when a run
-workspace is known.
+workspace is known. When an HTTP worker step preserved runtime state in the
+ledger, its step state includes `worker_view` with the worker runtime's compact
+`display`, `decision`, `next_action`, and `client_action`.
 
 ## Cancellation
 
