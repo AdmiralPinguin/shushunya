@@ -49,7 +49,26 @@ CERAXIA_PATCH:
       "old": "return 1",
       "new": "return 2"
     }
-  ]
+  ],
+  "verification_commands": ["python -m py_compile sample.py"]
+}
+"""
+
+
+def forbidden_verify_goal() -> str:
+    return """почини python приложение
+
+CERAXIA_PATCH:
+{
+  "operations": [
+    {
+      "type": "replace",
+      "path": "sample.py",
+      "old": "return 1",
+      "new": "return 2"
+    }
+  ],
+  "verification_commands": ["bash -lc echo-nope"]
 }
 """
 
@@ -74,6 +93,15 @@ def main() -> int:
         changed = final.get("changed_files", [])
         if not changed or changed[0].get("path") != "sample.py" or not changed[0].get("changed"):
             raise AssertionError(f"final manifest should preserve changed file metadata: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        sample = target_repo / "sample.py"
+        sample.write_text("def value():\n    return 1\n", encoding="utf-8")
+        final = run_pipeline(root / "work", goal=forbidden_verify_goal(), target_repo_root=target_repo)
+        if final.get("status") != "blocked" or final.get("approved"):
+            raise AssertionError(f"forbidden verification command should block final readiness: {final}")
     print("[ok] CogitatorCodewright code artifacts")
     return 0
 

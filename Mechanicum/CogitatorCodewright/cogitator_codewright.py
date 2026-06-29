@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import shlex
 import subprocess
 import sys
 from collections import Counter
@@ -192,6 +193,39 @@ def apply_patch_operation(repo_root: Path, operation: dict[str, Any]) -> dict[st
     }
 
 
+def command_allowed(command: list[str]) -> bool:
+    if not command:
+        return False
+    if command[0] == "pytest":
+        return True
+    if command[0] in {"python", "python3", sys.executable} and len(command) >= 3 and command[1] == "-m":
+        return command[2] in {"py_compile", "pytest", "unittest"}
+    return False
+
+
+def run_verification_command(repo_root: Path, raw_command: str) -> dict[str, Any]:
+    try:
+        command = shlex.split(raw_command)
+    except ValueError as exc:
+        return {"command": raw_command, "returncode": 2, "stdout": "", "stderr": f"invalid command syntax: {exc}"}
+    if not command_allowed(command):
+        return {
+            "command": raw_command,
+            "returncode": 126,
+            "stdout": "",
+            "stderr": "verification command is outside Ceraxia's allowlist",
+        }
+    if command[0] in {"python", "python3"}:
+        command[0] = sys.executable
+    completed = subprocess.run(command, cwd=repo_root, text=True, capture_output=True, timeout=120, check=False)
+    return {
+        "command": raw_command,
+        "returncode": completed.returncode,
+        "stdout": completed.stdout[-4000:],
+        "stderr": completed.stderr[-4000:],
+    }
+
+
 def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
     extension_counts: Counter[str] = Counter()
     candidate_files: list[str] = []
@@ -319,6 +353,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "plan_excerpt": plan[:3000],
         "patch_spec_present": bool(patch_spec),
         "changed_files": changed_files,
+        "verification_commands": patch_spec.get("verification_commands", []) if isinstance(patch_spec.get("verification_commands"), list) else [],
         "blockers": blockers,
         "warnings": [
             "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker.",
@@ -376,6 +411,18 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
             )
             if completed.returncode != 0:
                 blockers.append("git diff --check failed")
+        raw_commands = patch.get("verification_commands") if isinstance(patch.get("verification_commands"), list) else []
+        for raw_command in raw_commands:
+            if not isinstance(raw_command, str) or not raw_command.strip():
+                blockers.append("verification command must be a non-empty string")
+                continue
+            try:
+                result = run_verification_command(repo_root, raw_command)
+            except subprocess.TimeoutExpired:
+                result = {"command": raw_command, "returncode": 124, "stdout": "", "stderr": "verification command timed out"}
+            executed.append(result)
+            if result.get("returncode") != 0:
+                blockers.append(f"verification command failed: {raw_command}")
     report = {
         "status": "blocked" if blockers else "passed",
         "task_id": request.get("task_id"),

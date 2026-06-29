@@ -553,6 +553,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `OrdinatusVerifier` runs concrete checks for applied code changes:
   `py_compile` for changed Python files and `git diff --check` when the target
   repository is a git worktree.
+- Ceraxia patch specs can request allowlisted verification commands
+  (`pytest`, `python -m pytest`, `python -m unittest`, or
+  `python -m py_compile ...`). Disallowed commands block final readiness instead
+  of running through a shell.
 - The pipeline records inaccessible primary books as `corpus_requirements`;
   operators must provide legitimate local text files when full primary evidence
   is required.

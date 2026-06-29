@@ -32,9 +32,14 @@ CERAXIA_PATCH:
   "operations": [
     {"type": "replace", "path": "module.py", "old": "return 1", "new": "return 2"},
     {"type": "write_file", "path": "new_file.py", "content": "..."}
-  ]
+  ],
+  "verification_commands": ["python -m py_compile module.py"]
 }
 ```
 
 Without explicit patch operations, Ceraxia writes a blocked handoff package
 instead of claiming the code task is complete.
+
+Verification commands run without a shell and must match Ceraxia's allowlist:
+`pytest`, `python -m pytest`, `python -m unittest`, or
+`python -m py_compile ...`.
