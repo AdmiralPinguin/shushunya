@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -70,12 +73,123 @@ def write_text(workspace_root: Path, path: str, content: str) -> None:
     host_path.write_text(content, encoding="utf-8")
 
 
+def request_goal(request: dict[str, Any]) -> str:
+    contract = request.get("contract") if isinstance(request.get("contract"), dict) else {}
+    return str(request.get("goal") or request.get("task") or contract.get("goal") or "")
+
+
 def output_path_from_request(request: dict[str, Any]) -> str:
     step = request.get("step") if isinstance(request.get("step"), dict) else {}
     expected = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
     if not expected or not isinstance(expected[0], str):
         raise ValueError("step.expected_artifacts must contain an output path")
     return expected[0]
+
+
+def safe_repo_path(repo_root: Path, raw_path: str) -> Path:
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError("patch path must be a non-empty string")
+    candidate = Path(raw_path)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError(f"patch path must be relative and stay inside target repo: {raw_path}")
+    root = repo_root.resolve()
+    resolved = (root / candidate).resolve()
+    if not resolved.is_relative_to(root):
+        raise ValueError(f"patch path escapes target repo: {raw_path}")
+    if any(part in EXCLUDED_DIRS for part in resolved.relative_to(root).parts):
+        raise ValueError(f"patch path points into an excluded directory: {raw_path}")
+    return resolved
+
+
+def sha256_text(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def target_repo_root(request: dict[str, Any]) -> Path:
+    raw = str(request.get("target_repo_root") or request.get("code_workspace_root") or "").strip()
+    if not raw:
+        goal = request_goal(request)
+        marker = "CERAXIA_TARGET_REPO:"
+        marker_at = goal.find(marker)
+        if marker_at >= 0:
+            raw = goal[marker_at + len(marker):].strip().splitlines()[0].strip()
+    if not raw:
+        return Path.cwd().resolve()
+    return Path(raw).resolve()
+
+
+def extract_json_after_marker(text: str, marker: str) -> dict[str, Any]:
+    start = text.find(marker)
+    if start < 0:
+        return {}
+    payload_text = text[start + len(marker):].strip()
+    if payload_text.startswith("```"):
+        lines = payload_text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if "```" in lines:
+            lines = lines[:lines.index("```")]
+        payload_text = "\n".join(lines).strip()
+    decoder = json.JSONDecoder()
+    try:
+        payload, _ = decoder.raw_decode(payload_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"CERAXIA_PATCH JSON is invalid: {exc}") from exc
+    return payload if isinstance(payload, dict) else {}
+
+
+def patch_spec_from_request(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    payload = extract_json_after_marker(goal, "CERAXIA_PATCH:")
+    if not payload:
+        return {}
+    if isinstance(payload.get("ceraxia_patch"), dict):
+        payload = payload["ceraxia_patch"]
+    operations = payload.get("operations")
+    if not isinstance(operations, list) or not operations:
+        raise ValueError("CERAXIA_PATCH must contain a non-empty operations list")
+    return payload
+
+
+def apply_patch_operation(repo_root: Path, operation: dict[str, Any]) -> dict[str, Any]:
+    op_type = str(operation.get("type") or "").strip()
+    path = safe_repo_path(repo_root, str(operation.get("path") or ""))
+    before_exists = path.exists()
+    before_hash = sha256_text(path) if before_exists else ""
+    if op_type == "replace":
+        if not before_exists:
+            raise ValueError(f"replace target does not exist: {operation.get('path')}")
+        old = operation.get("old")
+        new = operation.get("new")
+        if not isinstance(old, str) or old == "":
+            raise ValueError("replace operation requires non-empty old text")
+        if not isinstance(new, str):
+            raise ValueError("replace operation requires new text")
+        content = path.read_text(encoding="utf-8")
+        count = content.count(old)
+        if count != 1:
+            raise ValueError(f"replace operation requires exactly one match in {operation.get('path')}, found {count}")
+        path.write_text(content.replace(old, new, 1), encoding="utf-8")
+    elif op_type == "write_file":
+        content = operation.get("content")
+        if not isinstance(content, str):
+            raise ValueError("write_file operation requires string content")
+        overwrite = bool(operation.get("overwrite"))
+        if before_exists and not overwrite:
+            raise ValueError(f"write_file target exists and overwrite is false: {operation.get('path')}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    else:
+        raise ValueError(f"unsupported patch operation type: {op_type}")
+    after_hash = sha256_text(path)
+    return {
+        "path": str(path.relative_to(repo_root)),
+        "operation": op_type,
+        "created": not before_exists,
+        "before_sha256": before_hash,
+        "after_sha256": after_hash,
+        "changed": before_hash != after_hash,
+    }
 
 
 def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
@@ -119,8 +233,8 @@ def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
 
 
 def run_repository_survey(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
-    goal = str(request.get("goal") or request.get("task") or "")
-    survey = repo_survey(Path.cwd(), goal)
+    goal = request_goal(request)
+    survey = repo_survey(target_repo_root(request), goal)
     write_json(workspace_root, output_path, survey)
     return {
         "ok": True,
@@ -135,7 +249,7 @@ def run_repository_survey(request: dict[str, Any], workspace_root: Path, output_
 
 def run_change_planning(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
-    goal = str(request.get("goal") or request.get("task") or survey.get("goal") or "")
+    goal = request_goal(request) or str(survey.get("goal") or "")
     candidates = survey.get("candidate_files") if isinstance(survey.get("candidate_files"), list) else []
     tests = survey.get("test_files") if isinstance(survey.get("test_files"), list) else []
     content = "\n".join(
@@ -173,11 +287,29 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
 
 def run_implementation(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     plan = read_text_optional(workspace_root, sibling_artifact(output_path, "change_plan.md"))
+    blockers: list[str] = []
+    changed_files: list[dict[str, Any]] = []
+    patch_spec: dict[str, Any] = {}
+    try:
+        patch_spec = patch_spec_from_request(request)
+        if patch_spec:
+            repo_root = target_repo_root(request)
+            for operation in patch_spec["operations"]:
+                if not isinstance(operation, dict):
+                    raise ValueError("each patch operation must be an object")
+                changed_files.append(apply_patch_operation(repo_root, operation))
+        else:
+            blockers.append(
+                "No CERAXIA_PATCH operations were provided; direct source mutation requires an explicit patch specification."
+            )
+    except ValueError as exc:
+        blockers.append(str(exc))
+    status = "applied" if changed_files and not blockers else "handoff_required"
     manifest = {
-        "status": "handoff_required",
-        "mode": "auditable_handoff",
+        "status": status,
+        "mode": "explicit_patch_apply" if status == "applied" else "auditable_handoff",
         "task_id": request.get("task_id"),
-        "summary": "Ceraxia prepared implementation intent, but no source files were mutated by this worker.",
+        "summary": "Ceraxia applied explicit patch operations." if status == "applied" else "Ceraxia prepared implementation intent, but no source files were mutated by this worker.",
         "intended_actions": [
             "read concrete target files before editing",
             "apply minimal scoped patch",
@@ -185,13 +317,14 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
             "return focused revision steps on failure",
         ],
         "plan_excerpt": plan[:3000],
-        "changed_files": [],
-        "blockers": [
-            "Direct source mutation is not enabled for this worker yet; hand off to a patch/apply worker before claiming the code task complete.",
-        ],
+        "patch_spec_present": bool(patch_spec),
+        "changed_files": changed_files,
+        "blockers": blockers,
         "warnings": [
+            "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker.",
+        ] if status == "applied" else [
             "The current package is an auditable implementation handoff, not a completed code change.",
-        ],
+        ]
     }
     write_json(workspace_root, output_path, manifest)
     return {
@@ -199,7 +332,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": "completed",
-        "summary": "Patch manifest written as auditable handoff; source mutation remains blocked.",
+        "summary": "Patch manifest written with applied changes." if status == "applied" else "Patch manifest written as auditable handoff; source mutation remains blocked.",
         "artifacts": [output_path],
         "confidence": "medium",
     }
@@ -207,17 +340,53 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
 
 def run_verification(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
+    blockers = [str(item) for item in patch.get("blockers", [])] if isinstance(patch.get("blockers"), list) else []
+    executed: list[dict[str, Any]] = []
+    repo_root = target_repo_root(request)
+    changed_files = patch.get("changed_files") if isinstance(patch.get("changed_files"), list) else []
+    if patch.get("status") == "applied":
+        py_files = [
+            str(item.get("path"))
+            for item in changed_files
+            if isinstance(item, dict) and str(item.get("path") or "").endswith(".py")
+        ]
+        if py_files:
+            cmd = [sys.executable, "-m", "py_compile", *py_files]
+            completed = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, check=False)
+            executed.append(
+                {
+                    "command": " ".join(cmd),
+                    "returncode": completed.returncode,
+                    "stdout": completed.stdout[-4000:],
+                    "stderr": completed.stderr[-4000:],
+                }
+            )
+            if completed.returncode != 0:
+                blockers.append("py_compile failed for changed Python files")
+        if (repo_root / ".git").exists():
+            cmd = ["git", "diff", "--check"]
+            completed = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, check=False)
+            executed.append(
+                {
+                    "command": "git diff --check",
+                    "returncode": completed.returncode,
+                    "stdout": completed.stdout[-4000:],
+                    "stderr": completed.stderr[-4000:],
+                }
+            )
+            if completed.returncode != 0:
+                blockers.append("git diff --check failed")
     report = {
-        "status": "blocked" if patch.get("blockers") else "ready",
+        "status": "blocked" if blockers else "passed",
         "task_id": request.get("task_id"),
         "commands": [
-            "./EyeOfTerror/check-eye-mechanicum.sh",
+            "python -m py_compile <changed .py files>",
             "git diff --check",
         ],
-        "executed": [],
-        "blockers": patch.get("blockers", []),
+        "executed": executed,
+        "blockers": blockers,
         "warnings": patch.get("warnings", []),
-        "summary": "Verification commands are identified; execution awaits real source mutation." if patch.get("blockers") else "Verification commands are identified.",
+        "summary": "Verification passed for applied changes." if not blockers else "Verification is blocked or failed.",
     }
     write_json(workspace_root, output_path, report)
     return {
@@ -232,11 +401,16 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
 
 
 def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
+    patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
     blockers = verification.get("blockers") if isinstance(verification.get("blockers"), list) else []
     warnings = verification.get("warnings") if isinstance(verification.get("warnings"), list) else []
+    if patch.get("status") != "applied":
+        blockers = [*blockers, "Patch manifest was not applied."]
+    if verification.get("status") != "passed":
+        blockers = [*blockers, "Verification did not pass."]
     review = {
-        "status": "blocked" if blockers else "passed_with_warnings",
+        "status": "blocked" if blockers else "passed",
         "approved": not blockers,
         "findings": [
             {"severity": "blocker", "message": str(item)}
@@ -249,7 +423,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             ],
             {
                 "severity": "warning",
-                "message": "Ceraxia skeleton currently prepares code handoff artifacts; direct patch application is not enabled yet.",
+                "message": "Ceraxia currently supports only explicit patch operations; autonomous code synthesis is not enabled yet.",
             }
         ],
         "revision_plan": {
@@ -277,7 +451,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "ok": True,
         "worker": worker_name(),
         "task_id": request.get("task_id"),
-        "status": "needs_revision" if blockers else "passed_with_warnings",
+        "status": "needs_revision" if blockers else "passed",
         "summary": f"Code review written with {len(blockers)} blocker(s).",
         "artifacts": [output_path],
         "revision_plan": review["revision_plan"],
@@ -286,6 +460,8 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
 
 
 def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
+    patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
+    verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
     review = load_json_optional(workspace_root, sibling_artifact(output_path, "code_review.json"))
     status = "blocked" if review.get("approved") is False else "ready"
     manifest = {
@@ -298,6 +474,8 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             sibling_artifact(output_path, "verification_report.json"),
             sibling_artifact(output_path, "code_review.json"),
         ],
+        "changed_files": patch.get("changed_files", []),
+        "verification_status": verification.get("status", "unknown"),
         "review_status": review.get("status", "unknown"),
         "blockers": [item.get("message") for item in review.get("findings", []) if isinstance(item, dict)],
         "next_safe_action": "handoff_to_patch_worker" if status == "blocked" else "inspect_final_package",

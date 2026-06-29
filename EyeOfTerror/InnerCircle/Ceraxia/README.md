@@ -19,7 +19,22 @@ LogisRepository(repository_survey)
 
 ## Current Boundary
 
-The first prototype produces auditable coding artifacts and a safe handoff.
 The named workers currently share the same execution core, which keeps the
 protocol stable while their internals are split into stronger specialized
 implementations.
+
+`FerrumPatchwright` can apply explicit patch operations embedded in the task:
+
+```text
+CERAXIA_TARGET_REPO: /absolute/path/to/repo
+CERAXIA_PATCH:
+{
+  "operations": [
+    {"type": "replace", "path": "module.py", "old": "return 1", "new": "return 2"},
+    {"type": "write_file", "path": "new_file.py", "content": "..."}
+  ]
+}
+```
+
+Without explicit patch operations, Ceraxia writes a blocked handoff package
+instead of claiming the code task is complete.

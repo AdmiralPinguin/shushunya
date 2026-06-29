@@ -547,6 +547,12 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   mutated. The prototype now emits `blocked` with
   `next_safe_action=handoff_to_patch_worker` until a real patch/apply worker
   executes and verifies the code change.
+- `FerrumPatchwright` can now apply explicit `CERAXIA_PATCH` operations
+  (`replace` and `write_file`) against an explicit `CERAXIA_TARGET_REPO` or the
+  current repository. Applied changes record file hashes and `changed_files`.
+- `OrdinatusVerifier` runs concrete checks for applied code changes:
+  `py_compile` for changed Python files and `git diff --check` when the target
+  repository is a git worktree.
 - The pipeline records inaccessible primary books as `corpus_requirements`;
   operators must provide legitimate local text files when full primary evidence
   is required.
