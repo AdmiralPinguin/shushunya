@@ -76,27 +76,43 @@ def missing_artifact_revision_steps(missing: list[str]) -> list[dict[str, str]]:
 
 def merge_revision_plan(critic: dict[str, Any], missing: list[str]) -> dict[str, Any]:
     steps: list[dict[str, Any]] = []
-    seen: set[str] = set()
     critic_plan = critic.get("revision_plan") if isinstance(critic.get("revision_plan"), dict) else {}
     for item in critic_plan.get("steps", []) if isinstance(critic_plan.get("steps"), list) else []:
         if not isinstance(item, dict):
             continue
-        marker = json.dumps(item, sort_keys=True, ensure_ascii=False)
-        if marker not in seen:
-            steps.append(item)
-            seen.add(marker)
+        add_unique_revision_step(
+            steps,
+            str(item.get("step_id") or ""),
+            str(item.get("worker") or ""),
+            str(item.get("reason") or ""),
+            str(item.get("source") or "critic_finding"),
+        )
     for item in missing_artifact_revision_steps(missing):
-        marker = json.dumps(item, sort_keys=True, ensure_ascii=False)
-        if marker not in seen:
-            steps.append(item)
-            seen.add(marker)
+        add_unique_revision_step(
+            steps,
+            str(item.get("step_id") or ""),
+            str(item.get("worker") or ""),
+            str(item.get("reason") or ""),
+            str(item.get("source") or "missing_package_file"),
+        )
     return {"required": bool(steps), "steps": steps}
 
 
 def add_unique_revision_step(steps: list[dict[str, Any]], step_id: str, worker: str, reason: str, source: str) -> None:
+    if not step_id or not worker:
+        return
     for item in steps:
-        if item.get("step_id") == step_id and item.get("worker") == worker and item.get("reason") == reason:
-            return
+        if item.get("step_id") != step_id or item.get("worker") != worker:
+            continue
+        existing_reasons = [part.strip() for part in str(item.get("reason") or "").split(" | ") if part.strip()]
+        if reason and reason not in existing_reasons:
+            existing_reasons.append(reason)
+            item["reason"] = " | ".join(existing_reasons[:6])
+        existing_sources = [part.strip() for part in str(item.get("source") or "").split(",") if part.strip()]
+        if source and source not in existing_sources:
+            existing_sources.append(source)
+            item["source"] = ",".join(existing_sources)
+        return
     steps.append(
         {
             "step_id": step_id,

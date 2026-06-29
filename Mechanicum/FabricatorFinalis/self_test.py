@@ -91,6 +91,18 @@ def main() -> int:
                     "required_direct_events": ["moon_parley", "golden_absolute"],
                     "metrics": {"source_coverage_ready": True},
                     "revision_focus": {"present": True},
+                    "revision_plan": {
+                        "required": True,
+                        "steps": [
+                            {
+                                "step_id": "draft_reconstruction",
+                                "worker": "ScriptoriumDaemon",
+                                "reason": "critic already requested draft rebuild",
+                                "source": "critic_finding",
+                                "priority": "blocker",
+                            }
+                        ],
+                    },
                 }
             ),
         )
@@ -107,6 +119,13 @@ def main() -> int:
         revision_workers = {step.get("worker") for step in manifest.get("revision_plan", {}).get("steps", [])}
         if not {"NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
             raise AssertionError(f"missing required event should produce downstream revision plan: {manifest}")
+        revision_steps = manifest.get("revision_plan", {}).get("steps", [])
+        revision_step_ids = [step.get("step_id") for step in revision_steps]
+        if len(revision_step_ids) != len(set(revision_step_ids)):
+            raise AssertionError(f"final manifest revision plan should not duplicate step ids: {manifest}")
+        draft_revision = next((step for step in revision_steps if step.get("step_id") == "draft_reconstruction"), {})
+        if "critic already requested draft rebuild" not in draft_revision.get("reason", "") or "Missing required direct events" not in draft_revision.get("reason", ""):
+            raise AssertionError(f"duplicate draft revision reasons should be merged: {manifest}")
         write(
             base / "critic_report.json",
             json.dumps(
