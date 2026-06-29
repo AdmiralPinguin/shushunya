@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse, urlunparse
 
 
 SHUSHUNYA_AGENT_DIR = Path(__file__).resolve().parents[1] / "ShushunyaAgent"
@@ -37,6 +38,28 @@ def default_fetch(url: str, max_bytes: int) -> dict[str, Any]:
     return web_fetch(FetchConfig(), url, max_bytes)
 
 
+def reddit_old_url(url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if not host.endswith("reddit.com"):
+        return ""
+    return urlunparse((parsed.scheme or "https", "old.reddit.com", parsed.path, parsed.params, parsed.query, parsed.fragment))
+
+
+def fetch_with_fallbacks(source: dict[str, Any], fetcher: FetchFn, max_bytes: int) -> dict[str, Any]:
+    url = str(source.get("url") or "").strip()
+    result = fetcher(url, max_bytes)
+    text = str(result.get("text") or "")
+    old_url = reddit_old_url(url)
+    if old_url and result.get("ok") and len(text.strip()) < 200 and "reddit" in text.lower() and "verification" in text.lower():
+        fallback = fetcher(old_url, max_bytes)
+        if fallback.get("ok") and len(str(fallback.get("text") or "")) > len(text):
+            fallback["fallback_from_url"] = url
+            fallback["fallback_reason"] = "reddit verification page"
+            return fallback
+    return result
+
+
 def compact_snapshot(source: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     text = str(result.get("text") or "")
     return {
@@ -55,6 +78,8 @@ def compact_snapshot(source: dict[str, Any], result: dict[str, Any]) -> dict[str
         "render_required": bool(result.get("render_required")),
         "render_reason": result.get("render_reason", ""),
         "error": result.get("error", ""),
+        "fallback_from_url": result.get("fallback_from_url", ""),
+        "fallback_reason": result.get("fallback_reason", ""),
     }
 
 
@@ -69,7 +94,7 @@ def collect_snapshots(source_map: dict[str, Any], fetcher: FetchFn = default_fet
             skipped.append({"source_title": source.get("title", ""), "reason": "no public URL in source map"})
             continue
         try:
-            result = fetcher(url, max_bytes)
+            result = fetch_with_fallbacks(source, fetcher, max_bytes)
         except Exception as exc:  # noqa: BLE001 - network failures are data for this worker.
             result = {"ok": False, "error": str(exc)}
         snapshots.append(compact_snapshot(source, result))
