@@ -116,6 +116,19 @@ def direct_evidence_source_count(notes: dict[str, Any]) -> int:
 
 
 def inaccessible_primary_titles(source_map: dict[str, Any]) -> list[str]:
+    local_primary_tokens = [
+        relevance_tokens(
+            " ".join(
+                [
+                    str(source.get("title") or ""),
+                    str(source.get("local_path") or ""),
+                    str(source.get("corpus_relative_path") or ""),
+                ]
+            )
+        )
+        for source in source_map.get("sources", [])
+        if isinstance(source, dict) and str(source.get("local_path") or "").strip()
+    ]
     titles: list[str] = []
     for source in source_map.get("sources", []):
         if not isinstance(source, dict):
@@ -124,8 +137,16 @@ def inaccessible_primary_titles(source_map: dict[str, Any]) -> list[str]:
         if "primary" not in source_class and str(source.get("type") or "").lower() not in {"novel", "short_story", "book"}:
             continue
         if not str(source.get("url") or "").strip() and not str(source.get("local_path") or "").strip():
+            source_tokens = relevance_tokens(str(source.get("title") or ""))
+            if source_tokens and any(len(source_tokens & local_tokens) >= min(2, len(source_tokens)) for local_tokens in local_primary_tokens):
+                continue
             titles.append(str(source.get("title") or "untitled primary source"))
     return titles
+
+
+def relevance_tokens(text: str) -> set[str]:
+    stopwords = {"the", "and", "for", "with", "warhammer", "black", "library", "ebook", "novel"}
+    return {token for token in "".join(char.lower() if char.isalnum() else " " for char in text).split() if len(token) > 2 and token not in stopwords}
 
 
 def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, Any], reconstruction: str) -> tuple[list[dict[str, str]], dict[str, Any]]:

@@ -135,6 +135,24 @@ def main() -> int:
         revision_workers = {step.get("worker") for step in report.get("revision_plan", {}).get("steps", [])}
         if "CorpusIngestor" not in revision_workers:
             raise AssertionError(f"missing primary corpus blocker should route through CorpusIngestor: {report}")
+        source_map_with_local_primary = json.loads((base / "source_map.json").read_text(encoding="utf-8"))
+        source_map_with_local_primary["sources"].insert(
+            0,
+            {
+                "title": "Kharn Eater Worlds local",
+                "local_path": "/project/Corpus/Kharn Eater Worlds.epub",
+                "corpus_relative_path": "Kharn Eater Worlds.epub",
+                "source_class": "local_primary_candidate",
+                "discovery_method": "local_corpus",
+            },
+        )
+        write_json(base / "source_map.json", source_map_with_local_primary)
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on local primary match: {result}")
+        report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
+        if "Kharn: Eater of Worlds" in json.dumps(report.get("findings", []), ensure_ascii=False):
+            raise AssertionError(f"matching local corpus source should satisfy missing Kharn primary blocker: {report}")
         write_json(
             base / "source_map.json",
             {
