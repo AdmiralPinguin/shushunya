@@ -268,6 +268,33 @@ def main() -> int:
                 raise AssertionError(f"cached live sources should be marked as cached: {cached.get('sources')}")
             if cached.get("source_coverage", {}).get("live_candidate_count", 0) < 1:
                 raise AssertionError(f"cached live sources should count toward live coverage: {cached.get('source_coverage')}")
+            (cache_dir / "skalathrax.json").write_text(
+                json.dumps(
+                    {
+                        "topic": "Skalathrax",
+                        "sources": [
+                            {
+                                "title": f"Cached Live {index}",
+                                "url": f"https://www.reddit.com/r/40kLore/comments/example/cached-{index}/",
+                                "source_class": "community_excerpt",
+                                "type": "discussion_excerpt",
+                                "discovery_method": "live_search",
+                            }
+                            for index in range(8)
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def forbidden_search(query: str, limit: int) -> dict:
+                raise AssertionError(f"network search should be skipped when cached live depth is sufficient: {query}")
+
+            cached_comprehensive = source_map_for_contract({"goal": long_goal}, forbidden_search)
+            if cached_comprehensive.get("discovery_status") != "playbook_matched_cached_live":
+                raise AssertionError(f"cached comprehensive discovery should skip fresh network search: {cached_comprehensive}")
+            if cached_comprehensive.get("source_coverage", {}).get("live_candidate_count", 0) < 8:
+                raise AssertionError(f"cached comprehensive coverage should satisfy live depth: {cached_comprehensive.get('source_coverage')}")
         finally:
             lexmechanic.SOURCE_CACHE_DIR = old_cache_dir
     print("[ok] Lexmechanic source map")

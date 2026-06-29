@@ -690,13 +690,21 @@ def source_map_for_contract(
         "A pass requires at least one reliable primary or official source candidate.",
         "Secondary summaries can guide discovery but must not become sole evidence.",
     ]
-    discovery_rounds = run_discovery_rounds(
-        rounds,
-        searcher,
-        limit=int(depth_profile.get("per_query_limit") or 5),
-        query_budget=int(depth_profile.get("query_budget") or 10),
-        per_round_query_limit=int(depth_profile.get("per_round_query_limit") or 4),
-    )
+    cached_live_count = sum(1 for source in cached_sources if source.get("discovery_method") == "cached_live_search")
+    min_live_candidate_count = int(depth_profile.get("min_live_candidate_count") or 0)
+    cache_satisfies_live_depth = bool(playbooks) and min_live_candidate_count > 0 and cached_live_count >= min_live_candidate_count
+    discovery_rounds = []
+    if cache_satisfies_live_depth:
+        discovery_status = "playbook_matched_cached_live"
+        quality_notes.append("Cached live discovery already satisfies the requested live-candidate depth; fresh network probing was skipped.")
+    else:
+        discovery_rounds = run_discovery_rounds(
+            rounds,
+            searcher,
+            limit=int(depth_profile.get("per_query_limit") or 5),
+            query_budget=int(depth_profile.get("query_budget") or 10),
+            per_round_query_limit=int(depth_profile.get("per_round_query_limit") or 4),
+        )
     discovery_results = flatten_discovery_results(discovery_rounds)
     relevance_terms = None
     if playbooks:
