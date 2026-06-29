@@ -87,6 +87,7 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
     stats: dict[str, Any] = {}
     orchestration_stats: dict[str, Any] = {}
     artifact_stats: dict[str, Any] = {}
+    failure_reasons: dict[str, int] = {}
     failures: list[dict[str, Any]] = []
     loaded = 0
     for path in report_paths:
@@ -104,6 +105,19 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
                 add_orchestration_stat(orchestration_stats, suite, agent, orchestration)
                 add_artifact_stat(artifact_stats, suite, agent, orchestration)
             if not ok:
+                checks = result.get("checks") if isinstance(result.get("checks"), list) else []
+                failed_checks = [check for check in checks if isinstance(check, dict) and check.get("ok") is not True]
+                exit_failed = result.get("exit_code") not in (0, None)
+                checks_failed = bool(failed_checks)
+                if exit_failed and checks_failed:
+                    reason = "both"
+                elif checks_failed:
+                    reason = "post_run_checks"
+                elif exit_failed:
+                    reason = "agent_exit"
+                else:
+                    reason = "unknown"
+                failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                 failures.append(
                     {
                         "report": path.name,
@@ -111,6 +125,8 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
                         "agent": agent,
                         "task_id": result.get("task_id"),
                         "exit_code": result.get("exit_code"),
+                        "failure_reason": reason,
+                        "failed_check_count": len(failed_checks),
                         "error": result.get("error", ""),
                     }
                 )
@@ -131,6 +147,7 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
         "stats": rows,
         "orchestration_quality": orchestration_rows,
         "artifact_quality": artifact_rows,
+        "failure_reasons": failure_reasons,
         "recent_failures": failures[:20],
     }
 

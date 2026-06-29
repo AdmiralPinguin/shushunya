@@ -107,6 +107,8 @@ def main() -> int:
                         "task_id": "artifact",
                         "ok": False,
                         "duration_sec": 3.0,
+                        "exit_code": 0,
+                        "checks": [{"type": "file_contains", "path": "report.md", "ok": False}],
                         "orchestration": {
                             "style": "artifact_reads_before_writes",
                             "ok": False,
@@ -126,6 +128,8 @@ def main() -> int:
         artifact_rows = analysis.get("artifact_quality", [])
         if not artifact_rows or artifact_rows[0].get("missing_input_reads") != 1:
             raise AssertionError(f"bad arena artifact report analysis: {analysis}")
+        if analysis.get("failure_reasons", {}).get("agent_exit") != 1 or analysis.get("failure_reasons", {}).get("post_run_checks") != 1:
+            raise AssertionError(f"bad arena failure reason analysis: {analysis}")
     print("[ok] AgentArena runner")
     return 0
 
