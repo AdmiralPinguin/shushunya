@@ -210,6 +210,12 @@ def main() -> int:
             raise AssertionError(f"multi-file marker should preserve both changed files: {final}")
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"multi-file final manifest should preserve verification evidence: {final}")
+        repeated = run_pipeline(root / "work_repeat", goal=multi_file_goal(), target_repo_root=target_repo)
+        if repeated.get("status") != "ready":
+            raise AssertionError(f"repeated multi-file marker task should remain ready: {repeated}")
+        repeated_files = repeated.get("changed_files", [])
+        if not repeated_files or not all(item.get("idempotent") for item in repeated_files if isinstance(item, dict)):
+            raise AssertionError(f"repeated multi-file marker should report idempotent writes: {repeated}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

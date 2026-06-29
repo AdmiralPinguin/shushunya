@@ -117,6 +117,20 @@ CERAXIA_FILES:
             raise AssertionError("Ceraxia multi-file pipeline did not write both target files")
         if manifest.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"Ceraxia multi-file manifest lacks verification evidence: {manifest}")
+        repeated_task_id = "ceraxia-multi-file-marker-pipeline-repeat"
+        repeated_prepared = prepare_task(task, repeated_task_id, run_root, governor_transport="local")
+        if not repeated_prepared.get("ok") or repeated_prepared.get("governor") != "Ceraxia":
+            raise AssertionError(f"Ceraxia repeated multi-file task did not prepare correctly: {repeated_prepared}")
+        repeated_result = research_loop_run(run_root, repeated_task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        if not repeated_result.get("ok") or repeated_result.get("phase") != "completed":
+            raise AssertionError(f"Ceraxia repeated multi-file pipeline did not complete: {repeated_result}")
+        repeated_manifest_path = next((run_root / repeated_task_id / "work").rglob("final_manifest.json"))
+        repeated_manifest = json.loads(repeated_manifest_path.read_text(encoding="utf-8"))
+        repeated_files = repeated_manifest.get("changed_files", [])
+        if repeated_manifest.get("status") != "ready" or not repeated_files:
+            raise AssertionError(f"Ceraxia repeated multi-file manifest should remain ready: {repeated_manifest}")
+        if not all(item.get("idempotent") for item in repeated_files if isinstance(item, dict)):
+            raise AssertionError(f"Ceraxia repeated multi-file manifest should report idempotent writes: {repeated_manifest}")
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
         target_repo = temp_root / "repo"

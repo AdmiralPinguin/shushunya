@@ -304,6 +304,16 @@ def apply_patch_operation(repo_root: Path, operation: dict[str, Any]) -> dict[st
         if not isinstance(content, str):
             raise ValueError("write_file operation requires string content")
         overwrite = bool(operation.get("overwrite"))
+        if before_exists and path.read_text(encoding="utf-8") == content:
+            return {
+                "path": str(path.relative_to(repo_root)),
+                "operation": op_type,
+                "created": False,
+                "before_sha256": before_hash,
+                "after_sha256": before_hash,
+                "changed": False,
+                "idempotent": True,
+            }
         if before_exists and not overwrite:
             raise ValueError(f"write_file target exists and overwrite is false: {operation.get('path')}")
         path.parent.mkdir(parents=True, exist_ok=True)

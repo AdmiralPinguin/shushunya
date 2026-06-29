@@ -40,6 +40,10 @@ CERAXIA_PATCH:
 Without explicit patch operations, Ceraxia writes a blocked handoff package
 instead of claiming the code task is complete.
 
+`write_file` is idempotent when the target file already contains the requested
+content. Different existing content still requires `"overwrite": true`, so
+retries can succeed without weakening accidental overwrite protection.
+
 Verification commands run without a shell and must match Ceraxia's allowlist:
 `pytest`, `python -m pytest`, `python -m unittest`, or
 `python -m py_compile ...`.
