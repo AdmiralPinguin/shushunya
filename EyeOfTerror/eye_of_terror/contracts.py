@@ -88,6 +88,7 @@ class TaskContract:
 def lore_required_artifacts(slug: str) -> list[str]:
     base = f"/work/{slug}"
     return [
+        f"{base}/corpus_index.json",
         f"{base}/source_map.json",
         f"{base}/source_snapshots.json",
         f"{base}/direct_event_notes.json",
@@ -103,9 +104,16 @@ def lore_worker_plan(slug: str) -> list[WorkerPlanStep]:
     base = f"/work/{slug}"
     return [
         WorkerPlanStep(
+            step_id="corpus_ingestion",
+            worker="CorpusIngestor",
+            purpose="Index user-provided local corpus files and expose matching primary-text candidates before web discovery.",
+            expected_artifacts=[f"{base}/corpus_index.json"],
+        ),
+        WorkerPlanStep(
             step_id="source_discovery",
             worker="Lexmechanic",
             purpose="Discover sources and classify reliability, language, and direct-event usefulness.",
+            depends_on=["corpus_ingestion"],
             expected_artifacts=[f"{base}/source_map.json"],
         ),
         WorkerPlanStep(

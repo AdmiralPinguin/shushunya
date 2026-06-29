@@ -118,8 +118,9 @@ def dedupe_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     for source in sources:
         url = str(source.get("url") or "").strip().lower()
+        local_path = str(source.get("local_path") or "").strip().lower()
         title = " ".join(str(source.get("title") or "").split()).lower()
-        key = url or title
+        key = url or local_path or title
         if key in seen:
             continue
         seen.add(key)
@@ -131,6 +132,8 @@ def source_type(source: dict[str, Any]) -> str:
     host = (urlparse(str(source.get("url") or "")).hostname or "").lower()
     kind = str(source.get("type") or "").lower()
     source_class = str(source.get("source_class") or "").lower()
+    if source.get("local_path") or source_class == "local_primary_candidate":
+        return "local_primary"
     if kind in {"novel", "codex", "campaign_book", "short_story", "book"}:
         return "published_primary"
     if "primary" in source_class and kind in {"extract", "excerpt"}:
@@ -167,6 +170,7 @@ def ranked_source(source: dict[str, Any]) -> dict[str, Any]:
     detail = str(enriched.get("direct_event_detail_level") or "").lower()
     class_score = {
         "published_primary": 100,
+        "local_primary": 96,
         "official_primary_extract": 88,
         "official_catalog": 78,
         "official_article": 76,
@@ -611,14 +615,15 @@ def source_coverage(sources: list[dict[str, Any]], discovery_results: list[dict[
     source_classes = [str(source.get("source_class") or source.get("type") or "") for source in sources if isinstance(source, dict)]
     fetched_query_count = len(discovery_results)
     successful_query_count = sum(1 for item in discovery_results if item.get("ok"))
-    has_primary = any(kind == "published_primary" or "primary" in source_class for kind, source_class in zip(source_types, source_classes))
-    has_official = any(kind in {"published_primary", "official_catalog", "official_article", "official_secondary"} for kind in source_types)
+    has_primary = any(kind in {"published_primary", "local_primary"} or "primary" in source_class for kind, source_class in zip(source_types, source_classes))
+    has_official = any(kind in {"published_primary", "local_primary", "official_catalog", "official_article", "official_secondary"} for kind in source_types)
     has_secondary = any(kind in {"curated_wiki", "wiki", "community_wiki"} for kind in source_types)
     live_count = sum(1 for source in sources if source.get("discovery_method") in {"live_search", "cached_live_search"})
     return {
         "source_count": len(sources),
         "matched_playbook_count": len(playbooks),
         "live_candidate_count": live_count,
+        "local_corpus_source_count": sum(1 for source in sources if source.get("discovery_method") == "local_corpus"),
         "query_count": fetched_query_count,
         "successful_query_count": successful_query_count,
         "has_primary_or_publication": has_primary,
@@ -629,7 +634,29 @@ def source_coverage(sources: list[dict[str, Any]], discovery_results: list[dict[
     }
 
 
-def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None = None) -> dict[str, Any]:
+def load_corpus_sources(request: dict[str, Any], workspace_root: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    input_artifacts = request.get("input_artifacts") if isinstance(request.get("input_artifacts"), list) else []
+    corpus_path = next((str(path) for path in input_artifacts if isinstance(path, str) and path.endswith("/corpus_index.json")), "")
+    if not corpus_path:
+        return [], {}
+    host_path = sandbox_path(workspace_root, corpus_path)
+    if not host_path.exists():
+        return [], {"missing": corpus_path}
+    try:
+        payload = json.loads(host_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [], {"error": str(exc), "path": corpus_path}
+    sources = payload.get("sources") if isinstance(payload, dict) else []
+    source_items = [dict(source) for source in sources if isinstance(source, dict)]
+    return source_items, payload if isinstance(payload, dict) else {}
+
+
+def source_map_for_contract(
+    contract: dict[str, Any],
+    searcher: SearchFn | None = None,
+    corpus_sources: list[dict[str, Any]] | None = None,
+    corpus_index: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     goal = str(contract.get("goal") or "")
     playbooks = matching_playbooks(goal)
     topic = next((str(playbook.get("topic") or "") for playbook in playbooks if playbook.get("topic")), goal)
@@ -679,8 +706,12 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
             if isinstance(source, dict) and source.get("title")
         ]
     live_candidates = classified_live_sources(discovery_results, relevance_terms)
-    sources = rank_sources(dedupe_sources(sources + cached_sources + live_candidates))
+    corpus_candidates = corpus_sources or []
+    sources = rank_sources(dedupe_sources(corpus_candidates + sources + cached_sources + live_candidates))
     coverage = source_coverage(sources, discovery_results, playbooks)
+    corpus_summary = corpus_index.get("summary") if isinstance(corpus_index, dict) and isinstance(corpus_index.get("summary"), dict) else {}
+    corpus_gaps = corpus_index.get("gaps") if isinstance(corpus_index, dict) and isinstance(corpus_index.get("gaps"), list) else []
+    coverage_gaps.extend(str(gap) for gap in corpus_gaps if gap)
     if sources and not coverage["ready_for_extraction"]:
         coverage_gaps.append("Source set is not extraction-ready: it needs both official/primary evidence and secondary cross-checking.")
     return {
@@ -694,6 +725,8 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
         "discovery_results": discovery_results,
         "live_source_candidates": live_candidates,
         "cached_source_candidates": cached_sources,
+        "local_corpus_candidates": corpus_candidates,
+        "corpus_summary": corpus_summary,
         "source_cache": {
             "enabled": bool(source_cache_path(topic)),
             "cached_source_count": len(cached_sources),
@@ -724,7 +757,8 @@ def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None
     selected_searcher = configured_searcher() if searcher is None else searcher
     if selected_searcher is False:
         selected_searcher = None
-    source_map = source_map_for_contract(contract, selected_searcher)
+    corpus_sources, corpus_index = load_corpus_sources(request, workspace_root)
+    source_map = source_map_for_contract(contract, selected_searcher, corpus_sources=corpus_sources, corpus_index=corpus_index)
     write_source_cache(str(source_map.get("topic") or ""), source_map.get("sources", []))
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)

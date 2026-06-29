@@ -27,12 +27,14 @@ The governor must define:
 
 ## Worker Sequence
 
-1. `Lexmechanic`: source discovery and reliability map.
-2. `NoosphericExtractor`: fact extraction with confidence labels.
-3. `Chronologis`: event ordering, contradictions, missing links.
-4. `ScriptoriumDaemon`: readable Russian reconstruction from extracted facts.
-5. `ReductorVerifier`: independent criticism against the task contract.
-6. `FabricatorFinalis`: package files and send requested outputs.
+1. `CorpusIngestor`: local user-provided corpus index and primary-text candidates.
+2. `Lexmechanic`: source discovery and reliability map.
+3. `AuspexBrowser`: source acquisition for public URLs and local corpus texts.
+4. `NoosphericExtractor`: fact extraction with confidence labels.
+5. `Chronologis`: event ordering, contradictions, missing links.
+6. `ScriptoriumDaemon`: readable Russian reconstruction from extracted facts.
+7. `ReductorVerifier`: independent criticism against the task contract.
+8. `FabricatorFinalis`: package files and send requested outputs.
 
 ## Failure Conditions
 
@@ -42,4 +44,3 @@ The governor must define:
 - critic report is missing;
 - final text contains unsupported facts;
 - final text is only a short summary when the task asked for full coverage.
-

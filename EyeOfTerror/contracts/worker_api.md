@@ -90,7 +90,7 @@ running on the selected port before sending work.
     "revision_policy": {
       "source_step": "critic_review",
       "final_steps": ["critic_review", "finalize"],
-      "allowed_steps": ["source_discovery", "source_acquisition", "fact_extraction", "timeline", "draft_reconstruction", "critic_review", "finalize"],
+      "allowed_steps": ["corpus_ingestion", "source_discovery", "source_acquisition", "fact_extraction", "timeline", "draft_reconstruction", "critic_review", "finalize"],
       "requires_downstream_rerun": true,
       "requires_focused_context": true,
       "requires_gap_disclosure": true

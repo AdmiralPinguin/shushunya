@@ -27,7 +27,8 @@ artifacts, built from the same worker-plan source used for concrete contracts.
 ## Default Worker Pipeline
 
 ```text
-Lexmechanic
+CorpusIngestor
+  -> Lexmechanic
   -> AuspexBrowser
   -> NoosphericExtractor
   -> Chronologis

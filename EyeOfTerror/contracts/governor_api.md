@@ -31,6 +31,7 @@ POST /prepare_run
   "api_version": 1,
   "task_kinds": ["research", "lore_reconstruction"],
   "required_workers": [
+    "CorpusIngestor",
     "Lexmechanic",
     "AuspexBrowser",
     "NoosphericExtractor",
@@ -41,8 +42,9 @@ POST /prepare_run
   ],
   "pipeline": {
     "kind": "lore_reconstruction",
-    "step_count": 7,
+    "step_count": 8,
     "required_workers": [
+      "CorpusIngestor",
       "Lexmechanic",
       "AuspexBrowser",
       "NoosphericExtractor",
@@ -53,9 +55,15 @@ POST /prepare_run
     ],
     "steps": [
       {
+        "step_id": "corpus_ingestion",
+        "worker": "CorpusIngestor",
+        "depends_on": [],
+        "expected_artifacts": ["/work/skalathrax/corpus_index.json"]
+      },
+      {
         "step_id": "source_discovery",
         "worker": "Lexmechanic",
-        "depends_on": [],
+        "depends_on": ["corpus_ingestion"],
         "expected_artifacts": ["/work/capabilities/source_map.json"],
         "expected_artifact_count": 1
       },
@@ -87,16 +95,16 @@ POST /prepare_run
   },
   "summary": {
     "pipeline_kind": "lore_reconstruction",
-    "step_count": 7,
-    "required_worker_count": 7,
+    "step_count": 8,
+    "required_worker_count": 8,
     "quality_gate_count": 6,
-    "step_quality_matrix_count": 7,
-    "handoff_count": 7,
+    "step_quality_matrix_count": 8,
+    "handoff_count": 8,
     "worker_availability_ok": true
   },
   "display": {
     "headline": "Iskandar Khayon capabilities",
-    "detail": "7 steps, 7 required workers",
+    "detail": "8 steps, 8 required workers",
     "severity": "info"
   },
   "next_action": {
@@ -177,7 +185,7 @@ pipeline payload.
     "detail": "governor plan is valid and required workers are available",
     "severity": "info",
     "task_id": "optional-stable-id",
-    "step_count": 7
+    "step_count": 8
   },
   "next_action": {
     "kind": "prepare_run",

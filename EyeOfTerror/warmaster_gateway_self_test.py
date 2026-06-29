@@ -476,7 +476,7 @@ def main() -> int:
                 if (
                     not pipelines
                     or pipelines[0].get("governor") != "IskandarKhayon"
-                    or pipelines[0].get("pipeline", {}).get("steps", [])[0].get("worker") != "Lexmechanic"
+                    or pipelines[0].get("pipeline", {}).get("steps", [])[0].get("worker") != "CorpusIngestor"
                 ):
                     raise AssertionError(f"governor pipeline summaries were not exposed: {pipelines}")
             finally:
@@ -718,10 +718,10 @@ def main() -> int:
                 not preflight.get("ok")
                 or (run_root / "warmaster-preflight-test").exists()
                 or len(preflight_steps) < 2
-                or preflight_steps[0].get("worker") != "Lexmechanic"
-                or preflight_steps[1].get("depends_on") != ["source_discovery"]
-                or preflight_steps[1].get("expected_artifacts") != ["/work/skalathrax/source_snapshots.json"]
-                or preflight_steps[1].get("expected_artifact_count") != 1
+                or preflight_steps[0].get("worker") != "CorpusIngestor"
+                or preflight_steps[1].get("depends_on") != ["corpus_ingestion"]
+                or preflight_steps[2].get("expected_artifacts") != ["/work/skalathrax/source_snapshots.json"]
+                or preflight_steps[2].get("expected_artifact_count") != 1
                 or preflight.get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or not preflight.get("oversight_validation", {}).get("ok")
                 or preflight.get("actions", {}).get("can_create_task") is not True
@@ -779,7 +779,7 @@ def main() -> int:
                 orchestrated_state.get("phase") != "ready_to_start"
                 or not orchestrated_state.get("decision", {}).get("can_start")
                 or orchestrated_state.get("display", {}).get("headline") != "Run is ready to start"
-                or orchestrated_state.get("display", {}).get("progress", {}).get("planned_steps") != 7
+                or orchestrated_state.get("display", {}).get("progress", {}).get("planned_steps") != 8
                 or orchestrated_state.get("next_action", {}).get("kind") != "start"
                 or orchestrated_state.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/start_http"
                 or orchestrated_state.get("snapshot", {}).get("summary", {}).get("task_id") != "warmaster-orchestrate-test"
@@ -939,7 +939,7 @@ def main() -> int:
             run_preflight = request_json(base + "/runs/warmaster-test/preflight_local", {"timeout_sec": 30})
             if (
                 not run_preflight.get("ok")
-                or run_preflight.get("step_ids", [])[0] != "source_discovery"
+                or run_preflight.get("step_ids", [])[0] != "corpus_ingestion"
                 or run_preflight.get("oversight_summary", {}).get("final_review", {}).get("final_step") != "finalize"
                 or run_preflight.get("run_status") != "created"
                 or run_preflight.get("actions", {}).get("can_start_run") is not True
@@ -1191,15 +1191,15 @@ def main() -> int:
                 or run_summary.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("quality_gate_count") != 6
-                or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_matrix_count") != 7
-                or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_check_count", 0) < 7
-                or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "source_discovery"
-                or run_summary.get("summary", {}).get("progress", {}).get("next_ready_step_id") != "source_discovery"
-                or run_summary.get("summary", {}).get("progress", {}).get("ready_step_ids") != ["source_discovery"]
+                or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_matrix_count") != 8
+                or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_check_count", 0) < 8
+                or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "corpus_ingestion"
+                or run_summary.get("summary", {}).get("progress", {}).get("next_ready_step_id") != "corpus_ingestion"
+                or run_summary.get("summary", {}).get("progress", {}).get("ready_step_ids") != ["corpus_ingestion"]
                 or "fact_extraction" not in run_summary.get("summary", {}).get("progress", {}).get("waiting_step_ids", [])
                 or run_summary.get("summary", {}).get("progress", {}).get("ready_steps") != 1
-                or run_summary.get("summary", {}).get("progress", {}).get("waiting_steps") != 6
-                or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("worker") != "Lexmechanic"
+                or run_summary.get("summary", {}).get("progress", {}).get("waiting_steps") != 7
+                or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("worker") != "CorpusIngestor"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("status") != "pending"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("quality_hints", {}).get("check_count", 0) < 1
             ):
@@ -1251,8 +1251,8 @@ def main() -> int:
             if (
                 not package.get("ok")
                 or not package.get("validation", {}).get("ok")
-                or package.get("contract_summary", {}).get("step_count") != 7
-                or package.get("dispatch_count") != 7
+                or package.get("contract_summary", {}).get("step_count") != 8
+                or package.get("dispatch_count") != 8
                 or not package.get("files", {}).get("oversight")
                 or package.get("phase") != "ready_to_start"
                 or package.get("next_action", {}).get("kind") != "start"
@@ -1288,7 +1288,7 @@ def main() -> int:
             if (
                 not worker_tasks.get("ok")
                 or not worker_tasks.get("worker_tasks")
-                or worker_tasks["worker_tasks"][0].get("task_id") != "warmaster-test:source_discovery"
+                or worker_tasks["worker_tasks"][0].get("task_id") != "warmaster-test:corpus_ingestion"
                 or worker_tasks.get("phase") != "ready_to_start"
                 or worker_tasks.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
                 or not worker_tasks.get("display", {}).get("headline")
@@ -1328,7 +1328,7 @@ def main() -> int:
             if (
                 not run_list.get("ok")
                 or run_list.get("run_summary", {}).get("total", 0) < 1
-                or not any(item.get("task_id") == "warmaster-test" and item.get("progress", {}).get("planned_steps") == 7 for item in run_list.get("runs", []))
+                or not any(item.get("task_id") == "warmaster-test" and item.get("progress", {}).get("planned_steps") == 8 for item in run_list.get("runs", []))
                 or not any(item.get("task_id") == "warmaster-test" and "headline" in item.get("display", {}) for item in run_list.get("orchestration_cards", []))
             ):
                 raise AssertionError(f"bad run list: {run_list}")
@@ -1347,7 +1347,7 @@ def main() -> int:
             restricted_run_dir = Path(restricted_task["run_dir"])
             restricted = request_json(
                 base + "/runs/warmaster-restricted-test/execute_local",
-                {"step_ids": ["source_discovery"], "timeout_sec": 30},
+                {"step_ids": ["corpus_ingestion"], "timeout_sec": 30},
                 timeout=60,
             )
             if (
@@ -1364,10 +1364,10 @@ def main() -> int:
             if restricted_ledger.get("ledger", {}).get("status") != "interrupted":
                 raise AssertionError(f"restricted execution should leave pending work interrupted: {restricted_ledger}")
             restricted_summary = request_json(base + "/runs/warmaster-restricted-test/summary")
-            if restricted_summary.get("summary", {}).get("progress", {}).get("ready_step_ids", [None])[0] != "source_acquisition":
+            if restricted_summary.get("summary", {}).get("progress", {}).get("ready_step_ids", [None])[0] != "source_discovery":
                 raise AssertionError(f"restricted execution did not advance ready steps: {restricted_summary}")
             restricted_pending = resume_step_ids_from_run(restricted_run_dir)
-            if not restricted_pending or restricted_pending[0] != "source_acquisition" or "source_discovery" in restricted_pending:
+            if not restricted_pending or restricted_pending[0] != "source_discovery" or "corpus_ingestion" in restricted_pending:
                 raise AssertionError(f"restricted execution did not expose resumable pending steps: {restricted_pending}")
             restricted_resumed = request_json(base + "/runs/warmaster-restricted-test/resume_local", {"timeout_sec": 30}, timeout=60)
             if (
@@ -1621,6 +1621,13 @@ def main() -> int:
                 raise AssertionError(f"bad partial resume task response: {partial_resume}")
             partial_run_dir = Path(partial_resume["run_dir"])
             partial_ledger = TaskLedger.load(partial_run_dir / "task_ledger.json")
+            partial_ledger.record_step(
+                "corpus_ingestion",
+                "CorpusIngestor",
+                "completed",
+                ["/work/skalathrax/corpus_index.json"],
+                "done",
+            )
             partial_ledger.record_step(
                 "source_discovery",
                 "Lexmechanic",

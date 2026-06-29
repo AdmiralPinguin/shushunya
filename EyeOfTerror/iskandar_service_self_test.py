@@ -37,9 +37,9 @@ def main() -> int:
     pipeline = pipeline_summary()
     if (
         pipeline.get("step_count") != len(contract_workers)
-        or pipeline.get("steps", [])[0].get("worker") != "Lexmechanic"
-        or pipeline.get("steps", [])[1].get("depends_on") != ["source_discovery"]
-        or pipeline.get("steps", [])[1].get("expected_artifacts") != ["/work/capabilities/source_snapshots.json"]
+        or pipeline.get("steps", [])[0].get("worker") != "CorpusIngestor"
+        or pipeline.get("steps", [])[1].get("depends_on") != ["corpus_ingestion"]
+        or pipeline.get("steps", [])[2].get("expected_artifacts") != ["/work/capabilities/source_snapshots.json"]
     ):
         raise AssertionError(f"bad Iskandar pipeline summary: {pipeline}")
     oversight = oversight_template()
@@ -69,7 +69,7 @@ def main() -> int:
             capabilities = request_json(base + "/capabilities")
             if "dispatch_packet_preparation" not in capabilities.get("capabilities", []):
                 raise AssertionError(f"bad capabilities: {capabilities}")
-            if capabilities.get("required_workers", [])[0] != "Lexmechanic" or "FabricatorFinalis" not in capabilities.get("required_workers", []):
+            if capabilities.get("required_workers", [])[0] != "CorpusIngestor" or "FabricatorFinalis" not in capabilities.get("required_workers", []):
                 raise AssertionError(f"capabilities did not expose required workers: {capabilities}")
             if (
                 capabilities.get("worker_availability", {}).get("ok") is not True
@@ -86,7 +86,7 @@ def main() -> int:
                 raise AssertionError(f"capabilities did not expose oversight plan: {capabilities}")
             if (
                 capabilities.get("pipeline", {}).get("step_count") != len(contract_workers)
-                or capabilities.get("pipeline", {}).get("steps", [])[0].get("step_id") != "source_discovery"
+                or capabilities.get("pipeline", {}).get("steps", [])[0].get("step_id") != "corpus_ingestion"
                 or capabilities.get("summary", {}).get("step_count") != len(contract_workers)
                 or capabilities.get("summary", {}).get("step_quality_matrix_count") != len(contract_workers)
                 or capabilities.get("display", {}).get("headline") != "Iskandar Khayon capabilities"
@@ -102,7 +102,7 @@ def main() -> int:
                 or len(plan.get("oversight", {}).get("step_quality_matrix", [])) != len(contract_workers)
                 or plan.get("oversight", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or plan.get("pipeline", {}).get("step_count") != len(contract_workers)
-                or plan.get("pipeline", {}).get("steps", [])[0].get("worker") != "Lexmechanic"
+                or plan.get("pipeline", {}).get("steps", [])[0].get("worker") != "CorpusIngestor"
                 or plan.get("actions", {}).get("can_prepare_run") is not True
                 or plan.get("actions", {}).get("next_action", {}).get("kind") != "prepare_run"
                 or plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task") != "Собери события Скалатракса"

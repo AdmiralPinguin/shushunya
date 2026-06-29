@@ -9,6 +9,11 @@
     "module_path": "Mechanicum/AuspexBrowser",
     "module": "auspex_browser"
   },
+  "CorpusIngestor": {
+    "port": 7013,
+    "module_path": "Mechanicum/CorpusIngestor",
+    "module": "corpus_ingestor"
+  },
   "NoosphericExtractor": {
     "port": 7003,
     "module_path": "Mechanicum/NoosphericExtractor",

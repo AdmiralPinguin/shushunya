@@ -14,6 +14,7 @@ from .pipeline import write_json_atomic
 
 
 WORKER_COMMANDS = {
+    "CorpusIngestor": ("Mechanicum/CorpusIngestor", "Mechanicum/CorpusIngestor/corpus_ingestor.py"),
     "Lexmechanic": ("Mechanicum/Lexmechanic", "Mechanicum/Lexmechanic/lexmechanic.py"),
     "AuspexBrowser": ("Mechanicum/AuspexBrowser", "Mechanicum/AuspexBrowser/auspex_browser.py"),
     "NoosphericExtractor": ("Mechanicum/NoosphericExtractor", "Mechanicum/NoosphericExtractor/noospheric_extractor.py"),

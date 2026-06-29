@@ -84,6 +84,11 @@
       "name": "OcularisRenderium",
       "role": "JavaScript render and screenshot worker",
       "path": "Mechanicum/OcularisRenderium"
+    },
+    "7013": {
+      "name": "CorpusIngestor",
+      "role": "local corpus indexer",
+      "path": "Mechanicum/CorpusIngestor"
     }
   }
 }

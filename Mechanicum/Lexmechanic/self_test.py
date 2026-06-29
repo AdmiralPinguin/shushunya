@@ -136,6 +136,40 @@ def main() -> int:
             raise AssertionError("source map must include coverage gaps")
         if not data.get("source_coverage", {}).get("has_primary_or_publication"):
             raise AssertionError(f"playbook source coverage should detect primary/publication sources: {data.get('source_coverage')}")
+        corpus_index = Path(temp_dir) / "local" / "corpus_index.json"
+        corpus_index.parent.mkdir(parents=True, exist_ok=True)
+        corpus_index.write_text(
+            json.dumps(
+                {
+                    "summary": {"sources_matched": 1},
+                    "sources": [
+                        {
+                            "title": "Local Skalathrax Primary",
+                            "type": "book",
+                            "local_path": "/tmp/Corpus/local-skalathrax.fb2",
+                            "source_class": "local_primary_candidate",
+                            "discovery_method": "local_corpus",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        corpus_request = {
+            "task_id": "test-corpus:source_discovery",
+            "contract": {"goal": "Собери историю неизвестной битвы."},
+            "input_artifacts": ["/work/local/corpus_index.json"],
+            "step": {"expected_artifacts": ["/work/local/source_map.json"]},
+        }
+        corpus_result = run(corpus_request, Path(temp_dir), searcher=fake_search)
+        if not corpus_result.get("ok"):
+            raise AssertionError(f"Lexmechanic should accept local corpus primary candidates: {corpus_result}")
+        corpus_map = json.loads((Path(temp_dir) / "local" / "source_map.json").read_text(encoding="utf-8"))
+        local_source = next((source for source in corpus_map.get("sources", []) if source.get("discovery_method") == "local_corpus"), {})
+        if local_source.get("source_type") != "local_primary":
+            raise AssertionError(f"local corpus source should be ranked as local primary: {corpus_map.get('sources')}")
+        if corpus_map.get("source_coverage", {}).get("local_corpus_source_count") != 1:
+            raise AssertionError(f"local corpus coverage was not counted: {corpus_map.get('source_coverage')}")
         generic_request = {
             "task_id": "test-generic:source_discovery",
             "contract": {"goal": "Собери историю неизвестной битвы."},

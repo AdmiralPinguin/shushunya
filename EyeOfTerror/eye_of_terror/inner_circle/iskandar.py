@@ -64,6 +64,11 @@ def downstream_step_ids(contract: TaskContract, step_id: str) -> list[str]:
 
 def step_quality_checks(step_id: str) -> list[str]:
     checks_by_step = {
+        "corpus_ingestion": [
+            "local corpus index exists and records whether user-provided primary texts are available",
+            "supported local files are classified separately from web-discovered sources",
+            "absence of local primary text is exposed as a coverage gap rather than hidden",
+        ],
         "source_discovery": [
             "source map exists and contains classified source candidates",
             "source map distinguishes primary, official, wiki, community, unavailable, and uncertain sources",
@@ -135,6 +140,7 @@ def step_quality_matrix(contract: TaskContract) -> list[dict[str, Any]]:
 def oversight_plan(contract: TaskContract) -> dict[str, Any]:
     planned_step_ids = [step.step_id for step in contract.worker_plan]
     artifacts_by_role = {
+        "corpus_index": [artifact for artifact in contract.required_artifacts if artifact.endswith("/corpus_index.json")],
         "source_map": [artifact for artifact in contract.required_artifacts if artifact.endswith("/source_map.json")],
         "source_snapshots": [artifact for artifact in contract.required_artifacts if artifact.endswith("/source_snapshots.json")],
         "evidence_notes": [artifact for artifact in contract.required_artifacts if artifact.endswith("/direct_event_notes.json")],

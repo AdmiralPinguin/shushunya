@@ -1,0 +1,8 @@
+{
+  "name": "CorpusIngestor",
+  "port": 7013,
+  "role": "local corpus indexer",
+  "status": "prototype",
+  "capabilities": ["local_corpus_scan", "primary_text_candidates", "epub_fb2_text_extraction"],
+  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+}

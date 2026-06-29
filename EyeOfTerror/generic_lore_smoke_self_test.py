@@ -22,11 +22,11 @@ def main() -> int:
         write_pipeline_run(plan.contract, run_dir, oversight=plan.to_dict()["oversight"])
         summary = execute_run(repo_root, run_dir, root / "work", timeout_sec=60)
         steps = summary.get("steps", []) if isinstance(summary.get("steps"), list) else []
-        if len(steps) != 1:
+        if len(steps) != 2:
             raise AssertionError(f"generic lore task should fail fast at source discovery: {summary}")
-        first_step = steps[0]
-        payload = first_step.get("payload") if isinstance(first_step.get("payload"), dict) else {}
-        if first_step.get("step_id") != "source_discovery" or payload.get("status") != "blocked":
+        source_step = steps[1]
+        payload = source_step.get("payload") if isinstance(source_step.get("payload"), dict) else {}
+        if source_step.get("step_id") != "source_discovery" or payload.get("status") != "blocked":
             raise AssertionError(f"generic lore task did not block at source discovery: {summary}")
         source_map = root / "work" / "task" / "source_map.json"
         if not source_map.exists():

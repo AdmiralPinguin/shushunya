@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 
+import auspex_browser
 from auspex_browser import collect_snapshots, run
 
 
@@ -94,6 +96,35 @@ def main() -> int:
     )
     if fetch_limits != [1000000]:
         raise AssertionError(f"comprehensive EPUB fetch should use expanded byte limit: {fetch_limits}")
+
+    with tempfile.TemporaryDirectory() as corpus_temp:
+        corpus_root = Path(corpus_temp)
+        local_file = corpus_root / "local-source.txt"
+        local_file.write_text("Local source text about Skalathrax and Kharn. " * 12, encoding="utf-8")
+        old_root = auspex_browser.DEFAULT_CORPUS_ROOT
+        auspex_browser.DEFAULT_CORPUS_ROOT = corpus_root
+        os.environ["SHUSHUNYA_CORPUS_DIR"] = str(corpus_root)
+        try:
+            local_snapshots = collect_snapshots(
+                {
+                    "topic": "test",
+                    "sources": [
+                        {
+                            "title": "Local Source",
+                            "source_class": "local_primary_candidate",
+                            "local_path": str(local_file),
+                        }
+                    ],
+                },
+                fake_fetch,
+            )
+            if local_snapshots["summary"]["sources_with_url"] != 1 or not local_snapshots["snapshots"][0]["ok"]:
+                raise AssertionError(f"local source was not snapshotted: {local_snapshots}")
+            if "Local source text" not in local_snapshots["snapshots"][0].get("text_excerpt", ""):
+                raise AssertionError(f"local source text missing from snapshot: {local_snapshots}")
+        finally:
+            auspex_browser.DEFAULT_CORPUS_ROOT = old_root
+            os.environ.pop("SHUSHUNYA_CORPUS_DIR", None)
 
     request = {
         "task_id": "test:source_acquisition",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -12,6 +13,12 @@ if str(SHUSHUNYA_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(SHUSHUNYA_AGENT_DIR))
 
 from shushunya_agent.web_tools import web_fetch  # noqa: E402
+
+CORPUS_INGESTOR_DIR = Path(__file__).resolve().parents[1] / "CorpusIngestor"
+if str(CORPUS_INGESTOR_DIR) not in sys.path:
+    sys.path.insert(0, str(CORPUS_INGESTOR_DIR))
+
+from corpus_ingestor import DEFAULT_CORPUS_ROOT, read_corpus_text  # noqa: E402
 
 
 class FetchConfig:
@@ -36,6 +43,39 @@ def source_map_path_for_output(output_path: str) -> str:
 
 def default_fetch(url: str, max_bytes: int) -> dict[str, Any]:
     return web_fetch(FetchConfig(), url, max_bytes)
+
+
+def configured_corpus_root() -> Path:
+    raw = os.environ.get("SHUSHUNYA_CORPUS_DIR", "").strip()
+    return Path(raw).expanduser().resolve() if raw else DEFAULT_CORPUS_ROOT.resolve()
+
+
+def local_source_result(source: dict[str, Any], max_bytes: int) -> dict[str, Any]:
+    raw_path = str(source.get("local_path") or "").strip()
+    if not raw_path:
+        return {"ok": False, "error": "local_path is empty"}
+    path = Path(raw_path).expanduser().resolve()
+    corpus_root = configured_corpus_root()
+    try:
+        path.relative_to(corpus_root)
+    except ValueError:
+        return {"ok": False, "error": f"local source path is outside configured corpus root: {path}"}
+    if not path.exists() or not path.is_file():
+        return {"ok": False, "error": f"local source file is missing: {path}"}
+    text, source_kind = read_corpus_text(path)
+    truncated = len(text.encode("utf-8")) > max_bytes
+    return {
+        "ok": True,
+        "url": "",
+        "status": 200,
+        "content_type": source_kind,
+        "title": source.get("title") or path.name,
+        "text": text[:max_bytes],
+        "bytes_read": min(len(text.encode("utf-8")), max_bytes),
+        "truncated": truncated,
+        "is_binary": False,
+        "local_path": str(path),
+    }
 
 
 def reddit_old_url(url: str) -> str:
@@ -77,6 +117,7 @@ def compact_snapshot(source: dict[str, Any], result: dict[str, Any]) -> dict[str
         "source_title": source.get("title", ""),
         "source_class": source.get("source_class", source.get("type", "")),
         "requested_url": source.get("url", ""),
+        "local_path": source.get("local_path", result.get("local_path", "")),
         "ok": bool(result.get("ok")),
         "final_url": result.get("url", ""),
         "status": result.get("status"),
@@ -101,11 +142,15 @@ def collect_snapshots(source_map: dict[str, Any], fetcher: FetchFn = default_fet
         if not isinstance(source, dict):
             continue
         url = str(source.get("url") or "").strip()
-        if not url:
+        local_path = str(source.get("local_path") or "").strip()
+        if not url and not local_path:
             skipped.append({"source_title": source.get("title", ""), "reason": "no public URL in source map"})
             continue
         try:
-            result = fetch_with_fallbacks(source, source_map, fetcher, max_bytes)
+            if local_path:
+                result = local_source_result(source, source_fetch_limit(source, source_map, max_bytes))
+            else:
+                result = fetch_with_fallbacks(source, source_map, fetcher, max_bytes)
         except Exception as exc:  # noqa: BLE001 - network failures are data for this worker.
             result = {"ok": False, "error": str(exc)}
         snapshots.append(compact_snapshot(source, result))
