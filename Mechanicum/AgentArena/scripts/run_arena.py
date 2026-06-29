@@ -65,7 +65,7 @@ def summarize_results(results: list[RunResult]) -> dict[str, Any]:
         item["passed" if result.ok else "failed"] += 1
         item["duration_sec"] = round(float(item["duration_sec"]) + result.duration_sec, 3)
         if not result.ok:
-            reason = failure_reason(result.exit_code, result.checks)
+            reason = failure_reason(result.exit_code, result.checks, result.error)
             failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
             for check in failed_checks(result.checks):
                 check_type = str(check.get("type") or "unknown")

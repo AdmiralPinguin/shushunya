@@ -116,7 +116,7 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
                     failed_check_types[check_type] = failed_check_types.get(check_type, 0) + 1
                     for symptom in failed_check_symptoms(check):
                         failed_check_symptom_counts[symptom] = failed_check_symptom_counts.get(symptom, 0) + 1
-                reason = failure_reason(result.get("exit_code"), checks)
+                reason = failure_reason(result.get("exit_code"), checks, str(result.get("error") or ""))
                 failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                 failures.append(
                     {

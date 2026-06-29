@@ -48,8 +48,9 @@ aggregates the same chain-quality metrics across recent reports.
 For data/artifact tasks with seeded input files and checked output files,
 reports also include `artifact_quality`, which records whether inputs were read
 before output artifacts were written.
-`analyze_reports.py` classifies failures as `agent_exit`, `post_run_checks`,
-`both`, or `unknown`, so bad artifacts are separated from runtime crashes.
+`analyze_reports.py` classifies failures as `agent_unavailable`, `agent_exit`,
+`post_run_checks`, `both`, or `unknown`, so missing runtimes, bad artifacts,
+and runtime crashes are separated.
 Recent failure entries include compact failed-check summaries for quick triage.
 The analyzer also aggregates failed check types, which helps distinguish
 artifact/content mistakes from command-level verification failures.

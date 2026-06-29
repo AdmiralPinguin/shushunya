@@ -5,10 +5,13 @@ import tempfile
 from pathlib import Path
 
 from analyze_reports import analyze_reports
+from report_metrics import failure_reason
 from run_arena import RunResult, analyze_artifact_orchestration, summarize_results, write_json
 
 
 def main() -> int:
+    if failure_reason(127, [{"type": "command", "ok": False}], "missing Docker/Podman") != "agent_unavailable":
+        raise AssertionError("arena failure_reason should classify missing runtimes separately")
     results = [
         RunResult(
             agent="shushunya",

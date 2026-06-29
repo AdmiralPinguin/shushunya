@@ -7,7 +7,16 @@ def failed_checks(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [check for check in checks if isinstance(check, dict) and check.get("ok") is not True]
 
 
-def failure_reason(exit_code: int | None, checks: list[dict[str, Any]]) -> str:
+def agent_unavailable(exit_code: int | None, error: str = "") -> bool:
+    if exit_code in {78, 127}:
+        return True
+    lowered = error.lower()
+    return any(marker in lowered for marker in ("missing docker", "missing docker/podman", "adapter not configured"))
+
+
+def failure_reason(exit_code: int | None, checks: list[dict[str, Any]], error: str = "") -> str:
+    if agent_unavailable(exit_code, error):
+        return "agent_unavailable"
     exit_failed = exit_code not in (0, None)
     checks_failed = bool(failed_checks(checks))
     if exit_failed and checks_failed:
