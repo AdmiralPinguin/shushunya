@@ -79,6 +79,34 @@ CERAXIA_VERIFY: python -m py_compile generated.py
             raise AssertionError("Ceraxia marker pipeline wrote wrong file content")
         if manifest.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"Ceraxia marker final manifest lacks verification evidence: {manifest}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_root = Path(temp_dir)
+        target_repo = temp_root / "repo"
+        target_repo.mkdir()
+        task = f"""создай python файл и исправь если py_compile найдет простую синтаксическую ошибку
+CERAXIA_TARGET_REPO: {target_repo}
+CERAXIA_CREATE_FILE: repair_me.py
+CERAXIA_FILE_CONTENT:
+def repaired_value()
+    return 42
+
+CERAXIA_VERIFY: python -m py_compile repair_me.py
+"""
+        run_root = temp_root / "runs"
+        task_id = "ceraxia-repair-pipeline"
+        prepared = prepare_task(task, task_id, run_root, governor_transport="local")
+        if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
+            raise AssertionError(f"Ceraxia repair task did not prepare correctly: {prepared}")
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        if not result.get("ok") or result.get("phase") != "completed":
+            raise AssertionError(f"Ceraxia repair pipeline did not complete: {result}")
+        manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        repaired = target_repo / "repair_me.py"
+        if manifest.get("status") != "ready" or manifest.get("verification_summary", {}).get("repair_count") != 1:
+            raise AssertionError(f"Ceraxia repair final manifest should be ready with repair evidence: {manifest}")
+        if "def repaired_value():\n" not in repaired.read_text(encoding="utf-8"):
+            raise AssertionError("Ceraxia repair pipeline did not update the target file")
     print("[ok] Ceraxia explicit patch pipeline")
     return 0
 

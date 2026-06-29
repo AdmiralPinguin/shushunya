@@ -85,6 +85,18 @@ CERAXIA_VERIFY: python -m py_compile generated.py
 """
 
 
+def repair_colon_goal() -> str:
+    return """создай python файл и исправь если проверка найдет синтаксис
+
+CERAXIA_CREATE_FILE: repair_me.py
+CERAXIA_FILE_CONTENT:
+def repaired_value()
+    return 42
+
+CERAXIA_VERIFY: python -m py_compile repair_me.py
+"""
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -130,6 +142,16 @@ def main() -> int:
             raise AssertionError("marker-synthesized create file task wrote wrong content")
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"marker final manifest should preserve verification evidence: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        final = run_pipeline(root / "work", goal=repair_colon_goal(), target_repo_root=target_repo)
+        repaired = target_repo / "repair_me.py"
+        if final.get("status") != "ready" or final.get("verification_summary", {}).get("repair_count") != 1:
+            raise AssertionError(f"expected-colon repair should produce ready final manifest: {final}")
+        if "def repaired_value():\n" not in repaired.read_text(encoding="utf-8"):
+            raise AssertionError("expected-colon repair did not update the source file")
     print("[ok] CogitatorCodewright code artifacts")
     return 0
 

@@ -65,3 +65,8 @@ CERAXIA_NEW:
 return 2
 CERAXIA_VERIFY: python -m py_compile module.py
 ```
+
+The first verifier repair loop is intentionally narrow: when `py_compile`
+reports `SyntaxError: expected ':'` for a changed Python file, Ceraxia can add
+the missing colon to the failing line, rerun verification, and record the repair
+in the final manifest.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import shlex
 import subprocess
 import sys
@@ -301,6 +302,38 @@ def run_verification_command(repo_root: Path, raw_command: str) -> dict[str, Any
     }
 
 
+def repair_expected_colon(repo_root: Path, py_file: str, stderr: str) -> dict[str, Any]:
+    if "SyntaxError: expected ':'" not in stderr:
+        return {"applied": False, "reason": "not an expected-colon SyntaxError"}
+    match = re.search(r'File "([^"]+)", line (\d+)', stderr)
+    if not match:
+        return {"applied": False, "reason": "could not locate failing file and line"}
+    failing_path = Path(match.group(1))
+    if failing_path.name != Path(py_file).name:
+        return {"applied": False, "reason": "failing file does not match changed file"}
+    line_number = int(match.group(2))
+    path = safe_repo_path(repo_root, py_file)
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    if line_number < 1 or line_number > len(lines):
+        return {"applied": False, "reason": "failing line is out of range"}
+    original = lines[line_number - 1]
+    line_without_newline = original.rstrip("\n")
+    if line_without_newline.rstrip().endswith(":"):
+        return {"applied": False, "reason": "failing line already ends with colon"}
+    newline = "\n" if original.endswith("\n") else ""
+    lines[line_number - 1] = f"{line_without_newline.rstrip()}:{newline}"
+    before_hash = sha256_text(path)
+    path.write_text("".join(lines), encoding="utf-8")
+    return {
+        "applied": True,
+        "kind": "expected_colon",
+        "path": py_file,
+        "line": line_number,
+        "before_sha256": before_hash,
+        "after_sha256": sha256_text(path),
+    }
+
+
 def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
     extension_counts: Counter[str] = Counter()
     candidate_files: list[str] = []
@@ -454,6 +487,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
     executed: list[dict[str, Any]] = []
     repo_root = target_repo_root(request)
     changed_files = patch.get("changed_files") if isinstance(patch.get("changed_files"), list) else []
+    repairs: list[dict[str, Any]] = []
     if patch.get("status") == "applied":
         py_files = [
             str(item.get("path"))
@@ -472,7 +506,25 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
                 }
             )
             if completed.returncode != 0:
-                blockers.append("py_compile failed for changed Python files")
+                repaired_any = False
+                for py_file in py_files:
+                    repair = repair_expected_colon(repo_root, py_file, completed.stderr)
+                    if repair.get("applied"):
+                        repairs.append(repair)
+                        repaired_any = True
+                if repaired_any:
+                    completed = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, check=False)
+                    executed.append(
+                        {
+                            "command": " ".join(cmd),
+                            "returncode": completed.returncode,
+                            "stdout": completed.stdout[-4000:],
+                            "stderr": completed.stderr[-4000:],
+                            "after_repair": True,
+                        }
+                    )
+                if completed.returncode != 0:
+                    blockers.append("py_compile failed for changed Python files")
         if (repo_root / ".git").exists():
             cmd = ["git", "diff", "--check"]
             completed = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, check=False)
@@ -506,6 +558,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
             "git diff --check",
         ],
         "executed": executed,
+        "repairs": repairs,
         "blockers": blockers,
         "warnings": patch.get("warnings", []),
         "summary": "Verification passed for applied changes." if not blockers else "Verification is blocked or failed.",
@@ -599,9 +652,11 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "changed_files": patch.get("changed_files", []),
         "verification_status": verification.get("status", "unknown"),
         "verification_executed": verification.get("executed", []),
+        "verification_repairs": verification.get("repairs", []),
         "verification_blockers": verification.get("blockers", []),
         "verification_summary": {
             "executed_count": len(verification.get("executed", [])) if isinstance(verification.get("executed"), list) else 0,
+            "repair_count": len(verification.get("repairs", [])) if isinstance(verification.get("repairs"), list) else 0,
             "blocker_count": len(verification.get("blockers", [])) if isinstance(verification.get("blockers"), list) else 0,
         },
         "review_status": review.get("status", "unknown"),

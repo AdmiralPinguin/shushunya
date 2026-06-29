@@ -565,6 +565,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   `verification_executed`, `verification_blockers`, and
   `verification_summary`, so the caller can see which commands proved or
   blocked readiness.
+- `OrdinatusVerifier` has a first narrow repair loop: when `py_compile`
+  reports `SyntaxError: expected ':'` for a changed Python file, it can add the
+  missing colon, rerun verification, and expose the repair through
+  `verification_repairs` and `verification_summary.repair_count`.
 - The pipeline records inaccessible primary books as `corpus_requirements`;
   operators must provide legitimate local text files when full primary evidence
   is required.
