@@ -20,6 +20,11 @@
       "name": "ForgeMasterGovernor",
       "role": "image generation governor",
       "path": "EyeOfTerror/InnerCircle/ForgeMasterGovernor"
+    },
+    "7104": {
+      "name": "Ceraxia",
+      "role": "code task governor",
+      "path": "EyeOfTerror/InnerCircle/Ceraxia"
     }
   },
   "mechanicum": {
@@ -58,11 +63,6 @@
       "role": "finalizer, packager, telegram sender",
       "path": "Mechanicum/FabricatorFinalis"
     },
-    "7008": {
-      "name": "CogitatorCodewright",
-      "role": "code worker",
-      "path": "Mechanicum/CogitatorCodewright"
-    },
     "7009": {
       "name": "AuspexBrowser",
       "role": "browser worker",
@@ -89,6 +89,11 @@
       "name": "CorpusIngestor",
       "role": "local corpus indexer",
       "path": "Mechanicum/CorpusIngestor"
+    },
+    "7014": {
+      "name": "CogitatorCodewright",
+      "role": "code task worker",
+      "path": "Mechanicum/CogitatorCodewright"
     }
   }
 }

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from eye_of_terror.governors import governor_by_name, governor_refs
+from eye_of_terror.inner_circle.ceraxia_service import service_capabilities as ceraxia_capabilities
 from eye_of_terror.inner_circle.iskandar_service import service_capabilities
 
 
@@ -46,6 +47,12 @@ def main() -> int:
     code = governor_by_name("CogitatorCodewrightGovernor")
     if not code or code.active():
         raise AssertionError(code)
+    ceraxia = governor_by_name("Ceraxia")
+    if not ceraxia or not ceraxia.active() or ceraxia.port != 7104:
+        raise AssertionError(ceraxia)
+    ceraxia_payload = ceraxia_capabilities()
+    if sorted(ceraxia_payload.get("task_kinds", [])) != sorted(ceraxia.task_kinds):
+        raise AssertionError(f"Ceraxia task kinds disagree with registry: {ceraxia_payload}")
     print("[ok] governor registry")
     return 0
 

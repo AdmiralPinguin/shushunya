@@ -9,7 +9,7 @@ def main() -> int:
     if not lore.ok or lore.governor != "IskandarKhayon":
         raise AssertionError(lore)
     code = route_message("почини баг в python приложении")
-    if code.ok or code.kind != "code" or code.governor != "CogitatorCodewrightGovernor":
+    if not code.ok or code.kind != "code" or code.governor != "Ceraxia":
         raise AssertionError(code)
     image = route_message("сделай рисовалку stable diffusion")
     if image.ok or image.kind != "image_generation" or image.governor != "ForgeMasterGovernor":

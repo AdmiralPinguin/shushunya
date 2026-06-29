@@ -421,10 +421,10 @@
   the ledger.
 - Mechanicum worker manifests are validated for required metadata, stable ports,
   API contract, and service-registry consistency.
-- Inner Circle governors are tracked in `EyeOfTerror/registry/governors.json`; code/image governors are explicit planned entries.
+- Inner Circle governors are tracked in `EyeOfTerror/registry/governors.json`; Ceraxia is the active code governor and image governance remains planned.
 - Warmaster, Governor, and Worker API contracts are covered by self-tests against
   advertised runtime capabilities/endpoints.
-- `CogitatorCodewrightGovernor` now has planned scope documentation but remains inactive.
+- `Ceraxia` now owns code-task governance; `CogitatorCodewrightGovernor` remains only as a disabled legacy stub.
 - `ForgeMasterGovernor` now has planned scope documentation but remains inactive.
 
 ## Main Check

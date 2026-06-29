@@ -14,6 +14,11 @@
     "module_path": "Mechanicum/CorpusIngestor",
     "module": "corpus_ingestor"
   },
+  "CogitatorCodewright": {
+    "port": 7014,
+    "module_path": "Mechanicum/CogitatorCodewright",
+    "module": "cogitator_codewright"
+  },
   "OcularisRenderium": {
     "port": 7012,
     "module_path": "Mechanicum/OcularisRenderium",

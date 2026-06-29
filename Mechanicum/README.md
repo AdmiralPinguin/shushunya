@@ -17,12 +17,12 @@ from governors and return structured outputs.
 | 7005 | ScriptoriumDaemon | Writer |
 | 7006 | ReductorVerifier | Critic/verifier |
 | 7007 | FabricatorFinalis | Finalizer/packager/Telegram |
-| 7008 | CogitatorCodewright | Code worker |
 | 7009 | AuspexBrowser | Browser worker |
 | 7010 | ForgeRelay | DemonsForge adapter |
 | 7011 | MnemosyneRelay | ArchiveOfHeresy adapter |
 | 7012 | OcularisRenderium | Planned JavaScript render/screenshot worker |
 | 7013 | CorpusIngestor | Local corpus indexer |
+| 7014 | CogitatorCodewright | Code worker |
 
 ## Current Rule
 

@@ -1,9 +1,8 @@
 {
   "name": "CogitatorCodewright",
-  "port": 7008,
+  "port": 7014,
   "role": "code worker",
-  "status": "planned",
-  "capabilities": ["diagnostics", "code_edit", "test_verification"],
+  "status": "prototype",
+  "capabilities": ["repository_survey", "change_planning", "patch_manifest", "verification_planning", "code_review", "final_handoff"],
   "api_contract": "EyeOfTerror/contracts/worker_api.md"
 }
-

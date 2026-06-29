@@ -23,6 +23,7 @@ WORKER_COMMANDS = {
     "ScriptoriumDaemon": ("Mechanicum/ScriptoriumDaemon", "Mechanicum/ScriptoriumDaemon/scriptorium_daemon.py"),
     "ReductorVerifier": ("Mechanicum/ReductorVerifier", "Mechanicum/ReductorVerifier/reductor_verifier.py"),
     "FabricatorFinalis": ("Mechanicum/FabricatorFinalis", "Mechanicum/FabricatorFinalis/fabricator_finalis.py"),
+    "CogitatorCodewright": ("Mechanicum/CogitatorCodewright", "Mechanicum/CogitatorCodewright/cogitator_codewright.py"),
 }
 
 

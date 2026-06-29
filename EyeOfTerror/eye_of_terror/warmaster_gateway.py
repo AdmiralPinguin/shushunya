@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
 from .contracts import validate_task_contract_payload
+from .inner_circle.ceraxia import plan_code_task
 from .inner_circle.iskandar import plan_lore_reconstruction
 from doctor import run_doctor
 from .http_executor import execute_run as execute_http_run, preflight_workers as preflight_http_workers
@@ -404,7 +405,10 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "error_code": "invalid_governor_transport",
             "actions": task_preflight_actions(False, "invalid_governor_transport", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
-    plan = plan_lore_reconstruction(message, task_id=task_id)
+    if governor == "Ceraxia":
+        plan = plan_code_task(message, task_id=task_id)
+    else:
+        plan = plan_lore_reconstruction(message, task_id=task_id)
     run_dir = run_root / plan.contract.task_id
     if run_dir.exists():
         return {

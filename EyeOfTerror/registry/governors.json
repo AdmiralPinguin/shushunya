@@ -10,8 +10,15 @@
     "status": "planned",
     "port": 7102,
     "task_kinds": ["code"],
-    "route_terms": ["код", "repo", "repository", "python", "bug", "ошибк", "приложени"],
+    "route_terms": ["legacy-codewright-disabled"],
     "service": ""
+  },
+  "Ceraxia": {
+    "status": "active",
+    "port": 7104,
+    "task_kinds": ["code"],
+    "route_terms": ["код", "repo", "repository", "python", "bug", "ошибк", "приложени", "app", "test", "pytest", "фикс", "почини"],
+    "service": "eye_of_terror.inner_circle.ceraxia_service"
   },
   "ForgeMasterGovernor": {
     "status": "planned",

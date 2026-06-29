@@ -95,10 +95,19 @@ def registry_port(repo_root: Path, section: str, service_name: str, default: int
     return default
 
 
-def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster_run_root: Path, iskandar_run_root: Path) -> list[CommandSpec]:
+def brigade_commands(
+    repo_root: Path,
+    host: str,
+    workspace_root: Path,
+    warmaster_run_root: Path,
+    iskandar_run_root: Path,
+    ceraxia_run_root: Path | None = None,
+) -> list[CommandSpec]:
     env = {"PYTHONPATH": pythonpath(repo_root)}
     warmaster_port = registry_port(repo_root, "eye_of_terror", "WarmasterGateway", 7000)
     iskandar_port = registry_port(repo_root, "eye_of_terror", "IskandarKhayon", 7101)
+    ceraxia_port = registry_port(repo_root, "eye_of_terror", "Ceraxia", 7104)
+    resolved_ceraxia_run_root = ceraxia_run_root or Path("runtime/ceraxia-runs")
     return [
         CommandSpec(
             "mechanicum-workers",
@@ -140,11 +149,31 @@ def brigade_commands(repo_root: Path, host: str, workspace_root: Path, warmaster
             env,
         ),
         CommandSpec(
+            "ceraxia",
+            "Inner Circle code task governor",
+            host,
+            ceraxia_port,
+            [],
+            f"http://{host}:{ceraxia_port}/health",
+            [
+                sys.executable,
+                "-m",
+                "eye_of_terror.inner_circle.ceraxia_service",
+                "--host",
+                host,
+                "--port",
+                str(ceraxia_port),
+                "--default-run-root",
+                str(resolved_ceraxia_run_root),
+            ],
+            env,
+        ),
+        CommandSpec(
             "warmaster-gateway",
             "user-facing orchestration gateway",
             host,
             warmaster_port,
-            ["mechanicum-workers", "iskandar-khayon"],
+            ["mechanicum-workers", "iskandar-khayon", "ceraxia"],
             f"http://{host}:{warmaster_port}/health",
             [
                 sys.executable,
@@ -199,8 +228,16 @@ def startup_stages(commands: list[CommandSpec], workers: list[dict[str, object]]
     return stages
 
 
-def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run_root: Path, iskandar_run_root: Path) -> dict[str, object]:
-    commands = brigade_commands(repo_root, host, workspace_root, warmaster_run_root, iskandar_run_root)
+def brigade_plan(
+    repo_root: Path,
+    host: str,
+    workspace_root: Path,
+    warmaster_run_root: Path,
+    iskandar_run_root: Path,
+    ceraxia_run_root: Path | None = None,
+) -> dict[str, object]:
+    resolved_ceraxia_run_root = ceraxia_run_root or Path("runtime/ceraxia-runs")
+    commands = brigade_commands(repo_root, host, workspace_root, warmaster_run_root, iskandar_run_root, resolved_ceraxia_run_root)
     workers = worker_service_plan(repo_root, host)
     top_level_health_urls = {command.name: command.health_url for command in commands if command.health_url}
     worker_health_urls = {str(worker["name"]): str(worker["health_url"]) for worker in workers if worker.get("health_url")}
@@ -212,12 +249,14 @@ def brigade_plan(repo_root: Path, host: str, workspace_root: Path, warmaster_run
         "ports": {
             "warmaster_gateway": next((command.port for command in commands if command.name == "warmaster-gateway"), 7000),
             "iskandar_khayon": next((command.port for command in commands if command.name == "iskandar-khayon"), 7101),
+            "ceraxia": next((command.port for command in commands if command.name == "ceraxia"), 7104),
             "mechanicum_workers": [worker["port"] for worker in workers],
         },
         "repo_root": str(repo_root),
         "workspace_root": str(workspace_root),
         "warmaster_run_root": str(warmaster_run_root),
         "iskandar_run_root": str(iskandar_run_root),
+        "ceraxia_run_root": str(resolved_ceraxia_run_root),
         "mechanicum_workers": workers,
         "services": [command.to_dict() for command in commands],
         "dependencies": {command.name: command.depends_on for command in commands},
@@ -335,6 +374,7 @@ def main() -> int:
     parser.add_argument("--workspace-root", default="runtime/mechanicum-work")
     parser.add_argument("--warmaster-run-root", default="runtime/warmaster-runs")
     parser.add_argument("--iskandar-run-root", default="runtime/iskandar-runs")
+    parser.add_argument("--ceraxia-run-root", default="runtime/ceraxia-runs")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable startup plan and exit.")
     parser.add_argument("--wait-ready", action="store_true", help="Wait for top-level service health URLs after starting.")
@@ -346,12 +386,14 @@ def main() -> int:
     workspace_root = Path(args.workspace_root)
     warmaster_run_root = Path(args.warmaster_run_root)
     iskandar_run_root = Path(args.iskandar_run_root)
+    ceraxia_run_root = Path(args.ceraxia_run_root)
     commands = brigade_commands(
         repo_root=repo_root,
         host=args.host,
         workspace_root=workspace_root,
         warmaster_run_root=warmaster_run_root,
         iskandar_run_root=iskandar_run_root,
+        ceraxia_run_root=ceraxia_run_root,
     )
     plan = brigade_plan(
         repo_root=repo_root,
@@ -359,6 +401,7 @@ def main() -> int:
         workspace_root=workspace_root,
         warmaster_run_root=warmaster_run_root,
         iskandar_run_root=iskandar_run_root,
+        ceraxia_run_root=ceraxia_run_root,
     )
     if args.json:
         print(json.dumps(plan, ensure_ascii=False, indent=2))

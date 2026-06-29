@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import tempfile
+import threading
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+
+from eye_of_terror.contracts import build_code_task_contract
+from eye_of_terror.inner_circle.ceraxia_service import make_handler, oversight_template, pipeline_summary, required_workers, resolve_run_dir
+
+
+def request_json(url: str, payload: dict | None = None) -> dict:
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    method = "POST" if data else "GET"
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
+    with urllib.request.urlopen(req, timeout=5) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def main() -> int:
+    contract_workers = [
+        step.worker
+        for step in build_code_task_contract("почини python приложение", task_id="ceraxia-service-test").worker_plan
+    ]
+    if required_workers() != ["CogitatorCodewright"] or set(contract_workers) != {"CogitatorCodewright"}:
+        raise AssertionError(f"Ceraxia required workers drifted from contract plan: {required_workers()} {contract_workers}")
+    pipeline = pipeline_summary()
+    if (
+        pipeline.get("kind") != "code_task"
+        or pipeline.get("step_count") != 6
+        or pipeline.get("steps", [])[0].get("step_id") != "repository_survey"
+        or pipeline.get("steps", [])[2].get("expected_artifacts") != ["/work/capabilities/patch_manifest.json"]
+        or pipeline.get("steps", [])[5].get("depends_on") != ["code_review"]
+    ):
+        raise AssertionError(f"bad Ceraxia pipeline summary: {pipeline}")
+    oversight = oversight_template()
+    if (
+        oversight.get("kind") != "code_task_oversight"
+        or oversight.get("final_review", {}).get("critic_step") != "code_review"
+        or oversight.get("revision_policy", {}).get("final_steps") != ["code_review", "finalize"]
+        or len(oversight.get("step_quality_matrix", [])) != 6
+    ):
+        raise AssertionError(f"bad Ceraxia oversight template: {oversight}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        if resolve_run_dir(root / "runs", "child", "task").resolve() != (root / "runs" / "child").resolve():
+            raise AssertionError("relative run_dir did not resolve under default root")
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(root / "runs"))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = f"http://127.0.0.1:{server.server_port}"
+            health = request_json(base + "/health")
+            if not health.get("ok") or health.get("governor") != "Ceraxia":
+                raise AssertionError(f"bad health: {health}")
+            capabilities = request_json(base + "/capabilities")
+            if (
+                capabilities.get("governor") != "Ceraxia"
+                or capabilities.get("summary", {}).get("step_count") != 6
+                or capabilities.get("worker_availability", {}).get("ok") is not True
+            ):
+                raise AssertionError(f"bad capabilities: {capabilities}")
+            plan = request_json(base + "/plan", {"task": "почини python приложение", "task_id": "ceraxia-http-test"})
+            if (
+                not plan.get("ok")
+                or plan.get("contract", {}).get("assigned_governor") != "Ceraxia"
+                or plan.get("pipeline", {}).get("step_count") != 6
+                or plan.get("phase") != "plan_ready"
+                or plan.get("actions", {}).get("next_action", {}).get("kind") != "prepare_run"
+            ):
+                raise AssertionError(f"bad plan: {plan}")
+            run_dir = root / "runs" / "custom-run"
+            prepared = request_json(
+                base + "/prepare_run",
+                {"task": "почини python приложение", "task_id": "ceraxia-http-test", "run_dir": str(run_dir)},
+            )
+            if (
+                not prepared.get("ok")
+                or prepared.get("governor") != "Ceraxia"
+                or not (run_dir / "dispatch" / "repository_survey.json").exists()
+                or not (run_dir / "oversight.json").exists()
+            ):
+                raise AssertionError(f"bad prepared run: {prepared}")
+            try:
+                request_json(
+                    base + "/prepare_run",
+                    {"task": "почини python приложение", "task_id": "ceraxia-escape-test", "run_dir": str(root / "escape")},
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+            else:
+                raise AssertionError("prepare_run should reject run_dir outside default root")
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+    print("[ok] Ceraxia service")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

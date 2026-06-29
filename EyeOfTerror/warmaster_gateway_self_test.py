@@ -259,8 +259,8 @@ def main() -> int:
                         "completion_criteria": ["done"],
                         "worker_plan": [
                             {
-                                "step_id": "code_review",
-                                "worker": "CogitatorCodewright",
+                                "step_id": "forge_render",
+                                "worker": "ForgeRelay",
                                 "purpose": "prove planned worker availability preflight",
                             }
                         ],
@@ -635,27 +635,17 @@ def main() -> int:
                 or worker_health.get("display", {}).get("headline") != "Worker registry"
             ):
                 raise AssertionError(f"bad worker health response: {worker_health}")
-            try:
-                request_json(base + "/task", {"message": "почини python приложение", "task_id": "unsupported-code"})
-            except urllib.error.HTTPError as exc:
-                if exc.code != 400:
-                    raise
-                rejected = json.loads(exc.read().decode("utf-8"))
-                if (
-                    rejected.get("kind") != "code"
-                    or rejected.get("error_code") != "governor_inactive"
-                    or rejected.get("governor") != "CogitatorCodewrightGovernor"
-                    or rejected.get("route", {}).get("governor") != "CogitatorCodewrightGovernor"
-                    or rejected.get("required_governor", {}).get("status") != "planned"
-                    or rejected.get("required_governor", {}).get("port") != 7102
-                    or "code" not in rejected.get("required_governor", {}).get("task_kinds", [])
-                    or rejected.get("phase") != "unsupported_task"
-                    or rejected.get("display", {}).get("headline") != "No active governor for this task"
-                    or rejected.get("client_action", {}).get("path") != "/capabilities"
-                ):
-                    raise AssertionError(f"bad unsupported route response: {rejected}")
-            else:
-                raise AssertionError("unsupported code task should be rejected until a code governor exists")
+            code_task = request_json(base + "/task", {"message": "почини python приложение", "task_id": "ceraxia-code-route-test"})
+            if (
+                not code_task.get("ok")
+                or code_task.get("governor") != "Ceraxia"
+                or code_task.get("status", {}).get("governor") != "Ceraxia"
+                or code_task.get("status", {}).get("step_count") != 6
+                or code_task.get("status", {}).get("steps", [])[0].get("step_id") != "repository_survey"
+                or code_task.get("status", {}).get("steps", [])[0].get("port") != 7014
+                or code_task.get("actions", {}).get("next_action", {}).get("kind") != "preflight_run"
+            ):
+                raise AssertionError(f"code route should create a Ceraxia run: {code_task}")
             try:
                 request_json(base + "/task_preflight", {"message": "сделай рисовалку stable diffusion", "task_id": "unsupported-image"})
             except urllib.error.HTTPError as exc:
