@@ -28,14 +28,21 @@ def main() -> int:
                 + "</p></body></html>",
             )
         (corpus_root / "irrelevant.txt").write_text("A short note about another topic " * 8, encoding="utf-8")
+        for index in range(35):
+            (corpus_root / f"irrelevant-{index:02d}.txt").write_text(
+                f"Unrelated local archive note {index}. " * 8,
+                encoding="utf-8",
+            )
         old_root = corpus_ingestor.DEFAULT_CORPUS_ROOT
         corpus_ingestor.DEFAULT_CORPUS_ROOT = corpus_root
         try:
             index = scan_corpus({"goal": "Максимально полно реконструируй события Скалатракса"})
             if index.get("summary", {}).get("sources_matched") != 2:
                 raise AssertionError(f"corpus scan should match only relevant local text: {index}")
-            if index.get("summary", {}).get("sources_non_matching") != 1 or not index.get("non_matching"):
+            if index.get("summary", {}).get("sources_non_matching") != 36 or index.get("summary", {}).get("non_matching_sample_count") != 30:
                 raise AssertionError(f"corpus scan should expose non-matching local files: {index}")
+            if len(index.get("non_matching", [])) != 30:
+                raise AssertionError(f"corpus scan should cap non-matching samples without losing total count: {index}")
             source = next((item for item in index["sources"] if item.get("corpus_relative_path") == "skalathrax-notes.txt"), {})
             if source.get("source_class") != "local_primary_candidate" or not source.get("local_path"):
                 raise AssertionError(f"local source metadata is wrong: {source}")

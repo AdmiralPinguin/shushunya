@@ -233,6 +233,7 @@ def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> di
     skipped: list[dict[str, Any]] = []
     non_matching: list[dict[str, Any]] = []
     files_scanned = 0
+    non_matching_count = 0
     if not root.exists():
         return {
             "topic": str(contract.get("goal") or ""),
@@ -263,6 +264,7 @@ def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> di
         matched_terms = terms & haystack_tokens
         score = len(matched_terms)
         if terms and score == 0:
+            non_matching_count += 1
             if len(non_matching) < 30:
                 non_matching.append(
                     {
@@ -290,7 +292,8 @@ def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> di
             "corpus_exists": True,
             "files_scanned": files_scanned,
             "sources_matched": len(sources),
-            "sources_non_matching": len(non_matching),
+            "sources_non_matching": non_matching_count,
+            "non_matching_sample_count": len(non_matching),
             "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
         },
         "gaps": gaps,
