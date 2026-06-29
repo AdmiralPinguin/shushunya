@@ -56,6 +56,8 @@
   `quality_expectations` before calling worker code.
 - EyeOfTerror can execute dispatch packets through HTTP services with `eye_of_terror.http_executor`.
 - The end-to-end HTTP pipeline test reaches a `ready` final manifest for the Skalathrax test task.
+- The generic lore smoke test verifies that non-playbook tasks fail fast at
+  source discovery without leaking Skalathrax-specific verifier findings.
 - Local and HTTP executors write `task_ledger.json` with task status, step status, artifacts, and event history.
 - Local and HTTP executors require explicit allowed terminal statuses before
   marking a run completed.
