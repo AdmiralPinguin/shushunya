@@ -570,6 +570,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `LogisRepository` repo maps now include `recommended_read_order`, and
   `MagosStrategos` carries it into `change_plan.md` so patch workers have an
   explicit inspect-before-mutate sequence.
+- Ceraxia patch and final manifests now expose `patch_scope_evidence`, showing
+  which changed files were inside the repo map and which were outside the
+  surveyed/ranked source surface.
 - `LogisRepository` now records Python symbol summaries and suggested unittest
   verification commands, and `MagosStrategos` carries those sections into the
   change plan for downstream patch planning.

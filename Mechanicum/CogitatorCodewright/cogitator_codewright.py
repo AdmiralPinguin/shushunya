@@ -120,6 +120,41 @@ def ranked_source_candidates_from_survey(workspace_root: Path, output_path: str)
     return candidates[:20]
 
 
+def patch_scope_evidence(workspace_root: Path, output_path: str, changed_files: list[dict[str, Any]]) -> dict[str, Any]:
+    survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
+    repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
+    ranked_files = repo_map.get("ranked_files") if isinstance(repo_map.get("ranked_files"), list) else []
+    ranked_by_path = {
+        str(item.get("path") or ""): item
+        for item in ranked_files
+        if isinstance(item, dict) and item.get("path")
+    }
+    evidence: list[dict[str, Any]] = []
+    unmapped: list[str] = []
+    for item in changed_files:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        ranked = ranked_by_path.get(path)
+        if ranked:
+            evidence.append(
+                {
+                    "path": path,
+                    "in_repo_map": True,
+                    "score": ranked.get("score", 0),
+                    "reasons": ranked.get("reasons", []),
+                }
+            )
+        else:
+            unmapped.append(path)
+            evidence.append({"path": path, "in_repo_map": False, "score": 0, "reasons": []})
+    return {
+        "changed_files_in_repo_map": [item["path"] for item in evidence if item.get("in_repo_map")],
+        "changed_files_outside_repo_map": unmapped,
+        "evidence": evidence,
+    }
+
+
 def output_path_from_request(request: dict[str, Any]) -> str:
     step = request.get("step") if isinstance(request.get("step"), dict) else {}
     expected = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
@@ -1094,6 +1129,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "diagnostics": patch_spec.get("diagnostics", {}) if isinstance(patch_spec.get("diagnostics"), dict) else {},
         "operation_count": len(patch_spec.get("operations", [])) if isinstance(patch_spec.get("operations"), list) else 0,
         "changed_files": changed_files,
+        "patch_scope_evidence": patch_scope_evidence(workspace_root, output_path, changed_files),
         "rollback": {
             "applied": bool(rolled_back_files),
             "files": rolled_back_files,
@@ -1363,6 +1399,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             sibling_artifact(output_path, "code_review.json"),
         ],
         "changed_files": patch.get("changed_files", []),
+        "patch_scope_evidence": patch.get("patch_scope_evidence", {}),
         "patch_source": patch.get("patch_source", ""),
         "diagnostics": patch.get("diagnostics", {}),
         "operation_count": patch.get("operation_count", 0),

@@ -83,6 +83,9 @@ callers can distinguish explicit JSON patches from marker-synthesized or
 natural-language-inferred patches. Test-inferred patches also expose
 `diagnostics` with the test path, target module, function name, and expected
 or actual values used to derive the patch.
+Patch and final manifests also expose `patch_scope_evidence`, linking changed
+files back to the repo map score/reasons where possible and listing changed
+files that were outside the survey map.
 
 Verification commands run without a shell and must match Ceraxia's allowlist:
 `pytest`, `python -m pytest`, `python -m unittest`, or

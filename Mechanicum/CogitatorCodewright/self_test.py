@@ -234,6 +234,9 @@ def main() -> int:
             raise AssertionError(f"final manifest should preserve changed file metadata: {final}")
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"final manifest should preserve verification evidence: {final}")
+        scope = final.get("patch_scope_evidence", {})
+        if "sample.py" not in scope.get("changed_files_in_repo_map", []):
+            raise AssertionError(f"final manifest should preserve patch scope evidence: {final}")
         repair_state = final.get("repair_loop_state", {})
         if (
             repair_state.get("status") != "passed"
