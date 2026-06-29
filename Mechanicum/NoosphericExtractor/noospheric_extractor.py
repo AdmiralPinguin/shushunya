@@ -55,6 +55,25 @@ def load_optional_snapshots(workspace_root: Path, output_path: str) -> dict[str,
     return payload if isinstance(payload, dict) else {}
 
 
+def evidence_excerpt(text: str, matched: list[str], max_chars: int = 520) -> str:
+    compact = " ".join(text.split())
+    if not compact:
+        return ""
+    lowered = compact.lower()
+    positions = [lowered.find(marker.lower()) for marker in matched if marker and marker.lower() in lowered]
+    pivot = min([position for position in positions if position >= 0], default=0)
+    start = max(0, pivot - max_chars // 3)
+    end = min(len(compact), start + max_chars)
+    if end - start < max_chars and start > 0:
+        start = max(0, end - max_chars)
+    excerpt = compact[start:end].strip()
+    if start > 0:
+        excerpt = "... " + excerpt
+    if end < len(compact):
+        excerpt += " ..."
+    return excerpt
+
+
 def snapshot_evidence(event_id: str, snapshots: dict[str, Any]) -> list[dict[str, str]]:
     markers = EVENT_EVIDENCE_MARKERS.get(event_id, [])
     evidence: list[dict[str, str]] = []
@@ -69,6 +88,7 @@ def snapshot_evidence(event_id: str, snapshots: dict[str, Any]) -> list[dict[str
                 {
                     "source_title": str(snapshot.get("source_title") or ""),
                     "matched_markers": ", ".join(matched),
+                    "excerpt": evidence_excerpt(text, matched),
                 }
             )
     return evidence

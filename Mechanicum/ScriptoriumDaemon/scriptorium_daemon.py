@@ -78,6 +78,23 @@ def event_text(event: dict[str, Any], notes_by_id: dict[str, dict[str, Any]]) ->
     return f"{text}{suffix}"
 
 
+def event_evidence_lines(event: dict[str, Any], notes_by_id: dict[str, dict[str, Any]]) -> list[str]:
+    note = notes_by_id.get(str(event.get("event_id") or ""), {})
+    evidence = note.get("evidence_snapshots") if isinstance(note.get("evidence_snapshots"), list) else []
+    lines: list[str] = []
+    for item in evidence[:3]:
+        if not isinstance(item, dict):
+            continue
+        excerpt = " ".join(str(item.get("excerpt") or "").split())
+        if not excerpt:
+            continue
+        source_title = str(item.get("source_title") or "source")
+        markers = str(item.get("matched_markers") or "")
+        marker_text = f"; markers: {markers}" if markers else ""
+        lines.append(f"> {source_title}{marker_text}: {excerpt}")
+    return lines
+
+
 def revision_context_lines(revision_context: dict[str, Any] | None, heading: str) -> list[str]:
     if not revision_context:
         return []
@@ -141,6 +158,10 @@ def build_reconstruction(
         lines.append("")
         for event in phase_events:
             lines.append(event_text(event, notes_by_id))
+            evidence_lines = event_evidence_lines(event, notes_by_id)
+            if evidence_lines:
+                lines.append("")
+                lines.extend(evidence_lines)
             lines.append("")
     contradictions = timeline.get("contradictions", [])
     if contradictions:
@@ -216,13 +237,19 @@ def build_coverage_report(
             for item in note.get("evidence_snapshots", [])
             if isinstance(item, dict)
         )
+        excerpts = " || ".join(
+            " ".join(str(item.get("excerpt") or "").split())[:220]
+            for item in note.get("evidence_snapshots", [])
+            if isinstance(item, dict) and item.get("excerpt")
+        )
         evidence_text = f" | evidence={evidence}" if evidence else " | evidence=missing"
+        excerpt_text = f" | excerpts={excerpts}" if excerpts else ""
         method = str(event.get("extraction_method") or note.get("extraction_method") or "")
         method_text = f" | method={method}" if method else ""
         lead_text = " | evidence_lead=true" if event.get("evidence_lead") or method == "generic_snapshot_lead" else ""
         lines.append(
             f"- {event.get('event_id')} | phase={event.get('phase')} | "
-            f"confidence={event.get('confidence')} | refs={refs}{method_text}{lead_text}{evidence_text}"
+            f"confidence={event.get('confidence')} | refs={refs}{method_text}{lead_text}{evidence_text}{excerpt_text}"
         )
     return "\n".join(lines).rstrip() + "\n"
 

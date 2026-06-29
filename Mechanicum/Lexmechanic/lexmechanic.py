@@ -322,6 +322,7 @@ def source_coverage(sources: list[dict[str, Any]], discovery_results: list[dict[
 def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None = None) -> dict[str, Any]:
     goal = str(contract.get("goal") or "")
     playbooks = matching_playbooks(goal)
+    topic = next((str(playbook.get("topic") or "") for playbook in playbooks if playbook.get("topic")), goal)
     sources = dedupe_sources(
         [
             source
@@ -358,7 +359,8 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
     if sources and not coverage["ready_for_extraction"]:
         coverage_gaps.append("Source set is not extraction-ready: it needs both official/primary evidence and secondary cross-checking.")
     return {
-        "topic": goal,
+        "topic": topic,
+        "original_goal": goal,
         "sources": sources,
         "search_queries": search_queries,
         "discovery_rounds": discovery_rounds,

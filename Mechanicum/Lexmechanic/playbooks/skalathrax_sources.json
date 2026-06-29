@@ -1,5 +1,6 @@
 {
   "name": "skalathrax_sources",
+  "topic": "Skalathrax",
   "match_terms": ["skalathrax", "скалатрак"],
   "sources": [
     {

@@ -67,6 +67,8 @@ def main() -> int:
         moon = next(event for event in data["events"] if event.get("event_id") == "moon_parley")
         if not moon.get("evidence_snapshots"):
             raise AssertionError("moon parley should include snapshot evidence")
+        if "parlay on a moon" not in moon["evidence_snapshots"][0].get("excerpt", ""):
+            raise AssertionError(f"snapshot evidence should preserve matched excerpt: {moon}")
         if moon.get("evidence_status") != "snapshot_matched" or data.get("summary", {}).get("events_with_evidence", 0) < 1:
             raise AssertionError(f"event evidence status should be summarized: {data}")
         if not any("HTTP Error 403" in gap for gap in data.get("gaps", [])):
