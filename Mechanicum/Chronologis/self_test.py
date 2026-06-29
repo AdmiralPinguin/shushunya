@@ -15,9 +15,10 @@ def main() -> int:
     }
     notes = {
         "topic": "Skalathrax",
+        "summary": {"source_coverage_ready": True},
         "events": [
-            {"event_id": "kharn_burns_shelters", "phase": "betrayal", "summary": "burns shelters", "confidence": "high"},
-            {"event_id": "moon_parley", "phase": "parley", "summary": "moon parley", "confidence": "medium"},
+            {"event_id": "kharn_burns_shelters", "phase": "betrayal", "summary": "burns shelters", "confidence": "high", "evidence_status": "snapshot_matched"},
+            {"event_id": "moon_parley", "phase": "parley", "summary": "moon parley", "confidence": "medium", "evidence_status": "missing_snapshot_evidence"},
             {"event_id": "ec_claim_system", "phase": "prelude", "summary": "claim", "confidence": "high"},
             {"event_id": "legion_fractures", "phase": "aftermath_boundary", "summary": "fractures", "confidence": "high"},
             {
@@ -49,6 +50,8 @@ def main() -> int:
             raise AssertionError(f"timeline should preserve generic evidence lead metadata: {lead}")
         if data.get("summary", {}).get("generic_evidence_leads") != 1 or data.get("summary", {}).get("low_confidence_events") != 1:
             raise AssertionError(f"timeline should summarize evidence lead uncertainty: {data.get('summary')}")
+        if data.get("summary", {}).get("events_missing_evidence") != 1 or data.get("summary", {}).get("source_coverage_ready") is not True:
+            raise AssertionError(f"timeline should summarize evidence coverage: {data.get('summary')}")
     print("[ok] Chronologis timeline")
     return 0
 

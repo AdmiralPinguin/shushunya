@@ -460,6 +460,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   revision instead of passing as warnings.
 - `Chronologis` and `ScriptoriumDaemon` preserve generic evidence-lead and
   low-confidence metadata through timeline and coverage artifacts.
+- `Chronologis` carries event evidence status and evidence-missing counts into
+  timeline summaries.
 - `ScriptoriumDaemon` exposes source-coverage readiness in the reader-facing
   reconstruction and machine-readable coverage report.
 - `ReductorVerifier` and `FabricatorFinalis` carry evidence-lead risk metrics

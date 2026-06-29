@@ -52,6 +52,7 @@ def build_timeline(notes: dict[str, Any]) -> dict[str, Any]:
                 "source_refs": event.get("source_refs", []),
                 "source_class": event.get("source_class", ""),
                 "extraction_method": event.get("extraction_method", ""),
+                "evidence_status": event.get("evidence_status", ""),
                 "evidence_lead": str(event.get("extraction_method") or "") == "generic_snapshot_lead",
             }
         )
@@ -70,6 +71,8 @@ def build_timeline(notes: dict[str, Any]) -> dict[str, Any]:
             "events": len(timeline),
             "low_confidence_events": sum(1 for item in timeline if item.get("confidence") == "low"),
             "generic_evidence_leads": sum(1 for item in timeline if item.get("evidence_lead")),
+            "events_missing_evidence": sum(1 for item in timeline if item.get("evidence_status") == "missing_snapshot_evidence"),
+            "source_coverage_ready": notes.get("summary", {}).get("source_coverage_ready") if isinstance(notes.get("summary"), dict) else None,
         },
         "phase_order": PHASE_ORDER,
         "contradictions": contradictions,
