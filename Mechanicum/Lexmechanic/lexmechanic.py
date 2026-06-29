@@ -378,6 +378,7 @@ def depth_profile_for_goal(goal: str, playbooks: list[dict[str, Any]]) -> dict[s
             "min_source_count": 24 if playbooks else 12,
             "min_live_candidate_count": 8 if playbooks else 6,
             "min_direct_evidence_sources": 6,
+            "min_primary_evidence_sources": 1,
             "min_draft_chars": 60000,
         }
     return {
@@ -389,6 +390,7 @@ def depth_profile_for_goal(goal: str, playbooks: list[dict[str, Any]]) -> dict[s
         "min_source_count": 1,
         "min_live_candidate_count": 0,
         "min_direct_evidence_sources": 1,
+        "min_primary_evidence_sources": 0,
         "min_draft_chars": 0,
     }
 

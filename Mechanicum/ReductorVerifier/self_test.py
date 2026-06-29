@@ -110,6 +110,7 @@ def main() -> int:
                     "min_source_count": 24,
                     "min_live_candidate_count": 8,
                     "min_direct_evidence_sources": 6,
+                    "min_primary_evidence_sources": 1,
                     "min_draft_chars": 60000,
                 },
                 "source_coverage": {
@@ -140,8 +141,14 @@ def main() -> int:
         if report.get("approved") or report.get("metrics", {}).get("comprehensive_depth", {}).get("passed"):
             raise AssertionError(f"comprehensive under-depth result should block approval: {report}")
         report_text = json.dumps(report)
-        if "Comprehensive draft is too short" not in report_text or "lacks accessible primary text" not in report_text:
+        if (
+            "Comprehensive draft is too short" not in report_text
+            or "lacks accessible primary text" not in report_text
+            or "too few primary-evidence sources" not in report_text
+        ):
             raise AssertionError(f"comprehensive depth blockers missing: {report}")
+        if report.get("metrics", {}).get("comprehensive_depth", {}).get("primary_evidence_source_count") != 0:
+            raise AssertionError(f"secondary evidence should not count as primary evidence: {report}")
         revision_workers = {step.get("worker") for step in report.get("revision_plan", {}).get("steps", [])}
         if "CorpusIngestor" not in revision_workers:
             raise AssertionError(f"missing primary corpus blocker should route through CorpusIngestor: {report}")
@@ -161,12 +168,24 @@ def main() -> int:
         )
         source_map_with_local_primary["corpus_requirements"] = {"required": False, "missing_count": 0, "missing_primary_texts": []}
         write_json(base / "source_map.json", source_map_with_local_primary)
+        write_json(
+            base / "direct_event_notes.json",
+            {
+                "events": [
+                    {"event_id": item, "evidence_snapshots": [{"source_title": "Kharn Eater Worlds local", "matched_markers": item}]}
+                    for item in events
+                ],
+                "gaps": ["gap"],
+            },
+        )
         result = run(request, root)
         if not result.get("ok"):
             raise AssertionError(f"ReductorVerifier failed on local primary match: {result}")
         report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
         if "Kharn: Eater of Worlds" in json.dumps(report.get("findings", []), ensure_ascii=False):
             raise AssertionError(f"matching local corpus source should satisfy missing Kharn primary blocker: {report}")
+        if report.get("metrics", {}).get("comprehensive_depth", {}).get("primary_evidence_source_count") != 1:
+            raise AssertionError(f"local primary evidence should count toward comprehensive depth: {report}")
         write_json(
             base / "source_map.json",
             {

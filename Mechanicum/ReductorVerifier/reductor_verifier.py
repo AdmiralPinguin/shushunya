@@ -173,6 +173,54 @@ def direct_evidence_source_count(notes: dict[str, Any]) -> int:
     return len(sources)
 
 
+def primary_source_title_tokens(source_map: dict[str, Any]) -> list[set[str]]:
+    tokens: list[set[str]] = []
+    for source in source_map.get("sources", []) if isinstance(source_map.get("sources"), list) else []:
+        if not isinstance(source, dict):
+            continue
+        source_class = str(source.get("source_class") or source.get("type") or "").lower()
+        source_kind = str(source.get("type") or "").lower()
+        if (
+            "primary" not in source_class
+            and source_kind not in {"novel", "short_story", "book", "codex", "campaign_book"}
+            and not str(source.get("local_path") or "").strip()
+        ):
+            continue
+        token_text = " ".join(
+            [
+                str(source.get("title") or ""),
+                str(source.get("local_path") or ""),
+                str(source.get("corpus_relative_path") or ""),
+            ]
+        )
+        source_tokens = relevance_tokens(token_text)
+        if source_tokens:
+            tokens.append(source_tokens)
+    return tokens
+
+
+def primary_evidence_source_count(source_map: dict[str, Any], notes: dict[str, Any]) -> int:
+    primary_tokens = primary_source_title_tokens(source_map)
+    if not primary_tokens:
+        return 0
+    sources: set[str] = set()
+    for event in notes.get("events", []) if isinstance(notes.get("events"), list) else []:
+        if not isinstance(event, dict):
+            continue
+        evidence = event.get("evidence_snapshots") if isinstance(event.get("evidence_snapshots"), list) else []
+        for item in evidence:
+            if not isinstance(item, dict):
+                continue
+            source_title = str(item.get("source_title") or "")
+            source_tokens = relevance_tokens(source_title)
+            if not source_tokens:
+                continue
+            required = min(2, len(source_tokens))
+            if any(len(source_tokens & candidate) >= required for candidate in primary_tokens):
+                sources.add(source_title)
+    return len(sources)
+
+
 def inaccessible_primary_titles(source_map: dict[str, Any]) -> list[str]:
     corpus_requirements = source_map.get("corpus_requirements") if isinstance(source_map.get("corpus_requirements"), dict) else {}
     missing = corpus_requirements.get("missing_primary_texts") if isinstance(corpus_requirements.get("missing_primary_texts"), list) else []
@@ -219,10 +267,12 @@ def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, An
     source_count = int(source_coverage.get("source_count") or len(source_map.get("sources", [])))
     live_candidate_count = int(source_coverage.get("live_candidate_count") or 0)
     evidence_source_count = direct_evidence_source_count(notes)
+    primary_evidence_count = primary_evidence_source_count(source_map, notes)
     draft_chars = len(reconstruction)
     min_source_count = int(depth_profile.get("min_source_count") or 0)
     min_live_candidate_count = int(depth_profile.get("min_live_candidate_count") or 0)
     min_direct_evidence_sources = int(depth_profile.get("min_direct_evidence_sources") or 0)
+    min_primary_evidence_sources = int(depth_profile.get("min_primary_evidence_sources") or 0)
     min_draft_chars = int(depth_profile.get("min_draft_chars") or 0)
     missing_primary = inaccessible_primary_titles(source_map)
     findings: list[dict[str, str]] = []
@@ -245,6 +295,13 @@ def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, An
             {
                 "severity": "blocker",
                 "message": f"Comprehensive task has too few direct-evidence sources: {evidence_source_count}/{min_direct_evidence_sources}.",
+            }
+        )
+    if primary_evidence_count < min_primary_evidence_sources:
+        findings.append(
+            {
+                "severity": "blocker",
+                "message": f"Comprehensive task has too few primary-evidence sources: {primary_evidence_count}/{min_primary_evidence_sources}.",
             }
         )
     if draft_chars < min_draft_chars:
@@ -271,6 +328,8 @@ def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, An
         "min_live_candidate_count": min_live_candidate_count,
         "direct_evidence_source_count": evidence_source_count,
         "min_direct_evidence_sources": min_direct_evidence_sources,
+        "primary_evidence_source_count": primary_evidence_count,
+        "min_primary_evidence_sources": min_primary_evidence_sources,
         "draft_chars": draft_chars,
         "min_draft_chars": min_draft_chars,
         "inaccessible_primary_count": len(missing_primary),
@@ -386,6 +445,10 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
         elif "comprehensive task has too few direct-evidence sources" in lowered:
+            add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
+            add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+            add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
+        elif "comprehensive task has too few primary-evidence sources" in lowered:
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
