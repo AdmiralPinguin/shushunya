@@ -120,6 +120,13 @@ def ranked_source_candidates_from_survey(workspace_root: Path, output_path: str)
     return candidates[:20]
 
 
+def recommended_read_order_from_survey(workspace_root: Path, output_path: str) -> list[dict[str, Any]]:
+    survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
+    repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
+    read_order = repo_map.get("recommended_read_order") if isinstance(repo_map.get("recommended_read_order"), list) else []
+    return [item for item in read_order if isinstance(item, dict)][:30]
+
+
 def patch_scope_evidence(workspace_root: Path, output_path: str, changed_files: list[dict[str, Any]]) -> dict[str, Any]:
     survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
     repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
@@ -1142,6 +1149,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "diagnostics": patch_spec.get("diagnostics", {}) if isinstance(patch_spec.get("diagnostics"), dict) else {},
         "operation_count": len(patch_spec.get("operations", [])) if isinstance(patch_spec.get("operations"), list) else 0,
         "changed_files": changed_files,
+        "recommended_read_order": recommended_read_order_from_survey(workspace_root, output_path),
         "patch_scope_evidence": patch_scope_evidence(workspace_root, output_path, changed_files),
         "rollback": {
             "applied": bool(rolled_back_files),
@@ -1424,6 +1432,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             sibling_artifact(output_path, "code_review.json"),
         ],
         "changed_files": patch.get("changed_files", []),
+        "recommended_read_order": patch.get("recommended_read_order", []),
         "patch_scope_evidence": patch.get("patch_scope_evidence", {}),
         "patch_source": patch.get("patch_source", ""),
         "diagnostics": patch.get("diagnostics", {}),

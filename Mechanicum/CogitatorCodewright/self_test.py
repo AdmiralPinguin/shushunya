@@ -530,6 +530,8 @@ def main() -> int:
             raise AssertionError(f"test-inferred return mismatch should expose patch audit fields: {final}")
         if final.get("diagnostics", {}).get("actual") != "1" or final.get("diagnostics", {}).get("expected") != "42":
             raise AssertionError(f"test-inferred return mismatch should expose diagnostics: {final}")
+        if final.get("recommended_read_order", [])[0].get("path") != "sample.py":
+            raise AssertionError(f"test-inferred return mismatch should preserve recommended read order: {final}")
         if sample.read_text(encoding="utf-8") != "def value():\n    return 42\n":
             raise AssertionError("test-inferred return mismatch task did not update the return value")
     with tempfile.TemporaryDirectory() as temp_dir:
