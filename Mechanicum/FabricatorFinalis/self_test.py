@@ -34,10 +34,24 @@ def main() -> int:
         base = root / "skalathrax"
         for filename in [
             "corpus_index.json",
-            "source_map.json",
             "source_snapshots.json",
         ]:
             write(base / filename, json.dumps({"approved": True, "status": "passed_with_warnings"}))
+        write(
+            base / "source_map.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "passed_with_warnings",
+                    "corpus_diagnostics": {
+                        "provided": True,
+                        "summary": {"sources_matched": 1, "sources_non_matching": 36},
+                        "non_matching_count": 36,
+                        "non_matching_sample": [{"corpus_relative_path": "unrelated-00.txt"}],
+                    },
+                }
+            ),
+        )
         write(
             base / "direct_event_notes.json",
             json.dumps(
@@ -82,6 +96,8 @@ def main() -> int:
         event_review = manifest.get("event_review", {})
         if event_review.get("required_direct_event_count") != 2 or event_review.get("required_events_covered") is not True:
             raise AssertionError(f"ready manifest should summarize required event coverage: {manifest}")
+        if manifest.get("corpus_diagnostics", {}).get("non_matching_count") != 36:
+            raise AssertionError(f"ready manifest should preserve corpus diagnostics: {manifest}")
         if manifest.get("readiness_checks", {}).get("source_coverage_ready") is not True:
             raise AssertionError(f"ready manifest should carry source coverage readiness: {manifest}")
         if manifest.get("readiness_checks", {}).get("comprehensive_depth_ready") is not True:

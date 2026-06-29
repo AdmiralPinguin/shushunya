@@ -1423,6 +1423,7 @@ def main() -> int:
                 final_manifest_item.get("manifest_summary", {}).get("status") != "ready"
                 or "critic_metrics" not in final_manifest_item.get("manifest_summary", {})
                 or "event_review" not in final_manifest_item.get("manifest_summary", {})
+                or "corpus_diagnostics" not in final_manifest_item.get("manifest_summary", {})
                 or "corpus_requirements" not in final_manifest_item.get("manifest_summary", {})
                 or "readiness_checks" not in final_manifest_item.get("manifest_summary", {})
                 or final_manifest_item.get("manifest_summary", {}).get("file_count", 0) < 1
@@ -1456,6 +1457,7 @@ def main() -> int:
                 or completed_snapshot.get("summary", {}).get("final_manifest_summary", {}).get("status") != "ready"
                 or "critic_metrics" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
                 or "event_review" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
+                or "corpus_diagnostics" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
                 or "corpus_requirements" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
                 or "readiness_checks" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
                 or "blocker_count" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
@@ -1558,6 +1560,7 @@ def main() -> int:
                 or completed_result_event.get("run_next_action", {}).get("kind") != "rerun_requires_force"
                 or completed_result_event.get("run_final_manifest_summary", {}).get("status") != "ready"
                 or "event_review" not in completed_result_event.get("run_final_manifest_summary", {})
+                or "corpus_diagnostics" not in completed_result_event.get("run_final_manifest_summary", {})
                 or "corpus_requirements" not in completed_result_event.get("run_final_manifest_summary", {})
             ):
                 raise AssertionError(f"global run events did not expose completed run action state: {completed_global_events}")

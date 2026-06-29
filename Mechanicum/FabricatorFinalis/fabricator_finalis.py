@@ -248,6 +248,21 @@ def event_review_summary(workspace_root: Path, manifest_path: str, critic: dict[
     }
 
 
+def source_map_diagnostics(workspace_root: Path, manifest_path: str) -> dict[str, Any]:
+    source_map_path = sandbox_path(workspace_root, sibling_artifact(manifest_path, "source_map.json"))
+    if not source_map_path.exists():
+        return {}
+    try:
+        source_map = load_json(source_map_path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    diagnostics = source_map.get("corpus_diagnostics") if isinstance(source_map.get("corpus_diagnostics"), dict) else {}
+    if diagnostics:
+        return diagnostics
+    summary = source_map.get("corpus_summary") if isinstance(source_map.get("corpus_summary"), dict) else {}
+    return {"provided": bool(summary), "summary": summary}
+
+
 def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, Any]) -> dict[str, Any]:
     files: list[dict[str, Any]] = []
     missing: list[str] = []
@@ -270,6 +285,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     quality_blockers = quality_expectation_blockers(request)
     critic_metrics = critic.get("metrics", {}) if isinstance(critic.get("metrics"), dict) else {}
     event_review = event_review_summary(workspace_root, manifest_path, critic)
+    corpus_diagnostics = source_map_diagnostics(workspace_root, manifest_path)
     source_coverage_ready = critic_metrics.get("source_coverage_ready")
     comprehensive_depth = critic_metrics.get("comprehensive_depth") if isinstance(critic_metrics.get("comprehensive_depth"), dict) else {}
     comprehensive_depth_ready = comprehensive_depth.get("passed") if comprehensive_depth.get("mode") == "comprehensive" else True
@@ -326,6 +342,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "critic_status": critic.get("status", "missing"),
         "critic_metrics": critic_metrics,
         "event_review": event_review,
+        "corpus_diagnostics": corpus_diagnostics,
         "corpus_requirements": corpus_requirements,
         "readiness_checks": readiness_checks,
         "warnings": critic.get("warnings", []),
