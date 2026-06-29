@@ -5,6 +5,7 @@ python3 EyeOfTerror/doctor.py --quiet
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/governors_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/generic_lore_smoke_self_test.py
+PYTHONPATH=EyeOfTerror python3 EyeOfTerror/local_corpus_pipeline_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/governor_api_contract_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/routing_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/warmaster_api_contract_self_test.py
