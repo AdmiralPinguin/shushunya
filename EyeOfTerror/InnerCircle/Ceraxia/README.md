@@ -79,3 +79,8 @@ repair evidence.
 A second narrow test repair handles `NameError: name 'x' is not defined` when
 the failing `assertEqual(..., literal)` exposes a simple expected literal and
 the changed Python file contains exactly one `return x`.
+
+Another narrow repair handles `ImportError: cannot import name 'f' from 'm'`
+when the changed file is `m.py` and stderr or target test files expose exactly
+one `assertEqual(f(), literal)`: Ceraxia appends
+`def f(): return literal`, reruns verification, and records the repair.

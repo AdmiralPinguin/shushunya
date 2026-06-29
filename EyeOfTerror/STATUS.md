@@ -580,6 +580,11 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   includes `NameError: name 'x' is not defined`, the failing `assertEqual`
   exposes a simple expected literal, and exactly one changed Python file
   contains `return x`.
+- `OrdinatusVerifier` can repair a narrow missing-function import pattern:
+  `ImportError: cannot import name 'f' from 'm'` plus
+  exactly one discoverable `assertEqual(f(), literal)` in stderr or target
+  repo test files appends `def f(): return literal` to changed `m.py` and
+  reruns verification.
 - The pipeline records inaccessible primary books as `corpus_requirements`;
   operators must provide legitimate local text files when full primary evidence
   is required.

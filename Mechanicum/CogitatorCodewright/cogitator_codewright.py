@@ -409,6 +409,54 @@ def repair_name_error_return_literal(repo_root: Path, py_files: list[str], outpu
     }
 
 
+def repair_import_error_missing_function(repo_root: Path, py_files: list[str], output: str) -> dict[str, Any]:
+    import_match = re.search(
+        r"ImportError: cannot import name '([A-Za-z_][A-Za-z0-9_]*)' from '([A-Za-z_][A-Za-z0-9_\.]*)'",
+        output,
+    )
+    if not import_match:
+        return {"applied": False, "reason": "no simple import-name ImportError found"}
+    function_name, module_name = import_match.groups()
+    expected_values = re.findall(
+        rf"assertEqual\(\s*{re.escape(function_name)}\(\)\s*,\s*([+-]?\d+|True|False|None)\s*\)",
+        output,
+    )
+    if not expected_values:
+        for test_file in sorted(repo_root.glob("test*.py")) + sorted(repo_root.glob("*_test.py")):
+            text = test_file.read_text(encoding="utf-8")
+            expected_values.extend(
+                re.findall(
+                    rf"assertEqual\(\s*{re.escape(function_name)}\(\)\s*,\s*([+-]?\d+|True|False|None)\s*\)",
+                    text,
+                )
+            )
+    if len(expected_values) != 1:
+        return {"applied": False, "reason": f"could not infer exactly one expected literal for missing function, found {len(expected_values)}"}
+    expected = expected_values[0]
+    module_path = f"{module_name.replace('.', '/')}.py"
+    if module_path not in py_files:
+        return {"applied": False, "reason": f"missing function module is not a changed file: {module_path}"}
+    path = safe_repo_path(repo_root, module_path)
+    content = path.read_text(encoding="utf-8")
+    if re.search(rf"^\s*def\s+{re.escape(function_name)}\s*\(", content, flags=re.MULTILINE):
+        return {"applied": False, "reason": f"function already exists: {function_name}"}
+    before_hash = sha256_text(path)
+    prefix = "" if not content or content.endswith("\n") else "\n"
+    suffix = "\n" if content else ""
+    addition = f"{prefix}{suffix}def {function_name}():\n    return {expected}\n"
+    path.write_text(content + addition, encoding="utf-8")
+    invalidate_python_cache(path)
+    return {
+        "applied": True,
+        "kind": "import_error_missing_function",
+        "path": module_path,
+        "function": function_name,
+        "expected": expected,
+        "before_sha256": before_hash,
+        "after_sha256": sha256_text(path),
+    }
+
+
 def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
     extension_counts: Counter[str] = Counter()
     candidate_files: list[str] = []
@@ -625,7 +673,9 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
             executed.append(result)
             if result.get("returncode") != 0:
                 output = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
-                repair = repair_name_error_return_literal(repo_root, py_files, output)
+                repair = repair_import_error_missing_function(repo_root, py_files, output)
+                if not repair.get("applied"):
+                    repair = repair_name_error_return_literal(repo_root, py_files, output)
                 if not repair.get("applied"):
                     repair = repair_assertion_return_mismatch(repo_root, py_files, output)
                 if repair.get("applied"):
