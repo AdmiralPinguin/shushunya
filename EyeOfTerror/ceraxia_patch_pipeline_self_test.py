@@ -47,6 +47,8 @@ CERAXIA_PATCH:
         changed = manifest.get("changed_files", [])
         if not changed or changed[0].get("path") != "sample.py" or not changed[0].get("changed"):
             raise AssertionError(f"Ceraxia final manifest lacks changed file evidence: {manifest}")
+        if manifest.get("verification_summary", {}).get("executed_count", 0) < 2:
+            raise AssertionError(f"Ceraxia final manifest lacks verification evidence: {manifest}")
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
         target_repo = temp_root / "repo"
@@ -75,6 +77,8 @@ CERAXIA_VERIFY: python -m py_compile generated.py
             raise AssertionError(f"Ceraxia marker final manifest should be ready: {manifest}")
         if "return 42" not in generated.read_text(encoding="utf-8"):
             raise AssertionError("Ceraxia marker pipeline wrote wrong file content")
+        if manifest.get("verification_summary", {}).get("executed_count", 0) < 2:
+            raise AssertionError(f"Ceraxia marker final manifest lacks verification evidence: {manifest}")
     print("[ok] Ceraxia explicit patch pipeline")
     return 0
 

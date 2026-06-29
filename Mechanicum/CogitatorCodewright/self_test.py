@@ -105,6 +105,8 @@ def main() -> int:
         changed = final.get("changed_files", [])
         if not changed or changed[0].get("path") != "sample.py" or not changed[0].get("changed"):
             raise AssertionError(f"final manifest should preserve changed file metadata: {final}")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 2:
+            raise AssertionError(f"final manifest should preserve verification evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
@@ -114,6 +116,8 @@ def main() -> int:
         final = run_pipeline(root / "work", goal=forbidden_verify_goal(), target_repo_root=target_repo)
         if final.get("status") != "blocked" or final.get("approved"):
             raise AssertionError(f"forbidden verification command should block final readiness: {final}")
+        if final.get("verification_summary", {}).get("blocker_count", 0) < 1:
+            raise AssertionError(f"blocked final manifest should preserve verification blockers: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
@@ -124,6 +128,8 @@ def main() -> int:
             raise AssertionError(f"marker-synthesized create file task should be ready: {final}")
         if "return 42" not in generated.read_text(encoding="utf-8"):
             raise AssertionError("marker-synthesized create file task wrote wrong content")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 2:
+            raise AssertionError(f"marker final manifest should preserve verification evidence: {final}")
     print("[ok] CogitatorCodewright code artifacts")
     return 0
 

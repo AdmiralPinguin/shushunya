@@ -561,6 +561,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   `CERAXIA_CREATE_FILE`/`CERAXIA_FILE_CONTENT` and
   `CERAXIA_REPLACE_IN_FILE`/`CERAXIA_OLD`/`CERAXIA_NEW`, plus repeated
   `CERAXIA_VERIFY` lines for allowlisted verification commands.
+- Ceraxia final manifests preserve verification evidence through
+  `verification_executed`, `verification_blockers`, and
+  `verification_summary`, so the caller can see which commands proved or
+  blocked readiness.
 - The pipeline records inaccessible primary books as `corpus_requirements`;
   operators must provide legitimate local text files when full primary evidence
   is required.

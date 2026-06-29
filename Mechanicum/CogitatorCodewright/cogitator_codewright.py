@@ -598,6 +598,12 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         ],
         "changed_files": patch.get("changed_files", []),
         "verification_status": verification.get("status", "unknown"),
+        "verification_executed": verification.get("executed", []),
+        "verification_blockers": verification.get("blockers", []),
+        "verification_summary": {
+            "executed_count": len(verification.get("executed", [])) if isinstance(verification.get("executed"), list) else 0,
+            "blocker_count": len(verification.get("blockers", [])) if isinstance(verification.get("blockers"), list) else 0,
+        },
         "review_status": review.get("status", "unknown"),
         "blockers": [item.get("message") for item in review.get("findings", []) if isinstance(item, dict)],
         "next_safe_action": "handoff_to_patch_worker" if status == "blocked" else "inspect_final_package",
