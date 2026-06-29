@@ -166,7 +166,11 @@ def check_source_playbooks(errors: list[str]) -> int:
     seen_names: set[str] = set()
     for path in sorted(playbook_dir.glob("*.json")):
         count += 1
-        playbook = load_json(path)
+        try:
+            playbook = load_json(path)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            require(False, f"source playbook {path.name} is invalid: {exc}", errors)
+            continue
         name = str(playbook.get("name") or path.stem)
         require(name not in seen_names, f"source playbook duplicate name: {name}", errors)
         seen_names.add(name)
@@ -198,7 +202,11 @@ def check_event_playbooks(errors: list[str]) -> int:
     count = 0
     for path in sorted(playbook_dir.glob("*.json")):
         count += 1
-        playbook = load_json(path)
+        try:
+            playbook = load_json(path)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            require(False, f"event playbook {path.name} is invalid: {exc}", errors)
+            continue
         require_string_list(playbook.get("match_terms"), f"event playbook {path.name} missing match_terms", errors)
         events = playbook.get("events")
         require(isinstance(events, list) and bool(events), f"event playbook {path.name} missing events", errors)
