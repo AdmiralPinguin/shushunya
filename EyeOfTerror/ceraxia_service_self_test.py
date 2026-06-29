@@ -63,6 +63,12 @@ def main() -> int:
         or "python -m unittest" not in patch_contract.get("verification_allowlist", [])
     ):
         raise AssertionError(f"bad Ceraxia local patch contract: {patch_contract}")
+    ferrum_contract = local_plan.get("resolved_workers", {}).get("FerrumPatchwright", {}).get("role_contract", {})
+    if (
+        ferrum_contract.get("owned_step") != "implementation"
+        or ferrum_contract.get("authority") != "scoped_source_mutation_from_explicit_patch_contract"
+    ):
+        raise AssertionError(f"Ceraxia plan should expose worker role contracts: {local_plan}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         if resolve_run_dir(root / "runs", "child", "task").resolve() != (root / "runs" / "child").resolve():
@@ -91,6 +97,7 @@ def main() -> int:
                 or plan.get("phase") != "plan_ready"
                 or plan.get("actions", {}).get("next_action", {}).get("kind") != "prepare_run"
                 or "explicit_json_patch" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
+                or plan.get("resolved_workers", {}).get("FerrumPatchwright", {}).get("role_contract", {}).get("owned_step") != "implementation"
             ):
                 raise AssertionError(f"bad plan: {plan}")
             run_dir = root / "runs" / "custom-run"

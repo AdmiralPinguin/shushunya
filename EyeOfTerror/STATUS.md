@@ -546,6 +546,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - Ceraxia's six active code workers expose machine-readable `role_contract`
   metadata with owned step, authority boundary, expected artifacts, and next
   handoff; the worker registry self-test enforces those contracts.
+- Ceraxia task plans preserve worker `role_contract` metadata in
+  `resolved_workers`, so Warmaster and future clients can inspect each worker's
+  authority boundary from the plan payload.
 - Ceraxia final manifests no longer report `ready` when no source files were
   mutated. The prototype now emits `blocked` with
   `next_safe_action=handoff_to_patch_worker` until a real patch/apply worker

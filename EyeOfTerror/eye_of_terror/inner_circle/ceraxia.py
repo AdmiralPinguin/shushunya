@@ -323,6 +323,8 @@ class CeraxiaPlan:
             if metadata:
                 worker_payload["status"] = metadata.get("status", "")
                 worker_payload["capabilities"] = metadata.get("capabilities", [])
+                if isinstance(metadata.get("role_contract"), dict):
+                    worker_payload["role_contract"] = metadata["role_contract"]
             resolved_workers[step.worker] = worker_payload
             if metadata.get("status") == "planned" and step.worker not in {item.get("name") for item in unavailable_workers}:
                 unavailable_workers.append(
