@@ -438,6 +438,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   low-confidence metadata through timeline and coverage artifacts.
 - `ReductorVerifier` and `FabricatorFinalis` carry evidence-lead risk metrics
   into critic reports and final manifests.
+- `ReductorVerifier` preserves worker `quality_expectations` in critic reports
+  and blocks approval when they contradict the current step request.
+- `FabricatorFinalis` preserves worker `quality_expectations` in final manifests
+  and blocks final readiness when they contradict the final step request.
 - `AuspexBrowser` performs guarded HTTP text fetches and marks low-text
   scripted HTML with `render_required`; it does not yet render JavaScript pages
   or screenshots.

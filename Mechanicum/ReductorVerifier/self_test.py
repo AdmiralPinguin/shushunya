@@ -20,7 +20,20 @@ def write_json(path: Path, payload: dict) -> None:
 def main() -> int:
     request = {
         "task_id": "test-skalathrax:critic_review",
-        "step": {"expected_artifacts": ["/work/skalathrax/critic_report.json"]},
+        "step": {"step_id": "critic_review", "expected_artifacts": ["/work/skalathrax/critic_report.json"]},
+        "quality_expectations": {
+            "step_quality": {
+                "step_id": "critic_review",
+                "worker": "ReductorVerifier",
+                "required_inputs": ["/work/skalathrax/reconstruction_ru.md", "/work/skalathrax/coverage_report.md"],
+                "expected_artifacts": ["/work/skalathrax/critic_report.json"],
+                "checks": ["critic compares draft against contract, extracted facts, timeline, and coverage report"],
+                "blockers": ["missing expected artifact"],
+                "revision_targets": ["critic_review", "finalize"],
+            },
+            "final_review": {"critic_step": "critic_review", "final_step": "finalize"},
+            "revision_policy": {"source_step": "critic_review", "final_steps": ["critic_review", "finalize"]},
+        },
     }
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -80,6 +93,19 @@ def main() -> int:
             raise AssertionError(f"expected verifier to record revision focus: {report}")
         if report.get("metrics", {}).get("generic_evidence_leads") != 1 or "generic low-confidence evidence lead" not in json.dumps(report):
             raise AssertionError(f"expected verifier to warn about generic evidence leads: {report}")
+        if (
+            report.get("quality_expectations", {}).get("check_count") != 1
+            or report.get("quality_expectations", {}).get("revision_targets") != ["critic_review", "finalize"]
+        ):
+            raise AssertionError(f"expected verifier to preserve quality expectations: {report}")
+        bad_quality_request = json.loads(json.dumps(request))
+        bad_quality_request["quality_expectations"]["step_quality"]["expected_artifacts"] = ["/work/skalathrax/wrong.json"]
+        result = run(bad_quality_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on bad quality expectations: {result}")
+        report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
+        if report.get("approved") or "expected_artifacts do not match" not in json.dumps(report):
+            raise AssertionError(f"bad quality expectations should block approval: {report}")
         write_json(base / "timeline.json", {"timeline": [{"event_id": "moon_parley"}], "gaps": []})
         result = run(request, root)
         if not result.get("ok"):

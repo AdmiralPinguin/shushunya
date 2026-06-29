@@ -91,7 +91,35 @@ def merge_revision_plan(critic: dict[str, Any], missing: list[str]) -> dict[str,
     return {"required": bool(steps), "steps": steps}
 
 
-def build_manifest(workspace_root: Path, manifest_path: str) -> dict[str, Any]:
+def quality_expectation_summary(request: dict[str, Any]) -> dict[str, Any]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
+    return {
+        "provided": bool(expectations),
+        "step_id": str(step_quality.get("step_id") or ""),
+        "worker": str(step_quality.get("worker") or ""),
+        "check_count": len(step_quality.get("checks") if isinstance(step_quality.get("checks"), list) else []),
+        "blocker_count": len(step_quality.get("blockers") if isinstance(step_quality.get("blockers"), list) else []),
+        "revision_targets": step_quality.get("revision_targets", []) if isinstance(step_quality.get("revision_targets"), list) else [],
+    }
+
+
+def quality_expectation_blockers(request: dict[str, Any]) -> list[dict[str, str]]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
+    if not step_quality:
+        return []
+    step = request.get("step") if isinstance(request.get("step"), dict) else {}
+    blockers: list[dict[str, str]] = []
+    if str(step_quality.get("worker") or "") not in {"", "FabricatorFinalis"}:
+        blockers.append({"severity": "blocker", "message": f"Quality expectations target another worker: {step_quality.get('worker')}"})
+    expected_artifacts = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
+    if step_quality.get("expected_artifacts") != expected_artifacts:
+        blockers.append({"severity": "blocker", "message": "Quality expectations expected_artifacts do not match request.step"})
+    return blockers
+
+
+def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, Any]) -> dict[str, Any]:
     files: list[dict[str, Any]] = []
     missing: list[str] = []
     for filename in PACKAGE_FILES:
@@ -110,8 +138,22 @@ def build_manifest(workspace_root: Path, manifest_path: str) -> dict[str, Any]:
     critic_path = sandbox_path(workspace_root, sibling_artifact(manifest_path, "critic_report.json"))
     critic = load_json(critic_path) if critic_path.exists() else {}
     approved = bool(critic.get("approved"))
-    status = "ready" if approved and not missing else "blocked"
+    quality_blockers = quality_expectation_blockers(request)
+    status = "ready" if approved and not missing and not quality_blockers else "blocked"
     revision_plan = merge_revision_plan(critic, missing)
+    if quality_blockers:
+        revision_plan = {
+            "required": True,
+            "steps": revision_plan.get("steps", []) + [
+                {
+                    "step_id": "finalize",
+                    "worker": "FabricatorFinalis",
+                    "reason": "Finalizer quality expectations failed",
+                    "source": "quality_expectations",
+                    "priority": "blocker",
+                }
+            ],
+        }
     return {
         "status": status,
         "approved": approved,
@@ -121,9 +163,10 @@ def build_manifest(workspace_root: Path, manifest_path: str) -> dict[str, Any]:
         "critic_status": critic.get("status", "missing"),
         "critic_metrics": critic.get("metrics", {}),
         "warnings": critic.get("warnings", []),
-        "blockers": critic.get("findings", []) + [{"severity": "blocker", "message": f"Missing package file: {path}"} for path in missing],
+        "blockers": critic.get("findings", []) + [{"severity": "blocker", "message": f"Missing package file: {path}"} for path in missing] + quality_blockers,
         "revision_plan": revision_plan,
         "revision_focus": critic.get("revision_focus", {"present": False}),
+        "quality_expectations": quality_expectation_summary(request),
     }
 
 
@@ -136,7 +179,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         return {"ok": False, "worker": "FabricatorFinalis", "error": "step.expected_artifacts is empty"}
     manifest_path = str(expected_artifacts[0])
     try:
-        manifest = build_manifest(workspace_root, manifest_path)
+        manifest = build_manifest(workspace_root, manifest_path, request)
     except (ValueError, json.JSONDecodeError) as exc:
         return {"ok": False, "worker": "FabricatorFinalis", "error": str(exc)}
     host_path = sandbox_path(workspace_root, manifest_path)

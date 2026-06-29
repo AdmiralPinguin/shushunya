@@ -200,6 +200,45 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
     }
 
 
+def quality_expectation_summary(request: dict[str, Any]) -> dict[str, Any]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
+    final_review = expectations.get("final_review") if isinstance(expectations.get("final_review"), dict) else {}
+    revision_policy = expectations.get("revision_policy") if isinstance(expectations.get("revision_policy"), dict) else {}
+    return {
+        "provided": bool(expectations),
+        "step_id": str(step_quality.get("step_id") or ""),
+        "worker": str(step_quality.get("worker") or ""),
+        "check_count": len(step_quality.get("checks") if isinstance(step_quality.get("checks"), list) else []),
+        "blocker_count": len(step_quality.get("blockers") if isinstance(step_quality.get("blockers"), list) else []),
+        "revision_targets": step_quality.get("revision_targets", []) if isinstance(step_quality.get("revision_targets"), list) else [],
+        "final_review": final_review,
+        "revision_policy": revision_policy,
+    }
+
+
+def quality_expectation_findings(request: dict[str, Any]) -> list[dict[str, str]]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
+    if not step_quality:
+        return []
+    findings: list[dict[str, str]] = []
+    step = request.get("step") if isinstance(request.get("step"), dict) else {}
+    step_id = str(step.get("step_id") or "")
+    if step_id and str(step_quality.get("step_id") or "") != step_id:
+        findings.append({"severity": "blocker", "message": f"Quality expectations target another step: {step_quality.get('step_id')}"})
+    if str(step_quality.get("worker") or "") not in {"", "ReductorVerifier"}:
+        findings.append({"severity": "blocker", "message": f"Quality expectations target another worker: {step_quality.get('worker')}"})
+    expected_artifacts = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
+    if step_quality.get("expected_artifacts") != expected_artifacts:
+        findings.append({"severity": "blocker", "message": "Quality expectations expected_artifacts do not match request.step"})
+    for field_name in ("checks", "blockers", "revision_targets"):
+        values = step_quality.get(field_name)
+        if not isinstance(values, list) or not values:
+            findings.append({"severity": "blocker", "message": f"Quality expectations missing non-empty {field_name}"})
+    return findings
+
+
 def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
     reconstruction_path = sibling_artifact(critic_path, "reconstruction_ru.md")
     coverage_path = sibling_artifact(critic_path, "coverage_report.md")
@@ -313,6 +352,13 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         report = review_artifacts(workspace_root, critic_path)
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         return {"ok": False, "worker": "ReductorVerifier", "error": str(exc)}
+    expectation_findings = quality_expectation_findings(request)
+    if expectation_findings:
+        report.setdefault("findings", []).extend(expectation_findings)
+        report["approved"] = False
+        report["status"] = "needs_revision"
+        report["revision_plan"] = revision_plan_from_findings(report.get("findings", []), report.get("missing_artifacts", []))
+    report["quality_expectations"] = quality_expectation_summary(request)
     host_path = sandbox_path(workspace_root, critic_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

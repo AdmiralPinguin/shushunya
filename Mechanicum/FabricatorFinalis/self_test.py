@@ -16,7 +16,18 @@ def write(path: Path, content: str) -> None:
 def main() -> int:
     request = {
         "task_id": "test-skalathrax:finalize",
-        "step": {"expected_artifacts": ["/work/skalathrax/final_manifest.json"]},
+        "step": {"step_id": "finalize", "expected_artifacts": ["/work/skalathrax/final_manifest.json"]},
+        "quality_expectations": {
+            "step_quality": {
+                "step_id": "finalize",
+                "worker": "FabricatorFinalis",
+                "required_inputs": ["/work/skalathrax/critic_report.json"],
+                "expected_artifacts": ["/work/skalathrax/final_manifest.json"],
+                "checks": ["final manifest includes deliverable, package files, critic status, warnings, and blockers"],
+                "blockers": ["missing expected artifact"],
+                "revision_targets": ["finalize"],
+            }
+        },
     }
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -53,6 +64,16 @@ def main() -> int:
             raise AssertionError(f"ready manifest should carry revision focus: {manifest}")
         if manifest.get("critic_metrics", {}).get("generic_evidence_leads") != 1:
             raise AssertionError(f"ready manifest should carry critic metrics: {manifest}")
+        if manifest.get("quality_expectations", {}).get("check_count") != 1:
+            raise AssertionError(f"ready manifest should carry quality expectations: {manifest}")
+        bad_quality_request = json.loads(json.dumps(request))
+        bad_quality_request["quality_expectations"]["step_quality"]["expected_artifacts"] = ["/work/skalathrax/wrong.json"]
+        result = run(bad_quality_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on bad quality expectations: {result}")
+        manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
+        if manifest.get("status") != "blocked" or "expected_artifacts do not match" not in json.dumps(manifest):
+            raise AssertionError(f"bad quality expectations should block manifest: {manifest}")
         (base / "timeline.json").unlink()
         write(
             base / "critic_report.json",
