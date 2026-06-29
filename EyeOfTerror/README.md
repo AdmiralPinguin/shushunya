@@ -176,8 +176,19 @@ only the requested rework steps, then `critic_review` and `finalize`. Revision
 reruns pass focused `revision_context` into the selected worker request; writer,
 critic, and finalizer artifacts preserve that focus as `revision_focus`.
 
+Research loop endpoints (`research_loop_local`, `research_loop_http`, and their
+`start_` background variants) let Warmaster run start/resume/revision decisions
+until a final package is ready or a bounded stop condition is hit. Use
+`max_revision_cycles` to cap automatic rework.
+
 Resume endpoints run only the pending steps of an `interrupted` package through
 local or HTTP execution and reject non-interrupted runs.
+
+Local corpus files live in `Corpus/` or `SHUSHUNYA_CORPUS_DIR`. Put optional
+sidecar metadata next to a file as `<file>.metadata.json`, `<file>.meta.json`,
+or `<file>.epub.json`/`<file>.txt.json`; useful fields include `title`,
+`language`, `type`, `source_class`, `reliability`, `direct_event_detail_level`,
+`tags`, `aliases`, and `expected_use`.
 
 `GET /runs/<task_id>/worker_tasks` maps a Warmaster run to the task ids sent to
 Mechanicum workers. Add `?live=1` for a best-effort lookup against worker

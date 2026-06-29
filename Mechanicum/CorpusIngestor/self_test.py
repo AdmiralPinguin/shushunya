@@ -27,6 +27,28 @@ def main() -> int:
                 + ("Primary EPUB text about Kharn and the World Eaters shelters. " * 6)
                 + "</p></body></html>",
             )
+        (corpus_root / "chapter-one.txt").write_text(
+            "This chapter begins far from the named battlefield but eventually matters to the requested reconstruction. " * 8,
+            encoding="utf-8",
+        )
+        (corpus_root / "chapter-one.txt.metadata.json").write_text(
+            json.dumps(
+                {
+                    "title": "Skalathrax Primary Appendix",
+                    "language": "en",
+                    "type": "short_story",
+                    "source_class": "official_primary_narrative",
+                    "reliability": "high",
+                    "direct_event_detail_level": "medium",
+                    "tags": ["Skalathrax", "Kharn"],
+                    "aliases": ["Battle of Skalathrax"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         (corpus_root / "irrelevant.txt").write_text("A short note about another topic " * 8, encoding="utf-8")
         for index in range(35):
             (corpus_root / f"irrelevant-{index:02d}.txt").write_text(
@@ -37,10 +59,12 @@ def main() -> int:
         corpus_ingestor.DEFAULT_CORPUS_ROOT = corpus_root
         try:
             index = scan_corpus({"goal": "Максимально полно реконструируй события Скалатракса"})
-            if index.get("summary", {}).get("sources_matched") != 2:
+            if index.get("summary", {}).get("sources_matched") != 3:
                 raise AssertionError(f"corpus scan should match only relevant local text: {index}")
             if index.get("summary", {}).get("sources_non_matching") != 36 or index.get("summary", {}).get("non_matching_sample_count") != 30:
                 raise AssertionError(f"corpus scan should expose non-matching local files: {index}")
+            if index.get("summary", {}).get("metadata_files_loaded") != 1:
+                raise AssertionError(f"corpus scan should load sidecar metadata: {index}")
             if len(index.get("non_matching", [])) != 30:
                 raise AssertionError(f"corpus scan should cap non-matching samples without losing total count: {index}")
             source = next((item for item in index["sources"] if item.get("corpus_relative_path") == "skalathrax-notes.txt"), {})
@@ -53,6 +77,15 @@ def main() -> int:
                 raise AssertionError(f"EPUB corpus source was not extracted as book text: {epub_source}")
             if "kharn" not in epub_source.get("matched_terms", []) or "skalathrax" in epub_source.get("matched_terms", []):
                 raise AssertionError(f"EPUB should match through source playbook title terms, not only topic text: {epub_source}")
+            metadata_source = next((item for item in index["sources"] if item.get("corpus_relative_path") == "chapter-one.txt"), {})
+            if (
+                metadata_source.get("title") != "Skalathrax Primary Appendix"
+                or metadata_source.get("source_class") != "official_primary_narrative"
+                or metadata_source.get("type") != "short_story"
+                or metadata_source.get("language") != "en"
+                or not metadata_source.get("metadata_available")
+            ):
+                raise AssertionError(f"sidecar corpus metadata was not applied: {metadata_source}")
             request = {
                 "task_id": "test:corpus_ingestion",
                 "contract": {"goal": "Скалатракс"},
@@ -66,7 +99,7 @@ def main() -> int:
             if not output.exists():
                 raise AssertionError("corpus index was not written")
             written = json.loads(output.read_text(encoding="utf-8"))
-            if written.get("summary", {}).get("sources_matched") != 2:
+            if written.get("summary", {}).get("sources_matched") != 3:
                 raise AssertionError(f"written corpus index is wrong: {written}")
         finally:
             corpus_ingestor.DEFAULT_CORPUS_ROOT = old_root

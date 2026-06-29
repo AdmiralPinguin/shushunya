@@ -18,6 +18,7 @@ LEXMECHANIC_PLAYBOOK_DIR = REPO_ROOT / "Mechanicum" / "Lexmechanic" / "playbooks
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".html", ".htm", ".xhtml", ".fb2", ".epub"}
 MAX_SCAN_BYTES = 25_000_000
 MAX_TEXT_CHARS = 250_000
+METADATA_SUFFIXES = (".metadata.json", ".meta.json")
 
 SHUSHUNYA_AGENT_DIR = Path(__file__).resolve().parents[1] / "ShushunyaAgent"
 if str(SHUSHUNYA_AGENT_DIR) not in sys.path:
@@ -193,6 +194,38 @@ def source_title(path: Path, text: str) -> str:
     return path.stem.replace("_", " ").replace("-", " ").strip() or path.name
 
 
+def metadata_paths_for(path: Path) -> list[Path]:
+    return [path.with_name(path.name + suffix) for suffix in METADATA_SUFFIXES] + [
+        path.with_suffix(path.suffix + ".json"),
+    ]
+
+
+def read_source_metadata(path: Path, corpus_root: Path) -> tuple[dict[str, Any], str]:
+    for metadata_path in metadata_paths_for(path):
+        if not metadata_path.exists():
+            continue
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return {}, f"{metadata_path.relative_to(corpus_root)}: {exc}"
+        if not isinstance(payload, dict):
+            return {}, f"{metadata_path.relative_to(corpus_root)}: metadata must be a JSON object"
+        return payload, ""
+    return {}, ""
+
+
+def metadata_terms(metadata: dict[str, Any]) -> set[str]:
+    values: list[str] = []
+    for key in ("title", "language", "source_class", "source_type", "type", "series", "author"):
+        if metadata.get(key):
+            values.append(str(metadata.get(key)))
+    for key in ("tags", "aliases", "topics", "keywords"):
+        raw_items = metadata.get(key)
+        if isinstance(raw_items, list):
+            values.extend(str(item) for item in raw_items if item)
+    return relevance_tokens(" ".join(values))
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -201,29 +234,47 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def corpus_source(path: Path, corpus_root: Path, text: str, source_kind: str, score: int, matched_terms: set[str]) -> dict[str, Any]:
+def corpus_source(
+    path: Path,
+    corpus_root: Path,
+    text: str,
+    source_kind: str,
+    score: int,
+    matched_terms: set[str],
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = metadata if isinstance(metadata, dict) else {}
     extension_type = {
         "local_epub": "book",
         "local_fb2": "book",
         "local_html": "document",
         "local_text": "document",
     }.get(source_kind, "document")
-    return {
-        "title": source_title(path, text),
-        "type": extension_type,
-        "language": "unknown",
+    title = str(metadata.get("title") or "").strip() or source_title(path, text)
+    source_kind_override = str(metadata.get("type") or metadata.get("source_type") or "").strip()
+    source_class = str(metadata.get("source_class") or "").strip() or "local_primary_candidate"
+    source = {
+        "title": title,
+        "type": source_kind_override or extension_type,
+        "language": str(metadata.get("language") or "unknown"),
         "local_path": str(path),
         "corpus_relative_path": str(path.relative_to(corpus_root)),
         "sha256": file_sha256(path),
         "text_chars": min(len(text), MAX_TEXT_CHARS),
         "relevance_score": score,
         "matched_terms": sorted(matched_terms),
-        "reliability": "user-provided",
-        "direct_event_detail_level": "unknown",
-        "source_class": "local_primary_candidate",
-        "expected_use": "user-provided local corpus text; treat as a primary candidate only after extractor evidence matches the task",
+        "reliability": str(metadata.get("reliability") or "user-provided"),
+        "direct_event_detail_level": str(metadata.get("direct_event_detail_level") or "unknown"),
+        "source_class": source_class,
+        "expected_use": str(metadata.get("expected_use") or "user-provided local corpus text; treat as a primary candidate only after extractor evidence matches the task"),
         "discovery_method": "local_corpus",
     }
+    for key in ("author", "series", "publication_year", "tags", "aliases", "topics"):
+        if key in metadata:
+            source[key] = metadata[key]
+    if metadata:
+        source["metadata_available"] = True
+    return source
 
 
 def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> dict[str, Any]:
@@ -232,8 +283,10 @@ def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> di
     sources: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     non_matching: list[dict[str, Any]] = []
+    metadata_errors: list[str] = []
     files_scanned = 0
     non_matching_count = 0
+    metadata_count = 0
     if not root.exists():
         return {
             "topic": str(contract.get("goal") or ""),
@@ -259,7 +312,19 @@ def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> di
         except Exception as exc:  # noqa: BLE001 - unreadable local files are corpus diagnostics.
             skipped.append({"path": str(path), "reason": str(exc)})
             continue
-        haystack = " ".join([path.name, str(path.relative_to(root)), text[:5000]]).lower()
+        metadata, metadata_error = read_source_metadata(path, root)
+        if metadata_error:
+            metadata_errors.append(metadata_error)
+        if metadata:
+            metadata_count += 1
+        haystack = " ".join(
+            [
+                path.name,
+                str(path.relative_to(root)),
+                " ".join(sorted(metadata_terms(metadata))),
+                text[:5000],
+            ]
+        ).lower()
         haystack_tokens = relevance_tokens(haystack)
         matched_terms = terms & haystack_tokens
         score = len(matched_terms)
@@ -277,7 +342,7 @@ def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> di
         if len(text.strip()) < 100:
             skipped.append({"path": str(path), "reason": "text extraction produced too little text"})
             continue
-        sources.append(corpus_source(path, root, text, source_kind, score, matched_terms))
+        sources.append(corpus_source(path, root, text, source_kind, score, matched_terms, metadata))
     sources.sort(key=lambda item: (int(item.get("relevance_score") or 0), int(item.get("text_chars") or 0)), reverse=True)
     gaps: list[str] = []
     if not sources:
@@ -294,8 +359,11 @@ def scan_corpus(contract: dict[str, Any], corpus_root: Path | None = None) -> di
             "sources_matched": len(sources),
             "sources_non_matching": non_matching_count,
             "non_matching_sample_count": len(non_matching),
+            "metadata_files_loaded": metadata_count,
+            "metadata_error_count": len(metadata_errors),
             "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
         },
+        "metadata_errors": metadata_errors,
         "gaps": gaps,
     }
 

@@ -456,6 +456,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   not extraction-ready, preventing weak source sets from flowing downstream.
 - `CorpusIngestor` scans `Corpus/` or `SHUSHUNYA_CORPUS_DIR` for local
   `.epub`, `.fb2`, text, markdown, and HTML files before source discovery.
+- `CorpusIngestor` reads per-file sidecar metadata such as
+  `<file>.metadata.json`, `<file>.meta.json`, or `<file>.epub.json` so local
+  corpus entries can declare title, language, source class, reliability, tags,
+  aliases, and expected use instead of relying only on filenames and excerpts.
 - Research artifacts expose `corpus_requirements` when primary texts are known
   but neither publicly fetchable nor present in the local corpus.
 - Local corpus files flow through source maps, snapshots, and direct-event
