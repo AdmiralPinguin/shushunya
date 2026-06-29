@@ -549,6 +549,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - Ceraxia task plans preserve worker `role_contract` metadata in
   `resolved_workers`, so Warmaster and future clients can inspect each worker's
   authority boundary from the plan payload.
+- `LogisRepository` now records Python symbol summaries and suggested unittest
+  verification commands, and `MagosStrategos` carries those sections into the
+  change plan for downstream patch planning.
 - Ceraxia final manifests no longer report `ready` when no source files were
   mutated. The prototype now emits `blocked` with
   `next_safe_action=handoff_to_patch_worker` until a real patch/apply worker

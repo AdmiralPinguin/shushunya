@@ -219,6 +219,13 @@ def main() -> int:
         target_repo.mkdir()
         sample = target_repo / "sample.py"
         sample.write_text("def value():\n    return 1\n", encoding="utf-8")
+        (target_repo / "test_sample.py").write_text(
+            "import unittest\nfrom sample import value\n\n"
+            "class ValueTest(unittest.TestCase):\n"
+            "    def test_value(self):\n"
+            "        self.assertEqual(value(), 2)\n",
+            encoding="utf-8",
+        )
         final = run_pipeline(root / "work", goal=inferred_replace_goal(), target_repo_root=target_repo)
         if final.get("status") != "ready":
             raise AssertionError(f"inferred replace task should be ready: {final}")
@@ -226,6 +233,15 @@ def main() -> int:
             raise AssertionError("inferred replace task did not mutate the target file")
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"inferred replace final manifest should preserve verification evidence: {final}")
+        survey = json.loads((root / "work" / "code" / "repo_survey.json").read_text(encoding="utf-8"))
+        symbol_paths = {item.get("path") for item in survey.get("python_symbols", []) if isinstance(item, dict)}
+        if not {"sample.py", "test_sample.py"}.issubset(symbol_paths):
+            raise AssertionError(f"repository survey should include Python symbol summaries: {survey}")
+        if "python -m unittest discover" not in survey.get("suggested_verification_commands", []):
+            raise AssertionError(f"repository survey should suggest Python unittest discovery: {survey}")
+        plan_text = (root / "work" / "code" / "change_plan.md").read_text(encoding="utf-8")
+        if "## Python Symbol Surface" not in plan_text or "## Suggested Verification" not in plan_text:
+            raise AssertionError(f"change plan should include symbol and verification sections: {plan_text}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

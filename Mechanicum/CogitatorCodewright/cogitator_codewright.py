@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ast
 import hashlib
 import re
 import shlex
@@ -27,6 +28,8 @@ EXCLUDED_DIRS = {
     "build",
     "dist",
 }
+
+MAX_SYMBOL_SCAN_BYTES = 120_000
 
 
 WORKER_NAME = "CogitatorCodewright"
@@ -598,11 +601,50 @@ def repair_import_error_missing_function(repo_root: Path, py_files: list[str], o
     }
 
 
+def python_file_summary(repo_root: Path, path: Path) -> dict[str, Any]:
+    rel = str(path.relative_to(repo_root))
+    try:
+        if path.stat().st_size > MAX_SYMBOL_SCAN_BYTES:
+            return {"path": rel, "skipped": "file_too_large_for_symbol_scan"}
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
+    except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+        return {"path": rel, "skipped": f"python_parse_failed: {exc.__class__.__name__}"}
+    functions: list[str] = []
+    classes: list[str] = []
+    imports: list[str] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.append(node.name)
+        elif isinstance(node, ast.ClassDef):
+            classes.append(node.name)
+        elif isinstance(node, ast.Import):
+            imports.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            imports.extend(f"{module}.{alias.name}" if module else alias.name for alias in node.names)
+    return {
+        "path": rel,
+        "functions": functions[:40],
+        "classes": classes[:40],
+        "imports": imports[:40],
+    }
+
+
+def suggested_verification_commands(test_files: list[str]) -> list[str]:
+    commands: list[str] = []
+    py_tests = [item for item in test_files if item.endswith(".py")]
+    if py_tests:
+        commands.append("python -m unittest discover")
+        commands.extend(f"python -m unittest {item[:-3].replace('/', '.')}" for item in py_tests[:5])
+    return commands[:8]
+
+
 def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
     extension_counts: Counter[str] = Counter()
     candidate_files: list[str] = []
     test_files: list[str] = []
     config_files: list[str] = []
+    python_symbols: list[dict[str, Any]] = []
     total_files = 0
     for path in sorted(repo_root.rglob("*")):
         if any(part in EXCLUDED_DIRS for part in path.relative_to(repo_root).parts):
@@ -618,6 +660,8 @@ def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
         lowered = rel.lower()
         if any(marker in lowered for marker in ("test", "self_test", "spec")):
             test_files.append(rel)
+        if path.suffix == ".py" and len(python_symbols) < 80:
+            python_symbols.append(python_file_summary(repo_root, path))
         if path.name in {"pyproject.toml", "package.json", "build.gradle", "settings.gradle", "gradlew", "requirements.txt"}:
             config_files.append(rel)
         goal_tokens = {token for token in goal.lower().replace("/", " ").replace("_", " ").split() if len(token) > 3}
@@ -632,6 +676,8 @@ def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
         "dominant_extensions": dominant_extensions,
         "candidate_files": candidate_files[:80],
         "test_files": test_files[:80],
+        "python_symbols": python_symbols,
+        "suggested_verification_commands": suggested_verification_commands(test_files),
         "config_files": config_files[:40],
         "excluded_dirs": sorted(EXCLUDED_DIRS),
         "summary": f"Surveyed {total_files} files; found {len(test_files)} test-like files and {len(candidate_files)} goal-matching candidates.",
@@ -658,6 +704,18 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
     goal = request_goal(request) or str(survey.get("goal") or "")
     candidates = survey.get("candidate_files") if isinstance(survey.get("candidate_files"), list) else []
     tests = survey.get("test_files") if isinstance(survey.get("test_files"), list) else []
+    symbols = survey.get("python_symbols") if isinstance(survey.get("python_symbols"), list) else []
+    suggested_commands = survey.get("suggested_verification_commands") if isinstance(survey.get("suggested_verification_commands"), list) else []
+    symbol_lines: list[str] = []
+    for item in symbols[:20]:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        functions = ", ".join(str(name) for name in item.get("functions", [])[:8]) if isinstance(item.get("functions"), list) else ""
+        classes = ", ".join(str(name) for name in item.get("classes", [])[:8]) if isinstance(item.get("classes"), list) else ""
+        skipped = str(item.get("skipped") or "")
+        detail = skipped or f"functions=[{functions}] classes=[{classes}]"
+        symbol_lines.append(f"- {path}: {detail}")
     content = "\n".join(
         [
             "# Ceraxia Change Plan",
@@ -673,6 +731,12 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             "",
             "## Test Surface",
             *[f"- {item}" for item in tests[:30]],
+            "",
+            "## Python Symbol Surface",
+            *symbol_lines,
+            "",
+            "## Suggested Verification",
+            *[f"- {item}" for item in suggested_commands[:8]],
             "",
             "## Implementation Policy",
             "- Produce an auditable patch manifest before mutating source files.",

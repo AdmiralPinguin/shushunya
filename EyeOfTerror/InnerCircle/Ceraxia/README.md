@@ -27,6 +27,10 @@ Each worker's `worker.json` exposes a `role_contract` with its owned step,
 authority boundary, expected artifact names, and next handoff. The registry
 self-test checks those contracts for the active six-worker code brigade.
 
+`LogisRepository` records Python symbol summaries for scanned `.py` files and
+suggests safe verification commands from discovered test files. `MagosStrategos`
+includes those symbol and verification sections in the change plan.
+
 `FerrumPatchwright` can apply explicit patch operations embedded in the task:
 
 ```text

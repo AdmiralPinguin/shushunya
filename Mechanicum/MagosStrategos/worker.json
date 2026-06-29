@@ -4,7 +4,7 @@
   "port": 7016,
   "role": "code change planner",
   "api_contract": "EyeOfTerror/contracts/worker_api.md",
-  "capabilities": ["change_planning", "scope_control", "risk_mapping"],
+  "capabilities": ["change_planning", "scope_control", "risk_mapping", "verification_suggestion"],
   "role_contract": {
     "owned_step": "change_planning",
     "authority": "implementation_strategy_without_mutation",

@@ -62,6 +62,7 @@ def main() -> int:
         or "operation batches are atomic and roll back earlier mutations on failure" not in patch_contract.get("safety_gates", [])
         or "natural language replace inference requires explicit backtick-delimited path, old text, and new text" not in patch_contract.get("safety_gates", [])
         or "python -m unittest" not in patch_contract.get("verification_allowlist", [])
+        or "python_symbol_extraction" not in patch_contract.get("repository_intelligence", [])
     ):
         raise AssertionError(f"bad Ceraxia local patch contract: {patch_contract}")
     ferrum_contract = local_plan.get("resolved_workers", {}).get("FerrumPatchwright", {}).get("role_contract", {})

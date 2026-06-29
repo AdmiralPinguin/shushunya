@@ -166,6 +166,11 @@ def patch_contract_capabilities() -> dict[str, Any]:
             "name_error_return_literal",
             "import_error_missing_function_literal",
         ],
+        "repository_intelligence": [
+            "python_symbol_extraction",
+            "test_surface_mapping",
+            "suggested_verification_commands",
+        ],
     }
 
 
