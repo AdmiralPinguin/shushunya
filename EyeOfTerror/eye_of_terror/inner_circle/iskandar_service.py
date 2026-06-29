@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..contracts import build_lore_reconstruction_contract, lore_worker_plan
-from .iskandar import oversight_plan, plan_lore_reconstruction
+from .iskandar import executable_client_action, oversight_plan, payload_with_plan_view, plan_lore_reconstruction
 from ..pipeline import write_pipeline_run
 
 
@@ -65,6 +65,15 @@ def payload_from(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 def service_capabilities() -> dict[str, Any]:
     capability_plan = plan_lore_reconstruction("capabilities", task_id="capabilities").to_dict()
+    pipeline = pipeline_summary()
+    oversight = oversight_template()
+    next_action = {
+        "kind": "plan_task",
+        "method": "POST",
+        "endpoint": "POST /plan",
+        "body": {"task": "<task>", "task_id": "<optional-task-id>"},
+        "reason": "inspect an Iskandar plan for a concrete task",
+    }
     return {
         "ok": True,
         "governor": "IskandarKhayon",
@@ -77,8 +86,23 @@ def service_capabilities() -> dict[str, Any]:
             "unavailable_workers": capability_plan.get("unavailable_workers", []),
             "resolved_workers": capability_plan.get("resolved_workers", {}),
         },
-        "pipeline": pipeline_summary(),
-        "oversight": oversight_template(),
+        "pipeline": pipeline,
+        "oversight": oversight,
+        "summary": {
+            "pipeline_kind": str(pipeline.get("kind") or ""),
+            "step_count": int(pipeline.get("step_count") or 0),
+            "required_worker_count": len(required_workers()),
+            "quality_gate_count": len(oversight.get("quality_gates") if isinstance(oversight.get("quality_gates"), list) else []),
+            "handoff_count": len(oversight.get("handoffs") if isinstance(oversight.get("handoffs"), list) else []),
+            "worker_availability_ok": not capability_plan.get("missing_workers") and not capability_plan.get("unavailable_workers"),
+        },
+        "display": {
+            "headline": "Iskandar Khayon capabilities",
+            "detail": f"{int(pipeline.get('step_count') or 0)} steps, {len(required_workers())} required workers",
+            "severity": "info" if not capability_plan.get("missing_workers") and not capability_plan.get("unavailable_workers") else "warning",
+        },
+        "next_action": next_action,
+        "client_action": executable_client_action("", next_action),
         "capabilities": [
             "lore_reconstruction_planning",
             "worker_plan_resolution",
@@ -137,12 +161,34 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                 task_id = str(payload.get("task_id") or "").strip() or None
                 plan = plan_lore_reconstruction(task, task_id=task_id)
                 if self.path == "/plan":
-                    response(self, 200, plan.to_dict())
+                    response(self, 200, payload_with_plan_view(plan.to_dict()))
                     return
                 if self.path == "/prepare_run":
                     run_dir = resolve_run_dir(default_run_root, str(payload.get("run_dir") or ""), plan.contract.task_id)
                     status = write_pipeline_run(plan.contract, run_dir, oversight=oversight_plan(plan.contract))
-                    response(self, 200, {"ok": status["ok"], "governor": "IskandarKhayon", "status": status})
+                    response(
+                        self,
+                        200,
+                        {
+                            "ok": status["ok"],
+                            "governor": "IskandarKhayon",
+                            "status": status,
+                            "phase": "run_prepared" if status.get("ok") else "prepare_failed",
+                            "decision": {
+                                "can_handoff_to_warmaster": bool(status.get("ok")),
+                                "recommended_kind": "handoff_run_package" if status.get("ok") else "",
+                                "recommended_endpoint": "",
+                            },
+                            "display": {
+                                "headline": "Run package prepared" if status.get("ok") else "Run package preparation failed",
+                                "detail": str(status.get("error") or "Run package was written for Warmaster verification"),
+                                "severity": "info" if status.get("ok") else "error",
+                                "task_id": plan.contract.task_id,
+                            },
+                            "next_action": {},
+                            "client_action": {},
+                        },
+                    )
                     return
                 response(self, 404, {"ok": False, "error": "not found"})
             except ValueError as exc:

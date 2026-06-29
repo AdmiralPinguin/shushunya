@@ -86,6 +86,9 @@ def main() -> int:
             if (
                 capabilities.get("pipeline", {}).get("step_count") != len(contract_workers)
                 or capabilities.get("pipeline", {}).get("steps", [])[0].get("step_id") != "source_discovery"
+                or capabilities.get("summary", {}).get("step_count") != len(contract_workers)
+                or capabilities.get("display", {}).get("headline") != "Iskandar Khayon capabilities"
+                or capabilities.get("client_action", {}).get("path") != "/plan"
             ):
                 raise AssertionError(f"capabilities did not expose pipeline summary: {capabilities}")
             plan = request_json(base + "/plan", {"task": "Собери события Скалатракса", "task_id": "iskandar-http-test"})
@@ -100,6 +103,10 @@ def main() -> int:
                 or plan.get("actions", {}).get("next_action", {}).get("kind") != "prepare_run"
                 or plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task") != "Собери события Скалатракса"
                 or plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task_id") != "iskandar-http-test"
+                or plan.get("phase") != "plan_ready"
+                or plan.get("decision", {}).get("can_prepare_run") is not True
+                or plan.get("display", {}).get("headline") != "Plan is ready"
+                or plan.get("client_action", {}).get("path") != "/prepare_run"
             ):
                 raise AssertionError(f"bad plan: {plan}")
             run_dir = root / "runs" / "custom-run"
@@ -112,6 +119,10 @@ def main() -> int:
                 or not (run_dir / "dispatch" / "source_discovery.json").exists()
                 or not (run_dir / "oversight.json").exists()
                 or not prepared.get("status", {}).get("oversight_path")
+                or prepared.get("phase") != "run_prepared"
+                or prepared.get("decision", {}).get("can_handoff_to_warmaster") is not True
+                or prepared.get("display", {}).get("headline") != "Run package prepared"
+                or prepared.get("client_action") != {}
             ):
                 raise AssertionError(f"bad prepared run: {prepared}")
             prepared_oversight = json.loads((run_dir / "oversight.json").read_text(encoding="utf-8"))

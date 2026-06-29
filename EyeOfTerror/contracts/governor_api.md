@@ -84,6 +84,33 @@ POST /prepare_run
     "handoffs": [],
     "final_review": {}
   },
+  "summary": {
+    "pipeline_kind": "lore_reconstruction",
+    "step_count": 7,
+    "required_worker_count": 7,
+    "quality_gate_count": 6,
+    "handoff_count": 7,
+    "worker_availability_ok": true
+  },
+  "display": {
+    "headline": "Iskandar Khayon capabilities",
+    "detail": "7 steps, 7 required workers",
+    "severity": "info"
+  },
+  "next_action": {
+    "kind": "plan_task",
+    "method": "POST",
+    "endpoint": "POST /plan",
+    "body": {"task": "<task>", "task_id": "<optional-task-id>"},
+    "reason": "inspect an Iskandar plan for a concrete task"
+  },
+  "client_action": {
+    "kind": "plan_task",
+    "method": "POST",
+    "path": "/plan",
+    "body": {"task": "<task>", "task_id": "<optional-task-id>"},
+    "reason": "inspect an Iskandar plan for a concrete task"
+  },
   "capabilities": ["lore_reconstruction_planning", "dispatch_packet_preparation", "oversight_plan"],
   "endpoints": ["GET /health", "GET /capabilities", "POST /plan", "POST /prepare_run"]
 }
@@ -100,6 +127,10 @@ artifact roles, worker handoffs, completion criteria, quality gates, final
 review expectations, and revision policy so Warmaster and admin clients can
 inspect how the governor intends to supervise worker output and rerun focused
 rework when verification fails.
+Capabilities responses include compact `summary`, `display`, `next_action`, and
+executable `client_action` fields so Warmaster/admin clients can render the
+governor service and request a concrete plan without reverse-engineering the
+pipeline payload.
 
 ## POST /plan Request
 
@@ -129,6 +160,34 @@ rework when verification fails.
       "body": {"task": "User task text", "task_id": "optional-stable-id"},
       "reason": "governor plan is valid and required workers are available"
     }
+  },
+  "phase": "plan_ready",
+  "decision": {
+    "can_prepare_run": true,
+    "can_inspect_capabilities": true,
+    "recommended_kind": "prepare_run",
+    "recommended_endpoint": "POST /prepare_run"
+  },
+  "display": {
+    "headline": "Plan is ready",
+    "detail": "governor plan is valid and required workers are available",
+    "severity": "info",
+    "task_id": "optional-stable-id",
+    "step_count": 7
+  },
+  "next_action": {
+    "kind": "prepare_run",
+    "method": "POST",
+    "endpoint": "POST /prepare_run",
+    "body": {"task": "User task text", "task_id": "optional-stable-id"},
+    "reason": "governor plan is valid and required workers are available"
+  },
+  "client_action": {
+    "kind": "prepare_run",
+    "method": "POST",
+    "path": "/prepare_run",
+    "body": {"task": "User task text", "task_id": "optional-stable-id"},
+    "reason": "governor plan is valid and required workers are available"
   }
 }
 ```
@@ -140,6 +199,9 @@ artifacts, and missing dependency diagnostics. The
 can proceed to `POST /prepare_run`; failed plans recommend capability
 inspection instead of forcing clients to infer the next step from validation
 fields.
+Plan responses include `phase`, `decision`, `display`, top-level
+`next_action`, and executable `client_action` fields for direct governor UI and
+Warmaster handoff logic.
 
 ## POST /prepare_run Request
 
@@ -153,6 +215,10 @@ fields.
 
 If a governor accepts `run_dir`, it must keep that path inside its configured
 default run root. Relative paths are resolved below the default root.
+`POST /prepare_run` responses include `phase`, `decision`, and `display`
+fields. A successful direct governor preparation reports
+`decision.can_handoff_to_warmaster=true`; the governor does not advertise
+Warmaster-only run-inspection endpoints as its own `client_action`.
 
 ## Rules
 

@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from ..contracts import TaskContract, build_lore_reconstruction_contract, validate_task_contract_payload
 from ..pipeline import build_dispatch_packets, pipeline_status, write_pipeline_run
@@ -11,6 +12,29 @@ from ..registry import worker_by_name
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def executable_client_action(task_id: str, action: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(action, dict) or not action:
+        return {}
+    method = str(action.get("method") or "").upper()
+    endpoint = str(action.get("endpoint") or "")
+    endpoint_method = ""
+    path = endpoint
+    if " " in endpoint:
+        endpoint_method, path = endpoint.split(" ", 1)
+        endpoint_method = endpoint_method.upper()
+    method = method or endpoint_method
+    if "{task_id}" in path:
+        path = path.replace("{task_id}", quote(task_id, safe=""))
+    body = action.get("body") if isinstance(action.get("body"), dict) else {}
+    return {
+        "kind": str(action.get("kind") or ""),
+        "method": method,
+        "path": path,
+        "body": body,
+        "reason": str(action.get("reason") or ""),
+    }
 
 
 def worker_metadata(path: str) -> dict[str, Any]:
@@ -99,6 +123,47 @@ def plan_actions(contract: dict[str, Any], ok: bool, errors: list[str], missing_
         }
     actions["next_action"] = next_action
     return actions
+
+
+def payload_with_plan_view(payload: dict[str, Any]) -> dict[str, Any]:
+    actions = payload.get("actions") if isinstance(payload.get("actions"), dict) else {}
+    next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+    contract = payload.get("contract") if isinstance(payload.get("contract"), dict) else {}
+    pipeline = payload.get("pipeline") if isinstance(payload.get("pipeline"), dict) else {}
+    task_id = str(contract.get("task_id") or "")
+    ok = bool(payload.get("ok"))
+    if ok:
+        phase = "plan_ready"
+        headline = "Plan is ready"
+        detail = str(next_action.get("reason") or "Governor can prepare the run")
+        severity = "info"
+    else:
+        phase = "plan_blocked"
+        headline = "Plan needs attention"
+        detail = str(next_action.get("reason") or "Governor plan is blocked")
+        severity = "warning"
+    enriched = dict(payload)
+    enriched.update(
+        {
+            "phase": phase,
+            "decision": {
+                "can_prepare_run": bool(actions.get("can_prepare_run")),
+                "can_inspect_capabilities": bool(actions.get("can_inspect_capabilities")),
+                "recommended_kind": str(next_action.get("kind") or ""),
+                "recommended_endpoint": str(next_action.get("endpoint") or ""),
+            },
+            "display": {
+                "headline": headline,
+                "detail": detail,
+                "severity": severity,
+                "task_id": task_id,
+                "step_count": int(pipeline.get("step_count") or 0),
+            },
+            "next_action": next_action,
+            "client_action": executable_client_action(task_id, next_action),
+        }
+    )
+    return enriched
 
 
 @dataclass

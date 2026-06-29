@@ -140,6 +140,9 @@
   `unavailable_workers` instead of marking the plan runnable.
 - Iskandar `/plan` exposes concrete pipeline summaries and action hints for
   preparing valid run packages or inspecting governor capabilities.
+- Iskandar capabilities and plan responses expose compact `summary`, `phase`,
+  `decision`, `display`, `next_action`, and executable `client_action` fields
+  so Warmaster/admin clients can render governor handoffs consistently.
 - Iskandar `/capabilities` exposes worker availability metadata for the default
   lore pipeline before a concrete task plan is created.
 - Run progress exposes per-step input, expected, and produced artifact statuses.
