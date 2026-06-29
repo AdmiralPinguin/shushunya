@@ -177,12 +177,16 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         readiness_blockers.append({"severity": "blocker", "message": "Final package source coverage is not extraction-ready."})
     if comprehensive_depth_ready is False:
         readiness_blockers.append({"severity": "blocker", "message": "Final package does not satisfy comprehensive depth requirements."})
+    if event_review.get("required_events_covered") is False:
+        missing_events = ", ".join(event_review.get("missing_required_events", [])[:8])
+        readiness_blockers.append({"severity": "blocker", "message": f"Final package is missing required direct events in timeline: {missing_events}."})
     readiness_checks = {
         "critic_approved": approved,
         "package_complete": not missing,
         "quality_expectations_ok": not quality_blockers,
         "source_coverage_ready": source_coverage_ready,
         "comprehensive_depth_ready": comprehensive_depth_ready,
+        "required_events_covered": event_review.get("required_events_covered"),
     }
     corpus_requirements = comprehensive_depth.get("corpus_requirements") if isinstance(comprehensive_depth.get("corpus_requirements"), dict) else {}
     status = "ready" if approved and not missing and not quality_blockers and not readiness_blockers else "blocked"

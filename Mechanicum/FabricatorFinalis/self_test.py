@@ -76,8 +76,32 @@ def main() -> int:
             raise AssertionError(f"ready manifest should carry source coverage readiness: {manifest}")
         if manifest.get("readiness_checks", {}).get("comprehensive_depth_ready") is not True:
             raise AssertionError(f"standard ready manifest should pass comprehensive depth readiness: {manifest}")
+        if manifest.get("readiness_checks", {}).get("required_events_covered") is not True:
+            raise AssertionError(f"standard ready manifest should pass required event readiness: {manifest}")
         if manifest.get("quality_expectations", {}).get("check_count") != 1:
             raise AssertionError(f"ready manifest should carry quality expectations: {manifest}")
+        write(
+            base / "critic_report.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "passed_with_warnings",
+                    "required_direct_events": ["moon_parley", "golden_absolute"],
+                    "metrics": {"source_coverage_ready": True},
+                    "revision_focus": {"present": True},
+                }
+            ),
+        )
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on missing required event: {result}")
+        manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
+        if (
+            manifest.get("status") != "blocked"
+            or manifest.get("readiness_checks", {}).get("required_events_covered") is not False
+            or "golden_absolute" not in json.dumps(manifest)
+        ):
+            raise AssertionError(f"missing required event should block final readiness: {manifest}")
         write(
             base / "critic_report.json",
             json.dumps(
