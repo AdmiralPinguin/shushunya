@@ -634,6 +634,74 @@ def source_coverage(sources: list[dict[str, Any]], discovery_results: list[dict[
     }
 
 
+def local_primary_tokens(sources: list[dict[str, Any]]) -> list[set[str]]:
+    tokens: list[set[str]] = []
+    for source in sources:
+        if not isinstance(source, dict) or not str(source.get("local_path") or "").strip():
+            continue
+        tokens.append(
+            relevance_tokens(
+                " ".join(
+                    [
+                        str(source.get("title") or ""),
+                        str(source.get("local_path") or ""),
+                        str(source.get("corpus_relative_path") or ""),
+                    ]
+                )
+            )
+        )
+    return tokens
+
+
+def source_satisfied_by_local(source: dict[str, Any], local_tokens: list[set[str]]) -> bool:
+    if str(source.get("local_path") or "").strip():
+        return True
+    source_tokens = relevance_tokens(str(source.get("title") or ""))
+    if not source_tokens:
+        return False
+    required = min(2, len(source_tokens))
+    return any(len(source_tokens & candidate) >= required for candidate in local_tokens)
+
+
+def suggested_corpus_filenames(title: str) -> list[str]:
+    stem = re.sub(r"[^a-zA-Zа-яА-Я0-9]+", "_", title).strip("_") or "primary_text"
+    return [f"{stem}{extension}" for extension in [".epub", ".fb2", ".txt", ".md"]]
+
+
+def corpus_requirements_for_sources(sources: list[dict[str, Any]], corpus_index: dict[str, Any] | None = None) -> dict[str, Any]:
+    local_tokens = local_primary_tokens(sources)
+    required: list[dict[str, Any]] = []
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        source_class = str(source.get("source_class") or source.get("type") or "").lower()
+        source_kind = str(source.get("type") or "").lower()
+        if "primary" not in source_class and source_kind not in {"novel", "short_story", "book"}:
+            continue
+        if str(source.get("url") or "").strip() or source_satisfied_by_local(source, local_tokens):
+            continue
+        title = str(source.get("title") or "untitled primary source")
+        required.append(
+            {
+                "title": title,
+                "type": source.get("type", ""),
+                "language": source.get("language", "unknown"),
+                "source_class": source.get("source_class", ""),
+                "reason": "Primary source has no public URL and no matching local corpus file.",
+                "suggested_filenames": suggested_corpus_filenames(title),
+                "supported_extensions": sorted({".epub", ".fb2", ".txt", ".md", ".html", ".xhtml"}),
+            }
+        )
+    corpus_summary = corpus_index.get("summary") if isinstance(corpus_index, dict) and isinstance(corpus_index.get("summary"), dict) else {}
+    return {
+        "required": bool(required),
+        "missing_count": len(required),
+        "missing_primary_texts": required,
+        "corpus_root": str(corpus_index.get("corpus_root") or "") if isinstance(corpus_index, dict) else "",
+        "corpus_summary": corpus_summary,
+    }
+
+
 def load_corpus_sources(request: dict[str, Any], workspace_root: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     input_artifacts = request.get("input_artifacts") if isinstance(request.get("input_artifacts"), list) else []
     corpus_path = next((str(path) for path in input_artifacts if isinstance(path, str) and path.endswith("/corpus_index.json")), "")
@@ -717,6 +785,7 @@ def source_map_for_contract(
     corpus_candidates = corpus_sources or []
     sources = rank_sources(dedupe_sources(corpus_candidates + sources + cached_sources + live_candidates))
     coverage = source_coverage(sources, discovery_results, playbooks)
+    corpus_requirements = corpus_requirements_for_sources(sources, corpus_index)
     corpus_summary = corpus_index.get("summary") if isinstance(corpus_index, dict) and isinstance(corpus_index.get("summary"), dict) else {}
     corpus_gaps = corpus_index.get("gaps") if isinstance(corpus_index, dict) and isinstance(corpus_index.get("gaps"), list) else []
     coverage_gaps.extend(str(gap) for gap in corpus_gaps if gap)
@@ -735,6 +804,7 @@ def source_map_for_contract(
         "cached_source_candidates": cached_sources,
         "local_corpus_candidates": corpus_candidates,
         "corpus_summary": corpus_summary,
+        "corpus_requirements": corpus_requirements,
         "source_cache": {
             "enabled": bool(source_cache_path(topic)),
             "cached_source_count": len(cached_sources),

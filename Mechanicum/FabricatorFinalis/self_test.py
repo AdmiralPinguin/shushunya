@@ -96,7 +96,14 @@ def main() -> int:
                     "status": "passed_with_warnings",
                     "metrics": {
                         "source_coverage_ready": True,
-                        "comprehensive_depth": {"mode": "comprehensive", "passed": False},
+                        "comprehensive_depth": {
+                            "mode": "comprehensive",
+                            "passed": False,
+                            "corpus_requirements": {
+                                "required": True,
+                                "missing_primary_texts": [{"title": "Kharn: Eater of Worlds"}],
+                            },
+                        },
                     },
                     "revision_focus": {"present": True},
                 }
@@ -108,6 +115,8 @@ def main() -> int:
         manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
         if manifest.get("status") != "blocked" or "comprehensive depth" not in json.dumps(manifest):
             raise AssertionError(f"weak comprehensive depth should block final readiness: {manifest}")
+        if manifest.get("corpus_requirements", {}).get("missing_primary_texts", [{}])[0].get("title") != "Kharn: Eater of Worlds":
+            raise AssertionError(f"final manifest should preserve corpus requirements: {manifest}")
         write(
             base / "critic_report.json",
             json.dumps(

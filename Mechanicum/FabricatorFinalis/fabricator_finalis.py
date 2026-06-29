@@ -157,6 +157,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "source_coverage_ready": source_coverage_ready,
         "comprehensive_depth_ready": comprehensive_depth_ready,
     }
+    corpus_requirements = comprehensive_depth.get("corpus_requirements") if isinstance(comprehensive_depth.get("corpus_requirements"), dict) else {}
     status = "ready" if approved and not missing and not quality_blockers and not readiness_blockers else "blocked"
     revision_plan = merge_revision_plan(critic, missing)
     if quality_blockers:
@@ -180,6 +181,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "missing": missing,
         "critic_status": critic.get("status", "missing"),
         "critic_metrics": critic_metrics,
+        "corpus_requirements": corpus_requirements,
         "readiness_checks": readiness_checks,
         "warnings": critic.get("warnings", []),
         "blockers": critic.get("findings", []) + [{"severity": "blocker", "message": f"Missing package file: {path}"} for path in missing] + quality_blockers + readiness_blockers,

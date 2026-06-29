@@ -126,6 +126,12 @@ def source_coverage_lines(source_map: dict[str, Any], heading: str) -> list[str]
     source_types = coverage.get("source_types") if isinstance(coverage.get("source_types"), list) else []
     if source_types:
         lines.append(f"- Source types: {', '.join(str(item) for item in source_types)}")
+    requirements = source_map.get("corpus_requirements") if isinstance(source_map.get("corpus_requirements"), dict) else {}
+    if requirements.get("required"):
+        missing = requirements.get("missing_primary_texts") if isinstance(requirements.get("missing_primary_texts"), list) else []
+        titles = [str(item.get("title") or "") for item in missing if isinstance(item, dict) and item.get("title")]
+        if titles:
+            lines.append(f"- Missing local primary texts: {', '.join(titles)}")
     lines.append("")
     return lines
 

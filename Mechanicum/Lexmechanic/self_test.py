@@ -136,6 +136,13 @@ def main() -> int:
             raise AssertionError("source map must include coverage gaps")
         if not data.get("source_coverage", {}).get("has_primary_or_publication"):
             raise AssertionError(f"playbook source coverage should detect primary/publication sources: {data.get('source_coverage')}")
+        requirements = data.get("corpus_requirements", {})
+        missing_titles = {item.get("title") for item in requirements.get("missing_primary_texts", [])}
+        if not requirements.get("required") or "Kharn: Eater of Worlds" not in missing_titles:
+            raise AssertionError(f"source map should expose missing local primary text requirements: {requirements}")
+        kharn_requirement = next(item for item in requirements.get("missing_primary_texts", []) if item.get("title") == "Kharn: Eater of Worlds")
+        if "Kharn_Eater_of_Worlds.epub" not in kharn_requirement.get("suggested_filenames", []):
+            raise AssertionError(f"corpus requirement should suggest usable filenames: {kharn_requirement}")
         corpus_index = Path(temp_dir) / "local" / "corpus_index.json"
         corpus_index.parent.mkdir(parents=True, exist_ok=True)
         corpus_index.write_text(
@@ -170,6 +177,8 @@ def main() -> int:
             raise AssertionError(f"local corpus source should be ranked as local primary: {corpus_map.get('sources')}")
         if corpus_map.get("source_coverage", {}).get("local_corpus_source_count") != 1:
             raise AssertionError(f"local corpus coverage was not counted: {corpus_map.get('source_coverage')}")
+        if corpus_map.get("corpus_requirements", {}).get("required"):
+            raise AssertionError(f"local corpus primary should not create missing primary requirements for generic task: {corpus_map.get('corpus_requirements')}")
         generic_request = {
             "task_id": "test-generic:source_discovery",
             "contract": {"goal": "Собери историю неизвестной битвы."},

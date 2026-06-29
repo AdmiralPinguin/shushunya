@@ -121,6 +121,16 @@ def main() -> int:
                     {"title": "Kharn: Eater of Worlds", "type": "novel", "url": "", "source_class": "official_primary_narrative"},
                     {"title": "Lexicanum: Battle of Skalathrax", "source_class": "secondary_wiki"},
                 ],
+                "corpus_requirements": {
+                    "required": True,
+                    "missing_count": 1,
+                    "missing_primary_texts": [
+                        {
+                            "title": "Kharn: Eater of Worlds",
+                            "suggested_filenames": ["Kharn_Eater_of_Worlds.epub"],
+                        }
+                    ],
+                },
             },
         )
         result = run(request, root)
@@ -135,6 +145,9 @@ def main() -> int:
         revision_workers = {step.get("worker") for step in report.get("revision_plan", {}).get("steps", [])}
         if "CorpusIngestor" not in revision_workers:
             raise AssertionError(f"missing primary corpus blocker should route through CorpusIngestor: {report}")
+        requirements = report.get("metrics", {}).get("comprehensive_depth", {}).get("corpus_requirements", {})
+        if requirements.get("missing_count") != 1 or requirements.get("missing_primary_texts", [{}])[0].get("title") != "Kharn: Eater of Worlds":
+            raise AssertionError(f"critic metrics should preserve corpus requirements: {report}")
         source_map_with_local_primary = json.loads((base / "source_map.json").read_text(encoding="utf-8"))
         source_map_with_local_primary["sources"].insert(
             0,
@@ -146,6 +159,7 @@ def main() -> int:
                 "discovery_method": "local_corpus",
             },
         )
+        source_map_with_local_primary["corpus_requirements"] = {"required": False, "missing_count": 0, "missing_primary_texts": []}
         write_json(base / "source_map.json", source_map_with_local_primary)
         result = run(request, root)
         if not result.get("ok"):

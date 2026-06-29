@@ -116,6 +116,10 @@ def direct_evidence_source_count(notes: dict[str, Any]) -> int:
 
 
 def inaccessible_primary_titles(source_map: dict[str, Any]) -> list[str]:
+    corpus_requirements = source_map.get("corpus_requirements") if isinstance(source_map.get("corpus_requirements"), dict) else {}
+    missing = corpus_requirements.get("missing_primary_texts") if isinstance(corpus_requirements.get("missing_primary_texts"), list) else []
+    if missing:
+        return [str(item.get("title") or "untitled primary source") for item in missing if isinstance(item, dict)]
     local_primary_tokens = [
         relevance_tokens(
             " ".join(
@@ -212,6 +216,7 @@ def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, An
         "draft_chars": draft_chars,
         "min_draft_chars": min_draft_chars,
         "inaccessible_primary_count": len(missing_primary),
+        "corpus_requirements": source_map.get("corpus_requirements", {}),
     }
     return findings, metrics
 
