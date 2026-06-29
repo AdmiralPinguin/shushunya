@@ -139,6 +139,14 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     critic = load_json(critic_path) if critic_path.exists() else {}
     approved = bool(critic.get("approved"))
     quality_blockers = quality_expectation_blockers(request)
+    critic_metrics = critic.get("metrics", {}) if isinstance(critic.get("metrics"), dict) else {}
+    source_coverage_ready = critic_metrics.get("source_coverage_ready")
+    readiness_checks = {
+        "critic_approved": approved,
+        "package_complete": not missing,
+        "quality_expectations_ok": not quality_blockers,
+        "source_coverage_ready": source_coverage_ready,
+    }
     status = "ready" if approved and not missing and not quality_blockers else "blocked"
     revision_plan = merge_revision_plan(critic, missing)
     if quality_blockers:
@@ -161,7 +169,8 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "files": files,
         "missing": missing,
         "critic_status": critic.get("status", "missing"),
-        "critic_metrics": critic.get("metrics", {}),
+        "critic_metrics": critic_metrics,
+        "readiness_checks": readiness_checks,
         "warnings": critic.get("warnings", []),
         "blockers": critic.get("findings", []) + [{"severity": "blocker", "message": f"Missing package file: {path}"} for path in missing] + quality_blockers,
         "revision_plan": revision_plan,

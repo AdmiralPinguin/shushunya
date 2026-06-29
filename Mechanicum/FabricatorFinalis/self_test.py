@@ -45,7 +45,7 @@ def main() -> int:
                 {
                     "approved": True,
                     "status": "passed_with_warnings",
-                    "metrics": {"generic_evidence_leads": 1, "low_confidence_events": 1},
+                    "metrics": {"generic_evidence_leads": 1, "low_confidence_events": 1, "source_coverage_ready": True},
                     "revision_focus": {"present": True, "coverage_items": ["Source step: critic_review"]},
                 }
             ),
@@ -64,6 +64,8 @@ def main() -> int:
             raise AssertionError(f"ready manifest should carry revision focus: {manifest}")
         if manifest.get("critic_metrics", {}).get("generic_evidence_leads") != 1:
             raise AssertionError(f"ready manifest should carry critic metrics: {manifest}")
+        if manifest.get("readiness_checks", {}).get("source_coverage_ready") is not True:
+            raise AssertionError(f"ready manifest should carry source coverage readiness: {manifest}")
         if manifest.get("quality_expectations", {}).get("check_count") != 1:
             raise AssertionError(f"ready manifest should carry quality expectations: {manifest}")
         bad_quality_request = json.loads(json.dumps(request))

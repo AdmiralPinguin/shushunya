@@ -95,6 +95,22 @@ def revision_context_lines(revision_context: dict[str, Any] | None, heading: str
     return lines
 
 
+def source_coverage_lines(source_map: dict[str, Any], heading: str) -> list[str]:
+    coverage = source_map.get("source_coverage") if isinstance(source_map.get("source_coverage"), dict) else {}
+    if not coverage:
+        return []
+    lines = [heading, ""]
+    lines.append(f"- Source count: {coverage.get('source_count', 0)}")
+    lines.append(f"- Official or primary support: {'yes' if coverage.get('has_official') or coverage.get('has_primary_or_publication') else 'no'}")
+    lines.append(f"- Secondary cross-check: {'yes' if coverage.get('has_secondary_crosscheck') else 'no'}")
+    lines.append(f"- Ready for extraction: {'yes' if coverage.get('ready_for_extraction') else 'no'}")
+    source_types = coverage.get("source_types") if isinstance(coverage.get("source_types"), list) else []
+    if source_types:
+        lines.append(f"- Source types: {', '.join(str(item) for item in source_types)}")
+    lines.append("")
+    return lines
+
+
 def build_reconstruction(
     source_map: dict[str, Any],
     notes: dict[str, Any],
@@ -119,6 +135,7 @@ def build_reconstruction(
         "",
     ]
     lines.extend(revision_context_lines(revision_context, "## Фокус ревизии"))
+    lines.extend(source_coverage_lines(source_map, "## Надёжность источников"))
     for phase, phase_events in by_phase.items():
         lines.append(f"## {PHASE_TITLES.get(phase, phase)}")
         lines.append("")
@@ -171,6 +188,7 @@ def build_coverage_report(
         "",
     ]
     lines.extend(revision_context_lines(revision_context, "## Revision Context"))
+    lines.extend(source_coverage_lines(source_map, "## Source Coverage"))
     lines.extend(["## Sources", ""])
     for source in sources:
         title = source.get("title", "")

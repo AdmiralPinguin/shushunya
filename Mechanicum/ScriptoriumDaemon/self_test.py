@@ -39,6 +39,14 @@ def main() -> int:
                 "sources": [
                     {"title": "Kharn: Eater of Worlds", "source_class": "official_primary_narrative", "reliability": "high"}
                 ],
+                "source_coverage": {
+                    "source_count": 1,
+                    "has_primary_or_publication": True,
+                    "has_official": True,
+                    "has_secondary_crosscheck": False,
+                    "ready_for_extraction": False,
+                    "source_types": ["published_primary"],
+                },
                 "coverage_gaps": ["primary text unavailable"],
             },
         )
@@ -112,6 +120,8 @@ def main() -> int:
                 raise AssertionError(f"missing reconstruction text: {needle}")
         if "Фокус ревизии" not in reconstruction or "Kharn burns shelters" not in reconstruction:
             raise AssertionError("reconstruction should expose revision context")
+        if "Надёжность источников" not in reconstruction or "Ready for extraction: no" not in coverage:
+            raise AssertionError("draft package should expose source coverage readiness")
         if "Discovery status: playbook_matched" not in coverage or "Sources mapped: 1" not in coverage or "moon_parley" not in coverage:
             raise AssertionError("coverage report is incomplete")
         if "evidence=Kharn: Eater of Worlds: parley" not in coverage:

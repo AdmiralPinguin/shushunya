@@ -456,8 +456,12 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   revision instead of passing as warnings.
 - `Chronologis` and `ScriptoriumDaemon` preserve generic evidence-lead and
   low-confidence metadata through timeline and coverage artifacts.
+- `ScriptoriumDaemon` exposes source-coverage readiness in the reader-facing
+  reconstruction and machine-readable coverage report.
 - `ReductorVerifier` and `FabricatorFinalis` carry evidence-lead risk metrics
   into critic reports and final manifests.
+- `FabricatorFinalis` writes explicit readiness checks for critic approval,
+  package completeness, quality expectations, and source coverage.
 - `ReductorVerifier` preserves worker `quality_expectations` in critic reports
   and blocks approval when they contradict the current step request.
 - `ReductorVerifier` performs generic direct-event coverage checks from
