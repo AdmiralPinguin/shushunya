@@ -49,6 +49,8 @@ def main() -> int:
         or not oversight.get("artifact_roles", {}).get("final", [])[0].endswith("/final_manifest.json")
         or not any(item.get("from_step") == "critic_review" and item.get("to_steps") == ["finalize"] for item in oversight.get("handoffs", []))
         or oversight.get("revision_policy", {}).get("final_steps") != ["critic_review", "finalize"]
+        or oversight.get("iteration_policy", {}).get("recommended_endpoint") != "POST /runs/{task_id}/start_research_loop_http"
+        or oversight.get("iteration_policy", {}).get("max_revision_cycles") != 3
         or len(oversight.get("step_quality_matrix", [])) != len(contract_workers)
     ):
         raise AssertionError(f"bad Iskandar oversight template: {oversight}")
@@ -82,6 +84,7 @@ def main() -> int:
                 "oversight_plan" not in capabilities.get("capabilities", [])
                 or capabilities.get("oversight", {}).get("final_review", {}).get("final_step") != "finalize"
                 or capabilities.get("oversight", {}).get("revision_policy", {}).get("requires_focused_context") is not True
+                or capabilities.get("oversight", {}).get("iteration_policy", {}).get("controller") != "WarmasterGateway"
             ):
                 raise AssertionError(f"capabilities did not expose oversight plan: {capabilities}")
             if (
@@ -101,6 +104,7 @@ def main() -> int:
                 or plan.get("oversight", {}).get("artifact_roles", {}).get("critic") != ["/work/skalathrax/critic_report.json"]
                 or len(plan.get("oversight", {}).get("step_quality_matrix", [])) != len(contract_workers)
                 or plan.get("oversight", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
+                or plan.get("oversight", {}).get("iteration_policy", {}).get("recommended_endpoint") != "POST /runs/{task_id}/start_research_loop_http"
                 or plan.get("pipeline", {}).get("step_count") != len(contract_workers)
                 or plan.get("pipeline", {}).get("steps", [])[0].get("worker") != "CorpusIngestor"
                 or plan.get("actions", {}).get("can_prepare_run") is not True
@@ -132,6 +136,8 @@ def main() -> int:
             prepared_oversight = json.loads((run_dir / "oversight.json").read_text(encoding="utf-8"))
             if prepared_oversight.get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json":
                 raise AssertionError(f"prepare_run wrote bad oversight: {prepared_oversight}")
+            if prepared_oversight.get("iteration_policy", {}).get("max_revision_cycles") != 3:
+                raise AssertionError(f"prepare_run wrote bad iteration policy: {prepared_oversight}")
             prepared_fact_dispatch = json.loads((run_dir / "dispatch" / "fact_extraction.json").read_text(encoding="utf-8"))
             if (
                 prepared_fact_dispatch.get("request", {}).get("quality_expectations", {}).get("step_quality", {}).get("step_id") != "fact_extraction"

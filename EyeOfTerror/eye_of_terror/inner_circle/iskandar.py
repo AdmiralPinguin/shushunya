@@ -184,6 +184,32 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
             "requires_focused_context": True,
             "requires_gap_disclosure": True,
         },
+        "iteration_policy": {
+            "controller": "WarmasterGateway",
+            "recommended_endpoint": "POST /runs/{task_id}/start_research_loop_http",
+            "max_revision_cycles": 3,
+            "poll_endpoint": "GET /runs/{task_id}/orchestration?events_after=0",
+            "auto_revision_triggers": [
+                "critic_report contains blockers or needs_revision",
+                "final_manifest status is blocked or needs_revision",
+                "corpus_requirements.required is true",
+                "required event evidence is missing",
+                "primary evidence minimum is not met for comprehensive tasks",
+            ],
+            "stop_conditions": [
+                "final_manifest status is ready",
+                "revision_plan is invalid",
+                "revision plan fingerprint repeats without progress",
+                "max_revision_cycles is reached",
+                "external input or missing local corpus text is required",
+            ],
+            "final_readiness_checks": [
+                "critic approval or explicit blockers are present",
+                "source coverage and corpus requirements are disclosed",
+                "event evidence trace is present",
+                "final package files exist and are readable",
+            ],
+        },
     }
 
 

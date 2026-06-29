@@ -231,8 +231,10 @@ def main() -> int:
             written_oversight.get("revision_policy", {}).get("source_step") != "critic_review"
             or written_oversight.get("revision_policy", {}).get("final_steps") != ["critic_review", "finalize"]
             or written_oversight.get("revision_policy", {}).get("requires_downstream_rerun") is not True
+            or written_oversight.get("iteration_policy", {}).get("recommended_endpoint") != "POST /runs/{task_id}/start_research_loop_http"
+            or written_oversight.get("iteration_policy", {}).get("max_revision_cycles") != 3
         ):
-            raise AssertionError(f"pipeline run wrote bad revision policy: {written_oversight}")
+            raise AssertionError(f"pipeline run wrote bad revision/iteration policy: {written_oversight}")
         quality_matrix = written_oversight.get("step_quality_matrix", [])
         fact_quality = next((item for item in quality_matrix if item.get("step_id") == "fact_extraction"), {})
         if (

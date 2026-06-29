@@ -1609,6 +1609,7 @@ def compact_oversight_summary(oversight: dict[str, Any]) -> dict[str, Any]:
     artifact_roles = oversight.get("artifact_roles") if isinstance(oversight.get("artifact_roles"), dict) else {}
     final_review = oversight.get("final_review") if isinstance(oversight.get("final_review"), dict) else {}
     revision_policy = oversight.get("revision_policy") if isinstance(oversight.get("revision_policy"), dict) else {}
+    iteration_policy = oversight.get("iteration_policy") if isinstance(oversight.get("iteration_policy"), dict) else {}
     quality_gates = oversight.get("quality_gates") if isinstance(oversight.get("quality_gates"), list) else []
     completion_criteria = oversight.get("completion_criteria") if isinstance(oversight.get("completion_criteria"), list) else []
     handoffs = oversight.get("handoffs") if isinstance(oversight.get("handoffs"), list) else []
@@ -1645,6 +1646,14 @@ def compact_oversight_summary(oversight: dict[str, Any]) -> dict[str, Any]:
             "requires_downstream_rerun": bool(revision_policy.get("requires_downstream_rerun")),
             "requires_focused_context": bool(revision_policy.get("requires_focused_context")),
             "requires_gap_disclosure": bool(revision_policy.get("requires_gap_disclosure")),
+        },
+        "iteration_policy": {
+            "controller": str(iteration_policy.get("controller") or ""),
+            "recommended_endpoint": str(iteration_policy.get("recommended_endpoint") or ""),
+            "max_revision_cycles": int(iteration_policy.get("max_revision_cycles") or 0),
+            "auto_revision_trigger_count": len(iteration_policy.get("auto_revision_triggers") if isinstance(iteration_policy.get("auto_revision_triggers"), list) else []),
+            "stop_condition_count": len(iteration_policy.get("stop_conditions") if isinstance(iteration_policy.get("stop_conditions"), list) else []),
+            "final_readiness_check_count": len(iteration_policy.get("final_readiness_checks") if isinstance(iteration_policy.get("final_readiness_checks"), list) else []),
         },
     }
 

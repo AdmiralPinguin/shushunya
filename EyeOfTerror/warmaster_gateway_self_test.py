@@ -1193,6 +1193,7 @@ def main() -> int:
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("quality_gate_count") != 6
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_matrix_count") != 8
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_check_count", 0) < 8
+                or run_summary.get("summary", {}).get("oversight_summary", {}).get("iteration_policy", {}).get("recommended_endpoint") != "POST /runs/{task_id}/start_research_loop_http"
                 or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "corpus_ingestion"
                 or run_summary.get("summary", {}).get("progress", {}).get("next_ready_step_id") != "corpus_ingestion"
                 or run_summary.get("summary", {}).get("progress", {}).get("ready_step_ids") != ["corpus_ingestion"]
@@ -1268,6 +1269,7 @@ def main() -> int:
                 or oversight.get("summary", {}).get("final_review", {}).get("final_step") != "finalize"
                 or oversight.get("summary", {}).get("revision_policy", {}).get("source_step") != "critic_review"
                 or oversight.get("summary", {}).get("revision_policy", {}).get("requires_downstream_rerun") is not True
+                or oversight.get("summary", {}).get("iteration_policy", {}).get("max_revision_cycles") != 3
                 or oversight.get("oversight", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or oversight.get("oversight", {}).get("artifact_roles", {}).get("draft") != ["/work/skalathrax/reconstruction_ru.md"]
                 or oversight.get("phase") != "ready_to_start"

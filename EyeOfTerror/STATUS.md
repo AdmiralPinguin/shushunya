@@ -517,6 +517,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - Warmaster compact final-manifest summaries expose readiness checks,
   event-review coverage, corpus requirements, and warning/blocker/file counts
   for client displays.
+- Iskandar oversight now includes an explicit `iteration_policy` with the
+  recommended Warmaster research-loop endpoint, revision triggers, stop
+  conditions, and final-readiness checks, so the governor acts as a brigade lead
+  instead of only emitting a static worker list.
 - `ReductorVerifier` preserves worker `quality_expectations` in critic reports
   and blocks approval when they contradict the current step request.
 - `ReductorVerifier` performs generic direct-event coverage checks from
