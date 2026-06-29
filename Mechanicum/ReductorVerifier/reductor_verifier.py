@@ -96,6 +96,29 @@ def text_contains_markers(text: str, markers: list[str]) -> bool:
     return all(marker.lower() in lowered for marker in markers)
 
 
+def should_apply_required_event_playbook(source_map: dict[str, Any], notes: dict[str, Any], timeline: dict[str, Any]) -> bool:
+    haystack = " ".join(
+        [
+            str(source_map.get("topic") or ""),
+            *(str(source.get("title") or "") for source in source_map.get("sources", []) if isinstance(source, dict)),
+        ]
+    ).lower()
+    if "skalathrax" in haystack or "скалатрак" in haystack:
+        return True
+    known_ids = set(REQUIRED_DIRECT_EVENT_IDS)
+    note_ids = {
+        str(item.get("event_id") or "")
+        for item in notes.get("events", [])
+        if isinstance(item, dict)
+    }
+    timeline_ids = {
+        str(item.get("event_id") or "")
+        for item in timeline.get("timeline", [])
+        if isinstance(item, dict)
+    }
+    return bool((note_ids | timeline_ids) & known_ids)
+
+
 def extract_section_bullets(text: str, headings: set[str]) -> list[str]:
     bullets: list[str] = []
     in_section = False
@@ -289,13 +312,14 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
     for event_id, note in sorted(note_by_event_id.items()):
         if not isinstance(note, dict) or not note.get("evidence_snapshots"):
             findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {event_id}"})
-    for event_id, label in REQUIRED_DIRECT_EVENT_IDS.items():
-        if event_id not in timeline_event_ids:
-            findings.append({"severity": "blocker", "message": f"Missing required direct event in timeline: {label}"})
-        elif not text_contains_markers(reconstruction, EVENT_TEXT_MARKERS[event_id]):
-            findings.append({"severity": "blocker", "message": f"Draft does not visibly cover required event: {label}"})
-        elif not note_by_event_id.get(event_id, {}).get("evidence_snapshots"):
-            findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {label}"})
+    if should_apply_required_event_playbook(source_map, notes, timeline):
+        for event_id, label in REQUIRED_DIRECT_EVENT_IDS.items():
+            if event_id not in timeline_event_ids:
+                findings.append({"severity": "blocker", "message": f"Missing required direct event in timeline: {label}"})
+            elif not text_contains_markers(reconstruction, EVENT_TEXT_MARKERS[event_id]):
+                findings.append({"severity": "blocker", "message": f"Draft does not visibly cover required event: {label}"})
+            elif not note_by_event_id.get(event_id, {}).get("evidence_snapshots"):
+                findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {label}"})
 
     source_classes = {
         str(item.get("source_class") or item.get("type") or "")

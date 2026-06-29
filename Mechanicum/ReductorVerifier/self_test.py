@@ -156,6 +156,23 @@ def main() -> int:
         draft_index = next(index for index, step in enumerate(revision_steps) if step.get("step_id") == "draft_reconstruction")
         if not source_acquisition_index < timeline_index < draft_index:
             raise AssertionError(f"revision dependencies are not ordered downstream: {report}")
+        generic_base = root / "generic"
+        generic_request = {
+            "task_id": "generic:critic_review",
+            "step": {"step_id": "critic_review", "expected_artifacts": ["/work/generic/critic_report.json"]},
+        }
+        write_json(generic_base / "source_map.json", {"topic": "Armageddon conflict", "discovery_status": "needs_live_discovery", "sources": []})
+        write_json(generic_base / "source_snapshots.json", {"snapshots": [], "skipped": []})
+        write_json(generic_base / "direct_event_notes.json", {"events": [], "gaps": []})
+        write_json(generic_base / "timeline.json", {"timeline": [], "summary": {}, "gaps": []})
+        write(generic_base / "reconstruction_ru.md", "## Что еще надо проверить\n- source discovery\n")
+        write(generic_base / "coverage_report.md", "## Gaps\n- source discovery\n")
+        result = run(generic_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on generic review: {result}")
+        generic_report = json.loads((generic_base / "critic_report.json").read_text(encoding="utf-8"))
+        if "moon parley" in json.dumps(generic_report) or "Kharn burns shelters" in json.dumps(generic_report):
+            raise AssertionError(f"generic review incorrectly applied Skalathrax playbook: {generic_report}")
     print("[ok] ReductorVerifier review")
     return 0
 

@@ -444,6 +444,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   and blocks approval when they contradict the current step request.
 - `ReductorVerifier` performs generic direct-event coverage checks from
   extracted notes to timeline entries, in addition to task-class playbook checks.
+- `ReductorVerifier` applies the strict Skalathrax required-event playbook only
+  when the task/source artifacts match that playbook or already contain those
+  event ids.
 - `FabricatorFinalis` preserves worker `quality_expectations` in final manifests
   and blocks final readiness when they contradict the final step request.
 - `AuspexBrowser` performs guarded HTTP text fetches and marks low-text
