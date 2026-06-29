@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 from analyze_reports import analyze_reports
-from run_arena import RunResult, summarize_results, write_json
+from run_arena import RunResult, analyze_artifact_orchestration, summarize_results, write_json
 
 
 def main() -> int:
@@ -46,6 +46,23 @@ def main() -> int:
     quality = summary.get("orchestration_quality", {}).get("shushunya", {})
     if quality.get("chain_pass_rate") != 0.5 or quality.get("missing_failing_diagnostic") != 1:
         raise AssertionError(f"bad arena orchestration quality summary: {summary}")
+    artifact_ok = analyze_artifact_orchestration(
+        [
+            {"_seq": 1, "action": {"action": "read_file", "path": "/work/input.csv"}, "result": {"ok": True}},
+            {"_seq": 2, "action": {"action": "write_file", "path": "/work/report.md"}, "result": {"ok": True}},
+        ],
+        {"seed_files": {"input.csv": "x"}, "checks": [{"path": "report.md"}]},
+        "unit",
+    )
+    if artifact_ok.get("ok") is not True or artifact_ok.get("style") != "artifact_reads_before_writes":
+        raise AssertionError(f"bad artifact orchestration success analysis: {artifact_ok}")
+    artifact_bad = analyze_artifact_orchestration(
+        [{"_seq": 1, "action": {"action": "write_file", "path": "/work/report.md"}, "result": {"ok": True}}],
+        {"seed_files": {"input.csv": "x"}, "checks": [{"path": "report.md"}]},
+        "unit",
+    )
+    if artifact_bad.get("ok") is not False or artifact_bad.get("missing_input_reads") != ["input.csv"]:
+        raise AssertionError(f"bad artifact orchestration failure analysis: {artifact_bad}")
     with tempfile.TemporaryDirectory() as temp_dir:
         path = Path(temp_dir) / "report.json"
         write_json(path, {"ok": True})
@@ -85,15 +102,30 @@ def main() -> int:
                             "verified_after_last_edit": False,
                         },
                     },
+                    {
+                        "agent": "shushunya",
+                        "task_id": "artifact",
+                        "ok": False,
+                        "duration_sec": 3.0,
+                        "orchestration": {
+                            "style": "artifact_reads_before_writes",
+                            "ok": False,
+                            "missing_input_reads": ["input.csv"],
+                            "missing_output_writes": [],
+                        },
+                    },
                 ],
             },
         )
         analysis = analyze_reports([report])
-        if analysis["stats"][0]["pass_rate"] != 0.5 or not analysis["recent_failures"]:
+        if analysis["stats"][0]["pass_rate"] != 0.333 or not analysis["recent_failures"]:
             raise AssertionError(f"bad arena report analysis: {analysis}")
         quality_rows = analysis.get("orchestration_quality", [])
         if not quality_rows or quality_rows[0].get("chain_pass_rate") != 0.5 or quality_rows[0].get("missing_edit") != 1:
             raise AssertionError(f"bad arena orchestration report analysis: {analysis}")
+        artifact_rows = analysis.get("artifact_quality", [])
+        if not artifact_rows or artifact_rows[0].get("missing_input_reads") != 1:
+            raise AssertionError(f"bad arena artifact report analysis: {analysis}")
     print("[ok] AgentArena runner")
     return 0
 

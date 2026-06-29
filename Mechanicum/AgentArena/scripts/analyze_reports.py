@@ -27,7 +27,7 @@ def add_stat(stats: dict[str, Any], suite: str, agent: str, ok: bool, duration_s
 
 
 def add_orchestration_stat(stats: dict[str, Any], suite: str, agent: str, orchestration: dict[str, Any]) -> None:
-    if orchestration.get("ok") is None:
+    if orchestration.get("ok") is None or orchestration.get("style") == "artifact_reads_before_writes":
         return
     key = f"{suite}:{agent}"
     item = stats.setdefault(
@@ -56,9 +56,37 @@ def add_orchestration_stat(stats: dict[str, Any], suite: str, agent: str, orches
             item["missing_verification_after_edit"] += 1
 
 
+def add_artifact_stat(stats: dict[str, Any], suite: str, agent: str, orchestration: dict[str, Any]) -> None:
+    if orchestration.get("style") != "artifact_reads_before_writes" or orchestration.get("ok") is None:
+        return
+    key = f"{suite}:{agent}"
+    item = stats.setdefault(
+        key,
+        {
+            "suite": suite,
+            "agent": agent,
+            "tracked": 0,
+            "passed_chain": 0,
+            "failed_chain": 0,
+            "missing_input_reads": 0,
+            "missing_output_writes": 0,
+        },
+    )
+    item["tracked"] += 1
+    if orchestration.get("ok") is True:
+        item["passed_chain"] += 1
+    else:
+        item["failed_chain"] += 1
+        if orchestration.get("missing_input_reads"):
+            item["missing_input_reads"] += 1
+        if orchestration.get("missing_output_writes"):
+            item["missing_output_writes"] += 1
+
+
 def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
     stats: dict[str, Any] = {}
     orchestration_stats: dict[str, Any] = {}
+    artifact_stats: dict[str, Any] = {}
     failures: list[dict[str, Any]] = []
     loaded = 0
     for path in report_paths:
@@ -74,6 +102,7 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
             orchestration = result.get("orchestration") if isinstance(result.get("orchestration"), dict) else {}
             if orchestration:
                 add_orchestration_stat(orchestration_stats, suite, agent, orchestration)
+                add_artifact_stat(artifact_stats, suite, agent, orchestration)
             if not ok:
                 failures.append(
                     {
@@ -93,7 +122,17 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
     for row in orchestration_rows:
         tracked = int(row["tracked"])
         row["chain_pass_rate"] = round(float(row["passed_chain"]) / tracked, 3) if tracked else 0.0
-    return {"reports": loaded, "stats": rows, "orchestration_quality": orchestration_rows, "recent_failures": failures[:20]}
+    artifact_rows = sorted(artifact_stats.values(), key=lambda item: (item["suite"], item["agent"]))
+    for row in artifact_rows:
+        tracked = int(row["tracked"])
+        row["chain_pass_rate"] = round(float(row["passed_chain"]) / tracked, 3) if tracked else 0.0
+    return {
+        "reports": loaded,
+        "stats": rows,
+        "orchestration_quality": orchestration_rows,
+        "artifact_quality": artifact_rows,
+        "recent_failures": failures[:20],
+    }
 
 
 def main() -> int:

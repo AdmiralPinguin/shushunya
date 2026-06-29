@@ -53,12 +53,27 @@ def write_json(path: Path, value: Any) -> None:
 def summarize_results(results: list[RunResult]) -> dict[str, Any]:
     by_agent: dict[str, dict[str, Any]] = {}
     orchestration_quality: dict[str, dict[str, Any]] = {}
+    artifact_quality: dict[str, dict[str, Any]] = {}
     for result in results:
         item = by_agent.setdefault(result.agent, {"total": 0, "passed": 0, "failed": 0, "duration_sec": 0.0})
         item["total"] += 1
         item["passed" if result.ok else "failed"] += 1
         item["duration_sec"] = round(float(item["duration_sec"]) + result.duration_sec, 3)
-        if isinstance(result.orchestration, dict) and result.orchestration.get("ok") is not None:
+        if isinstance(result.orchestration, dict) and result.orchestration.get("style") == "artifact_reads_before_writes":
+            quality = artifact_quality.setdefault(
+                result.agent,
+                {"tracked": 0, "passed_chain": 0, "failed_chain": 0, "missing_input_reads": 0, "missing_output_writes": 0},
+            )
+            quality["tracked"] += 1
+            if result.orchestration.get("ok") is True:
+                quality["passed_chain"] += 1
+            else:
+                quality["failed_chain"] += 1
+                if result.orchestration.get("missing_input_reads"):
+                    quality["missing_input_reads"] += 1
+                if result.orchestration.get("missing_output_writes"):
+                    quality["missing_output_writes"] += 1
+        elif isinstance(result.orchestration, dict) and result.orchestration.get("ok") is not None:
             quality = orchestration_quality.setdefault(
                 result.agent,
                 {
@@ -87,12 +102,16 @@ def summarize_results(results: list[RunResult]) -> dict[str, Any]:
     for item in orchestration_quality.values():
         tracked = int(item["tracked"])
         item["chain_pass_rate"] = round(float(item["passed_chain"]) / tracked, 3) if tracked else 0.0
+    for item in artifact_quality.values():
+        tracked = int(item["tracked"])
+        item["chain_pass_rate"] = round(float(item["passed_chain"]) / tracked, 3) if tracked else 0.0
     return {
         "total": len(results),
         "passed": sum(1 for item in results if item.ok),
         "failed": sum(1 for item in results if not item.ok),
         "by_agent": by_agent,
         "orchestration_quality": orchestration_quality,
+        "artifact_quality": artifact_quality,
     }
 
 
@@ -322,6 +341,68 @@ def task_looks_like_code_repair(task: dict[str, Any]) -> bool:
     return any(marker in prompt for marker in ("pytest", "тест", "tests/", "python-проект", "python project"))
 
 
+def path_matches_suffix(path: str, suffix: str) -> bool:
+    normalized_path = path.replace("\\", "/").rstrip("/")
+    normalized_suffix = suffix.replace("\\", "/").strip("/")
+    return normalized_path == normalized_suffix or normalized_path.endswith("/" + normalized_suffix)
+
+
+def analyze_artifact_orchestration(steps: list[dict[str, Any]], task: dict[str, Any], source: str) -> dict[str, Any]:
+    input_paths = sorted(str(path) for path in task.get("seed_files", {}) if path)
+    output_paths = sorted(
+        {
+            str(check.get("path"))
+            for check in task.get("checks", [])
+            if isinstance(check, dict) and isinstance(check.get("path"), str) and check.get("path") not in task.get("seed_files", {})
+        }
+    )
+    if not input_paths or not output_paths:
+        return {
+            "kind": "general_or_artifact",
+            "ok": None,
+            "steps": len(steps),
+            "source": source,
+            "note": "Artifact read-before-write chain is not required for this task shape.",
+        }
+    read_inputs: dict[str, int] = {}
+    output_writes: dict[str, int] = {}
+    for item in steps:
+        if not isinstance(item, dict):
+            continue
+        seq = int(item.get("_seq") or item.get("step") or 0)
+        action = item.get("action") if isinstance(item.get("action"), dict) else {}
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        action_type = str(action.get("action") or "")
+        path = str(action.get("path") or result.get("path") or "")
+        action_paths = [path]
+        if action_type == "write_files" and isinstance(action.get("files"), list):
+            action_paths.extend(str(item.get("path") or "") for item in action["files"] if isinstance(item, dict))
+        if action_type == "read_file" and result.get("ok") is True:
+            for input_path in input_paths:
+                if path_matches_suffix(path, input_path):
+                    read_inputs.setdefault(input_path, seq)
+        if action_type in {"write_file", "write_files", "append_file", "replace_in_file"} and result.get("ok") is True:
+            for output_path in output_paths:
+                if any(path_matches_suffix(candidate, output_path) for candidate in action_paths):
+                    output_writes.setdefault(output_path, seq)
+    first_write = min(output_writes.values()) if output_writes else 0
+    missing_input_reads = [path for path in input_paths if path not in read_inputs or (first_write and read_inputs[path] > first_write)]
+    missing_output_writes = [path for path in output_paths if path not in output_writes]
+    return {
+        "kind": "artifact_or_data",
+        "style": "artifact_reads_before_writes",
+        "ok": not missing_input_reads and not missing_output_writes,
+        "steps": len(steps),
+        "source": source,
+        "input_paths": input_paths,
+        "output_paths": output_paths,
+        "read_input_paths": sorted(read_inputs),
+        "written_output_paths": sorted(output_writes),
+        "missing_input_reads": missing_input_reads,
+        "missing_output_writes": missing_output_writes,
+    }
+
+
 def shushunya_steps_from_journal(payload: dict[str, Any]) -> list[dict[str, Any]]:
     journal = payload.get("journal") if isinstance(payload.get("journal"), dict) else {}
     events = journal.get("events") if isinstance(journal.get("events"), list) else []
@@ -362,13 +443,7 @@ def analyze_shushunya_orchestration(log_path: Path, task: dict[str, Any]) -> dic
     if not steps:
         steps = response.get("steps") if isinstance(response.get("steps"), list) else []
     if not task_looks_like_code_repair(task):
-        return {
-            "kind": "general_or_artifact",
-            "ok": None,
-            "steps": len(steps),
-            "source": source,
-            "note": "Code-repair orchestration chain is not required for this task type.",
-        }
+        return analyze_artifact_orchestration(steps, task, source)
     edit_steps: list[int] = []
     failing_diagnostic_steps: list[int] = []
     passing_verification_steps: list[int] = []
