@@ -439,7 +439,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 
 ## Current Limits
 
-- `Lexmechanic` uses source playbooks plus optional live discovery; allowlisted live results can become source candidates.
+- `Lexmechanic` dynamically loads source playbooks plus optional live discovery;
+  allowlisted live results can become source candidates.
 - `Lexmechanic` ranks source candidates and labels live discovery results with
   source types and ranking reasons.
 - `Lexmechanic` records multi-round discovery strategy and `source_coverage`
@@ -454,13 +455,19 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   but neither publicly fetchable nor present in the local corpus.
 - Local corpus files flow through source maps, snapshots, and direct-event
   evidence instead of bypassing the normal verifier/finalizer path.
-- `NoosphericExtractor` uses data playbooks when available and falls back to
-  low-confidence generic evidence leads from fetched source snapshots.
+- `NoosphericExtractor` dynamically loads event playbooks when available and
+  falls back to low-confidence generic evidence leads from fetched source
+  snapshots.
 - `NoosphericExtractor` preserves `render_required` source snapshots as explicit
   gaps so downstream timeline, draft, and critic artifacts do not hide browser
   render needs.
 - `NoosphericExtractor` summarizes event evidence coverage and marks each event
   as snapshot-matched or missing snapshot evidence.
+- Event playbook `narrative_ru` and review metadata are preserved through
+  `direct_event_notes.json` and `timeline.json`, keeping downstream artifacts
+  self-contained.
+- `EyeOfTerror/doctor.py` validates source and event playbook structure so
+  broken domain playbooks fail loudly before a run.
 - `ReductorVerifier` uses `source_coverage` diagnostics as source arbitration:
   weak source sets block approval and trigger source-discovery/downstream
   revision instead of passing as warnings.
@@ -482,9 +489,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   and blocks approval when they contradict the current step request.
 - `ReductorVerifier` performs generic direct-event coverage checks from
   extracted notes to timeline entries, in addition to task-class playbook checks.
-- `ReductorVerifier` applies the strict Skalathrax required-event playbook only
-  when the task/source artifacts match that playbook or already contain those
-  event ids.
+- `ReductorVerifier` applies required-event checks from matched event playbooks
+  instead of hardcoded task-specific event lists.
 - `FabricatorFinalis` preserves worker `quality_expectations` in final manifests
   and blocks final readiness when they contradict the final step request.
 - `AuspexBrowser` performs guarded HTTP text fetches and marks low-text
