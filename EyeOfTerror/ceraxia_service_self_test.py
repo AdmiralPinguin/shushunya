@@ -60,6 +60,7 @@ def main() -> int:
     if (
         "CERAXIA_FILES" not in patch_contract.get("input_markers", [])
         or "operation batches are atomic and roll back earlier mutations on failure" not in patch_contract.get("safety_gates", [])
+        or "natural language replace inference requires explicit backtick-delimited path, old text, and new text" not in patch_contract.get("safety_gates", [])
         or "python -m unittest" not in patch_contract.get("verification_allowlist", [])
     ):
         raise AssertionError(f"bad Ceraxia local patch contract: {patch_contract}")
@@ -97,6 +98,7 @@ def main() -> int:
                 or plan.get("phase") != "plan_ready"
                 or plan.get("actions", {}).get("next_action", {}).get("kind") != "prepare_run"
                 or "explicit_json_patch" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
+                or "natural_language_simple_replace" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or plan.get("resolved_workers", {}).get("FerrumPatchwright", {}).get("role_contract", {}).get("owned_step") != "implementation"
             ):
                 raise AssertionError(f"bad plan: {plan}")

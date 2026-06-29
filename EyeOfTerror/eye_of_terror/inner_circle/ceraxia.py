@@ -143,6 +143,7 @@ def patch_contract_capabilities() -> dict[str, Any]:
             "single_file_create_marker",
             "single_file_replace_marker",
             "multi_file_json_marker",
+            "natural_language_simple_replace",
         ],
         "verification_allowlist": [
             "pytest",
@@ -157,6 +158,7 @@ def patch_contract_capabilities() -> dict[str, Any]:
             "write_file is idempotent when existing content already matches",
             "operation batches are atomic and roll back earlier mutations on failure",
             "verification commands run without a shell and must match the allowlist",
+            "natural language replace inference requires explicit backtick-delimited path, old text, and new text",
         ],
         "repair_loops": [
             "expected_colon_py_compile",

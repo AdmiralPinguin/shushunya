@@ -197,6 +197,45 @@ def verification_commands_from_markers(goal: str) -> list[str]:
     return commands
 
 
+def verification_commands_from_natural_goal(goal: str) -> list[str]:
+    commands = verification_commands_from_markers(goal)
+    for match in re.finditer(r"(?:проверь|запусти|run|verify|test)\s+`([^`]+)`", goal, flags=re.IGNORECASE):
+        command = match.group(1).strip()
+        if command and command not in commands:
+            commands.append(command)
+    return commands
+
+
+def infer_simple_replace_patch_spec(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    patterns = [
+        r"(?:в\s+файле|в|in)\s+`(?P<path>[^`]+)`.*?(?:замени|replace)\s+`(?P<old>[^`]+)`\s+(?:на|with)\s+`(?P<new>[^`]+)`",
+        r"(?:замени|replace)\s+`(?P<old>[^`]+)`\s+(?:на|with)\s+`(?P<new>[^`]+)`.*?(?:в\s+файле|в|in)\s+`(?P<path>[^`]+)`",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, goal, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        raw_path = match.group("path").strip()
+        old = match.group("old")
+        new = match.group("new")
+        if "\x00" in old or "\x00" in new:
+            raise ValueError("inferred replace patch cannot contain NUL bytes")
+        return {
+            "source": "natural_language_simple_replace",
+            "operations": [
+                {
+                    "type": "replace",
+                    "path": raw_path,
+                    "old": old,
+                    "new": new,
+                }
+            ],
+            "verification_commands": verification_commands_from_natural_goal(goal),
+        }
+    return {}
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -276,6 +315,8 @@ def patch_spec_from_request(request: dict[str, Any]) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_PATCH:")
     if not payload:
         payload = synthesized_patch_spec_from_markers(goal)
+    if not payload:
+        payload = infer_simple_replace_patch_spec(request)
     if not payload:
         return {}
     if isinstance(payload.get("ceraxia_patch"), dict):

@@ -73,6 +73,12 @@ CERAXIA_PATCH:
 """
 
 
+def inferred_replace_goal() -> str:
+    return """почини python приложение: в файле `sample.py` замени `return 1` на `return 2`.
+Проверь `python -m py_compile sample.py`.
+"""
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -207,6 +213,19 @@ def main() -> int:
             raise AssertionError(f"forbidden verification command should block final readiness: {final}")
         if final.get("verification_summary", {}).get("blocker_count", 0) < 1:
             raise AssertionError(f"blocked final manifest should preserve verification blockers: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        sample = target_repo / "sample.py"
+        sample.write_text("def value():\n    return 1\n", encoding="utf-8")
+        final = run_pipeline(root / "work", goal=inferred_replace_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready":
+            raise AssertionError(f"inferred replace task should be ready: {final}")
+        if sample.read_text(encoding="utf-8") != "def value():\n    return 2\n":
+            raise AssertionError("inferred replace task did not mutate the target file")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 2:
+            raise AssertionError(f"inferred replace final manifest should preserve verification evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

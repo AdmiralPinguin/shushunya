@@ -84,6 +84,14 @@ return 2
 CERAXIA_VERIFY: python -m py_compile module.py
 ```
 
+Ceraxia can also infer one narrow replace operation from a natural-language
+task when the target path, old text, and new text are explicit code spans:
+
+```text
+В файле `module.py` замени `return 1` на `return 2`.
+Проверь `python -m py_compile module.py`.
+```
+
 For small multi-file tasks, Ceraxia can synthesize a patch spec from a JSON
 file list:
 
