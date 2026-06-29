@@ -86,7 +86,25 @@ def evidence_excerpt(text: str, matched: list[str], max_chars: int = 520) -> str
     return excerpt
 
 
-def snapshot_evidence(event_id: str, snapshots: dict[str, Any]) -> list[dict[str, str]]:
+def snapshot_is_primary(snapshot: dict[str, Any]) -> bool:
+    source_class = str(snapshot.get("source_class") or "").lower()
+    source_type = str(snapshot.get("source_type") or "").lower()
+    return bool(snapshot.get("local_path")) or "primary" in source_class or source_type in {"published_primary", "local_primary", "official_primary_extract"}
+
+
+def evidence_item(snapshot: dict[str, Any], matched_markers: str, excerpt: str) -> dict[str, Any]:
+    return {
+        "source_title": str(snapshot.get("source_title") or ""),
+        "source_class": str(snapshot.get("source_class") or ""),
+        "source_type": str(snapshot.get("source_type") or ""),
+        "local_path": str(snapshot.get("local_path") or ""),
+        "matched_markers": matched_markers,
+        "excerpt": excerpt,
+        "is_primary_source": snapshot_is_primary(snapshot),
+    }
+
+
+def snapshot_evidence(event_id: str, snapshots: dict[str, Any]) -> list[dict[str, Any]]:
     markers = EVENT_EVIDENCE_MARKERS.get(event_id, [])
     evidence: list[dict[str, str]] = []
     for snapshot in snapshots.get("snapshots", []):
@@ -96,13 +114,7 @@ def snapshot_evidence(event_id: str, snapshots: dict[str, Any]) -> list[dict[str
         lowered = text.lower()
         matched = [marker for marker in markers if marker.lower() in lowered]
         if matched:
-            evidence.append(
-                {
-                    "source_title": str(snapshot.get("source_title") or ""),
-                    "matched_markers": ", ".join(matched),
-                    "excerpt": evidence_excerpt(text, matched),
-                }
-            )
+            evidence.append(evidence_item(snapshot, ", ".join(matched), evidence_excerpt(text, matched)))
     return evidence
 
 
@@ -185,11 +197,36 @@ def generic_events_from_snapshots(source_snapshots: dict[str, Any]) -> list[dict
                 "source_class": str(snapshot.get("source_class") or ""),
                 "extraction_method": "generic_snapshot_lead",
                 "evidence_snapshots": [
-                    {
-                        "source_title": str(snapshot.get("source_title") or ""),
-                        "matched_markers": "generic excerpt lead",
-                    }
+                    evidence_item(snapshot, "generic excerpt lead", excerpt)
                 ],
+            }
+        )
+    return events
+
+
+def primary_evidence_leads(source_snapshots: dict[str, Any], existing_source_refs: set[str]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for snapshot in source_snapshots.get("snapshots", []):
+        if not isinstance(snapshot, dict) or not snapshot.get("ok") or not snapshot_is_primary(snapshot):
+            continue
+        title = str(snapshot.get("source_title") or snapshot.get("requested_url") or "unknown primary source")
+        text = str(snapshot.get("text_excerpt") or "")
+        excerpt = first_sentence(text, max_chars=520)
+        if not excerpt:
+            continue
+        if title in existing_source_refs:
+            continue
+        event_id = f"primary_text_evidence_{len(events) + 1}"
+        events.append(
+            {
+                "event_id": event_id,
+                "summary": excerpt,
+                "phase": "primary_text",
+                "confidence": "medium",
+                "source_refs": [title],
+                "source_class": str(snapshot.get("source_class") or ""),
+                "extraction_method": "primary_text_evidence_lead",
+                "evidence_snapshots": [evidence_item(snapshot, "primary text excerpt lead", excerpt)],
             }
         )
     return events
@@ -210,14 +247,30 @@ def extract_events(source_map: dict[str, Any], source_snapshots: dict[str, Any] 
     extraction_method = "playbook" if events else "generic_snapshot_leads"
     if not events:
         events.extend(generic_events_from_snapshots(source_snapshots))
+    existing_source_refs = {
+        str(ref)
+        for event in events
+        if isinstance(event, dict)
+        for ref in (event.get("source_refs") if isinstance(event.get("source_refs"), list) else [])
+    }
+    primary_leads = primary_evidence_leads(source_snapshots, existing_source_refs)
+    events.extend(primary_leads)
     for event in events:
         if isinstance(event, dict):
             if "evidence_snapshots" not in event:
                 event["evidence_snapshots"] = snapshot_evidence(str(event.get("event_id") or ""), source_snapshots)
+            primary_evidence = [
+                item
+                for item in event.get("evidence_snapshots", [])
+                if isinstance(item, dict) and item.get("is_primary_source")
+            ]
+            event["primary_evidence_snapshots"] = primary_evidence
             event["evidence_status"] = "snapshot_matched" if event.get("evidence_snapshots") else "missing_snapshot_evidence"
     events_with_evidence = sum(1 for event in events if isinstance(event, dict) and event.get("evidence_snapshots"))
+    events_with_primary_evidence = sum(1 for event in events if isinstance(event, dict) and event.get("primary_evidence_snapshots"))
     low_confidence_events = sum(1 for event in events if isinstance(event, dict) and str(event.get("confidence") or "").lower() == "low")
     source_coverage = source_map.get("source_coverage") if isinstance(source_map.get("source_coverage"), dict) else {}
+    primary_snapshot_count = sum(1 for item in source_snapshots.get("snapshots", []) if isinstance(item, dict) and item.get("ok") and snapshot_is_primary(item))
     return {
         "topic": topic,
         "events": events,
@@ -225,8 +278,11 @@ def extract_events(source_map: dict[str, Any], source_snapshots: dict[str, Any] 
         "summary": {
             "event_count": len(events),
             "events_with_evidence": events_with_evidence,
+            "events_with_primary_evidence": events_with_primary_evidence,
             "events_missing_evidence": max(0, len(events) - events_with_evidence),
             "low_confidence_events": low_confidence_events,
+            "primary_snapshot_count": primary_snapshot_count,
+            "primary_evidence_lead_count": len(primary_leads),
             "source_coverage_ready": source_coverage.get("ready_for_extraction") if source_coverage else None,
         },
         "gaps": [

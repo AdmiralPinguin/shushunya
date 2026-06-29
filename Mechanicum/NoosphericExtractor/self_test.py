@@ -34,8 +34,17 @@ def main() -> int:
                     "snapshots": [
                         {
                             "source_title": "Lexicanum: Battle of Skalathrax",
+                            "source_class": "curated_wiki",
+                            "source_type": "curated_wiki",
                             "ok": True,
                             "text_excerpt": "Kharn convinced officers to parlay on a moon of Skalathrax.",
+                        },
+                        {
+                            "source_title": "Kharn: Eater of Worlds",
+                            "source_class": "official_primary_narrative",
+                            "source_type": "published_primary",
+                            "ok": True,
+                            "text_excerpt": "Kharn joined a parlay on a moon of Skalathrax before the shelters burned.",
                         },
                         {
                             "source_title": "Blocked",
@@ -71,7 +80,14 @@ def main() -> int:
             raise AssertionError("moon parley should include snapshot evidence")
         if "parlay on a moon" not in moon["evidence_snapshots"][0].get("excerpt", ""):
             raise AssertionError(f"snapshot evidence should preserve matched excerpt: {moon}")
-        if moon.get("evidence_status") != "snapshot_matched" or data.get("summary", {}).get("events_with_evidence", 0) < 1:
+        if not moon.get("primary_evidence_snapshots") or not moon["primary_evidence_snapshots"][0].get("is_primary_source"):
+            raise AssertionError(f"primary evidence should be separated from secondary evidence: {moon}")
+        if (
+            moon.get("evidence_status") != "snapshot_matched"
+            or data.get("summary", {}).get("events_with_evidence", 0) < 1
+            or data.get("summary", {}).get("events_with_primary_evidence", 0) < 1
+            or data.get("summary", {}).get("primary_snapshot_count") != 1
+        ):
             raise AssertionError(f"event evidence status should be summarized: {data}")
         if not any("HTTP Error 403" in gap for gap in data.get("gaps", [])):
             raise AssertionError("snapshot fetch failures should be reported as gaps")
@@ -89,7 +105,8 @@ def main() -> int:
                     "snapshots": [
                         {
                             "source_title": "Recovered Chronicle",
-                            "source_class": "secondary",
+                            "source_class": "official_primary_narrative",
+                            "source_type": "published_primary",
                             "requested_url": "https://example.test/chronicle",
                             "ok": True,
                             "text_excerpt": "The first clash began at dawn. Later commentary drifts into speculation.",
@@ -115,6 +132,7 @@ def main() -> int:
             or generic_events[0].get("confidence") != "low"
             or "first clash began" not in generic_events[0].get("summary", "")
             or generic_data.get("summary", {}).get("low_confidence_events") != 1
+            or generic_data.get("summary", {}).get("events_with_primary_evidence") < 1
         ):
             raise AssertionError(f"generic fallback should create low-confidence evidence leads: {generic_data}")
     print("[ok] NoosphericExtractor event notes")

@@ -472,6 +472,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   render needs.
 - `NoosphericExtractor` summarizes event evidence coverage and marks each event
   as snapshot-matched or missing snapshot evidence.
+- `NoosphericExtractor` now preserves source class/type/local-path metadata in
+  evidence snapshots, separates `primary_evidence_snapshots`, and reports
+  primary snapshot/evidence-lead counts so primary text support is measurable
+  instead of inferred from source titles later.
 - Event playbook `narrative_ru` and review metadata are preserved through
   `direct_event_notes.json` and `timeline.json`, keeping downstream artifacts
   self-contained.
