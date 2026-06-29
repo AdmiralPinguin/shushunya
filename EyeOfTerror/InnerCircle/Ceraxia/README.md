@@ -50,7 +50,8 @@ retries can succeed without weakening accidental overwrite protection.
 
 Patch operation batches are atomic. If any operation in a batch fails,
 Ceraxia restores every file touched earlier in the batch and reports the task
-as blocked instead of leaving a partial code change behind.
+as blocked instead of leaving a partial code change behind. The patch manifest
+records rollback evidence under `rollback.applied` and `rollback.files`.
 
 The governor exposes the same machine-readable `patch_contract` through
 `/capabilities`, `/plan`, and the saved oversight plan. It lists supported

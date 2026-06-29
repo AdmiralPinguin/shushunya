@@ -32,6 +32,12 @@ EXCLUDED_DIRS = {
 WORKER_NAME = "CogitatorCodewright"
 
 
+class PatchApplyError(ValueError):
+    def __init__(self, message: str, rolled_back_files: list[dict[str, Any]]) -> None:
+        super().__init__(message)
+        self.rolled_back_files = rolled_back_files
+
+
 def worker_name() -> str:
     return WORKER_NAME
 
@@ -353,10 +359,24 @@ def apply_patch_operations_atomically(repo_root: Path, operations: list[Any]) ->
             if path not in snapshots:
                 snapshots[path] = path.read_bytes() if path.exists() else None
             changed_files.append(apply_patch_operation(repo_root, operation))
-    except ValueError:
+    except ValueError as exc:
+        rolled_back_files: list[dict[str, Any]] = []
+        mutated_paths = {
+            safe_repo_path(repo_root, str(item.get("path") or ""))
+            for item in changed_files
+            if isinstance(item, dict) and item.get("changed")
+        }
         for path, content in reversed(list(snapshots.items())):
             restore_path_snapshot(path, content)
-        raise
+            if path in mutated_paths:
+                rolled_back_files.append(
+                    {
+                        "path": str(path.relative_to(repo_root)),
+                        "restored": content is not None,
+                        "removed": content is None,
+                    }
+                )
+        raise PatchApplyError(str(exc), rolled_back_files) from exc
     return changed_files
 
 
@@ -634,6 +654,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
     plan = read_text_optional(workspace_root, sibling_artifact(output_path, "change_plan.md"))
     blockers: list[str] = []
     changed_files: list[dict[str, Any]] = []
+    rolled_back_files: list[dict[str, Any]] = []
     patch_spec: dict[str, Any] = {}
     try:
         patch_spec = patch_spec_from_request(request)
@@ -644,6 +665,9 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
             blockers.append(
                 "No CERAXIA_PATCH operations were provided; direct source mutation requires an explicit patch specification."
             )
+    except PatchApplyError as exc:
+        blockers.append(str(exc))
+        rolled_back_files = exc.rolled_back_files
     except ValueError as exc:
         blockers.append(str(exc))
     status = "applied" if changed_files and not blockers else "handoff_required"
@@ -661,6 +685,10 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "plan_excerpt": plan[:3000],
         "patch_spec_present": bool(patch_spec),
         "changed_files": changed_files,
+        "rollback": {
+            "applied": bool(rolled_back_files),
+            "files": rolled_back_files,
+        },
         "verification_commands": patch_spec.get("verification_commands", []) if isinstance(patch_spec.get("verification_commands"), list) else [],
         "blockers": blockers,
         "warnings": [

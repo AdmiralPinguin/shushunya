@@ -216,6 +216,10 @@ def main() -> int:
             raise AssertionError(f"partial patch failure should block final readiness: {final}")
         if (target_repo / "created_before_failure.py").exists():
             raise AssertionError("partial patch failure left a created file behind")
+        patch_manifest = json.loads((root / "work" / "code" / "patch_manifest.json").read_text(encoding="utf-8"))
+        rollback = patch_manifest.get("rollback", {})
+        if not rollback.get("applied") or rollback.get("files", [{}])[0].get("path") != "created_before_failure.py":
+            raise AssertionError(f"partial patch failure should record rollback evidence: {patch_manifest}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

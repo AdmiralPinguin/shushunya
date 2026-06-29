@@ -118,6 +118,11 @@ CERAXIA_PATCH:
             raise AssertionError(f"Ceraxia atomic failure manifest should be blocked: {manifest}")
         if (target_repo / "created_before_failure.py").exists():
             raise AssertionError("Ceraxia atomic failure pipeline left a created file behind")
+        patch_manifest_path = next((run_root / task_id / "work").rglob("patch_manifest.json"))
+        patch_manifest = json.loads(patch_manifest_path.read_text(encoding="utf-8"))
+        rollback = patch_manifest.get("rollback", {})
+        if not rollback.get("applied") or rollback.get("files", [{}])[0].get("path") != "created_before_failure.py":
+            raise AssertionError(f"Ceraxia atomic failure should record rollback evidence: {patch_manifest}")
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
         target_repo = temp_root / "repo"
