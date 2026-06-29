@@ -853,6 +853,8 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         ],
         "plan_excerpt": plan[:3000],
         "patch_spec_present": bool(patch_spec),
+        "patch_source": str(patch_spec.get("source") or "explicit_json_patch") if patch_spec else "",
+        "operation_count": len(patch_spec.get("operations", [])) if isinstance(patch_spec.get("operations"), list) else 0,
         "changed_files": changed_files,
         "rollback": {
             "applied": bool(rolled_back_files),
@@ -1062,6 +1064,8 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             sibling_artifact(output_path, "code_review.json"),
         ],
         "changed_files": patch.get("changed_files", []),
+        "patch_source": patch.get("patch_source", ""),
+        "operation_count": patch.get("operation_count", 0),
         "verification_status": verification.get("status", "unknown"),
         "verification_executed": verification.get("executed", []),
         "verification_repairs": verification.get("repairs", []),

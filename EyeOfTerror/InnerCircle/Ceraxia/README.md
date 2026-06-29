@@ -62,6 +62,10 @@ The governor exposes the same machine-readable `patch_contract` through
 markers, patch operation types, verification allowlist entries, safety gates,
 and narrow repair loops for Warmaster and client-side planning.
 
+Patch and final manifests expose `patch_source` and `operation_count`, so
+callers can distinguish explicit JSON patches from marker-synthesized or
+natural-language-inferred patches.
+
 Verification commands run without a shell and must match Ceraxia's allowlist:
 `pytest`, `python -m pytest`, `python -m unittest`, or
 `python -m py_compile ...`.

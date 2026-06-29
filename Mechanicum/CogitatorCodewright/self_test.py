@@ -235,6 +235,8 @@ def main() -> int:
         final = run_pipeline(root / "work", goal=inferred_replace_goal(), target_repo_root=target_repo)
         if final.get("status") != "ready":
             raise AssertionError(f"inferred replace task should be ready: {final}")
+        if final.get("patch_source") != "natural_language_simple_replace" or final.get("operation_count") != 1:
+            raise AssertionError(f"inferred replace final manifest should expose patch audit fields: {final}")
         if sample.read_text(encoding="utf-8") != "def value():\n    return 2\n":
             raise AssertionError("inferred replace task did not mutate the target file")
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:
@@ -266,6 +268,8 @@ def main() -> int:
         final = run_pipeline(root / "work", goal=inferred_add_function_goal(), target_repo_root=target_repo)
         if final.get("status") != "ready":
             raise AssertionError(f"inferred add-function task should be ready: {final}")
+        if final.get("patch_source") != "natural_language_add_function" or final.get("operation_count") != 1:
+            raise AssertionError(f"inferred add-function final manifest should expose patch audit fields: {final}")
         if "def value():\n    return 42\n" not in sample.read_text(encoding="utf-8"):
             raise AssertionError("inferred add-function task did not append the target function")
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:

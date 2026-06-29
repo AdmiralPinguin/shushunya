@@ -72,6 +72,8 @@ CERAXIA_TARGET_REPO: {target_repo}
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest.get("status") != "ready":
             raise AssertionError(f"Ceraxia inferred replace manifest should be ready: {manifest}")
+        if manifest.get("patch_source") != "natural_language_simple_replace" or manifest.get("operation_count") != 1:
+            raise AssertionError(f"Ceraxia inferred replace manifest should expose patch audit fields: {manifest}")
         if sample.read_text(encoding="utf-8") != "def value():\n    return 2\n":
             raise AssertionError("Ceraxia inferred replace pipeline did not mutate the target file")
         if manifest.get("verification_summary", {}).get("executed_count", 0) < 2:
@@ -108,6 +110,8 @@ CERAXIA_TARGET_REPO: {target_repo}
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest.get("status") != "ready":
             raise AssertionError(f"Ceraxia inferred add-function manifest should be ready: {manifest}")
+        if manifest.get("patch_source") != "natural_language_add_function" or manifest.get("operation_count") != 1:
+            raise AssertionError(f"Ceraxia inferred add-function manifest should expose patch audit fields: {manifest}")
         if "def value():\n    return 42\n" not in sample.read_text(encoding="utf-8"):
             raise AssertionError("Ceraxia inferred add-function pipeline did not append the target function")
         if manifest.get("verification_summary", {}).get("executed_count", 0) < 2:
