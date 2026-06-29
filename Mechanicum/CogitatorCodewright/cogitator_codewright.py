@@ -332,6 +332,34 @@ def apply_patch_operation(repo_root: Path, operation: dict[str, Any]) -> dict[st
     }
 
 
+def restore_path_snapshot(path: Path, content: bytes | None) -> None:
+    if content is None:
+        path.unlink(missing_ok=True)
+        invalidate_python_cache(path)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    invalidate_python_cache(path)
+
+
+def apply_patch_operations_atomically(repo_root: Path, operations: list[Any]) -> list[dict[str, Any]]:
+    changed_files: list[dict[str, Any]] = []
+    snapshots: dict[Path, bytes | None] = {}
+    try:
+        for operation in operations:
+            if not isinstance(operation, dict):
+                raise ValueError("each patch operation must be an object")
+            path = safe_repo_path(repo_root, str(operation.get("path") or ""))
+            if path not in snapshots:
+                snapshots[path] = path.read_bytes() if path.exists() else None
+            changed_files.append(apply_patch_operation(repo_root, operation))
+    except ValueError:
+        for path, content in reversed(list(snapshots.items())):
+            restore_path_snapshot(path, content)
+        raise
+    return changed_files
+
+
 def command_allowed(command: list[str]) -> bool:
     if not command:
         return False
@@ -611,10 +639,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         patch_spec = patch_spec_from_request(request)
         if patch_spec:
             repo_root = target_repo_root(request)
-            for operation in patch_spec["operations"]:
-                if not isinstance(operation, dict):
-                    raise ValueError("each patch operation must be an object")
-                changed_files.append(apply_patch_operation(repo_root, operation))
+            changed_files.extend(apply_patch_operations_atomically(repo_root, patch_spec["operations"]))
         else:
             blockers.append(
                 "No CERAXIA_PATCH operations were provided; direct source mutation requires an explicit patch specification."

@@ -73,6 +73,29 @@ CERAXIA_PATCH:
 """
 
 
+def partial_failure_goal() -> str:
+    return """проверь что частично сломанный патч не оставляет мусор
+
+CERAXIA_PATCH:
+{
+  "operations": [
+    {
+      "type": "write_file",
+      "path": "created_before_failure.py",
+      "content": "def value():\\n    return 1\\n"
+    },
+    {
+      "type": "replace",
+      "path": "missing.py",
+      "old": "return 1",
+      "new": "return 2"
+    }
+  ],
+  "verification_commands": ["python -m py_compile created_before_failure.py"]
+}
+"""
+
+
 def create_file_goal() -> str:
     return """создай python файл
 
@@ -184,6 +207,15 @@ def main() -> int:
             raise AssertionError(f"forbidden verification command should block final readiness: {final}")
         if final.get("verification_summary", {}).get("blocker_count", 0) < 1:
             raise AssertionError(f"blocked final manifest should preserve verification blockers: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        final = run_pipeline(root / "work", goal=partial_failure_goal(), target_repo_root=target_repo)
+        if final.get("status") != "blocked" or final.get("approved"):
+            raise AssertionError(f"partial patch failure should block final readiness: {final}")
+        if (target_repo / "created_before_failure.py").exists():
+            raise AssertionError("partial patch failure left a created file behind")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

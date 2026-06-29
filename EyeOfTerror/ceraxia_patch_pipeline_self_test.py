@@ -83,6 +83,45 @@ CERAXIA_VERIFY: python -m py_compile generated.py
         temp_root = Path(temp_dir)
         target_repo = temp_root / "repo"
         target_repo.mkdir()
+        task = f"""проверь что частично сломанный патч не оставляет мусор
+CERAXIA_TARGET_REPO: {target_repo}
+CERAXIA_PATCH:
+{{
+  "operations": [
+    {{
+      "type": "write_file",
+      "path": "created_before_failure.py",
+      "content": "def value():\\n    return 1\\n"
+    }},
+    {{
+      "type": "replace",
+      "path": "missing.py",
+      "old": "return 1",
+      "new": "return 2"
+    }}
+  ],
+  "verification_commands": ["python -m py_compile created_before_failure.py"]
+}}
+"""
+        run_root = temp_root / "runs"
+        task_id = "ceraxia-atomic-patch-failure-pipeline"
+        prepared = prepare_task(task, task_id, run_root, governor_transport="local")
+        if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
+            raise AssertionError(f"Ceraxia atomic failure task did not prepare correctly: {prepared}")
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        run_summary = result.get("run_summary") if isinstance(result.get("run_summary"), dict) else {}
+        if result.get("ok") or run_summary.get("status") != "blocked":
+            raise AssertionError(f"Ceraxia atomic failure pipeline should stop as blocked: {result}")
+        manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("status") != "blocked" or manifest.get("approved"):
+            raise AssertionError(f"Ceraxia atomic failure manifest should be blocked: {manifest}")
+        if (target_repo / "created_before_failure.py").exists():
+            raise AssertionError("Ceraxia atomic failure pipeline left a created file behind")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_root = Path(temp_dir)
+        target_repo = temp_root / "repo"
+        target_repo.mkdir()
         task = f"""создай несколько python файлов и проверь их вместе
 CERAXIA_TARGET_REPO: {target_repo}
 CERAXIA_FILES:

@@ -567,6 +567,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `write_file` patch operations are idempotent when the target already has the
   requested content, so repeated Ceraxia runs can prove the same desired state
   without requiring unsafe overwrite flags.
+- Ceraxia applies patch operation batches atomically: if one operation fails,
+  earlier file mutations in that batch are rolled back before the task is
+  reported as blocked.
 - Ceraxia final manifests preserve verification evidence through
   `verification_executed`, `verification_blockers`, and
   `verification_summary`, so the caller can see which commands proved or

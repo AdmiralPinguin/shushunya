@@ -44,6 +44,10 @@ instead of claiming the code task is complete.
 content. Different existing content still requires `"overwrite": true`, so
 retries can succeed without weakening accidental overwrite protection.
 
+Patch operation batches are atomic. If any operation in a batch fails,
+Ceraxia restores every file touched earlier in the batch and reports the task
+as blocked instead of leaving a partial code change behind.
+
 Verification commands run without a shell and must match Ceraxia's allowlist:
 `pytest`, `python -m pytest`, `python -m unittest`, or
 `python -m py_compile ...`.
