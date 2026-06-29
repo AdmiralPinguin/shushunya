@@ -63,12 +63,27 @@ def run_result_failure_reason(result: RunResult) -> str:
     return "unknown"
 
 
+def failed_check_symptoms(check: dict[str, Any]) -> list[str]:
+    text = "\n".join(str(check.get(key) or "") for key in ("error", "output", "command"))
+    markers = {
+        "json_decode_error": "JSONDecodeError",
+        "assertion_error": "AssertionError",
+        "type_error": "TypeError",
+        "import_error": "ImportError",
+        "module_not_found": "ModuleNotFoundError",
+        "syntax_error": "SyntaxError",
+        "missing_output": "Expecting value",
+    }
+    return [symptom for symptom, marker in markers.items() if marker in text]
+
+
 def summarize_results(results: list[RunResult]) -> dict[str, Any]:
     by_agent: dict[str, dict[str, Any]] = {}
     orchestration_quality: dict[str, dict[str, Any]] = {}
     artifact_quality: dict[str, dict[str, Any]] = {}
     failure_reasons: dict[str, int] = {}
     failed_check_types: dict[str, int] = {}
+    failed_check_symptom_counts: dict[str, int] = {}
     for result in results:
         item = by_agent.setdefault(result.agent, {"total": 0, "passed": 0, "failed": 0, "duration_sec": 0.0})
         item["total"] += 1
@@ -81,6 +96,8 @@ def summarize_results(results: list[RunResult]) -> dict[str, Any]:
                 if isinstance(check, dict) and check.get("ok") is not True:
                     check_type = str(check.get("type") or "unknown")
                     failed_check_types[check_type] = failed_check_types.get(check_type, 0) + 1
+                    for symptom in failed_check_symptoms(check):
+                        failed_check_symptom_counts[symptom] = failed_check_symptom_counts.get(symptom, 0) + 1
         if isinstance(result.orchestration, dict) and result.orchestration.get("style") == "artifact_reads_before_writes":
             quality = artifact_quality.setdefault(
                 result.agent,
@@ -136,6 +153,7 @@ def summarize_results(results: list[RunResult]) -> dict[str, Any]:
         "artifact_quality": artifact_quality,
         "failure_reasons": dict(sorted(failure_reasons.items(), key=lambda item: (-item[1], item[0]))),
         "failed_check_types": dict(sorted(failed_check_types.items(), key=lambda item: (-item[1], item[0]))),
+        "failed_check_symptoms": dict(sorted(failed_check_symptom_counts.items(), key=lambda item: (-item[1], item[0]))),
     }
 
 
