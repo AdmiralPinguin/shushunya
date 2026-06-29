@@ -153,6 +153,80 @@ def check_worker_services(errors: list[str]) -> int:
     return len(services)
 
 
+def require_string_list(value: Any, message: str, errors: list[str], *, allow_empty: bool = False) -> None:
+    valid = isinstance(value, list) and all(isinstance(item, str) and item.strip() for item in value)
+    if valid and (allow_empty or bool(value)):
+        return
+    errors.append(message)
+
+
+def check_source_playbooks(errors: list[str]) -> int:
+    playbook_dir = REPO_ROOT / "Mechanicum" / "Lexmechanic" / "playbooks"
+    count = 0
+    seen_names: set[str] = set()
+    for path in sorted(playbook_dir.glob("*.json")):
+        count += 1
+        playbook = load_json(path)
+        name = str(playbook.get("name") or path.stem)
+        require(name not in seen_names, f"source playbook duplicate name: {name}", errors)
+        seen_names.add(name)
+        require(bool(str(playbook.get("topic") or "").strip()), f"source playbook {path.name} missing topic", errors)
+        require_string_list(playbook.get("match_terms"), f"source playbook {path.name} missing match_terms", errors)
+        require_string_list(playbook.get("search_queries"), f"source playbook {path.name} missing search_queries", errors)
+        sources = playbook.get("sources")
+        require(isinstance(sources, list) and bool(sources), f"source playbook {path.name} missing sources", errors)
+        if not isinstance(sources, list):
+            continue
+        seen_titles: set[str] = set()
+        for index, source in enumerate(sources):
+            require(isinstance(source, dict), f"source playbook {path.name} source #{index} is not an object", errors)
+            if not isinstance(source, dict):
+                continue
+            title = str(source.get("title") or "").strip()
+            require(bool(title), f"source playbook {path.name} source #{index} missing title", errors)
+            if title:
+                require(title not in seen_titles, f"source playbook {path.name} duplicate source title: {title}", errors)
+                seen_titles.add(title)
+            require(bool(str(source.get("type") or "").strip()), f"source playbook {path.name} source {title or index} missing type", errors)
+            require(bool(str(source.get("source_class") or "").strip()), f"source playbook {path.name} source {title or index} missing source_class", errors)
+            require(bool(str(source.get("expected_use") or "").strip()), f"source playbook {path.name} source {title or index} missing expected_use", errors)
+    return count
+
+
+def check_event_playbooks(errors: list[str]) -> int:
+    playbook_dir = REPO_ROOT / "Mechanicum" / "NoosphericExtractor" / "playbooks"
+    count = 0
+    for path in sorted(playbook_dir.glob("*.json")):
+        count += 1
+        playbook = load_json(path)
+        require_string_list(playbook.get("match_terms"), f"event playbook {path.name} missing match_terms", errors)
+        events = playbook.get("events")
+        require(isinstance(events, list) and bool(events), f"event playbook {path.name} missing events", errors)
+        if not isinstance(events, list):
+            continue
+        seen_event_ids: set[str] = set()
+        required_count = 0
+        for index, event in enumerate(events):
+            require(isinstance(event, dict), f"event playbook {path.name} event #{index} is not an object", errors)
+            if not isinstance(event, dict):
+                continue
+            event_id = str(event.get("event_id") or "").strip()
+            require(bool(event_id), f"event playbook {path.name} event #{index} missing event_id", errors)
+            if event_id:
+                require(event_id not in seen_event_ids, f"event playbook {path.name} duplicate event_id: {event_id}", errors)
+                seen_event_ids.add(event_id)
+            for field in ("summary", "phase", "confidence"):
+                require(bool(str(event.get(field) or "").strip()), f"event playbook {path.name} event {event_id or index} missing {field}", errors)
+            require_string_list(event.get("source_refs"), f"event playbook {path.name} event {event_id or index} missing source_refs", errors)
+            require_string_list(event.get("evidence_markers"), f"event playbook {path.name} event {event_id or index} missing evidence_markers", errors)
+            if event.get("required_for_review"):
+                required_count += 1
+                require(bool(str(event.get("review_label") or "").strip()), f"event playbook {path.name} required event {event_id or index} missing review_label", errors)
+                require_string_list(event.get("draft_markers"), f"event playbook {path.name} required event {event_id or index} missing draft_markers", errors)
+        require(required_count > 0, f"event playbook {path.name} has no required_for_review events", errors)
+    return count
+
+
 def run_doctor() -> dict[str, Any]:
     errors: list[str] = []
     checks = [
@@ -160,6 +234,8 @@ def run_doctor() -> dict[str, Any]:
         ("port_registry", check_port_registry),
         ("worker_manifests", check_worker_manifests),
         ("worker_services", check_worker_services),
+        ("source_playbooks", check_source_playbooks),
+        ("event_playbooks", check_event_playbooks),
     ]
     counts: dict[str, int] = {}
     for name, check in checks:
