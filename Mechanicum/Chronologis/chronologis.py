@@ -48,11 +48,14 @@ def build_timeline(notes: dict[str, Any]) -> dict[str, Any]:
                 "event_id": event.get("event_id"),
                 "phase": event.get("phase"),
                 "summary": event.get("summary"),
+                "narrative_ru": event.get("narrative_ru", ""),
                 "confidence": event.get("confidence"),
                 "source_refs": event.get("source_refs", []),
                 "source_class": event.get("source_class", ""),
                 "extraction_method": event.get("extraction_method", ""),
                 "evidence_status": event.get("evidence_status", ""),
+                "required_for_review": bool(event.get("required_for_review")),
+                "review_label": event.get("review_label", ""),
                 "evidence_lead": str(event.get("extraction_method") or "") == "generic_snapshot_lead",
             }
         )

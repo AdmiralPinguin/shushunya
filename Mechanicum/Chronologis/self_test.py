@@ -18,7 +18,16 @@ def main() -> int:
         "summary": {"source_coverage_ready": True},
         "events": [
             {"event_id": "kharn_burns_shelters", "phase": "betrayal", "summary": "burns shelters", "confidence": "high", "evidence_status": "snapshot_matched"},
-            {"event_id": "moon_parley", "phase": "parley", "summary": "moon parley", "confidence": "medium", "evidence_status": "missing_snapshot_evidence"},
+            {
+                "event_id": "moon_parley",
+                "phase": "parley",
+                "summary": "moon parley",
+                "narrative_ru": "Попытка переговоров на луне Скалатракса.",
+                "confidence": "medium",
+                "evidence_status": "missing_snapshot_evidence",
+                "required_for_review": True,
+                "review_label": "moon parley",
+            },
             {"event_id": "ec_claim_system", "phase": "prelude", "summary": "claim", "confidence": "high"},
             {"event_id": "legion_fractures", "phase": "aftermath_boundary", "summary": "fractures", "confidence": "high"},
             {
@@ -45,6 +54,9 @@ def main() -> int:
             raise AssertionError(f"timeline order is wrong: {ordered}")
         if not data["contradictions"]:
             raise AssertionError("timeline should flag aftermath boundary")
+        parley = data["timeline"][1]
+        if "луне Скалатракса" not in parley.get("narrative_ru", "") or parley.get("review_label") != "moon parley":
+            raise AssertionError(f"timeline should preserve playbook narrative and review metadata: {parley}")
         lead = data["timeline"][-1]
         if not lead.get("evidence_lead") or lead.get("extraction_method") != "generic_snapshot_lead":
             raise AssertionError(f"timeline should preserve generic evidence lead metadata: {lead}")
