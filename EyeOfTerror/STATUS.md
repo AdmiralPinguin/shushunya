@@ -358,6 +358,8 @@
   revision plan exists.
 - Warmaster validates required revision plans against the run dispatch package
   and disables revision actions when the plan is invalid.
+- Warmaster self-tests cover corpus-first revision plans, including
+  `CorpusIngestor` through downstream reconstruction and final review steps.
 - Warmaster action hints disable ordinary start/execute for interrupted runs so
   clients prefer resume controls.
 - Warmaster action hints expose run preflight controls for local and HTTP
@@ -404,6 +406,9 @@
   `revision_policy.final_steps` instead of relying on hardcoded step names.
 - Warmaster enforces `revision_policy.requires_downstream_rerun`, so a
   revision of an upstream step cannot skip stale dependent artifacts.
+- `FabricatorFinalis` normalizes final revision plans by merging duplicate
+  step ids, preserving multiple reasons/sources, and sorting steps in pipeline
+  order before Warmaster executes them.
 - Shared local and HTTP worker preflights validate worker-facing
   `quality_expectations.revision_policy` fields before dispatch.
 - HTTP execution preflights all worker `/health` endpoints before running steps
@@ -477,8 +482,14 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   timeline summaries.
 - `ScriptoriumDaemon` exposes source-coverage readiness in the reader-facing
   reconstruction and machine-readable coverage report.
+- `ScriptoriumDaemon` matches evidence source names fuzzily against source-map
+  titles and local corpus paths, so local primary files still show direct
+  evidence coverage when filenames differ from canonical book titles.
 - `ReductorVerifier` and `FabricatorFinalis` carry evidence-lead risk metrics
   into critic reports and final manifests.
+- `ReductorVerifier` tracks primary-evidence source counts for comprehensive
+  tasks, blocking approval when all direct evidence comes from secondary
+  summaries instead of primary/local/published sources.
 - `FabricatorFinalis` writes explicit readiness checks for critic approval,
   package completeness, quality expectations, and source coverage.
 - `FabricatorFinalis` blocks final readiness when critic metrics explicitly
@@ -489,6 +500,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `FabricatorFinalis` also blocks final readiness when required event playbook
   events are absent from the timeline, and emits a downstream revision plan for
   extraction, timeline, and draft regeneration.
+- `FabricatorFinalis` also blocks final readiness when required events lack
+  direct evidence snapshots, even if their event ids are present in the
+  timeline and a critic report incorrectly claims approval.
 - Warmaster compact final-manifest summaries expose readiness checks,
   event-review coverage, corpus requirements, and warning/blocker/file counts
   for client displays.
