@@ -20,12 +20,53 @@ class WebConfig(Protocol):
 MAX_WEB_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_WEB_BYTES", "200000"))
 BRAVE_SEARCH_API_KEY = os.environ.get("SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY", "").strip()
 SEARXNG_URL = os.environ.get("SHUSHUNYA_AGENT_SEARXNG_URL", "").strip().rstrip("/")
-SEARCH_PROVIDERS = os.environ.get("SHUSHUNYA_AGENT_SEARCH_PROVIDERS", "searxng,marginalia,wikipedia,brave")
+SEARCH_PROVIDERS = os.environ.get("SHUSHUNYA_AGENT_SEARCH_PROVIDERS", "searxng,marginalia,duckduckgo,wikipedia,brave")
 WEB_USER_AGENT = os.environ.get(
     "SHUSHUNYA_AGENT_WEB_USER_AGENT",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
 )
 WEB_ACCEPT_LANGUAGE = os.environ.get("SHUSHUNYA_AGENT_WEB_ACCEPT_LANGUAGE", "ru,en;q=0.9")
+
+
+def duckduckgo_result_url(raw_url: str) -> str:
+    parsed = urlparse(raw_url)
+    if (not parsed.netloc or parsed.netloc.endswith("duckduckgo.com")) and parsed.path.startswith("/l/"):
+        target = parse_qs(parsed.query).get("uddg", [""])[0]
+        return target or raw_url
+    if raw_url.startswith("//"):
+        return "https:" + raw_url
+    if raw_url.startswith("/"):
+        return "https://duckduckgo.com" + raw_url
+    return raw_url
+
+
+class DuckDuckGoLiteParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.results: list[dict[str, str]] = []
+        self._active_link: str = ""
+        self._active_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attrs_dict = {key: value or "" for key, value in attrs}
+        if tag == "a" and "result-link" in attrs_dict.get("class", ""):
+            self._active_link = attrs_dict.get("href", "")
+            self._active_text = []
+
+    def handle_data(self, data: str) -> None:
+        if self._active_link:
+            self._active_text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag != "a" or not self._active_link:
+            return
+        title = " ".join(" ".join(self._active_text).split())
+        url = duckduckgo_result_url(html.unescape(self._active_link))
+        cleaned = clean_search_result(title, url, "")
+        if cleaned:
+            self.results.append(cleaned)
+        self._active_link = ""
+        self._active_text = []
 
 
 def read_limited_response(response: Any, max_bytes: int) -> tuple[bytes, bool]:
@@ -288,11 +329,13 @@ def configured_search_providers() -> list[str]:
             continue
         if name == "brave_api":
             name = "brave"
-        if name not in {"searxng", "marginalia", "wikipedia", "brave"}:
+        if name in {"ddg", "duckduckgo_lite"}:
+            name = "duckduckgo"
+        if name not in {"searxng", "marginalia", "duckduckgo", "wikipedia", "brave"}:
             continue
         if name not in providers:
             providers.append(name)
-    return providers or ["searxng", "marginalia", "wikipedia", "brave"]
+    return providers or ["searxng", "marginalia", "duckduckgo", "wikipedia", "brave"]
 
 
 def web_search_brave(query: str, limit: int) -> dict[str, Any]:
@@ -351,6 +394,27 @@ def web_search_marginalia(query: str, limit: int) -> dict[str, Any]:
         if cleaned:
             results.append(cleaned)
     return {"ok": True, "provider": "marginalia", "results": dedupe_results(results, limit), "truncated": truncated}
+
+
+def web_search_duckduckgo(query: str, limit: int) -> dict[str, Any]:
+    url = "https://lite.duckduckgo.com/lite/?" + urlencode({"q": query})
+    validate_public_url(url)
+    request = Request(
+        url,
+        headers={
+            "User-Agent": WEB_USER_AGENT,
+            "Accept": "text/html",
+            "Accept-Language": WEB_ACCEPT_LANGUAGE,
+        },
+    )
+    with build_opener(SafeRedirectHandler).open(request, timeout=25) as response:
+        final_url = response.geturl()
+        validate_public_url(final_url)
+        data, truncated = read_limited_response(response, 600000)
+        text, _ = decode_web_text(data, response.headers.get_content_charset())
+    parser = DuckDuckGoLiteParser()
+    parser.feed(text)
+    return {"ok": True, "provider": "duckduckgo", "results": dedupe_results(parser.results, limit), "truncated": truncated}
 
 
 def web_search_wikipedia(query: str, limit: int) -> dict[str, Any]:
@@ -464,6 +528,7 @@ def web_search(config: WebConfig, query: str, limit: int | None = None) -> dict[
     provider_map: dict[str, Callable[[str, int], dict[str, Any]]] = {
         "searxng": web_search_searxng,
         "marginalia": web_search_marginalia,
+        "duckduckgo": web_search_duckduckgo,
         "wikipedia": web_search_wikipedia,
         "brave": web_search_brave,
     }
