@@ -111,6 +111,20 @@ def quality_expectation_errors(request: dict[str, Any], worker_name: str) -> lis
         values = step_quality.get(field_name)
         if not isinstance(values, list) or not values or any(not isinstance(item, str) or not item for item in values):
             errors.append({"field": field_name, "error": "must be a non-empty list of strings"})
+    revision_policy = expectations.get("revision_policy") if isinstance(expectations.get("revision_policy"), dict) else {}
+    if revision_policy:
+        if not isinstance(revision_policy.get("source_step"), str) or not revision_policy.get("source_step"):
+            errors.append({"field": "revision_policy.source_step", "error": "must be a non-empty string"})
+        for field_name in ("final_steps", "allowed_steps"):
+            values = revision_policy.get(field_name)
+            if not isinstance(values, list) or not values or any(not isinstance(item, str) or not item for item in values):
+                errors.append({"field": f"revision_policy.{field_name}", "error": "must be a non-empty list of strings"})
+        allowed_steps = revision_policy.get("allowed_steps") if isinstance(revision_policy.get("allowed_steps"), list) else []
+        if step_id and allowed_steps and step_id not in allowed_steps:
+            errors.append({"field": "revision_policy.allowed_steps", "error": f"does not include current step {step_id}"})
+        for field_name in ("requires_downstream_rerun", "requires_focused_context", "requires_gap_disclosure"):
+            if not isinstance(revision_policy.get(field_name), bool):
+                errors.append({"field": f"revision_policy.{field_name}", "error": "must be a boolean"})
     return errors
 
 

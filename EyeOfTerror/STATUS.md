@@ -404,6 +404,8 @@
   `revision_policy.final_steps` instead of relying on hardcoded step names.
 - Warmaster enforces `revision_policy.requires_downstream_rerun`, so a
   revision of an upstream step cannot skip stale dependent artifacts.
+- Shared local and HTTP worker preflights validate worker-facing
+  `quality_expectations.revision_policy` fields before dispatch.
 - HTTP execution preflights all worker `/health` endpoints before running steps
   and rejects worker identity mismatches before dispatch.
 - Warmaster Gateway can mark stale `running`/`cancelling` ledgers as `interrupted` after a process restart.

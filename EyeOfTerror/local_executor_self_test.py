@@ -135,7 +135,15 @@ def main() -> int:
                             "checks": ["check"],
                             "blockers": ["blocker"],
                             "revision_targets": ["fact_extraction"],
-                        }
+                        },
+                        "revision_policy": {
+                            "source_step": "critic_review",
+                            "final_steps": ["critic_review", "finalize"],
+                            "allowed_steps": ["critic_review", "finalize"],
+                            "requires_downstream_rerun": True,
+                            "requires_focused_context": True,
+                            "requires_gap_disclosure": True,
+                        },
                     },
                 },
             },
@@ -145,6 +153,10 @@ def main() -> int:
             bad_quality_summary.get("ok")
             or bad_quality_summary.get("steps", [{}])[0].get("payload", {}).get("error") != "worker request preflight failed"
             or not bad_quality_summary.get("steps", [{}])[0].get("payload", {}).get("quality_expectation_errors")
+            or not any(
+                error.get("field") == "revision_policy.allowed_steps"
+                for error in bad_quality_summary.get("steps", [{}])[0].get("payload", {}).get("quality_expectation_errors", [])
+            )
         ):
             raise AssertionError(f"local executor did not reject bad quality expectations: {bad_quality_summary}")
         corrupt_dispatch_run = root / "corrupt-dispatch-run"

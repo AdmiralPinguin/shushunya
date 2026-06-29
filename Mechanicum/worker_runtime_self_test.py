@@ -149,7 +149,15 @@ def main() -> int:
                                     "checks": ["check"],
                                     "blockers": ["blocker"],
                                     "revision_targets": ["fact_extraction"],
-                                }
+                                },
+                                "revision_policy": {
+                                    "source_step": "critic_review",
+                                    "final_steps": ["critic_review", "finalize"],
+                                    "allowed_steps": ["critic_review", "finalize"],
+                                    "requires_downstream_rerun": True,
+                                    "requires_focused_context": True,
+                                    "requires_gap_disclosure": True,
+                                },
                             },
                         }
                     },
@@ -161,6 +169,7 @@ def main() -> int:
                 if (
                     bad_quality.get("error") != "worker request preflight failed"
                     or not bad_quality.get("quality_expectation_errors")
+                    or not any(error.get("field") == "revision_policy.allowed_steps" for error in bad_quality.get("quality_expectation_errors", []))
                     or bad_quality.get("display", {}).get("headline") != "NoosphericExtractor task failed"
                 ):
                     raise AssertionError(f"bad quality expectation response: {bad_quality}")
