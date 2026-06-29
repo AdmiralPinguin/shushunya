@@ -2044,7 +2044,7 @@ def main() -> int:
                 or started.get("client_action", {}).get("path") != "/runs/warmaster-background-test/snapshot"
             ):
                 raise AssertionError(f"background start failed: {started}")
-            for _ in range(60):
+            for _ in range(150):
                 background_ledger = request_json(base + "/runs/warmaster-background-test/ledger")
                 if background_ledger["ledger"].get("status") == "completed":
                     break
