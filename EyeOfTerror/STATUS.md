@@ -440,6 +440,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   into critic reports and final manifests.
 - `ReductorVerifier` preserves worker `quality_expectations` in critic reports
   and blocks approval when they contradict the current step request.
+- `ReductorVerifier` performs generic direct-event coverage checks from
+  extracted notes to timeline entries, in addition to task-class playbook checks.
 - `FabricatorFinalis` preserves worker `quality_expectations` in final manifests
   and blocks final readiness when they contradict the final step request.
 - `AuspexBrowser` performs guarded HTTP text fetches and marks low-text

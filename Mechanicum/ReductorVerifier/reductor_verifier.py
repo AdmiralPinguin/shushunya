@@ -181,6 +181,10 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
             add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
+        elif "timeline event lacks extracted direct-event note" in lowered:
+            add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
+            add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
         elif "draft does not visibly cover" in lowered or "coverage gaps clearly" in lowered:
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
         elif "lacks fetched source evidence" in lowered:
@@ -277,6 +281,14 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
     }
     findings: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
+    note_event_ids = set(note_by_event_id)
+    for event_id in sorted(note_event_ids - timeline_event_ids):
+        findings.append({"severity": "blocker", "message": f"Missing required direct event in timeline: {event_id}"})
+    for event_id in sorted(timeline_event_ids - note_event_ids):
+        findings.append({"severity": "blocker", "message": f"Timeline event lacks extracted direct-event note: {event_id}"})
+    for event_id, note in sorted(note_by_event_id.items()):
+        if not isinstance(note, dict) or not note.get("evidence_snapshots"):
+            findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {event_id}"})
     for event_id, label in REQUIRED_DIRECT_EVENT_IDS.items():
         if event_id not in timeline_event_ids:
             findings.append({"severity": "blocker", "message": f"Missing required direct event in timeline: {label}"})

@@ -106,6 +106,26 @@ def main() -> int:
         report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
         if report.get("approved") or "expected_artifacts do not match" not in json.dumps(report):
             raise AssertionError(f"bad quality expectations should block approval: {report}")
+        write_json(
+            base / "direct_event_notes.json",
+            {
+                "events": [
+                    {"event_id": item, "evidence_snapshots": [{"source_title": "Lexicanum", "matched_markers": item}]}
+                    for item in events
+                ]
+                + [{"event_id": "generic_extra_event", "evidence_snapshots": [{"source_title": "Lexicanum"}]}],
+                "gaps": [],
+            },
+        )
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on generic event coverage pass: {result}")
+        report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
+        if report.get("approved") or "generic_extra_event" not in json.dumps(report):
+            raise AssertionError(f"generic direct-event coverage should block approval: {report}")
+        revision_workers = {step.get("worker") for step in report.get("revision_plan", {}).get("steps", [])}
+        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
+            raise AssertionError(f"generic direct-event coverage did not produce upstream revision plan: {report}")
         write_json(base / "timeline.json", {"timeline": [{"event_id": "moon_parley"}], "gaps": []})
         result = run(request, root)
         if not result.get("ok"):
