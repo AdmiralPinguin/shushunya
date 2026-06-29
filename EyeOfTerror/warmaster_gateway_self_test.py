@@ -1201,6 +1201,7 @@ def main() -> int:
                 or run_summary.get("summary", {}).get("progress", {}).get("waiting_steps") != 6
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("worker") != "Lexmechanic"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("status") != "pending"
+                or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("quality_hints", {}).get("check_count", 0) < 1
             ):
                 raise AssertionError(f"bad run summary: {run_summary}")
             fact_step = next(

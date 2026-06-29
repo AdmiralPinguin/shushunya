@@ -59,6 +59,19 @@ def quality_expectations_for_step(oversight: dict[str, Any] | None, step_id: str
     return expectations
 
 
+def quality_hints_for_request(request: dict[str, Any]) -> dict[str, Any]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
+    checks = step_quality.get("checks") if isinstance(step_quality.get("checks"), list) else []
+    blockers = step_quality.get("blockers") if isinstance(step_quality.get("blockers"), list) else []
+    revision_targets = step_quality.get("revision_targets") if isinstance(step_quality.get("revision_targets"), list) else []
+    return {
+        "check_count": len(checks),
+        "blocker_count": len(blockers),
+        "revision_targets": revision_targets,
+    }
+
+
 def build_dispatch_packets(contract: TaskContract, oversight: dict[str, Any] | None = None) -> list[DispatchPacket]:
     packets: list[DispatchPacket] = []
     contract_payload = contract.to_dict()
@@ -124,6 +137,7 @@ def pipeline_status(contract: TaskContract, packets: list[DispatchPacket]) -> di
                 "depends_on": packet.depends_on,
                 "input_artifacts": packet.input_artifacts,
                 "expected_artifacts": packet.expected_artifacts,
+                "quality_hints": quality_hints_for_request(packet.request),
             }
             for packet in packets
         ],

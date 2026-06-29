@@ -171,6 +171,8 @@
 - Run progress separates waiting steps from ready and dependency-blocked steps.
 - Run progress step states expose preserved HTTP worker `worker_view` state
   when ledger step records include it.
+- Run progress step states expose compact governor `quality_hints` from
+  oversight-backed dispatch packets.
 - Warmaster Gateway can prepare tasks through the local governor path or through
   the active governor's HTTP service.
 - Brigade launcher derives Warmaster and Iskandar service ports from

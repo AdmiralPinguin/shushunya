@@ -182,6 +182,12 @@ def main() -> int:
         status = write_pipeline_run(contract, Path(temp_dir), oversight=oversight)
         if not status["ok"]:
             raise AssertionError(f"pipeline status failed: {status}")
+        fact_status = next((item for item in status.get("steps", []) if item.get("step_id") == "fact_extraction"), {})
+        if (
+            fact_status.get("quality_hints", {}).get("check_count", 0) < 1
+            or "critic_review" not in fact_status.get("quality_hints", {}).get("revision_targets", [])
+        ):
+            raise AssertionError(f"pipeline status did not expose quality hints: {status}")
         if not status.get("oversight_path"):
             raise AssertionError(f"pipeline status did not expose oversight path: {status}")
         expected_files = [

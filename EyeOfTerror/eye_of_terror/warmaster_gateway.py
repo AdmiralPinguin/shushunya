@@ -851,6 +851,7 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
         recorded_status = str(recorded.get("status") or "")
         input_artifacts = planned.get("input_artifacts") if isinstance(planned.get("input_artifacts"), list) else []
         expected_artifacts = planned.get("expected_artifacts") if isinstance(planned.get("expected_artifacts"), list) else []
+        quality_hints = planned.get("quality_hints") if isinstance(planned.get("quality_hints"), dict) else {}
         artifacts = recorded.get("artifacts") if isinstance(recorded.get("artifacts"), list) else []
         depends_on = planned.get("depends_on") if isinstance(planned.get("depends_on"), list) else []
         details = recorded.get("details") if isinstance(recorded.get("details"), dict) else {}
@@ -885,6 +886,7 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
                 "input_artifact_status": [sandbox_artifact_file_status(workspace_root, str(path)) for path in input_artifacts],
                 "expected_artifacts": expected_artifacts,
                 "expected_artifact_status": [sandbox_artifact_file_status(workspace_root, str(path)) for path in expected_artifacts],
+                "quality_hints": quality_hints,
                 "artifacts": artifacts,
                 "artifact_status": [sandbox_artifact_file_status(workspace_root, str(path)) for path in artifacts],
                 "summary": str(recorded.get("summary") or ""),
