@@ -5,6 +5,7 @@ import json
 import tempfile
 from pathlib import Path
 
+import lexmechanic
 from lexmechanic import classify_discovered_result, run, source_map_for_contract
 
 
@@ -205,6 +206,36 @@ def main() -> int:
         noisy_titles = {source.get("title") for source in noisy.get("sources", [])}
         if "Chaos Artefacts" in noisy_titles or "Black Library - Weakness of Others, The (eShort)" not in noisy_titles:
             raise AssertionError(f"playbook live discovery should filter irrelevant same-domain noise: {noisy.get('sources')}")
+        old_cache_dir = lexmechanic.SOURCE_CACHE_DIR
+        cache_dir = Path(temp_dir) / "cache"
+        lexmechanic.SOURCE_CACHE_DIR = str(cache_dir)
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            (cache_dir / "skalathrax.json").write_text(
+                json.dumps(
+                    {
+                        "topic": "Skalathrax",
+                        "sources": [
+                            {
+                                "title": "Cached Reddit Excerpt",
+                                "url": "https://www.reddit.com/r/40kLore/comments/example/cached/",
+                                "source_class": "community_excerpt",
+                                "type": "discussion_excerpt",
+                                "discovery_method": "live_search",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cached = source_map_for_contract({"goal": "Собери события Скалатракса"}, searcher=False)
+            cached_source = next((source for source in cached.get("sources", []) if source.get("title") == "Cached Reddit Excerpt"), {})
+            if cached_source.get("discovery_method") != "cached_live_search":
+                raise AssertionError(f"cached live sources should be marked as cached: {cached.get('sources')}")
+            if cached.get("source_coverage", {}).get("live_candidate_count", 0) < 1:
+                raise AssertionError(f"cached live sources should count toward live coverage: {cached.get('source_coverage')}")
+        finally:
+            lexmechanic.SOURCE_CACHE_DIR = old_cache_dir
     print("[ok] Lexmechanic source map")
     return 0
 

@@ -33,6 +33,7 @@ def load_playbook(name: str) -> dict[str, Any]:
 
 SOURCE_PLAYBOOKS = [load_playbook("skalathrax_sources.json")]
 LIVE_DISCOVERY_ENABLED = os.environ.get("LEXMECHANIC_LIVE_DISCOVERY", "0").strip().lower() in {"1", "true", "yes", "on"}
+SOURCE_CACHE_DIR = os.environ.get("LEXMECHANIC_SOURCE_CACHE_DIR", "").strip()
 STRONG_COMPREHENSIVE_GOAL_TERMS = [
     "максимально полно",
     "до последней",
@@ -66,6 +67,50 @@ def matching_playbooks(goal: str) -> list[dict[str, Any]]:
         if any(term in lowered for term in terms):
             matches.append(playbook)
     return matches
+
+
+def cache_key(topic: str) -> str:
+    key = re.sub(r"[^a-zа-я0-9]+", "-", topic.lower()).strip("-")
+    return key or "default"
+
+
+def source_cache_path(topic: str) -> Path | None:
+    if not SOURCE_CACHE_DIR:
+        return None
+    return Path(SOURCE_CACHE_DIR) / f"{cache_key(topic)}.json"
+
+
+def cached_sources_for_topic(topic: str) -> list[dict[str, Any]]:
+    path = source_cache_path(topic)
+    if not path or not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    sources = payload.get("sources") if isinstance(payload, dict) else []
+    source_items = sources if isinstance(sources, list) else []
+    result: list[dict[str, Any]] = []
+    for source in source_items:
+        if not isinstance(source, dict):
+            continue
+        cached = dict(source)
+        if cached.get("discovery_method") == "live_search":
+            cached["discovery_method"] = "cached_live_search"
+        result.append(cached)
+    return result
+
+
+def write_source_cache(topic: str, sources: list[dict[str, Any]]) -> None:
+    path = source_cache_path(topic)
+    if not path:
+        return
+    cacheable = [source for source in sources if isinstance(source, dict) and source.get("url")]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"topic": topic, "sources": cacheable}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def dedupe_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -554,7 +599,7 @@ def source_coverage(sources: list[dict[str, Any]], discovery_results: list[dict[
     has_primary = any(kind == "published_primary" or "primary" in source_class for kind, source_class in zip(source_types, source_classes))
     has_official = any(kind in {"published_primary", "official_catalog", "official_article", "official_secondary"} for kind in source_types)
     has_secondary = any(kind in {"curated_wiki", "wiki", "community_wiki"} for kind in source_types)
-    live_count = sum(1 for source in sources if source.get("discovery_method") == "live_search")
+    live_count = sum(1 for source in sources if source.get("discovery_method") in {"live_search", "cached_live_search"})
     return {
         "source_count": len(sources),
         "matched_playbook_count": len(playbooks),
@@ -583,6 +628,7 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
     )
     depth_profile = depth_profile_for_goal(goal, playbooks)
     rounds = search_rounds(topic, playbooks, depth_profile)
+    cached_sources = cached_sources_for_topic(topic)
     search_queries = [query for round_plan in rounds for query in round_plan.get("queries", []) if isinstance(query, str)]
     coverage_gaps = [
         str(gap)
@@ -618,7 +664,7 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
             if isinstance(source, dict) and source.get("title")
         ]
     live_candidates = classified_live_sources(discovery_results, relevance_terms)
-    sources = rank_sources(dedupe_sources(sources + live_candidates))
+    sources = rank_sources(dedupe_sources(sources + cached_sources + live_candidates))
     coverage = source_coverage(sources, discovery_results, playbooks)
     if sources and not coverage["ready_for_extraction"]:
         coverage_gaps.append("Source set is not extraction-ready: it needs both official/primary evidence and secondary cross-checking.")
@@ -632,6 +678,12 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
         "discovery_status": discovery_status,
         "discovery_results": discovery_results,
         "live_source_candidates": live_candidates,
+        "cached_source_candidates": cached_sources,
+        "source_cache": {
+            "enabled": bool(source_cache_path(topic)),
+            "cached_source_count": len(cached_sources),
+            "path": str(source_cache_path(topic) or ""),
+        },
         "source_coverage": coverage,
         "matched_playbooks": [str(playbook.get("name") or playbook.get("match_terms", ["unknown"])[0]) for playbook in playbooks],
         "coverage_gaps": coverage_gaps,
@@ -658,6 +710,7 @@ def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None
     if selected_searcher is False:
         selected_searcher = None
     source_map = source_map_for_contract(contract, selected_searcher)
+    write_source_cache(str(source_map.get("topic") or ""), source_map.get("sources", []))
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(source_map, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
