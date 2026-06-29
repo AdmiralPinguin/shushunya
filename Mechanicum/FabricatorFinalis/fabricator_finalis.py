@@ -27,6 +27,17 @@ ARTIFACT_REWORK_TARGETS = {
     "critic_report.json": ("critic_review", "ReductorVerifier"),
 }
 
+REVISION_STEP_ORDER = [
+    "corpus_ingestion",
+    "source_discovery",
+    "source_acquisition",
+    "fact_extraction",
+    "timeline",
+    "draft_reconstruction",
+    "critic_review",
+    "finalize",
+]
+
 
 def sandbox_path(workspace_root: Path, path: str) -> Path:
     if not path.startswith("/work/"):
@@ -122,6 +133,14 @@ def add_unique_revision_step(steps: list[dict[str, Any]], step_id: str, worker: 
             "priority": "blocker",
         }
     )
+
+
+def sort_revision_plan(revision_plan: dict[str, Any]) -> dict[str, Any]:
+    raw_steps = revision_plan.get("steps") if isinstance(revision_plan.get("steps"), list) else []
+    order = {step_id: index for index, step_id in enumerate(REVISION_STEP_ORDER)}
+    steps = [item for item in raw_steps if isinstance(item, dict)]
+    steps = sorted(steps, key=lambda item: (order.get(str(item.get("step_id") or ""), len(order)), str(item.get("step_id") or "")))
+    return {"required": bool(steps) or bool(revision_plan.get("required")), "steps": steps}
 
 
 def add_required_event_revision_steps(revision_plan: dict[str, Any], event_review: dict[str, Any]) -> dict[str, Any]:
@@ -270,6 +289,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
                 }
             ],
         }
+    revision_plan = sort_revision_plan(revision_plan)
     return {
         "status": status,
         "approved": approved,

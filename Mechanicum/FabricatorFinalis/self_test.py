@@ -123,6 +123,8 @@ def main() -> int:
         revision_step_ids = [step.get("step_id") for step in revision_steps]
         if len(revision_step_ids) != len(set(revision_step_ids)):
             raise AssertionError(f"final manifest revision plan should not duplicate step ids: {manifest}")
+        if revision_step_ids != ["fact_extraction", "timeline", "draft_reconstruction"]:
+            raise AssertionError(f"final manifest revision plan should follow pipeline order: {manifest}")
         draft_revision = next((step for step in revision_steps if step.get("step_id") == "draft_reconstruction"), {})
         if "critic already requested draft rebuild" not in draft_revision.get("reason", "") or "Missing required direct events" not in draft_revision.get("reason", ""):
             raise AssertionError(f"duplicate draft revision reasons should be merged: {manifest}")
