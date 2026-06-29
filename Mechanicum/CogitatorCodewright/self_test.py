@@ -419,6 +419,13 @@ def main() -> int:
             raise AssertionError("inferred replace task did not mutate the target file")
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"inferred replace final manifest should preserve verification evidence: {final}")
+        source_test_links = final.get("patch_scope_evidence", {}).get("changed_sources_with_linked_tests", [])
+        if not any(
+            item.get("path") == "sample.py" and "test_sample.py" in item.get("tests", [])
+            for item in source_test_links
+            if isinstance(item, dict)
+        ):
+            raise AssertionError(f"final manifest should link changed source files to tests: {final}")
         survey = json.loads((root / "work" / "code" / "repo_survey.json").read_text(encoding="utf-8"))
         if survey.get("role_policy", {}).get("authority") != "read_only_repository_mapping":
             raise AssertionError(f"repository survey should preserve its read-only role policy: {survey}")

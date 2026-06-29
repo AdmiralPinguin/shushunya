@@ -136,6 +136,20 @@ def patch_scope_evidence(workspace_root: Path, output_path: str, changed_files: 
         for item in ranked_files
         if isinstance(item, dict) and item.get("path")
     }
+    test_source_links = repo_map.get("test_source_links") if isinstance(repo_map.get("test_source_links"), list) else []
+    tests_by_source: dict[str, list[str]] = {}
+    sources_by_test: dict[str, list[str]] = {}
+    for link in test_source_links:
+        if not isinstance(link, dict):
+            continue
+        test_path = str(link.get("test_path") or "")
+        source_paths = [str(item) for item in link.get("source_paths", [])] if isinstance(link.get("source_paths"), list) else []
+        if test_path:
+            sources_by_test[test_path] = source_paths[:12]
+        for source_path in source_paths:
+            tests_by_source.setdefault(source_path, [])
+            if test_path and test_path not in tests_by_source[source_path]:
+                tests_by_source[source_path].append(test_path)
     evidence: list[dict[str, Any]] = []
     unmapped: list[str] = []
     for item in changed_files:
@@ -150,14 +164,35 @@ def patch_scope_evidence(workspace_root: Path, output_path: str, changed_files: 
                     "in_repo_map": True,
                     "score": ranked.get("score", 0),
                     "reasons": ranked.get("reasons", []),
+                    "linked_tests": tests_by_source.get(path, [])[:12],
+                    "linked_sources": sources_by_test.get(path, [])[:12],
                 }
             )
         else:
             unmapped.append(path)
-            evidence.append({"path": path, "in_repo_map": False, "score": 0, "reasons": []})
+            evidence.append(
+                {
+                    "path": path,
+                    "in_repo_map": False,
+                    "score": 0,
+                    "reasons": [],
+                    "linked_tests": tests_by_source.get(path, [])[:12],
+                    "linked_sources": sources_by_test.get(path, [])[:12],
+                }
+            )
     return {
         "changed_files_in_repo_map": [item["path"] for item in evidence if item.get("in_repo_map")],
         "changed_files_outside_repo_map": unmapped,
+        "changed_sources_with_linked_tests": [
+            {"path": item["path"], "tests": item.get("linked_tests", [])}
+            for item in evidence
+            if item.get("linked_tests")
+        ],
+        "changed_tests_with_linked_sources": [
+            {"path": item["path"], "sources": item.get("linked_sources", [])}
+            for item in evidence
+            if item.get("linked_sources")
+        ],
         "evidence": evidence,
     }
 
