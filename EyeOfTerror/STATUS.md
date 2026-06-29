@@ -52,6 +52,8 @@
   worker before calling worker code.
 - The shared worker runtime and local executor reject missing or invalid
   `input_artifacts` before calling worker code.
+- The shared worker runtime and local executor reject contradictory
+  `quality_expectations` before calling worker code.
 - EyeOfTerror can execute dispatch packets through HTTP services with `eye_of_terror.http_executor`.
 - The end-to-end HTTP pipeline test reaches a `ready` final manifest for the Skalathrax test task.
 - Local and HTTP executors write `task_ledger.json` with task status, step status, artifacts, and event history.

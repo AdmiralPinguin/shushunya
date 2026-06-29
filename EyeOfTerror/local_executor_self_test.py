@@ -93,6 +93,60 @@ def main() -> int:
         missing_ledger = json.loads((missing_input_run / "task_ledger.json").read_text(encoding="utf-8"))
         if missing_ledger.get("status") != "failed" or missing_ledger.get("steps", [{}])[0].get("status") != "failed":
             raise AssertionError(f"missing input failure was not recorded durably: {missing_ledger}")
+        bad_quality_run = root / "bad-quality-run"
+        bad_quality_dispatch = bad_quality_run / "dispatch"
+        source = root / "bad-quality-work" / "test" / "source_map.json"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(json.dumps({"topic": "test", "sources": []}), encoding="utf-8")
+        write_json(
+            bad_quality_run / "contract.json",
+            {"task_id": "bad-quality-local", "goal": "test bad quality", "assigned_governor": "IskandarKhayon"},
+        )
+        write_json(
+            bad_quality_run / "status.json",
+            {
+                "task_id": "bad-quality-local",
+                "governor": "IskandarKhayon",
+                "steps": [
+                    {
+                        "step_id": "fact_extraction",
+                        "worker": "NoosphericExtractor",
+                        "input_artifacts": ["/work/test/source_map.json"],
+                        "expected_artifacts": ["/work/test/direct_event_notes.json"],
+                    }
+                ],
+                "dispatch_dir": str(bad_quality_dispatch),
+            },
+        )
+        write_json(
+            bad_quality_dispatch / "fact_extraction.json",
+            {
+                "step_id": "fact_extraction",
+                "worker": "NoosphericExtractor",
+                "request": {
+                    "task_id": "bad-quality-local:fact_extraction",
+                    "input_artifacts": ["/work/test/source_map.json"],
+                    "step": {"step_id": "fact_extraction", "expected_artifacts": ["/work/test/direct_event_notes.json"]},
+                    "quality_expectations": {
+                        "step_quality": {
+                            "step_id": "fact_extraction",
+                            "worker": "WrongWorker",
+                            "expected_artifacts": ["/work/test/direct_event_notes.json"],
+                            "checks": ["check"],
+                            "blockers": ["blocker"],
+                            "revision_targets": ["fact_extraction"],
+                        }
+                    },
+                },
+            },
+        )
+        bad_quality_summary = execute_run(repo_root, bad_quality_run, root / "bad-quality-work", timeout_sec=30)
+        if (
+            bad_quality_summary.get("ok")
+            or bad_quality_summary.get("steps", [{}])[0].get("payload", {}).get("error") != "worker request preflight failed"
+            or not bad_quality_summary.get("steps", [{}])[0].get("payload", {}).get("quality_expectation_errors")
+        ):
+            raise AssertionError(f"local executor did not reject bad quality expectations: {bad_quality_summary}")
         corrupt_dispatch_run = root / "corrupt-dispatch-run"
         corrupt_dispatch_dir = corrupt_dispatch_run / "dispatch"
         write_json(

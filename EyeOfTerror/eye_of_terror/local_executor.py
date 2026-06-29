@@ -90,6 +90,30 @@ def input_artifact_errors(request: dict[str, Any], workspace_root: Path) -> list
     return errors
 
 
+def quality_expectation_errors(request: dict[str, Any], worker_name: str) -> list[dict[str, str]]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
+    if not step_quality:
+        return []
+    errors: list[dict[str, str]] = []
+    step = request.get("step") if isinstance(request.get("step"), dict) else {}
+    step_id = str(step.get("step_id") or "")
+    quality_step_id = str(step_quality.get("step_id") or "")
+    if step_id and quality_step_id != step_id:
+        errors.append({"field": "step_id", "error": f"expected {step_id}, got {quality_step_id or 'missing'}"})
+    quality_worker = str(step_quality.get("worker") or "")
+    if quality_worker and quality_worker != worker_name:
+        errors.append({"field": "worker", "error": f"expected {worker_name}, got {quality_worker}"})
+    expected_artifacts = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
+    if step_quality.get("expected_artifacts") != expected_artifacts:
+        errors.append({"field": "expected_artifacts", "error": "quality expectations do not match request.step.expected_artifacts"})
+    for field_name in ("checks", "blockers", "revision_targets"):
+        values = step_quality.get(field_name)
+        if not isinstance(values, list) or not values or any(not isinstance(item, str) or not item for item in values):
+            errors.append({"field": field_name, "error": "must be a non-empty list of strings"})
+    return errors
+
+
 def split_revision_values(value: str, separators: tuple[str, ...]) -> list[str]:
     values = [value.strip()]
     for separator in separators:
@@ -162,14 +186,16 @@ def run_step(
     step_id = str(packet.get("step_id") or dispatch_path.stem)
     request = packet.get("request") if isinstance(packet.get("request"), dict) else packet
     artifact_errors = input_artifact_errors(request, workspace_root)
-    if artifact_errors:
+    quality_errors = quality_expectation_errors(request, worker)
+    if artifact_errors or quality_errors:
         payload = {
             "ok": False,
             "worker": worker,
             "task_id": str(request.get("task_id") or ""),
             "status": "failed",
-            "error": "input artifact preflight failed",
+            "error": "worker request preflight failed" if quality_errors else "input artifact preflight failed",
             "input_artifact_errors": artifact_errors,
+            "quality_expectation_errors": quality_errors,
         }
         return StepResult(step_id, worker, 2, False, payload, "", payload["error"])
     if worker not in WORKER_COMMANDS:

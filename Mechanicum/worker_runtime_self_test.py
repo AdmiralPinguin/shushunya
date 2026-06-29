@@ -133,6 +133,39 @@ def main() -> int:
             wrong_worker_task = request_json(base + "/tasks/wrong-worker-test")
             if wrong_worker_task.get("task", {}).get("status") != "failed":
                 raise AssertionError(f"wrong-worker task did not fail durably: {wrong_worker_task}")
+            try:
+                request_json(
+                    base + "/run",
+                    {
+                        "request": {
+                            "task_id": "bad-quality-test",
+                            "input_artifacts": ["/work/test/source_map.json"],
+                            "step": {"step_id": "fact_extraction", "expected_artifacts": ["/work/test/direct_event_notes.json"]},
+                            "quality_expectations": {
+                                "step_quality": {
+                                    "step_id": "fact_extraction",
+                                    "worker": "WrongWorker",
+                                    "expected_artifacts": ["/work/test/direct_event_notes.json"],
+                                    "checks": ["check"],
+                                    "blockers": ["blocker"],
+                                    "revision_targets": ["fact_extraction"],
+                                }
+                            },
+                        }
+                    },
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                bad_quality = json.loads(exc.read().decode("utf-8"))
+                if (
+                    bad_quality.get("error") != "worker request preflight failed"
+                    or not bad_quality.get("quality_expectation_errors")
+                    or bad_quality.get("display", {}).get("headline") != "NoosphericExtractor task failed"
+                ):
+                    raise AssertionError(f"bad quality expectation response: {bad_quality}")
+            else:
+                raise AssertionError("worker runtime should reject mismatched quality expectations")
             task_list = request_json(base + "/tasks")
             if (
                 not task_list.get("ok")

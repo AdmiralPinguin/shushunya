@@ -111,6 +111,9 @@ required source artifacts before reporting completion.
 an oversight plan. It gives the worker the relevant per-step checks, blockers,
 revision targets, final review requirements, and revision policy before work
 starts, so quality control is not only a post-run inspection.
+The shared worker runtime rejects requests whose `step_quality` targets a
+different worker, a different step, different expected artifacts, or omits
+non-empty checks, blockers, or revision targets.
 
 When `/run` receives a full dispatch packet with a top-level `worker` field,
 the shared worker runtime must reject packets addressed to a different worker
