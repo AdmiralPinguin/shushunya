@@ -130,6 +130,9 @@
   events under `worker_view`.
 - Task routing failures also expose action hints that direct clients toward
   gateway capability inspection instead of attempting run creation.
+- Planned-governor routing failures expose `required_governor` registry
+  metadata so clients can identify the missing coordinator without hardcoded
+  task-class rules.
 - Successful task creation responses expose action hints that recommend run
   preflight before execution.
 - Rejected task creation responses expose action hints for existing-run,

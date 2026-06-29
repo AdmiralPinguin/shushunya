@@ -273,7 +273,10 @@ result in `cleanup`.
 
 When routing terms match a planned but inactive governor, task creation and task
 preflight return `error_code=governor_inactive`, the matched `governor`, `kind`,
-and a compact `route` object. When no route matches, they return
+and a compact `route` object. Planned-governor route failures also include
+`required_governor` with registry metadata such as status, port, service,
+task kinds, and route terms so clients and operators can see which coordinator
+must be implemented or activated. When no route matches, they return
 `error_code=no_supported_governor`.
 
 ## Run Inspection

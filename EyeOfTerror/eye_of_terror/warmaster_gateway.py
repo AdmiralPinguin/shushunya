@@ -287,6 +287,18 @@ def prepare_task_via_governor_service(message: str, task_id: str | None, run_roo
 
 def route_failure_payload(route: Any) -> dict[str, Any]:
     error_code = "governor_inactive" if route.governor else "no_supported_governor"
+    required_governor: dict[str, Any] = {}
+    if route.governor:
+        governor_ref = governor_by_name(str(route.governor))
+        if governor_ref is not None:
+            required_governor = {
+                "name": governor_ref.name,
+                "status": governor_ref.status,
+                "port": governor_ref.port,
+                "service": governor_ref.service,
+                "task_kinds": list(governor_ref.task_kinds),
+                "route_terms": list(governor_ref.route_terms),
+            }
     return {
         "ok": False,
         "gateway": "WarmasterGateway",
@@ -295,6 +307,7 @@ def route_failure_payload(route: Any) -> dict[str, Any]:
         "kind": route.kind,
         "governor": route.governor,
         "route": {"kind": route.kind, "governor": route.governor, "ok": route.ok, "reason": route.reason},
+        "required_governor": required_governor,
         "actions": {
             "can_create_task": False,
             "can_check_brigade_readiness": True,

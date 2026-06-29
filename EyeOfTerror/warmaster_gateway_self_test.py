@@ -646,6 +646,9 @@ def main() -> int:
                     or rejected.get("error_code") != "governor_inactive"
                     or rejected.get("governor") != "CogitatorCodewrightGovernor"
                     or rejected.get("route", {}).get("governor") != "CogitatorCodewrightGovernor"
+                    or rejected.get("required_governor", {}).get("status") != "planned"
+                    or rejected.get("required_governor", {}).get("port") != 7102
+                    or "code" not in rejected.get("required_governor", {}).get("task_kinds", [])
                     or rejected.get("phase") != "unsupported_task"
                     or rejected.get("display", {}).get("headline") != "No active governor for this task"
                     or rejected.get("client_action", {}).get("path") != "/capabilities"
@@ -662,6 +665,9 @@ def main() -> int:
                 if (
                     rejected_preflight.get("error_code") != "governor_inactive"
                     or rejected_preflight.get("governor") != "ForgeMasterGovernor"
+                    or rejected_preflight.get("required_governor", {}).get("status") != "planned"
+                    or rejected_preflight.get("required_governor", {}).get("port") != 7103
+                    or "image_generation" not in rejected_preflight.get("required_governor", {}).get("task_kinds", [])
                     or rejected_preflight.get("actions", {}).get("can_create_task")
                     or rejected_preflight.get("actions", {}).get("next_action", {}).get("kind") != "inspect_capabilities"
                     or rejected_preflight.get("client_action", {}).get("path") != "/capabilities"
