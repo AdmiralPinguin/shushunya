@@ -483,6 +483,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   package completeness, quality expectations, and source coverage.
 - `FabricatorFinalis` blocks final readiness when critic metrics explicitly
   report source coverage as not extraction-ready, even if approval was set.
+- `FabricatorFinalis` blocks final readiness when `corpus_requirements.required`
+  is still true, even if another metric incorrectly claims comprehensive depth
+  passed, and emits a corpus-first upstream revision plan.
 - `FabricatorFinalis` also blocks final readiness when required event playbook
   events are absent from the timeline, and emits a downstream revision plan for
   extraction, timeline, and draft regeneration.

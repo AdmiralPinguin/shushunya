@@ -120,6 +120,22 @@ def add_required_event_revision_steps(revision_plan: dict[str, Any], event_revie
     return {"required": True, "steps": steps}
 
 
+def add_corpus_requirement_revision_steps(revision_plan: dict[str, Any], corpus_requirements: dict[str, Any]) -> dict[str, Any]:
+    if not corpus_requirements.get("required"):
+        return revision_plan
+    steps = list(revision_plan.get("steps", []) if isinstance(revision_plan.get("steps"), list) else [])
+    missing = corpus_requirements.get("missing_primary_texts") if isinstance(corpus_requirements.get("missing_primary_texts"), list) else []
+    titles = ", ".join(str(item.get("title") or "untitled primary source") for item in missing[:6] if isinstance(item, dict))
+    reason = f"Missing required local primary corpus texts: {titles or 'primary corpus text'}"
+    add_unique_revision_step(steps, "corpus_ingestion", "CorpusIngestor", reason, "final_readiness")
+    add_unique_revision_step(steps, "source_discovery", "Lexmechanic", reason, "final_readiness")
+    add_unique_revision_step(steps, "source_acquisition", "AuspexBrowser", reason, "final_readiness")
+    add_unique_revision_step(steps, "fact_extraction", "NoosphericExtractor", reason, "final_readiness")
+    add_unique_revision_step(steps, "timeline", "Chronologis", reason, "final_readiness")
+    add_unique_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", reason, "final_readiness")
+    return {"required": True, "steps": steps}
+
+
 def quality_expectation_summary(request: dict[str, Any]) -> dict[str, Any]:
     expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
     step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
@@ -207,6 +223,11 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     if event_review.get("required_events_covered") is False:
         missing_events = ", ".join(event_review.get("missing_required_events", [])[:8])
         readiness_blockers.append({"severity": "blocker", "message": f"Final package is missing required direct events in timeline: {missing_events}."})
+    corpus_requirements = comprehensive_depth.get("corpus_requirements") if isinstance(comprehensive_depth.get("corpus_requirements"), dict) else {}
+    if corpus_requirements.get("required"):
+        missing_primary = corpus_requirements.get("missing_primary_texts") if isinstance(corpus_requirements.get("missing_primary_texts"), list) else []
+        titles = ", ".join(str(item.get("title") or "untitled primary source") for item in missing_primary[:6] if isinstance(item, dict))
+        readiness_blockers.append({"severity": "blocker", "message": f"Final package still requires local primary corpus texts: {titles or 'primary corpus text'}."})
     readiness_checks = {
         "critic_approved": approved,
         "package_complete": not missing,
@@ -214,11 +235,12 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "source_coverage_ready": source_coverage_ready,
         "comprehensive_depth_ready": comprehensive_depth_ready,
         "required_events_covered": event_review.get("required_events_covered"),
+        "corpus_requirements_satisfied": not bool(corpus_requirements.get("required")),
     }
-    corpus_requirements = comprehensive_depth.get("corpus_requirements") if isinstance(comprehensive_depth.get("corpus_requirements"), dict) else {}
     status = "ready" if approved and not missing and not quality_blockers and not readiness_blockers else "blocked"
     revision_plan = merge_revision_plan(critic, missing)
     revision_plan = add_required_event_revision_steps(revision_plan, event_review)
+    revision_plan = add_corpus_requirement_revision_steps(revision_plan, corpus_requirements)
     if quality_blockers:
         revision_plan = {
             "required": True,

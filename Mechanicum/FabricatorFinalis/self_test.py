@@ -78,6 +78,8 @@ def main() -> int:
             raise AssertionError(f"standard ready manifest should pass comprehensive depth readiness: {manifest}")
         if manifest.get("readiness_checks", {}).get("required_events_covered") is not True:
             raise AssertionError(f"standard ready manifest should pass required event readiness: {manifest}")
+        if manifest.get("readiness_checks", {}).get("corpus_requirements_satisfied") is not True:
+            raise AssertionError(f"standard ready manifest should satisfy corpus requirements: {manifest}")
         if manifest.get("quality_expectations", {}).get("check_count") != 1:
             raise AssertionError(f"ready manifest should carry quality expectations: {manifest}")
         write(
@@ -153,6 +155,41 @@ def main() -> int:
             raise AssertionError(f"weak comprehensive depth should block final readiness: {manifest}")
         if manifest.get("corpus_requirements", {}).get("missing_primary_texts", [{}])[0].get("title") != "Kharn: Eater of Worlds":
             raise AssertionError(f"final manifest should preserve corpus requirements: {manifest}")
+        corpus_revision_workers = {step.get("worker") for step in manifest.get("revision_plan", {}).get("steps", [])}
+        if not {"CorpusIngestor", "Lexmechanic", "AuspexBrowser", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(corpus_revision_workers):
+            raise AssertionError(f"missing corpus requirements should produce full upstream revision plan: {manifest}")
+        write(
+            base / "critic_report.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "passed_with_warnings",
+                    "required_direct_events": ["moon_parley"],
+                    "metrics": {
+                        "source_coverage_ready": True,
+                        "comprehensive_depth": {
+                            "mode": "comprehensive",
+                            "passed": True,
+                            "corpus_requirements": {
+                                "required": True,
+                                "missing_primary_texts": [{"title": "Lucius: The Faultless Blade"}],
+                            },
+                        },
+                    },
+                    "revision_focus": {"present": True},
+                }
+            ),
+        )
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on inconsistent corpus readiness: {result}")
+        manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
+        if (
+            manifest.get("status") != "blocked"
+            or manifest.get("readiness_checks", {}).get("corpus_requirements_satisfied") is not False
+            or "Lucius: The Faultless Blade" not in json.dumps(manifest)
+        ):
+            raise AssertionError(f"corpus requirements should block even when comprehensive depth claims pass: {manifest}")
         write(
             base / "critic_report.json",
             json.dumps(
