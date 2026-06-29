@@ -40,6 +40,9 @@ def main() -> int:
         or pipeline.get("steps", [])[0].get("worker") != "CorpusIngestor"
         or pipeline.get("steps", [])[1].get("depends_on") != ["corpus_ingestion"]
         or pipeline.get("steps", [])[2].get("expected_artifacts") != ["/work/capabilities/source_snapshots.json"]
+        or pipeline.get("steps", [])[3].get("worker") != "OcularisRenderium"
+        or pipeline.get("steps", [])[3].get("expected_artifacts") != ["/work/capabilities/rendered_snapshots.json"]
+        or pipeline.get("steps", [])[4].get("depends_on") != ["source_rendering"]
     ):
         raise AssertionError(f"bad Iskandar pipeline summary: {pipeline}")
     oversight = oversight_template()

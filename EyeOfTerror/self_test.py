@@ -126,6 +126,7 @@ def main() -> int:
         "CorpusIngestor",
         "Lexmechanic",
         "AuspexBrowser",
+        "OcularisRenderium",
         "NoosphericExtractor",
         "Chronologis",
         "ScriptoriumDaemon",
@@ -154,6 +155,7 @@ def main() -> int:
         "corpus_ingestion",
         "source_discovery",
         "source_acquisition",
+        "source_rendering",
         "fact_extraction",
         "timeline",
         "draft_reconstruction",
@@ -163,19 +165,21 @@ def main() -> int:
         raise AssertionError(f"wrong dispatch packet sequence: {[packet.step_id for packet in packets]}")
     if packets[0].port != 7013 or packets[-1].port != 7007:
         raise AssertionError(f"dispatch packets target wrong ports: {[packet.port for packet in packets]}")
-    if packets[3].request["task_id"] != "test-skalathrax:fact_extraction":
-        raise AssertionError(f"dispatch task id is not stable: {packets[3].request}")
+    if packets[4].request["task_id"] != "test-skalathrax:fact_extraction":
+        raise AssertionError(f"dispatch task id is not stable: {packets[4].request}")
     if packets[1].request["input_artifacts"] != ["/work/skalathrax/corpus_index.json"]:
         raise AssertionError(f"corpus input artifact was not propagated: {packets[1].request}")
     if packets[3].request["input_artifacts"] != ["/work/skalathrax/source_snapshots.json"]:
-        raise AssertionError(f"dependency input artifacts were not propagated: {packets[3].request}")
+        raise AssertionError(f"render dependency input artifact was not propagated: {packets[3].request}")
+    if packets[4].request["input_artifacts"] != ["/work/skalathrax/rendered_snapshots.json"]:
+        raise AssertionError(f"dependency input artifacts were not propagated: {packets[4].request}")
     expected_draft_inputs = [
         "/work/skalathrax/source_map.json",
         "/work/skalathrax/direct_event_notes.json",
         "/work/skalathrax/timeline.json",
     ]
-    if packets[5].input_artifacts != expected_draft_inputs:
-        raise AssertionError(f"multi-dependency input artifacts were not propagated: {packets[5].to_dict()}")
+    if packets[6].input_artifacts != expected_draft_inputs:
+        raise AssertionError(f"multi-dependency input artifacts were not propagated: {packets[6].to_dict()}")
     print("[ok] Iskandar dispatch packets")
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -201,6 +205,7 @@ def main() -> int:
             "dispatch/corpus_ingestion.json",
             "dispatch/source_discovery.json",
             "dispatch/source_acquisition.json",
+            "dispatch/source_rendering.json",
             "dispatch/fact_extraction.json",
             "dispatch/timeline.json",
             "dispatch/draft_reconstruction.json",
@@ -240,7 +245,7 @@ def main() -> int:
         if (
             len(quality_matrix) != len(contract.worker_plan)
             or fact_quality.get("worker") != "NoosphericExtractor"
-            or "/work/skalathrax/source_snapshots.json" not in fact_quality.get("required_inputs", [])
+            or "/work/skalathrax/rendered_snapshots.json" not in fact_quality.get("required_inputs", [])
             or "direct event notes are non-empty unless source coverage is explicitly blocked" not in fact_quality.get("checks", [])
             or "critic_review" not in fact_quality.get("revision_targets", [])
             or "finalize" not in fact_quality.get("revision_targets", [])

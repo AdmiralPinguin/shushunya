@@ -51,6 +51,13 @@ def source_snapshots_path_for_output(output_path: str) -> str:
     return f"{parent}/source_snapshots.json"
 
 
+def rendered_snapshots_path_for_output(output_path: str) -> str:
+    if not output_path.startswith("/work/"):
+        raise ValueError(f"unsupported output path: {output_path}")
+    parent = output_path.rsplit("/", 1)[0]
+    return f"{parent}/rendered_snapshots.json"
+
+
 EVENT_EVIDENCE_MARKERS = {
     str(event.get("event_id")): [str(marker) for marker in event.get("evidence_markers", [])]
     for playbook in EVENT_PLAYBOOKS
@@ -65,6 +72,42 @@ def load_optional_snapshots(workspace_root: Path, output_path: str) -> dict[str,
         return {}
     payload = json.loads(snapshots_path.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
+
+
+def load_optional_rendered_snapshots(workspace_root: Path, output_path: str) -> dict[str, Any]:
+    rendered_path = sandbox_path(workspace_root, rendered_snapshots_path_for_output(output_path))
+    if not rendered_path.exists():
+        return {}
+    payload = json.loads(rendered_path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else {}
+
+
+def merge_rendered_snapshots(source_snapshots: dict[str, Any], rendered_snapshots: dict[str, Any]) -> dict[str, Any]:
+    if not rendered_snapshots:
+        return source_snapshots
+    merged = dict(source_snapshots)
+    snapshots = [dict(item) for item in source_snapshots.get("snapshots", []) if isinstance(item, dict)]
+    rendered_items = rendered_snapshots.get("rendered_snapshots") if isinstance(rendered_snapshots.get("rendered_snapshots"), list) else []
+    for rendered in rendered_items:
+        if not isinstance(rendered, dict) or not rendered.get("ok"):
+            continue
+        snapshots.append(
+            {
+                "source_title": rendered.get("source_title", ""),
+                "source_class": rendered.get("source_class", "rendered_source"),
+                "source_type": rendered.get("source_type", "rendered_source"),
+                "requested_url": rendered.get("requested_url", ""),
+                "final_url": rendered.get("final_url", ""),
+                "ok": True,
+                "title": rendered.get("title", ""),
+                "text_excerpt": rendered.get("text_excerpt", ""),
+                "rendered": True,
+                "render_required": False,
+            }
+        )
+    merged["snapshots"] = snapshots
+    merged["rendered_summary"] = rendered_snapshots.get("summary", {}) if isinstance(rendered_snapshots.get("summary"), dict) else {}
+    return merged
 
 
 def evidence_excerpt(text: str, matched: list[str], max_chars: int = 520) -> str:
@@ -306,6 +349,8 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         return {"ok": False, "worker": "NoosphericExtractor", "error": "source_map is missing", "missing": source_path}
     source_map = json.loads(source_host_path.read_text(encoding="utf-8"))
     source_snapshots = load_optional_snapshots(workspace_root, output_path)
+    rendered_snapshots = load_optional_rendered_snapshots(workspace_root, output_path)
+    source_snapshots = merge_rendered_snapshots(source_snapshots, rendered_snapshots)
     notes = extract_events(source_map, source_snapshots)
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)

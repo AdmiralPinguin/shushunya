@@ -14,7 +14,7 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-TERMINAL_STATUSES = {"completed", "failed", "cancelled", "corrupt"}
+TERMINAL_STATUSES = {"completed", "failed", "cancelled", "corrupt", "blocked"}
 
 
 @dataclass
@@ -66,7 +66,11 @@ class TaskLedger:
             if isinstance(current, dict):
                 current_status = str(current.get("status") or "")
                 new_status = str(self.data.get("status") or "")
-                terminal_preserved = current_status in TERMINAL_STATUSES and current_status != new_status
+                terminal_preserved = (
+                    current_status in TERMINAL_STATUSES
+                    and current_status != new_status
+                    and not (current_status == "failed" and new_status == "blocked")
+                )
                 if terminal_preserved:
                     self.data["status"] = current_status
                     if isinstance(current.get("result"), dict):

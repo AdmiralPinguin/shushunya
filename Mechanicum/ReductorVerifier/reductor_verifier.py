@@ -11,6 +11,7 @@ ARTIFACT_REWORK_TARGETS = {
     "corpus_index.json": ("corpus_ingestion", "CorpusIngestor"),
     "source_map.json": ("source_discovery", "Lexmechanic"),
     "source_snapshots.json": ("source_acquisition", "AuspexBrowser"),
+    "rendered_snapshots.json": ("source_rendering", "OcularisRenderium"),
     "direct_event_notes.json": ("fact_extraction", "NoosphericExtractor"),
     "timeline.json": ("timeline", "Chronologis"),
     "reconstruction_ru.md": ("draft_reconstruction", "ScriptoriumDaemon"),
@@ -32,6 +33,12 @@ REVISION_DEPENDENCIES = {
         ("draft_reconstruction", "ScriptoriumDaemon"),
     ],
     "source_acquisition": [
+        ("source_rendering", "OcularisRenderium"),
+        ("fact_extraction", "NoosphericExtractor"),
+        ("timeline", "Chronologis"),
+        ("draft_reconstruction", "ScriptoriumDaemon"),
+    ],
+    "source_rendering": [
         ("fact_extraction", "NoosphericExtractor"),
         ("timeline", "Chronologis"),
         ("draft_reconstruction", "ScriptoriumDaemon"),
@@ -49,6 +56,7 @@ REVISION_STEP_ORDER = [
     "corpus_ingestion",
     "source_discovery",
     "source_acquisition",
+    "source_rendering",
     "fact_extraction",
     "timeline",
     "draft_reconstruction",
@@ -259,7 +267,113 @@ def relevance_tokens(text: str) -> set[str]:
     return {token for token in "".join(char.lower() if char.isalnum() else " " for char in text).split() if len(token) > 2 and token not in stopwords}
 
 
-def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, Any], reconstruction: str) -> tuple[list[dict[str, str]], dict[str, Any]]:
+def evidence_support_chars(note: dict[str, Any]) -> int:
+    total = 0
+    evidence = note.get("evidence_snapshots") if isinstance(note.get("evidence_snapshots"), list) else []
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        for field_name in ("excerpt", "matched_markers", "text_excerpt"):
+            value = item.get(field_name)
+            if isinstance(value, list):
+                total += sum(len(str(part)) for part in value if str(part).strip())
+            elif str(value or "").strip():
+                total += len(str(value))
+    return total
+
+
+def marker_context_chars(text: str, markers: list[str], radius: int = 120) -> int:
+    if not markers:
+        return 0
+    lowered = text.lower()
+    intervals: list[tuple[int, int]] = []
+    for marker in markers:
+        needle = marker.lower()
+        position = lowered.find(needle)
+        if position < 0:
+            continue
+        intervals.append((max(0, position - radius), min(len(text), position + len(marker) + radius)))
+    if not intervals:
+        return 0
+    intervals.sort()
+    merged: list[tuple[int, int]] = []
+    for start, end in intervals:
+        if not merged or start > merged[-1][1]:
+            merged.append((start, end))
+            continue
+        merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+    return sum(end - start for start, end in merged)
+
+
+def comprehensive_required_event_metrics(
+    depth_profile: dict[str, Any],
+    notes: dict[str, Any],
+    reconstruction: str,
+    required_events: list[dict[str, Any]],
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if not required_events:
+        return [], {
+            "required_event_count": 0,
+            "required_events_with_draft_coverage": 0,
+            "required_events_with_evidence_support": 0,
+            "under_detailed_required_events": [],
+        }
+    min_detail_chars = int(depth_profile.get("min_required_event_detail_chars") or 180)
+    min_evidence_chars = int(depth_profile.get("min_required_event_evidence_chars") or 24)
+    note_by_event_id = {
+        str(item.get("event_id")): item
+        for item in notes.get("events", [])
+        if isinstance(item, dict) and item.get("event_id")
+    }
+    findings: list[dict[str, str]] = []
+    draft_covered = 0
+    evidence_supported = 0
+    under_detailed: list[str] = []
+    weak_evidence: list[str] = []
+    for event in required_events:
+        event_id = str(event.get("event_id") or "")
+        label = required_event_label(event)
+        markers = required_event_markers(event)
+        detail_chars = marker_context_chars(reconstruction, markers)
+        if markers and text_contains_markers(reconstruction, markers):
+            draft_covered += 1
+        if detail_chars < min_detail_chars:
+            under_detailed.append(label)
+            findings.append(
+                {
+                    "severity": "blocker",
+                    "message": f"Required event is under-detailed in final draft: {label} ({detail_chars}/{min_detail_chars} chars of local context).",
+                }
+            )
+        note = note_by_event_id.get(event_id, {})
+        support_chars = evidence_support_chars(note) if isinstance(note, dict) else 0
+        if support_chars >= min_evidence_chars:
+            evidence_supported += 1
+        else:
+            weak_evidence.append(label)
+            findings.append(
+                {
+                    "severity": "blocker",
+                    "message": f"Required event lacks substantive evidence support: {label} ({support_chars}/{min_evidence_chars} chars).",
+                }
+            )
+    return findings, {
+        "required_event_count": len(required_events),
+        "required_events_with_draft_coverage": draft_covered,
+        "required_events_with_evidence_support": evidence_supported,
+        "min_required_event_detail_chars": min_detail_chars,
+        "min_required_event_evidence_chars": min_evidence_chars,
+        "under_detailed_required_events": under_detailed,
+        "weak_evidence_required_events": weak_evidence,
+    }
+
+
+def comprehensive_depth_findings(
+    source_map: dict[str, Any],
+    notes: dict[str, Any],
+    reconstruction: str,
+    required_events: list[dict[str, Any]],
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
     depth_profile = source_map.get("depth_profile") if isinstance(source_map.get("depth_profile"), dict) else {}
     if depth_profile.get("mode") != "comprehensive":
         return [], {"mode": str(depth_profile.get("mode") or "standard"), "passed": True}
@@ -274,8 +388,10 @@ def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, An
     min_direct_evidence_sources = int(depth_profile.get("min_direct_evidence_sources") or 0)
     min_primary_evidence_sources = int(depth_profile.get("min_primary_evidence_sources") or 0)
     min_draft_chars = int(depth_profile.get("min_draft_chars") or 0)
+    min_direct_event_count = int(depth_profile.get("min_direct_event_count") or 0)
     missing_primary = inaccessible_primary_titles(source_map)
     findings: list[dict[str, str]] = []
+    direct_event_count = len(notes.get("events", [])) if isinstance(notes.get("events"), list) else 0
     if source_count < min_source_count:
         findings.append(
             {
@@ -304,6 +420,13 @@ def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, An
                 "message": f"Comprehensive task has too few primary-evidence sources: {primary_evidence_count}/{min_primary_evidence_sources}.",
             }
         )
+    if direct_event_count < min_direct_event_count:
+        findings.append(
+            {
+                "severity": "blocker",
+                "message": f"Comprehensive task has too few extracted direct events: {direct_event_count}/{min_direct_event_count}.",
+            }
+        )
     if draft_chars < min_draft_chars:
         findings.append(
             {
@@ -319,6 +442,13 @@ def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, An
                 "message": f"Comprehensive task lacks accessible primary text URLs or local corpus files for: {joined}.",
             }
         )
+    required_event_findings, required_event_metrics = comprehensive_required_event_metrics(
+        depth_profile,
+        notes,
+        reconstruction,
+        required_events,
+    )
+    findings.extend(required_event_findings)
     metrics = {
         "mode": "comprehensive",
         "passed": not findings,
@@ -330,10 +460,13 @@ def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, An
         "min_direct_evidence_sources": min_direct_evidence_sources,
         "primary_evidence_source_count": primary_evidence_count,
         "min_primary_evidence_sources": min_primary_evidence_sources,
+        "direct_event_count": direct_event_count,
+        "min_direct_event_count": min_direct_event_count,
         "draft_chars": draft_chars,
         "min_draft_chars": min_draft_chars,
         "inaccessible_primary_count": len(missing_primary),
         "corpus_requirements": source_map.get("corpus_requirements", {}),
+        "required_event_coverage": required_event_metrics,
     }
     return findings, metrics
 
@@ -432,31 +565,40 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
             add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
-        elif "draft does not visibly cover" in lowered or "coverage gaps clearly" in lowered:
+        elif "draft does not visibly cover" in lowered or "coverage gaps clearly" in lowered or "under-detailed in final draft" in lowered:
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
-        elif "lacks fetched source evidence" in lowered:
+        elif "lacks fetched source evidence" in lowered or "lacks substantive evidence support" in lowered:
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+            add_revision_step(steps, "source_rendering", "OcularisRenderium", message, "critic_finding")
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
         elif "source discovery did not find" in lowered:
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+            add_revision_step(steps, "source_rendering", "OcularisRenderium", message, "critic_finding")
         elif "comprehensive task has too few mapped sources" in lowered or "comprehensive task has too few live-discovered" in lowered:
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
         elif "comprehensive task has too few direct-evidence sources" in lowered:
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+            add_revision_step(steps, "source_rendering", "OcularisRenderium", message, "critic_finding")
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
         elif "comprehensive task has too few primary-evidence sources" in lowered:
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+            add_revision_step(steps, "source_rendering", "OcularisRenderium", message, "critic_finding")
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
         elif "comprehensive task lacks accessible primary text" in lowered:
             add_revision_step(steps, "corpus_ingestion", "CorpusIngestor", message, "critic_finding")
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+            add_revision_step(steps, "source_rendering", "OcularisRenderium", message, "critic_finding")
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
+        elif "comprehensive task has too few extracted direct events" in lowered:
+            add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
+            add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
         elif "comprehensive draft is too short" in lowered:
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
             add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
@@ -464,6 +606,7 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
         elif "source set is not extraction-ready" in lowered or "source coverage is not extraction-ready" in lowered:
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")
             add_revision_step(steps, "source_acquisition", "AuspexBrowser", message, "critic_finding")
+            add_revision_step(steps, "source_rendering", "OcularisRenderium", message, "critic_finding")
         else:
             add_revision_step(steps, "critic_review", "ReductorVerifier", message, "critic_finding")
     expand_revision_dependencies(steps)
@@ -518,10 +661,20 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
     coverage_path = sibling_artifact(critic_path, "coverage_report.md")
     source_path = sibling_artifact(critic_path, "source_map.json")
     source_snapshots_path = sibling_artifact(critic_path, "source_snapshots.json")
+    rendered_snapshots_path = sibling_artifact(critic_path, "rendered_snapshots.json")
     notes_path = sibling_artifact(critic_path, "direct_event_notes.json")
     timeline_path = sibling_artifact(critic_path, "timeline.json")
     corpus_path = sibling_artifact(critic_path, "corpus_index.json")
-    required_paths = [corpus_path, reconstruction_path, coverage_path, source_path, source_snapshots_path, notes_path, timeline_path]
+    required_paths = [
+        corpus_path,
+        reconstruction_path,
+        coverage_path,
+        source_path,
+        source_snapshots_path,
+        rendered_snapshots_path,
+        notes_path,
+        timeline_path,
+    ]
     missing_artifacts = [path for path in required_paths if not artifact_exists(workspace_root, path)]
     if missing_artifacts:
         findings = [{"severity": "blocker", "message": f"Missing artifact: {path}"} for path in missing_artifacts]
@@ -536,6 +689,7 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
 
     source_map = load_json(workspace_root, source_path)
     source_snapshots = load_json(workspace_root, source_snapshots_path)
+    rendered_snapshots = load_json(workspace_root, rendered_snapshots_path)
     notes = load_json(workspace_root, notes_path)
     timeline = load_json(workspace_root, timeline_path)
     reconstruction = read_text(workspace_root, reconstruction_path)
@@ -590,7 +744,7 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
         findings.append({"severity": "blocker", "message": "Source coverage is not extraction-ready: official/primary evidence and secondary cross-checking are both required."})
     if "## Gaps" not in coverage or "Что еще надо проверить" not in reconstruction:
         findings.append({"severity": "blocker", "message": "Draft package does not expose coverage gaps clearly."})
-    comprehensive_findings, comprehensive_metrics = comprehensive_depth_findings(source_map, notes, reconstruction)
+    comprehensive_findings, comprehensive_metrics = comprehensive_depth_findings(source_map, notes, reconstruction, required_events)
     findings.extend(comprehensive_findings)
 
     notes_gaps = [str(item) for item in notes.get("gaps", []) if item]
@@ -633,6 +787,7 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
             "draft_chars": len(reconstruction),
             "comprehensive_depth": comprehensive_metrics,
             "snapshot_count": len(source_snapshots.get("snapshots", [])),
+            "rendered_snapshot_count": len(rendered_snapshots.get("rendered_snapshots", [])),
         },
     }
 

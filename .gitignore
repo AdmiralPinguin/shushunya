@@ -119,6 +119,7 @@ PalatineConsole/runtime/
 
 # Generic local runtime/cache
 runtime/
+EyeOfTerror/live_runs/
 tmp/
 temp/
 cache/

@@ -91,6 +91,7 @@ def lore_required_artifacts(slug: str) -> list[str]:
         f"{base}/corpus_index.json",
         f"{base}/source_map.json",
         f"{base}/source_snapshots.json",
+        f"{base}/rendered_snapshots.json",
         f"{base}/direct_event_notes.json",
         f"{base}/timeline.json",
         f"{base}/reconstruction_ru.md",
@@ -124,10 +125,17 @@ def lore_worker_plan(slug: str) -> list[WorkerPlanStep]:
             expected_artifacts=[f"{base}/source_snapshots.json"],
         ),
         WorkerPlanStep(
+            step_id="source_rendering",
+            worker="OcularisRenderium",
+            purpose="Render JavaScript-required source snapshots and record DOM text or render blockers.",
+            depends_on=["source_acquisition"],
+            expected_artifacts=[f"{base}/rendered_snapshots.json"],
+        ),
+        WorkerPlanStep(
             step_id="fact_extraction",
             worker="NoosphericExtractor",
             purpose="Extract direct event facts with confidence labels and source references.",
-            depends_on=["source_acquisition"],
+            depends_on=["source_rendering"],
             expected_artifacts=[f"{base}/direct_event_notes.json"],
         ),
         WorkerPlanStep(

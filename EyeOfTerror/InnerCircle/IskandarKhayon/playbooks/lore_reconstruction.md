@@ -30,11 +30,12 @@ The governor must define:
 1. `CorpusIngestor`: local user-provided corpus index and primary-text candidates.
 2. `Lexmechanic`: source discovery and reliability map.
 3. `AuspexBrowser`: source acquisition for public URLs and local corpus texts.
-4. `NoosphericExtractor`: fact extraction with confidence labels.
-5. `Chronologis`: event ordering, contradictions, missing links.
-6. `ScriptoriumDaemon`: readable Russian reconstruction from extracted facts.
-7. `ReductorVerifier`: independent criticism against the task contract.
-8. `FabricatorFinalis`: package files and send requested outputs.
+4. `OcularisRenderium`: JavaScript render pass for sources that text fetch marks as render-required.
+5. `NoosphericExtractor`: fact extraction with confidence labels.
+6. `Chronologis`: event ordering, contradictions, missing links.
+7. `ScriptoriumDaemon`: readable Russian reconstruction from extracted facts.
+8. `ReductorVerifier`: independent criticism against the task contract.
+9. `FabricatorFinalis`: package files and send requested outputs.
 
 ## Failure Conditions
 

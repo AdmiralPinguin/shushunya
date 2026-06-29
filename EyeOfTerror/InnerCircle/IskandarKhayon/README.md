@@ -30,6 +30,7 @@ artifacts, built from the same worker-plan source used for concrete contracts.
 CorpusIngestor
   -> Lexmechanic
   -> AuspexBrowser
+  -> OcularisRenderium
   -> NoosphericExtractor
   -> Chronologis
   -> ScriptoriumDaemon

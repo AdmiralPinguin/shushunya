@@ -50,6 +50,7 @@ def main() -> int:
             },
         )
         write_json(base / "source_snapshots.json", {"snapshots": [{"source_title": "Lexicanum", "ok": True}], "skipped": []})
+        write_json(base / "rendered_snapshots.json", {"rendered_snapshots": [], "summary": {"render_required": 0}})
         events = [
             "moon_parley",
             "dreagher_shoots_anteus",
@@ -111,7 +112,10 @@ def main() -> int:
                     "min_live_candidate_count": 8,
                     "min_direct_evidence_sources": 6,
                     "min_primary_evidence_sources": 1,
+                    "min_direct_event_count": 10,
                     "min_draft_chars": 60000,
+                    "min_required_event_detail_chars": 180,
+                    "min_required_event_evidence_chars": 24,
                 },
                 "source_coverage": {
                     "source_count": 2,
@@ -145,8 +149,17 @@ def main() -> int:
             "Comprehensive draft is too short" not in report_text
             or "lacks accessible primary text" not in report_text
             or "too few primary-evidence sources" not in report_text
+            or "too few extracted direct events" not in report_text
+            or "under-detailed in final draft" not in report_text
         ):
             raise AssertionError(f"comprehensive depth blockers missing: {report}")
+        event_coverage = report.get("metrics", {}).get("comprehensive_depth", {}).get("required_event_coverage", {})
+        if (
+            event_coverage.get("required_event_count") != 6
+            or not event_coverage.get("under_detailed_required_events")
+            or event_coverage.get("required_events_with_evidence_support") != 0
+        ):
+            raise AssertionError(f"required event coverage metrics missing: {report}")
         if report.get("metrics", {}).get("comprehensive_depth", {}).get("primary_evidence_source_count") != 0:
             raise AssertionError(f"secondary evidence should not count as primary evidence: {report}")
         revision_workers = {step.get("worker") for step in report.get("revision_plan", {}).get("steps", [])}
@@ -245,14 +258,17 @@ def main() -> int:
             raise AssertionError(f"expected missing evidence to fail: {report}")
         revision_steps = report.get("revision_plan", {}).get("steps", [])
         revision_workers = {step.get("worker") for step in revision_steps}
-        if not {"AuspexBrowser", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
+        if not {"AuspexBrowser", "OcularisRenderium", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
             raise AssertionError(f"missing evidence review did not produce source rework plan: {report}")
         source_acquisition_index = next(
             index for index, step in enumerate(revision_steps) if step.get("step_id") == "source_acquisition"
         )
+        source_rendering_index = next(
+            index for index, step in enumerate(revision_steps) if step.get("step_id") == "source_rendering"
+        )
         timeline_index = next(index for index, step in enumerate(revision_steps) if step.get("step_id") == "timeline")
         draft_index = next(index for index, step in enumerate(revision_steps) if step.get("step_id") == "draft_reconstruction")
-        if not source_acquisition_index < timeline_index < draft_index:
+        if not source_acquisition_index < source_rendering_index < timeline_index < draft_index:
             raise AssertionError(f"revision dependencies are not ordered downstream: {report}")
         write_json(
             base / "source_map.json",
@@ -286,7 +302,7 @@ def main() -> int:
         if report.get("approved") or "Source coverage is not extraction-ready" not in json.dumps(report):
             raise AssertionError(f"weak source coverage should block approval: {report}")
         revision_workers = {step.get("worker") for step in report.get("revision_plan", {}).get("steps", [])}
-        if not {"Lexmechanic", "AuspexBrowser", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
+        if not {"Lexmechanic", "AuspexBrowser", "OcularisRenderium", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
             raise AssertionError(f"weak source coverage did not produce full upstream revision plan: {report}")
         generic_base = root / "generic"
         generic_request = {
@@ -296,6 +312,7 @@ def main() -> int:
         write_json(generic_base / "corpus_index.json", {"summary": {"sources_matched": 0}, "sources": [], "gaps": []})
         write_json(generic_base / "source_map.json", {"topic": "Armageddon conflict", "discovery_status": "needs_live_discovery", "sources": []})
         write_json(generic_base / "source_snapshots.json", {"snapshots": [], "skipped": []})
+        write_json(generic_base / "rendered_snapshots.json", {"rendered_snapshots": [], "summary": {"render_required": 0}})
         write_json(generic_base / "direct_event_notes.json", {"events": [], "gaps": []})
         write_json(generic_base / "timeline.json", {"timeline": [], "summary": {}, "gaps": []})
         write(generic_base / "reconstruction_ru.md", "## Что еще надо проверить\n- source discovery\n")

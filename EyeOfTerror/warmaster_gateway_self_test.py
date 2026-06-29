@@ -722,6 +722,9 @@ def main() -> int:
                 or preflight_steps[1].get("depends_on") != ["corpus_ingestion"]
                 or preflight_steps[2].get("expected_artifacts") != ["/work/skalathrax/source_snapshots.json"]
                 or preflight_steps[2].get("expected_artifact_count") != 1
+                or preflight_steps[3].get("worker") != "OcularisRenderium"
+                or preflight_steps[3].get("expected_artifacts") != ["/work/skalathrax/rendered_snapshots.json"]
+                or preflight_steps[4].get("depends_on") != ["source_rendering"]
                 or preflight.get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or not preflight.get("oversight_validation", {}).get("ok")
                 or preflight.get("actions", {}).get("can_create_task") is not True
@@ -779,7 +782,7 @@ def main() -> int:
                 orchestrated_state.get("phase") != "ready_to_start"
                 or not orchestrated_state.get("decision", {}).get("can_start")
                 or orchestrated_state.get("display", {}).get("headline") != "Run is ready to start"
-                or orchestrated_state.get("display", {}).get("progress", {}).get("planned_steps") != 8
+                or orchestrated_state.get("display", {}).get("progress", {}).get("planned_steps") != 9
                 or orchestrated_state.get("next_action", {}).get("kind") != "start"
                 or orchestrated_state.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/start_http"
                 or orchestrated_state.get("snapshot", {}).get("summary", {}).get("task_id") != "warmaster-orchestrate-test"
@@ -1191,7 +1194,7 @@ def main() -> int:
                 or run_summary.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("quality_gate_count") != 6
-                or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_matrix_count") != 8
+                or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_matrix_count") != 9
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_check_count", 0) < 8
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("iteration_policy", {}).get("recommended_endpoint") != "POST /runs/{task_id}/start_research_loop_http"
                 or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "corpus_ingestion"
@@ -1199,7 +1202,7 @@ def main() -> int:
                 or run_summary.get("summary", {}).get("progress", {}).get("ready_step_ids") != ["corpus_ingestion"]
                 or "fact_extraction" not in run_summary.get("summary", {}).get("progress", {}).get("waiting_step_ids", [])
                 or run_summary.get("summary", {}).get("progress", {}).get("ready_steps") != 1
-                or run_summary.get("summary", {}).get("progress", {}).get("waiting_steps") != 7
+                or run_summary.get("summary", {}).get("progress", {}).get("waiting_steps") != 8
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("worker") != "CorpusIngestor"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("status") != "pending"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("quality_hints", {}).get("check_count", 0) < 1
@@ -1213,7 +1216,7 @@ def main() -> int:
                 ),
                 {},
             )
-            if fact_step.get("input_artifacts") != ["/work/skalathrax/source_snapshots.json"]:
+            if fact_step.get("input_artifacts") != ["/work/skalathrax/rendered_snapshots.json"]:
                 raise AssertionError(f"run summary did not expose step input artifacts: {run_summary}")
             if fact_step.get("dependencies_ready") or not fact_step.get("dependency_status"):
                 raise AssertionError(f"run summary did not expose dependency readiness: {run_summary}")
@@ -1252,8 +1255,8 @@ def main() -> int:
             if (
                 not package.get("ok")
                 or not package.get("validation", {}).get("ok")
-                or package.get("contract_summary", {}).get("step_count") != 8
-                or package.get("dispatch_count") != 8
+                or package.get("contract_summary", {}).get("step_count") != 9
+                or package.get("dispatch_count") != 9
                 or not package.get("files", {}).get("oversight")
                 or package.get("phase") != "ready_to_start"
                 or package.get("next_action", {}).get("kind") != "start"
@@ -1330,7 +1333,7 @@ def main() -> int:
             if (
                 not run_list.get("ok")
                 or run_list.get("run_summary", {}).get("total", 0) < 1
-                or not any(item.get("task_id") == "warmaster-test" and item.get("progress", {}).get("planned_steps") == 8 for item in run_list.get("runs", []))
+                or not any(item.get("task_id") == "warmaster-test" and item.get("progress", {}).get("planned_steps") == 9 for item in run_list.get("runs", []))
                 or not any(item.get("task_id") == "warmaster-test" and "headline" in item.get("display", {}) for item in run_list.get("orchestration_cards", []))
             ):
                 raise AssertionError(f"bad run list: {run_list}")
@@ -1671,7 +1674,7 @@ def main() -> int:
             ):
                 raise AssertionError(f"run progress did not expose worker view state: {partial_summary}")
             partial_steps = resume_step_ids_from_run(partial_run_dir)
-            if partial_steps[:2] != ["source_acquisition", "fact_extraction"] or "source_discovery" in partial_steps:
+            if partial_steps[:3] != ["source_acquisition", "source_rendering", "fact_extraction"] or "source_discovery" in partial_steps:
                 raise AssertionError(f"partial resume did not skip completed steps: {partial_steps}")
             ledger_path = run_dir / "task_ledger.json"
             ledger_payload = json.loads(ledger_path.read_text(encoding="utf-8"))
@@ -1843,6 +1846,13 @@ def main() -> int:
                         "priority": "blocker",
                     },
                     {
+                        "step_id": "source_rendering",
+                        "worker": "OcularisRenderium",
+                        "reason": "render-required sources must be snapshotted before extraction",
+                        "source": "self_test",
+                        "priority": "blocker",
+                    },
+                    {
                         "step_id": "fact_extraction",
                         "worker": "NoosphericExtractor",
                         "reason": "facts must be extracted from the revised source set",
@@ -1881,6 +1891,7 @@ def main() -> int:
                 "corpus_ingestion",
                 "source_discovery",
                 "source_acquisition",
+                "source_rendering",
                 "fact_extraction",
                 "timeline",
                 "draft_reconstruction",

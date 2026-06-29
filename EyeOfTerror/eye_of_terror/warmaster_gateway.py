@@ -953,6 +953,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         revision_plan_errors=revision_plan_errors,
         package_errors=package_errors,
         oversight_errors=oversight_errors,
+        research_loop_blocked=bool(result.get("research_loop_blocked")),
     )
     if status_error:
         summary["status_error"] = status_error
@@ -1095,6 +1096,8 @@ def orchestration_view_fields(
     if active or status in {"running", "queued", "cancelling"}:
         phase = "running"
         next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/orchestration", "body": {"events_after": event_cursor_next}, "reason": "run is active"}
+    elif next_action.get("kind") == "inspect_blockers":
+        phase = "blocked"
     elif actions.get("can_start_revision"):
         phase = "revision_required"
     elif status == "completed":
@@ -1396,6 +1399,7 @@ def run_actions(
     revision_plan_errors: list[str] | None = None,
     package_errors: list[str] | None = None,
     oversight_errors: list[str] | None = None,
+    research_loop_blocked: bool = False,
 ) -> dict[str, Any]:
     terminal_locked = status in {"completed", "running", "cancelling", "queued", "corrupt"}
     preflightable = status != "corrupt"
@@ -1405,7 +1409,14 @@ def run_actions(
     oversight_valid = not (oversight_errors or [])
     resume_required = status == "interrupted"
     runnable = not terminal_locked and not revision_required and not resume_required and package_valid and oversight_valid
-    revision_runnable = revision_required and revision_valid and package_valid and oversight_valid and status not in {"running", "cancelling", "queued", "corrupt"}
+    revision_runnable = (
+        revision_required
+        and revision_valid
+        and package_valid
+        and oversight_valid
+        and not research_loop_blocked
+        and status not in {"running", "cancelling", "queued", "corrupt", "blocked"}
+    )
     loop_runnable = runnable or revision_runnable or (resume_required and package_valid and oversight_valid)
     actions = {
         "can_preflight_local": preflightable,
@@ -1416,8 +1427,8 @@ def run_actions(
         "can_resume": status == "interrupted" and not revision_required and package_valid and oversight_valid,
         "can_execute_revision": revision_runnable,
         "can_start_revision": revision_runnable,
-        "can_research_loop": loop_runnable,
-        "can_start_research_loop": loop_runnable,
+        "can_research_loop": loop_runnable and not research_loop_blocked,
+        "can_start_research_loop": loop_runnable and not research_loop_blocked,
         "force_required_for_rerun": status == "completed" and not revision_required,
     }
     if status == "corrupt":
@@ -1432,6 +1443,8 @@ def run_actions(
         next_action = {"kind": "inspect_oversight", "method": "GET", "endpoint": "GET /runs/{task_id}/oversight", "body": {}, "reason": "governor oversight is missing or inconsistent"}
     elif revision_required and not revision_valid:
         next_action = {"kind": "inspect_revision", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "revision_plan is invalid"}
+    elif research_loop_blocked:
+        next_action = {"kind": "inspect_blockers", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "research loop stopped on a stable blocker"}
     elif revision_runnable:
         next_action = {"kind": "execute_revision", "method": "POST", "endpoint": "POST /runs/{task_id}/start_revision_http", "body": {}, "reason": "revision_plan requires selected steps to rerun"}
     elif resume_required:
@@ -2144,6 +2157,7 @@ def orchestration_display(
         "ready_to_start": "Run is ready to start",
         "resume_required": "Run can be resumed",
         "revision_required": "Revision is required",
+        "blocked": "Run is blocked",
         "needs_attention": "Run needs attention",
         "ready_to_preflight": "Run needs preflight",
         "inspect": "Inspect run state",
@@ -2155,6 +2169,8 @@ def orchestration_display(
         detail = f"Final package status: {final_summary.get('status') or 'unknown'}"
     elif phase == "revision_required":
         detail = f"{int(revision_summary.get('step_count') or 0)} revision steps ready"
+    elif phase == "blocked":
+        detail = str(next_action.get("reason") or "Stable blocker requires inspection")
     elif phase == "resume_required":
         detail = f"{pending_steps} pending steps can resume"
     elif phase == "ready_to_start":
@@ -2164,7 +2180,7 @@ def orchestration_display(
     else:
         detail = str(next_action.get("reason") or status or phase)
     severity = "info"
-    if phase in {"needs_attention", "revision_required"} or failed_steps:
+    if phase in {"needs_attention", "revision_required", "blocked"} or failed_steps:
         severity = "warning"
     if status in {"failed", "corrupt"}:
         severity = "error"
@@ -2858,8 +2874,36 @@ def research_loop_run(
                 },
             )
             if not execution.get("ok"):
+                post_execution_summary = run_summary(run_dir)
+                post_revision_summary = post_execution_summary.get("revision_plan_summary") if isinstance(post_execution_summary.get("revision_plan_summary"), dict) else {}
+                worker_steps = execution.get("steps") if isinstance(execution.get("steps"), list) else []
+                worker_steps_ok = bool(worker_steps) and all(isinstance(item, dict) and item.get("ok") for item in worker_steps)
+                if worker_steps_ok and post_revision_summary.get("required") and post_revision_summary.get("valid"):
+                    cycle["managed_blocker"] = True
+                    cycle["revision_step_ids"] = post_revision_summary.get("step_ids", [])
+                    continue
                 stop_reason = "execution_failed"
                 break
+        stable_blocker_reasons = {"repeated_revision_plan", "revision_cycle_limit"}
+        if stop_reason in stable_blocker_reasons:
+            try:
+                ledger = TaskLedger.load(run_dir / "task_ledger.json")
+                existing_result = ledger.data.get("result") if isinstance(ledger.data.get("result"), dict) else {}
+                blocked_result = dict(existing_result)
+                blocked_result.update(
+                    {
+                        "ok": False,
+                        "status": "blocked",
+                        "summary": f"Research loop stopped on stable blocker: {stop_reason}.",
+                        "research_loop_blocked": True,
+                        "research_loop_stop_reason": stop_reason,
+                        "research_loop_revision_cycles": revision_cycles,
+                    }
+                )
+                ledger.set_result(blocked_result)
+                ledger.set_status("blocked")
+            except Exception:
+                pass
         final_summary = run_summary(run_dir)
         final_view = orchestration_view_fields(final_summary, task_id=task_id)
         ok = stop_reason == "completed" or (

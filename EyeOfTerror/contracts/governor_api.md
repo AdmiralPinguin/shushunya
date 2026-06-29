@@ -34,6 +34,7 @@ POST /prepare_run
     "CorpusIngestor",
     "Lexmechanic",
     "AuspexBrowser",
+    "OcularisRenderium",
     "NoosphericExtractor",
     "Chronologis",
     "ScriptoriumDaemon",
@@ -42,11 +43,12 @@ POST /prepare_run
   ],
   "pipeline": {
     "kind": "lore_reconstruction",
-    "step_count": 8,
+    "step_count": 9,
     "required_workers": [
       "CorpusIngestor",
       "Lexmechanic",
       "AuspexBrowser",
+      "OcularisRenderium",
       "NoosphericExtractor",
       "Chronologis",
       "ScriptoriumDaemon",
@@ -72,6 +74,13 @@ POST /prepare_run
         "worker": "AuspexBrowser",
         "depends_on": ["source_discovery"],
         "expected_artifacts": ["/work/capabilities/source_snapshots.json"],
+        "expected_artifact_count": 1
+      },
+      {
+        "step_id": "source_rendering",
+        "worker": "OcularisRenderium",
+        "depends_on": ["source_acquisition"],
+        "expected_artifacts": ["/work/capabilities/rendered_snapshots.json"],
         "expected_artifact_count": 1
       },
       {
