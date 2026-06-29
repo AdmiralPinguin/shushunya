@@ -125,6 +125,9 @@
   rules.
 - HTTP task preflight and task creation responses expose top-level executable
   `client_action` fields for the recommended next step.
+- HTTP execution preserves compact worker runtime `display`, `decision`,
+  `next_action`, and `client_action` state in ledger step details and step
+  events under `worker_view`.
 - Task routing failures also expose action hints that direct clients toward
   gateway capability inspection instead of attempting run creation.
 - Successful task creation responses expose action hints that recommend run
@@ -283,6 +286,8 @@
   `/events?after=N` for clients that need one feed across runs.
 - Run and aggregate event polling responses expose `display_events` with
   headline, detail, severity, and timestamp for chat/mobile history rendering.
+- Step display events expose `worker_display` and `worker_client_action` when
+  HTTP worker execution preserved a worker runtime view in the ledger event.
 - Per-run event and snapshot polling responses expose executable
   `run_client_action` so task detail screens can update controls without
   rebuilding actions from summaries.

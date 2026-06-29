@@ -131,7 +131,15 @@ class TaskLedger:
         self.data["result"] = result
         self.record_event("result_recorded", result)
 
-    def record_step(self, step_id: str, worker: str, status: str, artifacts: list[str] | None = None, summary: str = "") -> None:
+    def record_step(
+        self,
+        step_id: str,
+        worker: str,
+        status: str,
+        artifacts: list[str] | None = None,
+        summary: str = "",
+        details: dict[str, Any] | None = None,
+    ) -> None:
         steps = self.data.setdefault("steps", [])
         existing = next((step for step in steps if step.get("step_id") == step_id), None)
         payload = {
@@ -142,12 +150,17 @@ class TaskLedger:
             "summary": summary,
             "updated_at": now_iso(),
         }
+        if details:
+            payload["details"] = details
         if existing is None:
             payload["created_at"] = payload["updated_at"]
             steps.append(payload)
         else:
             existing.update(payload)
-        self.record_event("step_recorded", {"step_id": step_id, "worker": worker, "status": status})
+        event_payload = {"step_id": step_id, "worker": worker, "status": status}
+        if details:
+            event_payload["details"] = details
+        self.record_event("step_recorded", event_payload)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.data)

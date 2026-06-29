@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from eye_of_terror.http_executor import execute_run, run_step, terminal_payload_allows_completion
+from eye_of_terror.warmaster_gateway import event_display
 
 import sys
 
@@ -113,6 +114,31 @@ def main() -> int:
                 raise AssertionError("HTTP executor did not write worker artifact")
             if not (run_dir / "task_ledger.json").exists():
                 raise AssertionError("HTTP executor did not write task ledger")
+            ledger = json.loads((run_dir / "task_ledger.json").read_text(encoding="utf-8"))
+            step = next((item for item in ledger.get("steps", []) if item.get("step_id") == "fact_extraction"), {})
+            worker_view = step.get("details", {}).get("worker_view", {})
+            if (
+                worker_view.get("display", {}).get("headline") != "NoosphericExtractor task completed"
+                or worker_view.get("client_action", {}).get("path") != "/tasks/http-test"
+                or worker_view.get("decision", {}).get("recommended_kind") != "inspect_task"
+            ):
+                raise AssertionError(f"HTTP executor did not preserve worker view state: {ledger}")
+            step_event = next(
+                (
+                    item
+                    for item in ledger.get("events", [])
+                    if item.get("type") == "step_recorded" and item.get("payload", {}).get("step_id") == "fact_extraction"
+                ),
+                {},
+            )
+            if step_event.get("payload", {}).get("details", {}).get("worker_view", {}).get("display", {}).get("severity") != "info":
+                raise AssertionError(f"HTTP executor did not preserve worker view state in events: {ledger}")
+            displayed_event = event_display(step_event, task_id="http-test")
+            if (
+                displayed_event.get("worker_display", {}).get("headline") != "NoosphericExtractor task completed"
+                or displayed_event.get("worker_client_action", {}).get("path") != "/tasks/http-test"
+            ):
+                raise AssertionError(f"Warmaster event display did not expose worker view state: {displayed_event}")
             server.shutdown()
             thread.join(timeout=5)
             summary = execute_run(run_dir, timeout_sec=1)

@@ -1800,7 +1800,7 @@ def event_display(event: dict[str, Any], task_id: str = "") -> dict[str, Any]:
     elif event_type in {"cancel_requested", "resume_execution_requested"}:
         headline = event_type.replace("_", " ").capitalize()
         detail = str(payload.get("reason") or payload.get("mode") or "")
-    return {
+    display = {
         "task_id": task_id,
         "at": str(event.get("at") or ""),
         "type": event_type,
@@ -1808,6 +1808,15 @@ def event_display(event: dict[str, Any], task_id: str = "") -> dict[str, Any]:
         "detail": detail,
         "severity": severity,
     }
+    details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+    worker_view = details.get("worker_view") if isinstance(details.get("worker_view"), dict) else {}
+    worker_display_payload = worker_view.get("display") if isinstance(worker_view.get("display"), dict) else {}
+    worker_client_action = worker_view.get("client_action") if isinstance(worker_view.get("client_action"), dict) else {}
+    if worker_display_payload:
+        display["worker_display"] = worker_display_payload
+    if worker_client_action:
+        display["worker_client_action"] = worker_client_action
+    return display
 
 
 def display_events_for(task_id: str, events: list[Any]) -> list[dict[str, Any]]:

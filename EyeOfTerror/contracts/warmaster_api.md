@@ -285,6 +285,10 @@ Clients should use:
 - `/events?after=N` for a compact aggregate run-event feed when the client
   wants one polling cursor across all runs. Responses include `display_events`
   with compact headline/detail/severity fields for chat/mobile history views.
+  Step events produced by HTTP worker services may also include
+  `worker_display` and `worker_client_action` copied from the worker runtime
+  response. Those fields describe the worker service task, not a Warmaster
+  endpoint.
 - `/runs/{task_id}/summary` for lightweight polling.
 - `/runs/{task_id}/snapshot` for a compact polling view containing summary,
   process-local active state, cursor events, executable `run_client_action`, and
@@ -302,6 +306,9 @@ Clients should use:
   include `cursor.after`, `cursor.next`, `cursor.total`, `display_events`, and
   executable `run_client_action`, plus the standard run detail `phase`,
   `decision`, `display`, `next_action`, and executable `client_action`.
+  Raw step events preserve compact worker runtime state under
+  `payload.details.worker_view` when the step was executed through the common
+  Mechanicum worker API.
 Aggregate `/events` responses include the same cursor shape plus `task_id`,
 `run_status`, `governor`, `run_updated_at`, `event_index`, `global_index`,
 `run_next_action`, executable `run_client_action`, and

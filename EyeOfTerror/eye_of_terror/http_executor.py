@@ -101,6 +101,15 @@ def terminal_payload_allows_completion(payload: dict[str, Any]) -> bool:
     return True
 
 
+def worker_view_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    view: dict[str, Any] = {}
+    for key in ("phase", "decision", "display", "next_action", "client_action"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            view[key] = value
+    return view
+
+
 def run_step(dispatch_path: Path, host: str, timeout_sec: int, revision_context: dict[str, Any] | None = None) -> HttpStepResult:
     try:
         packet = load_json(dispatch_path)
@@ -185,12 +194,15 @@ def execute_run(
             break
         result = run_step(dispatch_path, host, timeout_sec, revision_context=revision_contexts.get(dispatch_path.stem))
         results.append(result)
+        worker_view = worker_view_from_payload(result.payload)
+        step_details = {"worker_view": worker_view} if worker_view else None
         ledger.record_step(
             result.step_id,
             result.worker,
             str(result.payload.get("status") or ("completed" if result.ok else "failed")),
             [str(item) for item in result.payload.get("artifacts", [])] if isinstance(result.payload.get("artifacts"), list) else [],
             str(result.payload.get("summary") or result.payload.get("error") or result.error),
+            step_details,
         )
         if not result.ok:
             break
