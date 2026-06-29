@@ -215,7 +215,7 @@ def check_event_playbooks(errors: list[str]) -> int:
             if event_id:
                 require(event_id not in seen_event_ids, f"event playbook {path.name} duplicate event_id: {event_id}", errors)
                 seen_event_ids.add(event_id)
-            for field in ("summary", "phase", "confidence"):
+            for field in ("summary", "narrative_ru", "phase", "confidence"):
                 require(bool(str(event.get(field) or "").strip()), f"event playbook {path.name} event {event_id or index} missing {field}", errors)
             require_string_list(event.get("source_refs"), f"event playbook {path.name} event {event_id or index} missing source_refs", errors)
             require_string_list(event.get("evidence_markers"), f"event playbook {path.name} event {event_id or index} missing evidence_markers", errors)

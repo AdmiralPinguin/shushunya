@@ -18,20 +18,37 @@ PHASE_TITLES = {
     "aftermath_boundary": "Граница последствий",
 }
 
-KNOWN_RU_SUMMARIES = {
-    "ec_claim_system": "Дети Императора первыми нашли Скалатракс и рассматривали его как убежище и опорную точку после бегства из Ока Ужаса.",
-    "world_eaters_internal_dispute": "Среди Пожирателей Миров не было единой линии: часть командиров хотела немедленного удара, часть склонялась к отходу или переговорам.",
-    "world_eaters_arrival": "Прибытие крупного флота Пожирателей Миров превратило Скалатракс из убежища Детей Императора в спорную добычу двух предательских легионов.",
-    "anteus_hedonarch_presence": "На стороне Детей Императора в рассказах о переговорах фигурируют Тиберий Ангеллус Антей и Хедонарх.",
-    "moon_parley": "Попытка решить конфликт через встречу на луне Скалатракса стала центральной точкой перед открытым кровопролитием.",
-    "dreagher_shoots_anteus": "Выстрел Дреагера в Антея сломал переговоры и дал конфликту точку невозврата.",
-    "golden_absolute": "Во время эскалации вокруг отряда Кхарна и корабля Детей Императора Golden Absolute события окончательно ушли от переговоров к насилию.",
-    "planetary_battle": "После срыва договоренностей война перекинулась на сам Скалатракс: Пожиратели Миров атаковали, а Дети Императора удерживали свои позиции.",
-    "cold_night_shelters": "Смертоносная ночь Скалатракса заставила даже сверхлюдей искать укрытие от холода, на время ломая обычный ход битвы.",
-    "kharn_burns_shelters": "Кхарн начал выжигать убежища, убивая не только врагов, но и собственных братьев, прятавшихся от холода.",
-    "fratricide_spreads": "После этого бой перестал быть только войной против Детей Императора: Пожиратели Миров стали массово резать друг друга.",
-    "legion_fractures": "Итогом стала не просто победа или поражение, а окончательный распад Пожирателей Миров как единого легиона на военные банды.",
-}
+EVENT_PLAYBOOK_DIR = Path(__file__).resolve().parents[1] / "NoosphericExtractor" / "playbooks"
+
+
+def load_event_playbooks() -> list[dict[str, Any]]:
+    playbooks: list[dict[str, Any]] = []
+    if not EVENT_PLAYBOOK_DIR.exists():
+        return playbooks
+    for path in sorted(EVENT_PLAYBOOK_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            playbooks.append(payload)
+    return playbooks
+
+
+def playbook_narratives_ru() -> dict[str, str]:
+    narratives: dict[str, str] = {}
+    for playbook in load_event_playbooks():
+        for event in playbook.get("events", []):
+            if not isinstance(event, dict):
+                continue
+            event_id = str(event.get("event_id") or "")
+            narrative = str(event.get("narrative_ru") or "")
+            if event_id and narrative:
+                narratives[event_id] = narrative
+    return narratives
+
+
+PLAYBOOK_RU_SUMMARIES = playbook_narratives_ru()
 
 
 def sandbox_path(workspace_root: Path, path: str) -> Path:
@@ -69,7 +86,7 @@ def confidence_marker(value: Any) -> str:
 def event_text(event: dict[str, Any], notes_by_id: dict[str, dict[str, Any]]) -> str:
     event_id = str(event.get("event_id") or "")
     note = notes_by_id.get(event_id, {})
-    text = str(note.get("narrative_ru") or KNOWN_RU_SUMMARIES.get(event_id) or event.get("summary") or "")
+    text = str(note.get("narrative_ru") or PLAYBOOK_RU_SUMMARIES.get(event_id) or event.get("summary") or "")
     refs = event.get("source_refs") or note.get("source_refs") or []
     ref_text = ", ".join(str(item) for item in refs if item)
     suffix = confidence_marker(event.get("confidence") or note.get("confidence"))

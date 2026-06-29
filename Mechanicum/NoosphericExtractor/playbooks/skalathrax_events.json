@@ -4,6 +4,7 @@
     {
       "event_id": "ec_claim_system",
       "summary": "Emperor's Children discovered and claimed Skalathrax as a refuge/sanctuary before the World Eaters arrived.",
+      "narrative_ru": "Дети Императора первыми нашли Скалатракс и рассматривали его как убежище и опорную точку после бегства из Ока Ужаса.",
       "phase": "prelude",
       "confidence": "high",
       "source_refs": ["Lexicanum: Battle of Skalathrax"],
@@ -12,6 +13,7 @@
     {
       "event_id": "world_eaters_internal_dispute",
       "summary": "World Eaters leaders were split between immediate attack, withdrawal, and negotiation before Kharn pushed events toward violence.",
+      "narrative_ru": "Среди Пожирателей Миров не было единой линии: часть командиров хотела немедленного удара, часть склонялась к отходу или переговорам.",
       "phase": "prelude",
       "confidence": "medium",
       "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
@@ -20,6 +22,7 @@
     {
       "event_id": "world_eaters_arrival",
       "summary": "A large World Eaters fleet entered the system, creating a direct territorial conflict with Emperor's Children.",
+      "narrative_ru": "Прибытие крупного флота Пожирателей Миров превратило Скалатракс из убежища Детей Императора в спорную добычу двух предательских легионов.",
       "phase": "arrival",
       "confidence": "high",
       "source_refs": ["Lexicanum: Battle of Skalathrax"],
@@ -28,6 +31,7 @@
     {
       "event_id": "anteus_hedonarch_presence",
       "summary": "Tiberius Angellus Anteus and the Hedonarch are associated with the Emperor's Children side of the parley account.",
+      "narrative_ru": "На стороне Детей Императора в рассказах о переговорах фигурируют Тиберий Ангеллус Антей и Хедонарх.",
       "phase": "parley",
       "confidence": "medium",
       "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
@@ -36,6 +40,7 @@
     {
       "event_id": "moon_parley",
       "summary": "Kharn arranged or joined a parley on Skalathrax's moon with Emperor's Children representatives.",
+      "narrative_ru": "Попытка решить конфликт через встречу на луне Скалатракса стала центральной точкой перед открытым кровопролитием.",
       "phase": "parley",
       "confidence": "medium-high",
       "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
@@ -47,6 +52,7 @@
     {
       "event_id": "dreagher_shoots_anteus",
       "summary": "Dreagher's shooting of Anteus is treated as a key trigger that collapses the parley into bloodshed.",
+      "narrative_ru": "Выстрел Дреагера в Антея сломал переговоры и дал конфликту точку невозврата.",
       "phase": "parley_collapse",
       "confidence": "medium-high",
       "source_refs": ["Lexicanum: Dreagher", "Kharn: Eater of Worlds"],
@@ -58,6 +64,7 @@
     {
       "event_id": "golden_absolute",
       "summary": "Kharn's group is linked to the capture or redirection of the Emperor's Children vessel Golden Absolute during the escalation.",
+      "narrative_ru": "Во время эскалации вокруг отряда Кхарна и корабля Детей Императора Golden Absolute события окончательно ушли от переговоров к насилию.",
       "phase": "escalation",
       "confidence": "medium",
       "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
@@ -69,6 +76,7 @@
     {
       "event_id": "planetary_battle",
       "summary": "World Eaters attacked across Skalathrax and Emperor's Children resisted, including Lucius-related forces in the wider account.",
+      "narrative_ru": "После срыва договоренностей война перекинулась на сам Скалатракс: Пожиратели Миров атаковали, а Дети Императора удерживали свои позиции.",
       "phase": "battle",
       "confidence": "medium-high",
       "source_refs": ["Lexicanum: Battle of Skalathrax", "Lucius: The Faultless Blade"],
@@ -77,6 +85,7 @@
     {
       "event_id": "cold_night_shelters",
       "summary": "The deadly cold of Skalathrax's night forced combatants to seek shelter, interrupting open battle.",
+      "narrative_ru": "Смертоносная ночь Скалатракса заставила даже сверхлюдей искать укрытие от холода, на время ломая обычный ход битвы.",
       "phase": "turning_point",
       "confidence": "high",
       "source_refs": ["Lexicanum: Battle of Skalathrax", "Warhammer 40k Fandom: Battle of Skalathrax"],
@@ -88,6 +97,7 @@
     {
       "event_id": "fratricide_spreads",
       "summary": "Kharn's acts turned the battle into internal slaughter and encouraged World Eaters to kill their own brothers.",
+      "narrative_ru": "После этого бой перестал быть только войной против Детей Императора: Пожиратели Миров стали массово резать друг друга.",
       "phase": "betrayal",
       "confidence": "medium-high",
       "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
@@ -99,6 +109,7 @@
     {
       "event_id": "kharn_burns_shelters",
       "summary": "Kharn used fire/flamer imagery to destroy shelters and killed both enemies and World Eaters sheltering from the cold.",
+      "narrative_ru": "Кхарн начал выжигать убежища, убивая не только врагов, но и собственных братьев, прятавшихся от холода.",
       "phase": "betrayal",
       "confidence": "high",
       "source_refs": ["Lexicanum: Battle of Skalathrax", "Kharn: Eater of Worlds"],
@@ -110,6 +121,7 @@
     {
       "event_id": "legion_fractures",
       "summary": "After Skalathrax the World Eaters no longer functioned as a unified legion and fractured into warbands.",
+      "narrative_ru": "Итогом стала не просто победа или поражение, а окончательный распад Пожирателей Миров как единого легиона на военные банды.",
       "phase": "aftermath_boundary",
       "confidence": "high",
       "source_refs": ["__ALL_SOURCE_TITLES__"],
