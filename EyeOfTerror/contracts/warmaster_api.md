@@ -320,9 +320,10 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
   is a `final_manifest.json`, the response should also expand manifest `files`
   so clients can list and fetch the whole final package. The final manifest
   artifact item includes `manifest_summary` with status, critic status, critic
-  metrics, revision focus, warnings, and blockers, or `manifest_error` when the
-  manifest exists but cannot be parsed. The response includes the standard run
-  detail client-view fields.
+  metrics, event-review coverage, corpus requirements, readiness checks,
+  revision focus, warnings, and blockers, or `manifest_error` when the manifest
+  exists but cannot be parsed. The response includes the standard run detail
+  client-view fields.
 - `/runs/{task_id}/final` for a completed final package in one response:
   manifest summary, full manifest object, deliverable path, package files, and
   bounded text previews. `max_bytes` limits each file preview and is clamped by

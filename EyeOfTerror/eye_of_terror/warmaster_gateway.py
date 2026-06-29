@@ -2775,6 +2775,8 @@ def compact_manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:
         "approved": bool(manifest.get("approved")),
         "critic_status": manifest.get("critic_status", ""),
         "critic_metrics": manifest.get("critic_metrics", {}),
+        "event_review": manifest.get("event_review", {}) if isinstance(manifest.get("event_review"), dict) else {},
+        "corpus_requirements": manifest.get("corpus_requirements", {}) if isinstance(manifest.get("corpus_requirements"), dict) else {},
         "readiness_checks": manifest.get("readiness_checks", {}) if isinstance(manifest.get("readiness_checks"), dict) else {},
         "revision_focus": manifest.get("revision_focus", {}),
         "warning_count": len(warnings),
