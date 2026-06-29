@@ -557,6 +557,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   patch application is blocked when a step policy sets
   `may_mutate_source=false`, and verifier repair loops record blockers instead
   of mutating source under a read-only policy.
+- `OrdinatusVerifier` now produces `repair_loop_state.json` alongside
+  `verification_report.json`, preserving command counts, failed commands,
+  applied repairs, blocked repairs, pending blockers, and the next safe action
+  for review/finalization.
 - `LogisRepository` now records Python symbol summaries and suggested unittest
   verification commands, and `MagosStrategos` carries those sections into the
   change plan for downstream patch planning.

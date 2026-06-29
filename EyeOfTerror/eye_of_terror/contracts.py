@@ -212,6 +212,7 @@ def code_required_artifacts(slug: str) -> list[str]:
         f"{base}/change_plan.md",
         f"{base}/patch_manifest.json",
         f"{base}/verification_report.json",
+        f"{base}/repair_loop_state.json",
         f"{base}/code_review.json",
         f"{base}/final_manifest.json",
     ]
@@ -245,7 +246,7 @@ def code_worker_plan(slug: str) -> list[WorkerPlanStep]:
             worker="OrdinatusVerifier",
             purpose="Define and record the verification commands or blockers for the implementation.",
             depends_on=["implementation"],
-            expected_artifacts=[f"{base}/verification_report.json"],
+            expected_artifacts=[f"{base}/verification_report.json", f"{base}/repair_loop_state.json"],
         ),
         WorkerPlanStep(
             step_id="code_review",
@@ -279,7 +280,7 @@ def build_code_task_contract(user_task: str, task_id: str | None = None) -> Task
         ],
         required_artifacts=code_required_artifacts(slug),
         completion_criteria=[
-            "Repository survey, change plan, patch manifest, verification report, review, and final manifest exist.",
+            "Repository survey, change plan, patch manifest, verification report, repair loop state, review, and final manifest exist.",
             "The plan names files or modules likely to be touched and records test commands or blockers.",
             "The review records whether the implementation package is ready, blocked, or needs a stronger worker.",
             "Final manifest exposes the next safe action for Warmaster or a human/code agent.",
@@ -289,6 +290,7 @@ def build_code_task_contract(user_task: str, task_id: str | None = None) -> Task
             "change_plan_scoped",
             "patch_manifest_auditable",
             "verification_report_present",
+            "repair_loop_state_present",
             "code_review_passed_or_blocked",
             "final_manifest_created",
         ],

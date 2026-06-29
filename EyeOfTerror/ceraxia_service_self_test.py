@@ -43,6 +43,7 @@ def main() -> int:
         or pipeline.get("step_count") != 6
         or pipeline.get("steps", [])[0].get("step_id") != "repository_survey"
         or pipeline.get("steps", [])[2].get("expected_artifacts") != ["/work/capabilities/patch_manifest.json"]
+        or pipeline.get("steps", [])[3].get("expected_artifacts") != ["/work/capabilities/verification_report.json", "/work/capabilities/repair_loop_state.json"]
         or pipeline.get("steps", [])[5].get("depends_on") != ["code_review"]
     ):
         raise AssertionError(f"bad Ceraxia pipeline summary: {pipeline}")

@@ -33,6 +33,10 @@ limited to allowlisted verification and narrow repairs.
 The shared code-worker core enforces the mutation boundary: implementation will
 not apply patches when `may_mutate_source=false`, and verifier repair loops will
 record a blocker instead of editing source under a read-only policy.
+`OrdinatusVerifier` writes both `verification_report.json` and
+`repair_loop_state.json`; the latter records executed command counts, failed
+commands, applied repairs, blocked repairs, and the next safe action for the
+reviewer or governor.
 
 `LogisRepository` records Python symbol summaries for scanned `.py` files and
 suggests safe verification commands from discovered test files. `MagosStrategos`

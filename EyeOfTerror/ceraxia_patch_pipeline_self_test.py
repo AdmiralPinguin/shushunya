@@ -62,6 +62,8 @@ CERAXIA_PATCH:
             raise AssertionError(f"Ceraxia final manifest lacks changed file evidence: {manifest}")
         if manifest.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"Ceraxia final manifest lacks verification evidence: {manifest}")
+        if manifest.get("repair_loop_state", {}).get("next_action") != "continue_to_code_review":
+            raise AssertionError(f"Ceraxia final manifest should preserve repair loop state: {manifest}")
         if manifest.get("role_policies", {}).get("verification", {}).get("authority") != "allowlisted_verification_and_narrow_repairs":
             raise AssertionError(f"Ceraxia final manifest should preserve role policies: {manifest}")
     with tempfile.TemporaryDirectory() as temp_dir:

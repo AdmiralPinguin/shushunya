@@ -234,6 +234,13 @@ def main() -> int:
             raise AssertionError(f"final manifest should preserve changed file metadata: {final}")
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"final manifest should preserve verification evidence: {final}")
+        repair_state = final.get("repair_loop_state", {})
+        if (
+            repair_state.get("status") != "passed"
+            or repair_state.get("next_action") != "continue_to_code_review"
+            or repair_state.get("commands_executed_count", 0) < 2
+        ):
+            raise AssertionError(f"final manifest should preserve repair loop state: {final}")
         role_policies = final.get("role_policies", {})
         if (
             role_policies.get("implementation", {}).get("authority")
@@ -292,8 +299,11 @@ def main() -> int:
         if not result.get("ok"):
             raise AssertionError(f"read-only verification policy should write a blocked report: {result}")
         report = json.loads((work / "code" / "verification_report.json").read_text(encoding="utf-8"))
+        repair_state = json.loads((work / "code" / "repair_loop_state.json").read_text(encoding="utf-8"))
         if "role_policy forbids source mutation repair" not in report.get("blockers", []):
             raise AssertionError(f"read-only verification policy should block repair: {report}")
+        if not repair_state.get("blocked_repairs") or repair_state.get("repairs_allowed") is not False:
+            raise AssertionError(f"read-only verification policy should preserve blocked repair state: {repair_state}")
         if broken.read_text(encoding="utf-8") != "def value()\n    return 42\n":
             raise AssertionError("read-only verification policy allowed repair mutation")
     with tempfile.TemporaryDirectory() as temp_dir:

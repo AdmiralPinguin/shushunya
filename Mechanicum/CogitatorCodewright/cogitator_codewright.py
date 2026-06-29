@@ -1103,6 +1103,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
     repo_root = target_repo_root(request)
     changed_files = patch.get("changed_files") if isinstance(patch.get("changed_files"), list) else []
     repairs: list[dict[str, Any]] = []
+    blocked_repairs: list[dict[str, Any]] = []
     repairs_allowed = role_policy_allows_source_mutation(role_policy)
     if patch.get("status") == "applied":
         py_files = [
@@ -1126,6 +1127,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
                 for py_file in py_files:
                     if not repairs_allowed:
                         blockers.append("role_policy forbids source mutation repair")
+                        blocked_repairs.append({"kind": "py_compile_repair", "path": py_file, "reason": "role_policy forbids source mutation repair"})
                         break
                     repair = repair_expected_colon(repo_root, py_file, completed.stderr)
                     if repair.get("applied"):
@@ -1172,6 +1174,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
                 if not repairs_allowed:
                     repair = {"applied": False, "blocked": "role_policy forbids source mutation repair"}
                     blockers.append("role_policy forbids source mutation repair")
+                    blocked_repairs.append({"kind": "command_repair", "command": raw_command, "reason": "role_policy forbids source mutation repair"})
                 else:
                     repair = repair_import_error_missing_function(repo_root, py_files, output)
                 if not repair.get("applied") and repairs_allowed:
@@ -1202,14 +1205,33 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         "warnings": patch.get("warnings", []),
         "summary": "Verification passed for applied changes." if not blockers else "Verification is blocked or failed.",
     }
+    failed_commands = [
+        item
+        for item in executed
+        if isinstance(item, dict) and int(item.get("returncode") or 0) != 0
+    ]
+    repair_state = {
+        "status": "blocked" if blockers else "passed",
+        "task_id": request.get("task_id"),
+        "role_policy": role_policy,
+        "repairs_allowed": repairs_allowed,
+        "repair_attempts": repairs,
+        "blocked_repairs": blocked_repairs,
+        "commands_executed_count": len(executed),
+        "failed_commands": failed_commands,
+        "pending_blockers": blockers,
+        "next_action": "inspect_blockers_or_revision_plan" if blockers else "continue_to_code_review",
+        "summary": "Repair loop state recorded for verification step.",
+    }
     write_json(workspace_root, output_path, report)
+    write_json(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"), repair_state)
     return {
         "ok": True,
         "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": "completed",
         "summary": "Verification report written.",
-        "artifacts": [output_path],
+        "artifacts": [output_path, sibling_artifact(output_path, "repair_loop_state.json")],
         "confidence": "medium",
     }
 
@@ -1217,6 +1239,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
 def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
+    repair_state = load_json_optional(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"))
     role_policy = role_policy_from_request(request)
     blockers = verification.get("blockers") if isinstance(verification.get("blockers"), list) else []
     warnings = verification.get("warnings") if isinstance(verification.get("warnings"), list) else []
@@ -1228,6 +1251,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "status": "blocked" if blockers else "passed",
         "approved": not blockers,
         "role_policy": role_policy,
+        "repair_loop_status": repair_state.get("status", "unknown"),
         "findings": [
             {"severity": "blocker", "message": str(item)}
             for item in blockers
@@ -1278,6 +1302,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
 def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
+    repair_state = load_json_optional(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"))
     review = load_json_optional(workspace_root, sibling_artifact(output_path, "code_review.json"))
     role_policy = role_policy_from_request(request)
     status = "blocked" if review.get("approved") is False else "ready"
@@ -1296,6 +1321,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             sibling_artifact(output_path, "change_plan.md"),
             sibling_artifact(output_path, "patch_manifest.json"),
             sibling_artifact(output_path, "verification_report.json"),
+            sibling_artifact(output_path, "repair_loop_state.json"),
             sibling_artifact(output_path, "code_review.json"),
         ],
         "changed_files": patch.get("changed_files", []),
@@ -1305,6 +1331,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "verification_status": verification.get("status", "unknown"),
         "verification_executed": verification.get("executed", []),
         "verification_repairs": verification.get("repairs", []),
+        "repair_loop_state": repair_state,
         "verification_blockers": verification.get("blockers", []),
         "verification_summary": {
             "executed_count": len(verification.get("executed", [])) if isinstance(verification.get("executed"), list) else 0,
