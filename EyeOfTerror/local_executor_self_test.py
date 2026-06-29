@@ -182,6 +182,40 @@ def main() -> int:
         corrupt_ledger = json.loads((corrupt_dispatch_run / "task_ledger.json").read_text(encoding="utf-8"))
         if corrupt_ledger.get("status") != "failed" or corrupt_ledger.get("steps", [{}])[0].get("status") != "failed":
             raise AssertionError(f"corrupt dispatch failure was not recorded durably: {corrupt_ledger}")
+        timeout_run = root / "timeout-run"
+        timeout_dispatch = timeout_run / "dispatch"
+        write_json(
+            timeout_run / "contract.json",
+            {"task_id": "timeout-local", "goal": "test timeout", "assigned_governor": "IskandarKhayon"},
+        )
+        write_json(
+            timeout_run / "status.json",
+            {
+                "task_id": "timeout-local",
+                "governor": "IskandarKhayon",
+                "steps": [{"step_id": "source_discovery", "worker": "Lexmechanic", "expected_artifacts": ["/work/test/source_map.json"]}],
+                "dispatch_dir": str(timeout_dispatch),
+            },
+        )
+        write_json(
+            timeout_dispatch / "source_discovery.json",
+            {
+                "step_id": "source_discovery",
+                "worker": "Lexmechanic",
+                "request": {
+                    "task_id": "timeout-local:source_discovery",
+                    "contract": {"goal": "Собери историю неизвестной битвы."},
+                    "step": {"expected_artifacts": ["/work/test/source_map.json"]},
+                },
+            },
+        )
+        timeout_summary = execute_run(repo_root, timeout_run, root / "timeout-work", timeout_sec=0)
+        timeout_payload = timeout_summary.get("steps", [{}])[0].get("payload", {})
+        if timeout_summary.get("ok") or timeout_payload.get("error_code") != "worker_timeout":
+            raise AssertionError(f"local executor did not record worker timeout: {timeout_summary}")
+        timeout_ledger = json.loads((timeout_run / "task_ledger.json").read_text(encoding="utf-8"))
+        if timeout_ledger.get("status") != "failed" or timeout_ledger.get("steps", [{}])[0].get("status") != "failed":
+            raise AssertionError(f"worker timeout was not recorded durably: {timeout_ledger}")
         run_dir = root / "run"
         work_dir = root / "work"
         plan = plan_lore_reconstruction("Собери все известное о событиях Скалатракса.", task_id="executor-test")

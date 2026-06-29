@@ -224,6 +224,7 @@ def run_step(
     if revision_context:
         temp_dispatch_path = write_revision_dispatch(dispatch_path, packet, revision_context)
         execution_dispatch_path = temp_dispatch_path
+    timed_out: subprocess.TimeoutExpired | None = None
     try:
         completed = subprocess.run(
             [sys.executable, str(repo_root / script), str(execution_dispatch_path), "--workspace-root", str(workspace_root)],
@@ -234,9 +235,36 @@ def run_step(
             timeout=timeout_sec,
             check=False,
         )
+    except subprocess.TimeoutExpired as exc:
+        timed_out = exc
     finally:
         if temp_dispatch_path is not None:
             temp_dispatch_path.unlink(missing_ok=True)
+    if timed_out is not None:
+        stdout = timed_out.stdout.decode("utf-8", errors="replace") if isinstance(timed_out.stdout, bytes) else str(timed_out.stdout or "")
+        stderr = timed_out.stderr.decode("utf-8", errors="replace") if isinstance(timed_out.stderr, bytes) else str(timed_out.stderr or "")
+        payload = {
+            "ok": False,
+            "worker": worker,
+            "task_id": str(request.get("task_id") or ""),
+            "status": "failed",
+            "error_code": "worker_timeout",
+            "error": f"worker timed out after {timeout_sec} seconds",
+            "summary": f"{worker} timed out after {timeout_sec} seconds.",
+            "revision_plan": {
+                "required": True,
+                "steps": [
+                    {
+                        "step_id": step_id,
+                        "worker": worker,
+                        "reason": f"Worker timed out after {timeout_sec} seconds",
+                        "source": "local_executor_timeout",
+                        "priority": "blocker",
+                    }
+                ],
+            },
+        }
+        return StepResult(step_id, worker, 124, False, payload, stdout[-4000:], stderr[-4000:])
     payload = parse_worker_stdout(completed.stdout)
     ok = completed.returncode == 0 and bool(payload.get("ok"))
     return StepResult(step_id, worker, completed.returncode, ok, payload, completed.stdout, completed.stderr)
