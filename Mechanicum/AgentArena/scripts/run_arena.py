@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from report_metrics import failed_check_symptoms, failed_checks, failure_reason
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs"
@@ -50,33 +52,6 @@ def write_json(path: Path, value: Any) -> None:
     os.replace(temp_path, path)
 
 
-def run_result_failure_reason(result: RunResult) -> str:
-    failed_checks = [check for check in result.checks if isinstance(check, dict) and check.get("ok") is not True]
-    exit_failed = result.exit_code not in (0, None)
-    checks_failed = bool(failed_checks)
-    if exit_failed and checks_failed:
-        return "both"
-    if checks_failed:
-        return "post_run_checks"
-    if exit_failed:
-        return "agent_exit"
-    return "unknown"
-
-
-def failed_check_symptoms(check: dict[str, Any]) -> list[str]:
-    text = "\n".join(str(check.get(key) or "") for key in ("error", "output", "command"))
-    markers = {
-        "json_decode_error": "JSONDecodeError",
-        "assertion_error": "AssertionError",
-        "type_error": "TypeError",
-        "import_error": "ImportError",
-        "module_not_found": "ModuleNotFoundError",
-        "syntax_error": "SyntaxError",
-        "missing_output": "Expecting value",
-    }
-    return [symptom for symptom, marker in markers.items() if marker in text]
-
-
 def summarize_results(results: list[RunResult]) -> dict[str, Any]:
     by_agent: dict[str, dict[str, Any]] = {}
     orchestration_quality: dict[str, dict[str, Any]] = {}
@@ -90,14 +65,13 @@ def summarize_results(results: list[RunResult]) -> dict[str, Any]:
         item["passed" if result.ok else "failed"] += 1
         item["duration_sec"] = round(float(item["duration_sec"]) + result.duration_sec, 3)
         if not result.ok:
-            reason = run_result_failure_reason(result)
+            reason = failure_reason(result.exit_code, result.checks)
             failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
-            for check in result.checks:
-                if isinstance(check, dict) and check.get("ok") is not True:
-                    check_type = str(check.get("type") or "unknown")
-                    failed_check_types[check_type] = failed_check_types.get(check_type, 0) + 1
-                    for symptom in failed_check_symptoms(check):
-                        failed_check_symptom_counts[symptom] = failed_check_symptom_counts.get(symptom, 0) + 1
+            for check in failed_checks(result.checks):
+                check_type = str(check.get("type") or "unknown")
+                failed_check_types[check_type] = failed_check_types.get(check_type, 0) + 1
+                for symptom in failed_check_symptoms(check):
+                    failed_check_symptom_counts[symptom] = failed_check_symptom_counts.get(symptom, 0) + 1
         if isinstance(result.orchestration, dict) and result.orchestration.get("style") == "artifact_reads_before_writes":
             quality = artifact_quality.setdefault(
                 result.agent,

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from report_metrics import failed_check_symptoms, failed_checks, failure_reason, summarize_failed_check
+
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORTS = ROOT / "reports"
@@ -83,41 +85,6 @@ def add_artifact_stat(stats: dict[str, Any], suite: str, agent: str, orchestrati
             item["missing_output_writes"] += 1
 
 
-def summarize_failed_check(check: dict[str, Any]) -> dict[str, Any]:
-    summary: dict[str, Any] = {
-        "type": check.get("type", "unknown"),
-        "path": check.get("path", ""),
-    }
-    for key in ("exit_code", "error"):
-        if check.get(key) not in (None, ""):
-            summary[key] = check.get(key)
-    if check.get("text"):
-        summary["text"] = str(check["text"])[:160]
-    if check.get("command"):
-        summary["command"] = str(check["command"])[:240]
-    if check.get("output"):
-        summary["output_tail"] = str(check["output"])[-500:]
-    return summary
-
-
-def failed_check_symptoms(check: dict[str, Any]) -> list[str]:
-    text = "\n".join(str(check.get(key) or "") for key in ("error", "output", "command"))
-    symptoms: list[str] = []
-    markers = {
-        "json_decode_error": "JSONDecodeError",
-        "assertion_error": "AssertionError",
-        "type_error": "TypeError",
-        "import_error": "ImportError",
-        "module_not_found": "ModuleNotFoundError",
-        "syntax_error": "SyntaxError",
-        "missing_output": "Expecting value",
-    }
-    for symptom, marker in markers.items():
-        if marker in text and symptom not in symptoms:
-            symptoms.append(symptom)
-    return symptoms
-
-
 def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
     stats: dict[str, Any] = {}
     orchestration_stats: dict[str, Any] = {}
@@ -143,22 +110,13 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
                 add_artifact_stat(artifact_stats, suite, agent, orchestration)
             if not ok:
                 checks = result.get("checks") if isinstance(result.get("checks"), list) else []
-                failed_checks = [check for check in checks if isinstance(check, dict) and check.get("ok") is not True]
-                for check in failed_checks:
+                failed = failed_checks(checks)
+                for check in failed:
                     check_type = str(check.get("type") or "unknown")
                     failed_check_types[check_type] = failed_check_types.get(check_type, 0) + 1
                     for symptom in failed_check_symptoms(check):
                         failed_check_symptom_counts[symptom] = failed_check_symptom_counts.get(symptom, 0) + 1
-                exit_failed = result.get("exit_code") not in (0, None)
-                checks_failed = bool(failed_checks)
-                if exit_failed and checks_failed:
-                    reason = "both"
-                elif checks_failed:
-                    reason = "post_run_checks"
-                elif exit_failed:
-                    reason = "agent_exit"
-                else:
-                    reason = "unknown"
+                reason = failure_reason(result.get("exit_code"), checks)
                 failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                 failures.append(
                     {
@@ -168,8 +126,8 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
                         "task_id": result.get("task_id"),
                         "exit_code": result.get("exit_code"),
                         "failure_reason": reason,
-                        "failed_check_count": len(failed_checks),
-                        "failed_checks": [summarize_failed_check(check) for check in failed_checks[:5]],
+                        "failed_check_count": len(failed),
+                        "failed_checks": [summarize_failed_check(check) for check in failed[:5]],
                         "error": result.get("error", ""),
                     }
                 )
