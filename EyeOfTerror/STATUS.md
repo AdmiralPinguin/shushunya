@@ -583,6 +583,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `FerrumPatchwright` can infer one missing Python function from a named
   unittest file when the file contains exactly one safe import/assertEqual
   literal candidate and the target module already exists.
+- `FerrumPatchwright` can infer one simple return-literal mismatch from a named
+  unittest file when the imported function already exists and has exactly one
+  simple source return literal.
 - `write_file` patch operations are idempotent when the target already has the
   requested content, so repeated Ceraxia runs can prove the same desired state
   without requiring unsafe overwrite flags.

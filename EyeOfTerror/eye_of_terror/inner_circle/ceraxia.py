@@ -145,6 +145,7 @@ def patch_contract_capabilities() -> dict[str, Any]:
             "multi_file_json_marker",
             "natural_language_simple_replace",
             "natural_language_add_function",
+            "test_inferred_return_mismatch",
             "test_inferred_missing_function",
         ],
         "verification_allowlist": [
@@ -163,6 +164,7 @@ def patch_contract_capabilities() -> dict[str, Any]:
             "natural language replace inference requires explicit backtick-delimited path, old text, and new text",
             "natural language add-function inference requires explicit backtick-delimited path, function name, and safe return literal",
             "natural language add-function inference blocks duplicate Python function definitions",
+            "test-inferred return mismatch mode requires exactly one import/assertEqual literal candidate and one simple source return literal",
             "test-inferred missing function mode requires exactly one import/assertEqual literal candidate",
         ],
         "repair_loops": [

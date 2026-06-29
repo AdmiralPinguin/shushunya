@@ -286,9 +286,7 @@ def test_paths_from_goal(goal: str) -> list[str]:
     return paths
 
 
-def infer_missing_function_from_tests(request: dict[str, Any]) -> dict[str, Any]:
-    goal = request_goal(request)
-    repo_root = target_repo_root(request)
+def test_expectation_candidates(repo_root: Path, goal: str) -> list[dict[str, str]]:
     candidates: list[dict[str, str]] = []
     for test_path in test_paths_from_goal(goal):
         path = safe_repo_path(repo_root, test_path)
@@ -307,9 +305,6 @@ def infer_missing_function_from_tests(request: dict[str, Any]) -> dict[str, Any]
             source_path = safe_repo_path(repo_root, module_path)
             if not source_path.exists():
                 continue
-            current = source_path.read_text(encoding="utf-8")
-            if re.search(rf"^\s*def\s+{re.escape(function_name)}\s*\(", current, flags=re.MULTILINE):
-                continue
             candidates.append(
                 {
                     "test_path": test_path,
@@ -318,6 +313,83 @@ def infer_missing_function_from_tests(request: dict[str, Any]) -> dict[str, Any]
                     "literal": safe_return_literal(expected_values[0]),
                 }
             )
+    return candidates
+
+
+def ast_return_literal_for_function(source_path: Path, function_name: str) -> str:
+    try:
+        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return ""
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef) or node.name != function_name:
+            continue
+        returns = [item for item in ast.walk(node) if isinstance(item, ast.Return)]
+        if len(returns) != 1:
+            return ""
+        value = returns[0].value
+        if isinstance(value, ast.Constant):
+            if isinstance(value.value, bool):
+                return "True" if value.value else "False"
+            if value.value is None:
+                return "None"
+            if isinstance(value.value, int):
+                return str(value.value)
+            if isinstance(value.value, str):
+                return repr(value.value)
+    return ""
+
+
+def infer_return_mismatch_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    candidates: list[dict[str, str]] = []
+    for candidate in test_expectation_candidates(repo_root, goal):
+        source_path = safe_repo_path(repo_root, candidate["module_path"])
+        current = source_path.read_text(encoding="utf-8")
+        function_name = candidate["function_name"]
+        if not re.search(rf"^\s*def\s+{re.escape(function_name)}\s*\(", current, flags=re.MULTILINE):
+            continue
+        actual = ast_return_literal_for_function(source_path, function_name)
+        expected = candidate["literal"]
+        if not actual or actual == expected:
+            continue
+        if current.count(f"return {actual}") != 1:
+            continue
+        candidates.append({**candidate, "actual": actual})
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred return mismatch requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    commands = verification_commands_from_natural_goal(goal)
+    if not commands:
+        test_module = candidate["test_path"][:-3].replace("/", ".")
+        commands = [f"python -m unittest {test_module}"]
+    return {
+        "source": "test_inferred_return_mismatch",
+        "operations": [
+            {
+                "type": "replace",
+                "path": candidate["module_path"],
+                "old": f"return {candidate['actual']}",
+                "new": f"return {candidate['literal']}",
+            }
+        ],
+        "verification_commands": commands,
+    }
+
+
+def infer_missing_function_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    candidates: list[dict[str, str]] = []
+    for candidate in test_expectation_candidates(repo_root, goal):
+        source_path = safe_repo_path(repo_root, candidate["module_path"])
+        current = source_path.read_text(encoding="utf-8")
+        if re.search(rf"^\s*def\s+{re.escape(candidate['function_name'])}\s*\(", current, flags=re.MULTILINE):
+            continue
+        candidates.append(candidate)
     if not candidates:
         return {}
     if len(candidates) != 1:
@@ -426,6 +498,8 @@ def patch_spec_from_request(request: dict[str, Any]) -> dict[str, Any]:
         payload = infer_simple_replace_patch_spec(request)
     if not payload:
         payload = infer_add_function_patch_spec(request)
+    if not payload:
+        payload = infer_return_mismatch_from_tests(request)
     if not payload:
         payload = infer_missing_function_from_tests(request)
     if not payload:

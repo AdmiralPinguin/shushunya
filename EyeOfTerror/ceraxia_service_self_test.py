@@ -63,6 +63,7 @@ def main() -> int:
         or "natural language replace inference requires explicit backtick-delimited path, old text, and new text" not in patch_contract.get("safety_gates", [])
         or "natural language add-function inference requires explicit backtick-delimited path, function name, and safe return literal" not in patch_contract.get("safety_gates", [])
         or "natural language add-function inference blocks duplicate Python function definitions" not in patch_contract.get("safety_gates", [])
+        or "test-inferred return mismatch mode requires exactly one import/assertEqual literal candidate and one simple source return literal" not in patch_contract.get("safety_gates", [])
         or "test-inferred missing function mode requires exactly one import/assertEqual literal candidate" not in patch_contract.get("safety_gates", [])
         or "python -m unittest" not in patch_contract.get("verification_allowlist", [])
         or "python_symbol_extraction" not in patch_contract.get("repository_intelligence", [])
@@ -105,6 +106,7 @@ def main() -> int:
                 or "explicit_json_patch" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or "natural_language_simple_replace" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or "natural_language_add_function" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
+                or "test_inferred_return_mismatch" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or "test_inferred_missing_function" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or plan.get("resolved_workers", {}).get("FerrumPatchwright", {}).get("role_contract", {}).get("owned_step") != "implementation"
             ):

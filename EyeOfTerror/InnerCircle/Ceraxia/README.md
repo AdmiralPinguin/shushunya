@@ -120,6 +120,10 @@ the target module file already exists:
 Почини тест `test_module.py`.
 ```
 
+If that function already exists and contains exactly one simple literal return,
+the same test-inferred mode can replace the return literal with the test's
+expected literal.
+
 For small multi-file tasks, Ceraxia can synthesize a patch spec from a JSON
 file list:
 

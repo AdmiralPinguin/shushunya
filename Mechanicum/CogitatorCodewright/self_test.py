@@ -315,6 +315,28 @@ def main() -> int:
         root = Path(temp_dir)
         target_repo = root / "repo"
         target_repo.mkdir()
+        sample = target_repo / "sample.py"
+        sample.write_text("def value():\n    return 1\n", encoding="utf-8")
+        (target_repo / "test_sample.py").write_text(
+            "import unittest\nfrom sample import value\n\n"
+            "class ValueTest(unittest.TestCase):\n"
+            "    def test_value(self):\n"
+            "        self.assertEqual(value(), 42)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=test_inferred_missing_function_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready":
+            raise AssertionError(f"test-inferred return mismatch task should be ready: {final}")
+        if final.get("patch_source") != "test_inferred_return_mismatch" or final.get("operation_count") != 1:
+            raise AssertionError(f"test-inferred return mismatch should expose patch audit fields: {final}")
+        if sample.read_text(encoding="utf-8") != "def value():\n    return 42\n":
+            raise AssertionError("test-inferred return mismatch task did not update the return value")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
         final = run_pipeline(root / "work", goal=partial_failure_goal(), target_repo_root=target_repo)
         if final.get("status") != "blocked" or final.get("approved"):
             raise AssertionError(f"partial patch failure should block final readiness: {final}")
