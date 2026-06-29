@@ -117,11 +117,21 @@ def main() -> int:
     if health_urls.get("Lexmechanic") != "http://127.0.0.1:7002/health":
         raise AssertionError(f"bad worker health URLs: {plan}")
     worker_names = {item.get("name") for item in plan.get("mechanicum_workers", []) if isinstance(item, dict)}
-    required_workers = {"CorpusIngestor", "Lexmechanic", "AuspexBrowser", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon", "ReductorVerifier", "FabricatorFinalis"}
+    required_workers = {
+        "CorpusIngestor",
+        "Lexmechanic",
+        "AuspexBrowser",
+        "OcularisRenderium",
+        "NoosphericExtractor",
+        "Chronologis",
+        "ScriptoriumDaemon",
+        "ReductorVerifier",
+        "FabricatorFinalis",
+    }
     if not required_workers.issubset(worker_names):
         raise AssertionError(f"brigade JSON plan missing workers: {required_workers - worker_names}")
     worker_ports = plan.get("ports", {}).get("mechanicum_workers", [])
-    if worker_ports != [7002, 7003, 7004, 7005, 7006, 7007, 7009, 7013]:
+    if worker_ports != [7002, 7003, 7004, 7005, 7006, 7007, 7009, 7012, 7013]:
         raise AssertionError(f"bad worker port plan: {worker_ports}")
     if "http://127.0.0.1:7002/health" not in plan.get("readiness_urls", []):
         raise AssertionError(f"worker readiness URL missing from plan: {plan}")

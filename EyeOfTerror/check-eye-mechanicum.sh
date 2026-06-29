@@ -13,6 +13,7 @@ PYTHONPATH=EyeOfTerror python3 EyeOfTerror/start_brigade_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ledger_self_test.py
 PYTHONPATH=Mechanicum/Lexmechanic python3 Mechanicum/Lexmechanic/self_test.py
 PYTHONPATH=Mechanicum/AuspexBrowser python3 Mechanicum/AuspexBrowser/self_test.py
+PYTHONPATH=Mechanicum/OcularisRenderium python3 Mechanicum/OcularisRenderium/self_test.py
 PYTHONPATH=Mechanicum/NoosphericExtractor python3 Mechanicum/NoosphericExtractor/self_test.py
 PYTHONPATH=Mechanicum/Chronologis python3 Mechanicum/Chronologis/self_test.py
 PYTHONPATH=Mechanicum/ScriptoriumDaemon python3 Mechanicum/ScriptoriumDaemon/self_test.py

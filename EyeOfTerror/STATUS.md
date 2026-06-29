@@ -519,11 +519,11 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `FabricatorFinalis` preserves worker `quality_expectations` in final manifests
   and blocks final readiness when they contradict the final step request.
 - `AuspexBrowser` performs guarded HTTP text fetches and marks low-text
-  scripted HTML with `render_required`; it does not yet render JavaScript pages
-  or screenshots.
-- `OcularisRenderium` reserves port 7012 as the planned JavaScript render and
-  screenshot worker; it is not a runnable service until the browser runtime is
-  locked down.
+  scripted HTML with `render_required`.
+- `OcularisRenderium` runs as the port 7012 JavaScript render worker prototype:
+  it consumes `source_snapshots.json`, writes `rendered_snapshots.json`, uses
+  optional Playwright rendering when enabled, and otherwise records structured
+  browser-runtime gaps instead of hiding render needs.
 - The pipeline records inaccessible primary books as `corpus_requirements`;
   operators must provide legitimate local text files when full primary evidence
   is required.

@@ -259,8 +259,8 @@ def main() -> int:
                         "completion_criteria": ["done"],
                         "worker_plan": [
                             {
-                                "step_id": "render",
-                                "worker": "OcularisRenderium",
+                                "step_id": "code_review",
+                                "worker": "CogitatorCodewright",
                                 "purpose": "prove planned worker availability preflight",
                             }
                         ],

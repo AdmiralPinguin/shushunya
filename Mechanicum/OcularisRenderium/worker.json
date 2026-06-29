@@ -2,7 +2,7 @@
   "name": "OcularisRenderium",
   "port": 7012,
   "role": "javascript render and screenshot worker",
-  "status": "planned",
-  "capabilities": ["javascript_render", "dom_snapshot", "screenshot", "network_trace"],
+  "status": "prototype",
+  "capabilities": ["javascript_render", "dom_snapshot", "screenshot", "network_trace", "render_required_sources"],
   "api_contract": "EyeOfTerror/contracts/worker_api.md"
 }
