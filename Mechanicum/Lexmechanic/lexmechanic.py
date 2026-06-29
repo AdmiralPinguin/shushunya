@@ -24,14 +24,26 @@ class SearchConfig:
 SearchFn = Callable[[str, int], dict[str, Any]]
 
 
-def load_playbook(name: str) -> dict[str, Any]:
-    payload = json.loads((PLAYBOOK_DIR / name).read_text(encoding="utf-8"))
+def load_playbook(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise ValueError(f"source playbook must be an object: {name}")
+        raise ValueError(f"source playbook must be an object: {path.name}")
     return payload
 
 
-SOURCE_PLAYBOOKS = [load_playbook("skalathrax_sources.json")]
+def load_source_playbooks() -> list[dict[str, Any]]:
+    playbooks: list[dict[str, Any]] = []
+    if not PLAYBOOK_DIR.exists():
+        return playbooks
+    for path in sorted(PLAYBOOK_DIR.glob("*.json")):
+        try:
+            playbooks.append(load_playbook(path))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    return playbooks
+
+
+SOURCE_PLAYBOOKS = load_source_playbooks()
 LIVE_DISCOVERY_ENABLED = os.environ.get("LEXMECHANIC_LIVE_DISCOVERY", "0").strip().lower() in {"1", "true", "yes", "on"}
 SOURCE_CACHE_DIR = os.environ.get("LEXMECHANIC_SOURCE_CACHE_DIR", "").strip()
 STRONG_COMPREHENSIVE_GOAL_TERMS = [
