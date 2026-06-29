@@ -39,7 +39,10 @@
       "phase": "parley",
       "confidence": "medium-high",
       "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
-      "evidence_markers": ["parlay on a moon of Skalathrax"]
+      "evidence_markers": ["parlay on a moon of Skalathrax"],
+      "required_for_review": true,
+      "review_label": "moon parley",
+      "draft_markers": ["луне Скалатракса", "переговор"]
     },
     {
       "event_id": "dreagher_shoots_anteus",
@@ -47,7 +50,10 @@
       "phase": "parley_collapse",
       "confidence": "medium-high",
       "source_refs": ["Lexicanum: Dreagher", "Kharn: Eater of Worlds"],
-      "evidence_markers": ["Dreagher", "Anteus", "open fire"]
+      "evidence_markers": ["Dreagher", "Anteus", "open fire"],
+      "required_for_review": true,
+      "review_label": "Dreagher and Anteus",
+      "draft_markers": ["Дреагер", "Анте"]
     },
     {
       "event_id": "golden_absolute",
@@ -55,7 +61,10 @@
       "phase": "escalation",
       "confidence": "medium",
       "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
-      "evidence_markers": ["Golden Absolute"]
+      "evidence_markers": ["Golden Absolute"],
+      "required_for_review": true,
+      "review_label": "Golden Absolute",
+      "draft_markers": ["Golden Absolute"]
     },
     {
       "event_id": "planetary_battle",
@@ -71,7 +80,10 @@
       "phase": "turning_point",
       "confidence": "high",
       "source_refs": ["Lexicanum: Battle of Skalathrax", "Warhammer 40k Fandom: Battle of Skalathrax"],
-      "evidence_markers": ["extremely cold night", "seek shelter"]
+      "evidence_markers": ["extremely cold night", "seek shelter"],
+      "required_for_review": true,
+      "review_label": "deadly night and shelters",
+      "draft_markers": ["ночь Скалатракса", "укрыти"]
     },
     {
       "event_id": "fratricide_spreads",
@@ -79,7 +91,10 @@
       "phase": "betrayal",
       "confidence": "medium-high",
       "source_refs": ["Kharn: Eater of Worlds", "Lexicanum: Battle of Skalathrax"],
-      "evidence_markers": ["turned against their comrades"]
+      "evidence_markers": ["turned against their comrades"],
+      "required_for_review": true,
+      "review_label": "fratricide spreads",
+      "draft_markers": ["Пожиратели Миров стали", "резать друг друга"]
     },
     {
       "event_id": "kharn_burns_shelters",
@@ -87,7 +102,10 @@
       "phase": "betrayal",
       "confidence": "high",
       "source_refs": ["Lexicanum: Battle of Skalathrax", "Kharn: Eater of Worlds"],
-      "evidence_markers": ["flamer", "burning his fellow"]
+      "evidence_markers": ["flamer", "burning his fellow"],
+      "required_for_review": true,
+      "review_label": "Kharn burns shelters",
+      "draft_markers": ["Кхарн", "убежищ"]
     },
     {
       "event_id": "legion_fractures",

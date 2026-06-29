@@ -5,23 +5,7 @@ from pathlib import Path
 from typing import Any
 
 
-REQUIRED_DIRECT_EVENT_IDS = {
-    "moon_parley": "moon parley",
-    "dreagher_shoots_anteus": "Dreagher and Anteus",
-    "golden_absolute": "Golden Absolute",
-    "cold_night_shelters": "deadly night and shelters",
-    "kharn_burns_shelters": "Kharn burns shelters",
-    "fratricide_spreads": "fratricide spreads",
-}
-
-EVENT_TEXT_MARKERS = {
-    "moon_parley": ["луне Скалатракса", "переговор"],
-    "dreagher_shoots_anteus": ["Дреагер", "Анте"],
-    "golden_absolute": ["Golden Absolute"],
-    "cold_night_shelters": ["ночь Скалатракса", "укрыти"],
-    "kharn_burns_shelters": ["Кхарн", "убежищ"],
-    "fratricide_spreads": ["Пожиратели Миров стали", "резать друг друга"],
-}
+EVENT_PLAYBOOK_DIR = Path(__file__).resolve().parents[1] / "NoosphericExtractor" / "playbooks"
 
 ARTIFACT_REWORK_TARGETS = {
     "corpus_index.json": ("corpus_ingestion", "CorpusIngestor"),
@@ -70,6 +54,80 @@ REVISION_STEP_ORDER = [
     "draft_reconstruction",
     "critic_review",
 ]
+
+
+def load_event_playbooks() -> list[dict[str, Any]]:
+    playbooks: list[dict[str, Any]] = []
+    if not EVENT_PLAYBOOK_DIR.exists():
+        return playbooks
+    for path in sorted(EVENT_PLAYBOOK_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            playbooks.append(payload)
+    return playbooks
+
+
+EVENT_PLAYBOOKS = load_event_playbooks()
+
+
+def playbook_matches(playbook: dict[str, Any], source_map: dict[str, Any], notes: dict[str, Any], timeline: dict[str, Any]) -> bool:
+    source_titles = [
+        str(source.get("title") or "")
+        for source in source_map.get("sources", [])
+        if isinstance(source, dict) and source.get("title")
+    ]
+    note_ids = [
+        str(item.get("event_id") or "")
+        for item in notes.get("events", [])
+        if isinstance(item, dict) and item.get("event_id")
+    ]
+    timeline_ids = [
+        str(item.get("event_id") or "")
+        for item in timeline.get("timeline", [])
+        if isinstance(item, dict) and item.get("event_id")
+    ]
+    haystack = " ".join(
+        [
+            str(source_map.get("topic") or ""),
+            str(source_map.get("original_goal") or ""),
+            *source_titles,
+            *note_ids,
+            *timeline_ids,
+        ]
+    ).lower()
+    terms = [str(term).lower() for term in playbook.get("match_terms", []) if term]
+    return any(term in haystack for term in terms)
+
+
+def required_review_events(source_map: dict[str, Any], notes: dict[str, Any], timeline: dict[str, Any]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for playbook in EVENT_PLAYBOOKS:
+        if not playbook_matches(playbook, source_map, notes, timeline):
+            continue
+        for event in playbook.get("events", []):
+            if not isinstance(event, dict) or not event.get("required_for_review"):
+                continue
+            event_id = str(event.get("event_id") or "")
+            if not event_id or event_id in seen:
+                continue
+            seen.add(event_id)
+            events.append(event)
+    return events
+
+
+def required_event_label(event: dict[str, Any]) -> str:
+    return str(event.get("review_label") or event.get("summary") or event.get("event_id") or "required event")
+
+
+def required_event_markers(event: dict[str, Any]) -> list[str]:
+    markers = event.get("draft_markers") if isinstance(event.get("draft_markers"), list) else []
+    if not markers:
+        markers = event.get("evidence_markers") if isinstance(event.get("evidence_markers"), list) else []
+    return [str(marker) for marker in markers if str(marker).strip()]
 
 
 def sandbox_path(workspace_root: Path, path: str) -> Path:
@@ -224,29 +282,6 @@ def comprehensive_depth_findings(source_map: dict[str, Any], notes: dict[str, An
 def text_contains_markers(text: str, markers: list[str]) -> bool:
     lowered = text.lower()
     return all(marker.lower() in lowered for marker in markers)
-
-
-def should_apply_required_event_playbook(source_map: dict[str, Any], notes: dict[str, Any], timeline: dict[str, Any]) -> bool:
-    haystack = " ".join(
-        [
-            str(source_map.get("topic") or ""),
-            *(str(source.get("title") or "") for source in source_map.get("sources", []) if isinstance(source, dict)),
-        ]
-    ).lower()
-    if "skalathrax" in haystack or "скалатрак" in haystack:
-        return True
-    known_ids = set(REQUIRED_DIRECT_EVENT_IDS)
-    note_ids = {
-        str(item.get("event_id") or "")
-        for item in notes.get("events", [])
-        if isinstance(item, dict)
-    }
-    timeline_ids = {
-        str(item.get("event_id") or "")
-        for item in timeline.get("timeline", [])
-        if isinstance(item, dict)
-    }
-    return bool((note_ids | timeline_ids) & known_ids)
 
 
 def extract_section_bullets(text: str, headings: set[str]) -> list[str]:
@@ -463,11 +498,15 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
     for event_id, note in sorted(note_by_event_id.items()):
         if not isinstance(note, dict) or not note.get("evidence_snapshots"):
             findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {event_id}"})
-    if should_apply_required_event_playbook(source_map, notes, timeline):
-        for event_id, label in REQUIRED_DIRECT_EVENT_IDS.items():
+    required_events = required_review_events(source_map, notes, timeline)
+    for event in required_events:
+        event_id = str(event.get("event_id") or "")
+        label = required_event_label(event)
+        markers = required_event_markers(event)
+        if event_id:
             if event_id not in timeline_event_ids:
                 findings.append({"severity": "blocker", "message": f"Missing required direct event in timeline: {label}"})
-            elif not text_contains_markers(reconstruction, EVENT_TEXT_MARKERS[event_id]):
+            elif markers and not text_contains_markers(reconstruction, markers):
                 findings.append({"severity": "blocker", "message": f"Draft does not visibly cover required event: {label}"})
             elif not note_by_event_id.get(event_id, {}).get("evidence_snapshots"):
                 findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {label}"})
@@ -516,7 +555,7 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
         "status": status,
         "approved": not findings,
         "checked_artifacts": required_paths,
-        "required_direct_events": sorted(REQUIRED_DIRECT_EVENT_IDS),
+        "required_direct_events": sorted(str(event.get("event_id") or "") for event in required_events if event.get("event_id")),
         "findings": findings,
         "warnings": warnings,
         "revision_plan": revision_plan_from_findings(findings, []),
