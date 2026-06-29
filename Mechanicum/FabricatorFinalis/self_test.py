@@ -37,15 +37,19 @@ def main() -> int:
             "source_map.json",
             "source_snapshots.json",
             "direct_event_notes.json",
-            "timeline.json",
         ]:
             write(base / filename, json.dumps({"approved": True, "status": "passed_with_warnings"}))
+        write(
+            base / "timeline.json",
+            json.dumps({"timeline": [{"event_id": "moon_parley"}, {"event_id": "kharn_burns_shelters"}]}),
+        )
         write(
             base / "critic_report.json",
             json.dumps(
                 {
                     "approved": True,
                     "status": "passed_with_warnings",
+                    "required_direct_events": ["moon_parley", "kharn_burns_shelters"],
                     "metrics": {"generic_evidence_leads": 1, "low_confidence_events": 1, "source_coverage_ready": True},
                     "revision_focus": {"present": True, "coverage_items": ["Source step: critic_review"]},
                 }
@@ -65,6 +69,9 @@ def main() -> int:
             raise AssertionError(f"ready manifest should carry revision focus: {manifest}")
         if manifest.get("critic_metrics", {}).get("generic_evidence_leads") != 1:
             raise AssertionError(f"ready manifest should carry critic metrics: {manifest}")
+        event_review = manifest.get("event_review", {})
+        if event_review.get("required_direct_event_count") != 2 or event_review.get("required_events_covered") is not True:
+            raise AssertionError(f"ready manifest should summarize required event coverage: {manifest}")
         if manifest.get("readiness_checks", {}).get("source_coverage_ready") is not True:
             raise AssertionError(f"ready manifest should carry source coverage readiness: {manifest}")
         if manifest.get("readiness_checks", {}).get("comprehensive_depth_ready") is not True:
@@ -77,6 +84,7 @@ def main() -> int:
                 {
                     "approved": True,
                     "status": "passed_with_warnings",
+                    "required_direct_events": ["moon_parley"],
                     "metrics": {"source_coverage_ready": False},
                     "revision_focus": {"present": True},
                 }
@@ -94,6 +102,7 @@ def main() -> int:
                 {
                     "approved": True,
                     "status": "passed_with_warnings",
+                    "required_direct_events": ["moon_parley"],
                     "metrics": {
                         "source_coverage_ready": True,
                         "comprehensive_depth": {
@@ -123,6 +132,7 @@ def main() -> int:
                 {
                     "approved": True,
                     "status": "passed_with_warnings",
+                    "required_direct_events": ["moon_parley"],
                     "metrics": {"generic_evidence_leads": 1, "low_confidence_events": 1, "source_coverage_ready": True},
                     "revision_focus": {"present": True, "coverage_items": ["Source step: critic_review"]},
                 }

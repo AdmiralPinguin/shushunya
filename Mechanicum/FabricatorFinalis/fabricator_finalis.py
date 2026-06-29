@@ -121,6 +121,32 @@ def quality_expectation_blockers(request: dict[str, Any]) -> list[dict[str, str]
     return blockers
 
 
+def event_review_summary(workspace_root: Path, manifest_path: str, critic: dict[str, Any]) -> dict[str, Any]:
+    required_events = [
+        str(event_id)
+        for event_id in critic.get("required_direct_events", [])
+        if str(event_id).strip()
+    ]
+    timeline_path = sandbox_path(workspace_root, sibling_artifact(manifest_path, "timeline.json"))
+    timeline_event_ids: set[str] = set()
+    if timeline_path.exists():
+        try:
+            timeline = load_json(timeline_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            timeline = {}
+        for item in timeline.get("timeline", []) if isinstance(timeline.get("timeline"), list) else []:
+            if isinstance(item, dict) and item.get("event_id"):
+                timeline_event_ids.add(str(item.get("event_id")))
+    missing_required_events = [event_id for event_id in required_events if event_id not in timeline_event_ids]
+    return {
+        "required_direct_events": required_events,
+        "required_direct_event_count": len(required_events),
+        "timeline_event_count": len(timeline_event_ids),
+        "missing_required_events": missing_required_events,
+        "required_events_covered": not missing_required_events,
+    }
+
+
 def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, Any]) -> dict[str, Any]:
     files: list[dict[str, Any]] = []
     missing: list[str] = []
@@ -142,6 +168,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     approved = bool(critic.get("approved"))
     quality_blockers = quality_expectation_blockers(request)
     critic_metrics = critic.get("metrics", {}) if isinstance(critic.get("metrics"), dict) else {}
+    event_review = event_review_summary(workspace_root, manifest_path, critic)
     source_coverage_ready = critic_metrics.get("source_coverage_ready")
     comprehensive_depth = critic_metrics.get("comprehensive_depth") if isinstance(critic_metrics.get("comprehensive_depth"), dict) else {}
     comprehensive_depth_ready = comprehensive_depth.get("passed") if comprehensive_depth.get("mode") == "comprehensive" else True
@@ -181,6 +208,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "missing": missing,
         "critic_status": critic.get("status", "missing"),
         "critic_metrics": critic_metrics,
+        "event_review": event_review,
         "corpus_requirements": corpus_requirements,
         "readiness_checks": readiness_checks,
         "warnings": critic.get("warnings", []),
