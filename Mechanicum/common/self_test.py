@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from swe_guardrails import build_repo_map, python_module_name, test_source_links
+from swe_guardrails import build_repo_map, python_module_name, source_candidates_from_traceback_text, test_source_links
 
 
 def main() -> int:
@@ -18,6 +18,14 @@ def main() -> int:
     ranked = repo_map.get("ranked_files", [])
     if not ranked or ranked[0].get("path") != "sample.py":
         raise AssertionError(f"imported source should outrank the test file: {repo_map}")
+    traceback = (
+        'Traceback (most recent call last):\n'
+        '  File "/tmp/repo/pkg/core.py", line 2, in run\n'
+        '  File "/tmp/other/outside.py", line 1, in nope\n'
+    )
+    candidates = source_candidates_from_traceback_text(traceback, "/tmp/repo")
+    if candidates != ["pkg/core.py"]:
+        raise AssertionError(f"bad traceback source candidates: {candidates}")
     print("[ok] Mechanicum common SWE guardrails")
     return 0
 

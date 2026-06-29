@@ -15,7 +15,7 @@ MECHANICUM_ROOT = Path(__file__).resolve().parents[1]
 if str(MECHANICUM_ROOT) not in sys.path:
     sys.path.insert(0, str(MECHANICUM_ROOT))
 
-from common.swe_guardrails import build_repo_map, python_module_name  # noqa: E402
+from common.swe_guardrails import build_repo_map, python_module_name, source_candidates_from_traceback_text  # noqa: E402
 
 
 EXCLUDED_DIRS = {
@@ -1104,6 +1104,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
     changed_files = patch.get("changed_files") if isinstance(patch.get("changed_files"), list) else []
     repairs: list[dict[str, Any]] = []
     blocked_repairs: list[dict[str, Any]] = []
+    candidate_source_paths: list[str] = []
     repairs_allowed = role_policy_allows_source_mutation(role_policy)
     if patch.get("status") == "applied":
         py_files = [
@@ -1123,6 +1124,9 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
                 }
             )
             if completed.returncode != 0:
+                for candidate in source_candidates_from_traceback_text(completed.stderr, repo_root):
+                    if candidate not in candidate_source_paths:
+                        candidate_source_paths.append(candidate)
                 repaired_any = False
                 for py_file in py_files:
                     if not repairs_allowed:
@@ -1171,6 +1175,9 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
             executed.append(result)
             if result.get("returncode") != 0:
                 output = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+                for candidate in source_candidates_from_traceback_text(output, repo_root):
+                    if candidate not in candidate_source_paths:
+                        candidate_source_paths.append(candidate)
                 if not repairs_allowed:
                     repair = {"applied": False, "blocked": "role_policy forbids source mutation repair"}
                     blockers.append("role_policy forbids source mutation repair")
@@ -1219,6 +1226,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         "blocked_repairs": blocked_repairs,
         "commands_executed_count": len(executed),
         "failed_commands": failed_commands,
+        "candidate_source_paths": candidate_source_paths[:20],
         "pending_blockers": blockers,
         "next_action": "inspect_blockers_or_revision_plan" if blockers else "continue_to_code_review",
         "summary": "Repair loop state recorded for verification step.",

@@ -304,6 +304,8 @@ def main() -> int:
             raise AssertionError(f"read-only verification policy should block repair: {report}")
         if not repair_state.get("blocked_repairs") or repair_state.get("repairs_allowed") is not False:
             raise AssertionError(f"read-only verification policy should preserve blocked repair state: {repair_state}")
+        if "repair_me.py" not in repair_state.get("candidate_source_paths", []):
+            raise AssertionError(f"verification repair state should expose traceback source candidates: {repair_state}")
         if broken.read_text(encoding="utf-8") != "def value()\n    return 42\n":
             raise AssertionError("read-only verification policy allowed repair mutation")
     with tempfile.TemporaryDirectory() as temp_dir:

@@ -36,7 +36,9 @@ record a blocker instead of editing source under a read-only policy.
 `OrdinatusVerifier` writes both `verification_report.json` and
 `repair_loop_state.json`; the latter records executed command counts, failed
 commands, applied repairs, blocked repairs, and the next safe action for the
-reviewer or governor.
+reviewer or governor. When failed command output includes Python traceback
+frames inside the target repo, the state also records `candidate_source_paths`
+for focused revision.
 
 `LogisRepository` records Python symbol summaries for scanned `.py` files and
 suggests safe verification commands from discovered test files. `MagosStrategos`

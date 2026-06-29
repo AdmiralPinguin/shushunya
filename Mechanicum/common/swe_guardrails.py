@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -119,3 +120,27 @@ def build_repo_map(
             "test_source_links are derived from static Python imports and are advisory, not proof of coverage",
         ],
     }
+
+
+def source_candidates_from_traceback_text(text: str, repo_root: str | Path | None = None) -> list[str]:
+    root = Path(repo_root).resolve() if repo_root else None
+    candidates: list[str] = []
+    for match in re.finditer(r'File "([^"]+\.py)"', text):
+        raw_path = match.group(1)
+        path = Path(raw_path)
+        if root and path.is_absolute():
+            try:
+                resolved = path.resolve()
+                if not resolved.is_relative_to(root):
+                    continue
+                raw_path = str(resolved.relative_to(root))
+            except OSError:
+                continue
+        elif path.is_absolute():
+            continue
+        normalized = raw_path.replace("\\", "/")
+        if normalized.startswith("../") or "/../" in normalized:
+            continue
+        if normalized.endswith(".py") and normalized not in candidates:
+            candidates.append(normalized)
+    return candidates[:20]
