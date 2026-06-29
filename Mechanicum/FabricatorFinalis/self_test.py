@@ -36,9 +36,19 @@ def main() -> int:
             "corpus_index.json",
             "source_map.json",
             "source_snapshots.json",
-            "direct_event_notes.json",
         ]:
             write(base / filename, json.dumps({"approved": True, "status": "passed_with_warnings"}))
+        write(
+            base / "direct_event_notes.json",
+            json.dumps(
+                {
+                    "events": [
+                        {"event_id": "moon_parley", "evidence_snapshots": [{"source_title": "Kharn: Eater of Worlds"}]},
+                        {"event_id": "kharn_burns_shelters", "evidence_snapshots": [{"source_title": "Kharn: Eater of Worlds"}]},
+                    ]
+                }
+            ),
+        )
         write(
             base / "timeline.json",
             json.dumps({"timeline": [{"event_id": "moon_parley"}, {"event_id": "kharn_burns_shelters"}]}),
@@ -78,10 +88,49 @@ def main() -> int:
             raise AssertionError(f"standard ready manifest should pass comprehensive depth readiness: {manifest}")
         if manifest.get("readiness_checks", {}).get("required_events_covered") is not True:
             raise AssertionError(f"standard ready manifest should pass required event readiness: {manifest}")
+        if manifest.get("readiness_checks", {}).get("required_event_evidence_covered") is not True:
+            raise AssertionError(f"standard ready manifest should pass required evidence readiness: {manifest}")
         if manifest.get("readiness_checks", {}).get("corpus_requirements_satisfied") is not True:
             raise AssertionError(f"standard ready manifest should satisfy corpus requirements: {manifest}")
         if manifest.get("quality_expectations", {}).get("check_count") != 1:
             raise AssertionError(f"ready manifest should carry quality expectations: {manifest}")
+        write(base / "direct_event_notes.json", json.dumps({"events": [{"event_id": "moon_parley", "evidence_snapshots": []}]}))
+        write(
+            base / "critic_report.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "passed_with_warnings",
+                    "required_direct_events": ["moon_parley"],
+                    "metrics": {"source_coverage_ready": True},
+                    "revision_focus": {"present": True},
+                }
+            ),
+        )
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on missing required event evidence: {result}")
+        manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
+        if (
+            manifest.get("status") != "blocked"
+            or manifest.get("readiness_checks", {}).get("required_event_evidence_covered") is not False
+            or "missing direct evidence" not in json.dumps(manifest)
+        ):
+            raise AssertionError(f"missing required event evidence should block final readiness: {manifest}")
+        evidence_revision_workers = {step.get("worker") for step in manifest.get("revision_plan", {}).get("steps", [])}
+        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(evidence_revision_workers):
+            raise AssertionError(f"missing required event evidence should produce downstream revision plan: {manifest}")
+        write(
+            base / "direct_event_notes.json",
+            json.dumps(
+                {
+                    "events": [
+                        {"event_id": "moon_parley", "evidence_snapshots": [{"source_title": "Kharn: Eater of Worlds"}]},
+                        {"event_id": "kharn_burns_shelters", "evidence_snapshots": [{"source_title": "Kharn: Eater of Worlds"}]},
+                    ]
+                }
+            ),
+        )
         write(
             base / "critic_report.json",
             json.dumps(

@@ -144,11 +144,17 @@ def sort_revision_plan(revision_plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def add_required_event_revision_steps(revision_plan: dict[str, Any], event_review: dict[str, Any]) -> dict[str, Any]:
-    if event_review.get("required_events_covered") is not False:
+    if event_review.get("required_events_covered") is not False and event_review.get("required_event_evidence_covered") is not False:
         return revision_plan
     steps = list(revision_plan.get("steps", []) if isinstance(revision_plan.get("steps"), list) else [])
-    missing_events = ", ".join(str(item) for item in event_review.get("missing_required_events", [])[:8])
-    reason = f"Missing required direct events in timeline: {missing_events}"
+    missing_timeline_events = [str(item) for item in event_review.get("missing_required_events", [])[:8]]
+    missing_evidence_events = [str(item) for item in event_review.get("missing_required_event_evidence", [])[:8]]
+    if missing_timeline_events and missing_evidence_events:
+        reason = f"Missing required direct events in timeline: {', '.join(missing_timeline_events)}; missing direct evidence: {', '.join(missing_evidence_events)}"
+    elif missing_evidence_events:
+        reason = f"Missing direct evidence for required events: {', '.join(missing_evidence_events)}"
+    else:
+        reason = f"Missing required direct events in timeline: {', '.join(missing_timeline_events)}"
     add_unique_revision_step(steps, "fact_extraction", "NoosphericExtractor", reason, "final_readiness")
     add_unique_revision_step(steps, "timeline", "Chronologis", reason, "final_readiness")
     add_unique_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", reason, "final_readiness")
@@ -206,7 +212,9 @@ def event_review_summary(workspace_root: Path, manifest_path: str, critic: dict[
         if str(event_id).strip()
     ]
     timeline_path = sandbox_path(workspace_root, sibling_artifact(manifest_path, "timeline.json"))
+    notes_path = sandbox_path(workspace_root, sibling_artifact(manifest_path, "direct_event_notes.json"))
     timeline_event_ids: set[str] = set()
+    evidence_event_ids: set[str] = set()
     if timeline_path.exists():
         try:
             timeline = load_json(timeline_path)
@@ -215,13 +223,28 @@ def event_review_summary(workspace_root: Path, manifest_path: str, critic: dict[
         for item in timeline.get("timeline", []) if isinstance(timeline.get("timeline"), list) else []:
             if isinstance(item, dict) and item.get("event_id"):
                 timeline_event_ids.add(str(item.get("event_id")))
+    if notes_path.exists():
+        try:
+            notes = load_json(notes_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            notes = {}
+        for item in notes.get("events", []) if isinstance(notes.get("events"), list) else []:
+            if not isinstance(item, dict) or not item.get("event_id"):
+                continue
+            evidence = item.get("evidence_snapshots") if isinstance(item.get("evidence_snapshots"), list) else []
+            if evidence:
+                evidence_event_ids.add(str(item.get("event_id")))
     missing_required_events = [event_id for event_id in required_events if event_id not in timeline_event_ids]
+    missing_required_event_evidence = [event_id for event_id in required_events if event_id not in evidence_event_ids]
     return {
         "required_direct_events": required_events,
         "required_direct_event_count": len(required_events),
         "timeline_event_count": len(timeline_event_ids),
+        "evidence_event_count": len(evidence_event_ids),
         "missing_required_events": missing_required_events,
+        "missing_required_event_evidence": missing_required_event_evidence,
         "required_events_covered": not missing_required_events,
+        "required_event_evidence_covered": not missing_required_event_evidence,
     }
 
 
@@ -258,6 +281,9 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     if event_review.get("required_events_covered") is False:
         missing_events = ", ".join(event_review.get("missing_required_events", [])[:8])
         readiness_blockers.append({"severity": "blocker", "message": f"Final package is missing required direct events in timeline: {missing_events}."})
+    if event_review.get("required_event_evidence_covered") is False:
+        missing_events = ", ".join(event_review.get("missing_required_event_evidence", [])[:8])
+        readiness_blockers.append({"severity": "blocker", "message": f"Final package is missing direct evidence for required events: {missing_events}."})
     corpus_requirements = comprehensive_depth.get("corpus_requirements") if isinstance(comprehensive_depth.get("corpus_requirements"), dict) else {}
     if corpus_requirements.get("required"):
         missing_primary = corpus_requirements.get("missing_primary_texts") if isinstance(corpus_requirements.get("missing_primary_texts"), list) else []
@@ -270,6 +296,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "source_coverage_ready": source_coverage_ready,
         "comprehensive_depth_ready": comprehensive_depth_ready,
         "required_events_covered": event_review.get("required_events_covered"),
+        "required_event_evidence_covered": event_review.get("required_event_evidence_covered"),
         "corpus_requirements_satisfied": not bool(corpus_requirements.get("required")),
     }
     status = "ready" if approved and not missing and not quality_blockers and not readiness_blockers else "blocked"
