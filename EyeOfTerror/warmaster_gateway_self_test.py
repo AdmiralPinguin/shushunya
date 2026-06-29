@@ -1036,6 +1036,23 @@ def main() -> int:
                 or bad_revision_policy_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "inspect_oversight"
             ):
                 raise AssertionError(f"summary should block bad revision policy: {bad_revision_policy_summary}")
+            bad_quality_matrix_task = request_json(
+                base + "/task",
+                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bad-quality-matrix-test"},
+            )
+            bad_quality_matrix_path = Path(bad_quality_matrix_task["run_dir"], "oversight.json")
+            bad_quality_matrix_payload = json.loads(bad_quality_matrix_path.read_text(encoding="utf-8"))
+            bad_quality_matrix_payload["step_quality_matrix"][0]["worker"] = "WrongWorker"
+            bad_quality_matrix_payload["step_quality_matrix"][1]["revision_targets"] = ["missing_step"]
+            write_json(bad_quality_matrix_path, bad_quality_matrix_payload)
+            bad_quality_matrix_summary = request_json(base + "/runs/warmaster-bad-quality-matrix-test/summary")
+            bad_quality_matrix_errors = bad_quality_matrix_summary.get("summary", {}).get("oversight_errors", [])
+            if (
+                not any("worker does not match run step" in error for error in bad_quality_matrix_errors)
+                or not any("revision_targets references unknown step" in error for error in bad_quality_matrix_errors)
+                or bad_quality_matrix_summary.get("summary", {}).get("actions", {}).get("next_action", {}).get("kind") != "inspect_oversight"
+            ):
+                raise AssertionError(f"summary should block bad step quality matrix: {bad_quality_matrix_summary}")
             try:
                 request_json(base + "/runs/warmaster-bad-oversight-test/package")
             except urllib.error.HTTPError as exc:
@@ -1174,6 +1191,8 @@ def main() -> int:
                 or run_summary.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("quality_gate_count") != 6
+                or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_matrix_count") != 7
+                or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_check_count", 0) < 7
                 or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "source_discovery"
                 or run_summary.get("summary", {}).get("progress", {}).get("next_ready_step_id") != "source_discovery"
                 or run_summary.get("summary", {}).get("progress", {}).get("ready_step_ids") != ["source_discovery"]

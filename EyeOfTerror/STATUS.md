@@ -12,6 +12,9 @@
 - Iskandar Khayon exposes an oversight plan through `/capabilities` and
   `/plan`, including artifact roles, handoffs, quality gates, completion
   criteria, and final review expectations.
+- Iskandar Khayon oversight includes a per-step quality matrix with required
+  inputs, expected artifacts, checks, blockers, and revision targets for every
+  pipeline step.
 - Iskandar run packages persist the governor oversight plan as `oversight.json`,
   and Warmaster exposes it through `GET /runs/{task_id}/oversight`.
 - Warmaster oversight inspection includes compact summary and validation
@@ -383,6 +386,9 @@
   and focused revision context requirement.
 - Warmaster validates `revision_policy` against the run steps and exposes it in
   compact oversight summaries, so broken revision supervision blocks execution.
+- Warmaster validates oversight `step_quality_matrix` entries against run steps,
+  workers, artifacts, checks, blockers, and revision targets, so broken per-step
+  supervision blocks execution.
 - Revision execution appends final review steps from the saved oversight
   `revision_policy.final_steps` instead of relying on hardcoded step names.
 - HTTP execution preflights all worker `/health` endpoints before running steps

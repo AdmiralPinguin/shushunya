@@ -49,6 +49,7 @@ def main() -> int:
         or not oversight.get("artifact_roles", {}).get("final", [])[0].endswith("/final_manifest.json")
         or not any(item.get("from_step") == "critic_review" and item.get("to_steps") == ["finalize"] for item in oversight.get("handoffs", []))
         or oversight.get("revision_policy", {}).get("final_steps") != ["critic_review", "finalize"]
+        or len(oversight.get("step_quality_matrix", [])) != len(contract_workers)
     ):
         raise AssertionError(f"bad Iskandar oversight template: {oversight}")
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -87,8 +88,10 @@ def main() -> int:
                 capabilities.get("pipeline", {}).get("step_count") != len(contract_workers)
                 or capabilities.get("pipeline", {}).get("steps", [])[0].get("step_id") != "source_discovery"
                 or capabilities.get("summary", {}).get("step_count") != len(contract_workers)
+                or capabilities.get("summary", {}).get("step_quality_matrix_count") != len(contract_workers)
                 or capabilities.get("display", {}).get("headline") != "Iskandar Khayon capabilities"
                 or capabilities.get("client_action", {}).get("path") != "/plan"
+                or "step_quality_matrix" not in capabilities.get("capabilities", [])
             ):
                 raise AssertionError(f"capabilities did not expose pipeline summary: {capabilities}")
             plan = request_json(base + "/plan", {"task": "Собери события Скалатракса", "task_id": "iskandar-http-test"})
@@ -96,6 +99,7 @@ def main() -> int:
                 not plan.get("ok")
                 or plan["contract"]["assigned_governor"] != "IskandarKhayon"
                 or plan.get("oversight", {}).get("artifact_roles", {}).get("critic") != ["/work/skalathrax/critic_report.json"]
+                or len(plan.get("oversight", {}).get("step_quality_matrix", [])) != len(contract_workers)
                 or plan.get("oversight", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or plan.get("pipeline", {}).get("step_count") != len(contract_workers)
                 or plan.get("pipeline", {}).get("steps", [])[0].get("worker") != "Lexmechanic"

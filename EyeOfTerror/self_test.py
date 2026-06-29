@@ -213,6 +213,17 @@ def main() -> int:
             or written_oversight.get("revision_policy", {}).get("requires_downstream_rerun") is not True
         ):
             raise AssertionError(f"pipeline run wrote bad revision policy: {written_oversight}")
+        quality_matrix = written_oversight.get("step_quality_matrix", [])
+        fact_quality = next((item for item in quality_matrix if item.get("step_id") == "fact_extraction"), {})
+        if (
+            len(quality_matrix) != len(contract.worker_plan)
+            or fact_quality.get("worker") != "NoosphericExtractor"
+            or "/work/skalathrax/source_snapshots.json" not in fact_quality.get("required_inputs", [])
+            or "direct event notes are non-empty unless source coverage is explicitly blocked" not in fact_quality.get("checks", [])
+            or "critic_review" not in fact_quality.get("revision_targets", [])
+            or "finalize" not in fact_quality.get("revision_targets", [])
+        ):
+            raise AssertionError(f"pipeline run wrote bad step quality matrix: {written_oversight}")
     print("[ok] Iskandar pipeline run package")
     return 0
 

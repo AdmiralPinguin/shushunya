@@ -82,6 +82,7 @@ POST /prepare_run
     "completion_criteria": [],
     "artifact_roles": {},
     "handoffs": [],
+    "step_quality_matrix": [],
     "final_review": {}
   },
   "summary": {
@@ -89,6 +90,7 @@ POST /prepare_run
     "step_count": 7,
     "required_worker_count": 7,
     "quality_gate_count": 6,
+    "step_quality_matrix_count": 7,
     "handoff_count": 7,
     "worker_availability_ok": true
   },
@@ -111,7 +113,7 @@ POST /prepare_run
     "body": {"task": "<task>", "task_id": "<optional-task-id>"},
     "reason": "inspect an Iskandar plan for a concrete task"
   },
-  "capabilities": ["lore_reconstruction_planning", "dispatch_packet_preparation", "oversight_plan"],
+  "capabilities": ["lore_reconstruction_planning", "dispatch_packet_preparation", "oversight_plan", "step_quality_matrix"],
   "endpoints": ["GET /health", "GET /capabilities", "POST /plan", "POST /prepare_run"]
 }
 ```
@@ -123,10 +125,12 @@ against the Mechanicum registry before starting a task.
 source as concrete task contracts; clients can inspect step dependencies and
 expected artifacts before creating a run.
 `oversight` is the governor's task-class quality-control plan. It should expose
-artifact roles, worker handoffs, completion criteria, quality gates, final
-review expectations, and revision policy so Warmaster and admin clients can
-inspect how the governor intends to supervise worker output and rerun focused
-rework when verification fails.
+artifact roles, worker handoffs, completion criteria, quality gates, per-step
+quality matrix entries, final review expectations, and revision policy so
+Warmaster and admin clients can inspect how the governor intends to supervise
+worker output and rerun focused rework when verification fails. Each
+`step_quality_matrix` entry should name a real step, its worker, required
+inputs, expected artifacts, checks, blockers, and revision targets.
 Capabilities responses include compact `summary`, `display`, `next_action`, and
 executable `client_action` fields so Warmaster/admin clients can render the
 governor service and request a concrete plan without reverse-engineering the

@@ -94,6 +94,7 @@ def service_capabilities() -> dict[str, Any]:
             "required_worker_count": len(required_workers()),
             "quality_gate_count": len(oversight.get("quality_gates") if isinstance(oversight.get("quality_gates"), list) else []),
             "handoff_count": len(oversight.get("handoffs") if isinstance(oversight.get("handoffs"), list) else []),
+            "step_quality_matrix_count": len(oversight.get("step_quality_matrix") if isinstance(oversight.get("step_quality_matrix"), list) else []),
             "worker_availability_ok": not capability_plan.get("missing_workers") and not capability_plan.get("unavailable_workers"),
         },
         "display": {
@@ -108,6 +109,7 @@ def service_capabilities() -> dict[str, Any]:
             "worker_plan_resolution",
             "dispatch_packet_preparation",
             "oversight_plan",
+            "step_quality_matrix",
             "source_research_coordination",
             "timeline_coordination",
             "writer_verifier_finalizer_coordination",

@@ -1550,12 +1550,19 @@ def compact_oversight_summary(oversight: dict[str, Any]) -> dict[str, Any]:
     quality_gates = oversight.get("quality_gates") if isinstance(oversight.get("quality_gates"), list) else []
     completion_criteria = oversight.get("completion_criteria") if isinstance(oversight.get("completion_criteria"), list) else []
     handoffs = oversight.get("handoffs") if isinstance(oversight.get("handoffs"), list) else []
+    step_quality_matrix = oversight.get("step_quality_matrix") if isinstance(oversight.get("step_quality_matrix"), list) else []
     return {
         "kind": str(oversight.get("kind") or ""),
         "governor": str(oversight.get("governor") or ""),
         "quality_gate_count": len(quality_gates),
         "completion_criteria_count": len(completion_criteria),
         "handoff_count": len(handoffs),
+        "step_quality_check_count": sum(
+            len(item.get("checks") if isinstance(item.get("checks"), list) else [])
+            for item in step_quality_matrix
+            if isinstance(item, dict)
+        ),
+        "step_quality_matrix_count": len(step_quality_matrix),
         "artifact_roles": {
             "draft": artifact_roles.get("draft", []),
             "critic": artifact_roles.get("critic", []),
@@ -1660,6 +1667,58 @@ def validate_oversight_payload(contract: dict[str, Any], oversight: dict[str, An
         for to_step in to_steps:
             if str(to_step) not in steps_by_id:
                 errors.append(f"oversight handoffs[{index}].to_steps references unknown step: {to_step}")
+    matrix = oversight.get("step_quality_matrix") if isinstance(oversight.get("step_quality_matrix"), list) else []
+    if not matrix:
+        errors.append("oversight step_quality_matrix must be a non-empty list")
+    else:
+        matrix_step_ids: set[str] = set()
+        known_artifacts = {
+            str(artifact)
+            for step in steps
+            if isinstance(step, dict)
+            for artifact in (step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else [])
+        }
+        for index, item in enumerate(matrix):
+            if not isinstance(item, dict):
+                errors.append(f"oversight step_quality_matrix[{index}] must be an object")
+                continue
+            step_id = str(item.get("step_id") or "")
+            if not step_id:
+                errors.append(f"oversight step_quality_matrix[{index}].step_id is required")
+                continue
+            if step_id in matrix_step_ids:
+                errors.append(f"oversight step_quality_matrix has duplicate step_id: {step_id}")
+            matrix_step_ids.add(step_id)
+            step = steps_by_id.get(step_id)
+            if not step:
+                errors.append(f"oversight step_quality_matrix[{index}].step_id references unknown step: {step_id}")
+                continue
+            worker = str(item.get("worker") or "")
+            if worker != str(step.get("worker") or ""):
+                errors.append(f"oversight step_quality_matrix[{index}].worker does not match run step: {step_id}")
+            expected_artifacts = item.get("expected_artifacts")
+            if expected_artifacts != (step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []):
+                errors.append(f"oversight step_quality_matrix[{index}].expected_artifacts does not match run step: {step_id}")
+            required_inputs = item.get("required_inputs") if isinstance(item.get("required_inputs"), list) else []
+            for artifact in required_inputs:
+                if str(artifact) not in known_artifacts:
+                    errors.append(f"oversight step_quality_matrix[{index}].required_inputs references unknown artifact: {artifact}")
+            checks = item.get("checks")
+            if not isinstance(checks, list) or not checks or any(not isinstance(check, str) or not check for check in checks):
+                errors.append(f"oversight step_quality_matrix[{index}].checks must be non-empty strings")
+            blockers = item.get("blockers")
+            if not isinstance(blockers, list) or not blockers or any(not isinstance(blocker, str) or not blocker for blocker in blockers):
+                errors.append(f"oversight step_quality_matrix[{index}].blockers must be non-empty strings")
+            revision_targets = item.get("revision_targets")
+            if not isinstance(revision_targets, list) or not revision_targets:
+                errors.append(f"oversight step_quality_matrix[{index}].revision_targets must be a non-empty list")
+            else:
+                for target in revision_targets:
+                    if str(target) not in steps_by_id:
+                        errors.append(f"oversight step_quality_matrix[{index}].revision_targets references unknown step: {target}")
+        missing_matrix_steps = sorted(set(steps_by_id) - matrix_step_ids)
+        if missing_matrix_steps:
+            errors.append(f"oversight step_quality_matrix missing steps: {missing_matrix_steps}")
     return errors
 
 

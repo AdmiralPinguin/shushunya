@@ -46,6 +46,92 @@ def worker_metadata(path: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def downstream_step_ids(contract: TaskContract, step_id: str) -> list[str]:
+    downstream: list[str] = []
+    seen: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for step in contract.worker_plan:
+            if step.step_id in seen:
+                continue
+            if step_id in step.depends_on or any(dependency in seen for dependency in step.depends_on):
+                seen.add(step.step_id)
+                downstream.append(step.step_id)
+                changed = True
+    return downstream
+
+
+def step_quality_checks(step_id: str) -> list[str]:
+    checks_by_step = {
+        "source_discovery": [
+            "source map exists and contains classified source candidates",
+            "source map distinguishes primary, official, wiki, community, unavailable, and uncertain sources",
+            "direct-event usefulness is labeled before downstream extraction",
+        ],
+        "source_acquisition": [
+            "snapshot artifact records fetched, blocked, binary, and render-required sources separately",
+            "blocked or render-required sources remain visible as coverage gaps",
+        ],
+        "fact_extraction": [
+            "direct event notes are non-empty unless source coverage is explicitly blocked",
+            "facts include confidence labels and source references",
+            "aftermath and interpretation are separated from direct events",
+        ],
+        "timeline": [
+            "timeline orders direct events before consequences and interpretations",
+            "contradictions and missing links are preserved as explicit uncertainty",
+        ],
+        "draft_reconstruction": [
+            "draft uses extracted facts and timeline artifacts as inputs",
+            "coverage report names gaps and source limitations",
+            "unsupported narrative invention is treated as a blocker",
+        ],
+        "critic_review": [
+            "critic compares draft against contract, extracted facts, timeline, and coverage report",
+            "critic returns pass, warnings, blockers, and focused revision steps",
+            "critic must not approve when required direct-event artifacts are absent",
+        ],
+        "finalize": [
+            "final manifest includes deliverable, package files, critic status, warnings, and blockers",
+            "final package is ready only when critic passes or blockers are explicitly disclosed",
+        ],
+    }
+    return checks_by_step.get(step_id, ["expected artifacts exist and satisfy the step purpose"])
+
+
+def step_quality_matrix(contract: TaskContract) -> list[dict[str, Any]]:
+    final_review_steps = ["critic_review", "finalize"]
+    matrix: list[dict[str, Any]] = []
+    for step in contract.worker_plan:
+        downstream = downstream_step_ids(contract, step.step_id)
+        rerun_targets = [step.step_id] + [item for item in downstream if item not in final_review_steps] + final_review_steps
+        deduped_targets: list[str] = []
+        for target in rerun_targets:
+            if target not in deduped_targets:
+                deduped_targets.append(target)
+        matrix.append(
+            {
+                "step_id": step.step_id,
+                "worker": step.worker,
+                "required_inputs": [
+                    artifact
+                    for dependency in step.depends_on
+                    for artifact in next((candidate.expected_artifacts for candidate in contract.worker_plan if candidate.step_id == dependency), [])
+                ],
+                "expected_artifacts": step.expected_artifacts,
+                "checks": step_quality_checks(step.step_id),
+                "blockers": [
+                    "missing expected artifact",
+                    "artifact contradicts the task contract",
+                    "worker hides uncertainty required by the contract",
+                ],
+                "revision_targets": deduped_targets,
+            }
+        )
+    return matrix
+
+
 def oversight_plan(contract: TaskContract) -> dict[str, Any]:
     artifacts_by_role = {
         "source_map": [artifact for artifact in contract.required_artifacts if artifact.endswith("/source_map.json")],
@@ -73,6 +159,7 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
         "non_goals": contract.non_goals,
         "artifact_roles": artifacts_by_role,
         "handoffs": handoffs,
+        "step_quality_matrix": step_quality_matrix(contract),
         "final_review": {
             "critic_step": "critic_review",
             "final_step": "finalize",

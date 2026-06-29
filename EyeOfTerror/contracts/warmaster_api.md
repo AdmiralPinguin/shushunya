@@ -343,10 +343,11 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
   `client_action` fields as package diagnostics.
 - `/runs/{task_id}/oversight` for the immutable governor oversight plan saved
   with the run package. This lets clients and higher-level governors inspect the
-  specific run's artifact roles, handoffs, quality gates, and final review
-  expectations even if the governor service changes later. The response also
-  includes a compact `summary` and `validation` diagnostics against the current
-  contract and status files, plus the focused run inspection client-view fields.
+  specific run's artifact roles, handoffs, quality gates, step quality matrix,
+  and final review expectations even if the governor service changes later. The
+  response also includes a compact `summary` and `validation` diagnostics
+  against the current contract and status files, plus the focused run inspection
+  client-view fields.
 - `/runs/{task_id}/worker_tasks?live=1` when worker services are running and
   live worker task state is needed.
 
@@ -395,8 +396,9 @@ inspection buttons or follow `actions.next_action` without hardcoded URLs.
 Run summaries include `oversight_summary` when the run package has
 `oversight.json`. It is a compact view of the governor's run-specific
 supervision plan: governor, kind, artifact role highlights, quality gate count,
-completion criteria count, handoff count, final review requirements, and
-revision policy. Use `/runs/{task_id}/oversight` for the full oversight object.
+completion criteria count, handoff count, step quality matrix counts, final
+review requirements, and revision policy. Use `/runs/{task_id}/oversight` for
+the full oversight object.
 
 Run summaries also expose `last_preflight` when the ledger has a recorded run
 preflight. It contains the event timestamp, mode, selected steps, result, and
