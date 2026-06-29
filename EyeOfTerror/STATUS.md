@@ -576,6 +576,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - Python repair writes invalidate matching `__pycache__` entries before
   re-running verification, so repeated checks do not accidentally read stale
   bytecode.
+- `OrdinatusVerifier` can repair a narrow NameError pattern when test output
+  includes `NameError: name 'x' is not defined`, the failing `assertEqual`
+  exposes a simple expected literal, and exactly one changed Python file
+  contains `return x`.
 - The pipeline records inaccessible primary books as `corpus_requirements`;
   operators must provide legitimate local text files when full primary evidence
   is required.

@@ -75,3 +75,7 @@ Ceraxia can also repair a narrow unittest/pytest value mismatch:
 `AssertionError: 1 != 2` can update exactly one `return 1` in a changed Python
 file to `return 2`, rerun the failed verification command, and preserve the
 repair evidence.
+
+A second narrow test repair handles `NameError: name 'x' is not defined` when
+the failing `assertEqual(..., literal)` exposes a simple expected literal and
+the changed Python file contains exactly one `return x`.

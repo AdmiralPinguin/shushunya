@@ -376,6 +376,39 @@ def repair_assertion_return_mismatch(repo_root: Path, py_files: list[str], outpu
     }
 
 
+def repair_name_error_return_literal(repo_root: Path, py_files: list[str], output: str) -> dict[str, Any]:
+    match = re.search(r"NameError: name '([A-Za-z_][A-Za-z0-9_]*)' is not defined", output)
+    if not match:
+        return {"applied": False, "reason": "no simple NameError found"}
+    name = match.group(1)
+    expected_match = re.search(r"assertEqual\([^,\n]+,\s*([+-]?\d+|True|False|None)\)", output)
+    if not expected_match:
+        return {"applied": False, "reason": "could not infer a literal expected value from assertEqual"}
+    expected = expected_match.group(1)
+    needle = f"return {name}"
+    candidates: list[tuple[Path, str]] = []
+    for py_file in py_files:
+        path = safe_repo_path(repo_root, py_file)
+        content = path.read_text(encoding="utf-8")
+        if content.count(needle) == 1:
+            candidates.append((path, content))
+    if len(candidates) != 1:
+        return {"applied": False, "reason": f"expected one changed file with {needle!r}, found {len(candidates)}"}
+    path, content = candidates[0]
+    before_hash = sha256_text(path)
+    path.write_text(content.replace(needle, f"return {expected}", 1), encoding="utf-8")
+    invalidate_python_cache(path)
+    return {
+        "applied": True,
+        "kind": "name_error_return_literal",
+        "path": str(path.relative_to(repo_root)),
+        "name": name,
+        "expected": expected,
+        "before_sha256": before_hash,
+        "after_sha256": sha256_text(path),
+    }
+
+
 def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
     extension_counts: Counter[str] = Counter()
     candidate_files: list[str] = []
@@ -591,11 +624,10 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
                 result = {"command": raw_command, "returncode": 124, "stdout": "", "stderr": "verification command timed out"}
             executed.append(result)
             if result.get("returncode") != 0:
-                repair = repair_assertion_return_mismatch(
-                    repo_root,
-                    py_files,
-                    f"{result.get('stdout', '')}\n{result.get('stderr', '')}",
-                )
+                output = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+                repair = repair_name_error_return_literal(repo_root, py_files, output)
+                if not repair.get("applied"):
+                    repair = repair_assertion_return_mismatch(repo_root, py_files, output)
                 if repair.get("applied"):
                     repairs.append(repair)
                     try:
