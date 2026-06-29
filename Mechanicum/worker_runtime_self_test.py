@@ -39,7 +39,12 @@ def main() -> int:
             if "GET /tasks" not in health.get("endpoints", []):
                 raise AssertionError(f"health did not advertise worker API endpoints: {health}")
             capabilities = request_json(base + "/capabilities")
-            if capabilities.get("worker") != "NoosphericExtractor" or not isinstance(capabilities.get("capabilities"), list):
+            if (
+                capabilities.get("worker") != "NoosphericExtractor"
+                or not isinstance(capabilities.get("capabilities"), list)
+                or capabilities.get("display", {}).get("headline") != "NoosphericExtractor is ready"
+                or capabilities.get("client_action", {}).get("path") != "/capabilities"
+            ):
                 raise AssertionError(f"bad capabilities response: {capabilities}")
             try:
                 request_json(
@@ -55,7 +60,11 @@ def main() -> int:
                 if exc.code != 400:
                     raise
                 missing_task_id = json.loads(exc.read().decode("utf-8"))
-                if missing_task_id.get("error") != "task_id is required":
+                if (
+                    missing_task_id.get("error") != "task_id is required"
+                    or missing_task_id.get("display", {}).get("headline") != "NoosphericExtractor task failed"
+                    or missing_task_id.get("client_action", {}).get("path") != "/capabilities"
+                ):
                     raise AssertionError(f"bad missing task_id response: {missing_task_id}")
             else:
                 raise AssertionError("worker runtime should reject /run without task_id")
@@ -69,10 +78,21 @@ def main() -> int:
                     }
                 },
             )
-            if not result.get("ok"):
+            if (
+                not result.get("ok")
+                or result.get("display", {}).get("headline") != "NoosphericExtractor task completed"
+                or result.get("client_action", {}).get("path") != "/tasks/runtime-test"
+            ):
                 raise AssertionError(f"bad run response: {result}")
             task = request_json(base + "/tasks/runtime-test")
-            if not task.get("ok") or task["task"].get("status") != "completed" or not task["task"].get("created_at") or not task["task"].get("updated_at"):
+            if (
+                not task.get("ok")
+                or task["task"].get("status") != "completed"
+                or not task["task"].get("created_at")
+                or not task["task"].get("updated_at")
+                or task.get("display", {}).get("headline") != "NoosphericExtractor task completed"
+                or task.get("client_action", {}).get("path") != "/tasks/runtime-test"
+            ):
                 raise AssertionError(f"bad task status response: {task}")
             try:
                 request_json(base + "/tasks/runtime-test/cancel", {})
@@ -80,7 +100,10 @@ def main() -> int:
                 if exc.code != 409:
                     raise
                 terminal_cancel = json.loads(exc.read().decode("utf-8"))
-                if terminal_cancel.get("task", {}).get("status") != "completed":
+                if (
+                    terminal_cancel.get("task", {}).get("status") != "completed"
+                    or terminal_cancel.get("display", {}).get("headline") != "NoosphericExtractor task completed"
+                ):
                     raise AssertionError(f"late cancel should preserve completed status: {terminal_cancel}")
             else:
                 raise AssertionError("worker runtime should reject cancellation for terminal tasks")
@@ -111,7 +134,13 @@ def main() -> int:
             if wrong_worker_task.get("task", {}).get("status") != "failed":
                 raise AssertionError(f"wrong-worker task did not fail durably: {wrong_worker_task}")
             task_list = request_json(base + "/tasks")
-            if not task_list.get("ok") or not any(item.get("task_id") == "runtime-test" for item in task_list.get("tasks", [])):
+            if (
+                not task_list.get("ok")
+                or not any(item.get("task_id") == "runtime-test" for item in task_list.get("tasks", []))
+                or task_list.get("summary", {}).get("total", 0) < 1
+                or task_list.get("display", {}).get("headline") != "NoosphericExtractor is ready"
+                or task_list.get("client_action", {}).get("path") != "/capabilities"
+            ):
                 raise AssertionError(f"bad task list response: {task_list}")
             try:
                 request_json(

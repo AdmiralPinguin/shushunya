@@ -34,6 +34,9 @@
 - Worker services expose `GET /health`, `GET /capabilities`, `POST /run`,
   `GET /tasks`, `GET /tasks/{task_id}`, and
   `POST /tasks/{task_id}/cancel` through the shared runtime.
+- Worker runtime responses expose compact task `summary`, `phase`, `decision`,
+  `display`, `next_action`, and executable `client_action` fields for
+  Warmaster/admin worker-state screens.
 - The shared worker runtime rejects `/run` requests without `task_id` so every
   worker step remains pollable and cancellable.
 - The shared worker runtime rejects late cancellation of terminal worker tasks

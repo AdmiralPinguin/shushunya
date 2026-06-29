@@ -32,7 +32,33 @@ running on the selected port before sending work.
     "api_contract": "EyeOfTerror/contracts/worker_api.md"
   },
   "capabilities": ["web_search", "source_map", "reliability_labels"],
-  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+  "api_contract": "EyeOfTerror/contracts/worker_api.md",
+  "phase": "available",
+  "decision": {
+    "can_poll": false,
+    "can_cancel": false,
+    "recommended_kind": "inspect_capabilities",
+    "recommended_endpoint": "GET /capabilities"
+  },
+  "display": {
+    "headline": "Lexmechanic is ready",
+    "detail": "worker service is available",
+    "severity": "info"
+  },
+  "next_action": {
+    "kind": "inspect_capabilities",
+    "method": "GET",
+    "endpoint": "GET /capabilities",
+    "body": {},
+    "reason": "inspect worker capabilities"
+  },
+  "client_action": {
+    "kind": "inspect_capabilities",
+    "method": "GET",
+    "path": "/capabilities",
+    "body": {},
+    "reason": "inspect worker capabilities"
+  }
 }
 ```
 
@@ -86,9 +112,34 @@ Warmaster preflight identity checks.
     "status": "completed",
     "cancel_requested": false,
     "result": {}
+  },
+  "phase": "completed",
+  "decision": {
+    "can_poll": false,
+    "can_cancel": false,
+    "recommended_kind": "inspect_task",
+    "recommended_endpoint": "GET /tasks/stable-task-id"
+  },
+  "display": {
+    "headline": "Lexmechanic task completed",
+    "detail": "completed",
+    "severity": "info"
+  },
+  "client_action": {
+    "kind": "inspect_task",
+    "method": "GET",
+    "path": "/tasks/stable-task-id",
+    "body": {},
+    "reason": "inspect recorded worker task"
   }
 }
 ```
+
+`GET /tasks` includes a compact `summary` by status plus a `display` object for
+worker task-list screens. `GET /tasks/{task_id}`, `/run`, and cancellation
+responses include `phase`, `decision`, `display`, `next_action`, and executable
+`client_action` fields so Warmaster or an admin client can render worker state
+without interpreting raw task dictionaries.
 
 ## POST /tasks/{task_id}/cancel
 

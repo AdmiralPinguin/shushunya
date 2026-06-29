@@ -30,6 +30,80 @@ def worker_api_endpoints() -> list[str]:
     ]
 
 
+def executable_client_action(action: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(action, dict) or not action:
+        return {}
+    method = str(action.get("method") or "").upper()
+    endpoint = str(action.get("endpoint") or "")
+    endpoint_method = ""
+    path = endpoint
+    if " " in endpoint:
+        endpoint_method, path = endpoint.split(" ", 1)
+        endpoint_method = endpoint_method.upper()
+    method = method or endpoint_method
+    body = action.get("body") if isinstance(action.get("body"), dict) else {}
+    return {
+        "kind": str(action.get("kind") or ""),
+        "method": method,
+        "path": path,
+        "body": body,
+        "reason": str(action.get("reason") or ""),
+    }
+
+
+def worker_display(worker_name: str, status: str, detail: str = "") -> dict[str, Any]:
+    severity = "info"
+    headline = f"{worker_name} is ready"
+    if status in {"running", "cancelling"}:
+        headline = f"{worker_name} task is running"
+    elif status in {"completed", "ready", "passed", "passed_with_warnings"}:
+        headline = f"{worker_name} task completed"
+    elif status in {"failed", "blocked"}:
+        headline = f"{worker_name} task failed"
+        severity = "error"
+    elif status == "cancelled":
+        headline = f"{worker_name} task cancelled"
+        severity = "warning"
+    elif status == "queued":
+        headline = f"{worker_name} task is queued"
+    return {"headline": headline, "detail": detail or status, "severity": severity}
+
+
+def worker_next_action(task_id: str, status: str) -> dict[str, Any]:
+    if not task_id:
+        return {"kind": "inspect_capabilities", "method": "GET", "endpoint": "GET /capabilities", "body": {}, "reason": "inspect worker capabilities"}
+    if status in {"running", "queued", "cancelling"}:
+        return {"kind": "poll_task", "method": "GET", "endpoint": f"GET /tasks/{task_id}", "body": {}, "reason": "worker task is still active"}
+    if status in {"completed", "ready", "passed", "passed_with_warnings", "failed", "blocked", "cancelled"}:
+        return {"kind": "inspect_task", "method": "GET", "endpoint": f"GET /tasks/{task_id}", "body": {}, "reason": "inspect recorded worker task"}
+    return {"kind": "inspect_task", "method": "GET", "endpoint": f"GET /tasks/{task_id}", "body": {}, "reason": "inspect worker task state"}
+
+
+def payload_with_worker_view(payload: dict[str, Any], worker_name: str, task_id: str = "", status: str = "") -> dict[str, Any]:
+    resolved_task_id = str(payload.get("task_id") or task_id or "")
+    resolved_status = str(payload.get("status") or status or "")
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    if task:
+        resolved_task_id = str(task.get("task_id") or resolved_task_id)
+        resolved_status = str(task.get("status") or resolved_status)
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else task.get("result") if isinstance(task.get("result"), dict) else {}
+    detail = str(payload.get("error") or result.get("summary") or result.get("error") or resolved_status or "worker service is available")
+    next_action = worker_next_action(resolved_task_id, resolved_status)
+    return {
+        **payload,
+        "phase": resolved_status or "available",
+        "decision": {
+            "can_poll": resolved_status in {"running", "queued", "cancelling"},
+            "can_cancel": resolved_status in {"running", "queued"},
+            "recommended_kind": str(next_action.get("kind") or ""),
+            "recommended_endpoint": str(next_action.get("endpoint") or ""),
+        },
+        "display": worker_display(worker_name, resolved_status or "available", detail),
+        "next_action": next_action,
+        "client_action": executable_client_action(next_action),
+    }
+
+
 def load_worker(module_path: Path, module_name: str) -> WorkerRun:
     if str(module_path) not in sys.path:
         sys.path.insert(0, str(module_path))
@@ -115,7 +189,7 @@ def make_handler(
         return task
 
     def service_manifest() -> dict[str, Any]:
-        return {
+        payload = {
             "ok": True,
             "worker": worker_name,
             "workspace_root": str(workspace_root),
@@ -124,6 +198,7 @@ def make_handler(
             "api_contract": worker_metadata.get("api_contract", ""),
             "endpoints": worker_api_endpoints(),
         }
+        return payload_with_worker_view(payload, worker_name)
 
     class WorkerHandler(BaseHTTPRequestHandler):
         server_version = f"{worker_name}Worker/0.1"
@@ -146,16 +221,30 @@ def make_handler(
             if parts == ["tasks"]:
                 with tasks_lock:
                     task_list = sorted((dict(task) for task in tasks.values()), key=lambda item: str(item.get("updated_at") or ""), reverse=True)
-                response(self, 200, {"ok": True, "worker": worker_name, "tasks": task_list})
+                by_status: dict[str, int] = {}
+                for task in task_list:
+                    status = str(task.get("status") or "unknown")
+                    by_status[status] = by_status.get(status, 0) + 1
+                payload = payload_with_worker_view(
+                    {
+                        "ok": True,
+                        "worker": worker_name,
+                        "summary": {"total": len(task_list), "by_status": by_status},
+                        "display": worker_display(worker_name, "available", f"{len(task_list)} recorded tasks"),
+                        "tasks": task_list,
+                    },
+                    worker_name,
+                )
+                response(self, 200, payload)
                 return
             if len(parts) == 2 and parts[0] == "tasks":
                 task_id = unquote(parts[1])
                 with tasks_lock:
                     task = dict(tasks.get(task_id, {}))
                 if not task:
-                    response(self, 404, {"ok": False, "worker": worker_name, "task_id": task_id, "error": "task not found"})
+                    response(self, 404, payload_with_worker_view({"ok": False, "worker": worker_name, "task_id": task_id, "error": "task not found"}, worker_name, task_id=task_id, status="missing"))
                     return
-                response(self, 200, {"ok": True, "worker": worker_name, "task": task})
+                response(self, 200, payload_with_worker_view({"ok": True, "worker": worker_name, "task": task}, worker_name))
                 return
             response(self, 404, {"ok": False, "error": "not found"})
 
@@ -167,12 +256,12 @@ def make_handler(
                 with tasks_lock:
                     task = ensure_task(task_id)
                     if task.get("status") in terminal_statuses:
-                        response(self, 409, {"ok": False, "worker": worker_name, "task": dict(task), "error": "task is already terminal"})
+                        response(self, 409, payload_with_worker_view({"ok": False, "worker": worker_name, "task": dict(task), "error": "task is already terminal"}, worker_name))
                         return
                     task["cancel_requested"] = True
                     task["cancel_reason"] = "requested through worker API"
                     task["status"] = "cancelling" if task.get("status") == "running" else "cancelled"
-                response(self, 200, {"ok": True, "worker": worker_name, "task": dict(task)})
+                response(self, 200, payload_with_worker_view({"ok": True, "worker": worker_name, "task": dict(task)}, worker_name))
                 return
             if parsed.path != "/run":
                 response(self, 404, {"ok": False, "error": "not found"})
@@ -186,7 +275,7 @@ def make_handler(
                 request = payload.get("request") if isinstance(payload.get("request"), dict) else payload
                 task_id = str(request.get("task_id") or payload.get("task_id") or "")
                 if not task_id:
-                    response(self, 400, {"ok": False, "worker": worker_name, "status": "failed", "error": "task_id is required"})
+                    response(self, 400, payload_with_worker_view({"ok": False, "worker": worker_name, "status": "failed", "error": "task_id is required"}, worker_name, status="failed"))
                     return
                 packet_worker = str(payload.get("worker") or "").strip()
                 if packet_worker and packet_worker != worker_name:
@@ -202,7 +291,7 @@ def make_handler(
                             task = ensure_task(task_id)
                             task["status"] = "failed"
                             task["result"] = result
-                    response(self, 409, result)
+                    response(self, 409, payload_with_worker_view(result, worker_name, task_id=task_id, status="failed"))
                     return
                 if task_id:
                     with tasks_lock:
@@ -210,7 +299,7 @@ def make_handler(
                         if task.get("cancel_requested"):
                             task["status"] = "cancelled"
                             task["updated_at"] = now_iso()
-                            response(self, 409, {"ok": False, "worker": worker_name, "task_id": task_id, "status": "cancelled", "error": "task cancelled before start"})
+                            response(self, 409, payload_with_worker_view({"ok": False, "worker": worker_name, "task_id": task_id, "status": "cancelled", "error": "task cancelled before start"}, worker_name, task_id=task_id, status="cancelled"))
                             return
                         task["status"] = "running"
                 artifact_errors = input_artifact_errors(request, workspace_root)
@@ -228,7 +317,7 @@ def make_handler(
                             task = ensure_task(task_id)
                             task["status"] = "failed"
                             task["result"] = result
-                    response(self, 400, result)
+                    response(self, 400, payload_with_worker_view(result, worker_name, task_id=task_id, status="failed"))
                     return
                 result = run_worker(request, workspace_root)
                 if task_id:
@@ -236,14 +325,14 @@ def make_handler(
                         task = ensure_task(task_id)
                         task["status"] = str(result.get("status") or ("completed" if result.get("ok") else "failed"))
                         task["result"] = result
-                response(self, 200 if result.get("ok") else 400, result)
+                response(self, 200 if result.get("ok") else 400, payload_with_worker_view(result, worker_name, task_id=task_id))
             except Exception as exc:  # noqa: BLE001 - server boundary converts exceptions to JSON.
                 if task_id:
                     with tasks_lock:
                         task = ensure_task(task_id)
                         task["status"] = "failed"
                         task["error"] = str(exc)
-                response(self, 500, {"ok": False, "worker": worker_name, "error": str(exc)})
+                response(self, 500, payload_with_worker_view({"ok": False, "worker": worker_name, "task_id": task_id, "status": "failed", "error": str(exc)}, worker_name, task_id=task_id, status="failed"))
 
     return WorkerHandler
 
