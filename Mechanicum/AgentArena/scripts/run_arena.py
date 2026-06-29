@@ -52,19 +52,47 @@ def write_json(path: Path, value: Any) -> None:
 
 def summarize_results(results: list[RunResult]) -> dict[str, Any]:
     by_agent: dict[str, dict[str, Any]] = {}
+    orchestration_quality: dict[str, dict[str, Any]] = {}
     for result in results:
         item = by_agent.setdefault(result.agent, {"total": 0, "passed": 0, "failed": 0, "duration_sec": 0.0})
         item["total"] += 1
         item["passed" if result.ok else "failed"] += 1
         item["duration_sec"] = round(float(item["duration_sec"]) + result.duration_sec, 3)
+        if isinstance(result.orchestration, dict) and result.orchestration.get("ok") is not None:
+            quality = orchestration_quality.setdefault(
+                result.agent,
+                {
+                    "tracked": 0,
+                    "passed_chain": 0,
+                    "failed_chain": 0,
+                    "missing_failing_diagnostic": 0,
+                    "missing_edit": 0,
+                    "missing_verification_after_edit": 0,
+                },
+            )
+            quality["tracked"] += 1
+            if result.orchestration.get("ok") is True:
+                quality["passed_chain"] += 1
+            else:
+                quality["failed_chain"] += 1
+                if not result.orchestration.get("failing_diagnostic_steps"):
+                    quality["missing_failing_diagnostic"] += 1
+                if not result.orchestration.get("edit_steps"):
+                    quality["missing_edit"] += 1
+                if not result.orchestration.get("verified_after_last_edit"):
+                    quality["missing_verification_after_edit"] += 1
     for item in by_agent.values():
         total = int(item["total"])
         item["pass_rate"] = round(float(item["passed"]) / total, 3) if total else 0.0
+    for item in orchestration_quality.values():
+        tracked = int(item["tracked"])
+        item["chain_pass_rate"] = round(float(item["passed_chain"]) / tracked, 3) if tracked else 0.0
     return {
         "total": len(results),
         "passed": sum(1 for item in results if item.ok),
         "failed": sum(1 for item in results if not item.ok),
         "by_agent": by_agent,
+        "orchestration_quality": orchestration_quality,
     }
 
 

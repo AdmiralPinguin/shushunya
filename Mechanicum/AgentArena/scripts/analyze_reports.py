@@ -26,8 +26,39 @@ def add_stat(stats: dict[str, Any], suite: str, agent: str, ok: bool, duration_s
     item["duration_sec"] = round(float(item["duration_sec"]) + duration_sec, 3)
 
 
+def add_orchestration_stat(stats: dict[str, Any], suite: str, agent: str, orchestration: dict[str, Any]) -> None:
+    if orchestration.get("ok") is None:
+        return
+    key = f"{suite}:{agent}"
+    item = stats.setdefault(
+        key,
+        {
+            "suite": suite,
+            "agent": agent,
+            "tracked": 0,
+            "passed_chain": 0,
+            "failed_chain": 0,
+            "missing_failing_diagnostic": 0,
+            "missing_edit": 0,
+            "missing_verification_after_edit": 0,
+        },
+    )
+    item["tracked"] += 1
+    if orchestration.get("ok") is True:
+        item["passed_chain"] += 1
+    else:
+        item["failed_chain"] += 1
+        if not orchestration.get("failing_diagnostic_steps"):
+            item["missing_failing_diagnostic"] += 1
+        if not orchestration.get("edit_steps"):
+            item["missing_edit"] += 1
+        if not orchestration.get("verified_after_last_edit"):
+            item["missing_verification_after_edit"] += 1
+
+
 def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
     stats: dict[str, Any] = {}
+    orchestration_stats: dict[str, Any] = {}
     failures: list[dict[str, Any]] = []
     loaded = 0
     for path in report_paths:
@@ -40,6 +71,9 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
             agent = str(result.get("agent") or "unknown")
             ok = bool(result.get("ok"))
             add_stat(stats, suite, agent, ok, float(result.get("duration_sec") or 0.0))
+            orchestration = result.get("orchestration") if isinstance(result.get("orchestration"), dict) else {}
+            if orchestration:
+                add_orchestration_stat(orchestration_stats, suite, agent, orchestration)
             if not ok:
                 failures.append(
                     {
@@ -55,7 +89,11 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
     for row in rows:
         total = int(row["total"])
         row["pass_rate"] = round(float(row["passed"]) / total, 3) if total else 0.0
-    return {"reports": loaded, "stats": rows, "recent_failures": failures[:20]}
+    orchestration_rows = sorted(orchestration_stats.values(), key=lambda item: (item["suite"], item["agent"]))
+    for row in orchestration_rows:
+        tracked = int(row["tracked"])
+        row["chain_pass_rate"] = round(float(row["passed_chain"]) / tracked, 3) if tracked else 0.0
+    return {"reports": loaded, "stats": rows, "orchestration_quality": orchestration_rows, "recent_failures": failures[:20]}
 
 
 def main() -> int:

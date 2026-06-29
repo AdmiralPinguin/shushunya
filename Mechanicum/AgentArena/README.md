@@ -40,6 +40,10 @@ workspaces to `workspaces/`.
 
 Reports are written atomically and include a `summary` block with per-agent
 totals, pass counts, fail counts, duration, and pass rate.
+For Shushunya task journals the summary also includes
+`orchestration_quality`: whether code-repair runs showed a failing diagnostic,
+performed an edit, and verified after the last edit. `analyze_reports.py`
+aggregates the same chain-quality metrics across recent reports.
 
 Runner self-test:
 
