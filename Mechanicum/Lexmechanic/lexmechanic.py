@@ -193,6 +193,35 @@ def generic_search_queries(goal: str) -> list[str]:
     ]
 
 
+def search_rounds(goal: str, playbooks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    playbook_queries = [
+        str(query)
+        for playbook in playbooks
+        for query in playbook.get("search_queries", [])
+        if query
+    ]
+    if playbook_queries:
+        return [
+            {"round": "playbook_seed", "purpose": "known high-value queries from matched source playbooks", "queries": playbook_queries},
+            {
+                "round": "official_crosscheck",
+                "purpose": "official publisher, catalog, or article leads for source arbitration",
+                "queries": [f"{goal} Black Library", f"{goal} Warhammer official", f"{goal} Games Workshop"],
+            },
+            {
+                "round": "summary_crosscheck",
+                "purpose": "secondary summaries for chronology and named-entity cross-checking",
+                "queries": [f"{goal} Lexicanum", f"{goal} Warhammer wiki", f"{goal} chronology"],
+            },
+        ]
+    return [
+        {"round": "primary_probe", "purpose": "find primary or publication-level sources", "queries": [f"{goal} primary source", f"{goal} novel", f"{goal} book"]},
+        {"round": "official_probe", "purpose": "find official publisher or article sources", "queries": [f"{goal} official source", f"{goal} Black Library", f"{goal} Warhammer official"]},
+        {"round": "summary_probe", "purpose": "find secondary summaries for cross-checking only", "queries": [f"{goal} wiki", f"{goal} Lexicanum", f"{goal} chronology"]},
+        {"round": "language_probe", "purpose": "find Russian and English variants of the same topic", "queries": [f"{goal} русский", f"{goal} English", f"{goal} перевод"]},
+    ]
+
+
 def default_search(query: str, limit: int) -> dict[str, Any]:
     return web_search(SearchConfig(), query, limit)
 
@@ -218,6 +247,43 @@ def run_discovery_queries(search_queries: list[str], searcher: SearchFn | None, 
     return results
 
 
+def run_discovery_rounds(rounds: list[dict[str, Any]], searcher: SearchFn | None, limit: int = 5, query_budget: int = 10) -> list[dict[str, Any]]:
+    if searcher is None:
+        return []
+    results: list[dict[str, Any]] = []
+    used_queries = 0
+    for round_plan in rounds:
+        queries = round_plan.get("queries") if isinstance(round_plan.get("queries"), list) else []
+        round_results = run_discovery_queries(
+            [str(query) for query in queries if query][: max(0, query_budget - used_queries)],
+            searcher,
+            limit,
+        )
+        used_queries += len(round_results)
+        results.append(
+            {
+                "round": str(round_plan.get("round") or "discovery"),
+                "purpose": str(round_plan.get("purpose") or ""),
+                "queries": [item.get("query", "") for item in round_results],
+                "results": round_results,
+            }
+        )
+        if used_queries >= query_budget:
+            break
+    return results
+
+
+def flatten_discovery_results(discovery_rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    flattened: list[dict[str, Any]] = []
+    for round_result in discovery_rounds:
+        for query_result in round_result.get("results", []):
+            if isinstance(query_result, dict):
+                enriched = dict(query_result)
+                enriched["round"] = round_result.get("round", "")
+                flattened.append(enriched)
+    return flattened
+
+
 def classified_live_sources(discovery_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for discovery in discovery_results:
@@ -228,6 +294,29 @@ def classified_live_sources(discovery_results: list[dict[str, Any]]) -> list[dic
             if candidate:
                 candidates.append(candidate)
     return rank_sources(dedupe_sources(candidates))
+
+
+def source_coverage(sources: list[dict[str, Any]], discovery_results: list[dict[str, Any]], playbooks: list[dict[str, Any]]) -> dict[str, Any]:
+    source_types = [str(source.get("source_type") or source_type(source)) for source in sources if isinstance(source, dict)]
+    source_classes = [str(source.get("source_class") or source.get("type") or "") for source in sources if isinstance(source, dict)]
+    fetched_query_count = len(discovery_results)
+    successful_query_count = sum(1 for item in discovery_results if item.get("ok"))
+    has_primary = any(kind == "published_primary" or "primary" in source_class for kind, source_class in zip(source_types, source_classes))
+    has_official = any(kind in {"published_primary", "official_catalog", "official_article", "official_secondary"} for kind in source_types)
+    has_secondary = any(kind in {"curated_wiki", "wiki", "community_wiki"} for kind in source_types)
+    live_count = sum(1 for source in sources if source.get("discovery_method") == "live_search")
+    return {
+        "source_count": len(sources),
+        "matched_playbook_count": len(playbooks),
+        "live_candidate_count": live_count,
+        "query_count": fetched_query_count,
+        "successful_query_count": successful_query_count,
+        "has_primary_or_publication": has_primary,
+        "has_official": has_official,
+        "has_secondary_crosscheck": has_secondary,
+        "ready_for_extraction": bool(sources) and (has_primary or has_official) and has_secondary,
+        "source_types": sorted(set(source_types)),
+    }
 
 
 def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None = None) -> dict[str, Any]:
@@ -241,12 +330,8 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
             if isinstance(source, dict)
         ]
     )
-    search_queries = [
-        str(query)
-        for playbook in playbooks
-        for query in playbook.get("search_queries", [])
-        if query
-    ] or generic_search_queries(goal)
+    rounds = search_rounds(goal, playbooks)
+    search_queries = [query for round_plan in rounds for query in round_plan.get("queries", []) if isinstance(query, str)]
     coverage_gaps = [
         str(gap)
         for playbook in playbooks
@@ -265,16 +350,22 @@ def source_map_for_contract(contract: dict[str, Any], searcher: SearchFn | None 
         "A pass requires at least one reliable primary or official source candidate.",
         "Secondary summaries can guide discovery but must not become sole evidence.",
     ]
-    discovery_results = run_discovery_queries(search_queries, searcher)
+    discovery_rounds = run_discovery_rounds(rounds, searcher)
+    discovery_results = flatten_discovery_results(discovery_rounds)
     live_candidates = classified_live_sources(discovery_results)
     sources = rank_sources(dedupe_sources(sources + live_candidates))
+    coverage = source_coverage(sources, discovery_results, playbooks)
+    if sources and not coverage["ready_for_extraction"]:
+        coverage_gaps.append("Source set is not extraction-ready: it needs both official/primary evidence and secondary cross-checking.")
     return {
         "topic": goal,
         "sources": sources,
         "search_queries": search_queries,
+        "discovery_rounds": discovery_rounds,
         "discovery_status": discovery_status,
         "discovery_results": discovery_results,
         "live_source_candidates": live_candidates,
+        "source_coverage": coverage,
         "matched_playbooks": [str(playbook.get("name") or playbook.get("match_terms", ["unknown"])[0]) for playbook in playbooks],
         "coverage_gaps": coverage_gaps,
         "quality_notes": quality_notes,

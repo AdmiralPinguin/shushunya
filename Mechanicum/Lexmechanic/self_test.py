@@ -49,8 +49,12 @@ def main() -> int:
         raise AssertionError("unknown domains must not become source candidates")
     if not discovered["discovery_results"] or discovered["discovery_results"][0]["provider"] != "fake":
         raise AssertionError(f"fake discovery was not recorded: {discovered['discovery_results']}")
-    if not fake_search_calls:
+    if len(fake_search_calls) < 4:
         raise AssertionError("fake searcher was not called")
+    if not discovered.get("discovery_rounds") or discovered["discovery_rounds"][0].get("round") != "primary_probe":
+        raise AssertionError(f"discovery rounds should expose source-search strategy: {discovered.get('discovery_rounds')}")
+    if not discovered.get("source_coverage", {}).get("ready_for_extraction"):
+        raise AssertionError(f"source coverage should mark official/wiki fallback as extraction-ready: {discovered.get('source_coverage')}")
 
     request = {
         "task_id": "test-skalathrax:source_discovery",
@@ -79,6 +83,8 @@ def main() -> int:
             raise AssertionError(f"wrong discovery status: {data.get('discovery_status')}")
         if not data.get("coverage_gaps"):
             raise AssertionError("source map must include coverage gaps")
+        if not data.get("source_coverage", {}).get("has_primary_or_publication"):
+            raise AssertionError(f"playbook source coverage should detect primary/publication sources: {data.get('source_coverage')}")
         generic_request = {
             "task_id": "test-generic:source_discovery",
             "contract": {"goal": "Собери историю неизвестной битвы."},
@@ -94,6 +100,10 @@ def main() -> int:
             raise AssertionError(f"generic fallback should request live discovery: {generic}")
         if not generic.get("discovery_results"):
             raise AssertionError(f"generic fallback should record discovery results: {generic}")
+        if not generic.get("discovery_rounds") or len(generic.get("discovery_rounds", [])) < 2:
+            raise AssertionError(f"generic fallback should record multiple discovery rounds: {generic}")
+        if not generic.get("source_coverage", {}).get("ready_for_extraction"):
+            raise AssertionError(f"generic fallback should expose extraction-ready coverage: {generic.get('source_coverage')}")
         if not any("live source discovery" in gap for gap in generic.get("coverage_gaps", [])):
             raise AssertionError(f"generic fallback should demand live discovery: {generic}")
         blocked_request = {
