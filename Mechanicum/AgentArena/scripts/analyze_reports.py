@@ -20,11 +20,16 @@ def load_report(path: Path) -> dict[str, Any]:
     return payload
 
 
-def add_stat(stats: dict[str, Any], suite: str, agent: str, ok: bool, duration_sec: float) -> None:
+def add_stat(stats: dict[str, Any], suite: str, agent: str, ok: bool, duration_sec: float, unavailable: bool = False) -> None:
     key = f"{suite}:{agent}"
-    item = stats.setdefault(key, {"suite": suite, "agent": agent, "total": 0, "passed": 0, "failed": 0, "duration_sec": 0.0})
+    item = stats.setdefault(
+        key,
+        {"suite": suite, "agent": agent, "total": 0, "passed": 0, "failed": 0, "unavailable": 0, "duration_sec": 0.0},
+    )
     item["total"] += 1
     item["passed" if ok else "failed"] += 1
+    if unavailable:
+        item["unavailable"] += 1
     item["duration_sec"] = round(float(item["duration_sec"]) + duration_sec, 3)
 
 
@@ -103,20 +108,20 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
                 continue
             agent = str(result.get("agent") or "unknown")
             ok = bool(result.get("ok"))
-            add_stat(stats, suite, agent, ok, float(result.get("duration_sec") or 0.0))
+            checks = result.get("checks") if isinstance(result.get("checks"), list) else []
+            reason = failure_reason(result.get("exit_code"), checks, str(result.get("error") or "")) if not ok else ""
+            add_stat(stats, suite, agent, ok, float(result.get("duration_sec") or 0.0), reason == "agent_unavailable")
             orchestration = result.get("orchestration") if isinstance(result.get("orchestration"), dict) else {}
             if orchestration:
                 add_orchestration_stat(orchestration_stats, suite, agent, orchestration)
                 add_artifact_stat(artifact_stats, suite, agent, orchestration)
             if not ok:
-                checks = result.get("checks") if isinstance(result.get("checks"), list) else []
                 failed = failed_checks(checks)
                 for check in failed:
                     check_type = str(check.get("type") or "unknown")
                     failed_check_types[check_type] = failed_check_types.get(check_type, 0) + 1
                     for symptom in failed_check_symptoms(check):
                         failed_check_symptom_counts[symptom] = failed_check_symptom_counts.get(symptom, 0) + 1
-                reason = failure_reason(result.get("exit_code"), checks, str(result.get("error") or ""))
                 failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                 failures.append(
                     {
@@ -134,7 +139,10 @@ def analyze_reports(report_paths: list[Path]) -> dict[str, Any]:
     rows = sorted(stats.values(), key=lambda item: (item["suite"], item["agent"]))
     for row in rows:
         total = int(row["total"])
+        runnable_total = total - int(row.get("unavailable", 0))
         row["pass_rate"] = round(float(row["passed"]) / total, 3) if total else 0.0
+        row["runnable_total"] = runnable_total
+        row["runnable_pass_rate"] = round(float(row["passed"]) / runnable_total, 3) if runnable_total else None
     orchestration_rows = sorted(orchestration_stats.values(), key=lambda item: (item["suite"], item["agent"]))
     for row in orchestration_rows:
         tracked = int(row["tracked"])

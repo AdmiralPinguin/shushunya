@@ -60,13 +60,15 @@ def summarize_results(results: list[RunResult]) -> dict[str, Any]:
     failed_check_types: dict[str, int] = {}
     failed_check_symptom_counts: dict[str, int] = {}
     for result in results:
-        item = by_agent.setdefault(result.agent, {"total": 0, "passed": 0, "failed": 0, "duration_sec": 0.0})
+        item = by_agent.setdefault(result.agent, {"total": 0, "passed": 0, "failed": 0, "unavailable": 0, "duration_sec": 0.0})
         item["total"] += 1
         item["passed" if result.ok else "failed"] += 1
         item["duration_sec"] = round(float(item["duration_sec"]) + result.duration_sec, 3)
         if not result.ok:
             reason = failure_reason(result.exit_code, result.checks, result.error)
             failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+            if reason == "agent_unavailable":
+                item["unavailable"] += 1
             for check in failed_checks(result.checks):
                 check_type = str(check.get("type") or "unknown")
                 failed_check_types[check_type] = failed_check_types.get(check_type, 0) + 1
@@ -111,7 +113,10 @@ def summarize_results(results: list[RunResult]) -> dict[str, Any]:
                     quality["missing_verification_after_edit"] += 1
     for item in by_agent.values():
         total = int(item["total"])
+        runnable_total = total - int(item.get("unavailable", 0))
         item["pass_rate"] = round(float(item["passed"]) / total, 3) if total else 0.0
+        item["runnable_total"] = runnable_total
+        item["runnable_pass_rate"] = round(float(item["passed"]) / runnable_total, 3) if runnable_total else None
     for item in orchestration_quality.values():
         tracked = int(item["tracked"])
         item["chain_pass_rate"] = round(float(item["passed_chain"]) / tracked, 3) if tracked else 0.0

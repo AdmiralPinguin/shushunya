@@ -41,6 +41,9 @@ workspaces to `workspaces/`.
 Reports are written atomically and include a `summary` block with per-agent
 totals, pass counts, fail counts, duration, pass rate, failure reasons, and
 failed check type/symptom counters.
+Per-agent rows also expose `unavailable`, `runnable_total`, and
+`runnable_pass_rate`, so missing runtimes do not get confused with poor task
+quality.
 For Shushunya task journals the summary also includes
 `orchestration_quality`: whether code-repair runs showed a failing diagnostic,
 performed an edit, and verified after the last edit. `analyze_reports.py`

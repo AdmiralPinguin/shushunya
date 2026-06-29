@@ -41,12 +41,15 @@ def main() -> int:
             },
         ),
         RunResult(agent="aider", task_id="a", ok=True, duration_sec=3.0, checks=[]),
+        RunResult(agent="openhands", task_id="a", ok=False, duration_sec=0.1, checks=[], exit_code=127, error="missing Docker/Podman"),
     ]
     summary = summarize_results(results)
-    if summary["total"] != 3 or summary["passed"] != 2 or summary["failed"] != 1:
+    if summary["total"] != 4 or summary["passed"] != 2 or summary["failed"] != 2:
         raise AssertionError(f"bad arena summary totals: {summary}")
     if summary["by_agent"]["shushunya"]["pass_rate"] != 0.5:
         raise AssertionError(f"bad arena per-agent summary: {summary}")
+    if summary["by_agent"]["openhands"]["unavailable"] != 1 or summary["by_agent"]["openhands"]["runnable_pass_rate"] is not None:
+        raise AssertionError(f"bad arena unavailable summary: {summary}")
     if summary.get("failure_reasons", {}).get("post_run_checks") != 1 or summary.get("failed_check_types", {}).get("file_contains") != 1:
         raise AssertionError(f"bad arena direct summary failure counters: {summary}")
     if summary.get("failed_check_symptoms", {}).get("assertion_error") != 1:
