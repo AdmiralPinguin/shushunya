@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -195,6 +196,27 @@ def generic_search_queries(goal: str) -> list[str]:
     ]
 
 
+def playbook_source_title_queries(playbooks: list[dict[str, Any]]) -> list[str]:
+    queries: list[str] = []
+    seen: set[str] = set()
+    for playbook in playbooks:
+        for source in playbook.get("sources", []):
+            if not isinstance(source, dict):
+                continue
+            source_class = str(source.get("source_class") or source.get("type") or "").lower()
+            if "primary" not in source_class and str(source.get("type") or "").lower() not in {"novel", "short_story", "book"}:
+                continue
+            title = " ".join(str(source.get("title") or "").split())
+            if not title:
+                continue
+            for query in (f'"{title}" Black Library', f'"{title}" Warhammer'):
+                key = query.lower()
+                if key not in seen:
+                    seen.add(key)
+                    queries.append(query)
+    return queries
+
+
 def search_rounds(goal: str, playbooks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     playbook_queries = [
         str(query)
@@ -203,24 +225,38 @@ def search_rounds(goal: str, playbooks: list[dict[str, Any]]) -> list[dict[str, 
         if query
     ]
     if playbook_queries:
-        return [
+        title_queries = playbook_source_title_queries(playbooks)
+        rounds = [
             {"round": "playbook_seed", "purpose": "known high-value queries from matched source playbooks", "queries": playbook_queries},
-            {
-                "round": "official_crosscheck",
-                "purpose": "official publisher, catalog, or article leads for source arbitration",
-                "queries": [f"{goal} Black Library", f"{goal} Warhammer official", f"{goal} Games Workshop"],
-            },
-            {
-                "round": "summary_crosscheck",
-                "purpose": "secondary summaries for chronology and named-entity cross-checking",
-                "queries": [f"{goal} Lexicanum", f"{goal} Warhammer wiki", f"{goal} chronology"],
-            },
-            {
-                "round": "language_probe",
-                "purpose": "find Russian and English variants of the same topic",
-                "queries": [f"{goal} русский", f"{goal} English", f"{goal} перевод"],
-            },
         ]
+        if title_queries:
+            rounds.append(
+                {
+                    "round": "source_title_probe",
+                    "purpose": "official catalog or publication pages for named primary sources",
+                    "queries": title_queries,
+                }
+            )
+        rounds.extend(
+            [
+                {
+                    "round": "official_crosscheck",
+                    "purpose": "official publisher, catalog, or article leads for source arbitration",
+                    "queries": [f"{goal} Black Library", f"{goal} Warhammer official", f"{goal} Games Workshop"],
+                },
+                {
+                    "round": "summary_crosscheck",
+                    "purpose": "secondary summaries for chronology and named-entity cross-checking",
+                    "queries": [f"{goal} Lexicanum", f"{goal} Warhammer wiki", f"{goal} chronology"],
+                },
+                {
+                    "round": "language_probe",
+                    "purpose": "find Russian and English variants of the same topic",
+                    "queries": [f"{goal} русский", f"{goal} English", f"{goal} перевод"],
+                },
+            ]
+        )
+        return rounds
     return [
         {"round": "primary_probe", "purpose": "find primary or publication-level sources", "queries": [f"{goal} primary source", f"{goal} novel", f"{goal} book"]},
         {"round": "official_probe", "purpose": "find official publisher or article sources", "queries": [f"{goal} official source", f"{goal} Black Library", f"{goal} Warhammer official"]},
@@ -291,6 +327,35 @@ def flatten_discovery_results(discovery_rounds: list[dict[str, Any]]) -> list[di
     return flattened
 
 
+def relevance_tokens(text: str) -> set[str]:
+    stopwords = {
+        "the",
+        "and",
+        "for",
+        "with",
+        "warhammer",
+        "black",
+        "library",
+        "lexicanum",
+        "wiki",
+        "fandom",
+        "official",
+        "source",
+    }
+    return {token for token in re.findall(r"[a-zа-я0-9]+", text.lower()) if len(token) > 2 and token not in stopwords}
+
+
+def term_matches_haystack(term: str, haystack: str, haystack_tokens: set[str]) -> bool:
+    normalized_term = " ".join(term.lower().split())
+    if normalized_term and normalized_term in haystack:
+        return True
+    tokens = relevance_tokens(term)
+    if not tokens:
+        return False
+    required = min(len(tokens), 2)
+    return len(tokens & haystack_tokens) >= required
+
+
 def relevant_live_result(result: dict[str, Any], relevance_terms: list[str] | None) -> bool:
     if not relevance_terms:
         return True
@@ -301,7 +366,8 @@ def relevant_live_result(result: dict[str, Any], relevance_terms: list[str] | No
             str(result.get("snippet") or ""),
         ]
     ).lower()
-    return any(term.lower() in haystack for term in relevance_terms if term)
+    haystack_tokens = relevance_tokens(haystack)
+    return any(term_matches_haystack(term, haystack, haystack_tokens) for term in relevance_terms if term)
 
 
 def classified_live_sources(discovery_results: list[dict[str, Any]], relevance_terms: list[str] | None = None) -> list[dict[str, Any]]:

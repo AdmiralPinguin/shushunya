@@ -61,7 +61,7 @@ def main() -> int:
                 {
                     "title": "Black Library - Weakness of Others, The (eShort)",
                     "url": "https://www.blacklibrary.com/warhammer-40000/quick-reads/the-weakness-of-others-ebook.html",
-                    "snippet": "The Weakness of Others is a known source from the playbook.",
+                    "snippet": "Official product page.",
                 },
             ],
         }
@@ -173,6 +173,8 @@ def main() -> int:
         live_queries = [query for round_plan in live_playbook.get("discovery_rounds", []) for query in round_plan.get("queries", [])]
         if any("очень длинное задание" in query for query in live_queries):
             raise AssertionError(f"live discovery queries should use normalized topic, not full prompt: {live_queries}")
+        if not any('"Kharn: Eater of Worlds" Black Library' == query for query in live_queries):
+            raise AssertionError(f"playbook discovery should probe named primary sources: {live_queries}")
         urls = [source.get("url") for source in live_playbook.get("sources", []) if source.get("url")]
         if len(urls) != len(set(urls)):
             raise AssertionError(f"source dedupe should collapse duplicate live/playbook URLs: {live_playbook.get('sources')}")
