@@ -992,6 +992,74 @@ def payload_with_client_action(payload: dict[str, Any], fallback_task_id: str = 
     return enriched
 
 
+def payload_with_task_view(payload: dict[str, Any], fallback_task_id: str = "") -> dict[str, Any]:
+    actions = payload.get("actions") if isinstance(payload.get("actions"), dict) else {}
+    next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+    task_id = str(payload.get("task_id") or fallback_task_id or "")
+    ok = bool(payload.get("ok"))
+    error_code = str(payload.get("error_code") or "")
+    route = payload.get("route") if isinstance(payload.get("route"), dict) else {}
+    governor = str(payload.get("governor") or route.get("governor") or "")
+    if ok and next_action.get("kind") == "create_task":
+        phase = "task_ready"
+        headline = "Task is ready"
+        detail = str(next_action.get("reason") or "Task can be created")
+        severity = "info"
+    elif ok:
+        phase = "task_created"
+        headline = "Task created"
+        detail = str(next_action.get("reason") or "Run package is ready for preflight")
+        severity = "info"
+    elif error_code == "task_exists":
+        phase = "existing_task"
+        headline = "Task already exists"
+        detail = "Open the existing run instead of creating a duplicate"
+        severity = "warning"
+    elif error_code in {"governor_inactive", "no_supported_governor"}:
+        phase = "unsupported_task"
+        headline = "No active governor for this task"
+        detail = str(payload.get("error") or next_action.get("reason") or error_code)
+        severity = "warning"
+    elif error_code in {"contract_workers_missing", "contract_workers_unavailable", "governor_workers_missing", "governor_workers_unavailable"}:
+        phase = "brigade_blocked"
+        headline = "Required workers are unavailable"
+        detail = str(next_action.get("reason") or error_code)
+        severity = "warning"
+    elif error_code:
+        phase = "task_blocked"
+        headline = "Task cannot be prepared"
+        detail = str(payload.get("error") or next_action.get("reason") or error_code)
+        severity = "error"
+    else:
+        phase = "task_blocked"
+        headline = "Task cannot be prepared"
+        detail = str(payload.get("error") or "Task request failed")
+        severity = "error"
+    decision = {
+        "can_create_task": bool(actions.get("can_create_task")),
+        "can_check_brigade_readiness": bool(actions.get("can_check_brigade_readiness")),
+        "recommended_kind": str(next_action.get("kind") or ""),
+        "recommended_endpoint": str(next_action.get("endpoint") or ""),
+    }
+    enriched = payload_with_client_action(payload, fallback_task_id=task_id)
+    enriched.update(
+        {
+            "phase": phase,
+            "decision": decision,
+            "display": {
+                "headline": headline,
+                "detail": detail,
+                "severity": severity,
+                "task_id": task_id,
+                "governor": governor,
+            },
+            "next_action": next_action,
+            "client_action": executable_client_action(task_id, next_action),
+        }
+    )
+    return enriched
+
+
 def orchestration_view_fields(
     summary: dict[str, Any],
     active: bool = False,
@@ -3818,7 +3886,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
                     prepared = prepare_task(message, task_id, run_root, governor_transport=governor_transport, governor_host=governor_host)
-                    prepared = payload_with_client_action(prepared, fallback_task_id=task_id or "")
+                    prepared = payload_with_task_view(prepared, fallback_task_id=task_id or "")
                     response(self, 409 if prepared.get("error_code") == "task_exists" else (200 if prepared.get("ok") else 400), prepared)
                     return
                 if self.path == "/task_preflight":
@@ -3838,7 +3906,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         governor_host=governor_host,
                         include_brigade_health=include_brigade_health,
                     )
-                    preflight = payload_with_client_action(preflight, fallback_task_id=task_id or "")
+                    preflight = payload_with_task_view(preflight, fallback_task_id=task_id or "")
                     response(self, 409 if preflight.get("error_code") == "task_exists" else (200 if preflight.get("ok") else 400), preflight)
                     return
                 if self.path == "/recover_stale":

@@ -153,12 +153,14 @@ Task preflight responses include `actions.can_create_task` and
 `actions.next_action` so chat clients can either create the task, inspect an
 existing run after a `task_id` conflict, or inspect brigade/governor
 diagnostics after validation failures. HTTP responses also expose top-level
-`client_action` for the same recommendation.
+`phase`, `decision`, `display`, `next_action`, and executable `client_action`
+fields for the same recommendation.
 `POST /task` responses use the same action hint vocabulary for both successful
 creation and rejected creation attempts. Successful creation recommends run
 preflight before execution, while rejected creation attempts point clients to
 existing-run, brigade, governor, capability, or preflight diagnostics. HTTP
-responses also expose top-level `client_action` for the recommended next step.
+responses also expose top-level `phase`, `decision`, `display`, `next_action`,
+and executable `client_action` for the recommended next step.
 When task preflight is run with explicit or default HTTP governor transport,
 its `create_task` and retry action bodies preserve `governor_transport` and
 `governor_host` so clients can follow `actions.next_action` without switching

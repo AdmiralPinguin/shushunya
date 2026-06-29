@@ -646,6 +646,9 @@ def main() -> int:
                     or rejected.get("error_code") != "governor_inactive"
                     or rejected.get("governor") != "CogitatorCodewrightGovernor"
                     or rejected.get("route", {}).get("governor") != "CogitatorCodewrightGovernor"
+                    or rejected.get("phase") != "unsupported_task"
+                    or rejected.get("display", {}).get("headline") != "No active governor for this task"
+                    or rejected.get("client_action", {}).get("path") != "/capabilities"
                 ):
                     raise AssertionError(f"bad unsupported route response: {rejected}")
             else:
@@ -662,6 +665,8 @@ def main() -> int:
                     or rejected_preflight.get("actions", {}).get("can_create_task")
                     or rejected_preflight.get("actions", {}).get("next_action", {}).get("kind") != "inspect_capabilities"
                     or rejected_preflight.get("client_action", {}).get("path") != "/capabilities"
+                    or rejected_preflight.get("phase") != "unsupported_task"
+                    or rejected_preflight.get("display", {}).get("headline") != "No active governor for this task"
                 ):
                     raise AssertionError(f"bad unsupported preflight route response: {rejected_preflight}")
             else:
@@ -689,7 +694,11 @@ def main() -> int:
                 if exc.code != 400:
                     raise
                 invalid_task = json.loads(exc.read().decode("utf-8"))
-                if invalid_task.get("error_code") != "invalid_task_id":
+                if (
+                    invalid_task.get("error_code") != "invalid_task_id"
+                    or invalid_task.get("phase") != "task_blocked"
+                    or invalid_task.get("display", {}).get("headline") != "Task cannot be prepared"
+                ):
                     raise AssertionError(f"bad invalid task_id response: {invalid_task}")
             else:
                 raise AssertionError("unsafe task_id should be rejected")
@@ -715,6 +724,9 @@ def main() -> int:
                 or preflight.get("actions", {}).get("next_action", {}).get("kind") != "create_task"
                 or preflight.get("actions", {}).get("next_action", {}).get("method") != "POST"
                 or preflight.get("client_action", {}).get("path") != "/task"
+                or preflight.get("phase") != "task_ready"
+                or preflight.get("decision", {}).get("can_create_task") is not True
+                or preflight.get("display", {}).get("headline") != "Task is ready"
             ):
                 raise AssertionError(f"task preflight should not create a run: {preflight}")
             if "brigade_readiness" in preflight:
@@ -842,6 +854,8 @@ def main() -> int:
                 or task.get("actions", {}).get("next_action", {}).get("kind") != "preflight_run"
                 or task.get("actions", {}).get("next_action", {}).get("endpoint") != "POST /runs/{task_id}/preflight_http"
                 or task.get("client_action", {}).get("path") != "/runs/warmaster-test/preflight_http"
+                or task.get("phase") != "task_created"
+                or task.get("display", {}).get("headline") != "Task created"
             ):
                 raise AssertionError(f"bad task response: {task}")
             global_events = request_json(base + "/events?limit=20")

@@ -68,6 +68,9 @@
   runs recommend force rerun instead of unsafe plain start.
 - Warmaster Gateway exposes `POST /task_preflight` for routing, governor,
   contract, and worker checks without creating run history.
+- Task creation and task-preflight responses expose `phase`, `decision`,
+  `display`, top-level `next_action`, and executable `client_action` fields for
+  chat/mobile routing cards.
 - Warmaster Gateway exposes prepare-only `POST /orchestrate` for chat clients:
   task preflight, task creation, run preflight, trace, and next start/inspect
   action without launching long worker execution.
