@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import html
+import io
 import ipaddress
 import json
 import os
 import socket
+import zipfile
 from html.parser import HTMLParser
 from typing import Any, Callable, Protocol
 from urllib.parse import parse_qs, quote, urlencode, urlparse
@@ -250,6 +252,28 @@ def html_render_hint(raw_html: str, extracted_text: str) -> str:
     return ""
 
 
+def extract_epub_text(data: bytes, max_members: int = 80) -> tuple[str, str]:
+    texts: list[str] = []
+    title = ""
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        names = [
+            name
+            for name in archive.namelist()
+            if name.lower().endswith((".xhtml", ".html", ".htm")) and not name.lower().endswith("toc.ncx")
+        ][:max_members]
+        for name in names:
+            raw = archive.read(name)
+            text, _ = decode_web_text(raw, None)
+            parser = WebTextExtractor()
+            parser.feed(text)
+            member_title, member_text = parser.result()
+            if member_title and not title:
+                title = member_title
+            if member_text:
+                texts.append(member_text)
+    return title, " ".join(" ".join(texts).split())
+
+
 class DuckDuckGoParser(HTMLParser):
     def __init__(self, limit: int) -> None:
         super().__init__()
@@ -462,6 +486,33 @@ def web_fetch(config: WebConfig, url: str, max_bytes: int | None = None) -> dict
         validate_public_url(final_url)
         data, truncated = read_limited_response(response, max_bytes)
         content_type = response.headers.get("Content-Type", "")
+        final_url_lower = final_url.lower()
+        if "epub" in content_type.lower() or final_url_lower.endswith(".epub"):
+            try:
+                title, epub_text = extract_epub_text(data)
+            except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
+                return {
+                    "ok": False,
+                    "url": final_url,
+                    "status": getattr(response, "status", 200),
+                    "content_type": content_type,
+                    "truncated": truncated,
+                    "bytes_read": len(data),
+                    "error": f"EPUB extraction failed: {exc}",
+                }
+            return {
+                "ok": True,
+                "url": final_url,
+                "status": getattr(response, "status", 200),
+                "content_type": content_type,
+                "encoding": "epub",
+                "title": title,
+                "truncated": truncated,
+                "bytes_read": len(data),
+                "is_binary": False,
+                "text": truncate(epub_text.strip(), config.max_tool_output_chars),
+                "text_note": "EPUB container extracted into text from HTML/XHTML members",
+            }
         if not is_textual_content(content_type, data):
             return {
                 "ok": True,

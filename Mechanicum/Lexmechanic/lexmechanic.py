@@ -133,6 +133,8 @@ def source_type(source: dict[str, Any]) -> str:
     source_class = str(source.get("source_class") or "").lower()
     if kind in {"novel", "codex", "campaign_book", "short_story", "book"}:
         return "published_primary"
+    if "primary" in source_class and kind in {"extract", "excerpt"}:
+        return "official_primary_extract"
     if "blacklibrary.com" in host:
         return "official_catalog"
     if host.endswith("warhammer-community.com") or host.endswith("warhammer.com"):
@@ -165,6 +167,7 @@ def ranked_source(source: dict[str, Any]) -> dict[str, Any]:
     detail = str(enriched.get("direct_event_detail_level") or "").lower()
     class_score = {
         "published_primary": 100,
+        "official_primary_extract": 88,
         "official_catalog": 78,
         "official_article": 76,
         "official_secondary": 72,
@@ -250,6 +253,18 @@ def classify_discovered_result(result: dict[str, Any]) -> dict[str, Any] | None:
             "discovery_method": "live_search",
         }
     if host.endswith("blacklibrary.com") or host.endswith("warhammer.com"):
+        if "/downloads/product/" in url.lower() and "extract" in url.lower():
+            return {
+                "title": title,
+                "type": "extract",
+                "language": "unknown",
+                "url": url,
+                "reliability": "high",
+                "direct_event_detail_level": "medium",
+                "source_class": "official_primary_extract",
+                "expected_use": "official free extract from a primary publication; use as direct wording only within excerpt scope",
+                "discovery_method": "live_search",
+            }
         return {
             "title": title,
             "type": "official_catalog",

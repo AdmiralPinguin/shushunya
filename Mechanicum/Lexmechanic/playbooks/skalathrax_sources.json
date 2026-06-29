@@ -34,6 +34,16 @@
       "expected_use": "direct narrative around Kharn, Dreagher, parley, Golden Absolute, and the battle"
     },
     {
+      "title": "Black Library Extract: Kharn: Eater of Worlds",
+      "type": "extract",
+      "language": "en",
+      "url": "https://www.blacklibrary.com/Downloads/Product/ePub%20and%20MOBI%20Extracts/K/Extract-Kharn-Eater-of-Worlds.epub",
+      "reliability": "high",
+      "direct_event_detail_level": "medium",
+      "source_class": "official_primary_extract",
+      "expected_use": "official free extract from Kharn: Eater of Worlds; direct primary wording only within extract scope"
+    },
+    {
       "title": "Lucius: The Faultless Blade",
       "type": "novel",
       "language": "en",
@@ -42,6 +52,16 @@
       "direct_event_detail_level": "medium",
       "source_class": "official_primary_narrative",
       "expected_use": "Emperor's Children and Lucius-side references"
+    },
+    {
+      "title": "Black Library Extract: Lucius: The Faultless Blade",
+      "type": "extract",
+      "language": "en",
+      "url": "https://www.blacklibrary.com/Downloads/Product/ePub%20and%20MOBI%20Extracts/L/Extract-Lucius-The-Faultless-Blade.epub",
+      "reliability": "high",
+      "direct_event_detail_level": "medium",
+      "source_class": "official_primary_extract",
+      "expected_use": "official free extract from Lucius: The Faultless Blade; direct primary wording only within extract scope"
     },
     {
       "title": "The Weakness of Others",

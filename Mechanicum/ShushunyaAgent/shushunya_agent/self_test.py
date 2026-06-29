@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 from unittest import mock
 from urllib.error import HTTPError
@@ -531,6 +532,13 @@ def main() -> int:
     if decoded_text != "привет" or decoded_encoding != "utf-8":
         raise AssertionError(f"web_fetch charset fallback failed: text={decoded_text}, encoding={decoded_encoding}")
     print("[ok] web_fetch charset fallback")
+    epub_buffer = io.BytesIO()
+    with zipfile.ZipFile(epub_buffer, "w") as archive:
+        archive.writestr("chapter.xhtml", "<html><head><title>Extract</title></head><body><p>Primary extract text.</p></body></html>")
+    epub_title, epub_text = web_tools.extract_epub_text(epub_buffer.getvalue())
+    if epub_title != "Extract" or "Primary extract text" not in epub_text:
+        raise AssertionError(f"EPUB extraction failed: title={epub_title}, text={epub_text}")
+    print("[ok] web_fetch EPUB extraction")
     render_reason = web_tools.html_render_hint(
         '<html><body><div id="root"></div><script>a()</script><script>b()</script><script>c()</script></body></html>',
         "",
