@@ -51,3 +51,14 @@ The runtime exposes:
 - `GET /health`
 - `GET /capabilities`
 - `POST /run` with either a dispatch packet or raw worker request JSON
+
+## Local Corpus
+
+`CorpusIngestor` scans `Corpus/` by default, or `SHUSHUNYA_CORPUS_DIR` when the
+environment variable is set. It indexes user-provided primary texts before
+source discovery and writes `/work/<slug>/corpus_index.json`.
+
+Downstream workers treat matching local files like source candidates:
+`Lexmechanic` adds them to `source_map.json`, `AuspexBrowser` extracts their
+text into `source_snapshots.json`, and `NoosphericExtractor` can use their text
+as direct-event evidence.

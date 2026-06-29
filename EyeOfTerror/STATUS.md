@@ -448,6 +448,12 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   available, while still writing source-map diagnostics for recovery.
 - `Lexmechanic` also blocks early when candidates exist but source coverage is
   not extraction-ready, preventing weak source sets from flowing downstream.
+- `CorpusIngestor` scans `Corpus/` or `SHUSHUNYA_CORPUS_DIR` for local
+  `.epub`, `.fb2`, text, markdown, and HTML files before source discovery.
+- Research artifacts expose `corpus_requirements` when primary texts are known
+  but neither publicly fetchable nor present in the local corpus.
+- Local corpus files flow through source maps, snapshots, and direct-event
+  evidence instead of bypassing the normal verifier/finalizer path.
 - `NoosphericExtractor` uses data playbooks when available and falls back to
   low-confidence generic evidence leads from fetched source snapshots.
 - `NoosphericExtractor` preserves `render_required` source snapshots as explicit
@@ -487,7 +493,9 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - `OcularisRenderium` reserves port 7012 as the planned JavaScript render and
   screenshot worker; it is not a runnable service until the browser runtime is
   locked down.
-- The pipeline records inaccessible primary books as gaps instead of solving book acquisition.
+- The pipeline records inaccessible primary books as `corpus_requirements`;
+  operators must provide legitimate local text files when full primary evidence
+  is required.
 - Warmaster Gateway background execution is in-process only; restart recovery
   marks stale jobs interrupted, and operators can bulk-start recoverable runs
   through explicit recovery endpoints.

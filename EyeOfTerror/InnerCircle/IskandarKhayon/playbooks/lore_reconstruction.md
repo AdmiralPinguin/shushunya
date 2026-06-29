@@ -41,6 +41,8 @@ The governor must define:
 - only one wiki source was used for a broad research task;
 - direct events were replaced by consequences or general lore;
 - source gaps were hidden;
+- required local primary texts were missing from `Corpus/` and
+  `corpus_requirements` was ignored;
 - critic report is missing;
 - final text contains unsupported facts;
 - final text is only a short summary when the task asked for full coverage.
