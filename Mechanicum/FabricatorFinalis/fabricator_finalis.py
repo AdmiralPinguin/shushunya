@@ -85,7 +85,26 @@ def missing_artifact_revision_steps(missing: list[str]) -> list[dict[str, str]]:
     return steps
 
 
-def merge_revision_plan(critic: dict[str, Any], missing: list[str]) -> dict[str, Any]:
+def package_file_error_revision_steps(errors: list[dict[str, str]]) -> list[dict[str, str]]:
+    steps: list[dict[str, str]] = []
+    for error in errors:
+        artifact = str(error.get("path") or "")
+        filename = artifact.rsplit("/", 1)[-1]
+        target = ARTIFACT_REWORK_TARGETS.get(filename)
+        if not target:
+            continue
+        step_id, worker = target
+        add_unique_revision_step(
+            steps,
+            step_id,
+            worker,
+            f"Invalid package file: {artifact}",
+            "invalid_package_file",
+        )
+    return steps
+
+
+def merge_revision_plan(critic: dict[str, Any], missing: list[str], package_file_errors: list[dict[str, str]] | None = None) -> dict[str, Any]:
     steps: list[dict[str, Any]] = []
     critic_plan = critic.get("revision_plan") if isinstance(critic.get("revision_plan"), dict) else {}
     for item in critic_plan.get("steps", []) if isinstance(critic_plan.get("steps"), list) else []:
@@ -105,6 +124,14 @@ def merge_revision_plan(critic: dict[str, Any], missing: list[str]) -> dict[str,
             str(item.get("worker") or ""),
             str(item.get("reason") or ""),
             str(item.get("source") or "missing_package_file"),
+        )
+    for item in package_file_error_revision_steps(package_file_errors or []):
+        add_unique_revision_step(
+            steps,
+            str(item.get("step_id") or ""),
+            str(item.get("worker") or ""),
+            str(item.get("reason") or ""),
+            str(item.get("source") or "invalid_package_file"),
         )
     return {"required": bool(steps), "steps": steps}
 
@@ -266,6 +293,7 @@ def source_map_diagnostics(workspace_root: Path, manifest_path: str) -> dict[str
 def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, Any]) -> dict[str, Any]:
     files: list[dict[str, Any]] = []
     missing: list[str] = []
+    package_file_errors: list[dict[str, str]] = []
     for filename in PACKAGE_FILES:
         artifact_path = sibling_artifact(manifest_path, filename)
         host_path = sandbox_path(workspace_root, artifact_path)
@@ -279,6 +307,11 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
                 "kind": "markdown" if filename.endswith(".md") else "json",
             }
         )
+        if filename.endswith(".json"):
+            try:
+                load_json(host_path)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                package_file_errors.append({"path": artifact_path, "error": str(exc)})
     critic_path = sandbox_path(workspace_root, sibling_artifact(manifest_path, "critic_report.json"))
     critic = load_json(critic_path) if critic_path.exists() else {}
     approved = bool(critic.get("approved"))
@@ -292,6 +325,9 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     readiness_blockers: list[dict[str, str]] = []
     if source_coverage_ready is False:
         readiness_blockers.append({"severity": "blocker", "message": "Final package source coverage is not extraction-ready."})
+    if package_file_errors:
+        joined = ", ".join(item["path"] for item in package_file_errors[:8])
+        readiness_blockers.append({"severity": "blocker", "message": f"Final package contains invalid JSON artifacts: {joined}."})
     if comprehensive_depth_ready is False:
         readiness_blockers.append({"severity": "blocker", "message": "Final package does not satisfy comprehensive depth requirements."})
     if event_review.get("required_events_covered") is False:
@@ -308,6 +344,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     readiness_checks = {
         "critic_approved": approved,
         "package_complete": not missing,
+        "package_files_valid": not package_file_errors,
         "quality_expectations_ok": not quality_blockers,
         "source_coverage_ready": source_coverage_ready,
         "comprehensive_depth_ready": comprehensive_depth_ready,
@@ -316,7 +353,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "corpus_requirements_satisfied": not bool(corpus_requirements.get("required")),
     }
     status = "ready" if approved and not missing and not quality_blockers and not readiness_blockers else "blocked"
-    revision_plan = merge_revision_plan(critic, missing)
+    revision_plan = merge_revision_plan(critic, missing, package_file_errors)
     revision_plan = add_required_event_revision_steps(revision_plan, event_review)
     revision_plan = add_corpus_requirement_revision_steps(revision_plan, corpus_requirements)
     if quality_blockers:
@@ -339,6 +376,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "deliverable": sibling_artifact(manifest_path, "reconstruction_ru.md"),
         "files": files,
         "missing": missing,
+        "package_file_errors": package_file_errors,
         "critic_status": critic.get("status", "missing"),
         "critic_metrics": critic_metrics,
         "event_review": event_review,

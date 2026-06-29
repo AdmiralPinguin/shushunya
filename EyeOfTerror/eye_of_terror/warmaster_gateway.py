@@ -2778,6 +2778,7 @@ def compact_manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:
         "event_review": manifest.get("event_review", {}) if isinstance(manifest.get("event_review"), dict) else {},
         "corpus_diagnostics": manifest.get("corpus_diagnostics", {}) if isinstance(manifest.get("corpus_diagnostics"), dict) else {},
         "corpus_requirements": manifest.get("corpus_requirements", {}) if isinstance(manifest.get("corpus_requirements"), dict) else {},
+        "package_file_errors": manifest.get("package_file_errors", []) if isinstance(manifest.get("package_file_errors"), list) else [],
         "readiness_checks": manifest.get("readiness_checks", {}) if isinstance(manifest.get("readiness_checks"), dict) else {},
         "revision_focus": manifest.get("revision_focus", {}),
         "warning_count": len(warnings),

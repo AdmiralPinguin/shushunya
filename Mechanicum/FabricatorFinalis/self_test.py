@@ -98,6 +98,39 @@ def main() -> int:
             raise AssertionError(f"ready manifest should summarize required event coverage: {manifest}")
         if manifest.get("corpus_diagnostics", {}).get("non_matching_count") != 36:
             raise AssertionError(f"ready manifest should preserve corpus diagnostics: {manifest}")
+        write(base / "source_map.json", "{")
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on invalid package JSON: {result}")
+        manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
+        if (
+            manifest.get("status") != "blocked"
+            or manifest.get("readiness_checks", {}).get("package_files_valid") is not False
+            or manifest.get("package_file_errors", [{}])[0].get("path") != "/work/skalathrax/source_map.json"
+        ):
+            raise AssertionError(f"invalid JSON package artifact should block final readiness: {manifest}")
+        invalid_revision_workers = {step.get("worker") for step in manifest.get("revision_plan", {}).get("steps", [])}
+        if "Lexmechanic" not in invalid_revision_workers:
+            raise AssertionError(f"invalid source_map should produce source discovery revision: {manifest}")
+        write(
+            base / "source_map.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "passed_with_warnings",
+                    "corpus_diagnostics": {
+                        "provided": True,
+                        "summary": {"sources_matched": 1, "sources_non_matching": 36},
+                        "non_matching_count": 36,
+                        "non_matching_sample": [{"corpus_relative_path": "unrelated-00.txt"}],
+                    },
+                }
+            ),
+        )
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed after restoring package JSON: {result}")
+        manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
         if manifest.get("readiness_checks", {}).get("source_coverage_ready") is not True:
             raise AssertionError(f"ready manifest should carry source coverage readiness: {manifest}")
         if manifest.get("readiness_checks", {}).get("comprehensive_depth_ready") is not True:

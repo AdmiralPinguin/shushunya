@@ -1425,6 +1425,7 @@ def main() -> int:
                 or "event_review" not in final_manifest_item.get("manifest_summary", {})
                 or "corpus_diagnostics" not in final_manifest_item.get("manifest_summary", {})
                 or "corpus_requirements" not in final_manifest_item.get("manifest_summary", {})
+                or "package_file_errors" not in final_manifest_item.get("manifest_summary", {})
                 or "readiness_checks" not in final_manifest_item.get("manifest_summary", {})
                 or final_manifest_item.get("manifest_summary", {}).get("file_count", 0) < 1
             ):
@@ -1459,6 +1460,7 @@ def main() -> int:
                 or "event_review" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
                 or "corpus_diagnostics" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
                 or "corpus_requirements" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
+                or "package_file_errors" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
                 or "readiness_checks" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
                 or "blocker_count" not in completed_snapshot.get("summary", {}).get("final_manifest_summary", {})
                 or completed_snapshot.get("summary", {}).get("progress", {}).get("pending_step_ids")
@@ -1562,6 +1564,7 @@ def main() -> int:
                 or "event_review" not in completed_result_event.get("run_final_manifest_summary", {})
                 or "corpus_diagnostics" not in completed_result_event.get("run_final_manifest_summary", {})
                 or "corpus_requirements" not in completed_result_event.get("run_final_manifest_summary", {})
+                or "package_file_errors" not in completed_result_event.get("run_final_manifest_summary", {})
             ):
                 raise AssertionError(f"global run events did not expose completed run action state: {completed_global_events}")
             text_preview = request_json(base + f"/runs/warmaster-test/artifact_text?path={artifact_path}&max_bytes=8")
