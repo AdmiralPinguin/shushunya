@@ -309,6 +309,8 @@ def main() -> int:
             raise AssertionError(f"test-inferred missing function task should be ready: {final}")
         if final.get("patch_source") != "test_inferred_missing_function" or final.get("operation_count") != 1:
             raise AssertionError(f"test-inferred missing function should expose patch audit fields: {final}")
+        if final.get("diagnostics", {}).get("function_name") != "value" or final.get("diagnostics", {}).get("test_path") != "test_sample.py":
+            raise AssertionError(f"test-inferred missing function should expose diagnostics: {final}")
         if "def value():\n    return 42\n" not in sample.read_text(encoding="utf-8"):
             raise AssertionError("test-inferred missing function task did not append the target function")
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -331,6 +333,8 @@ def main() -> int:
             raise AssertionError(f"test-inferred return mismatch task should be ready: {final}")
         if final.get("patch_source") != "test_inferred_return_mismatch" or final.get("operation_count") != 1:
             raise AssertionError(f"test-inferred return mismatch should expose patch audit fields: {final}")
+        if final.get("diagnostics", {}).get("actual") != "1" or final.get("diagnostics", {}).get("expected") != "42":
+            raise AssertionError(f"test-inferred return mismatch should expose diagnostics: {final}")
         if sample.read_text(encoding="utf-8") != "def value():\n    return 42\n":
             raise AssertionError("test-inferred return mismatch task did not update the return value")
     with tempfile.TemporaryDirectory() as temp_dir:

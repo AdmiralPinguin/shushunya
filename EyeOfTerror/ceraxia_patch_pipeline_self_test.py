@@ -171,6 +171,8 @@ CERAXIA_TARGET_REPO: {target_repo}
             raise AssertionError(f"Ceraxia test-inferred manifest should be ready: {manifest}")
         if manifest.get("patch_source") != "test_inferred_missing_function" or manifest.get("operation_count") != 1:
             raise AssertionError(f"Ceraxia test-inferred manifest should expose patch audit fields: {manifest}")
+        if manifest.get("diagnostics", {}).get("function_name") != "value" or manifest.get("diagnostics", {}).get("test_path") != "test_sample.py":
+            raise AssertionError(f"Ceraxia test-inferred manifest should expose diagnostics: {manifest}")
         if "def value():\n    return 42\n" not in sample.read_text(encoding="utf-8"):
             raise AssertionError("Ceraxia test-inferred pipeline did not append the target function")
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -206,6 +208,8 @@ CERAXIA_TARGET_REPO: {target_repo}
             raise AssertionError(f"Ceraxia test-inferred return manifest should be ready: {manifest}")
         if manifest.get("patch_source") != "test_inferred_return_mismatch" or manifest.get("operation_count") != 1:
             raise AssertionError(f"Ceraxia test-inferred return manifest should expose patch audit fields: {manifest}")
+        if manifest.get("diagnostics", {}).get("actual") != "1" or manifest.get("diagnostics", {}).get("expected") != "42":
+            raise AssertionError(f"Ceraxia test-inferred return manifest should expose diagnostics: {manifest}")
         if sample.read_text(encoding="utf-8") != "def value():\n    return 42\n":
             raise AssertionError("Ceraxia test-inferred return pipeline did not update the return value")
     with tempfile.TemporaryDirectory() as temp_dir:

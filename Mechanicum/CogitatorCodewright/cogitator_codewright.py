@@ -368,6 +368,14 @@ def infer_return_mismatch_from_tests(request: dict[str, Any]) -> dict[str, Any]:
         commands = [f"python -m unittest {test_module}"]
     return {
         "source": "test_inferred_return_mismatch",
+        "diagnostics": {
+            "kind": "test_inferred_return_mismatch",
+            "test_path": candidate["test_path"],
+            "module_path": candidate["module_path"],
+            "function_name": candidate["function_name"],
+            "actual": candidate["actual"],
+            "expected": candidate["literal"],
+        },
         "operations": [
             {
                 "type": "replace",
@@ -403,6 +411,13 @@ def infer_missing_function_from_tests(request: dict[str, Any]) -> dict[str, Any]
         commands = [f"python -m unittest {test_module}"]
     return {
         "source": "test_inferred_missing_function",
+        "diagnostics": {
+            "kind": "test_inferred_missing_function",
+            "test_path": candidate["test_path"],
+            "module_path": candidate["module_path"],
+            "function_name": function_name,
+            "expected": candidate["literal"],
+        },
         "operations": [
             {
                 "type": "append",
@@ -997,6 +1012,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "plan_excerpt": plan[:3000],
         "patch_spec_present": bool(patch_spec),
         "patch_source": str(patch_spec.get("source") or "explicit_json_patch") if patch_spec else "",
+        "diagnostics": patch_spec.get("diagnostics", {}) if isinstance(patch_spec.get("diagnostics"), dict) else {},
         "operation_count": len(patch_spec.get("operations", [])) if isinstance(patch_spec.get("operations"), list) else 0,
         "changed_files": changed_files,
         "rollback": {
@@ -1208,6 +1224,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         ],
         "changed_files": patch.get("changed_files", []),
         "patch_source": patch.get("patch_source", ""),
+        "diagnostics": patch.get("diagnostics", {}),
         "operation_count": patch.get("operation_count", 0),
         "verification_status": verification.get("status", "unknown"),
         "verification_executed": verification.get("executed", []),

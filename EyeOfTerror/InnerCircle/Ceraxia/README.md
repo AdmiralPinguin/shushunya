@@ -64,7 +64,9 @@ and narrow repair loops for Warmaster and client-side planning.
 
 Patch and final manifests expose `patch_source` and `operation_count`, so
 callers can distinguish explicit JSON patches from marker-synthesized or
-natural-language-inferred patches.
+natural-language-inferred patches. Test-inferred patches also expose
+`diagnostics` with the test path, target module, function name, and expected
+or actual values used to derive the patch.
 
 Verification commands run without a shell and must match Ceraxia's allowlist:
 `pytest`, `python -m pytest`, `python -m unittest`, or

@@ -598,6 +598,8 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
 - Ceraxia patch and final manifests expose `patch_source` and
   `operation_count`, so explicit, marker-synthesized, and inferred code changes
   can be audited separately.
+- Test-inferred Ceraxia patches expose `diagnostics` with the test path, target
+  module, function name, and expected/actual literals used to derive the edit.
 - Ceraxia exposes a machine-readable `patch_contract` through service
   capabilities, task plans, and oversight packages, including supported markers,
   operation types, verification allowlist, safety gates, and repair loops.
