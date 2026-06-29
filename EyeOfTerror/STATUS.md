@@ -553,6 +553,10 @@ PYTHONPATH=Mechanicum/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 Mechanicu
   source-mutation permission, required evidence, and forbidden actions. Dispatch
   requests pass this policy to workers, and code worker artifacts preserve it
   through patch, verification, review, and final manifests.
+- `CogitatorCodewright` now enforces Ceraxia's source-mutation role boundary:
+  patch application is blocked when a step policy sets
+  `may_mutate_source=false`, and verifier repair loops record blockers instead
+  of mutating source under a read-only policy.
 - `LogisRepository` now records Python symbol summaries and suggested unittest
   verification commands, and `MagosStrategos` carries those sections into the
   change plan for downstream patch planning.

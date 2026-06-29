@@ -96,6 +96,10 @@ def role_policy_from_request(request: dict[str, Any]) -> dict[str, Any]:
     return role_policy
 
 
+def role_policy_allows_source_mutation(role_policy: dict[str, Any]) -> bool:
+    return not role_policy or role_policy.get("may_mutate_source") is not False
+
+
 def output_path_from_request(request: dict[str, Any]) -> str:
     step = request.get("step") if isinstance(request.get("step"), dict) else {}
     expected = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
@@ -1005,8 +1009,11 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
     try:
         patch_spec = patch_spec_from_request(request)
         if patch_spec:
-            repo_root = target_repo_root(request)
-            changed_files.extend(apply_patch_operations_atomically(repo_root, patch_spec["operations"]))
+            if not role_policy_allows_source_mutation(role_policy):
+                blockers.append("role_policy forbids source mutation for this step")
+            else:
+                repo_root = target_repo_root(request)
+                changed_files.extend(apply_patch_operations_atomically(repo_root, patch_spec["operations"]))
         else:
             blockers.append(
                 "No CERAXIA_PATCH operations were provided; direct source mutation requires an explicit patch specification."
@@ -1067,6 +1074,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
     repo_root = target_repo_root(request)
     changed_files = patch.get("changed_files") if isinstance(patch.get("changed_files"), list) else []
     repairs: list[dict[str, Any]] = []
+    repairs_allowed = role_policy_allows_source_mutation(role_policy)
     if patch.get("status") == "applied":
         py_files = [
             str(item.get("path"))
@@ -1087,6 +1095,9 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
             if completed.returncode != 0:
                 repaired_any = False
                 for py_file in py_files:
+                    if not repairs_allowed:
+                        blockers.append("role_policy forbids source mutation repair")
+                        break
                     repair = repair_expected_colon(repo_root, py_file, completed.stderr)
                     if repair.get("applied"):
                         repairs.append(repair)
@@ -1129,10 +1140,14 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
             executed.append(result)
             if result.get("returncode") != 0:
                 output = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
-                repair = repair_import_error_missing_function(repo_root, py_files, output)
-                if not repair.get("applied"):
+                if not repairs_allowed:
+                    repair = {"applied": False, "blocked": "role_policy forbids source mutation repair"}
+                    blockers.append("role_policy forbids source mutation repair")
+                else:
+                    repair = repair_import_error_missing_function(repo_root, py_files, output)
+                if not repair.get("applied") and repairs_allowed:
                     repair = repair_name_error_return_literal(repo_root, py_files, output)
-                if not repair.get("applied"):
+                if not repair.get("applied") and repairs_allowed:
                     repair = repair_assertion_return_mismatch(repo_root, py_files, output)
                 if repair.get("applied"):
                     repairs.append(repair)

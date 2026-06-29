@@ -248,6 +248,60 @@ def main() -> int:
         target_repo.mkdir()
         sample = target_repo / "sample.py"
         sample.write_text("def value():\n    return 1\n", encoding="utf-8")
+        payload = request("implementation", "/work/code/patch_manifest.json", goal=explicit_patch_goal(), target_repo_root=target_repo)
+        payload["quality_expectations"]["step_quality"]["role_policy"] = {
+            "role": "read_only_test",
+            "authority": "read_only_repository_mapping",
+            "may_mutate_source": False,
+        }
+        result = run(payload, root / "work")
+        if not result.get("ok"):
+            raise AssertionError(f"read-only implementation policy should produce an auditable blocker: {result}")
+        manifest = json.loads((root / "work" / "code" / "patch_manifest.json").read_text(encoding="utf-8"))
+        if manifest.get("status") != "handoff_required" or "role_policy forbids source mutation for this step" not in manifest.get("blockers", []):
+            raise AssertionError(f"read-only implementation policy should block mutation: {manifest}")
+        if sample.read_text(encoding="utf-8") != "def value():\n    return 1\n":
+            raise AssertionError("read-only implementation policy allowed source mutation")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        broken = target_repo / "repair_me.py"
+        broken.write_text("def value()\n    return 42\n", encoding="utf-8")
+        work = root / "work"
+        (work / "code").mkdir(parents=True)
+        (work / "code" / "patch_manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "applied",
+                    "changed_files": [{"path": "repair_me.py", "changed": True}],
+                    "verification_commands": [],
+                    "warnings": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        payload = request("verification", "/work/code/verification_report.json", target_repo_root=target_repo)
+        payload["quality_expectations"]["step_quality"]["role_policy"] = {
+            "role": "read_only_test",
+            "authority": "read_only_verification_without_repair",
+            "may_mutate_source": False,
+        }
+        result = run(payload, work)
+        if not result.get("ok"):
+            raise AssertionError(f"read-only verification policy should write a blocked report: {result}")
+        report = json.loads((work / "code" / "verification_report.json").read_text(encoding="utf-8"))
+        if "role_policy forbids source mutation repair" not in report.get("blockers", []):
+            raise AssertionError(f"read-only verification policy should block repair: {report}")
+        if broken.read_text(encoding="utf-8") != "def value()\n    return 42\n":
+            raise AssertionError("read-only verification policy allowed repair mutation")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        sample = target_repo / "sample.py"
+        sample.write_text("def value():\n    return 1\n", encoding="utf-8")
         final = run_pipeline(root / "work", goal=forbidden_verify_goal(), target_repo_root=target_repo)
         if final.get("status") != "blocked" or final.get("approved"):
             raise AssertionError(f"forbidden verification command should block final readiness: {final}")
