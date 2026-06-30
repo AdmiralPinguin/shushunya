@@ -23,6 +23,52 @@ def load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def resolve_repo_path(path_text: str) -> Path:
+    path = Path(path_text)
+    if path.is_absolute():
+        return path
+    return ROOT.parent / path
+
+
+def honest_evidence_status(entry: dict[str, Any]) -> dict[str, Any]:
+    evidence_paths = entry.get("evidence_paths")
+    if not isinstance(evidence_paths, list):
+        return {"present": False, "passed": False, "reason": "missing evidence_paths"}
+    trial_result_path = None
+    for item in evidence_paths:
+        if not isinstance(item, str):
+            continue
+        path = resolve_repo_path(item)
+        if path.name == "trial_result.json" and path.exists():
+            trial_result_path = path
+            break
+    if trial_result_path is None:
+        return {"present": False, "passed": False, "reason": "missing readable trial_result.json"}
+    try:
+        trial_result = load_json(trial_result_path)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        return {"present": False, "passed": False, "reason": f"unreadable trial_result.json: {exc}"}
+    honest = trial_result.get("honest_evidence") if isinstance(trial_result.get("honest_evidence"), dict) else {}
+    checks = honest.get("checks") if isinstance(honest.get("checks"), dict) else {}
+    required = {
+        "source_correct",
+        "tests_not_adjusted",
+        "patch_minimal",
+        "verification_meaningful",
+        "review_artifacts_present",
+    }
+    passed = honest.get("status") == "passed" and required.issubset(checks) and all(
+        isinstance(item, dict) and item.get("passed") is True
+        for item in checks.values()
+    )
+    return {
+        "present": bool(honest),
+        "passed": passed,
+        "trial_result": str(trial_result_path),
+        "missing_checks": sorted(required - set(checks)),
+    }
+
+
 def validate_ledger(spec: dict[str, Any], ledger: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     dimensions = [str(item) for item in spec.get("dimensions", [])]
@@ -78,18 +124,37 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     expert_classes: set[str] = set()
     expert_entries: list[dict[str, Any]] = []
     unshaped_expert_entries: list[dict[str, Any]] = []
+    honest_evidence_by_run: dict[str, dict[str, Any]] = {}
+    accepted_legacy_without_honest_evidence: list[dict[str, str]] = []
+    honest_expert_entries: list[dict[str, Any]] = []
+    honest_unshaped_expert_entries: list[dict[str, Any]] = []
     dimension_min = float(target.get("dimension_average_min") or 0)
     dimension_sample_min = int(target.get("dimension_sample_min") or 0)
     for entry in accepted:
         trial = trial_by_id.get(str(entry.get("trial_id") or ""), {})
+        run_id = str(entry.get("run_id") or "")
+        honest_status = honest_evidence_status(entry)
+        honest_evidence_by_run[run_id] = honest_status
+        if not honest_status.get("passed"):
+            accepted_legacy_without_honest_evidence.append(
+                {
+                    "trial_id": str(entry.get("trial_id") or ""),
+                    "run_id": run_id,
+                    "reason": str(honest_status.get("reason") or "honest evidence missing or incomplete"),
+                }
+            )
         if trial.get("class"):
             classes.add(str(trial.get("class")))
             if trial.get("difficulty") == "expert":
                 expert_classes.add(str(trial.get("class")))
         if trial.get("difficulty") == "expert":
             expert_entries.append(entry)
+            if honest_status.get("passed"):
+                honest_expert_entries.append(entry)
             if str(entry.get("trial_id") or "").startswith("ceraxia-expert-unshaped-"):
                 unshaped_expert_entries.append(entry)
+                if honest_status.get("passed"):
+                    honest_unshaped_expert_entries.append(entry)
         applicable = trial.get("applicable_dimensions")
         applicable_dimensions = (
             {str(item) for item in applicable}
@@ -168,8 +233,10 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
                         }
                     )
     enough_expert_trials = len(expert_entries) >= int(expert_target.get("minimum_expert_trials") or 0)
+    enough_honest_expert_trials = len(honest_expert_entries) >= int(expert_target.get("minimum_expert_trials") or 0)
     enough_expert_classes = len(expert_classes) >= int(expert_target.get("minimum_expert_classes") or 0)
     enough_unshaped_expert_trials = len(unshaped_expert_entries) >= int(expert_target.get("minimum_unshaped_expert_trials") or 0)
+    enough_honest_unshaped_expert_trials = len(honest_unshaped_expert_entries) >= int(expert_target.get("minimum_unshaped_expert_trials") or 0)
     enough_expert_dimensions = all(value >= expert_dimension_min for value in expert_dimension_averages.values())
     enough_expert_samples = all(count >= expert_sample_min for count in expert_dimension_sample_counts.values())
     enough_expert_overall = expert_overall >= float(expert_target.get("rolling_average_min") or 0)
@@ -177,8 +244,10 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     expert_target_met = bool(
         expert_target
         and enough_expert_trials
+        and enough_honest_expert_trials
         and enough_expert_classes
         and enough_unshaped_expert_trials
+        and enough_honest_unshaped_expert_trials
         and enough_expert_dimensions
         and enough_expert_samples
         and enough_expert_overall
@@ -194,6 +263,10 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
         "dimension_sample_counts": dimension_sample_counts,
         "expert_dimension_sample_counts": expert_dimension_sample_counts,
         "accepted_trial_count": len(accepted),
+        "accepted_honest_evidence_count": sum(
+            1 for status in honest_evidence_by_run.values() if status.get("passed")
+        ),
+        "accepted_legacy_without_honest_evidence": accepted_legacy_without_honest_evidence,
         "draft_trial_count": len(entries) - len(accepted),
         "covered_classes": sorted(classes),
         "covered_expert_classes": sorted(expert_classes),
@@ -238,9 +311,18 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
                 if items
             },
             "expert_trial_count": len(expert_entries),
+            "honest_expert_trial_count": len(honest_expert_entries),
             "expert_class_count": len(expert_classes),
             "unshaped_expert_trial_count": len(unshaped_expert_entries),
+            "honest_unshaped_expert_trial_count": len(honest_unshaped_expert_entries),
             "needs_more_unshaped_expert_trials": not enough_unshaped_expert_trials,
+            "needs_more_honest_expert_evidence": not enough_honest_expert_trials,
+            "needs_more_honest_unshaped_expert_evidence": not enough_honest_unshaped_expert_trials,
+            "expert_entries_without_honest_evidence": [
+                item
+                for item in accepted_legacy_without_honest_evidence
+                if trial_by_id.get(item["trial_id"], {}).get("difficulty") == "expert"
+            ],
         },
     }
 

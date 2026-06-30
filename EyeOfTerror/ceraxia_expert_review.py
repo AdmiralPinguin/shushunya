@@ -60,6 +60,15 @@ def score_from_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[st
     trial_class = str(packet.get("class") or "")
     changed_files = observed.get("changed_files") if isinstance(observed.get("changed_files"), list) else []
     blockers = observed.get("blockers") if isinstance(observed.get("blockers"), list) else []
+    honest = observed.get("honest_evidence") if isinstance(observed.get("honest_evidence"), dict) else {}
+    honest_checks = honest.get("checks") if isinstance(honest.get("checks"), dict) else {}
+    required_honest_checks = {
+        "source_correct",
+        "tests_not_adjusted",
+        "patch_minimal",
+        "verification_meaningful",
+        "review_artifacts_present",
+    }
     all_checks_pass = bool(checks) and all(
         isinstance(value, dict) and value.get("passed") is True
         for value in checks.values()
@@ -68,6 +77,17 @@ def score_from_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[st
         raise ValueError(f"{trial_id} did not pass expected expert outcome")
     if not all_checks_pass:
         raise ValueError(f"{trial_id} lacks passing trial-specific checks")
+    if honest.get("status") != "passed":
+        raise ValueError(f"{trial_id} lacks passed honest evidence")
+    if not required_honest_checks.issubset(honest_checks):
+        missing = ", ".join(sorted(required_honest_checks - set(honest_checks)))
+        raise ValueError(f"{trial_id} lacks required honest evidence checks: {missing}")
+    if not all(
+        isinstance(value, dict) and value.get("passed") is True
+        for name, value in honest_checks.items()
+        if name in required_honest_checks
+    ):
+        raise ValueError(f"{trial_id} has failed honest evidence checks")
     if int(verification.get("executed_count") or 0) <= 0:
         raise ValueError(f"{trial_id} lacks executed verification evidence")
     if blockers:
@@ -180,7 +200,19 @@ def main() -> int:
             entry for entry in entries
             if str(entry.get("trial_id") or "").startswith("ceraxia-expert-unshaped-")
         ]
-    reviews = [review_payload_for_entry(entry, spec, args.reviewer) for entry in entries]
+    reviews: list[dict[str, Any]] = []
+    rejected_entries: list[dict[str, str]] = []
+    for entry in entries:
+        try:
+            reviews.append(review_payload_for_entry(entry, spec, args.reviewer))
+        except ValueError as exc:
+            rejected_entries.append(
+                {
+                    "trial_id": str(entry.get("trial_id") or ""),
+                    "run_id": str(entry.get("run_id") or ""),
+                    "reason": str(exc),
+                }
+            )
     if args.write_dir:
         for review in reviews:
             write_json(args.write_dir / f"{review['run_id']}.json", review)
@@ -189,9 +221,11 @@ def main() -> int:
     output = {
         "ok": True,
         "review_count": len(reviews),
+        "rejected_count": len(rejected_entries),
         "applied": bool(args.apply and not args.dry_run),
         "report": report,
         "reviews": reviews,
+        "rejected_entries": rejected_entries,
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))
     if args.apply and not args.dry_run:

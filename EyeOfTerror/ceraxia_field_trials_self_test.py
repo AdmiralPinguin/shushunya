@@ -78,14 +78,20 @@ def main() -> int:
     if report.returncode != 0:
         raise AssertionError(f"Ceraxia field trial reporter failed: {report.stdout} {report.stderr}")
     report_payload = json.loads(report.stdout)
+    if "accepted_honest_evidence_count" not in report_payload:
+        raise AssertionError(f"Ceraxia report must expose honest accepted evidence count: {report_payload}")
+    if not isinstance(report_payload.get("accepted_legacy_without_honest_evidence"), list):
+        raise AssertionError(f"Ceraxia report must expose accepted legacy honest-evidence gaps: {report_payload}")
     if report_payload.get("target_met") is True and not ledger.get("entries"):
         raise AssertionError(f"empty Ceraxia ledger must not prove target completion: {report_payload}")
     if report_payload.get("expert_target_met") is True:
         expert_gaps = report_payload.get("expert_gaps", {})
         if (
             expert_gaps.get("expert_trial_count", 0) < expert_target.get("minimum_expert_trials", 0)
+            or expert_gaps.get("honest_expert_trial_count", 0) < expert_target.get("minimum_expert_trials", 0)
             or expert_gaps.get("expert_class_count", 0) < expert_target.get("minimum_expert_classes", 0)
             or expert_gaps.get("unshaped_expert_trial_count", 0) < expert_target.get("minimum_unshaped_expert_trials", 0)
+            or expert_gaps.get("honest_unshaped_expert_trial_count", 0) < expert_target.get("minimum_unshaped_expert_trials", 0)
             or report_payload.get("expert_overall_score", 0) < expert_target.get("rolling_average_min", 0)
         ):
             raise AssertionError(f"Ceraxia expert target cannot pass without required evidence: {report_payload}")
@@ -102,6 +108,16 @@ def main() -> int:
     expert_dimension_averages = report_payload.get("expert_dimension_averages", {})
     if set(expert_dimension_averages) != set(dimensions):
         raise AssertionError(f"Ceraxia report must expose expert averages for every dimension: {report_payload}")
+    expert_gaps = report_payload.get("expert_gaps", {})
+    for key in {
+        "honest_expert_trial_count",
+        "honest_unshaped_expert_trial_count",
+        "needs_more_honest_expert_evidence",
+        "needs_more_honest_unshaped_expert_evidence",
+        "expert_entries_without_honest_evidence",
+    }:
+        if key not in expert_gaps:
+            raise AssertionError(f"Ceraxia expert report must expose honest-evidence gap {key}: {report_payload}")
     strict_report = subprocess.run(
         [sys.executable, str(REPORTER), "--require-target"],
         cwd=str(ROOT.parent),
@@ -212,7 +228,7 @@ def main() -> int:
     if expert_review.returncode != 0:
         raise AssertionError(f"Ceraxia strict expert reviewer failed: {expert_review.stdout} {expert_review.stderr}")
     expert_review_payload = json.loads(expert_review.stdout)
-    if "review_count" not in expert_review_payload or "report" not in expert_review_payload:
+    if "review_count" not in expert_review_payload or "report" not in expert_review_payload or "rejected_entries" not in expert_review_payload:
         raise AssertionError(f"Ceraxia strict expert reviewer returned malformed payload: {expert_review_payload}")
     unshaped_draft_count = sum(
         1
@@ -320,11 +336,14 @@ def main() -> int:
                 check=False,
             )
             if good_accept.returncode != 0:
-                raise AssertionError(f"Ceraxia accept helper rejected complete dry-run review: {good_accept.stdout} {good_accept.stderr}")
-            good_payload = json.loads(good_accept.stdout)
-            expected_accepted = accepted_before_dry_run if first_entry.get("accepted_for_rolling_score") is True else accepted_before_dry_run + 1
-            if good_payload.get("dry_run") is not True or good_payload.get("report", {}).get("accepted_trial_count") != expected_accepted:
-                raise AssertionError(f"Ceraxia accept helper dry-run report is wrong: {good_payload}")
+                good_payload = json.loads(good_accept.stdout)
+                if "honest_evidence" not in str(good_payload.get("error", "")):
+                    raise AssertionError(f"Ceraxia accept helper rejected complete dry-run review for the wrong reason: {good_accept.stdout} {good_accept.stderr}")
+            else:
+                good_payload = json.loads(good_accept.stdout)
+                expected_accepted = accepted_before_dry_run if first_entry.get("accepted_for_rolling_score") is True else accepted_before_dry_run + 1
+                if good_payload.get("dry_run") is not True or good_payload.get("report", {}).get("accepted_trial_count") != expected_accepted:
+                    raise AssertionError(f"Ceraxia accept helper dry-run report is wrong: {good_payload}")
             ledger_after_dry_run = json.loads(LEDGER.read_text(encoding="utf-8"))
             if ledger_after_dry_run != ledger:
                 raise AssertionError("Ceraxia accept helper dry-run mutated the ledger")

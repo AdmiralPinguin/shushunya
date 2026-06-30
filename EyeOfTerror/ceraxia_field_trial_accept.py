@@ -60,6 +60,30 @@ def validate_review_payload(spec: dict[str, Any], ledger_entry: dict[str, Any], 
     return errors
 
 
+def validate_honest_evidence(packet: dict[str, Any]) -> list[str]:
+    honest = packet.get("observed", {}).get("honest_evidence")
+    if not isinstance(honest, dict) or honest.get("status") != "passed":
+        return ["accepted review requires passed honest_evidence"]
+    checks = honest.get("checks") if isinstance(honest.get("checks"), dict) else {}
+    required = {
+        "source_correct",
+        "tests_not_adjusted",
+        "patch_minimal",
+        "verification_meaningful",
+        "review_artifacts_present",
+    }
+    missing = sorted(required - set(checks))
+    errors = [f"accepted review missing honest_evidence checks: {', '.join(missing)}"] if missing else []
+    failed = [
+        name
+        for name, value in checks.items()
+        if name in required and (not isinstance(value, dict) or value.get("passed") is not True)
+    ]
+    if failed:
+        errors.append(f"accepted review has failed honest_evidence checks: {', '.join(sorted(failed))}")
+    return errors
+
+
 def apply_review(spec: dict[str, Any], ledger: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
     entries = ledger.get("entries") if isinstance(ledger.get("entries"), list) else []
     run_id = str(review.get("run_id") or "")
@@ -71,6 +95,7 @@ def apply_review(spec: dict[str, Any], ledger: dict[str, Any], review: dict[str,
     if not packet.get("evidence", {}).get("trial_result"):
         raise ValueError(f"review packet for {run_id} lacks trial_result evidence")
     errors = validate_review_payload(spec, entry, review)
+    errors.extend(validate_honest_evidence(packet))
     if errors:
         raise ValueError("; ".join(errors))
     entry["reviewer"] = str(review.get("reviewer") or "").strip()
