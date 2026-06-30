@@ -161,6 +161,10 @@ CERAXIA_PATCH:
 """
 
 
+def ambiguous_goal() -> str:
+    return "кодовая задача: улучши обработку ошибок в python приложении, требования и формат ошибки не заданы. Если вариантов несколько, не угадывай."
+
+
 def create_file_goal() -> str:
     return """создай python файл
 
@@ -746,6 +750,34 @@ def main() -> int:
         dirty = final.get("dirty_worktree", {})
         if not dirty.get("dirty_targets") or dirty.get("dirty_targets", [{}])[0].get("path") != "settings.py":
             raise AssertionError(f"dirty worktree evidence missing target path: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "parser.py").write_text("def parse_amount(raw):\n    return int(raw)\n", encoding="utf-8")
+        (target_repo / "api.py").write_text(
+            "from parser import parse_amount\n\n"
+            "def handle_payload(payload):\n"
+            "    return {'amount': parse_amount(payload['amount'])}\n",
+            encoding="utf-8",
+        )
+        (target_repo / "test_api.py").write_text(
+            "import unittest\nfrom api import handle_payload\n\n"
+            "class ApiTest(unittest.TestCase):\n"
+            "    def test_valid_amount(self):\n"
+            "        self.assertEqual(handle_payload({'amount': '12'}), {'amount': 12})\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=ambiguous_goal(), target_repo_root=target_repo)
+        ambiguity = final.get("ambiguity_analysis", {})
+        if final.get("status") != "blocked" or not any("Ambiguous code task" in item for item in final.get("blockers", [])):
+            raise AssertionError(f"ambiguous task should block with clarification request: {final}")
+        if (
+            ambiguity.get("status") != "ambiguous"
+            or len(ambiguity.get("candidate_interpretations", [])) < 2
+            or "expected behavior" not in ambiguity.get("safe_next_question", "")
+        ):
+            raise AssertionError(f"ambiguous task should preserve candidate interpretations: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

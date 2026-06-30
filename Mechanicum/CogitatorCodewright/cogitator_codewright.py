@@ -454,6 +454,58 @@ def verification_commands_from_natural_goal(goal: str) -> list[str]:
     return commands
 
 
+def ambiguity_analysis_from_goal(goal: str, repo_root: Path) -> dict[str, Any]:
+    lowered = goal.lower()
+    ambiguity_markers = [
+        "не задан",
+        "не указ",
+        "если вариантов несколько",
+        "не угадывай",
+        "улучши",
+        "improve",
+        "ambiguous",
+    ]
+    if not any(marker in lowered for marker in ambiguity_markers):
+        return {}
+    candidates: list[dict[str, str]] = []
+    if any(marker in lowered for marker in ("ошиб", "error", "exception")):
+        candidates.extend(
+            [
+                {
+                    "interpretation": "raise_exception",
+                    "risk": "callers may expect exceptions and HTTP/API layers may need mapping",
+                },
+                {
+                    "interpretation": "return_error_object",
+                    "risk": "changes return shape and may break existing callers",
+                },
+                {
+                    "interpretation": "fallback_default",
+                    "risk": "can hide invalid input and corrupt downstream data",
+                },
+            ]
+        )
+    if not candidates:
+        candidates.append(
+            {
+                "interpretation": "multiple_valid_implementations",
+                "risk": "task lacks an acceptance criterion that distinguishes correct behavior",
+            }
+        )
+    test_files = [
+        str(path.relative_to(repo_root))
+        for path in sorted(repo_root.rglob("*.py"))
+        if test_like_path(str(path.relative_to(repo_root))) and not any(part in EXCLUDED_DIRS for part in path.relative_to(repo_root).parts)
+    ][:8]
+    return {
+        "status": "ambiguous",
+        "reason": "task does not provide enough acceptance criteria for safe source mutation",
+        "candidate_interpretations": candidates,
+        "safe_next_question": "Specify the expected behavior, error shape, and verification command before source mutation.",
+        "available_test_files": test_files,
+    }
+
+
 def infer_simple_replace_patch_spec(request: dict[str, Any]) -> dict[str, Any]:
     goal = request_goal(request)
     patterns = [
@@ -1845,6 +1897,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
     excerpts = source_excerpt_pack(workspace_root, output_path, repo_root)
     patch_resolution = {"patch_spec": {}, "candidates": [], "selected_candidate": {}}
     dirty_worktree = {"git_repo": False, "dirty_targets": []}
+    ambiguity_analysis: dict[str, Any] = {}
     try:
         patch_resolution = patch_spec_resolution_from_request(request)
         patch_spec = patch_resolution["patch_spec"] if isinstance(patch_resolution.get("patch_spec"), dict) else {}
@@ -1861,9 +1914,13 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
                 else:
                     changed_files.extend(apply_patch_operations_atomically(repo_root, operations))
         else:
-            blockers.append(
-                "No patch candidate could be selected from explicit contract, task text, or test evidence."
-            )
+            ambiguity_analysis = ambiguity_analysis_from_goal(request_goal(request), repo_root)
+            if ambiguity_analysis:
+                blockers.append("Ambiguous code task requires clarification before source mutation.")
+            else:
+                blockers.append(
+                    "No patch candidate could be selected from explicit contract, task text, or test evidence."
+                )
     except PatchApplyError as exc:
         blockers.append(str(exc))
         rolled_back_files = exc.rolled_back_files
@@ -1886,6 +1943,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "task_profile": task_profile,
         "worker_brief": worker_brief,
         "dirty_worktree": dirty_worktree,
+        "ambiguity_analysis": ambiguity_analysis,
         "patch_spec_present": bool(patch_spec),
         "patch_source": str(patch_spec.get("source") or "explicit_json_patch") if patch_spec else "",
         "patch_candidates": patch_resolution.get("candidates", []) if isinstance(patch_resolution.get("candidates"), list) else [],
@@ -2326,6 +2384,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "patch_candidates": patch.get("patch_candidates", []),
         "selected_patch_candidate": patch.get("selected_patch_candidate", {}),
         "dirty_worktree": patch.get("dirty_worktree", {}),
+        "ambiguity_analysis": patch.get("ambiguity_analysis", {}),
         "source_excerpt_summary": patch.get("source_excerpt_summary", []),
         "implementation_decision_record": patch.get("implementation_decision_record", []),
         "diagnostics": patch.get("diagnostics", {}),

@@ -77,7 +77,11 @@ def main() -> int:
         raise AssertionError(f"Ceraxia field trial runner list failed: {runner_list.stdout} {runner_list.stderr}")
     runner_payload = json.loads(runner_list.stdout)
     runner_trials = set(runner_payload.get("trials", []))
-    required_runner_trials = {"ceraxia-field-bugfix-unnamed-source", "ceraxia-field-safety-dirty-worktree"}
+    required_runner_trials = {
+        "ceraxia-field-ambiguous-task",
+        "ceraxia-field-bugfix-unnamed-source",
+        "ceraxia-field-safety-dirty-worktree",
+    }
     if not required_runner_trials.issubset(runner_trials):
         raise AssertionError(f"Ceraxia field trial runner lacks first reproducible trial: {runner_payload}")
     required_phrases = [
