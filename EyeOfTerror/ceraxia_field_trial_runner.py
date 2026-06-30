@@ -153,11 +153,63 @@ CERAXIA_CONFIG_RUNTIME:
 """
 
 
+def fixture_refactor_preserve_behavior(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "orders.py").write_text(
+        "def order_total(gross, fee):\n"
+        "    return gross - fee\n",
+        encoding="utf-8",
+    )
+    (repo / "refunds.py").write_text(
+        "def refund_total(gross, fee):\n"
+        "    return gross - fee\n",
+        encoding="utf-8",
+    )
+    (repo / "test_totals.py").write_text(
+        "import unittest\nfrom orders import order_total\nfrom refunds import refund_total\n\n"
+        "class TotalsTest(unittest.TestCase):\n"
+        "    def test_order_total(self):\n"
+        "        self.assertEqual(order_total(100, 15), 85)\n\n"
+        "    def test_refund_total(self):\n"
+        "        self.assertEqual(refund_total(80, 5), 75)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return f"""кодовая задача: отрефактори duplicated business logic без изменения публичных функций и поведения.
+CERAXIA_TARGET_REPO: {repo}
+CERAXIA_REFACTOR:
+{{
+  "helper_path": "common/calculations.py",
+  "helper_function": "net_amount",
+  "arguments": ["gross", "fee"],
+  "return_expression": "gross - fee",
+  "baseline_verification_commands": ["python -m unittest discover"],
+  "replacements": [
+    {{
+      "path": "orders.py",
+      "public_function": "order_total",
+      "old": "def order_total(gross, fee):\\n    return gross - fee\\n",
+      "new": "from common.calculations import net_amount\\n\\n\\ndef order_total(gross, fee):\\n    return net_amount(gross, fee)\\n"
+    }},
+    {{
+      "path": "refunds.py",
+      "public_function": "refund_total",
+      "old": "def refund_total(gross, fee):\\n    return gross - fee\\n",
+      "new": "from common.calculations import net_amount\\n\\n\\ndef refund_total(gross, fee):\\n    return net_amount(gross, fee)\\n"
+    }}
+  ],
+  "verification_commands": ["python -m unittest discover", "python -m py_compile orders.py refunds.py common/calculations.py"]
+}}
+"""
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
     "ceraxia-field-cross-language-config": fixture_cross_language_config,
     "ceraxia-field-multifile-feature": fixture_multifile_feature,
+    "ceraxia-field-refactor-preserve-behavior": fixture_refactor_preserve_behavior,
     "ceraxia-field-safety-dirty-worktree": fixture_safety_dirty_worktree,
 }
 

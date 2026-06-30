@@ -237,6 +237,35 @@ CERAXIA_CONFIG_RUNTIME:
 """
 
 
+def refactor_goal() -> str:
+    return """вынеси дублированный расчет в общий helper, не меняя публичные функции
+
+CERAXIA_REFACTOR:
+{
+  "helper_path": "common/calculations.py",
+  "helper_function": "net_amount",
+  "arguments": ["gross", "fee"],
+  "return_expression": "gross - fee",
+  "baseline_verification_commands": ["python -m unittest discover"],
+  "replacements": [
+    {
+      "path": "orders.py",
+      "public_function": "order_total",
+      "old": "def order_total(gross, fee):\\n    return gross - fee\\n",
+      "new": "from common.calculations import net_amount\\n\\n\\ndef order_total(gross, fee):\\n    return net_amount(gross, fee)\\n"
+    },
+    {
+      "path": "refunds.py",
+      "public_function": "refund_total",
+      "old": "def refund_total(gross, fee):\\n    return gross - fee\\n",
+      "new": "from common.calculations import net_amount\\n\\n\\ndef refund_total(gross, fee):\\n    return net_amount(gross, fee)\\n"
+    }
+  ],
+  "verification_commands": ["python -m unittest discover", "python -m py_compile orders.py refunds.py common/calculations.py"]
+}
+"""
+
+
 def repair_colon_goal() -> str:
     return """создай python файл и исправь если проверка найдет синтаксис
 
@@ -884,6 +913,44 @@ def main() -> int:
             raise AssertionError("config/runtime marker did not write JSON config")
         if final.get("verification_summary", {}).get("executed_count", 0) < 3:
             raise AssertionError(f"config/runtime final manifest should preserve verification evidence: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "orders.py").write_text(
+            "def order_total(gross, fee):\n"
+            "    return gross - fee\n",
+            encoding="utf-8",
+        )
+        (target_repo / "refunds.py").write_text(
+            "def refund_total(gross, fee):\n"
+            "    return gross - fee\n",
+            encoding="utf-8",
+        )
+        (target_repo / "test_totals.py").write_text(
+            "import unittest\nfrom orders import order_total\nfrom refunds import refund_total\n\n"
+            "class TotalsTest(unittest.TestCase):\n"
+            "    def test_order_total(self):\n"
+            "        self.assertEqual(order_total(100, 15), 85)\n\n"
+            "    def test_refund_total(self):\n"
+            "        self.assertEqual(refund_total(80, 5), 75)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=refactor_goal(), target_repo_root=target_repo)
+        expected_paths = {"common/calculations.py", "orders.py", "refunds.py"}
+        changed_paths = {item.get("path") for item in final.get("changed_files", []) if isinstance(item, dict)}
+        if final.get("status") != "ready" or final.get("patch_source") != "refactor_marker_synthesis":
+            raise AssertionError(f"refactor marker task should be ready: {final}")
+        if changed_paths != expected_paths:
+            raise AssertionError(f"refactor marker should touch helper and duplicate modules only: {final}")
+        if "def net_amount" not in (target_repo / "common" / "calculations.py").read_text(encoding="utf-8"):
+            raise AssertionError("refactor marker did not write helper function")
+        if "order_total" not in final.get("diagnostics", {}).get("public_functions", []):
+            raise AssertionError(f"refactor marker should preserve public function evidence: {final}")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 3:
+            raise AssertionError(f"refactor final manifest should preserve verification evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

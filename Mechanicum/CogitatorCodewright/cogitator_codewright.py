@@ -422,6 +422,7 @@ def marker_block(text: str, marker: str) -> str:
         "\nCERAXIA_PATCH:",
         "\nCERAXIA_FEATURE:",
         "\nCERAXIA_CONFIG_RUNTIME:",
+        "\nCERAXIA_REFACTOR:",
         "\nCERAXIA_FILES:",
         "\nCERAXIA_CREATE_FILE:",
         "\nCERAXIA_FILE_CONTENT:",
@@ -1098,6 +1099,76 @@ def patch_spec_from_config_runtime_marker(goal: str) -> dict[str, Any]:
     }
 
 
+def patch_spec_from_refactor_marker(goal: str) -> dict[str, Any]:
+    payload = extract_json_after_marker(goal, "CERAXIA_REFACTOR:")
+    if not payload:
+        return {}
+    helper_path = str(payload.get("helper_path") or "").strip()
+    helper_function = str(payload.get("helper_function") or "").strip()
+    expression = str(payload.get("return_expression") or "").strip()
+    if not helper_path or not helper_function or not expression:
+        raise ValueError("CERAXIA_REFACTOR requires helper_path, helper_function, and return_expression")
+    if not helper_path.endswith(".py"):
+        raise ValueError("CERAXIA_REFACTOR helper_path must be a Python file")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", helper_function):
+        raise ValueError("CERAXIA_REFACTOR helper_function must be a valid Python identifier")
+    arguments = payload.get("arguments")
+    if not isinstance(arguments, list) or not arguments or not all(isinstance(item, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item) for item in arguments):
+        raise ValueError("CERAXIA_REFACTOR arguments must be a non-empty list of Python identifiers")
+    if "\n" in expression or not re.fullmatch(r"[A-Za-z0-9_ +\-*/().]+", expression):
+        raise ValueError("CERAXIA_REFACTOR return_expression must be a simple arithmetic expression")
+    replacements = payload.get("replacements")
+    if not isinstance(replacements, list) or len(replacements) < 2:
+        raise ValueError("CERAXIA_REFACTOR requires at least two replacements")
+    operations: list[dict[str, Any]] = [
+        {
+            "type": "write_file",
+            "path": helper_path,
+            "content": f"def {helper_function}({', '.join(arguments)}):\n    return {expression}\n",
+        }
+    ]
+    public_functions: list[str] = []
+    touched_paths: list[str] = [helper_path]
+    for index, item in enumerate(replacements):
+        if not isinstance(item, dict):
+            raise ValueError(f"CERAXIA_REFACTOR replacement {index} must be an object")
+        path = str(item.get("path") or "").strip()
+        old = item.get("old")
+        new = item.get("new")
+        public_function = str(item.get("public_function") or "").strip()
+        if not path or not isinstance(old, str) or not old or not isinstance(new, str):
+            raise ValueError(f"CERAXIA_REFACTOR replacement {index} requires path, old, and new")
+        if public_function and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", public_function):
+            raise ValueError(f"CERAXIA_REFACTOR replacement {index} public_function must be a valid identifier")
+        if public_function:
+            public_functions.append(public_function)
+        touched_paths.append(path)
+        operations.append({"type": "replace", "path": path, "old": old, "new": new})
+    verification_commands = payload.get("verification_commands")
+    if verification_commands is None:
+        verification_commands = ["python -m unittest discover"]
+    if not isinstance(verification_commands, list) or not all(isinstance(item, str) for item in verification_commands):
+        raise ValueError("CERAXIA_REFACTOR verification_commands must be a list of strings")
+    baseline_commands = payload.get("baseline_verification_commands", [])
+    if baseline_commands is None:
+        baseline_commands = []
+    if not isinstance(baseline_commands, list) or not all(isinstance(item, str) for item in baseline_commands):
+        raise ValueError("CERAXIA_REFACTOR baseline_verification_commands must be a list of strings")
+    return {
+        "source": "refactor_marker_synthesis",
+        "diagnostics": {
+            "kind": "refactor_marker_synthesis",
+            "helper_path": helper_path,
+            "helper_function": helper_function,
+            "public_functions": public_functions,
+            "touched_paths": touched_paths,
+            "baseline_verification_commands": baseline_commands,
+        },
+        "operations": operations,
+        "verification_commands": verification_commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -1139,6 +1210,9 @@ def synthesized_patch_spec_from_markers(goal: str) -> dict[str, Any]:
     config_runtime = patch_spec_from_config_runtime_marker(goal)
     if config_runtime:
         return config_runtime
+    refactor = patch_spec_from_refactor_marker(goal)
+    if refactor:
+        return refactor
     feature = patch_spec_from_feature_marker(goal)
     if feature:
         return feature
