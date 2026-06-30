@@ -955,7 +955,28 @@ def ast_patch_plan_required_for_source(patch_source: str) -> bool:
         "test_inferred_return_mismatch",
         "test_inferred_self_repair_seed",
         "test_inferred_missing_function",
+        "test_inferred_security_boundary",
     }
+
+
+def function_defs_by_name(tree: ast.Module) -> dict[str, ast.FunctionDef]:
+    return {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+
+
+def function_has_raise(node: ast.FunctionDef, exception_name: str = "ValueError") -> bool:
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Raise):
+            continue
+        exc = child.exc
+        if isinstance(exc, ast.Call):
+            exc = exc.func
+        if isinstance(exc, ast.Name) and exc.id == exception_name:
+            return True
+    return False
+
+
+def count_function_ifs(node: ast.FunctionDef) -> int:
+    return sum(1 for child in ast.walk(node) if isinstance(child, ast.If))
 
 
 def ast_patch_plan_from_spec(repo_root: Path, patch_spec: dict[str, Any]) -> dict[str, Any]:
@@ -968,6 +989,9 @@ def ast_patch_plan_from_spec(repo_root: Path, patch_spec: dict[str, Any]) -> dic
         if not isinstance(operation, dict):
             continue
         path = str(operation.get("path") or "")
+        if is_unshaped_patch_source(patch_source) and test_like_path(path):
+            blockers.append(f"unshaped inferred repairs must not mutate test files: {path}")
+            continue
         if not path.endswith(".py"):
             continue
         op_type = str(operation.get("type") or "")
@@ -1025,6 +1049,49 @@ def ast_patch_plan_from_spec(repo_root: Path, patch_spec: dict[str, Any]) -> dic
                     "minimality": "single_function_append",
                 }
             )
+        elif op_type == "write_file" and operation.get("overwrite") is True:
+            content = str(operation.get("content") or "")
+            source_path = safe_repo_path(repo_root, path)
+            if not source_path.exists():
+                continue
+            try:
+                before_tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+                after_tree = ast.parse(content, filename=path)
+            except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+                blockers.append(f"write_file overwrite content is not valid comparable Python AST for {path}: {exc}")
+                continue
+            before_functions = function_defs_by_name(before_tree)
+            after_functions = function_defs_by_name(after_tree)
+            for function_name, after_function in after_functions.items():
+                before_function = before_functions.get(function_name)
+                if not before_function:
+                    planned.append(
+                        {
+                            "kind": "add_function",
+                            "path": path,
+                            "function_name": function_name,
+                            "minimality": "function_added_in_overwrite",
+                        }
+                    )
+                    continue
+                before_ifs = count_function_ifs(before_function)
+                after_ifs = count_function_ifs(after_function)
+                if (
+                    after_ifs > before_ifs
+                    and function_has_raise(after_function, "ValueError")
+                    and not function_has_raise(before_function, "ValueError")
+                ):
+                    planned.append(
+                        {
+                            "kind": "add_validation_branch",
+                            "path": path,
+                            "function_name": function_name,
+                            "old_if_count": before_ifs,
+                            "new_if_count": after_ifs,
+                            "validation_exception": "ValueError",
+                            "minimality": "preserve_function_with_added_validation",
+                        }
+                    )
     if blockers:
         status = "blocked"
     elif planned:

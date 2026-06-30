@@ -1456,12 +1456,25 @@ def main() -> int:
         if final.get("status") != "ready" or final.get("patch_source") != "test_inferred_security_boundary":
             raise AssertionError(f"security boundary should be inferred from tests without marker: {final}")
         diagnostics = final.get("diagnostics", {})
+        ast_patch_plan = final.get("ast_patch_plan", {})
         if (
             diagnostics.get("function_name") != "safe_archive_path"
             or diagnostics.get("source_path") != "archive_paths.py"
             or diagnostics.get("malicious_case_count", 0) < 2
         ):
             raise AssertionError(f"security boundary diagnostics should identify threat surface: {final}")
+        if (
+            ast_patch_plan.get("status") != "recorded"
+            or not any(
+                isinstance(item, dict)
+                and item.get("kind") == "add_validation_branch"
+                and item.get("path") == "archive_paths.py"
+                and item.get("function_name") == "safe_archive_path"
+                and item.get("validation_exception") == "ValueError"
+                for item in ast_patch_plan.get("planned_operations", [])
+            )
+        ):
+            raise AssertionError(f"security boundary should preserve AST validation-branch plan: {final}")
         archive_paths = (target_repo / "archive_paths.py").read_text(encoding="utf-8")
         docs = (target_repo / "docs" / "archive_paths.md").read_text(encoding="utf-8")
         if "'..' in parts" not in archive_paths or "startswith('/')" not in archive_paths or "'/'.join(parts)" not in archive_paths:

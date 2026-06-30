@@ -1609,6 +1609,16 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
         source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
         test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
         docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        ast_patch_plan = manifest.get("ast_patch_plan") if isinstance(manifest.get("ast_patch_plan"), dict) else {}
+        ast_operations = ast_patch_plan.get("planned_operations") if isinstance(ast_patch_plan.get("planned_operations"), list) else []
+        has_validation_branch = any(
+            isinstance(item, dict)
+            and item.get("kind") == "add_validation_branch"
+            and item.get("path") == "archive_paths.py"
+            and item.get("function_name") == "safe_archive_path"
+            and item.get("validation_exception") == "ValueError"
+            for item in ast_operations
+        )
         return {
             "expert_unshaped_security_boundary": {
                 "rejects_parent_traversal": "'..' in parts" in source_text,
@@ -1617,6 +1627,7 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                 "tests_malicious_inputs": "../secret.txt" in test_text and "/etc/passwd" in test_text,
                 "tests_valid_edges": "./books//chapter2.txt" in test_text,
                 "docs_security_boundary": "archive root" in docs_text.lower() or "traversal" in docs_text.lower(),
+                "ast_validation_branch": has_validation_branch,
                 "not_marker_synthesized": str(manifest.get("patch_source") or "") not in {
                     "edge_fix_marker_synthesis",
                     "multi_file_marker_synthesis",
@@ -1630,6 +1641,7 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and "/etc/passwd" in test_text
                     and "./books//chapter2.txt" in test_text
                     and ("archive root" in docs_text.lower() or "traversal" in docs_text.lower())
+                    and has_validation_branch
                     and str(manifest.get("patch_source") or "") not in {
                         "edge_fix_marker_synthesis",
                         "multi_file_marker_synthesis",
