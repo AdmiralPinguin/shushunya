@@ -759,6 +759,37 @@
         "edits tests instead of source",
         "finalizes while verification is still blocked"
       ]
+    },
+    {
+      "id": "ceraxia-expert-repo-grade-workflow",
+      "class": "expert_repo_grade_workflow",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "multi_file_reasoning",
+        "patch_correctness",
+        "verification_discipline",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Exercise Ceraxia as a repo-grade code brigade on a large PR-shaped change across source, tests, docs, config, and compatibility surfaces. The run must produce an architecture decision record, focused and broad verification, self-review gates, a patch package, and a PR-style final summary.",
+      "required_evidence": [
+        "architecture decision record with alternatives and rollback notes",
+        "changed-file package touching 8-15 files across source/tests/docs/config",
+        "focused verification commands for changed behavior",
+        "broad verification command for regression coverage",
+        "review decision record gating architecture and broad verification",
+        "final patch package and PR-style summary"
+      ],
+      "failure_modes_to_watch": [
+        "treats a repo-grade task as a small local patch",
+        "finalizes without broad verification",
+        "does not preserve architecture decision evidence",
+        "misses docs, config, tests, or compatibility notes",
+        "returns changed files without a final patch package"
+      ]
     }
   ],
   "ledger_template": {

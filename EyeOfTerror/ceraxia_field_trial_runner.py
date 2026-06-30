@@ -1021,6 +1021,65 @@ def fixture_expert_unshaped_self_repair(repo: Path) -> str:
     )
 
 
+def fixture_expert_repo_grade_workflow(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "files": [
+            {
+                "path": "src/billing/pricing.py",
+                "content": "def net_amount(gross, fee):\n    return gross - fee\n",
+            },
+            {
+                "path": "src/billing/tax.py",
+                "content": "def tax_amount(net, rate):\n    return round(net * rate, 2)\n",
+            },
+            {
+                "path": "src/billing/invoice.py",
+                "content": "from src.billing.pricing import net_amount\nfrom src.billing.tax import tax_amount\n\n\ndef invoice_total(gross, fee, tax_rate):\n    net = net_amount(gross, fee)\n    return net + tax_amount(net, tax_rate)\n",
+            },
+            {
+                "path": "src/billing/reporting.py",
+                "content": "from src.billing.invoice import invoice_total\n\n\ndef invoice_summary(gross, fee, tax_rate):\n    return {'total': invoice_total(gross, fee, tax_rate), 'currency': 'USD'}\n",
+            },
+            {
+                "path": "config/billing.json",
+                "content": "{\n  \"currency\": \"USD\",\n  \"default_tax_rate\": 0.1\n}\n",
+            },
+            {
+                "path": "docs/billing.md",
+                "content": "# Billing\n\nInvoices use gross minus fee plus tax over the net amount. The public reporting shape keeps `total` and `currency`.\n",
+            },
+            {
+                "path": "tests/test_invoice.py",
+                "content": "import unittest\nfrom src.billing.invoice import invoice_total\n\n\nclass InvoiceTest(unittest.TestCase):\n    def test_invoice_total(self):\n        self.assertEqual(invoice_total(100, 10, 0.1), 99.0)\n\n\nif __name__ == '__main__':\n    unittest.main()\n",
+            },
+            {
+                "path": "tests/test_reporting.py",
+                "content": "import unittest\nfrom src.billing.reporting import invoice_summary\n\n\nclass ReportingTest(unittest.TestCase):\n    def test_invoice_summary_contract(self):\n        self.assertEqual(invoice_summary(100, 10, 0.1), {'total': 99.0, 'currency': 'USD'})\n\n\nif __name__ == '__main__':\n    unittest.main()\n",
+            },
+            {
+                "path": "README.md",
+                "content": "# Billing Fixture\n\nRepo-grade billing change touches source, tests, docs, config, and compatibility notes.\n",
+            },
+        ],
+        "verification_commands": [
+            "python -m unittest tests.test_invoice",
+            "python -m unittest tests.test_reporting",
+            "python -m unittest discover -s tests",
+            "python -m py_compile src/billing/pricing.py src/billing/tax.py src/billing/invoice.py src/billing/reporting.py",
+        ],
+    }
+    return (
+        "кодовая expert repo-grade задача: спроектируй и упакуй billing change как реальный repo-grade PR. "
+        "Нужны architecture decision record, impact matrix, focused verification, broad verification, self-review, "
+        "PR summary, rollback/compatibility notes, и изменение 8-15 файлов across source/tests/docs/config. "
+        "Это проверяет workflow Цераксии, а не только локальный патч.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_FILES:\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
+    )
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
@@ -1037,6 +1096,7 @@ FIXTURES = {
     "ceraxia-expert-unshaped-data-migration": fixture_expert_unshaped_data_migration,
     "ceraxia-expert-unshaped-flaky-root-cause": fixture_expert_unshaped_flaky_root_cause,
     "ceraxia-expert-unshaped-retry-policy": fixture_expert_unshaped_retry_policy,
+    "ceraxia-expert-repo-grade-workflow": fixture_expert_repo_grade_workflow,
     "ceraxia-expert-unshaped-self-repair": fixture_expert_unshaped_self_repair,
     "ceraxia-expert-unshaped-security-boundary": fixture_expert_unshaped_security_boundary,
     "ceraxia-field-integration-contract": fixture_integration_contract,
@@ -1460,6 +1520,68 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and "return 1" not in source_text
                     and "assertEqual(max_daily_exports(), 7)" in test_text
                     and changed_paths == ["quota.py"]
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-repo-grade-workflow":
+        expected_paths = {
+            "src/billing/pricing.py",
+            "src/billing/tax.py",
+            "src/billing/invoice.py",
+            "src/billing/reporting.py",
+            "config/billing.json",
+            "docs/billing.md",
+            "tests/test_invoice.py",
+            "tests/test_reporting.py",
+            "README.md",
+        }
+        changed_paths = {
+            str(item.get("path") or "")
+            for item in manifest.get("changed_files", [])
+            if isinstance(item, dict)
+        }
+        repo_grade_workflow = manifest.get("repo_grade_workflow") if isinstance(manifest.get("repo_grade_workflow"), dict) else {}
+        architecture_decision_record = manifest.get("architecture_decision_record") if isinstance(manifest.get("architecture_decision_record"), dict) else {}
+        pr_summary = manifest.get("pr_summary") if isinstance(manifest.get("pr_summary"), dict) else {}
+        patch_package = manifest.get("patch_package") if isinstance(manifest.get("patch_package"), dict) else {}
+        verification_strategy = manifest.get("verification_strategy") if isinstance(manifest.get("verification_strategy"), dict) else {}
+        review_decision = manifest.get("review_decision_record") if isinstance(manifest.get("review_decision_record"), list) else []
+        review_checks = {str(item.get("check")): str(item.get("status")) for item in review_decision if isinstance(item, dict)}
+        broad_commands = verification_strategy.get("broad_commands") if isinstance(verification_strategy.get("broad_commands"), list) else []
+        focused_commands = verification_strategy.get("focused_commands") if isinstance(verification_strategy.get("focused_commands"), list) else []
+        docs_text = (repo / "docs" / "billing.md").read_text(encoding="utf-8") if (repo / "docs" / "billing.md").exists() else ""
+        config_text = (repo / "config" / "billing.json").read_text(encoding="utf-8") if (repo / "config" / "billing.json").exists() else ""
+        return {
+            "expert_repo_grade_workflow": {
+                "expected_paths": sorted(expected_paths),
+                "changed_paths": sorted(changed_paths),
+                "all_surfaces_changed": changed_paths == expected_paths,
+                "source_count": len([path for path in changed_paths if path.startswith("src/")]),
+                "tests_changed": {"tests/test_invoice.py", "tests/test_reporting.py"}.issubset(changed_paths),
+                "docs_and_config_changed": "docs/billing.md" in changed_paths and "config/billing.json" in changed_paths,
+                "workflow_mode": repo_grade_workflow.get("mode"),
+                "architecture_recorded": architecture_decision_record.get("status") == "recorded",
+                "pr_summary_ready": bool(pr_summary.get("verification")) and bool(pr_summary.get("rollback")),
+                "patch_package_ready": patch_package.get("kind") == "ceraxia_patch_package",
+                "focused_verification_count": len(focused_commands),
+                "broad_verification_count": len(broad_commands),
+                "review_gated_architecture": review_checks.get("architecture_decision_record_present") == "pass",
+                "review_gated_broad_verification": review_checks.get("broad_verification_present") == "pass",
+                "docs_name_contract": "total" in docs_text and "currency" in docs_text,
+                "config_names_currency": "USD" in config_text,
+                "passed": (
+                    changed_paths == expected_paths
+                    and repo_grade_workflow.get("mode") == "repo_grade"
+                    and architecture_decision_record.get("status") == "recorded"
+                    and bool(pr_summary.get("verification"))
+                    and patch_package.get("kind") == "ceraxia_patch_package"
+                    and len(focused_commands) >= 3
+                    and len(broad_commands) >= 1
+                    and review_checks.get("architecture_decision_record_present") == "pass"
+                    and review_checks.get("broad_verification_present") == "pass"
+                    and "total" in docs_text
+                    and "currency" in docs_text
+                    and "USD" in config_text
                 ),
             }
         }

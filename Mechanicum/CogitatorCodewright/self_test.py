@@ -247,6 +247,59 @@ CERAXIA_FILES:
 """
 
 
+def repo_grade_workflow_goal() -> str:
+    return """repo-grade architecture refactor compatibility задача: создай большой PR-shaped пакет на 9 файлов с ADR, focused verification, broad verification и PR summary.
+
+CERAXIA_FILES:
+{
+  "files": [
+    {
+      "path": "src/billing/pricing.py",
+      "content": "def net_amount(gross, fee):\\n    return gross - fee\\n"
+    },
+    {
+      "path": "src/billing/tax.py",
+      "content": "def tax_amount(net, rate):\\n    return round(net * rate, 2)\\n"
+    },
+    {
+      "path": "src/billing/invoice.py",
+      "content": "from src.billing.pricing import net_amount\\nfrom src.billing.tax import tax_amount\\n\\n\\ndef invoice_total(gross, fee, tax_rate):\\n    net = net_amount(gross, fee)\\n    return net + tax_amount(net, tax_rate)\\n"
+    },
+    {
+      "path": "src/billing/reporting.py",
+      "content": "from src.billing.invoice import invoice_total\\n\\n\\ndef invoice_summary(gross, fee, tax_rate):\\n    return {'total': invoice_total(gross, fee, tax_rate), 'currency': 'USD'}\\n"
+    },
+    {
+      "path": "config/billing.json",
+      "content": "{\\n  \\"currency\\": \\"USD\\",\\n  \\"default_tax_rate\\": 0.1\\n}\\n"
+    },
+    {
+      "path": "docs/billing.md",
+      "content": "# Billing\\n\\nInvoices preserve total and currency in the reporting contract.\\n"
+    },
+    {
+      "path": "tests/test_invoice.py",
+      "content": "import unittest\\nfrom src.billing.invoice import invoice_total\\n\\n\\nclass InvoiceTest(unittest.TestCase):\\n    def test_invoice_total(self):\\n        self.assertEqual(invoice_total(100, 10, 0.1), 99.0)\\n\\n\\nif __name__ == '__main__':\\n    unittest.main()\\n"
+    },
+    {
+      "path": "tests/test_reporting.py",
+      "content": "import unittest\\nfrom src.billing.reporting import invoice_summary\\n\\n\\nclass ReportingTest(unittest.TestCase):\\n    def test_invoice_summary_contract(self):\\n        self.assertEqual(invoice_summary(100, 10, 0.1), {'total': 99.0, 'currency': 'USD'})\\n\\n\\nif __name__ == '__main__':\\n    unittest.main()\\n"
+    },
+    {
+      "path": "README.md",
+      "content": "# Billing Fixture\\n\\nRepo-grade package.\\n"
+    }
+  ],
+  "verification_commands": [
+    "python -m unittest tests.test_invoice",
+    "python -m unittest tests.test_reporting",
+    "python -m unittest discover -s tests",
+    "python -m py_compile src/billing/pricing.py src/billing/tax.py src/billing/invoice.py src/billing/reporting.py"
+  ]
+}
+"""
+
+
 def feature_goal() -> str:
     return """добавь multi-file feature с source, tests, docs, caller
 
@@ -1364,6 +1417,51 @@ def main() -> int:
         repeated_files = repeated.get("changed_files", [])
         if not repeated_files or not all(item.get("idempotent") for item in repeated_files if isinstance(item, dict)):
             raise AssertionError(f"repeated multi-file marker should report idempotent writes: {repeated}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        final = run_pipeline(root / "work", goal=repo_grade_workflow_goal(), target_repo_root=target_repo)
+        changed_paths = {item.get("path") for item in final.get("changed_files", []) if isinstance(item, dict)}
+        expected_paths = {
+            "src/billing/pricing.py",
+            "src/billing/tax.py",
+            "src/billing/invoice.py",
+            "src/billing/reporting.py",
+            "config/billing.json",
+            "docs/billing.md",
+            "tests/test_invoice.py",
+            "tests/test_reporting.py",
+            "README.md",
+        }
+        if final.get("status") != "ready" or changed_paths != expected_paths:
+            raise AssertionError(f"repo-grade workflow task should write the full patch surface: {final}")
+        if (
+            final.get("repo_grade_workflow", {}).get("mode") != "repo_grade"
+            or final.get("architecture_decision_record", {}).get("status") != "recorded"
+            or final.get("patch_package", {}).get("kind") != "ceraxia_patch_package"
+            or not final.get("pr_summary", {}).get("verification")
+        ):
+            raise AssertionError(f"repo-grade final manifest should preserve architecture and package evidence: {final}")
+        strategy = final.get("verification_strategy", {})
+        if (
+            len(strategy.get("focused_commands", [])) < 3
+            or len(strategy.get("broad_commands", [])) < 1
+        ):
+            raise AssertionError(f"repo-grade task should preserve focused and broad verification: {final}")
+        review_checks = {
+            item.get("check"): item.get("status")
+            for item in final.get("review_decision_record", [])
+            if isinstance(item, dict)
+        }
+        if (
+            review_checks.get("architecture_decision_record_present") != "pass"
+            or review_checks.get("broad_verification_present") != "pass"
+        ):
+            raise AssertionError(f"repo-grade review should gate architecture and broad verification: {final}")
+        plan_text = (root / "work" / "code" / "change_plan.md").read_text(encoding="utf-8")
+        if "## Architecture Decision Record" not in plan_text or "## Repo-Grade Workflow" not in plan_text:
+            raise AssertionError(f"repo-grade change plan should expose ADR and workflow sections: {plan_text}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

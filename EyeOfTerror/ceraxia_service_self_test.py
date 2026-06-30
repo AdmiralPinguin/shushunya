@@ -76,6 +76,21 @@ def main() -> int:
         or local_plan.get("worker_specialization_briefs", [])[2].get("worker") != "FerrumPatchwright"
     ):
         raise AssertionError(f"Ceraxia plan should expose task profile and worker briefs: {local_plan}")
+    repo_grade_plan = plan_code_task(
+        "repo-grade architecture refactor migration compatibility 8-15 files with focused and broad verification",
+        task_id="ceraxia-repo-grade-plan-test",
+    ).to_dict()
+    repo_grade_profile = repo_grade_plan.get("task_profile", {})
+    repo_grade_briefs = repo_grade_plan.get("worker_specialization_briefs", [])
+    if (
+        repo_grade_profile.get("workflow_mode") != "repo_grade"
+        or "architecture decision record with alternatives and tradeoffs"
+        not in repo_grade_profile.get("repo_grade_required_evidence", [])
+        or "architecture decision record" not in repo_grade_briefs[1].get("must_produce", [])
+        or "broad verification or blocker" not in repo_grade_briefs[3].get("must_produce", [])
+        or "pr_summary" not in repo_grade_briefs[5].get("must_produce", [])
+    ):
+        raise AssertionError(f"Ceraxia repo-grade plan should expose architecture workflow evidence: {repo_grade_plan}")
     patch_contract = local_plan.get("patch_contract", {})
     if (
         "CERAXIA_FILES" not in patch_contract.get("input_markers", [])

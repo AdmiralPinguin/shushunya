@@ -114,6 +114,78 @@ def worker_brief_from_request(request: dict[str, Any]) -> dict[str, Any]:
     return brief
 
 
+def repo_grade_workflow_from_request(request: dict[str, Any], changed_files: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    task_profile = task_profile_from_request(request)
+    goal = request_goal(request).lower()
+    kinds = task_profile.get("kinds") if isinstance(task_profile.get("kinds"), list) else []
+    changed_count = len(changed_files or [])
+    explicit_repo_grade = any(
+        marker in goal
+        for marker in ("repo-grade", "real repo", "architecture", "architect", "8-15")
+    )
+    repo_grade = explicit_repo_grade or changed_count >= 8
+    required_passes = [
+        "survey",
+        "architecture_decision",
+        "implementation",
+        "focused_verification",
+        "broad_verification",
+        "self_review",
+        "revision_if_needed",
+        "final_package",
+    ]
+    return {
+        "mode": "repo_grade" if repo_grade else "focused_fix",
+        "required_passes": required_passes if repo_grade else ["survey", "implementation", "verification", "self_review", "final_package"],
+        "requires_architecture_decision_record": repo_grade,
+        "requires_focused_and_broad_verification": repo_grade,
+        "requires_compatibility_and_rollback_notes": repo_grade or any("api" in str(kind) for kind in kinds),
+        "requires_pr_summary": True,
+    }
+
+
+def architecture_decision_record_from_evidence(
+    request: dict[str, Any],
+    survey: dict[str, Any],
+    changed_files: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    readiness = survey.get("engineering_readiness") if isinstance(survey.get("engineering_readiness"), dict) else {}
+    investigation = survey.get("engineering_investigation") if isinstance(survey.get("engineering_investigation"), dict) else {}
+    decision_seed = investigation.get("design_decision_seed") if isinstance(investigation.get("design_decision_seed"), list) else []
+    impact_matrix = readiness.get("impact_matrix") if isinstance(readiness.get("impact_matrix"), list) else []
+    changed_paths = [
+        str(item.get("path"))
+        for item in (changed_files or [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    return {
+        "status": "recorded",
+        "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+        "drivers": [
+            "preserve existing public behavior unless the task explicitly changes it",
+            "prefer source changes backed by focused tests and broad regression checks",
+            "keep rollback evidence and changed-file scope review in the final package",
+        ],
+        "alternatives_considered": [
+            {
+                "option": "single-file shortcut",
+                "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit",
+            },
+            {
+                "option": "broad rewrite",
+                "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff",
+            },
+        ],
+        "seed_rules": [str(item) for item in decision_seed[:8]],
+        "impacted_files": changed_paths or [
+            str(item.get("path"))
+            for item in impact_matrix[:12]
+            if isinstance(item, dict) and item.get("path")
+        ],
+        "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed.",
+    }
+
+
 def role_policy_allows_source_mutation(role_policy: dict[str, Any]) -> bool:
     return not role_policy or role_policy.get("may_mutate_source") is not False
 
@@ -3217,6 +3289,8 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
     risk_register = readiness.get("risk_register") if isinstance(readiness.get("risk_register"), list) else []
     acceptance_criteria = readiness.get("acceptance_criteria") if isinstance(readiness.get("acceptance_criteria"), list) else []
     test_strategy = readiness.get("test_strategy") if isinstance(readiness.get("test_strategy"), dict) else {}
+    repo_grade_workflow = repo_grade_workflow_from_request(request)
+    architecture_decision_record = architecture_decision_record_from_evidence(request, survey)
     symbol_lines: list[str] = []
     for item in symbols[:20]:
         if not isinstance(item, dict):
@@ -3312,6 +3386,32 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             "",
             "## Design Decision Seed",
             *[f"- {item}" for item in decision_seed[:12]],
+            "",
+            "## Architecture Decision Record",
+            f"- status: {architecture_decision_record.get('status')}",
+            f"- decision: {architecture_decision_record.get('decision')}",
+            *[
+                f"- driver: {item}"
+                for item in architecture_decision_record.get("drivers", [])
+                if isinstance(item, str)
+            ],
+            *[
+                f"- rejected: {item.get('option')} because {item.get('rejected_because')}"
+                for item in architecture_decision_record.get("alternatives_considered", [])
+                if isinstance(item, dict)
+            ],
+            f"- rollback: {architecture_decision_record.get('rollback')}",
+            "",
+            "## Repo-Grade Workflow",
+            f"- mode: {repo_grade_workflow.get('mode')}",
+            *[
+                f"- required_pass: {item}"
+                for item in repo_grade_workflow.get("required_passes", [])
+                if isinstance(item, str)
+            ],
+            f"- requires_architecture_decision_record: {repo_grade_workflow.get('requires_architecture_decision_record')}",
+            f"- requires_focused_and_broad_verification: {repo_grade_workflow.get('requires_focused_and_broad_verification')}",
+            f"- requires_pr_summary: {repo_grade_workflow.get('requires_pr_summary')}",
             "",
             "## File Impact Matrix",
             *impact_lines,
@@ -3421,11 +3521,13 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
     except ValueError as exc:
         blockers.append(str(exc))
     status = "applied" if changed_files and not blockers else "handoff_required"
+    repo_grade_workflow = repo_grade_workflow_from_request(request, changed_files)
+    architecture_decision_record = architecture_decision_record_from_evidence(request, survey, changed_files)
     manifest = {
         "status": status,
         "mode": "explicit_patch_apply" if status == "applied" else "auditable_handoff",
         "task_id": request.get("task_id"),
-        "summary": "Ceraxia applied explicit patch operations." if status == "applied" else "Ceraxia prepared implementation intent, but no source files were mutated by this worker.",
+        "summary": "Ceraxia applied scoped patch operations." if status == "applied" else "Ceraxia prepared implementation intent, but no source files were mutated by this worker.",
         "intended_actions": [
             "read concrete target files before editing",
             "apply minimal scoped patch",
@@ -3478,6 +3580,8 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
                 "detail": str(role_policy.get("authority") or "default_source_mutation_allowed"),
             },
         ],
+        "architecture_decision_record": architecture_decision_record,
+        "repo_grade_workflow": repo_grade_workflow,
         "diagnostics": patch_spec.get("diagnostics", {}) if isinstance(patch_spec.get("diagnostics"), dict) else {},
         "operation_count": len(patch_spec.get("operations", [])) if isinstance(patch_spec.get("operations"), list) else 0,
         "changed_files": changed_files,
@@ -3491,7 +3595,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "verification_commands": patch_spec.get("verification_commands", []) if isinstance(patch_spec.get("verification_commands"), list) else [],
         "blockers": blockers,
         "warnings": [
-            "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker.",
+            "Patch was selected from Ceraxia's guarded patch contracts or safe inference modes; broad synthesis still requires explicit evidence.",
         ] if status == "applied" else [
             "The current package is an auditable implementation handoff, not a completed code change.",
         ]
@@ -3626,6 +3730,24 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         "role_policy": role_policy,
         "task_profile": task_profile,
         "worker_brief": worker_brief,
+        "repo_grade_workflow": patch.get("repo_grade_workflow", repo_grade_workflow_from_request(request, changed_files)),
+        "verification_strategy": {
+            "focused_commands": [
+                item.get("command")
+                for item in executed
+                if isinstance(item, dict)
+                and isinstance(item.get("command"), str)
+                and item.get("command") != "git diff --check"
+                and "unittest discover" not in item.get("command", "")
+            ],
+            "broad_commands": [
+                item.get("command")
+                for item in executed
+                if isinstance(item, dict)
+                and isinstance(item.get("command"), str)
+                and ("unittest discover" in item.get("command", "") or item.get("command") == "git diff --check")
+            ],
+        },
         "commands": [
             "python -m py_compile <changed .py files>",
             "git diff --check",
@@ -3691,6 +3813,12 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     patch_source = str(patch.get("patch_source") or "")
     diagnostics = patch.get("diagnostics") if isinstance(patch.get("diagnostics"), dict) else {}
     changed_files = patch.get("changed_files") if isinstance(patch.get("changed_files"), list) else []
+    repo_grade_workflow = patch.get("repo_grade_workflow") if isinstance(patch.get("repo_grade_workflow"), dict) else repo_grade_workflow_from_request(request, changed_files)
+    architecture_decision_record = patch.get("architecture_decision_record") if isinstance(patch.get("architecture_decision_record"), dict) else {}
+    verification_strategy = verification.get("verification_strategy") if isinstance(verification.get("verification_strategy"), dict) else {}
+    focused_commands = verification_strategy.get("focused_commands") if isinstance(verification_strategy.get("focused_commands"), list) else []
+    broad_commands = verification_strategy.get("broad_commands") if isinstance(verification_strategy.get("broad_commands"), list) else []
+    repo_grade_mode = repo_grade_workflow.get("mode") == "repo_grade"
     failed_commands = repair_state.get("failed_commands") if isinstance(repair_state.get("failed_commands"), list) else []
     candidate_source_paths = repair_state.get("candidate_source_paths") if isinstance(repair_state.get("candidate_source_paths"), list) else []
     decision_record: list[dict[str, Any]] = [
@@ -3729,6 +3857,21 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "status": "pass" if investigation_review.get("status") == "covered" else "blocker",
             "evidence": investigation_review,
         },
+        {
+            "check": "architecture_decision_record_present",
+            "status": "pass" if (not repo_grade_mode or architecture_decision_record.get("status") == "recorded") else "blocker",
+            "evidence": architecture_decision_record,
+        },
+        {
+            "check": "focused_verification_present",
+            "status": "pass" if focused_commands or verification.get("status") == "passed" else "blocker",
+            "evidence": focused_commands,
+        },
+        {
+            "check": "broad_verification_present",
+            "status": "pass" if (not repo_grade_mode or broad_commands) else "blocker",
+            "evidence": broad_commands,
+        },
     ]
     review_warnings = [
         {"severity": "warning", "message": str(item)}
@@ -3764,6 +3907,10 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         blockers = [*blockers, "Engineering readiness model lacks acceptance criteria."]
     if not readiness_checks.get("has_test_strategy"):
         blockers = [*blockers, "Engineering readiness model lacks test strategy."]
+    if repo_grade_mode and architecture_decision_record.get("status") != "recorded":
+        blockers = [*blockers, "Repo-grade task lacks architecture decision record."]
+    if repo_grade_mode and not broad_commands:
+        blockers = [*blockers, "Repo-grade task lacks broad verification evidence."]
     high_risks = [item for item in risk_register if isinstance(item, dict) and item.get("severity") == "high"]
     if high_risks and not changed_files:
         blockers = [*blockers, "High-risk task has no applied source change or explicit handoff resolution."]
@@ -3787,6 +3934,9 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "impact_matrix": impact_matrix,
             "readiness_checks": readiness_checks,
         },
+        "architecture_decision_record": architecture_decision_record,
+        "repo_grade_workflow": repo_grade_workflow,
+        "verification_strategy": verification_strategy,
         "repository_investigation_review": investigation_review,
     }
     review = {
@@ -3804,6 +3954,12 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "high_risk_count": len(high_risks),
             "impact_file_count": len(impact_matrix),
         },
+        "repo_grade_workflow_review": {
+            "mode": repo_grade_workflow.get("mode"),
+            "architecture_decision_record_present": architecture_decision_record.get("status") == "recorded",
+            "focused_verification_count": len(focused_commands),
+            "broad_verification_count": len(broad_commands),
+        },
         "repository_investigation_review": investigation_review,
         "decision_record": decision_record,
         "findings": [
@@ -3814,7 +3970,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             *review_warnings,
             {
                 "severity": "warning",
-                "message": "Ceraxia currently supports only explicit patch operations; autonomous code synthesis is not enabled yet.",
+                "message": "Ceraxia supports explicit, marker-synthesized, and guarded test-inferred patches; broader repo-grade synthesis must still block with evidence.",
             }
         ],
         "revision_plan": {
@@ -3861,6 +4017,41 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
     task_profile = task_profile_from_request(request)
     worker_brief = worker_brief_from_request(request)
     status = "blocked" if review.get("approved") is False else "ready"
+    changed_files = patch.get("changed_files", []) if isinstance(patch.get("changed_files"), list) else []
+    repo_grade_workflow = patch.get("repo_grade_workflow") if isinstance(patch.get("repo_grade_workflow"), dict) else repo_grade_workflow_from_request(request, changed_files)
+    architecture_decision_record = patch.get("architecture_decision_record") if isinstance(patch.get("architecture_decision_record"), dict) else {}
+    verification_strategy = verification.get("verification_strategy") if isinstance(verification.get("verification_strategy"), dict) else {}
+    changed_file_paths = [
+        str(item.get("path"))
+        for item in changed_files
+        if isinstance(item, dict) and item.get("path")
+    ]
+    pr_summary = {
+        "title": "Ceraxia code task package",
+        "status": status,
+        "scope": changed_file_paths,
+        "verification": {
+            "status": verification.get("status", "unknown"),
+            "focused_commands": verification_strategy.get("focused_commands", []),
+            "broad_commands": verification_strategy.get("broad_commands", []),
+            "repair_count": len(verification.get("repairs", [])) if isinstance(verification.get("repairs"), list) else 0,
+        },
+        "architecture": architecture_decision_record,
+        "risks": patch.get("engineering_readiness", {}).get("risk_register", []) if isinstance(patch.get("engineering_readiness"), dict) else [],
+        "rollback": architecture_decision_record.get("rollback") or "Revert changed files from patch_package.changed_files.",
+        "next_safe_action": "handoff_to_patch_worker" if status == "blocked" else "inspect_final_package",
+    }
+    patch_package = {
+        "kind": "ceraxia_patch_package",
+        "workflow_mode": repo_grade_workflow.get("mode"),
+        "changed_files": changed_files,
+        "patch_source": patch.get("patch_source", ""),
+        "operation_count": patch.get("operation_count", 0),
+        "architecture_decision_record": architecture_decision_record,
+        "verification_strategy": verification_strategy,
+        "review_decision_record": review.get("decision_record", []),
+        "pr_summary": pr_summary,
+    }
     manifest = {
         "status": status,
         "approved": review.get("approved") is True,
@@ -3881,7 +4072,12 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             sibling_artifact(output_path, "repair_loop_state.json"),
             sibling_artifact(output_path, "code_review.json"),
         ],
-        "changed_files": patch.get("changed_files", []),
+        "changed_files": changed_files,
+        "repo_grade_workflow": repo_grade_workflow,
+        "architecture_decision_record": architecture_decision_record,
+        "verification_strategy": verification_strategy,
+        "patch_package": patch_package,
+        "pr_summary": pr_summary,
         "recommended_read_order": patch.get("recommended_read_order", []),
         "engineering_investigation": survey.get("engineering_investigation", {}) if isinstance(survey.get("engineering_investigation"), dict) else {},
         "engineering_readiness": patch.get("engineering_readiness", {}),

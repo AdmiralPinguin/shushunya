@@ -17,6 +17,12 @@ She owns code-task decomposition, repository survey, scoped implementation
 planning, patch manifest handoff, verification planning, code review, and final
 handoff packaging.
 
+Repo-grade workflow requirements are documented in
+`repo_grade_workflow.md`. In short, high-risk architecture/refactor/migration
+tasks must be treated like a small PR pipeline: survey, architecture decision,
+implementation, focused verification, broad verification, self-review,
+revision if needed, and final package.
+
 ## Default Worker Pipeline
 
 ```text
@@ -76,8 +82,9 @@ CERAXIA_PATCH:
 }
 ```
 
-Without explicit patch operations, Ceraxia writes a blocked handoff package
-instead of claiming the code task is complete.
+Without an explicit, marker-synthesized, or guarded test-inferred patch path,
+Ceraxia writes a blocked handoff package instead of claiming the code task is
+complete.
 
 `write_file` is idempotent when the target file already contains the requested
 content. Different existing content still requires `"overwrite": true`, so
@@ -123,6 +130,12 @@ the same code-task evidence through `final_manifest_summary`.
 application, verification, scope review, and diagnostic-linkage checks. Blocked
 reviews preserve focused revision context with changed files, failed commands,
 candidate source paths, patch source, and diagnostics.
+
+For repo-grade tasks, final manifests additionally preserve
+`repo_grade_workflow`, `architecture_decision_record`,
+`verification_strategy`, `patch_package`, and `pr_summary`. `JudicatorCodicis`
+gates architecture evidence and broad verification before `SealwrightFinalis`
+can package the result as ready.
 
 Verification commands run without a shell and must match Ceraxia's allowlist:
 `pytest`, `python -m pytest`, `python -m unittest`, or

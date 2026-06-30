@@ -157,6 +157,8 @@ def classify_code_task(goal: str) -> dict[str, Any]:
         "test_repair": ["почини тест", "fix test", "pytest", "unittest", "assert", "traceback", "ошибка тест"],
         "api_contract": ["api", "endpoint", "contract", "schema", "http", "request", "response"],
         "multi_file": ["multi-file", "несколько файлов", "ceraxia_files", "files", "package", "module"],
+        "repo_grade": ["repo-grade", "real repo", "8-15", "architecture", "architect", "migration", "refactor", "compatibility", "backward"],
+        "architecture_change": ["architecture", "architect", "adr", "design decision", "refactor", "migration"],
         "new_feature": ["добавь", "add ", "implement", "feature", "создай", "create"],
         "bugfix": ["почини", "fix", "bug", "ошибка", "исправь", "repair"],
     }
@@ -174,11 +176,16 @@ def classify_code_task(goal: str) -> dict[str, Any]:
         complexity_score += 1
     if "api_contract" in detected:
         complexity_score += 1
+    if "repo_grade" in detected:
+        complexity_score += 2
+    if "architecture_change" in detected:
+        complexity_score += 2
     if len(re.findall(r"`[^`]+`", goal)) >= 4:
         complexity_score += 1
     if len(goal) > 1500:
         complexity_score += 1
     complexity = "high" if complexity_score >= 5 else ("medium" if complexity_score >= 3 else "low")
+    workflow_mode = "repo_grade" if complexity == "high" or "repo_grade" in detected or "architecture_change" in detected else "focused_fix"
     required_governor_checks = [
         "repository survey must identify candidate source and test files before mutation",
         "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
@@ -192,16 +199,31 @@ def classify_code_task(goal: str) -> dict[str, Any]:
         required_governor_checks.append("multi-file tasks must keep changed-file scope evidence for every mutated file")
     if "api_contract" in detected:
         required_governor_checks.append("API/contract tasks must preserve public response shape and schema compatibility evidence")
+    repo_grade_required_evidence: list[str] = []
+    if workflow_mode == "repo_grade":
+        repo_grade_required_evidence = [
+            "architecture decision record with alternatives and tradeoffs",
+            "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+            "focused verification for the changed behavior",
+            "broad verification for repo-level regressions or an explicit blocker",
+            "self-review decision record before final packaging",
+            "PR-style final summary with changed files, verification, risks, and rollback notes",
+        ]
+        required_governor_checks.extend(repo_grade_required_evidence)
     return {
         "kinds": detected,
         "complexity": complexity,
         "complexity_score": complexity_score,
+        "workflow_mode": workflow_mode,
+        "repo_grade_required_evidence": repo_grade_required_evidence,
         "risk_flags": [
             flag
             for flag, enabled in {
                 "multi_file_scope_drift": "multi_file" in detected,
                 "test_diagnostic_required": "test_repair" in detected,
                 "public_contract_regression": "api_contract" in detected,
+                "architecture_drift": "architecture_change" in detected,
+                "repo_grade_evidence_required": workflow_mode == "repo_grade",
                 "natural_language_patch_inference": "explicit_patch" not in detected,
             }.items()
             if enabled
@@ -218,9 +240,9 @@ def worker_specialization_briefs(contract: TaskContract, task_profile: dict[str,
             "handoff_question": "Which files should the strategist inspect first, and why?",
         },
         "change_planning": {
-            "brief": "Convert repo evidence into a scoped implementation plan.",
-            "must_produce": ["candidate file rationale", "test surface", "verification suggestions", "risk notes"],
-            "handoff_question": "What is the narrowest safe patch path?",
+            "brief": "Convert repo evidence into a scoped implementation plan and architecture decision.",
+            "must_produce": ["candidate file rationale", "test surface", "verification suggestions", "risk notes", "architecture decision record", "repo-grade workflow"],
+            "handoff_question": "What is the narrowest safe patch path, and which architecture tradeoffs were rejected?",
         },
         "implementation": {
             "brief": "Apply only explicit or safely inferred scoped patch operations.",
@@ -229,17 +251,17 @@ def worker_specialization_briefs(contract: TaskContract, task_profile: dict[str,
         },
         "verification": {
             "brief": "Run allowlisted checks and perform only narrow repair loops.",
-            "must_produce": ["executed commands", "repair_loop_state", "failed_commands", "candidate_source_paths"],
+            "must_produce": ["executed commands", "focused verification", "broad verification or blocker", "repair_loop_state", "failed_commands", "candidate_source_paths"],
             "handoff_question": "Did checks pass after repair, or what blocks review?",
         },
         "code_review": {
-            "brief": "Judge scope, evidence, verification, and revision needs.",
-            "must_produce": ["approved flag", "findings", "patch_scope_review", "revision_plan"],
+            "brief": "Judge scope, architecture evidence, verification, and revision needs.",
+            "must_produce": ["approved flag", "findings", "architecture review", "patch_scope_review", "revision_plan"],
             "handoff_question": "Can the final packager mark this ready?",
         },
         "finalize": {
             "brief": "Package final evidence for Warmaster and chat clients.",
-            "must_produce": ["deliverables", "execution_report", "next_safe_action", "blockers"],
+            "must_produce": ["deliverables", "execution_report", "patch_package", "pr_summary", "next_safe_action", "blockers"],
             "handoff_question": "What should the operator or Warmaster do next?",
         },
     }

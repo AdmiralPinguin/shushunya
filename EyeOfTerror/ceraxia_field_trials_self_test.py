@@ -146,6 +146,7 @@ def main() -> int:
         "ceraxia-expert-flaky-test-root-cause",
         "ceraxia-expert-legacy-migration",
         "ceraxia-expert-public-api-deprecation",
+        "ceraxia-expert-repo-grade-workflow",
         "ceraxia-expert-security-boundary",
         "ceraxia-field-integration-contract",
         "ceraxia-field-large-file-restraint",
