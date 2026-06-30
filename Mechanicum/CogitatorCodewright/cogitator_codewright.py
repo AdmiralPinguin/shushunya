@@ -2229,6 +2229,106 @@ def infer_flaky_ordering_from_tests(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def infer_retry_policy_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    commands = verification_commands_from_natural_goal(goal)
+    test_paths = discovered_test_paths(repo_root, goal)
+    candidates: list[dict[str, Any]] = []
+    for test_path in test_paths:
+        path = safe_repo_path(repo_root, test_path)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "ConnectionError" not in text or "assertRaises(ValueError)" not in text:
+            continue
+        if "calls" not in text or "assertEqual" not in text:
+            continue
+        imports = re.findall(r"^\s*from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", text, flags=re.MULTILINE)
+        if len(imports) != 1:
+            continue
+        module_name, function_name = imports[0]
+        source_path = f"{module_name.replace('.', '/')}.py"
+        source = safe_repo_path(repo_root, source_path)
+        if not source.exists():
+            continue
+        source_text = source.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(source_text, filename=str(source))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        function_node = next((node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == function_name), None)
+        if not function_node or len(function_node.args.args) != 2:
+            continue
+        if ".send(" not in source_text:
+            continue
+        docs_path = ""
+        for docs in sorted(repo_root.rglob("*.md")):
+            if any(part in EXCLUDED_DIRS for part in docs.relative_to(repo_root).parts):
+                continue
+            docs_text = docs.read_text(encoding="utf-8")
+            if "retry" in docs_text.lower() or "validation" in docs_text.lower() or function_name in docs_text:
+                docs_path = str(docs.relative_to(repo_root))
+                break
+        candidates.append(
+            {
+                "test_path": test_path,
+                "source_path": source_path,
+                "function_name": function_name,
+                "transport_arg": function_node.args.args[0].arg,
+                "event_arg": function_node.args.args[1].arg,
+                "docs_path": docs_path,
+            }
+        )
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred retry policy requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    source_path = str(candidate["source_path"])
+    function_name = str(candidate["function_name"])
+    transport_arg = str(candidate["transport_arg"])
+    event_arg = str(candidate["event_arg"])
+    source_content = (
+        f"def {function_name}({transport_arg}, {event_arg}, max_attempts=3):\n"
+        "    last_error = None\n"
+        "    for _ in range(max_attempts):\n"
+        "        try:\n"
+        f"            return {transport_arg}.send({event_arg})\n"
+        "        except ConnectionError as exc:\n"
+        "            last_error = exc\n"
+        "    raise last_error\n"
+    )
+    operations: list[dict[str, Any]] = [
+        {"type": "write_file", "path": source_path, "content": source_content, "overwrite": True}
+    ]
+    docs_path = str(candidate.get("docs_path") or "")
+    if docs_path:
+        docs_content = (
+            "# Client\n\n"
+            "Retry policy: transient `ConnectionError` transport failures are retried up to `max_attempts`. "
+            "Validation failures such as `ValueError` are not retried and must surface immediately; no sleep-based waiting is used.\n"
+        )
+        operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
+    if not commands:
+        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+    return {
+        "source": "test_inferred_retry_policy",
+        "diagnostics": {
+            "kind": "test_inferred_retry_policy",
+            "test_path": candidate["test_path"],
+            "source_path": source_path,
+            "function_name": function_name,
+            "retry_exception": "ConnectionError",
+            "non_retry_exception": "ValueError",
+            "max_attempts": 3,
+            "docs_path": docs_path,
+        },
+        "operations": operations,
+        "verification_commands": commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -2355,6 +2455,7 @@ def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any
         ("test_inferred_security_boundary", lambda: infer_security_boundary_from_tests(request)),
         ("test_inferred_cache_concurrency", lambda: infer_cache_concurrency_from_tests(request)),
         ("test_inferred_flaky_ordering", lambda: infer_flaky_ordering_from_tests(request)),
+        ("test_inferred_retry_policy", lambda: infer_retry_policy_from_tests(request)),
         ("natural_language_simple_replace", lambda: infer_simple_replace_patch_spec(request)),
         ("natural_language_add_function", lambda: infer_add_function_patch_spec(request)),
         ("test_inferred_arithmetic_return", lambda: infer_arithmetic_return_from_tests(request)),

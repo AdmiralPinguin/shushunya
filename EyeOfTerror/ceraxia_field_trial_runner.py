@@ -939,6 +939,60 @@ def fixture_expert_unshaped_flaky_root_cause(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_retry_policy(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "docs").mkdir(parents=True, exist_ok=True)
+    (repo / "client.py").write_text(
+        "def publish_event(transport, event):\n"
+        "    return transport.send(event)\n",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "client.md").write_text(
+        "# Client\n\nTransient transport failures should be retried; validation failures should surface immediately.\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_client.py").write_text(
+        "import unittest\n"
+        "from client import publish_event\n\n"
+        "class FlakyTransport:\n"
+        "    def __init__(self):\n"
+        "        self.calls = 0\n"
+        "    def send(self, event):\n"
+        "        self.calls += 1\n"
+        "        if self.calls < 3:\n"
+        "            raise ConnectionError('temporary outage')\n"
+        "        return {'ok': True, 'event': event}\n\n"
+        "class ValidationTransport:\n"
+        "    def __init__(self):\n"
+        "        self.calls = 0\n"
+        "    def send(self, event):\n"
+        "        self.calls += 1\n"
+        "        raise ValueError('invalid event')\n\n"
+        "class ClientTest(unittest.TestCase):\n"
+        "    def test_retries_transient_connection_errors(self):\n"
+        "        transport = FlakyTransport()\n"
+        "        self.assertEqual(publish_event(transport, {'id': 'evt-1'}), {'ok': True, 'event': {'id': 'evt-1'}})\n"
+        "        self.assertEqual(transport.calls, 3)\n\n"
+        "    def test_validation_errors_are_not_retried(self):\n"
+        "        transport = ValidationTransport()\n"
+        "        with self.assertRaises(ValueError):\n"
+        "            publish_event(transport, {'bad': True})\n"
+        "        self.assertEqual(transport.calls, 1)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured retry marker: исправь integration client retry policy. "
+        "Выведи контракт из tests и docs: ConnectionError transient failures retry до bounded max attempts, "
+        "ValueError validation failures не retry, sleep/ослабление тестов запрещены.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_client\n"
+        "CERAXIA_VERIFY: python -m py_compile client.py\n"
+    )
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
@@ -954,6 +1008,7 @@ FIXTURES = {
     "ceraxia-expert-unshaped-concurrency-cache": fixture_expert_unshaped_concurrency_cache,
     "ceraxia-expert-unshaped-data-migration": fixture_expert_unshaped_data_migration,
     "ceraxia-expert-unshaped-flaky-root-cause": fixture_expert_unshaped_flaky_root_cause,
+    "ceraxia-expert-unshaped-retry-policy": fixture_expert_unshaped_retry_policy,
     "ceraxia-expert-unshaped-security-boundary": fixture_expert_unshaped_security_boundary,
     "ceraxia-field-integration-contract": fixture_integration_contract,
     "ceraxia-field-large-file-restraint": fixture_large_file_restraint,
@@ -1294,6 +1349,42 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and "range(20)" in test_text
                     and all(marker not in (source_text + test_text).lower() for marker in ("skip", "xfail", "sleep("))
                     and ("tie-breaker" in docs_text or "deterministic" in docs_text)
+                    and str(manifest.get("patch_source") or "") not in {
+                        "multi_file_marker_synthesis",
+                        "explicit_json_patch",
+                    }
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-unshaped-retry-policy":
+        source_path = repo / "client.py"
+        test_path = repo / "tests" / "test_client.py"
+        docs_path = repo / "docs" / "client.md"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        lower_source_and_test = (source_text + test_text).lower()
+        return {
+            "expert_unshaped_retry_policy": {
+                "bounded_retry_loop": "max_attempts" in source_text and "range(" in source_text,
+                "transient_only": "except ConnectionError" in source_text and "except Exception" not in source_text,
+                "validation_not_retried": "assertRaises(ValueError)" in test_text and "ValueError" not in source_text,
+                "does_not_skip_or_sleep": all(marker not in lower_source_and_test for marker in ("skip", "xfail", "sleep(")),
+                "retry_docs": "retry" in docs_text.lower() and "validation" in docs_text.lower(),
+                "not_marker_synthesized": str(manifest.get("patch_source") or "") not in {
+                    "multi_file_marker_synthesis",
+                    "explicit_json_patch",
+                },
+                "passed": (
+                    "max_attempts" in source_text
+                    and "range(" in source_text
+                    and "except ConnectionError" in source_text
+                    and "except Exception" not in source_text
+                    and "assertRaises(ValueError)" in test_text
+                    and "ValueError" not in source_text
+                    and all(marker not in lower_source_and_test for marker in ("skip", "xfail", "sleep("))
+                    and "retry" in docs_text.lower()
+                    and "validation" in docs_text.lower()
                     and str(manifest.get("patch_source") or "") not in {
                         "multi_file_marker_synthesis",
                         "explicit_json_patch",

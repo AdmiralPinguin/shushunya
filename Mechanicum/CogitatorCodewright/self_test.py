@@ -156,6 +156,13 @@ CERAXIA_VERIFY: python -m py_compile scheduler.py
 """
 
 
+def test_inferred_retry_policy_goal() -> str:
+    return """кодовая задача без structured retry marker: исправь integration client retry behavior. Выведи контракт из tests и docs: ConnectionError retry bounded, ValueError validation не retry, sleep запрещён.
+CERAXIA_VERIFY: python -m unittest tests.test_client
+CERAXIA_VERIFY: python -m py_compile client.py
+"""
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -1162,6 +1169,64 @@ def main() -> int:
             raise AssertionError("flaky ordering inference did not add deterministic tie-breaker cleanly")
         if "Root cause" not in docs or "tie-breaker" not in docs:
             raise AssertionError("flaky ordering inference did not document root cause")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "tests").mkdir()
+        (target_repo / "docs").mkdir()
+        (target_repo / "client.py").write_text(
+            "def publish_event(transport, event):\n"
+            "    return transport.send(event)\n",
+            encoding="utf-8",
+        )
+        (target_repo / "docs" / "client.md").write_text(
+            "# Client\n\nTransient transport failures should be retried; validation failures should surface immediately.\n",
+            encoding="utf-8",
+        )
+        (target_repo / "tests" / "test_client.py").write_text(
+            "import unittest\n"
+            "from client import publish_event\n\n"
+            "class FlakyTransport:\n"
+            "    def __init__(self):\n"
+            "        self.calls = 0\n"
+            "    def send(self, event):\n"
+            "        self.calls += 1\n"
+            "        if self.calls < 3:\n"
+            "            raise ConnectionError('temporary outage')\n"
+            "        return {'ok': True, 'event': event}\n\n"
+            "class ValidationTransport:\n"
+            "    def __init__(self):\n"
+            "        self.calls = 0\n"
+            "    def send(self, event):\n"
+            "        self.calls += 1\n"
+            "        raise ValueError('invalid event')\n\n"
+            "class ClientTest(unittest.TestCase):\n"
+            "    def test_retries_transient_connection_errors(self):\n"
+            "        transport = FlakyTransport()\n"
+            "        self.assertEqual(publish_event(transport, {'id': 'evt-1'}), {'ok': True, 'event': {'id': 'evt-1'}})\n"
+            "        self.assertEqual(transport.calls, 3)\n\n"
+            "    def test_validation_errors_are_not_retried(self):\n"
+            "        transport = ValidationTransport()\n"
+            "        with self.assertRaises(ValueError):\n"
+            "            publish_event(transport, {'bad': True})\n"
+            "        self.assertEqual(transport.calls, 1)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=test_inferred_retry_policy_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready" or final.get("patch_source") != "test_inferred_retry_policy":
+            raise AssertionError(f"retry policy should be inferred from tests without marker: {final}")
+        diagnostics = final.get("diagnostics", {})
+        if diagnostics.get("retry_exception") != "ConnectionError" or diagnostics.get("non_retry_exception") != "ValueError":
+            raise AssertionError(f"retry diagnostics should identify retry boundary: {final}")
+        client = (target_repo / "client.py").read_text(encoding="utf-8")
+        docs = (target_repo / "docs" / "client.md").read_text(encoding="utf-8")
+        if "except ConnectionError" not in client or "except Exception" in client or "sleep(" in client:
+            raise AssertionError("retry policy inference did not keep retry boundary clean")
+        if "Retry policy" not in docs or "Validation" not in docs:
+            raise AssertionError("retry policy inference did not document retry boundary")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
