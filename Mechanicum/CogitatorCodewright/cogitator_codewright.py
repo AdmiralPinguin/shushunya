@@ -613,6 +613,200 @@ def code_review_discipline_findings(patch_source: str, changed_files: list[dict[
     return findings
 
 
+def is_unshaped_patch_source(patch_source: str) -> bool:
+    return patch_source.startswith("test_inferred_") or patch_source.startswith("natural_language_")
+
+
+def extracted_assertion_diagnostics_from_text(text: str) -> list[dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for match in re.finditer(r"AssertionError:\s+(.+?)\s+!=\s+(.+)", text):
+        actual = match.group(1).strip()
+        expected = match.group(2).strip()
+        key = ("not_equal", actual, expected)
+        if key in seen:
+            continue
+        seen.add(key)
+        diagnostics.append(
+            {
+                "kind": "assert_not_equal",
+                "actual": actual[:200],
+                "expected": expected[:200],
+                "excerpt": match.group(0)[:500],
+            }
+        )
+    for match in re.finditer(r"AssertionError:\s+(.+?)\s+is not true", text, flags=re.IGNORECASE):
+        expression = match.group(1).strip()
+        key = ("truthy", expression, "true")
+        if key in seen:
+            continue
+        seen.add(key)
+        diagnostics.append(
+            {
+                "kind": "assert_truthy",
+                "actual": expression[:200],
+                "expected": "truthy",
+                "excerpt": match.group(0)[:500],
+            }
+        )
+    return diagnostics
+
+
+def static_diagnostic_hypotheses_from_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    hypotheses: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or candidate.get("status") != "selected":
+            continue
+        diagnostics = candidate.get("diagnostics") if isinstance(candidate.get("diagnostics"), dict) else {}
+        if not diagnostics:
+            continue
+        hypotheses.append(
+            {
+                "source": candidate.get("source", ""),
+                "kind": diagnostics.get("kind", candidate.get("source", "")),
+                "test_path": diagnostics.get("test_path", ""),
+                "module_path": diagnostics.get("module_path", ""),
+                "function_name": diagnostics.get("function_name", ""),
+                "delegated_from": diagnostics.get("delegated_from", {}),
+                "expected": diagnostics.get("expected", diagnostics.get("replacement_expression", "")),
+                "actual": diagnostics.get("actual", diagnostics.get("actual_expression", "")),
+                "evidence": diagnostics,
+            }
+        )
+    return hypotheses
+
+
+def survey_source_candidates_from_payload(survey: dict[str, Any]) -> list[str]:
+    repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
+    ranked = repo_map.get("ranked_files") if isinstance(repo_map.get("ranked_files"), list) else []
+    candidates: list[str] = []
+    for item in ranked:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        if path and not test_like_path(path) and path not in candidates:
+            candidates.append(path)
+    return candidates
+
+
+def unshaped_repair_plan_from_resolution(
+    request: dict[str, Any],
+    survey: dict[str, Any],
+    patch_resolution: dict[str, Any],
+    patch_spec: dict[str, Any],
+    excerpts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    patch_source = str(patch_spec.get("source") or "")
+    candidates = patch_resolution.get("candidates") if isinstance(patch_resolution.get("candidates"), list) else []
+    selected = patch_resolution.get("selected_candidate") if isinstance(patch_resolution.get("selected_candidate"), dict) else {}
+    source_paths: list[str] = []
+    for operation in patch_spec.get("operations", []) if isinstance(patch_spec.get("operations"), list) else []:
+        if isinstance(operation, dict) and operation.get("path"):
+            path = str(operation.get("path"))
+            if path not in source_paths:
+                source_paths.append(path)
+    for item in excerpts:
+        if isinstance(item, dict) and item.get("path"):
+            path = str(item.get("path"))
+            if path not in source_paths:
+                source_paths.append(path)
+    for path in survey_source_candidates_from_payload(survey):
+        if path not in source_paths:
+            source_paths.append(path)
+    static_hypotheses = static_diagnostic_hypotheses_from_candidates(candidates)
+    minimal_patch_candidates = [
+        {
+            "source": candidate.get("source", ""),
+            "status": candidate.get("status", ""),
+            "operation_count": candidate.get("operation_count", 0),
+            "verification_command_count": candidate.get("verification_command_count", 0),
+            "diagnostics": candidate.get("diagnostics", {}),
+        }
+        for candidate in candidates
+        if isinstance(candidate, dict) and candidate.get("status") in {"selected", "blocked"}
+    ]
+    mode = "unshaped_repo_repair" if is_unshaped_patch_source(patch_source) else "structured_patch"
+    status = "recorded" if patch_spec and (is_unshaped_patch_source(patch_source) or static_hypotheses) else "not_required"
+    return {
+        "status": status,
+        "mode": mode,
+        "task_id": request.get("task_id"),
+        "goal_excerpt": request_goal(request)[:1200],
+        "selected_source": patch_source,
+        "selected_candidate": selected,
+        "files_to_read": source_paths[:20],
+        "commands_to_run": patch_spec.get("verification_commands", [])
+        if isinstance(patch_spec.get("verification_commands"), list)
+        else [],
+        "defect_hypotheses": static_hypotheses,
+        "minimal_patch_candidates": minimal_patch_candidates[:12],
+        "proof_plan": {
+            "focused_verification": patch_spec.get("verification_commands", [])
+            if isinstance(patch_spec.get("verification_commands"), list)
+            else [],
+            "source_must_change": True,
+            "tests_must_not_be_edited_for_test_inferred_repairs": True,
+            "review_gates": [
+                "diagnostic_linkage",
+                "patch_scope_review",
+                "verification_passed",
+                "review_discipline_findings",
+            ],
+        },
+        "safety_constraints": [
+            "prefer the smallest source patch that satisfies test and contract evidence",
+            "do not edit tests to make an inferred repair pass",
+            "block instead of mutating when source mapping is ambiguous",
+        ],
+    }
+
+
+def diagnostic_extraction_from_execution(
+    patch: dict[str, Any],
+    executed: list[dict[str, Any]],
+    candidate_source_paths: list[str],
+) -> dict[str, Any]:
+    candidates = patch.get("patch_candidates") if isinstance(patch.get("patch_candidates"), list) else []
+    runtime_failures: list[dict[str, Any]] = []
+    assertions: list[dict[str, Any]] = []
+    traceback_sources: list[str] = []
+    for item in executed:
+        if not isinstance(item, dict) or int(item.get("returncode") or 0) == 0:
+            continue
+        output = f"{item.get('stdout', '')}\n{item.get('stderr', '')}"
+        parsed_assertions = extracted_assertion_diagnostics_from_text(output)
+        assertions.extend(parsed_assertions)
+        runtime_failures.append(
+            {
+                "command": item.get("command", ""),
+                "returncode": item.get("returncode"),
+                "assertion_count": len(parsed_assertions),
+                "stderr_excerpt": str(item.get("stderr") or "")[-1200:],
+                "stdout_excerpt": str(item.get("stdout") or "")[-1200:],
+            }
+        )
+    for path in candidate_source_paths:
+        path_str = str(path)
+        if path_str not in traceback_sources:
+            traceback_sources.append(path_str)
+    static_hypotheses = static_diagnostic_hypotheses_from_candidates(candidates)
+    return {
+        "status": "recorded",
+        "mode": "unshaped_repo_repair" if is_unshaped_patch_source(str(patch.get("patch_source") or "")) else "structured_patch",
+        "patch_source": patch.get("patch_source", ""),
+        "runtime_failures": runtime_failures,
+        "assertions": assertions,
+        "traceback_source_candidates": traceback_sources[:20],
+        "static_test_expectations": static_hypotheses,
+        "selected_diagnostics": patch.get("diagnostics", {}) if isinstance(patch.get("diagnostics"), dict) else {},
+        "parser_coverage": {
+            "unittest_assertions": len(assertions),
+            "traceback_source_candidates": len(traceback_sources),
+            "static_test_expectations": len(static_hypotheses),
+        },
+    }
+
+
 def output_path_from_request(request: dict[str, Any]) -> str:
     step = request.get("step") if isinstance(request.get("step"), dict) else {}
     expected = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
@@ -3660,6 +3854,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
     status = "applied" if changed_files and not blockers else "handoff_required"
     repo_grade_workflow = repo_grade_workflow_from_request(request, changed_files)
     architecture_decision_record = architecture_decision_record_from_evidence(request, survey, changed_files)
+    unshaped_repair_plan = unshaped_repair_plan_from_resolution(request, survey, patch_resolution, patch_spec, excerpts)
     manifest = {
         "status": status,
         "mode": "explicit_patch_apply" if status == "applied" else "auditable_handoff",
@@ -3721,6 +3916,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         ],
         "architecture_decision_record": architecture_decision_record,
         "repo_grade_workflow": repo_grade_workflow,
+        "unshaped_repair_plan": unshaped_repair_plan,
         "diagnostics": patch_spec.get("diagnostics", {}) if isinstance(patch_spec.get("diagnostics"), dict) else {},
         "operation_count": len(patch_spec.get("operations", [])) if isinstance(patch_spec.get("operations"), list) else 0,
         "changed_files": changed_files,
@@ -3740,13 +3936,14 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         ]
     }
     write_json(workspace_root, output_path, manifest)
+    write_json(workspace_root, sibling_artifact(output_path, "unshaped_repair_plan.json"), unshaped_repair_plan)
     return {
         "ok": True,
         "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": "completed",
         "summary": "Patch manifest written with applied changes." if status == "applied" else "Patch manifest written as auditable handoff; source mutation remains blocked.",
-        "artifacts": [output_path],
+        "artifacts": [output_path, sibling_artifact(output_path, "unshaped_repair_plan.json")],
         "confidence": "medium",
     }
 
@@ -3918,15 +4115,21 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         "next_action": "inspect_blockers_or_revision_plan" if blockers else "continue_to_code_review",
         "summary": "Repair loop state recorded for verification step.",
     }
+    diagnostic_extraction = diagnostic_extraction_from_execution(patch, executed, candidate_source_paths)
     write_json(workspace_root, output_path, report)
     write_json(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"), repair_state)
+    write_json(workspace_root, sibling_artifact(output_path, "diagnostic_extraction.json"), diagnostic_extraction)
     return {
         "ok": True,
         "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": "completed",
         "summary": "Verification report written.",
-        "artifacts": [output_path, sibling_artifact(output_path, "repair_loop_state.json")],
+        "artifacts": [
+            output_path,
+            sibling_artifact(output_path, "repair_loop_state.json"),
+            sibling_artifact(output_path, "diagnostic_extraction.json"),
+        ],
         "confidence": "medium",
     }
 
@@ -3938,6 +4141,8 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
     repair_state = load_json_optional(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"))
+    unshaped_repair_plan = load_json_optional(workspace_root, sibling_artifact(output_path, "unshaped_repair_plan.json"))
+    diagnostic_extraction = load_json_optional(workspace_root, sibling_artifact(output_path, "diagnostic_extraction.json"))
     problem_statement = load_json_optional(workspace_root, sibling_artifact(output_path, "problem_statement.json"))
     architecture_options = load_json_optional(workspace_root, sibling_artifact(output_path, "architecture_options.json"))
     role_policy = role_policy_from_request(request)
@@ -3963,6 +4168,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     broad_commands = verification_strategy.get("broad_commands") if isinstance(verification_strategy.get("broad_commands"), list) else []
     repo_grade_mode = repo_grade_workflow.get("mode") == "repo_grade"
     discipline_findings = code_review_discipline_findings(patch_source, changed_files)
+    unshaped_required = is_unshaped_patch_source(patch_source)
     failed_commands = repair_state.get("failed_commands") if isinstance(repair_state.get("failed_commands"), list) else []
     candidate_source_paths = repair_state.get("candidate_source_paths") if isinstance(repair_state.get("candidate_source_paths"), list) else []
     decision_record: list[dict[str, Any]] = [
@@ -3985,6 +4191,30 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "check": "diagnostic_linkage",
             "status": "pass" if (not patch_source.startswith("test_inferred_") or diagnostics) else "blocker",
             "evidence": diagnostics,
+        },
+        {
+            "check": "unshaped_repair_plan_present",
+            "status": "pass"
+            if (not unshaped_required or unshaped_repair_plan.get("mode") == "unshaped_repo_repair")
+            else "blocker",
+            "evidence": {
+                "required": unshaped_required,
+                "status": unshaped_repair_plan.get("status", ""),
+                "mode": unshaped_repair_plan.get("mode", ""),
+                "hypothesis_count": len(unshaped_repair_plan.get("defect_hypotheses", []))
+                if isinstance(unshaped_repair_plan.get("defect_hypotheses"), list)
+                else 0,
+                "candidate_count": len(unshaped_repair_plan.get("minimal_patch_candidates", []))
+                if isinstance(unshaped_repair_plan.get("minimal_patch_candidates"), list)
+                else 0,
+            },
+        },
+        {
+            "check": "diagnostic_extraction_present",
+            "status": "pass"
+            if (not unshaped_required or diagnostic_extraction.get("status") == "recorded")
+            else "blocker",
+            "evidence": diagnostic_extraction.get("parser_coverage", {}),
         },
         {
             "check": "readiness_model_present",
@@ -4058,6 +4288,10 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         blockers = [*blockers, "Verification did not pass."]
     if patch_source.startswith("test_inferred_") and not diagnostics:
         blockers = [*blockers, "Test-inferred patch lacks diagnostics linking test evidence to source mutation."]
+    if unshaped_required and unshaped_repair_plan.get("mode") != "unshaped_repo_repair":
+        blockers = [*blockers, "Unshaped repair lacks a recorded repair plan."]
+    if unshaped_required and diagnostic_extraction.get("status") != "recorded":
+        blockers = [*blockers, "Unshaped repair lacks diagnostic extraction evidence."]
     if investigation_review.get("status") != "covered":
         for item in investigation_review.get("blockers", []) if isinstance(investigation_review.get("blockers"), list) else []:
             check_name = str(item.get("check") or "repository_investigation")
@@ -4103,8 +4337,18 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "problem_statement": problem_statement,
         "architecture_options": architecture_options,
         "repo_grade_workflow": repo_grade_workflow,
+        "unshaped_repair_plan": unshaped_repair_plan,
+        "diagnostic_extraction": diagnostic_extraction,
         "verification_strategy": verification_strategy,
         "repository_investigation_review": investigation_review,
+        "unshaped_repair_review": {
+            "required": unshaped_required,
+            "plan_present": unshaped_repair_plan.get("mode") == "unshaped_repo_repair",
+            "diagnostic_extraction_present": diagnostic_extraction.get("status") == "recorded",
+            "hypothesis_count": len(unshaped_repair_plan.get("defect_hypotheses", []))
+            if isinstance(unshaped_repair_plan.get("defect_hypotheses"), list)
+            else 0,
+        },
     }
     revision_steps = [
         {
@@ -4204,6 +4448,8 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
     repair_state = load_json_optional(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"))
+    unshaped_repair_plan = load_json_optional(workspace_root, sibling_artifact(output_path, "unshaped_repair_plan.json"))
+    diagnostic_extraction = load_json_optional(workspace_root, sibling_artifact(output_path, "diagnostic_extraction.json"))
     review = load_json_optional(workspace_root, sibling_artifact(output_path, "code_review.json"))
     role_policy = role_policy_from_request(request)
     task_profile = task_profile_from_request(request)
@@ -4243,6 +4489,8 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "architecture_options": architecture_options,
         "architecture_decision_record": architecture_decision_record,
         "verification_strategy": verification_strategy,
+        "unshaped_repair_plan": unshaped_repair_plan,
+        "diagnostic_extraction": diagnostic_extraction,
         "review_decision_record": review.get("decision_record", []),
         "review_repair_loop": review.get("review_repair_loop", {}),
         "pr_summary": pr_summary,
@@ -4265,12 +4513,16 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             sibling_artifact(output_path, "architecture_options.json"),
             sibling_artifact(output_path, "change_plan.md"),
             sibling_artifact(output_path, "patch_manifest.json"),
+            sibling_artifact(output_path, "unshaped_repair_plan.json"),
             sibling_artifact(output_path, "verification_report.json"),
             sibling_artifact(output_path, "repair_loop_state.json"),
+            sibling_artifact(output_path, "diagnostic_extraction.json"),
             sibling_artifact(output_path, "code_review.json"),
         ],
         "changed_files": changed_files,
         "repo_grade_workflow": repo_grade_workflow,
+        "unshaped_repair_plan": unshaped_repair_plan,
+        "diagnostic_extraction": diagnostic_extraction,
         "problem_statement": problem_statement,
         "architecture_options": architecture_options,
         "architecture_decision_record": architecture_decision_record,

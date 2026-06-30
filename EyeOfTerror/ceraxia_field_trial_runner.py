@@ -1143,6 +1143,8 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
         checkout_text = checkout_path.read_text(encoding="utf-8") if checkout_path.exists() else ""
         test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
         diagnostics = manifest.get("diagnostics") if isinstance(manifest.get("diagnostics"), dict) else {}
+        repair_plan = manifest.get("unshaped_repair_plan") if isinstance(manifest.get("unshaped_repair_plan"), dict) else {}
+        diagnostic_extraction = manifest.get("diagnostic_extraction") if isinstance(manifest.get("diagnostic_extraction"), dict) else {}
         changed_paths = [
             str(item.get("path") or "")
             for item in manifest.get("changed_files", [])
@@ -1161,6 +1163,13 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                 "test_preserved": "assertEqual(total_after_discount(200, 25), 150)" in test_text,
                 "architect_evidence": architect_review.get("problem_statement_present") is True
                 and architect_review.get("architecture_options_present") is True,
+                "unshaped_repair_plan": repair_plan.get("mode") == "unshaped_repo_repair"
+                and bool(repair_plan.get("defect_hypotheses"))
+                and bool(repair_plan.get("minimal_patch_candidates")),
+                "diagnostic_extraction": diagnostic_extraction.get("status") == "recorded"
+                and diagnostic_extraction.get("parser_coverage", {}).get("static_test_expectations", 0) >= 1
+                if isinstance(diagnostic_extraction.get("parser_coverage"), dict)
+                else False,
                 "passed": (
                     manifest.get("patch_source") == "test_inferred_arithmetic_return"
                     and changed_paths == ["pricing.py"]
@@ -1170,6 +1179,10 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and "assertEqual(total_after_discount(200, 25), 150)" in test_text
                     and architect_review.get("problem_statement_present") is True
                     and architect_review.get("architecture_options_present") is True
+                    and repair_plan.get("mode") == "unshaped_repo_repair"
+                    and bool(repair_plan.get("defect_hypotheses"))
+                    and bool(repair_plan.get("minimal_patch_candidates"))
+                    and diagnostic_extraction.get("status") == "recorded"
                 ),
             }
         }

@@ -1018,6 +1018,20 @@ def main() -> int:
             raise AssertionError(f"test-inferred arithmetic should preserve candidate resolution chain: {final}")
         if final.get("diagnostics", {}).get("replacement_expression") != "left + right":
             raise AssertionError(f"test-inferred arithmetic diagnostics should explain replacement: {final}")
+        repair_plan = final.get("unshaped_repair_plan", {})
+        diagnostic_extraction = final.get("diagnostic_extraction", {})
+        if (
+            repair_plan.get("mode") != "unshaped_repo_repair"
+            or not repair_plan.get("defect_hypotheses")
+            or not repair_plan.get("minimal_patch_candidates")
+            or not repair_plan.get("proof_plan", {}).get("focused_verification")
+        ):
+            raise AssertionError(f"test-inferred arithmetic should preserve an unshaped repair plan: {final}")
+        if (
+            diagnostic_extraction.get("status") != "recorded"
+            or diagnostic_extraction.get("parser_coverage", {}).get("static_test_expectations", 0) < 1
+        ):
+            raise AssertionError(f"test-inferred arithmetic should preserve diagnostic extraction: {final}")
         if "return left + right" not in calc.read_text(encoding="utf-8"):
             raise AssertionError("test-inferred arithmetic did not update the return expression")
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -1051,6 +1065,18 @@ def main() -> int:
             or diagnostics.get("replacement_expression") != "price - (price * percent / 100)"
         ):
             raise AssertionError(f"delegated arithmetic diagnostics should explain wrapper traversal: {final}")
+        repair_plan = final.get("unshaped_repair_plan", {})
+        if (
+            repair_plan.get("mode") != "unshaped_repo_repair"
+            or not repair_plan.get("defect_hypotheses")
+            or not any(
+                isinstance(item, dict)
+                and isinstance(item.get("delegated_from"), dict)
+                and item.get("delegated_from", {}).get("module_path") == "checkout.py"
+                for item in repair_plan.get("defect_hypotheses", [])
+            )
+        ):
+            raise AssertionError(f"delegated arithmetic should preserve wrapper-aware repair plan: {final}")
         if "return price - (price * percent / 100)" not in pricing.read_text(encoding="utf-8"):
             raise AssertionError("delegated arithmetic did not update the implementation source")
     with tempfile.TemporaryDirectory() as temp_dir:
