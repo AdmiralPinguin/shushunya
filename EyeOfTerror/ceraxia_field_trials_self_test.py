@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ceraxia_field_trial_runner import classify_trial_outcome
+from ceraxia_field_trial_runner import apply_trial_checks_to_outcome, classify_trial_outcome
 
 
 ROOT = Path(__file__).resolve().parent
@@ -84,6 +84,7 @@ def main() -> int:
         "ceraxia-field-bugfix-unnamed-source",
         "ceraxia-field-cross-language-config",
         "ceraxia-field-data-migration",
+        "ceraxia-field-large-file-restraint",
         "ceraxia-field-multifile-feature",
         "ceraxia-field-negative-test",
         "ceraxia-field-refactor-preserve-behavior",
@@ -105,6 +106,12 @@ def main() -> int:
     )
     if failed_outcome.get("status") != "failed" or failed_outcome.get("expected") is not False:
         raise AssertionError(f"unexpected blocker trial outcome was not classified as failed: {failed_outcome}")
+    checked_outcome = apply_trial_checks_to_outcome(
+        {"status": "passed", "expected": True, "reason": "base outcome passed"},
+        {"large_file_restraint": {"passed": False}},
+    )
+    if checked_outcome.get("status") != "failed" or checked_outcome.get("expected") is not False:
+        raise AssertionError(f"failed trial-specific check did not fail the trial: {checked_outcome}")
     required_phrases = [
         "A scripted self-test proves only that a known scenario still works.",
         "The real 7/10 target is met only when",

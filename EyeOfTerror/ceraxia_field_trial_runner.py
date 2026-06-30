@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
@@ -263,11 +264,45 @@ CERAXIA_DATA_MIGRATION:
 """
 
 
+def large_generated_payload() -> str:
+    rows = [f'{{"id": {index}, "value": "generated-row-{index}"}}' for index in range(2500)]
+    return "[\n  " + ",\n  ".join(rows) + "\n]\n"
+
+
+def fixture_large_file_restraint(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    generated = repo / "generated"
+    generated.mkdir()
+    (generated / "huge_report.json").write_text(large_generated_payload(), encoding="utf-8")
+    (repo / "calculator.py").write_text(
+        "def net_total(gross, fee):\n"
+        "    return gross + fee\n",
+        encoding="utf-8",
+    )
+    (repo / "test_calculator.py").write_text(
+        "import unittest\nfrom calculator import net_total\n\n"
+        "class CalculatorTest(unittest.TestCase):\n"
+        "    def test_net_total_subtracts_fee(self):\n"
+        "        self.assertEqual(net_total(80, 5), 75)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая задача: почини маленький bugfix, но не читай и не переписывай generated/huge_report.json. "
+        "Нужно сохранить scope restraint и проверить тесты.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest test_calculator\n"
+        "CERAXIA_VERIFY: python -m py_compile calculator.py\n"
+    )
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
     "ceraxia-field-cross-language-config": fixture_cross_language_config,
     "ceraxia-field-data-migration": fixture_data_migration,
+    "ceraxia-field-large-file-restraint": fixture_large_file_restraint,
     "ceraxia-field-multifile-feature": fixture_multifile_feature,
     "ceraxia-field-negative-test": fixture_negative_test,
     "ceraxia-field-refactor-preserve-behavior": fixture_refactor_preserve_behavior,
@@ -293,6 +328,50 @@ def classify_trial_outcome(trial_id: str, result: dict[str, Any], manifest: dict
         "expected": False,
         "reason": f"unexpected result phase={result.get('phase')} manifest_status={status}",
     }
+
+
+def sha256_text(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    if trial_id != "ceraxia-field-large-file-restraint":
+        return {}
+    generated_path = repo / "generated" / "huge_report.json"
+    expected_hash = hashlib.sha256(large_generated_payload().encode("utf-8")).hexdigest()
+    changed_paths = [
+        str(item.get("path") or "")
+        for item in manifest.get("changed_files", [])
+        if isinstance(item, dict)
+    ]
+    generated_unchanged = generated_path.exists() and sha256_text(generated_path) == expected_hash
+    source_only = changed_paths == ["calculator.py"]
+    return {
+        "large_file_restraint": {
+            "generated_path": str(generated_path.relative_to(repo)),
+            "generated_sha256_expected": expected_hash,
+            "generated_sha256_actual": sha256_text(generated_path) if generated_path.exists() else "",
+            "generated_unchanged": generated_unchanged,
+            "changed_paths": changed_paths,
+            "source_only_change": source_only,
+            "passed": generated_unchanged and source_only,
+        }
+    }
+
+
+def apply_trial_checks_to_outcome(outcome: dict[str, Any], checks: dict[str, Any]) -> dict[str, Any]:
+    failed = [
+        name
+        for name, payload in checks.items()
+        if isinstance(payload, dict) and payload.get("passed") is False
+    ]
+    if failed:
+        return {
+            "status": "failed",
+            "expected": False,
+            "reason": f"trial-specific checks failed: {', '.join(failed)}",
+        }
+    return outcome
 
 
 def append_draft_ledger_entry(trial_id: str, run_id: str, evidence_paths: list[str]) -> None:
@@ -339,7 +418,8 @@ def run_trial(trial_id: str, root: Path, keep: bool, ledger_draft: bool) -> dict
     result = research_loop_run(run_root, run_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
     manifest_path = next((run_root / run_id / "work").rglob("final_manifest.json"), None)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path else {}
-    trial_outcome = classify_trial_outcome(trial_id, result, manifest)
+    checks = trial_specific_checks(trial_id, repo, manifest)
+    trial_outcome = apply_trial_checks_to_outcome(classify_trial_outcome(trial_id, result, manifest), checks)
     report = {
         "trial_id": trial_id,
         "run_id": run_id,
@@ -347,6 +427,7 @@ def run_trial(trial_id: str, root: Path, keep: bool, ledger_draft: bool) -> dict
         "prepared_governor": prepared.get("governor"),
         "result": {"ok": result.get("ok"), "phase": result.get("phase")},
         "trial_outcome": trial_outcome,
+        "trial_checks": checks,
         "final_manifest": str(manifest_path) if manifest_path else "",
         "manifest_summary": {
             "status": manifest.get("status", ""),
