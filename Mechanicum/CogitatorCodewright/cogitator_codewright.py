@@ -800,6 +800,46 @@ def imported_symbol_map_from_tree(tree: ast.Module) -> dict[str, dict[str, str]]
     return imports
 
 
+def test_function_nodes_from_tree(tree: ast.Module) -> list[tuple[str, ast.FunctionDef]]:
+    functions: list[tuple[str, ast.FunctionDef]] = []
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test"):
+            functions.append(("", node))
+        if isinstance(node, ast.ClassDef):
+            for child in node.body:
+                if isinstance(child, ast.FunctionDef) and child.name.startswith("test"):
+                    functions.append((node.name, child))
+    return functions
+
+
+def assertion_call_nodes(func_node: ast.FunctionDef) -> list[dict[str, Any]]:
+    assertions: list[dict[str, Any]] = []
+    for node in ast.walk(func_node):
+        if isinstance(node, ast.Call):
+            method = call_symbol_name(node.func)
+            if method not in {"assertEqual", "assertNotEqual", "assertTrue", "assertFalse"}:
+                continue
+            assertions.append(
+                {
+                    "assertion": method,
+                    "actual_node": node.args[0] if node.args else None,
+                    "expected_node": node.args[1] if method in {"assertEqual", "assertNotEqual"} and len(node.args) > 1 else None,
+                }
+            )
+        if isinstance(node, ast.Assert) and isinstance(node.test, ast.Compare) and len(node.test.ops) == 1 and len(node.test.comparators) == 1:
+            operator = node.test.ops[0]
+            if not isinstance(operator, (ast.Eq, ast.NotEq)):
+                continue
+            assertions.append(
+                {
+                    "assertion": "assertEqual" if isinstance(operator, ast.Eq) else "assertNotEqual",
+                    "actual_node": node.test.left,
+                    "expected_node": node.test.comparators[0],
+                }
+            )
+    return assertions[:20]
+
+
 def test_symbol_links_from_goal(repo_root: Path, goal: str) -> list[dict[str, Any]]:
     links: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str, str]] = set()
@@ -812,37 +852,33 @@ def test_symbol_links_from_goal(repo_root: Path, goal: str) -> list[dict[str, An
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         imports = imported_symbol_map_from_tree(tree)
-        for class_node in [item for item in tree.body if isinstance(item, ast.ClassDef)]:
-            for func_node in [item for item in class_node.body if isinstance(item, ast.FunctionDef) and item.name.startswith("test")]:
-                for call in [item for item in ast.walk(func_node) if isinstance(item, ast.Call)]:
-                    method = call_symbol_name(call.func)
-                    if method not in {"assertEqual", "assertNotEqual", "assertTrue", "assertFalse"}:
-                        continue
-                    actual_node = call.args[0] if call.args else None
-                    actual_symbol = call_symbol_name(actual_node)
-                    imported = imports.get(actual_symbol)
-                    if not imported:
-                        continue
-                    expected_node = call.args[1] if method in {"assertEqual", "assertNotEqual"} and len(call.args) > 1 else None
-                    key = (test_path, func_node.name, imported["source_path"], imported["imported_symbol"])
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    links.append(
-                        {
-                            "test_path": test_path,
-                            "test_class": class_node.name,
-                            "test_function": func_node.name,
-                            "assertion": method,
-                            "actual_expression": literal_preview(actual_node),
-                            "expected_expression": literal_preview(expected_node),
-                            "imported_symbol": imported["imported_symbol"],
-                            "local_symbol": imported["local_symbol"],
-                            "source_module": imported["module"],
-                            "source_path": imported["source_path"],
-                            "source_exists": safe_repo_path(repo_root, imported["source_path"]).exists(),
-                        }
-                    )
+        for class_name, func_node in test_function_nodes_from_tree(tree):
+            for assertion in assertion_call_nodes(func_node):
+                actual_node = assertion.get("actual_node")
+                actual_symbol = call_symbol_name(actual_node) if isinstance(actual_node, ast.AST) else ""
+                imported = imports.get(actual_symbol)
+                if not imported:
+                    continue
+                expected_node = assertion.get("expected_node")
+                key = (test_path, func_node.name, imported["source_path"], imported["imported_symbol"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                links.append(
+                    {
+                        "test_path": test_path,
+                        "test_class": class_name,
+                        "test_function": func_node.name,
+                        "assertion": assertion.get("assertion", ""),
+                        "actual_expression": literal_preview(actual_node if isinstance(actual_node, ast.AST) else None),
+                        "expected_expression": literal_preview(expected_node if isinstance(expected_node, ast.AST) else None),
+                        "imported_symbol": imported["imported_symbol"],
+                        "local_symbol": imported["local_symbol"],
+                        "source_module": imported["module"],
+                        "source_path": imported["source_path"],
+                        "source_exists": safe_repo_path(repo_root, imported["source_path"]).exists(),
+                    }
+                )
     return links[:50]
 
 

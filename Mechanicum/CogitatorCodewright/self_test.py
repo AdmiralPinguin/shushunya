@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from cogitator_codewright import run
+from cogitator_codewright import run, test_symbol_links_from_goal
 
 
 def role_policy(step_id: str) -> dict:
@@ -529,6 +529,29 @@ def main() -> int:
         final = run_pipeline(root)
         if final.get("status") != "blocked" or final.get("next_safe_action") != "handoff_to_patch_worker":
             raise AssertionError(f"final manifest should refuse code completion without source mutation: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "maths.py").write_text("def double(value):\n    return value * 2\n", encoding="utf-8")
+        (target_repo / "test_maths.py").write_text(
+            "from maths import double\n\n"
+            "def test_double():\n"
+            "    assert double(4) == 8\n",
+            encoding="utf-8",
+        )
+        links = test_symbol_links_from_goal(target_repo, "`test_maths.py`")
+        if not any(
+            item.get("test_class") == ""
+            and item.get("test_function") == "test_double"
+            and item.get("assertion") == "assertEqual"
+            and item.get("imported_symbol") == "double"
+            and item.get("source_path") == "maths.py"
+            and item.get("expected_expression") == "8"
+            for item in links
+            if isinstance(item, dict)
+        ):
+            raise AssertionError(f"top-level assert tests should link to imported source symbols: {links}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
