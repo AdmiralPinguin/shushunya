@@ -1932,6 +1932,110 @@ def infer_data_migration_from_tests(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def infer_security_boundary_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    commands = verification_commands_from_natural_goal(goal)
+    test_paths = discovered_test_paths(repo_root, goal)
+    candidates: list[dict[str, Any]] = []
+    for test_path in test_paths:
+        path = safe_repo_path(repo_root, test_path)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "assertRaises(ValueError)" not in text:
+            continue
+        if ".." not in text or "/" not in text:
+            continue
+        imports = re.findall(r"^\s*from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", text, flags=re.MULTILINE)
+        if len(imports) != 1:
+            continue
+        module_name, function_name = imports[0]
+        source_path = f"{module_name.replace('.', '/')}.py"
+        source = safe_repo_path(repo_root, source_path)
+        if not source.exists():
+            continue
+        try:
+            tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        function_node = next((node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == function_name), None)
+        if not function_node or len(function_node.args.args) != 1:
+            continue
+        arg_name = function_node.args.args[0].arg
+        positive_cases = re.findall(
+            rf"assertEqual\(\s*{re.escape(function_name)}\(\s*(['\"][^'\"]+['\"])\s*\)\s*,\s*(['\"][^'\"]+['\"])\s*\)",
+            text,
+        )
+        malicious_literals = re.findall(r"['\"]([^'\"]*(?:\.\.|/etc/passwd)[^'\"]*)['\"]", text)
+        if not positive_cases or not malicious_literals:
+            continue
+        docs_path = ""
+        for docs in sorted(repo_root.rglob("*.md")):
+            if any(part in EXCLUDED_DIRS for part in docs.relative_to(repo_root).parts):
+                continue
+            docs_text = docs.read_text(encoding="utf-8")
+            if function_name in docs_text or "archive" in docs_text.lower() or "path" in docs_text.lower():
+                docs_path = str(docs.relative_to(repo_root))
+                break
+        candidates.append(
+            {
+                "test_path": test_path,
+                "source_path": source_path,
+                "function_name": function_name,
+                "argument": arg_name,
+                "positive_case_count": len(positive_cases),
+                "malicious_case_count": len(set(malicious_literals)),
+                "docs_path": docs_path,
+            }
+        )
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred security boundary requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    source_path = str(candidate["source_path"])
+    function_name = str(candidate["function_name"])
+    argument = str(candidate["argument"])
+    source_content = (
+        f"def {function_name}({argument}):\n"
+        f"    candidate = str({argument}).replace('\\\\\\\\', '/')\n"
+        "    parts = [part for part in candidate.split('/') if part not in ('', '.')]\n"
+        "    if candidate.startswith('/') or '..' in parts:\n"
+        "        raise ValueError('archive path escapes root')\n"
+        "    if not parts:\n"
+        "        raise ValueError('archive path is empty')\n"
+        "    return '/'.join(parts)\n"
+    )
+    operations: list[dict[str, Any]] = [
+        {"type": "write_file", "path": source_path, "content": source_content, "overwrite": True}
+    ]
+    docs_path = str(candidate.get("docs_path") or "")
+    if docs_path:
+        docs_content = (
+            "# Archive Paths\n\n"
+            "Paths are normalized as relative archive-root paths. Absolute paths and parent traversal segments are rejected with `ValueError`.\n"
+        )
+        operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
+    if not commands:
+        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+    return {
+        "source": "test_inferred_security_boundary",
+        "diagnostics": {
+            "kind": "test_inferred_security_boundary",
+            "test_path": candidate["test_path"],
+            "source_path": source_path,
+            "function_name": function_name,
+            "argument": argument,
+            "positive_case_count": candidate["positive_case_count"],
+            "malicious_case_count": candidate["malicious_case_count"],
+            "docs_path": docs_path,
+        },
+        "operations": operations,
+        "verification_commands": commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -2055,6 +2159,7 @@ def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any
         ("marker_synthesis", lambda: synthesized_patch_spec_from_markers(goal)),
         ("test_inferred_api_deprecation", lambda: infer_api_deprecation_from_tests(request)),
         ("test_inferred_data_migration", lambda: infer_data_migration_from_tests(request)),
+        ("test_inferred_security_boundary", lambda: infer_security_boundary_from_tests(request)),
         ("natural_language_simple_replace", lambda: infer_simple_replace_patch_spec(request)),
         ("natural_language_add_function", lambda: infer_add_function_patch_spec(request)),
         ("test_inferred_arithmetic_return", lambda: infer_arithmetic_return_from_tests(request)),

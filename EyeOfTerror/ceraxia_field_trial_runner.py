@@ -801,6 +801,46 @@ def fixture_expert_unshaped_data_migration(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_security_boundary(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "docs").mkdir(parents=True, exist_ok=True)
+    (repo / "archive_paths.py").write_text(
+        "def safe_archive_path(raw):\n"
+        "    return str(raw)\n",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "archive_paths.md").write_text(
+        "# Archive Paths\n\n"
+        "Archive paths must stay inside the archive root while allowing ordinary relative paths.\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_archive_paths.py").write_text(
+        "import unittest\n"
+        "from archive_paths import safe_archive_path\n\n"
+        "class ArchivePathsTest(unittest.TestCase):\n"
+        "    def test_valid_relative_paths_are_normalized(self):\n"
+        "        self.assertEqual(safe_archive_path('books/chapter1.txt'), 'books/chapter1.txt')\n"
+        "        self.assertEqual(safe_archive_path('./books//chapter2.txt'), 'books/chapter2.txt')\n\n"
+        "    def test_traversal_and_absolute_paths_are_rejected(self):\n"
+        "        for raw in ('../secret.txt', '/etc/passwd', 'books/../../secret.txt'):\n"
+        "            with self.subTest(raw=raw):\n"
+        "                with self.assertRaises(ValueError):\n"
+        "                    safe_archive_path(raw)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured security marker: исправь path traversal boundary. "
+        "Выведи контракт из tests и docs: абсолютные пути и parent traversal должны отклоняться, "
+        "обычные относительные пути должны нормализоваться и продолжать работать.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_archive_paths\n"
+        "CERAXIA_VERIFY: python -m py_compile archive_paths.py\n"
+    )
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
@@ -814,6 +854,7 @@ FIXTURES = {
     "ceraxia-expert-security-boundary": fixture_expert_security_boundary,
     "ceraxia-expert-unshaped-api-evolution": fixture_expert_unshaped_api_evolution,
     "ceraxia-expert-unshaped-data-migration": fixture_expert_unshaped_data_migration,
+    "ceraxia-expert-unshaped-security-boundary": fixture_expert_unshaped_security_boundary,
     "ceraxia-field-integration-contract": fixture_integration_contract,
     "ceraxia-field-large-file-restraint": fixture_large_file_restraint,
     "ceraxia-field-multifile-feature": fixture_multifile_feature,
@@ -1055,6 +1096,42 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and "total_amount" in docs_text
                     and str(manifest.get("patch_source") or "") not in {
                         "data_migration_marker_synthesis",
+                        "multi_file_marker_synthesis",
+                        "explicit_json_patch",
+                    }
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-unshaped-security-boundary":
+        source_path = repo / "archive_paths.py"
+        test_path = repo / "tests" / "test_archive_paths.py"
+        docs_path = repo / "docs" / "archive_paths.md"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        return {
+            "expert_unshaped_security_boundary": {
+                "rejects_parent_traversal": "'..' in parts" in source_text,
+                "rejects_absolute": "startswith('/')" in source_text,
+                "normalizes_relative_path": "'/'.join(parts)" in source_text,
+                "tests_malicious_inputs": "../secret.txt" in test_text and "/etc/passwd" in test_text,
+                "tests_valid_edges": "./books//chapter2.txt" in test_text,
+                "docs_security_boundary": "archive root" in docs_text.lower() or "traversal" in docs_text.lower(),
+                "not_marker_synthesized": str(manifest.get("patch_source") or "") not in {
+                    "edge_fix_marker_synthesis",
+                    "multi_file_marker_synthesis",
+                    "explicit_json_patch",
+                },
+                "passed": (
+                    "'..' in parts" in source_text
+                    and "startswith('/')" in source_text
+                    and "'/'.join(parts)" in source_text
+                    and "../secret.txt" in test_text
+                    and "/etc/passwd" in test_text
+                    and "./books//chapter2.txt" in test_text
+                    and ("archive root" in docs_text.lower() or "traversal" in docs_text.lower())
+                    and str(manifest.get("patch_source") or "") not in {
+                        "edge_fix_marker_synthesis",
                         "multi_file_marker_synthesis",
                         "explicit_json_patch",
                     }

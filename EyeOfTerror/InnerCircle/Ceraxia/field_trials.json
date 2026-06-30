@@ -598,6 +598,38 @@
         "edits tests instead of source",
         "does not explain old/new field inference"
       ]
+    },
+    {
+      "id": "ceraxia-expert-unshaped-security-boundary",
+      "class": "expert_unshaped_security",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "multi_file_reasoning",
+        "patch_correctness",
+        "verification_discipline",
+        "self_repair",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Fix a path traversal boundary without a structured patch marker. Infer the normalization and rejection contract from malicious and valid path tests, preserve legitimate relative paths, and document the security assumptions.",
+      "required_evidence": [
+        "baseline failing malicious-input tests",
+        "source boundary function inspected",
+        "tests distinguish malicious and legitimate paths",
+        "source rejects absolute and parent traversal paths",
+        "source preserves normalized legitimate relative paths",
+        "post-fix verification output"
+      ],
+      "failure_modes_to_watch": [
+        "requires a structured edge-fix marker",
+        "uses fragile substring filtering",
+        "blocks legitimate relative paths",
+        "edits tests instead of source",
+        "claims security without audit notes"
+      ]
     }
   ],
   "ledger_template": {

@@ -134,6 +134,13 @@ CERAXIA_VERIFY: python -m py_compile service/records.py
 """
 
 
+def test_inferred_security_boundary_goal() -> str:
+    return """кодовая задача без structured security marker: исправь path traversal boundary. Выведи контракт из tests и docs: malicious absolute/parent paths reject, valid relative paths normalize.
+CERAXIA_VERIFY: python -m unittest tests.test_archive_paths
+CERAXIA_VERIFY: python -m py_compile archive_paths.py
+"""
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -990,6 +997,53 @@ def main() -> int:
         records = (target_repo / "service" / "records.py").read_text(encoding="utf-8")
         if "'amount' in record" not in records or "'total_amount' in record" not in records or "def serialize_record" not in records:
             raise AssertionError("data migration inference did not preserve reader compatibility and writer output")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "tests").mkdir()
+        (target_repo / "docs").mkdir()
+        (target_repo / "archive_paths.py").write_text(
+            "def safe_archive_path(raw):\n"
+            "    return str(raw)\n",
+            encoding="utf-8",
+        )
+        (target_repo / "docs" / "archive_paths.md").write_text(
+            "# Archive Paths\n\nArchive paths must remain inside the archive root.\n",
+            encoding="utf-8",
+        )
+        (target_repo / "tests" / "test_archive_paths.py").write_text(
+            "import unittest\n"
+            "from archive_paths import safe_archive_path\n\n"
+            "class ArchivePathsTest(unittest.TestCase):\n"
+            "    def test_valid_relative_paths_are_normalized(self):\n"
+            "        self.assertEqual(safe_archive_path('books/chapter1.txt'), 'books/chapter1.txt')\n"
+            "        self.assertEqual(safe_archive_path('./books//chapter2.txt'), 'books/chapter2.txt')\n\n"
+            "    def test_traversal_and_absolute_paths_are_rejected(self):\n"
+            "        for raw in ('../secret.txt', '/etc/passwd', 'books/../../secret.txt'):\n"
+            "            with self.subTest(raw=raw):\n"
+            "                with self.assertRaises(ValueError):\n"
+            "                    safe_archive_path(raw)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=test_inferred_security_boundary_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready" or final.get("patch_source") != "test_inferred_security_boundary":
+            raise AssertionError(f"security boundary should be inferred from tests without marker: {final}")
+        diagnostics = final.get("diagnostics", {})
+        if (
+            diagnostics.get("function_name") != "safe_archive_path"
+            or diagnostics.get("source_path") != "archive_paths.py"
+            or diagnostics.get("malicious_case_count", 0) < 2
+        ):
+            raise AssertionError(f"security boundary diagnostics should identify threat surface: {final}")
+        archive_paths = (target_repo / "archive_paths.py").read_text(encoding="utf-8")
+        docs = (target_repo / "docs" / "archive_paths.md").read_text(encoding="utf-8")
+        if "'..' in parts" not in archive_paths or "startswith('/')" not in archive_paths or "'/'.join(parts)" not in archive_paths:
+            raise AssertionError("security boundary inference did not reject traversal and normalize relative paths")
+        if "archive-root" not in docs and "archive root" not in docs:
+            raise AssertionError("security boundary inference did not update audit docs")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
