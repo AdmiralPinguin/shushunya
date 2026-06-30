@@ -1559,6 +1559,16 @@ def main() -> int:
             or ast_plan.get("planned_operations", [{}])[0].get("function_name") != "max_daily_exports"
         ):
             raise AssertionError(f"runtime diagnostic alias should preserve AST replacement plan: {final}")
+        repair_plan = final.get("unshaped_repair_plan", {})
+        if (
+            repair_plan.get("patch_operations", [{}])[0].get("type") != "replace_return_expression"
+            or repair_plan.get("patch_operations", [{}])[0].get("old_expression") != "1"
+            or repair_plan.get("patch_operations", [{}])[0].get("new_expression") != "7"
+            or repair_plan.get("runtime_evidence", {}).get("runtime_minimal_patch_candidates", [{}])[0].get("function_name") != "max_daily_exports"
+            or repair_plan.get("proof_plan", {}).get("runtime_diagnostic_required") is not True
+            or repair_plan.get("proof_plan", {}).get("ast_patch_plan_required") is not True
+        ):
+            raise AssertionError(f"runtime diagnostic alias should preserve an actionable unshaped repair plan: {final}")
         if "return 7" not in quota.read_text(encoding="utf-8"):
             raise AssertionError("runtime diagnostic alias task did not patch the source return expression")
     with tempfile.TemporaryDirectory() as temp_dir:

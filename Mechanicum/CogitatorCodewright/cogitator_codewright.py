@@ -1121,6 +1121,38 @@ def survey_source_candidates_from_payload(survey: dict[str, Any]) -> list[str]:
     return candidates
 
 
+def patch_operation_plan_items(patch_spec: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    operations = patch_spec.get("operations") if isinstance(patch_spec.get("operations"), list) else []
+    for operation in operations:
+        if not isinstance(operation, dict):
+            continue
+        op_type = str(operation.get("type") or "")
+        item = {
+            "type": op_type,
+            "path": operation.get("path", ""),
+        }
+        for key in ("function_name", "old_expression", "new_expression", "old", "new"):
+            if key in operation:
+                item[key] = operation.get(key)
+        items.append(item)
+    return items
+
+
+def runtime_evidence_from_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]:
+    runtime = diagnostics.get("runtime_diagnostic_extraction") if isinstance(diagnostics.get("runtime_diagnostic_extraction"), dict) else {}
+    if not runtime:
+        return {}
+    return {
+        "runtime_failure_count": len(runtime.get("runtime_failures", [])) if isinstance(runtime.get("runtime_failures"), list) else 0,
+        "runtime_test_failure_count": len(runtime.get("runtime_test_failures", [])) if isinstance(runtime.get("runtime_test_failures"), list) else 0,
+        "runtime_minimal_patch_candidates": runtime.get("runtime_minimal_patch_candidates", [])[:5]
+        if isinstance(runtime.get("runtime_minimal_patch_candidates"), list)
+        else [],
+        "parser_coverage": runtime.get("parser_coverage", {}) if isinstance(runtime.get("parser_coverage"), dict) else {},
+    }
+
+
 def unshaped_repair_plan_from_resolution(
     request: dict[str, Any],
     survey: dict[str, Any],
@@ -1148,6 +1180,8 @@ def unshaped_repair_plan_from_resolution(
         if path not in source_paths:
             source_paths.append(path)
     static_hypotheses = static_diagnostic_hypotheses_from_candidates(candidates)
+    diagnostics = patch_spec.get("diagnostics") if isinstance(patch_spec.get("diagnostics"), dict) else {}
+    runtime_evidence = runtime_evidence_from_diagnostics(diagnostics)
     minimal_patch_candidates = [
         {
             "source": candidate.get("source", ""),
@@ -1155,6 +1189,8 @@ def unshaped_repair_plan_from_resolution(
             "operation_count": candidate.get("operation_count", 0),
             "verification_command_count": candidate.get("verification_command_count", 0),
             "diagnostics": candidate.get("diagnostics", {}),
+            "operations": patch_operation_plan_items(patch_spec) if candidate.get("status") == "selected" else [],
+            "runtime_evidence": runtime_evidence if candidate.get("status") == "selected" else {},
         }
         for candidate in candidates
         if isinstance(candidate, dict) and candidate.get("status") in {"selected", "blocked"}
@@ -1170,6 +1206,8 @@ def unshaped_repair_plan_from_resolution(
         "selected_candidate": selected,
         "files_to_read": source_paths[:20],
         "test_symbol_links": test_symbol_links,
+        "patch_operations": patch_operation_plan_items(patch_spec),
+        "runtime_evidence": runtime_evidence,
         "commands_to_run": patch_spec.get("verification_commands", [])
         if isinstance(patch_spec.get("verification_commands"), list)
         else [],
@@ -1182,6 +1220,8 @@ def unshaped_repair_plan_from_resolution(
             "source_must_change": True,
             "tests_must_not_be_edited_for_test_inferred_repairs": True,
             "test_to_source_linkage_required": is_unshaped_patch_source(patch_source),
+            "runtime_diagnostic_required": patch_source.startswith("runtime_diagnostic_"),
+            "ast_patch_plan_required": ast_patch_plan_required_for_source(patch_source),
             "review_gates": [
                 "diagnostic_linkage",
                 "test_symbol_linkage",
