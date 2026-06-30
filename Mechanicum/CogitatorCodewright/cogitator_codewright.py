@@ -421,6 +421,7 @@ def marker_block(text: str, marker: str) -> str:
         "\nCERAXIA_TARGET_REPO:",
         "\nCERAXIA_PATCH:",
         "\nCERAXIA_FEATURE:",
+        "\nCERAXIA_INTEGRATION_CONTRACT:",
         "\nCERAXIA_CONFIG_RUNTIME:",
         "\nCERAXIA_REFACTOR:",
         "\nCERAXIA_EDGE_FIX:",
@@ -1017,6 +1018,121 @@ def patch_spec_from_feature_marker(goal: str) -> dict[str, Any]:
     }
 
 
+def patch_spec_from_integration_contract_marker(goal: str) -> dict[str, Any]:
+    payload = extract_json_after_marker(goal, "CERAXIA_INTEGRATION_CONTRACT:")
+    if not payload:
+        return {}
+    contract_path = str(payload.get("contract_path") or "").strip()
+    implementation_path = str(payload.get("implementation_path") or "").strip()
+    caller_path = str(payload.get("caller_path") or "").strip()
+    test_path = str(payload.get("test_path") or "").strip()
+    report_path = str(payload.get("report_path") or "").strip()
+    function_name = str(payload.get("function_name") or "").strip()
+    caller_function = str(payload.get("caller_function") or "").strip()
+    response_field = str(payload.get("response_field") or "").strip()
+    expression = str(payload.get("return_expression") or "").strip()
+    required = [contract_path, implementation_path, caller_path, test_path, report_path, function_name, caller_function, response_field, expression]
+    if not all(required):
+        raise ValueError("CERAXIA_INTEGRATION_CONTRACT requires contract, implementation, caller, test, report, function, caller_function, response_field, and return_expression")
+    if not implementation_path.endswith(".py") or not caller_path.endswith(".py") or not test_path.endswith(".py"):
+        raise ValueError("CERAXIA_INTEGRATION_CONTRACT implementation, caller, and test paths must be Python files")
+    identifiers = [function_name, caller_function, response_field]
+    if not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item) for item in identifiers):
+        raise ValueError("CERAXIA_INTEGRATION_CONTRACT function and field names must be simple identifiers")
+    request_fields = payload.get("request_fields")
+    if not isinstance(request_fields, list) or not request_fields or not all(isinstance(item, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item) for item in request_fields):
+        raise ValueError("CERAXIA_INTEGRATION_CONTRACT request_fields must be a non-empty list of identifiers")
+    if "\n" in expression or not re.fullmatch(r"[A-Za-z0-9_ +\-*/().]+", expression):
+        raise ValueError("CERAXIA_INTEGRATION_CONTRACT return_expression must be a simple arithmetic expression")
+    test_cases = payload.get("test_cases")
+    if not isinstance(test_cases, list) or not test_cases:
+        raise ValueError("CERAXIA_INTEGRATION_CONTRACT test_cases must be a non-empty list")
+    contract_content = json.dumps(
+        {
+            "endpoint": function_name,
+            "request_fields": request_fields,
+            "response_fields": [response_field],
+            "caller": caller_function,
+        },
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n"
+    assignments = "".join(f"    {field} = payload['{field}']\n" for field in request_fields)
+    implementation_content = (
+        f"def {function_name}(payload):\n"
+        f"{assignments}"
+        f"    return {{'{response_field}': {expression}}}\n"
+    )
+    implementation_module = implementation_path[:-3].replace("/", ".")
+    caller_args = ", ".join(request_fields)
+    caller_payload = ", ".join(f"'{field}': {field}" for field in request_fields)
+    caller_content = (
+        f"from {implementation_module} import {function_name}\n\n"
+        f"def {caller_function}({caller_args}):\n"
+        f"    return {function_name}({{{caller_payload}}})['{response_field}']\n"
+    )
+    rendered_cases: list[str] = []
+    for index, item in enumerate(test_cases):
+        if not isinstance(item, dict):
+            raise ValueError(f"CERAXIA_INTEGRATION_CONTRACT test case {index} must be an object")
+        inputs = item.get("inputs")
+        expected = item.get("expected")
+        if not isinstance(inputs, dict) or set(inputs) != set(request_fields):
+            raise ValueError(f"CERAXIA_INTEGRATION_CONTRACT test case {index} inputs must match request_fields")
+        if not all(isinstance(inputs[field], (int, float)) for field in request_fields) or not isinstance(expected, (int, float)):
+            raise ValueError(f"CERAXIA_INTEGRATION_CONTRACT test case {index} supports only numeric values")
+        payload_literal = "{" + ", ".join(f"{field!r}: {inputs[field]!r}" for field in request_fields) + "}"
+        args_literal = ", ".join(repr(inputs[field]) for field in request_fields)
+        rendered_cases.append(f"        self.assertEqual({function_name}({payload_literal})['{response_field}'], {expected!r})")
+        rendered_cases.append(f"        self.assertEqual({caller_function}({args_literal}), {expected!r})")
+    caller_module = caller_path[:-3].replace("/", ".")
+    class_name = "".join(part.capitalize() for part in function_name.split("_")) + "ContractTest"
+    test_content = (
+        f"import json\nimport unittest\nfrom pathlib import Path\nfrom {implementation_module} import {function_name}\nfrom {caller_module} import {caller_function}\n\n"
+        f"class {class_name}(unittest.TestCase):\n"
+        "    def test_contract_declares_response_field(self):\n"
+        f"        contract = json.loads(Path('{contract_path}').read_text(encoding='utf-8'))\n"
+        f"        self.assertIn('{response_field}', contract['response_fields'])\n\n"
+        "    def test_implementation_and_caller_follow_contract(self):\n"
+        + "\n".join(rendered_cases)
+        + "\n\nif __name__ == '__main__':\n    unittest.main()\n"
+    )
+    report_content = (
+        "# Integration Contract Update\n\n"
+        f"- Contract: `{contract_path}`\n"
+        f"- Implementation: `{implementation_path}`\n"
+        f"- Caller: `{caller_path}`\n"
+        f"- Tests: `{test_path}`\n"
+        f"- Response field: `{response_field}`\n"
+    )
+    verification_commands = payload.get("verification_commands")
+    if verification_commands is None:
+        verification_commands = [f"python -m unittest {test_path[:-3].replace('/', '.')}"]
+    if not isinstance(verification_commands, list) or not all(isinstance(item, str) for item in verification_commands):
+        raise ValueError("CERAXIA_INTEGRATION_CONTRACT verification_commands must be a list of strings")
+    return {
+        "source": "integration_contract_marker_synthesis",
+        "diagnostics": {
+            "kind": "integration_contract_marker_synthesis",
+            "contract_path": contract_path,
+            "implementation_path": implementation_path,
+            "caller_path": caller_path,
+            "test_path": test_path,
+            "report_path": report_path,
+            "request_fields": request_fields,
+            "response_field": response_field,
+        },
+        "operations": [
+            {"type": "write_file", "path": contract_path, "content": contract_content, "overwrite": True},
+            {"type": "write_file", "path": implementation_path, "content": implementation_content, "overwrite": True},
+            {"type": "write_file", "path": caller_path, "content": caller_content, "overwrite": True},
+            {"type": "write_file", "path": test_path, "content": test_content, "overwrite": True},
+            {"type": "write_file", "path": report_path, "content": report_content, "overwrite": True},
+        ],
+        "verification_commands": verification_commands,
+    }
+
+
 def patch_spec_from_config_runtime_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_CONFIG_RUNTIME:")
     if not payload:
@@ -1370,6 +1486,9 @@ def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
 
 
 def synthesized_patch_spec_from_markers(goal: str) -> dict[str, Any]:
+    integration_contract = patch_spec_from_integration_contract_marker(goal)
+    if integration_contract:
+        return integration_contract
     config_runtime = patch_spec_from_config_runtime_marker(goal)
     if config_runtime:
         return config_runtime

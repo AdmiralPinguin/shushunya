@@ -84,6 +84,7 @@ def main() -> int:
         "ceraxia-field-bugfix-unnamed-source",
         "ceraxia-field-cross-language-config",
         "ceraxia-field-data-migration",
+        "ceraxia-field-integration-contract",
         "ceraxia-field-large-file-restraint",
         "ceraxia-field-multifile-feature",
         "ceraxia-field-negative-test",
@@ -119,6 +120,12 @@ def main() -> int:
     )
     if repair_checked_outcome.get("status") != "failed" or repair_checked_outcome.get("expected") is not False:
         raise AssertionError(f"failed repair-specific check did not fail the trial: {repair_checked_outcome}")
+    integration_checked_outcome = apply_trial_checks_to_outcome(
+        {"status": "passed", "expected": True, "reason": "base outcome passed"},
+        {"integration_contract": {"passed": False}},
+    )
+    if integration_checked_outcome.get("status") != "failed" or integration_checked_outcome.get("expected") is not False:
+        raise AssertionError(f"failed integration-specific check did not fail the trial: {integration_checked_outcome}")
     required_phrases = [
         "A scripted self-test proves only that a known scenario still works.",
         "The real 7/10 target is met only when",

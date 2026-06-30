@@ -313,6 +313,30 @@ CERAXIA_DATA_MIGRATION:
 """
 
 
+def integration_contract_goal() -> str:
+    return """обнови локальный API contract, implementation, caller, tests и summary
+
+CERAXIA_INTEGRATION_CONTRACT:
+{
+  "contract_path": "contracts/invoice.json",
+  "implementation_path": "api/invoice_service.py",
+  "caller_path": "client/invoice_client.py",
+  "test_path": "tests/test_invoice_contract.py",
+  "report_path": "reports/invoice_contract.md",
+  "function_name": "calculate_invoice",
+  "caller_function": "invoice_total",
+  "request_fields": ["gross", "fee"],
+  "response_field": "net_total",
+  "return_expression": "gross - fee",
+  "test_cases": [
+    {"inputs": {"gross": 100, "fee": 15}, "expected": 85},
+    {"inputs": {"gross": 80, "fee": 5}, "expected": 75}
+  ],
+  "verification_commands": ["python -m unittest tests.test_invoice_contract", "python -m py_compile api/invoice_service.py client/invoice_client.py"]
+}
+"""
+
+
 def repair_colon_goal() -> str:
     return """создай python файл и исправь если проверка найдет синтаксис
 
@@ -1045,6 +1069,32 @@ def main() -> int:
             raise AssertionError("data migration marker did not write compatibility tests")
         if final.get("verification_summary", {}).get("executed_count", 0) < 3:
             raise AssertionError(f"data migration final manifest should preserve verification evidence: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        final = run_pipeline(root / "work", goal=integration_contract_goal(), target_repo_root=target_repo)
+        expected_paths = {
+            "contracts/invoice.json",
+            "api/invoice_service.py",
+            "client/invoice_client.py",
+            "tests/test_invoice_contract.py",
+            "reports/invoice_contract.md",
+        }
+        changed_paths = {item.get("path") for item in final.get("changed_files", []) if isinstance(item, dict)}
+        diagnostics = final.get("diagnostics", {})
+        if final.get("status") != "ready" or final.get("patch_source") != "integration_contract_marker_synthesis":
+            raise AssertionError(f"integration contract marker task should be ready: {final}")
+        if changed_paths != expected_paths:
+            raise AssertionError(f"integration contract marker should touch contract/implementation/caller/test/report: {final}")
+        if diagnostics.get("response_field") != "net_total" or diagnostics.get("caller_path") != "client/invoice_client.py":
+            raise AssertionError(f"integration contract diagnostics should preserve contract evidence: {final}")
+        if "net_total" not in (target_repo / "contracts" / "invoice.json").read_text(encoding="utf-8"):
+            raise AssertionError("integration contract marker did not write response field to contract")
+        if "invoice_total" not in (target_repo / "client" / "invoice_client.py").read_text(encoding="utf-8"):
+            raise AssertionError("integration contract marker did not write caller")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 3:
+            raise AssertionError(f"integration contract final manifest should preserve verification evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

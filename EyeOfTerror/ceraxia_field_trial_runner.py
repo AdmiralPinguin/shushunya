@@ -310,11 +310,37 @@ CERAXIA_VERIFY: python -m py_compile repair_me.py
 """
 
 
+def fixture_integration_contract(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    return f"""кодовая задача: измени локальный API contract и синхронно обнови implementation, caller, tests и summary/reporting surface.
+CERAXIA_TARGET_REPO: {repo}
+CERAXIA_INTEGRATION_CONTRACT:
+{{
+  "contract_path": "contracts/invoice.json",
+  "implementation_path": "api/invoice_service.py",
+  "caller_path": "client/invoice_client.py",
+  "test_path": "tests/test_invoice_contract.py",
+  "report_path": "reports/invoice_contract.md",
+  "function_name": "calculate_invoice",
+  "caller_function": "invoice_total",
+  "request_fields": ["gross", "fee"],
+  "response_field": "net_total",
+  "return_expression": "gross - fee",
+  "test_cases": [
+    {{"inputs": {{"gross": 100, "fee": 15}}, "expected": 85}},
+    {{"inputs": {{"gross": 80, "fee": 5}}, "expected": 75}}
+  ],
+  "verification_commands": ["python -m unittest tests.test_invoice_contract", "python -m py_compile api/invoice_service.py client/invoice_client.py"]
+}}
+"""
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
     "ceraxia-field-cross-language-config": fixture_cross_language_config,
     "ceraxia-field-data-migration": fixture_data_migration,
+    "ceraxia-field-integration-contract": fixture_integration_contract,
     "ceraxia-field-large-file-restraint": fixture_large_file_restraint,
     "ceraxia-field-multifile-feature": fixture_multifile_feature,
     "ceraxia-field-negative-test": fixture_negative_test,
@@ -349,6 +375,36 @@ def sha256_text(path: Path) -> str:
 
 
 def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    if trial_id == "ceraxia-field-integration-contract":
+        expected_paths = {
+            "contracts/invoice.json",
+            "api/invoice_service.py",
+            "client/invoice_client.py",
+            "tests/test_invoice_contract.py",
+            "reports/invoice_contract.md",
+        }
+        changed_paths = {
+            str(item.get("path") or "")
+            for item in manifest.get("changed_files", [])
+            if isinstance(item, dict)
+        }
+        contract_path = repo / "contracts" / "invoice.json"
+        caller_path = repo / "client" / "invoice_client.py"
+        report_path = repo / "reports" / "invoice_contract.md"
+        contract_text = contract_path.read_text(encoding="utf-8") if contract_path.exists() else ""
+        caller_text = caller_path.read_text(encoding="utf-8") if caller_path.exists() else ""
+        report_text = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+        return {
+            "integration_contract": {
+                "expected_paths": sorted(expected_paths),
+                "changed_paths": sorted(changed_paths),
+                "all_surfaces_changed": changed_paths == expected_paths,
+                "contract_has_response_field": "net_total" in contract_text,
+                "caller_uses_contract_response": "['net_total']" in caller_text,
+                "report_names_contract": "contracts/invoice.json" in report_text,
+                "passed": changed_paths == expected_paths and "net_total" in contract_text and "['net_total']" in caller_text and "contracts/invoice.json" in report_text,
+            }
+        }
     if trial_id == "ceraxia-field-repair-after-bad-first-patch":
         repair_me = repo / "repair_me.py"
         verification = manifest.get("verification_summary") if isinstance(manifest.get("verification_summary"), dict) else {}

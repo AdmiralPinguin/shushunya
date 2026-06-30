@@ -1,0 +1,337 @@
+{
+  "status": "applied",
+  "mode": "explicit_patch_apply",
+  "task_id": "ceraxia-field-integration-contract-20260630-161059:implementation",
+  "summary": "Ceraxia applied explicit patch operations.",
+  "intended_actions": [
+    "read concrete target files before editing",
+    "apply minimal scoped patch",
+    "run verification commands from verification_report.json",
+    "return focused revision steps on failure"
+  ],
+  "plan_excerpt": "# Ceraxia Change Plan\n\nGoal: кодовая задача: измени локальный API contract и синхронно обнови implementation, caller, tests и summary/reporting surface.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-field-integration-contract-20260630-161059/fixture/repo\nCERAXIA_INTEGRATION_CONTRACT:\n{\n  \"contract_path\": \"contracts/invoice.json\",\n  \"implementation_path\": \"api/invoice_service.py\",\n  \"caller_path\": \"client/invoice_client.py\",\n  \"test_path\": \"tests/test_invoice_contract.py\",\n  \"report_path\": \"reports/invoice_contract.md\",\n  \"function_name\": \"calculate_invoice\",\n  \"caller_function\": \"invoice_total\",\n  \"request_fields\": [\"gross\", \"fee\"],\n  \"response_field\": \"net_total\",\n  \"return_expression\": \"gross - fee\",\n  \"test_cases\": [\n    {\"inputs\": {\"gross\": 100, \"fee\": 15}, \"expected\": 85},\n    {\"inputs\": {\"gross\": 80, \"fee\": 5}, \"expected\": 75}\n  ],\n  \"verification_commands\": [\"python -m unittest tests.test_invoice_contract\", \"python -m py_compile api/invoice_service.py client/invoice_client.py\"]\n}\n\n## Scope\n- Inspect the named task and constrain edits to the smallest coherent module set.\n- Preserve user changes and expose blockers instead of guessing.\n\n## Candidate Files\n\n## Ranked Repo Map\n\n## Test Source Links\n\n## Recommended Read Order\n\n## Targeted Reading Plan\n\n## Hypothesis Log\n- [low] No strong source candidate was found from filenames, symbols, or tests. evidence=[repository map has no high-signal ranked files] risk=manual task clarification or broader survey may be required\n\n## Design Decision Seed\n- Prefer the smallest patch that satisfies the failing test or explicit user contract.\n- Inspect dependents before changing public functions or modules with reverse dependencies.\n- If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation.\n\n## File Impact Matrix\n\n## Risk Register\n- [high] no_ranked_source_candidate: block broad source mutation until a focused file or failing test identifies the target\n- [medium] no_test_surface_detected: require syntax checks and task-specific verification commands\n\n## Acceptance Criteria\n- requested_behavior_addressed: patch candidate selected from explicit contract, task text, or test evidence\n- source_scope_is_explained: changed files map back to repo survey or review warns about drift\n- changed_python_compiles: py_compile runs for changed Python files\n- task_verification_passes: requested or inferred verification commands return zero\n- review_has_no_blockers: code_review decision record approves final package\n\n## Test Strategy\n- fallback: python -m py_compile <changed .py files>\n- fallback: git diff --check\n\n## Test Surface\n\n## Python Symbol Surface\n\n## Suggested Verification\n\n## Implementation Policy\n- Produce an auditable patch manifest before mutating source files.\n- Require verification commands or explicit blockers before final readiness.\n\n## Task Profile\n- kinds: test_repair, api_contract, new_feature, bugfix\n- complexity: medium\n- risk: test_diagnost",
+  "role_policy": {
+    "role": "patchwright",
+    "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unsafe_overwrite",
+      "duplicate_function_append"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "api_contract",
+      "new_feature",
+      "bugfix"
+    ],
+    "complexity": "medium",
+    "complexity_score": 3,
+    "risk_flags": [
+      "test_diagnostic_required",
+      "public_contract_regression",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+      "API/contract tasks must preserve public response shape and schema compatibility evidence"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "implementation",
+    "worker": "FerrumPatchwright",
+    "purpose": "Prepare an auditable patch manifest and implementation handoff for code changes.",
+    "brief": "Apply only explicit or safely inferred scoped patch operations.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "api_contract",
+        "new_feature",
+        "bugfix"
+      ],
+      "complexity": "medium",
+      "complexity_score": 3,
+      "risk_flags": [
+        "test_diagnostic_required",
+        "public_contract_regression",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+        "API/contract tasks must preserve public response shape and schema compatibility evidence"
+      ]
+    },
+    "must_produce": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "handoff_question": "What exactly changed, and what should verification run?",
+    "authority_boundary": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+  },
+  "dirty_worktree": {
+    "git_repo": false,
+    "dirty_targets": []
+  },
+  "ambiguity_analysis": {},
+  "patch_spec_present": true,
+  "patch_source": "integration_contract_marker_synthesis",
+  "patch_candidates": [
+    {
+      "source": "explicit_json_patch",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "marker_synthesis",
+      "status": "selected",
+      "operation_count": 5,
+      "verification_command_count": 2,
+      "diagnostics": {
+        "kind": "integration_contract_marker_synthesis",
+        "contract_path": "contracts/invoice.json",
+        "implementation_path": "api/invoice_service.py",
+        "caller_path": "client/invoice_client.py",
+        "test_path": "tests/test_invoice_contract.py",
+        "report_path": "reports/invoice_contract.md",
+        "request_fields": [
+          "gross",
+          "fee"
+        ],
+        "response_field": "net_total"
+      }
+    }
+  ],
+  "selected_patch_candidate": {
+    "source": "marker_synthesis",
+    "status": "selected",
+    "operation_count": 5,
+    "verification_command_count": 2,
+    "diagnostics": {
+      "kind": "integration_contract_marker_synthesis",
+      "contract_path": "contracts/invoice.json",
+      "implementation_path": "api/invoice_service.py",
+      "caller_path": "client/invoice_client.py",
+      "test_path": "tests/test_invoice_contract.py",
+      "report_path": "reports/invoice_contract.md",
+      "request_fields": [
+        "gross",
+        "fee"
+      ],
+      "response_field": "net_total"
+    }
+  },
+  "source_excerpt_pack": [],
+  "source_excerpt_summary": [],
+  "implementation_decision_record": [
+    {
+      "check": "source_evidence_loaded",
+      "status": "warn",
+      "detail": "0 targeted files read"
+    },
+    {
+      "check": "patch_candidate_selected",
+      "status": "pass",
+      "detail": "marker_synthesis"
+    },
+    {
+      "check": "mutation_authority",
+      "status": "pass",
+      "detail": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+    }
+  ],
+  "diagnostics": {
+    "kind": "integration_contract_marker_synthesis",
+    "contract_path": "contracts/invoice.json",
+    "implementation_path": "api/invoice_service.py",
+    "caller_path": "client/invoice_client.py",
+    "test_path": "tests/test_invoice_contract.py",
+    "report_path": "reports/invoice_contract.md",
+    "request_fields": [
+      "gross",
+      "fee"
+    ],
+    "response_field": "net_total"
+  },
+  "operation_count": 5,
+  "changed_files": [
+    {
+      "path": "contracts/invoice.json",
+      "operation": "write_file",
+      "created": true,
+      "before_sha256": "",
+      "after_sha256": "027bc9295ed8dc9d14ff81e3461abbae0b1528c7d3d610a47b2a97f9bdc5b345",
+      "changed": true
+    },
+    {
+      "path": "api/invoice_service.py",
+      "operation": "write_file",
+      "created": true,
+      "before_sha256": "",
+      "after_sha256": "04d49ff5cb196e106839a024f524d43510c2c9b36fcb2ea9f19dda80a5d4517d",
+      "changed": true
+    },
+    {
+      "path": "client/invoice_client.py",
+      "operation": "write_file",
+      "created": true,
+      "before_sha256": "",
+      "after_sha256": "bc5c8f4ed6306c595acfc051946da7cf62c0e30587fd0939175ec99dccc8f416",
+      "changed": true
+    },
+    {
+      "path": "tests/test_invoice_contract.py",
+      "operation": "write_file",
+      "created": true,
+      "before_sha256": "",
+      "after_sha256": "972c44d2e2e2ffbe201b3e3d287f7ebde074c89ac6b0038e425b9725254cb71c",
+      "changed": true
+    },
+    {
+      "path": "reports/invoice_contract.md",
+      "operation": "write_file",
+      "created": true,
+      "before_sha256": "",
+      "after_sha256": "80e635b369da1cf41a30b84c014f7b6bc3dee5ac9602f2b041707e05b426584b",
+      "changed": true
+    }
+  ],
+  "recommended_read_order": [],
+  "engineering_readiness": {
+    "impact_matrix": [],
+    "risk_register": [
+      {
+        "risk": "no_ranked_source_candidate",
+        "severity": "high",
+        "mitigation": "block broad source mutation until a focused file or failing test identifies the target"
+      },
+      {
+        "risk": "no_test_surface_detected",
+        "severity": "medium",
+        "mitigation": "require syntax checks and task-specific verification commands"
+      }
+    ],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [],
+      "linked_test_targets": [],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": false,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 1
+    }
+  },
+  "patch_scope_evidence": {
+    "changed_files_in_repo_map": [],
+    "changed_files_outside_repo_map": [
+      "contracts/invoice.json",
+      "api/invoice_service.py",
+      "client/invoice_client.py",
+      "tests/test_invoice_contract.py",
+      "reports/invoice_contract.md"
+    ],
+    "changed_sources_with_linked_tests": [],
+    "changed_tests_with_linked_sources": [],
+    "evidence": [
+      {
+        "path": "contracts/invoice.json",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      },
+      {
+        "path": "api/invoice_service.py",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      },
+      {
+        "path": "client/invoice_client.py",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      },
+      {
+        "path": "tests/test_invoice_contract.py",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      },
+      {
+        "path": "reports/invoice_contract.md",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      }
+    ]
+  },
+  "rollback": {
+    "applied": false,
+    "files": []
+  },
+  "verification_commands": [
+    "python -m unittest tests.test_invoice_contract",
+    "python -m py_compile api/invoice_service.py client/invoice_client.py"
+  ],
+  "blockers": [],
+  "warnings": [
+    "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker."
+  ]
+}
