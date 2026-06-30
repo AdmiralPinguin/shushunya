@@ -3073,6 +3073,26 @@ def compact_manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:
         "revision_focus": manifest.get("revision_focus", {}),
         "task_profile": manifest.get("task_profile", {}) if isinstance(manifest.get("task_profile"), dict) else {},
         "execution_report": manifest.get("execution_report", {}) if isinstance(manifest.get("execution_report"), dict) else {},
+        "engineering_investigation": {
+            "hypothesis_count": len(
+                manifest.get("engineering_investigation", {}).get("hypotheses", [])
+                if isinstance(manifest.get("engineering_investigation", {}), dict)
+                and isinstance(manifest.get("engineering_investigation", {}).get("hypotheses"), list)
+                else []
+            ),
+            "targeted_read_count": len(
+                manifest.get("engineering_investigation", {}).get("targeted_reading_plan", [])
+                if isinstance(manifest.get("engineering_investigation", {}), dict)
+                and isinstance(manifest.get("engineering_investigation", {}).get("targeted_reading_plan"), list)
+                else []
+            ),
+            "dependency_edge_count": int(
+                manifest.get("engineering_investigation", {}).get("dependency_graph", {}).get("edge_count") or 0
+            )
+            if isinstance(manifest.get("engineering_investigation", {}), dict)
+            and isinstance(manifest.get("engineering_investigation", {}).get("dependency_graph"), dict)
+            else 0,
+        },
         "patch_source": str(manifest.get("patch_source") or ""),
         "operation_count": int(manifest.get("operation_count") or 0),
         "verification_status": str(manifest.get("verification_status") or ""),

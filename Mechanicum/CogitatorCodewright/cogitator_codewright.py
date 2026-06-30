@@ -979,6 +979,7 @@ def python_file_summary(repo_root: Path, path: Path) -> dict[str, Any]:
     functions: list[str] = []
     classes: list[str] = []
     imports: list[str] = []
+    calls: list[str] = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             functions.append(node.name)
@@ -989,13 +990,140 @@ def python_file_summary(repo_root: Path, path: Path) -> dict[str, Any]:
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             imports.extend(f"{module}.{alias.name}" if module else alias.name for alias in node.names)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        target = node.func
+        if isinstance(target, ast.Name):
+            calls.append(target.id)
+        elif isinstance(target, ast.Attribute):
+            calls.append(target.attr)
     return {
         "path": rel,
         "module": python_module_name(rel),
         "functions": functions[:40],
         "classes": classes[:40],
         "imports": imports[:40],
+        "calls": sorted(set(calls))[:80],
     }
+
+
+def import_dependency_graph(python_symbols: list[dict[str, Any]]) -> dict[str, Any]:
+    modules_by_name = {
+        str(item.get("module") or ""): str(item.get("path") or "")
+        for item in python_symbols
+        if isinstance(item, dict) and item.get("module") and item.get("path")
+    }
+    edges: list[dict[str, str]] = []
+    reverse: dict[str, list[str]] = {}
+    for item in python_symbols:
+        if not isinstance(item, dict):
+            continue
+        source_path = str(item.get("path") or "")
+        imports = item.get("imports") if isinstance(item.get("imports"), list) else []
+        for imported in imports:
+            text = str(imported)
+            candidate_modules = [text, text.rsplit(".", 1)[0] if "." in text else text]
+            target_path = next((modules_by_name[module] for module in candidate_modules if module in modules_by_name), "")
+            if not target_path or target_path == source_path:
+                continue
+            edge = {"from": source_path, "to": target_path, "import": text}
+            if edge not in edges:
+                edges.append(edge)
+                reverse.setdefault(target_path, [])
+                if source_path not in reverse[target_path]:
+                    reverse[target_path].append(source_path)
+    return {
+        "edges": edges[:200],
+        "reverse_dependents": {key: value[:20] for key, value in sorted(reverse.items())[:80]},
+        "edge_count": len(edges),
+    }
+
+
+def call_graph_summary(python_symbols: list[dict[str, Any]]) -> dict[str, Any]:
+    function_defs: dict[str, str] = {}
+    for item in python_symbols:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        for name in item.get("functions", []) if isinstance(item.get("functions"), list) else []:
+            function_defs.setdefault(str(name), path)
+    edges: list[dict[str, str]] = []
+    for item in python_symbols:
+        if not isinstance(item, dict):
+            continue
+        source_path = str(item.get("path") or "")
+        for call in item.get("calls", []) if isinstance(item.get("calls"), list) else []:
+            target_path = function_defs.get(str(call), "")
+            if target_path and target_path != source_path:
+                edge = {"from": source_path, "to": target_path, "call": str(call)}
+                if edge not in edges:
+                    edges.append(edge)
+    return {
+        "edges": edges[:200],
+        "edge_count": len(edges),
+        "known_function_count": len(function_defs),
+    }
+
+
+def targeted_reading_plan(repo_map: dict[str, Any], dependency_graph: dict[str, Any]) -> list[dict[str, Any]]:
+    read_order = repo_map.get("recommended_read_order") if isinstance(repo_map.get("recommended_read_order"), list) else []
+    reverse = dependency_graph.get("reverse_dependents") if isinstance(dependency_graph.get("reverse_dependents"), dict) else {}
+    plan: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in read_order[:20]:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        dependents = [str(value) for value in reverse.get(path, [])] if isinstance(reverse.get(path), list) else []
+        plan.append(
+            {
+                "path": path,
+                "phase": item.get("phase", ""),
+                "reason": item.get("reason", ""),
+                "dependent_count": len(dependents),
+                "sample_dependents": dependents[:5],
+                "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+            }
+        )
+    return plan[:20]
+
+
+def engineering_hypotheses(goal: str, repo_map: dict[str, Any], dependency_graph: dict[str, Any]) -> list[dict[str, Any]]:
+    ranked = repo_map.get("ranked_files") if isinstance(repo_map.get("ranked_files"), list) else []
+    reverse = dependency_graph.get("reverse_dependents") if isinstance(dependency_graph.get("reverse_dependents"), dict) else {}
+    hypotheses: list[dict[str, Any]] = []
+    for item in ranked[:8]:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        if not path:
+            continue
+        reasons = item.get("reasons") if isinstance(item.get("reasons"), list) else []
+        dependents = reverse.get(path, []) if isinstance(reverse.get(path), list) else []
+        hypotheses.append(
+            {
+                "hypothesis": f"{path} is likely relevant to the requested code change.",
+                "confidence": "high" if int(item.get("score") or 0) >= 8 else "medium",
+                "evidence": reasons[:5],
+                "risk": "public behavior may affect dependents" if dependents else "local change risk appears limited",
+                "next_read": path,
+            }
+        )
+    if not hypotheses:
+        hypotheses.append(
+            {
+                "hypothesis": "No strong source candidate was found from filenames, symbols, or tests.",
+                "confidence": "low",
+                "evidence": ["repository map has no high-signal ranked files"],
+                "risk": "manual task clarification or broader survey may be required",
+                "next_read": "",
+            }
+        )
+    return hypotheses
 
 
 def suggested_verification_commands(test_files: list[str]) -> list[str]:
@@ -1037,6 +1165,11 @@ def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
         if goal_tokens & rel_tokens:
             candidate_files.append(rel)
     dominant_extensions = [{"extension": ext, "count": count} for ext, count in extension_counts.most_common(12)]
+    repo_map = build_repo_map(goal, candidate_files[:80], test_files[:80], python_symbols)
+    dependency_graph = import_dependency_graph(python_symbols)
+    call_graph = call_graph_summary(python_symbols)
+    reading_plan = targeted_reading_plan(repo_map, dependency_graph)
+    hypotheses = engineering_hypotheses(goal, repo_map, dependency_graph)
     return {
         "repo_root": str(repo_root),
         "goal": goal,
@@ -1046,7 +1179,18 @@ def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
         "test_files": test_files[:80],
         "python_symbols": python_symbols,
         "suggested_verification_commands": suggested_verification_commands(test_files),
-        "repo_map": build_repo_map(goal, candidate_files[:80], test_files[:80], python_symbols),
+        "repo_map": repo_map,
+        "engineering_investigation": {
+            "dependency_graph": dependency_graph,
+            "call_graph": call_graph,
+            "targeted_reading_plan": reading_plan,
+            "hypotheses": hypotheses,
+            "design_decision_seed": [
+                "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+                "Inspect dependents before changing public functions or modules with reverse dependencies.",
+                "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation.",
+            ],
+        },
         "config_files": config_files[:40],
         "excluded_dirs": sorted(EXCLUDED_DIRS),
         "summary": f"Surveyed {total_files} files; found {len(test_files)} test-like files and {len(candidate_files)} goal-matching candidates.",
@@ -1082,9 +1226,13 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
     symbols = survey.get("python_symbols") if isinstance(survey.get("python_symbols"), list) else []
     suggested_commands = survey.get("suggested_verification_commands") if isinstance(survey.get("suggested_verification_commands"), list) else []
     repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
+    investigation = survey.get("engineering_investigation") if isinstance(survey.get("engineering_investigation"), dict) else {}
     ranked_files = repo_map.get("ranked_files") if isinstance(repo_map.get("ranked_files"), list) else []
     test_source_links = repo_map.get("test_source_links") if isinstance(repo_map.get("test_source_links"), list) else []
     read_order = repo_map.get("recommended_read_order") if isinstance(repo_map.get("recommended_read_order"), list) else []
+    targeted_reads = investigation.get("targeted_reading_plan") if isinstance(investigation.get("targeted_reading_plan"), list) else []
+    hypotheses = investigation.get("hypotheses") if isinstance(investigation.get("hypotheses"), list) else []
+    decision_seed = investigation.get("design_decision_seed") if isinstance(investigation.get("design_decision_seed"), list) else []
     symbol_lines: list[str] = []
     for item in symbols[:20]:
         if not isinstance(item, dict):
@@ -1112,6 +1260,19 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
         if not isinstance(item, dict):
             continue
         read_order_lines.append(f"- {item.get('phase')}: {item.get('path')} ({item.get('reason')})")
+    targeted_read_lines: list[str] = []
+    for item in targeted_reads[:20]:
+        if not isinstance(item, dict):
+            continue
+        targeted_read_lines.append(
+            f"- {item.get('path')}: {item.get('question')} dependents={item.get('dependent_count', 0)}"
+        )
+    hypothesis_lines: list[str] = []
+    for item in hypotheses[:12]:
+        if not isinstance(item, dict):
+            continue
+        evidence = ", ".join(str(value) for value in item.get("evidence", [])[:4]) if isinstance(item.get("evidence"), list) else ""
+        hypothesis_lines.append(f"- [{item.get('confidence')}] {item.get('hypothesis')} evidence=[{evidence}] risk={item.get('risk')}")
     content = "\n".join(
         [
             "# Ceraxia Change Plan",
@@ -1133,6 +1294,15 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             "",
             "## Recommended Read Order",
             *read_order_lines,
+            "",
+            "## Targeted Reading Plan",
+            *targeted_read_lines,
+            "",
+            "## Hypothesis Log",
+            *hypothesis_lines,
+            "",
+            "## Design Decision Seed",
+            *[f"- {item}" for item in decision_seed[:12]],
             "",
             "## Test Surface",
             *[f"- {item}" for item in tests[:30]],
@@ -1508,6 +1678,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
 
 
 def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
+    survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
     repair_state = load_json_optional(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"))
@@ -1538,6 +1709,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         ],
         "changed_files": patch.get("changed_files", []),
         "recommended_read_order": patch.get("recommended_read_order", []),
+        "engineering_investigation": survey.get("engineering_investigation", {}) if isinstance(survey.get("engineering_investigation"), dict) else {},
         "patch_scope_evidence": patch.get("patch_scope_evidence", {}),
         "patch_source": patch.get("patch_source", ""),
         "diagnostics": patch.get("diagnostics", {}),

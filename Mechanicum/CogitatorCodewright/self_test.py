@@ -224,6 +224,14 @@ def main() -> int:
         target_repo.mkdir()
         sample = target_repo / "sample.py"
         sample.write_text("def value():\n    return 1\n", encoding="utf-8")
+        (target_repo / "helper.py").write_text("from sample import value\n\ndef doubled():\n    return value() * 2\n", encoding="utf-8")
+        (target_repo / "test_sample.py").write_text(
+            "import unittest\nfrom sample import value\n\n"
+            "class ValueTest(unittest.TestCase):\n"
+            "    def test_value(self):\n"
+            "        self.assertEqual(value(), 2)\n",
+            encoding="utf-8",
+        )
         final = run_pipeline(root / "work", goal=explicit_patch_goal(), target_repo_root=target_repo)
         if final.get("status") != "ready" or final.get("next_safe_action") != "inspect_final_package":
             raise AssertionError(f"final manifest should be ready after explicit patch verification: {final}")
@@ -239,9 +247,9 @@ def main() -> int:
             raise AssertionError(f"final manifest should preserve patch scope evidence: {final}")
         scope_review = final.get("patch_scope_review", {})
         if (
-            scope_review.get("status") != "needs_attention"
+            scope_review.get("status") != "covered"
             or scope_review.get("mapped_changed_file_count") != 1
-            or "sample.py" not in scope_review.get("source_without_linked_tests", [])
+            or scope_review.get("source_without_linked_tests")
         ):
             raise AssertionError(f"final manifest should preserve patch scope review: {final}")
         repair_state = final.get("repair_loop_state", {})
@@ -259,6 +267,18 @@ def main() -> int:
             or role_policies.get("finalize", {}).get("may_mutate_source") is not False
         ):
             raise AssertionError(f"final manifest should preserve role policy evidence: {final}")
+        investigation = final.get("engineering_investigation", {})
+        dependency_edges = investigation.get("dependency_graph", {}).get("edges", [])
+        if not any(edge.get("from") == "helper.py" and edge.get("to") == "sample.py" for edge in dependency_edges):
+            raise AssertionError(f"engineering investigation should include import dependency graph: {final}")
+        targeted = investigation.get("targeted_reading_plan", [])
+        if not any(item.get("path") == "sample.py" and item.get("dependent_count", 0) >= 1 for item in targeted):
+            raise AssertionError(f"engineering investigation should include targeted reading with dependents: {final}")
+        if not investigation.get("hypotheses"):
+            raise AssertionError(f"engineering investigation should preserve hypothesis log: {final}")
+        plan_text = (root / "work" / "code" / "change_plan.md").read_text(encoding="utf-8")
+        if "## Hypothesis Log" not in plan_text or "## Targeted Reading Plan" not in plan_text:
+            raise AssertionError(f"change plan should include engineering investigation sections: {plan_text}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

@@ -15,6 +15,14 @@ def main() -> int:
         target_repo.mkdir()
         sample = target_repo / "sample.py"
         sample.write_text("def value():\n    return 1\n", encoding="utf-8")
+        (target_repo / "helper.py").write_text("from sample import value\n\ndef doubled():\n    return value() * 2\n", encoding="utf-8")
+        (target_repo / "test_sample.py").write_text(
+            "import unittest\nfrom sample import value\n\n"
+            "class ValueTest(unittest.TestCase):\n"
+            "    def test_value(self):\n"
+            "        self.assertEqual(value(), 2)\n",
+            encoding="utf-8",
+        )
         task = f"""почини python приложение
 CERAXIA_TARGET_REPO: {target_repo}
 CERAXIA_PATCH:
@@ -80,6 +88,8 @@ CERAXIA_PATCH:
             or summary_manifest.get("task_profile", {}).get("kinds") != ["explicit_patch", "bugfix"]
             or summary_manifest.get("execution_report", {}).get("changed_file_count") != 1
             or summary_manifest.get("next_safe_action") != "inspect_final_package"
+            or summary_manifest.get("engineering_investigation", {}).get("dependency_edge_count", 0) < 2
+            or summary_manifest.get("engineering_investigation", {}).get("hypothesis_count", 0) < 1
         ):
             raise AssertionError(f"Warmaster summary should expose Ceraxia final evidence: {result}")
     with tempfile.TemporaryDirectory() as temp_dir:
