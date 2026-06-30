@@ -3819,6 +3819,22 @@ def start_background(task_id: str, target: Any) -> bool:
     return True
 
 
+def execute_with_ledger_failure_guard(run_dir: Path, target: Any) -> Any:
+    try:
+        return target()
+    except Exception as exc:  # noqa: BLE001 - background failures must not leave runs stuck as running.
+        ledger_path = run_dir / "task_ledger.json"
+        if ledger_path.exists():
+            try:
+                ledger = TaskLedger.load(ledger_path)
+                ledger.record_event("background_execution_failed", {"error": str(exc), "type": type(exc).__name__})
+                ledger.set_result({"ok": False, "status": "failed", "summary": str(exc), "error": str(exc)})
+                ledger.set_status("failed")
+            except Exception:
+                pass
+        raise
+
+
 def orchestrate_start_run(
     run_root: Path,
     task_id: str,
@@ -3939,22 +3955,28 @@ def start_recoverable_runs(run_root: Path, mode: str, host: str = "127.0.0.1", t
                 ledger.record_event("background_start_requested", {"mode": f"bulk_start_resume_{mode}", "step_ids": step_ids})
             workspace_root = resolve_run_child_path(run_dir, "", "work")
             if mode == "local":
-                executor = lambda run_dir=run_dir, workspace_root=workspace_root, step_ids=step_ids: execute_local_run(
-                    REPO_ROOT,
+                executor = lambda run_dir=run_dir, workspace_root=workspace_root, step_ids=step_ids: execute_with_ledger_failure_guard(
                     run_dir,
-                    workspace_root,
-                    timeout_sec=timeout_sec,
-                    step_ids=step_ids,
-                    execution_mode="resume",
+                    lambda: execute_local_run(
+                        REPO_ROOT,
+                        run_dir,
+                        workspace_root,
+                        timeout_sec=timeout_sec,
+                        step_ids=step_ids,
+                        execution_mode="resume",
+                    ),
                 )
             else:
-                executor = lambda run_dir=run_dir, step_ids=step_ids: execute_http_run(
+                executor = lambda run_dir=run_dir, step_ids=step_ids: execute_with_ledger_failure_guard(
                     run_dir,
-                    host=host,
-                    timeout_sec=timeout_sec,
-                    workspace_root=None,
-                    step_ids=step_ids,
-                    execution_mode="resume",
+                    lambda: execute_http_run(
+                        run_dir,
+                        host=host,
+                        timeout_sec=timeout_sec,
+                        workspace_root=None,
+                        step_ids=step_ids,
+                        execution_mode="resume",
+                    ),
                 )
             if not start_background(task_id, executor):
                 already_active_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "run is already active"}

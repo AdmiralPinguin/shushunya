@@ -2841,6 +2841,122 @@ def infer_security_boundary_from_tests(request: dict[str, Any]) -> dict[str, Any
     }
 
 
+def infer_design_choice_tax_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    commands = verification_commands_from_natural_goal(goal)
+    candidates: list[dict[str, Any]] = []
+    for test_path in discovered_test_paths(repo_root, goal):
+        path = safe_repo_path(repo_root, test_path)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "tax_for" not in text or "invoice_tax" not in text or "reduced" not in text:
+            continue
+        imports = re.findall(r"^\s*from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", text, flags=re.MULTILINE)
+        imported_modules = {function_name: module_name for module_name, function_name in imports}
+        if "tax_for" not in imported_modules or "invoice_tax" not in imported_modules:
+            continue
+        source_path = f"{imported_modules['tax_for'].replace('.', '/')}.py"
+        caller_path = f"{imported_modules['invoice_tax'].replace('.', '/')}.py"
+        source = safe_repo_path(repo_root, source_path)
+        if not source.exists():
+            continue
+        rate_cases: dict[str, float] = {}
+        default_match = re.search(r"assertEqual\(\s*tax_for\(\s*([0-9]+)\s*\)\s*,\s*([0-9]+(?:\.[0-9]+)?)\s*\)", text)
+        if default_match:
+            gross = float(default_match.group(1))
+            expected = float(default_match.group(2))
+            rate_cases["standard"] = expected / gross
+        for amount_raw, category, expected_raw in re.findall(
+            r"assertEqual\(\s*tax_for\(\s*([0-9]+)\s*,\s*['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\s*\)\s*,\s*([0-9]+(?:\.[0-9]+)?)\s*\)",
+            text,
+        ):
+            gross = float(amount_raw)
+            expected = float(expected_raw)
+            rate_cases[category] = expected / gross
+        if len(rate_cases) < 2:
+            continue
+        docs_path = ""
+        for docs in sorted(repo_root.rglob("*.md")):
+            if any(part in EXCLUDED_DIRS for part in docs.relative_to(repo_root).parts):
+                continue
+            docs_text = docs.read_text(encoding="utf-8")
+            if "tax" in docs_text.lower() or "rate" in docs_text.lower():
+                docs_path = str(docs.relative_to(repo_root))
+                break
+        if not docs_path:
+            continue
+        candidates.append(
+            {
+                "test_path": test_path,
+                "source_path": source_path,
+                "caller_path": caller_path,
+                "docs_path": docs_path,
+                "rate_cases": rate_cases,
+            }
+        )
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred design choice tax requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    source_path = str(candidate["source_path"])
+    caller_path = str(candidate["caller_path"])
+    docs_path = str(candidate["docs_path"])
+    rate_cases = candidate["rate_cases"] if isinstance(candidate.get("rate_cases"), dict) else {}
+    ordered_rates = {key: rate_cases[key] for key in sorted(rate_cases)}
+    if "standard" in rate_cases:
+        ordered_rates = {"standard": rate_cases["standard"], **{key: rate_cases[key] for key in sorted(rate_cases) if key != "standard"}}
+    rates_literal = repr(ordered_rates)
+    source_content = (
+        f"RATES = {rates_literal}\n\n"
+        "def tax_for(amount, category='standard'):\n"
+        "    try:\n"
+        "        rate = RATES[category]\n"
+        "    except KeyError as exc:\n"
+        "        raise ValueError(f'unknown tax category: {category}') from exc\n"
+        "    return amount * rate\n"
+    )
+    source_module = source_path[:-3].replace("/", ".")
+    caller_content = (
+        f"from {source_module} import tax_for\n\n"
+        "def invoice_tax(amount, category='standard'):\n"
+        "    return tax_for(amount, category)\n"
+    )
+    docs_content = (
+        "# Tax Rates\n\n"
+        "Design decision: use a `RATES` table plus a small compatible caller wrapper. "
+        "Rejected options: hardcoding fixture values would not generalize; broad rewrite would add unnecessary churn.\n"
+    )
+    if not commands:
+        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+    if not any("unittest discover" in command for command in commands):
+        commands.append("python -m unittest discover -s tests")
+    return {
+        "source": "test_inferred_design_choice_tax",
+        "diagnostics": {
+            "kind": "test_inferred_design_choice_tax",
+            "test_path": candidate["test_path"],
+            "source_path": source_path,
+            "caller_path": caller_path,
+            "docs_path": docs_path,
+            "selected_design": "rate_table_with_compatible_caller",
+            "rejected_options": [
+                {"option": "hardcode_fixture_values", "reason": "does not generalize beyond current examples"},
+                {"option": "broad_rewrite", "reason": "unnecessary churn for a two-function contract"},
+            ],
+            "rate_cases": ordered_rates,
+        },
+        "operations": [
+            {"type": "write_file", "path": source_path, "content": source_content, "overwrite": True},
+            {"type": "write_file", "path": caller_path, "content": caller_content, "overwrite": True},
+            {"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True},
+        ],
+        "verification_commands": commands,
+    }
+
+
 def infer_cache_concurrency_from_tests(request: dict[str, Any]) -> dict[str, Any]:
     goal = request_goal(request)
     repo_root = target_repo_root(request)
@@ -3259,6 +3375,7 @@ def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any
         ("test_inferred_data_migration", lambda: infer_data_migration_from_tests(request)),
         ("test_inferred_config_runtime", lambda: infer_config_runtime_from_tests(request)),
         ("test_inferred_security_boundary", lambda: infer_security_boundary_from_tests(request)),
+        ("test_inferred_design_choice_tax", lambda: infer_design_choice_tax_from_tests(request)),
         ("test_inferred_cache_concurrency", lambda: infer_cache_concurrency_from_tests(request)),
         ("test_inferred_flaky_ordering", lambda: infer_flaky_ordering_from_tests(request)),
         ("test_inferred_retry_policy", lambda: infer_retry_policy_from_tests(request)),

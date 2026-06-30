@@ -2151,7 +2151,8 @@ def main() -> int:
                 or bulk_recovery.get("display", {}).get("headline") != "Recovery is ready"
             ):
                 raise AssertionError(f"recovery endpoint should expose startable resume packages: {recovery_with_bulk}")
-            bulk_started = request_json(base + "/recovery/start_resume_local", {"timeout_sec": 30}, timeout=60)
+            bulk_timeout_sec = 30
+            bulk_started = request_json(base + "/recovery/start_resume_local", {"timeout_sec": bulk_timeout_sec}, timeout=60)
             if (
                 bulk_started.get("started", 0) < 1
                 or not any(item.get("task_id") == "warmaster-bulk-recovery-test" and item.get("ok") for item in bulk_started.get("results", []))
@@ -2168,13 +2169,15 @@ def main() -> int:
                 )
             ):
                 raise AssertionError(f"bulk recovery did not start valid runs and skip malformed runs: {bulk_started}")
-            for _ in range(60):
+            for _ in range(max(90, bulk_timeout_sec * 4)):
                 bulk_ledger = request_json(base + "/runs/warmaster-bulk-recovery-test/ledger")
-                if bulk_ledger["ledger"].get("status") == "completed":
+                if bulk_ledger["ledger"].get("status") in {"completed", "failed", "cancelled"}:
                     break
                 time.sleep(0.2)
             else:
                 raise AssertionError(f"bulk recovery run did not complete: {bulk_ledger}")
+            if bulk_ledger["ledger"].get("status") != "completed":
+                raise AssertionError(f"bulk recovery run did not complete successfully: {bulk_ledger}")
             bulk_events = [event.get("type") for event in bulk_ledger["ledger"].get("events", [])]
             if "resume_execution_requested" not in bulk_events or "background_start_requested" not in bulk_events:
                 raise AssertionError(f"bulk recovery did not record resume/background events: {bulk_ledger}")

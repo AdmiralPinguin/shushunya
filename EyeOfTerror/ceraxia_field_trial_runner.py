@@ -855,6 +855,44 @@ def fixture_expert_unshaped_config_runtime(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_design_choice(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tax").mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "docs").mkdir(parents=True, exist_ok=True)
+    (repo / "tax" / "rates.py").write_text(
+        "def tax_for(amount):\n"
+        "    return amount * 0.2\n",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "tax_rates.md").write_text(
+        "# Tax Rates\n\n"
+        "Tax categories should be table-driven so adding new categories does not require branching per fixture.\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_tax_rates.py").write_text(
+        "import unittest\n"
+        "from tax.rates import tax_for\n"
+        "from tax.invoice import invoice_tax\n\n"
+        "class TaxRatesTest(unittest.TestCase):\n"
+        "    def test_standard_and_reduced_rates(self):\n"
+        "        self.assertEqual(tax_for(100), 20)\n"
+        "        self.assertEqual(tax_for(100, 'reduced'), 5)\n"
+        "        self.assertEqual(invoice_tax(100, 'reduced'), 5)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured marker: выбери правильный маленький design для tax categories. "
+        "Есть три варианта: hardcode под текущие assertions, широкий rewrite всего billing, или маленькая таблица rates "
+        "с caller compatibility. Выбери нормальный вариант, объясни rejected options, не редактируй tests.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_tax_rates\n"
+        "CERAXIA_VERIFY: python -m py_compile tax/rates.py tax/invoice.py\n"
+    )
+
+
 def fixture_expert_unshaped_security_boundary(repo: Path) -> str:
     repo.mkdir(parents=True, exist_ok=True)
     (repo / "tests").mkdir(parents=True, exist_ok=True)
@@ -1149,6 +1187,7 @@ FIXTURES = {
     "ceraxia-expert-unshaped-config-runtime": fixture_expert_unshaped_config_runtime,
     "ceraxia-expert-unshaped-concurrency-cache": fixture_expert_unshaped_concurrency_cache,
     "ceraxia-expert-unshaped-data-migration": fixture_expert_unshaped_data_migration,
+    "ceraxia-expert-unshaped-design-choice": fixture_expert_unshaped_design_choice,
     "ceraxia-expert-unshaped-flaky-root-cause": fixture_expert_unshaped_flaky_root_cause,
     "ceraxia-expert-unshaped-retry-policy": fixture_expert_unshaped_retry_policy,
     "ceraxia-expert-repo-grade-workflow": fixture_expert_repo_grade_workflow,
@@ -1498,6 +1537,53 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and set(changed_paths) == {"app/settings.json", "app/config_loader.py", "bin/run-app.sh"}
                     and repair_plan.get("mode") == "unshaped_repo_repair"
                     and diagnostic_extraction.get("status") == "recorded"
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-unshaped-design-choice":
+        source_path = repo / "tax" / "rates.py"
+        caller_path = repo / "tax" / "invoice.py"
+        docs_path = repo / "docs" / "tax_rates.md"
+        test_path = repo / "tests" / "test_tax_rates.py"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        caller_text = caller_path.read_text(encoding="utf-8") if caller_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        diagnostics = manifest.get("diagnostics") if isinstance(manifest.get("diagnostics"), dict) else {}
+        changed_paths = [
+            str(item.get("path") or "")
+            for item in manifest.get("changed_files", [])
+            if isinstance(item, dict)
+        ]
+        return {
+            "expert_unshaped_design_choice": {
+                "patch_source": manifest.get("patch_source", ""),
+                "uses_rate_table": "RATES =" in source_text and "'reduced': 0.05" in source_text,
+                "caller_compatibility": "def invoice_tax(amount, category='standard')" in caller_text,
+                "tests_preserved": "assertEqual(tax_for(100, 'reduced'), 5)" in test_text,
+                "docs_explain_rejected_options": "hardcoding" in docs_text.lower() and "broad rewrite" in docs_text.lower(),
+                "diagnostics_explain_choice": diagnostics.get("selected_design") == "rate_table_with_compatible_caller"
+                and len(diagnostics.get("rejected_options", [])) >= 2
+                if isinstance(diagnostics.get("rejected_options"), list)
+                else False,
+                "minimal_surface": set(changed_paths) == {"tax/rates.py", "tax/invoice.py", "docs/tax_rates.md"},
+                "not_hardcoded_fixture": "if amount == 100" not in source_text and "return 5" not in source_text,
+                "not_marker_synthesized": str(manifest.get("patch_source") or "") not in {
+                    "multi_file_marker_synthesis",
+                    "explicit_json_patch",
+                },
+                "passed": (
+                    manifest.get("patch_source") == "test_inferred_design_choice_tax"
+                    and "RATES =" in source_text
+                    and "'reduced': 0.05" in source_text
+                    and "def invoice_tax(amount, category='standard')" in caller_text
+                    and "assertEqual(tax_for(100, 'reduced'), 5)" in test_text
+                    and "hardcoding" in docs_text.lower()
+                    and "broad rewrite" in docs_text.lower()
+                    and diagnostics.get("selected_design") == "rate_table_with_compatible_caller"
+                    and set(changed_paths) == {"tax/rates.py", "tax/invoice.py", "docs/tax_rates.md"}
+                    and "if amount == 100" not in source_text
+                    and "return 5" not in source_text
                 ),
             }
         }
