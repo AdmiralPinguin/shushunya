@@ -220,6 +220,23 @@ CERAXIA_FEATURE:
 """
 
 
+def config_runtime_goal() -> str:
+    return """согласуй JSON config, Python loader и shell entrypoint
+
+CERAXIA_CONFIG_RUNTIME:
+{
+  "config_path": "app/settings.json",
+  "loader_path": "app/config_loader.py",
+  "entrypoint_path": "bin/run-app.sh",
+  "test_path": "tests/test_config_loader.py",
+  "setting_key": "service_url",
+  "env_var": "SERVICE_URL",
+  "default_value": "http://localhost:8080",
+  "verification_commands": ["python -m unittest tests.test_config_loader", "python -m py_compile app/config_loader.py"]
+}
+"""
+
+
 def repair_colon_goal() -> str:
     return """создай python файл и исправь если проверка найдет синтаксис
 
@@ -850,6 +867,23 @@ def main() -> int:
             raise AssertionError("feature marker did not write docs")
         if final.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"feature marker final manifest should preserve verification evidence: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        final = run_pipeline(root / "work", goal=config_runtime_goal(), target_repo_root=target_repo)
+        expected_paths = {"app/settings.json", "app/config_loader.py", "bin/run-app.sh", "tests/test_config_loader.py"}
+        changed_paths = {item.get("path") for item in final.get("changed_files", []) if isinstance(item, dict)}
+        if final.get("status") != "ready" or final.get("patch_source") != "config_runtime_marker_synthesis":
+            raise AssertionError(f"config/runtime marker task should be ready: {final}")
+        if changed_paths != expected_paths:
+            raise AssertionError(f"config/runtime marker should write config/loader/entrypoint/test: {final}")
+        if "SERVICE_URL" not in (target_repo / "bin" / "run-app.sh").read_text(encoding="utf-8"):
+            raise AssertionError("config/runtime marker did not write entrypoint env var")
+        if '"service_url"' not in (target_repo / "app" / "settings.json").read_text(encoding="utf-8"):
+            raise AssertionError("config/runtime marker did not write JSON config")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 3:
+            raise AssertionError(f"config/runtime final manifest should preserve verification evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

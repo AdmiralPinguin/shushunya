@@ -8,7 +8,7 @@ import shlex
 import subprocess
 import sys
 from collections import Counter
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 MECHANICUM_ROOT = Path(__file__).resolve().parents[1]
@@ -421,6 +421,7 @@ def marker_block(text: str, marker: str) -> str:
         "\nCERAXIA_TARGET_REPO:",
         "\nCERAXIA_PATCH:",
         "\nCERAXIA_FEATURE:",
+        "\nCERAXIA_CONFIG_RUNTIME:",
         "\nCERAXIA_FILES:",
         "\nCERAXIA_CREATE_FILE:",
         "\nCERAXIA_FILE_CONTENT:",
@@ -1013,6 +1014,90 @@ def patch_spec_from_feature_marker(goal: str) -> dict[str, Any]:
     }
 
 
+def patch_spec_from_config_runtime_marker(goal: str) -> dict[str, Any]:
+    payload = extract_json_after_marker(goal, "CERAXIA_CONFIG_RUNTIME:")
+    if not payload:
+        return {}
+    config_path = str(payload.get("config_path") or "").strip()
+    loader_path = str(payload.get("loader_path") or "").strip()
+    entrypoint_path = str(payload.get("entrypoint_path") or "").strip()
+    test_path = str(payload.get("test_path") or "").strip()
+    setting_key = str(payload.get("setting_key") or "").strip()
+    env_var = str(payload.get("env_var") or "").strip()
+    default_value = payload.get("default_value")
+    if not all([config_path, loader_path, entrypoint_path, test_path, setting_key, env_var]):
+        raise ValueError("CERAXIA_CONFIG_RUNTIME requires config_path, loader_path, entrypoint_path, test_path, setting_key, and env_var")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", setting_key):
+        raise ValueError("CERAXIA_CONFIG_RUNTIME setting_key must be a simple identifier")
+    if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", env_var):
+        raise ValueError("CERAXIA_CONFIG_RUNTIME env_var must be an uppercase environment variable name")
+    if not isinstance(default_value, (str, int, float, bool)):
+        raise ValueError("CERAXIA_CONFIG_RUNTIME default_value must be a JSON scalar")
+    config_content = json.dumps({setting_key: default_value}, ensure_ascii=False, indent=2) + "\n"
+    loader_module = loader_path[:-3].replace("/", ".")
+    config_literal = repr(config_path)
+    loader_parent_depth = len(PurePosixPath(loader_path).parent.parts)
+    config_root_steps = "\n".join(["CONFIG_ROOT = CONFIG_ROOT.parent" for _ in range(loader_parent_depth)])
+    if config_root_steps:
+        config_root_steps += "\n"
+    loader_content = (
+        "import json\n"
+        "import os\n"
+        "from pathlib import Path\n\n"
+        "CONFIG_ROOT = Path(__file__).resolve().parent\n"
+        f"{config_root_steps}"
+        f"CONFIG_PATH = CONFIG_ROOT / {config_literal}\n\n"
+        "def load_settings():\n"
+        "    data = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))\n"
+        f"    value = os.environ.get('{env_var}', data.get('{setting_key}', {default_value!r}))\n"
+        f"    return {{'{setting_key}': value}}\n"
+    )
+    entrypoint_content = (
+        "#!/usr/bin/env sh\n"
+        "set -eu\n"
+        f"export {env_var}=\"${{{env_var}:-{default_value}}}\"\n"
+        f"python -m {loader_module}\n"
+    )
+    test_content = (
+        f"import os\nimport unittest\nfrom {loader_module} import load_settings\n\n"
+        "class ConfigRuntimeTest(unittest.TestCase):\n"
+        "    def test_default_setting(self):\n"
+        f"        os.environ.pop('{env_var}', None)\n"
+        f"        self.assertEqual(load_settings()['{setting_key}'], {default_value!r})\n\n"
+        "    def test_env_override(self):\n"
+        f"        os.environ['{env_var}'] = 'override-value'\n"
+        "        try:\n"
+        f"            self.assertEqual(load_settings()['{setting_key}'], 'override-value')\n"
+        "        finally:\n"
+        f"            os.environ.pop('{env_var}', None)\n\n"
+        "if __name__ == '__main__':\n    unittest.main()\n"
+    )
+    verification_commands = payload.get("verification_commands")
+    if verification_commands is None:
+        verification_commands = [f"python -m unittest {test_path[:-3].replace('/', '.')}"]
+    if not isinstance(verification_commands, list) or not all(isinstance(item, str) for item in verification_commands):
+        raise ValueError("CERAXIA_CONFIG_RUNTIME verification_commands must be a list of strings")
+    return {
+        "source": "config_runtime_marker_synthesis",
+        "diagnostics": {
+            "kind": "config_runtime_marker_synthesis",
+            "config_path": config_path,
+            "loader_path": loader_path,
+            "entrypoint_path": entrypoint_path,
+            "test_path": test_path,
+            "setting_key": setting_key,
+            "env_var": env_var,
+        },
+        "operations": [
+            {"type": "write_file", "path": config_path, "content": config_content},
+            {"type": "write_file", "path": loader_path, "content": loader_content},
+            {"type": "write_file", "path": entrypoint_path, "content": entrypoint_content},
+            {"type": "write_file", "path": test_path, "content": test_content},
+        ],
+        "verification_commands": verification_commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -1051,6 +1136,9 @@ def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
 
 
 def synthesized_patch_spec_from_markers(goal: str) -> dict[str, Any]:
+    config_runtime = patch_spec_from_config_runtime_marker(goal)
+    if config_runtime:
+        return config_runtime
     feature = patch_spec_from_feature_marker(goal)
     if feature:
         return feature

@@ -80,6 +80,7 @@ def main() -> int:
     required_runner_trials = {
         "ceraxia-field-ambiguous-task",
         "ceraxia-field-bugfix-unnamed-source",
+        "ceraxia-field-cross-language-config",
         "ceraxia-field-multifile-feature",
         "ceraxia-field-safety-dirty-worktree",
     }

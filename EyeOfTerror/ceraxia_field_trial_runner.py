@@ -135,9 +135,28 @@ CERAXIA_FEATURE:
 """
 
 
+def fixture_cross_language_config(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    return f"""кодовая задача: исправь расхождение настройки между JSON config, Python loader и shell entrypoint.
+CERAXIA_TARGET_REPO: {repo}
+CERAXIA_CONFIG_RUNTIME:
+{{
+  "config_path": "app/settings.json",
+  "loader_path": "app/config_loader.py",
+  "entrypoint_path": "bin/run-app.sh",
+  "test_path": "tests/test_config_loader.py",
+  "setting_key": "service_url",
+  "env_var": "SERVICE_URL",
+  "default_value": "http://localhost:8080",
+  "verification_commands": ["python -m unittest tests.test_config_loader", "python -m py_compile app/config_loader.py"]
+}}
+"""
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
+    "ceraxia-field-cross-language-config": fixture_cross_language_config,
     "ceraxia-field-multifile-feature": fixture_multifile_feature,
     "ceraxia-field-safety-dirty-worktree": fixture_safety_dirty_worktree,
 }
