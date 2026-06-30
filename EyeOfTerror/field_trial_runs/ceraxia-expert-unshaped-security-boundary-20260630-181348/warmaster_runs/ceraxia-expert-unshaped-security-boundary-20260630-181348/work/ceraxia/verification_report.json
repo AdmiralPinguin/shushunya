@@ -1,0 +1,103 @@
+{
+  "status": "passed",
+  "task_id": "ceraxia-expert-unshaped-security-boundary-20260630-181348:verification",
+  "role_policy": {
+    "role": "verifier",
+    "authority": "allowlisted_verification_and_narrow_repairs",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "verification_executed",
+      "verification_blockers",
+      "verification_repairs"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unallowlisted_command",
+      "broad_unscoped_rewrite"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 2,
+    "risk_flags": [
+      "test_diagnostic_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "verification",
+    "worker": "OrdinatusVerifier",
+    "purpose": "Define and record the verification commands or blockers for the implementation.",
+    "brief": "Run allowlisted checks and perform only narrow repair loops.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 2,
+      "risk_flags": [
+        "test_diagnostic_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+      ]
+    },
+    "must_produce": [
+      "executed commands",
+      "repair_loop_state",
+      "failed_commands",
+      "candidate_source_paths"
+    ],
+    "handoff_question": "Did checks pass after repair, or what blocks review?",
+    "authority_boundary": "allowlisted_verification_and_narrow_repairs"
+  },
+  "commands": [
+    "python -m py_compile <changed .py files>",
+    "git diff --check"
+  ],
+  "executed": [
+    {
+      "command": "/usr/bin/python3 -m py_compile archive_paths.py",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": "python -m unittest tests.test_archive_paths",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n"
+    },
+    {
+      "command": "python -m py_compile archive_paths.py",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "repairs": [],
+  "blockers": [],
+  "warnings": [
+    "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker."
+  ],
+  "summary": "Verification passed for applied changes."
+}

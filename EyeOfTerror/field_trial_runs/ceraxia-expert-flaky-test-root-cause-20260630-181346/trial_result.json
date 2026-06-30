@@ -1,0 +1,91 @@
+{
+  "trial_id": "ceraxia-expert-flaky-test-root-cause",
+  "run_id": "ceraxia-expert-flaky-test-root-cause-20260630-181346",
+  "trial_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-flaky-test-root-cause-20260630-181346",
+  "prepared_governor": "Ceraxia",
+  "result": {
+    "ok": true,
+    "phase": "completed"
+  },
+  "trial_outcome": {
+    "status": "passed",
+    "expected": true,
+    "reason": "task completed with ready final manifest"
+  },
+  "trial_checks": {
+    "expert_flaky_test_root_cause": {
+      "deterministic_tie_breaker": true,
+      "repeated_verification_test": true,
+      "does_not_skip": true,
+      "root_cause_doc": true,
+      "passed": true
+    }
+  },
+  "final_manifest": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-flaky-test-root-cause-20260630-181346/warmaster_runs/ceraxia-expert-flaky-test-root-cause-20260630-181346/work/ceraxia/final_manifest.json",
+  "manifest_summary": {
+    "status": "ready",
+    "patch_source": "multi_file_marker_synthesis",
+    "changed_files": [
+      {
+        "path": "scheduler.py",
+        "operation": "write_file",
+        "created": false,
+        "before_sha256": "765815e2481a4f37f455020a10d8813a8393e4ccbca8909128a4a475081bea95",
+        "after_sha256": "a5305ecf29a1484d119b037103de119131412354ac44791acba7d87d1371f675",
+        "changed": true
+      },
+      {
+        "path": "tests/test_scheduler.py",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "16b192db7c83bd757794977df5614e8db31056f3fc262141fecfa5b9186add66",
+        "changed": true
+      },
+      {
+        "path": "docs/flaky_root_cause.md",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "85a76755d86c346821f9aa2bc9800660f526b0589f4499ef12e22682990ea7b6",
+        "changed": true
+      }
+    ],
+    "diagnostics": {
+      "kind": "multi_file_marker_synthesis",
+      "file_count": 3,
+      "planned_paths": [
+        "scheduler.py",
+        "tests/test_scheduler.py",
+        "docs/flaky_root_cause.md"
+      ],
+      "overwrite_paths": [
+        "scheduler.py"
+      ],
+      "created_or_updated_paths": [
+        "scheduler.py",
+        "tests/test_scheduler.py",
+        "docs/flaky_root_cause.md"
+      ]
+    },
+    "dirty_worktree": {
+      "git_repo": false,
+      "dirty_targets": []
+    },
+    "ambiguity_analysis": {},
+    "verification_summary": {
+      "executed_count": 4,
+      "repair_count": 0,
+      "blocker_count": 0
+    },
+    "blockers": []
+  },
+  "pricing_py": "",
+  "settings_py": "",
+  "fixture_files": [
+    "docs/flaky_root_cause.md",
+    "scheduler.py",
+    "tests/test_scheduler.py"
+  ],
+  "kept": true
+}

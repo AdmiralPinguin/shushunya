@@ -1,0 +1,228 @@
+{
+  "task_id": "ceraxia-expert-public-api-deprecation-20260630-181345",
+  "goal": "кодовая expert-задача: проведи public API evolution с deprecated параметром, сохрани старых callers через warning, обнови нового caller, docs и tests old/new call styles.\nCERAXIA_TARGET_REPO: /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-public-api-deprecation-20260630-181345/fixture/repo\nCERAXIA_FILES:\n{\n  \"files\": [\n    {\n      \"path\": \"payments/api.py\",\n      \"overwrite\": true,\n      \"content\": \"import warnings\\n\\ndef calculate_total(gross, fee=0, *, service_fee=None):\\n    if service_fee is None:\\n        service_fee = fee\\n        if fee != 0:\\n            warnings.warn('fee is deprecated; use service_fee', DeprecationWarning, stacklevel=2)\\n    return gross - service_fee\\n\"\n    },\n    {\n      \"path\": \"payments/client.py\",\n      \"content\": \"from payments.api import calculate_total\\n\\ndef client_total(gross, service_fee):\\n    return calculate_total(gross, service_fee=service_fee)\\n\"\n    },\n    {\n      \"path\": \"tests/test_api_deprecation.py\",\n      \"content\": \"import warnings\\nimport unittest\\nfrom payments.api import calculate_total\\nfrom payments.client import client_total\\n\\nclass ApiDeprecationTest(unittest.TestCase):\\n    def test_old_positional_fee_still_works_with_warning(self):\\n        with warnings.catch_warnings(record=True) as caught:\\n            warnings.simplefilter('always')\\n            self.assertEqual(calculate_total(100, 15), 85)\\n        self.assertTrue(any(item.category is DeprecationWarning for item in caught))\\n\\n    def test_new_keyword_path_and_caller(self):\\n        self.assertEqual(calculate_total(80, service_fee=5), 75)\\n        self.assertEqual(client_total(80, 5), 75)\\n\\nif __name__ == '__main__':\\n    unittest.main()\\n\"\n    },\n    {\n      \"path\": \"docs/api_deprecation.md\",\n      \"content\": \"# API Deprecation\\n\\n`fee` remains supported with a warning; new callers use `service_fee`.\\n\"\n    }\n  ],\n  \"verification_commands\": [\n    \"python -m unittest tests.test_api_deprecation\",\n    \"python -m py_compile payments/api.py payments/client.py\"\n  ]\n}",
+  "governor": "Ceraxia",
+  "status": "completed",
+  "created_at": "2026-06-30T09:13:45.885110+00:00",
+  "updated_at": "2026-06-30T09:13:46.202826+00:00",
+  "steps": [
+    {
+      "step_id": "repository_survey",
+      "worker": "LogisRepository",
+      "status": "completed",
+      "artifacts": [
+        "/work/ceraxia/repo_survey.json"
+      ],
+      "summary": "Surveyed 1 files; found 0 test-like files and 1 goal-matching candidates.",
+      "updated_at": "2026-06-30T09:13:45.923623+00:00",
+      "created_at": "2026-06-30T09:13:45.923623+00:00"
+    },
+    {
+      "step_id": "change_planning",
+      "worker": "MagosStrategos",
+      "status": "completed",
+      "artifacts": [
+        "/work/ceraxia/change_plan.md"
+      ],
+      "summary": "Code change plan written.",
+      "updated_at": "2026-06-30T09:13:45.959235+00:00",
+      "created_at": "2026-06-30T09:13:45.959235+00:00"
+    },
+    {
+      "step_id": "implementation",
+      "worker": "FerrumPatchwright",
+      "status": "completed",
+      "artifacts": [
+        "/work/ceraxia/patch_manifest.json"
+      ],
+      "summary": "Patch manifest written with applied changes.",
+      "updated_at": "2026-06-30T09:13:45.997800+00:00",
+      "created_at": "2026-06-30T09:13:45.997800+00:00"
+    },
+    {
+      "step_id": "verification",
+      "worker": "OrdinatusVerifier",
+      "status": "completed",
+      "artifacts": [
+        "/work/ceraxia/verification_report.json",
+        "/work/ceraxia/repair_loop_state.json"
+      ],
+      "summary": "Verification report written.",
+      "updated_at": "2026-06-30T09:13:46.116750+00:00",
+      "created_at": "2026-06-30T09:13:46.116750+00:00"
+    },
+    {
+      "step_id": "code_review",
+      "worker": "JudicatorCodicis",
+      "status": "passed",
+      "artifacts": [
+        "/work/ceraxia/code_review.json"
+      ],
+      "summary": "Code review written with 0 blocker(s).",
+      "updated_at": "2026-06-30T09:13:46.153237+00:00",
+      "created_at": "2026-06-30T09:13:46.153237+00:00"
+    },
+    {
+      "step_id": "finalize",
+      "worker": "SealwrightFinalis",
+      "status": "ready",
+      "artifacts": [
+        "/work/ceraxia/final_manifest.json"
+      ],
+      "summary": "Ceraxia code task package finalized.",
+      "updated_at": "2026-06-30T09:13:46.189883+00:00",
+      "created_at": "2026-06-30T09:13:46.189883+00:00"
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-06-30T09:13:45.885124+00:00",
+      "type": "task_created",
+      "payload": {
+        "governor": "Ceraxia"
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:45.885337+00:00",
+      "type": "research_loop_started",
+      "payload": {
+        "mode": "research_loop_local",
+        "max_revision_cycles": 1,
+        "allow_resume": true
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:45.887015+00:00",
+      "type": "research_loop_cycle_started",
+      "payload": {
+        "cycle": 0,
+        "operation": "full",
+        "revision_cycle": 0
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:45.887483+00:00",
+      "type": "status_changed",
+      "payload": {
+        "status": "running"
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:45.923635+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "repository_survey",
+        "worker": "LogisRepository",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:45.959247+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "change_planning",
+        "worker": "MagosStrategos",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:45.997814+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "implementation",
+        "worker": "FerrumPatchwright",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:46.116767+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "verification",
+        "worker": "OrdinatusVerifier",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:46.153252+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "code_review",
+        "worker": "JudicatorCodicis",
+        "status": "passed"
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:46.189900+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "finalize",
+        "worker": "SealwrightFinalis",
+        "status": "ready"
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:46.191358+00:00",
+      "type": "result_recorded",
+      "payload": {
+        "ok": true,
+        "final_step": "finalize",
+        "artifacts": [
+          "/work/ceraxia/final_manifest.json"
+        ],
+        "workspace_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-public-api-deprecation-20260630-181345/warmaster_runs/ceraxia-expert-public-api-deprecation-20260630-181345/work",
+        "status": "ready",
+        "summary": "Ceraxia code task package finalized.",
+        "revision_plan": {
+          "required": false,
+          "focused_context": {},
+          "steps": []
+        }
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:46.192198+00:00",
+      "type": "status_changed",
+      "payload": {
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:46.193372+00:00",
+      "type": "research_loop_cycle_finished",
+      "payload": {
+        "cycle": 0,
+        "operation": "full",
+        "ok": true,
+        "status": "",
+        "step_ids": []
+      }
+    },
+    {
+      "at": "2026-06-30T09:13:46.202404+00:00",
+      "type": "research_loop_finished",
+      "payload": {
+        "ok": true,
+        "stop_reason": "completed",
+        "cycles": 2,
+        "revision_cycles": 0,
+        "final_status": "completed"
+      }
+    }
+  ],
+  "result": {
+    "ok": true,
+    "final_step": "finalize",
+    "artifacts": [
+      "/work/ceraxia/final_manifest.json"
+    ],
+    "workspace_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-public-api-deprecation-20260630-181345/warmaster_runs/ceraxia-expert-public-api-deprecation-20260630-181345/work",
+    "status": "ready",
+    "summary": "Ceraxia code task package finalized.",
+    "revision_plan": {
+      "required": false,
+      "focused_context": {},
+      "steps": []
+    }
+  }
+}

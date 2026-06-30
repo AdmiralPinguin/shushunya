@@ -1,0 +1,173 @@
+{
+  "ok": true,
+  "task_id": "ceraxia-expert-unshaped-retry-policy-20260630-181847",
+  "governor": "Ceraxia",
+  "step_count": 6,
+  "required_workers": [
+    "LogisRepository",
+    "MagosStrategos",
+    "FerrumPatchwright",
+    "OrdinatusVerifier",
+    "JudicatorCodicis",
+    "SealwrightFinalis"
+  ],
+  "steps": [
+    {
+      "step_id": "repository_survey",
+      "worker": "LogisRepository",
+      "port": 7015,
+      "depends_on": [],
+      "input_artifacts": [],
+      "expected_artifacts": [
+        "/work/ceraxia/repo_survey.json"
+      ],
+      "quality_hints": {
+        "check_count": 2,
+        "blocker_count": 3,
+        "revision_targets": [
+          "repository_survey",
+          "change_planning",
+          "implementation",
+          "verification",
+          "code_review",
+          "finalize"
+        ],
+        "task_complexity": "low",
+        "worker_brief": "Map the repository before anyone edits it."
+      }
+    },
+    {
+      "step_id": "change_planning",
+      "worker": "MagosStrategos",
+      "port": 7016,
+      "depends_on": [
+        "repository_survey"
+      ],
+      "input_artifacts": [
+        "/work/ceraxia/repo_survey.json"
+      ],
+      "expected_artifacts": [
+        "/work/ceraxia/change_plan.md"
+      ],
+      "quality_hints": {
+        "check_count": 2,
+        "blocker_count": 3,
+        "revision_targets": [
+          "change_planning",
+          "implementation",
+          "verification",
+          "code_review",
+          "finalize"
+        ],
+        "task_complexity": "low",
+        "worker_brief": "Convert repo evidence into a scoped implementation plan."
+      }
+    },
+    {
+      "step_id": "implementation",
+      "worker": "FerrumPatchwright",
+      "port": 7017,
+      "depends_on": [
+        "change_planning"
+      ],
+      "input_artifacts": [
+        "/work/ceraxia/change_plan.md"
+      ],
+      "expected_artifacts": [
+        "/work/ceraxia/patch_manifest.json"
+      ],
+      "quality_hints": {
+        "check_count": 2,
+        "blocker_count": 3,
+        "revision_targets": [
+          "implementation",
+          "verification",
+          "code_review",
+          "finalize"
+        ],
+        "task_complexity": "low",
+        "worker_brief": "Apply only explicit or safely inferred scoped patch operations."
+      }
+    },
+    {
+      "step_id": "verification",
+      "worker": "OrdinatusVerifier",
+      "port": 7018,
+      "depends_on": [
+        "implementation"
+      ],
+      "input_artifacts": [
+        "/work/ceraxia/patch_manifest.json"
+      ],
+      "expected_artifacts": [
+        "/work/ceraxia/verification_report.json",
+        "/work/ceraxia/repair_loop_state.json"
+      ],
+      "quality_hints": {
+        "check_count": 2,
+        "blocker_count": 3,
+        "revision_targets": [
+          "verification",
+          "code_review",
+          "finalize"
+        ],
+        "task_complexity": "low",
+        "worker_brief": "Run allowlisted checks and perform only narrow repair loops."
+      }
+    },
+    {
+      "step_id": "code_review",
+      "worker": "JudicatorCodicis",
+      "port": 7019,
+      "depends_on": [
+        "verification"
+      ],
+      "input_artifacts": [
+        "/work/ceraxia/verification_report.json",
+        "/work/ceraxia/repair_loop_state.json"
+      ],
+      "expected_artifacts": [
+        "/work/ceraxia/code_review.json"
+      ],
+      "quality_hints": {
+        "check_count": 2,
+        "blocker_count": 3,
+        "revision_targets": [
+          "code_review",
+          "finalize"
+        ],
+        "task_complexity": "low",
+        "worker_brief": "Judge scope, evidence, verification, and revision needs."
+      }
+    },
+    {
+      "step_id": "finalize",
+      "worker": "SealwrightFinalis",
+      "port": 7020,
+      "depends_on": [
+        "code_review"
+      ],
+      "input_artifacts": [
+        "/work/ceraxia/code_review.json"
+      ],
+      "expected_artifacts": [
+        "/work/ceraxia/final_manifest.json"
+      ],
+      "quality_hints": {
+        "check_count": 2,
+        "blocker_count": 3,
+        "revision_targets": [
+          "finalize",
+          "code_review"
+        ],
+        "task_complexity": "low",
+        "worker_brief": "Package final evidence for Warmaster and chat clients."
+      }
+    }
+  ],
+  "missing_dependencies": {},
+  "run_dir": "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847/warmaster_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847",
+  "contract_path": "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847/warmaster_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847/contract.json",
+  "oversight_path": "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847/warmaster_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847/oversight.json",
+  "dispatch_dir": "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847/warmaster_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847/dispatch"
+}

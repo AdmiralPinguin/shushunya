@@ -1,0 +1,249 @@
+{
+  "repo_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-public-api-deprecation-20260630-181345/fixture/repo",
+  "goal": "кодовая expert-задача: проведи public API evolution с deprecated параметром, сохрани старых callers через warning, обнови нового caller, docs и tests old/new call styles.\nCERAXIA_TARGET_REPO: /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-public-api-deprecation-20260630-181345/fixture/repo\nCERAXIA_FILES:\n{\n  \"files\": [\n    {\n      \"path\": \"payments/api.py\",\n      \"overwrite\": true,\n      \"content\": \"import warnings\\n\\ndef calculate_total(gross, fee=0, *, service_fee=None):\\n    if service_fee is None:\\n        service_fee = fee\\n        if fee != 0:\\n            warnings.warn('fee is deprecated; use service_fee', DeprecationWarning, stacklevel=2)\\n    return gross - service_fee\\n\"\n    },\n    {\n      \"path\": \"payments/client.py\",\n      \"content\": \"from payments.api import calculate_total\\n\\ndef client_total(gross, service_fee):\\n    return calculate_total(gross, service_fee=service_fee)\\n\"\n    },\n    {\n      \"path\": \"tests/test_api_deprecation.py\",\n      \"content\": \"import warnings\\nimport unittest\\nfrom payments.api import calculate_total\\nfrom payments.client import client_total\\n\\nclass ApiDeprecationTest(unittest.TestCase):\\n    def test_old_positional_fee_still_works_with_warning(self):\\n        with warnings.catch_warnings(record=True) as caught:\\n            warnings.simplefilter('always')\\n            self.assertEqual(calculate_total(100, 15), 85)\\n        self.assertTrue(any(item.category is DeprecationWarning for item in caught))\\n\\n    def test_new_keyword_path_and_caller(self):\\n        self.assertEqual(calculate_total(80, service_fee=5), 75)\\n        self.assertEqual(client_total(80, 5), 75)\\n\\nif __name__ == '__main__':\\n    unittest.main()\\n\"\n    },\n    {\n      \"path\": \"docs/api_deprecation.md\",\n      \"content\": \"# API Deprecation\\n\\n`fee` remains supported with a warning; new callers use `service_fee`.\\n\"\n    }\n  ],\n  \"verification_commands\": [\n    \"python -m unittest tests.test_api_deprecation\",\n    \"python -m py_compile payments/api.py payments/client.py\"\n  ]\n}",
+  "total_files_scanned": 1,
+  "dominant_extensions": [
+    {
+      "extension": ".py",
+      "count": 1
+    }
+  ],
+  "candidate_files": [
+    "payments/api.py"
+  ],
+  "test_files": [],
+  "python_symbols": [
+    {
+      "path": "payments/api.py",
+      "module": "payments.api",
+      "functions": [
+        "calculate_total"
+      ],
+      "classes": [],
+      "imports": [],
+      "calls": []
+    }
+  ],
+  "suggested_verification_commands": [],
+  "repo_map": {
+    "ranked_files": [
+      {
+        "path": "payments/api.py",
+        "score": 15,
+        "reasons": [
+          "goal_filename_match",
+          "goal_symbol_match:api,calculate,payments,total",
+          "python_source"
+        ]
+      }
+    ],
+    "test_source_links": [],
+    "recommended_read_order": [
+      {
+        "path": "payments/api.py",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match, goal_symbol_match:api,calculate,payments,total, python_source"
+      }
+    ],
+    "notes": [
+      "ranked_files combines goal filename matches, symbol matches, test surfaces, and test-to-source imports",
+      "test_source_links are derived from static Python imports and are advisory, not proof of coverage",
+      "recommended_read_order lists files to inspect before patch planning or source mutation"
+    ]
+  },
+  "engineering_investigation": {
+    "dependency_graph": {
+      "edges": [],
+      "reverse_dependents": {},
+      "edge_count": 0
+    },
+    "call_graph": {
+      "edges": [],
+      "edge_count": 0,
+      "known_function_count": 1
+    },
+    "targeted_reading_plan": [
+      {
+        "path": "payments/api.py",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match, goal_symbol_match:api,calculate,payments,total, python_source",
+        "dependent_count": 0,
+        "sample_dependents": [],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis": "payments/api.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "goal_filename_match",
+          "goal_symbol_match:api,calculate,payments,total",
+          "python_source"
+        ],
+        "risk": "local change risk appears limited",
+        "next_read": "payments/api.py"
+      }
+    ],
+    "design_decision_seed": [
+      "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+      "Inspect dependents before changing public functions or modules with reverse dependencies.",
+      "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+    ]
+  },
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "payments/api.py",
+        "impact_level": "medium",
+        "rank_score": 15,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      }
+    ],
+    "risk_register": [
+      {
+        "risk": "no_test_surface_detected",
+        "severity": "medium",
+        "mitigation": "require syntax checks and task-specific verification commands"
+      }
+    ],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [],
+      "linked_test_targets": [],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "config_files": [],
+  "excluded_dirs": [
+    ".cache",
+    ".git",
+    ".gradle",
+    ".venv",
+    "__pycache__",
+    "build",
+    "cache",
+    "dist",
+    "live_runs",
+    "models",
+    "node_modules",
+    "outputs",
+    "runtime",
+    "tmp"
+  ],
+  "summary": "Surveyed 1 files; found 0 test-like files and 1 goal-matching candidates.",
+  "role_policy": {
+    "role": "repository_mapper",
+    "authority": "read_only_repository_mapping",
+    "may_mutate_source": false,
+    "required_evidence": [
+      "repo_root",
+      "dominant_extensions",
+      "test_files",
+      "python_symbols"
+    ],
+    "forbidden_actions": [
+      "source_mutation",
+      "verification_claim_without_artifacts"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "explicit_patch",
+      "test_repair",
+      "api_contract",
+      "multi_file",
+      "bugfix"
+    ],
+    "complexity": "high",
+    "complexity_score": 6,
+    "risk_flags": [
+      "multi_file_scope_drift",
+      "test_diagnostic_required",
+      "public_contract_regression"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+      "multi-file tasks must keep changed-file scope evidence for every mutated file",
+      "API/contract tasks must preserve public response shape and schema compatibility evidence"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "repository_survey",
+    "worker": "LogisRepository",
+    "purpose": "Inspect repository shape, likely ownership boundaries, risky files, and available test surfaces.",
+    "brief": "Map the repository before anyone edits it.",
+    "task_profile": {
+      "kinds": [
+        "explicit_patch",
+        "test_repair",
+        "api_contract",
+        "multi_file",
+        "bugfix"
+      ],
+      "complexity": "high",
+      "complexity_score": 6,
+      "risk_flags": [
+        "multi_file_scope_drift",
+        "test_diagnostic_required",
+        "public_contract_regression"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+        "multi-file tasks must keep changed-file scope evidence for every mutated file",
+        "API/contract tasks must preserve public response shape and schema compatibility evidence"
+      ]
+    },
+    "must_produce": [
+      "repo_map",
+      "candidate_files",
+      "test_files",
+      "recommended_read_order"
+    ],
+    "handoff_question": "Which files should the strategist inspect first, and why?",
+    "authority_boundary": "read_only_repository_mapping"
+  }
+}

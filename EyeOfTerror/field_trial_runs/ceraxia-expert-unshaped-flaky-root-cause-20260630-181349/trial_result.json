@@ -1,0 +1,77 @@
+{
+  "trial_id": "ceraxia-expert-unshaped-flaky-root-cause",
+  "run_id": "ceraxia-expert-unshaped-flaky-root-cause-20260630-181349",
+  "trial_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260630-181349",
+  "prepared_governor": "Ceraxia",
+  "result": {
+    "ok": true,
+    "phase": "completed"
+  },
+  "trial_outcome": {
+    "status": "passed",
+    "expected": true,
+    "reason": "task completed with ready final manifest"
+  },
+  "trial_checks": {
+    "expert_unshaped_flaky_root_cause": {
+      "deterministic_tie_breaker": true,
+      "priority_preserved": true,
+      "repeated_verification_test": true,
+      "does_not_skip_or_sleep": true,
+      "root_cause_doc": true,
+      "not_marker_synthesized": true,
+      "passed": true
+    }
+  },
+  "final_manifest": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260630-181349/warmaster_runs/ceraxia-expert-unshaped-flaky-root-cause-20260630-181349/work/ceraxia/final_manifest.json",
+  "manifest_summary": {
+    "status": "ready",
+    "patch_source": "test_inferred_flaky_ordering",
+    "changed_files": [
+      {
+        "path": "scheduler.py",
+        "operation": "write_file",
+        "created": false,
+        "before_sha256": "765815e2481a4f37f455020a10d8813a8393e4ccbca8909128a4a475081bea95",
+        "after_sha256": "a5305ecf29a1484d119b037103de119131412354ac44791acba7d87d1371f675",
+        "changed": true
+      },
+      {
+        "path": "docs/scheduler.md",
+        "operation": "write_file",
+        "created": false,
+        "before_sha256": "46fb772122919201fab2c8c585ad17a902d1766710a60d7e37b95fdd156d54c0",
+        "after_sha256": "ca7079eac1649d92ad76d4fb8890d28f67d24f20c2c9870ea41ac34d84862bd1",
+        "changed": true
+      }
+    ],
+    "diagnostics": {
+      "kind": "test_inferred_flaky_ordering",
+      "test_path": "tests/test_scheduler.py",
+      "source_path": "scheduler.py",
+      "function_name": "schedule_order",
+      "argument": "items",
+      "tie_breaker": "id",
+      "docs_path": "docs/scheduler.md"
+    },
+    "dirty_worktree": {
+      "git_repo": false,
+      "dirty_targets": []
+    },
+    "ambiguity_analysis": {},
+    "verification_summary": {
+      "executed_count": 4,
+      "repair_count": 0,
+      "blocker_count": 0
+    },
+    "blockers": []
+  },
+  "pricing_py": "",
+  "settings_py": "",
+  "fixture_files": [
+    "docs/scheduler.md",
+    "scheduler.py",
+    "tests/test_scheduler.py"
+  ],
+  "kept": true
+}

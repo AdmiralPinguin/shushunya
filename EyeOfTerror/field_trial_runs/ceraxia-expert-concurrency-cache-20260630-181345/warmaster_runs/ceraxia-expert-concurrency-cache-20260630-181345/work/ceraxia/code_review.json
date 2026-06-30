@@ -1,0 +1,335 @@
+{
+  "status": "passed",
+  "approved": true,
+  "role_policy": {
+    "role": "critic",
+    "authority": "read_only_package_review_and_revision_ordering",
+    "may_mutate_source": false,
+    "required_evidence": [
+      "review_status",
+      "findings",
+      "revision_plan"
+    ],
+    "forbidden_actions": [
+      "source_mutation",
+      "approving_without_verification_evidence"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "explicit_patch",
+      "test_repair",
+      "multi_file",
+      "bugfix"
+    ],
+    "complexity": "high",
+    "complexity_score": 5,
+    "risk_flags": [
+      "multi_file_scope_drift",
+      "test_diagnostic_required"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+      "multi-file tasks must keep changed-file scope evidence for every mutated file"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "code_review",
+    "worker": "JudicatorCodicis",
+    "purpose": "Review the implementation package for scope, test evidence, and unsafe assumptions.",
+    "brief": "Judge scope, evidence, verification, and revision needs.",
+    "task_profile": {
+      "kinds": [
+        "explicit_patch",
+        "test_repair",
+        "multi_file",
+        "bugfix"
+      ],
+      "complexity": "high",
+      "complexity_score": 5,
+      "risk_flags": [
+        "multi_file_scope_drift",
+        "test_diagnostic_required"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+        "multi-file tasks must keep changed-file scope evidence for every mutated file"
+      ]
+    },
+    "must_produce": [
+      "approved flag",
+      "findings",
+      "patch_scope_review",
+      "revision_plan"
+    ],
+    "handoff_question": "Can the final packager mark this ready?",
+    "authority_boundary": "read_only_package_review_and_revision_ordering"
+  },
+  "repair_loop_status": "passed",
+  "patch_scope_review": {
+    "status": "needs_attention",
+    "changed_file_count": 3,
+    "mapped_changed_file_count": 1,
+    "unmapped_changed_file_count": 2,
+    "unmapped_changed_files": [
+      "tests/test_cache_store.py",
+      "docs/cache_risk.md"
+    ],
+    "source_without_linked_tests": [
+      "cache_store.py"
+    ]
+  },
+  "engineering_readiness_review": {
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    },
+    "acceptance_criteria_count": 5,
+    "risk_count": 1,
+    "high_risk_count": 0,
+    "impact_file_count": 1
+  },
+  "repository_investigation_review": {
+    "status": "covered",
+    "checks": [
+      {
+        "check": "ranked_repo_map_present",
+        "status": "pass",
+        "evidence": {
+          "ranked_file_count": 1,
+          "explicit_output_surface": false,
+          "planned_output_paths": [
+            "tests/test_cache_store.py",
+            "docs/cache_risk.md"
+          ]
+        }
+      },
+      {
+        "check": "targeted_reading_plan_present",
+        "status": "pass",
+        "evidence": {
+          "targeted_read_count": 1,
+          "recommended_read_count": 1,
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "hypotheses_present",
+        "status": "pass",
+        "evidence": {
+          "hypothesis_count": 1
+        }
+      },
+      {
+        "check": "impact_matrix_present",
+        "status": "pass",
+        "evidence": {
+          "impact_file_count": 1,
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "pre_mutation_source_reads_present",
+        "status": "pass",
+        "evidence": {
+          "read_excerpt_count": 1,
+          "read_paths": [
+            "cache_store.py"
+          ],
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "changed_files_mapped_to_survey",
+        "status": "pass",
+        "evidence": {
+          "changed_file_count": 3,
+          "preexisting_changed_file_count": 1,
+          "mapped_changed_file_count": 1,
+          "created_changes_allowed_as_explicit_outputs": [
+            "tests/test_cache_store.py",
+            "docs/cache_risk.md"
+          ],
+          "unmapped_preexisting_changed_files": []
+        }
+      }
+    ],
+    "blockers": [],
+    "summary": "Repository investigation evidence is sufficient."
+  },
+  "decision_record": [
+    {
+      "check": "patch_applied",
+      "status": "pass",
+      "evidence": "applied"
+    },
+    {
+      "check": "verification_passed",
+      "status": "pass",
+      "evidence": "passed"
+    },
+    {
+      "check": "scope_review",
+      "status": "needs_attention",
+      "evidence": {
+        "status": "needs_attention",
+        "changed_file_count": 3,
+        "mapped_changed_file_count": 1,
+        "unmapped_changed_file_count": 2,
+        "unmapped_changed_files": [
+          "tests/test_cache_store.py",
+          "docs/cache_risk.md"
+        ],
+        "source_without_linked_tests": [
+          "cache_store.py"
+        ]
+      }
+    },
+    {
+      "check": "diagnostic_linkage",
+      "status": "pass",
+      "evidence": {
+        "kind": "multi_file_marker_synthesis",
+        "file_count": 3,
+        "planned_paths": [
+          "cache_store.py",
+          "tests/test_cache_store.py",
+          "docs/cache_risk.md"
+        ],
+        "overwrite_paths": [
+          "cache_store.py"
+        ],
+        "created_or_updated_paths": [
+          "cache_store.py",
+          "tests/test_cache_store.py",
+          "docs/cache_risk.md"
+        ]
+      }
+    },
+    {
+      "check": "readiness_model_present",
+      "status": "pass",
+      "evidence": {
+        "has_ranked_sources": true,
+        "has_acceptance_criteria": true,
+        "has_test_strategy": true,
+        "high_risk_count": 0
+      }
+    },
+    {
+      "check": "impact_matrix_present",
+      "status": "pass",
+      "evidence": {
+        "impact_file_count": 1
+      }
+    },
+    {
+      "check": "repository_investigation_review",
+      "status": "pass",
+      "evidence": {
+        "status": "covered",
+        "checks": [
+          {
+            "check": "ranked_repo_map_present",
+            "status": "pass",
+            "evidence": {
+              "ranked_file_count": 1,
+              "explicit_output_surface": false,
+              "planned_output_paths": [
+                "tests/test_cache_store.py",
+                "docs/cache_risk.md"
+              ]
+            }
+          },
+          {
+            "check": "targeted_reading_plan_present",
+            "status": "pass",
+            "evidence": {
+              "targeted_read_count": 1,
+              "recommended_read_count": 1,
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "hypotheses_present",
+            "status": "pass",
+            "evidence": {
+              "hypothesis_count": 1
+            }
+          },
+          {
+            "check": "impact_matrix_present",
+            "status": "pass",
+            "evidence": {
+              "impact_file_count": 1,
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "pre_mutation_source_reads_present",
+            "status": "pass",
+            "evidence": {
+              "read_excerpt_count": 1,
+              "read_paths": [
+                "cache_store.py"
+              ],
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "changed_files_mapped_to_survey",
+            "status": "pass",
+            "evidence": {
+              "changed_file_count": 3,
+              "preexisting_changed_file_count": 1,
+              "mapped_changed_file_count": 1,
+              "created_changes_allowed_as_explicit_outputs": [
+                "tests/test_cache_store.py",
+                "docs/cache_risk.md"
+              ],
+              "unmapped_preexisting_changed_files": []
+            }
+          }
+        ],
+        "blockers": [],
+        "summary": "Repository investigation evidence is sufficient."
+      }
+    }
+  ],
+  "findings": [],
+  "warnings": [
+    {
+      "severity": "warning",
+      "message": "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker."
+    },
+    {
+      "severity": "warning",
+      "message": "Changed file(s) outside ranked repo map should be manually checked for scope drift: tests/test_cache_store.py, docs/cache_risk.md"
+    },
+    {
+      "severity": "warning",
+      "message": "Changed source file(s) have no static linked tests in repo map; verify coverage manually: cache_store.py"
+    },
+    {
+      "severity": "warning",
+      "message": "Ceraxia currently supports only explicit patch operations; autonomous code synthesis is not enabled yet."
+    }
+  ],
+  "revision_plan": {
+    "required": false,
+    "focused_context": {},
+    "steps": []
+  }
+}

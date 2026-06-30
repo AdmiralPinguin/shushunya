@@ -1,0 +1,103 @@
+{
+  "trial_id": "ceraxia-expert-public-api-deprecation",
+  "run_id": "ceraxia-expert-public-api-deprecation-20260630-181345",
+  "trial_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-public-api-deprecation-20260630-181345",
+  "prepared_governor": "Ceraxia",
+  "result": {
+    "ok": true,
+    "phase": "completed"
+  },
+  "trial_outcome": {
+    "status": "passed",
+    "expected": true,
+    "reason": "task completed with ready final manifest"
+  },
+  "trial_checks": {
+    "expert_public_api_deprecation": {
+      "old_parameter_preserved": true,
+      "warning_emitted": true,
+      "new_caller_uses_keyword": true,
+      "tests_old_and_new_paths": true,
+      "docs_deprecation": true,
+      "passed": true
+    }
+  },
+  "final_manifest": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-public-api-deprecation-20260630-181345/warmaster_runs/ceraxia-expert-public-api-deprecation-20260630-181345/work/ceraxia/final_manifest.json",
+  "manifest_summary": {
+    "status": "ready",
+    "patch_source": "multi_file_marker_synthesis",
+    "changed_files": [
+      {
+        "path": "payments/api.py",
+        "operation": "write_file",
+        "created": false,
+        "before_sha256": "2e46cc2b4c71932d05440a2e7c44c7cd60aaef0c026e5eb7aa77df1d6f339ba0",
+        "after_sha256": "9772013c60bd6149818276661ff7a28c14cb38ad3e1598f54056232b174350bd",
+        "changed": true
+      },
+      {
+        "path": "payments/client.py",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "2046c46389e8875b13ff1a04d643fd3751b0b0c35693af34dc517b3fdc55ee3f",
+        "changed": true
+      },
+      {
+        "path": "tests/test_api_deprecation.py",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "0983531a99cfb46138691e331c8b80e762f1ac75b2ee9d85d65d2c8011804448",
+        "changed": true
+      },
+      {
+        "path": "docs/api_deprecation.md",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "29bc625256cf3bd0da2389a6f13bb91a007b3d0c658d22b998c6b8eec55b000d",
+        "changed": true
+      }
+    ],
+    "diagnostics": {
+      "kind": "multi_file_marker_synthesis",
+      "file_count": 4,
+      "planned_paths": [
+        "payments/api.py",
+        "payments/client.py",
+        "tests/test_api_deprecation.py",
+        "docs/api_deprecation.md"
+      ],
+      "overwrite_paths": [
+        "payments/api.py"
+      ],
+      "created_or_updated_paths": [
+        "payments/api.py",
+        "payments/client.py",
+        "tests/test_api_deprecation.py",
+        "docs/api_deprecation.md"
+      ]
+    },
+    "dirty_worktree": {
+      "git_repo": false,
+      "dirty_targets": []
+    },
+    "ambiguity_analysis": {},
+    "verification_summary": {
+      "executed_count": 3,
+      "repair_count": 0,
+      "blocker_count": 0
+    },
+    "blockers": []
+  },
+  "pricing_py": "",
+  "settings_py": "",
+  "fixture_files": [
+    "docs/api_deprecation.md",
+    "payments/api.py",
+    "payments/client.py",
+    "tests/test_api_deprecation.py"
+  ],
+  "kept": true
+}

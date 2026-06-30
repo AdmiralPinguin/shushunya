@@ -576,6 +576,306 @@
         "Keep ambiguity trials in the suite but exclude non-applicable dimensions from rolling engineering averages."
       ],
       "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-legacy-migration",
+      "run_id": "ceraxia-expert-legacy-migration-20260630-181345",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-legacy-migration-20260630-181345/trial_result.json",
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-legacy-migration-20260630-181345/warmaster_runs/ceraxia-expert-legacy-migration-20260630-181345/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-concurrency-cache",
+      "run_id": "ceraxia-expert-concurrency-cache-20260630-181345",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-concurrency-cache-20260630-181345/trial_result.json",
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-concurrency-cache-20260630-181345/warmaster_runs/ceraxia-expert-concurrency-cache-20260630-181345/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-public-api-deprecation",
+      "run_id": "ceraxia-expert-public-api-deprecation-20260630-181345",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-public-api-deprecation-20260630-181345/trial_result.json",
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-public-api-deprecation-20260630-181345/warmaster_runs/ceraxia-expert-public-api-deprecation-20260630-181345/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-security-boundary",
+      "run_id": "ceraxia-expert-security-boundary-20260630-181346",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-security-boundary-20260630-181346/trial_result.json",
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-security-boundary-20260630-181346/warmaster_runs/ceraxia-expert-security-boundary-20260630-181346/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-flaky-test-root-cause",
+      "run_id": "ceraxia-expert-flaky-test-root-cause-20260630-181346",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-flaky-test-root-cause-20260630-181346/trial_result.json",
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-flaky-test-root-cause-20260630-181346/warmaster_runs/ceraxia-expert-flaky-test-root-cause-20260630-181346/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-failed-review-revision",
+      "run_id": "ceraxia-expert-failed-review-revision-20260630-181347",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-failed-review-revision-20260630-181347/trial_result.json",
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-failed-review-revision-20260630-181347/warmaster_runs/ceraxia-expert-failed-review-revision-20260630-181347/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-api-evolution",
+      "run_id": "ceraxia-expert-unshaped-api-evolution-20260630-181347",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260630-181347/trial_result.json",
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260630-181347/warmaster_runs/ceraxia-expert-unshaped-api-evolution-20260630-181347/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-data-migration",
+      "run_id": "ceraxia-expert-unshaped-data-migration-20260630-181347",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-data-migration-20260630-181347/trial_result.json",
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-data-migration-20260630-181347/warmaster_runs/ceraxia-expert-unshaped-data-migration-20260630-181347/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-security-boundary",
+      "run_id": "ceraxia-expert-unshaped-security-boundary-20260630-181348",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-security-boundary-20260630-181348/trial_result.json",
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-security-boundary-20260630-181348/warmaster_runs/ceraxia-expert-unshaped-security-boundary-20260630-181348/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-concurrency-cache",
+      "run_id": "ceraxia-expert-unshaped-concurrency-cache-20260630-181348",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-concurrency-cache-20260630-181348/trial_result.json",
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-concurrency-cache-20260630-181348/warmaster_runs/ceraxia-expert-unshaped-concurrency-cache-20260630-181348/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-flaky-root-cause",
+      "run_id": "ceraxia-expert-unshaped-flaky-root-cause-20260630-181349",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260630-181349/trial_result.json",
+        "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260630-181349/warmaster_runs/ceraxia-expert-unshaped-flaky-root-cause-20260630-181349/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-retry-policy",
+      "run_id": "ceraxia-expert-unshaped-retry-policy-20260630-181847",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847/warmaster_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
     }
   ]
 }

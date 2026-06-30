@@ -1,0 +1,92 @@
+{
+  "trial_id": "ceraxia-expert-concurrency-cache",
+  "run_id": "ceraxia-expert-concurrency-cache-20260630-181345",
+  "trial_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-concurrency-cache-20260630-181345",
+  "prepared_governor": "Ceraxia",
+  "result": {
+    "ok": true,
+    "phase": "completed"
+  },
+  "trial_outcome": {
+    "status": "passed",
+    "expected": true,
+    "reason": "task completed with ready final manifest"
+  },
+  "trial_checks": {
+    "expert_concurrency_cache": {
+      "uses_lock": true,
+      "invalidates_idempotently": true,
+      "tests_threads": true,
+      "no_sleep_based_test": true,
+      "risk_doc": true,
+      "passed": true
+    }
+  },
+  "final_manifest": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-concurrency-cache-20260630-181345/warmaster_runs/ceraxia-expert-concurrency-cache-20260630-181345/work/ceraxia/final_manifest.json",
+  "manifest_summary": {
+    "status": "ready",
+    "patch_source": "multi_file_marker_synthesis",
+    "changed_files": [
+      {
+        "path": "cache_store.py",
+        "operation": "write_file",
+        "created": false,
+        "before_sha256": "f23142355580ef2f66d5c8d87e28e8e44c1b778ea42433258fe9b7dac8b54e9c",
+        "after_sha256": "9f3d566f86c28526fc9ade8dd401174d85fa7b0875d53202e540aa3ef1a79c02",
+        "changed": true
+      },
+      {
+        "path": "tests/test_cache_store.py",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "98d7a5d9a8e485279ab028d4b781617c7b1ec2721b9d8cd33096a01f05cdd054",
+        "changed": true
+      },
+      {
+        "path": "docs/cache_risk.md",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "02fe1dabc7d0a4d1881d012b11d3c7a18ab6605adc146f75f1437608e75d3e24",
+        "changed": true
+      }
+    ],
+    "diagnostics": {
+      "kind": "multi_file_marker_synthesis",
+      "file_count": 3,
+      "planned_paths": [
+        "cache_store.py",
+        "tests/test_cache_store.py",
+        "docs/cache_risk.md"
+      ],
+      "overwrite_paths": [
+        "cache_store.py"
+      ],
+      "created_or_updated_paths": [
+        "cache_store.py",
+        "tests/test_cache_store.py",
+        "docs/cache_risk.md"
+      ]
+    },
+    "dirty_worktree": {
+      "git_repo": false,
+      "dirty_targets": []
+    },
+    "ambiguity_analysis": {},
+    "verification_summary": {
+      "executed_count": 3,
+      "repair_count": 0,
+      "blocker_count": 0
+    },
+    "blockers": []
+  },
+  "pricing_py": "",
+  "settings_py": "",
+  "fixture_files": [
+    "cache_store.py",
+    "docs/cache_risk.md",
+    "tests/test_cache_store.py"
+  ],
+  "kept": true
+}

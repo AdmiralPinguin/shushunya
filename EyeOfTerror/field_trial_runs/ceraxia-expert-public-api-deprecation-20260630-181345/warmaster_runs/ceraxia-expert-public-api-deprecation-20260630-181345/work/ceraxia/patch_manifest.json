@@ -1,0 +1,376 @@
+{
+  "status": "applied",
+  "mode": "explicit_patch_apply",
+  "task_id": "ceraxia-expert-public-api-deprecation-20260630-181345:implementation",
+  "summary": "Ceraxia applied explicit patch operations.",
+  "intended_actions": [
+    "read concrete target files before editing",
+    "apply minimal scoped patch",
+    "run verification commands from verification_report.json",
+    "return focused revision steps on failure"
+  ],
+  "plan_excerpt": "# Ceraxia Change Plan\n\nGoal: кодовая expert-задача: проведи public API evolution с deprecated параметром, сохрани старых callers через warning, обнови нового caller, docs и tests old/new call styles.\nCERAXIA_TARGET_REPO: /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-public-api-deprecation-20260630-181345/fixture/repo\nCERAXIA_FILES:\n{\n  \"files\": [\n    {\n      \"path\": \"payments/api.py\",\n      \"overwrite\": true,\n      \"content\": \"import warnings\\n\\ndef calculate_total(gross, fee=0, *, service_fee=None):\\n    if service_fee is None:\\n        service_fee = fee\\n        if fee != 0:\\n            warnings.warn('fee is deprecated; use service_fee', DeprecationWarning, stacklevel=2)\\n    return gross - service_fee\\n\"\n    },\n    {\n      \"path\": \"payments/client.py\",\n      \"content\": \"from payments.api import calculate_total\\n\\ndef client_total(gross, service_fee):\\n    return calculate_total(gross, service_fee=service_fee)\\n\"\n    },\n    {\n      \"path\": \"tests/test_api_deprecation.py\",\n      \"content\": \"import warnings\\nimport unittest\\nfrom payments.api import calculate_total\\nfrom payments.client import client_total\\n\\nclass ApiDeprecationTest(unittest.TestCase):\\n    def test_old_positional_fee_still_works_with_warning(self):\\n        with warnings.catch_warnings(record=True) as caught:\\n            warnings.simplefilter('always')\\n            self.assertEqual(calculate_total(100, 15), 85)\\n        self.assertTrue(any(item.category is DeprecationWarning for item in caught))\\n\\n    def test_new_keyword_path_and_caller(self):\\n        self.assertEqual(calculate_total(80, service_fee=5), 75)\\n        self.assertEqual(client_total(80, 5), 75)\\n\\nif __name__ == '__main__':\\n    unittest.main()\\n\"\n    },\n    {\n      \"path\": \"docs/api_deprecation.md\",\n      \"content\": \"# API Deprecation\\n\\n`fee` remains supported with a warning; new callers use `service_fee`.\\n\"\n    }\n  ],\n  \"verification_commands\": [\n    \"python -m unittest tests.test_api_deprecation\",\n    \"python -m py_compile payments/api.py payments/client.py\"\n  ]\n}\n\n## Scope\n- Inspect the named task and constrain edits to the smallest coherent module set.\n- Preserve user changes and expose blockers instead of guessing.\n\n## Candidate Files\n- payments/api.py\n\n## Ranked Repo Map\n- payments/api.py: score=15 reasons=[goal_filename_match, goal_symbol_match:api,calculate,payments,total, python_source]\n\n## Test Source Links\n\n## Recommended Read Order\n- inspect_source: payments/api.py (goal_filename_match, goal_symbol_match:api,calculate,payments,total, python_source)\n\n## Targeted Reading Plan\n- payments/api.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=0\n\n## Hypothesis Log\n- [high] payments/api.py is likely relevant to the requested code change. evidence=[goal_filename_match, goal_symbol_match:api,calculate,payments,total, python_source] risk=local change risk appears limited\n\n## Design Decision Seed\n- Prefer the small",
+  "role_policy": {
+    "role": "patchwright",
+    "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unsafe_overwrite",
+      "duplicate_function_append"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "explicit_patch",
+      "test_repair",
+      "api_contract",
+      "multi_file",
+      "bugfix"
+    ],
+    "complexity": "high",
+    "complexity_score": 6,
+    "risk_flags": [
+      "multi_file_scope_drift",
+      "test_diagnostic_required",
+      "public_contract_regression"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+      "multi-file tasks must keep changed-file scope evidence for every mutated file",
+      "API/contract tasks must preserve public response shape and schema compatibility evidence"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "implementation",
+    "worker": "FerrumPatchwright",
+    "purpose": "Prepare an auditable patch manifest and implementation handoff for code changes.",
+    "brief": "Apply only explicit or safely inferred scoped patch operations.",
+    "task_profile": {
+      "kinds": [
+        "explicit_patch",
+        "test_repair",
+        "api_contract",
+        "multi_file",
+        "bugfix"
+      ],
+      "complexity": "high",
+      "complexity_score": 6,
+      "risk_flags": [
+        "multi_file_scope_drift",
+        "test_diagnostic_required",
+        "public_contract_regression"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+        "multi-file tasks must keep changed-file scope evidence for every mutated file",
+        "API/contract tasks must preserve public response shape and schema compatibility evidence"
+      ]
+    },
+    "must_produce": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "handoff_question": "What exactly changed, and what should verification run?",
+    "authority_boundary": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+  },
+  "dirty_worktree": {
+    "git_repo": false,
+    "dirty_targets": []
+  },
+  "ambiguity_analysis": {},
+  "patch_spec_present": true,
+  "patch_source": "multi_file_marker_synthesis",
+  "patch_candidates": [
+    {
+      "source": "explicit_json_patch",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "marker_synthesis",
+      "status": "selected",
+      "operation_count": 4,
+      "verification_command_count": 2,
+      "diagnostics": {
+        "kind": "multi_file_marker_synthesis",
+        "file_count": 4,
+        "planned_paths": [
+          "payments/api.py",
+          "payments/client.py",
+          "tests/test_api_deprecation.py",
+          "docs/api_deprecation.md"
+        ],
+        "overwrite_paths": [
+          "payments/api.py"
+        ],
+        "created_or_updated_paths": [
+          "payments/api.py",
+          "payments/client.py",
+          "tests/test_api_deprecation.py",
+          "docs/api_deprecation.md"
+        ]
+      }
+    }
+  ],
+  "selected_patch_candidate": {
+    "source": "marker_synthesis",
+    "status": "selected",
+    "operation_count": 4,
+    "verification_command_count": 2,
+    "diagnostics": {
+      "kind": "multi_file_marker_synthesis",
+      "file_count": 4,
+      "planned_paths": [
+        "payments/api.py",
+        "payments/client.py",
+        "tests/test_api_deprecation.py",
+        "docs/api_deprecation.md"
+      ],
+      "overwrite_paths": [
+        "payments/api.py"
+      ],
+      "created_or_updated_paths": [
+        "payments/api.py",
+        "payments/client.py",
+        "tests/test_api_deprecation.py",
+        "docs/api_deprecation.md"
+      ]
+    }
+  },
+  "source_excerpt_pack": [
+    {
+      "path": "payments/api.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, goal_symbol_match:api,calculate,payments,total, python_source",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 0,
+      "bytes": 56,
+      "status": "read",
+      "excerpt": "def calculate_total(gross, fee):\n    return gross - fee\n",
+      "truncated": false
+    }
+  ],
+  "source_excerpt_summary": [
+    {
+      "path": "payments/api.py",
+      "status": "read",
+      "bytes": 56,
+      "truncated": false
+    }
+  ],
+  "implementation_decision_record": [
+    {
+      "check": "source_evidence_loaded",
+      "status": "pass",
+      "detail": "1 targeted files read"
+    },
+    {
+      "check": "patch_candidate_selected",
+      "status": "pass",
+      "detail": "marker_synthesis"
+    },
+    {
+      "check": "mutation_authority",
+      "status": "pass",
+      "detail": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+    }
+  ],
+  "diagnostics": {
+    "kind": "multi_file_marker_synthesis",
+    "file_count": 4,
+    "planned_paths": [
+      "payments/api.py",
+      "payments/client.py",
+      "tests/test_api_deprecation.py",
+      "docs/api_deprecation.md"
+    ],
+    "overwrite_paths": [
+      "payments/api.py"
+    ],
+    "created_or_updated_paths": [
+      "payments/api.py",
+      "payments/client.py",
+      "tests/test_api_deprecation.py",
+      "docs/api_deprecation.md"
+    ]
+  },
+  "operation_count": 4,
+  "changed_files": [
+    {
+      "path": "payments/api.py",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "2e46cc2b4c71932d05440a2e7c44c7cd60aaef0c026e5eb7aa77df1d6f339ba0",
+      "after_sha256": "9772013c60bd6149818276661ff7a28c14cb38ad3e1598f54056232b174350bd",
+      "changed": true
+    },
+    {
+      "path": "payments/client.py",
+      "operation": "write_file",
+      "created": true,
+      "before_sha256": "",
+      "after_sha256": "2046c46389e8875b13ff1a04d643fd3751b0b0c35693af34dc517b3fdc55ee3f",
+      "changed": true
+    },
+    {
+      "path": "tests/test_api_deprecation.py",
+      "operation": "write_file",
+      "created": true,
+      "before_sha256": "",
+      "after_sha256": "0983531a99cfb46138691e331c8b80e762f1ac75b2ee9d85d65d2c8011804448",
+      "changed": true
+    },
+    {
+      "path": "docs/api_deprecation.md",
+      "operation": "write_file",
+      "created": true,
+      "before_sha256": "",
+      "after_sha256": "29bc625256cf3bd0da2389a6f13bb91a007b3d0c658d22b998c6b8eec55b000d",
+      "changed": true
+    }
+  ],
+  "recommended_read_order": [
+    {
+      "path": "payments/api.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, goal_symbol_match:api,calculate,payments,total, python_source"
+    }
+  ],
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "payments/api.py",
+        "impact_level": "medium",
+        "rank_score": 15,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      }
+    ],
+    "risk_register": [
+      {
+        "risk": "no_test_surface_detected",
+        "severity": "medium",
+        "mitigation": "require syntax checks and task-specific verification commands"
+      }
+    ],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [],
+      "linked_test_targets": [],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "patch_scope_evidence": {
+    "changed_files_in_repo_map": [
+      "payments/api.py"
+    ],
+    "changed_files_outside_repo_map": [
+      "payments/client.py",
+      "tests/test_api_deprecation.py",
+      "docs/api_deprecation.md"
+    ],
+    "changed_sources_with_linked_tests": [],
+    "changed_tests_with_linked_sources": [],
+    "evidence": [
+      {
+        "path": "payments/api.py",
+        "in_repo_map": true,
+        "score": 15,
+        "reasons": [
+          "goal_filename_match",
+          "goal_symbol_match:api,calculate,payments,total",
+          "python_source"
+        ],
+        "linked_tests": [],
+        "linked_sources": []
+      },
+      {
+        "path": "payments/client.py",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      },
+      {
+        "path": "tests/test_api_deprecation.py",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      },
+      {
+        "path": "docs/api_deprecation.md",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      }
+    ]
+  },
+  "rollback": {
+    "applied": false,
+    "files": []
+  },
+  "verification_commands": [
+    "python -m unittest tests.test_api_deprecation",
+    "python -m py_compile payments/api.py payments/client.py"
+  ],
+  "blockers": [],
+  "warnings": [
+    "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker."
+  ]
+}

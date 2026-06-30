@@ -1,0 +1,390 @@
+{
+  "status": "applied",
+  "mode": "explicit_patch_apply",
+  "task_id": "ceraxia-expert-unshaped-security-boundary-20260630-181348:implementation",
+  "summary": "Ceraxia applied explicit patch operations.",
+  "intended_actions": [
+    "read concrete target files before editing",
+    "apply minimal scoped patch",
+    "run verification commands from verification_report.json",
+    "return focused revision steps on failure"
+  ],
+  "plan_excerpt": "# Ceraxia Change Plan\n\nGoal: кодовая expert-задача без structured security marker: исправь path traversal boundary. Выведи контракт из tests и docs: абсолютные пути и parent traversal должны отклоняться, обычные относительные пути должны нормализоваться и продолжать работать.\nCERAXIA_TARGET_REPO: /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-security-boundary-20260630-181348/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_archive_paths\nCERAXIA_VERIFY: python -m py_compile archive_paths.py\n\n## Scope\n- Inspect the named task and constrain edits to the smallest coherent module set.\n- Preserve user changes and expose blockers instead of guessing.\n\n## Candidate Files\n- archive_paths.py\n- docs/archive_paths.md\n- tests/test_archive_paths.py\n\n## Ranked Repo Map\n- archive_paths.py: score=22 reasons=[goal_filename_match, imported_by:tests/test_archive_paths.py, goal_symbol_match:archive,path,paths, python_source]\n- tests/test_archive_paths.py: score=19 reasons=[goal_filename_match, test_surface, linked_test, goal_symbol_match:archive,path,paths,test,tests]\n- docs/archive_paths.md: score=6 reasons=[goal_filename_match]\n\n## Test Source Links\n- tests/test_archive_paths.py -> archive_paths.py\n\n## Recommended Read Order\n- inspect_source: archive_paths.py (goal_filename_match, imported_by:tests/test_archive_paths.py, goal_symbol_match:archive,path,paths)\n- inspect_test: tests/test_archive_paths.py (goal_filename_match, test_surface, linked_test)\n- inspect_source: docs/archive_paths.md (goal_filename_match)\n\n## Targeted Reading Plan\n- archive_paths.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=1\n- tests/test_archive_paths.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=0\n- docs/archive_paths.md: What contract does this file expose, and what tests or dependents would break if it changes? dependents=0\n\n## Hypothesis Log\n- [high] archive_paths.py is likely relevant to the requested code change. evidence=[goal_filename_match, imported_by:tests/test_archive_paths.py, goal_symbol_match:archive,path,paths, python_source] risk=public behavior may affect dependents\n- [high] tests/test_archive_paths.py is likely relevant to the requested code change. evidence=[goal_filename_match, test_surface, linked_test, goal_symbol_match:archive,path,paths,test,tests] risk=local change risk appears limited\n- [medium] docs/archive_paths.md is likely relevant to the requested code change. evidence=[goal_filename_match] risk=local change risk appears limited\n\n## Design Decision Seed\n- Prefer the smallest patch that satisfies the failing test or explicit user contract.\n- Inspect dependents before changing public functions or modules with reverse dependencies.\n- If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation.\n\n## File Impact Matrix\n- archive_paths.py: impac",
+  "role_policy": {
+    "role": "patchwright",
+    "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unsafe_overwrite",
+      "duplicate_function_append"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 2,
+    "risk_flags": [
+      "test_diagnostic_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "implementation",
+    "worker": "FerrumPatchwright",
+    "purpose": "Prepare an auditable patch manifest and implementation handoff for code changes.",
+    "brief": "Apply only explicit or safely inferred scoped patch operations.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 2,
+      "risk_flags": [
+        "test_diagnostic_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+      ]
+    },
+    "must_produce": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "handoff_question": "What exactly changed, and what should verification run?",
+    "authority_boundary": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+  },
+  "dirty_worktree": {
+    "git_repo": false,
+    "dirty_targets": []
+  },
+  "ambiguity_analysis": {},
+  "patch_spec_present": true,
+  "patch_source": "test_inferred_security_boundary",
+  "patch_candidates": [
+    {
+      "source": "explicit_json_patch",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "marker_synthesis",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_api_deprecation",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_data_migration",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_security_boundary",
+      "status": "selected",
+      "operation_count": 2,
+      "verification_command_count": 2,
+      "diagnostics": {
+        "kind": "test_inferred_security_boundary",
+        "test_path": "tests/test_archive_paths.py",
+        "source_path": "archive_paths.py",
+        "function_name": "safe_archive_path",
+        "argument": "raw",
+        "positive_case_count": 2,
+        "malicious_case_count": 3,
+        "docs_path": "docs/archive_paths.md"
+      }
+    }
+  ],
+  "selected_patch_candidate": {
+    "source": "test_inferred_security_boundary",
+    "status": "selected",
+    "operation_count": 2,
+    "verification_command_count": 2,
+    "diagnostics": {
+      "kind": "test_inferred_security_boundary",
+      "test_path": "tests/test_archive_paths.py",
+      "source_path": "archive_paths.py",
+      "function_name": "safe_archive_path",
+      "argument": "raw",
+      "positive_case_count": 2,
+      "malicious_case_count": 3,
+      "docs_path": "docs/archive_paths.md"
+    }
+  },
+  "source_excerpt_pack": [
+    {
+      "path": "archive_paths.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, imported_by:tests/test_archive_paths.py, goal_symbol_match:archive,path,paths",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 1,
+      "bytes": 48,
+      "status": "read",
+      "excerpt": "def safe_archive_path(raw):\n    return str(raw)\n",
+      "truncated": false
+    },
+    {
+      "path": "tests/test_archive_paths.py",
+      "phase": "inspect_test",
+      "reason": "goal_filename_match, test_surface, linked_test",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 0,
+      "bytes": 664,
+      "status": "read",
+      "excerpt": "import unittest\nfrom archive_paths import safe_archive_path\n\nclass ArchivePathsTest(unittest.TestCase):\n    def test_valid_relative_paths_are_normalized(self):\n        self.assertEqual(safe_archive_path('books/chapter1.txt'), 'books/chapter1.txt')\n        self.assertEqual(safe_archive_path('./books//chapter2.txt'), 'books/chapter2.txt')\n\n    def test_traversal_and_absolute_paths_are_rejected(self):\n        for raw in ('../secret.txt', '/etc/passwd', 'books/../../secret.txt'):\n            with self.subTest(raw=raw):\n                with self.assertRaises(ValueError):\n                    safe_archive_path(raw)\n\nif __name__ == '__main__':\n    unittest.main()\n",
+      "truncated": false
+    },
+    {
+      "path": "docs/archive_paths.md",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 0,
+      "bytes": 105,
+      "status": "read",
+      "excerpt": "# Archive Paths\n\nArchive paths must stay inside the archive root while allowing ordinary relative paths.\n",
+      "truncated": false
+    }
+  ],
+  "source_excerpt_summary": [
+    {
+      "path": "archive_paths.py",
+      "status": "read",
+      "bytes": 48,
+      "truncated": false
+    },
+    {
+      "path": "tests/test_archive_paths.py",
+      "status": "read",
+      "bytes": 664,
+      "truncated": false
+    },
+    {
+      "path": "docs/archive_paths.md",
+      "status": "read",
+      "bytes": 105,
+      "truncated": false
+    }
+  ],
+  "implementation_decision_record": [
+    {
+      "check": "source_evidence_loaded",
+      "status": "pass",
+      "detail": "3 targeted files read"
+    },
+    {
+      "check": "patch_candidate_selected",
+      "status": "pass",
+      "detail": "test_inferred_security_boundary"
+    },
+    {
+      "check": "mutation_authority",
+      "status": "pass",
+      "detail": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+    }
+  ],
+  "diagnostics": {
+    "kind": "test_inferred_security_boundary",
+    "test_path": "tests/test_archive_paths.py",
+    "source_path": "archive_paths.py",
+    "function_name": "safe_archive_path",
+    "argument": "raw",
+    "positive_case_count": 2,
+    "malicious_case_count": 3,
+    "docs_path": "docs/archive_paths.md"
+  },
+  "operation_count": 2,
+  "changed_files": [
+    {
+      "path": "archive_paths.py",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "92a504c9ae6ee892d3a44f3538859fa8c4afbcfd0c4f968f64252540135fa4c3",
+      "after_sha256": "92554b3c0623880bc080a6f290582621045fbcc443e94515b7ef8b943676438d",
+      "changed": true
+    },
+    {
+      "path": "docs/archive_paths.md",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "3d8821933d3801b914875afc7bec534e61b340869702776a3930ff8c9de12964",
+      "after_sha256": "34ea7e1d18e217ad30914503eaec89d2995391ad07ad0eae4b078170953b20b5",
+      "changed": true
+    }
+  ],
+  "recommended_read_order": [
+    {
+      "path": "archive_paths.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, imported_by:tests/test_archive_paths.py, goal_symbol_match:archive,path,paths"
+    },
+    {
+      "path": "tests/test_archive_paths.py",
+      "phase": "inspect_test",
+      "reason": "goal_filename_match, test_surface, linked_test"
+    },
+    {
+      "path": "docs/archive_paths.md",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match"
+    }
+  ],
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "archive_paths.py",
+        "impact_level": "medium",
+        "rank_score": 22,
+        "dependent_count": 1,
+        "linked_tests": [
+          "tests/test_archive_paths.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "tests/test_archive_paths.py",
+        "impact_level": "medium",
+        "rank_score": 19,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      },
+      {
+        "path": "docs/archive_paths.md",
+        "impact_level": "low",
+        "rank_score": 6,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      }
+    ],
+    "risk_register": [],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [
+        "python -m unittest discover",
+        "python -m unittest tests.test_archive_paths"
+      ],
+      "linked_test_targets": [
+        "tests/test_archive_paths.py"
+      ],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "patch_scope_evidence": {
+    "changed_files_in_repo_map": [
+      "archive_paths.py",
+      "docs/archive_paths.md"
+    ],
+    "changed_files_outside_repo_map": [],
+    "changed_sources_with_linked_tests": [
+      {
+        "path": "archive_paths.py",
+        "tests": [
+          "tests/test_archive_paths.py"
+        ]
+      }
+    ],
+    "changed_tests_with_linked_sources": [],
+    "evidence": [
+      {
+        "path": "archive_paths.py",
+        "in_repo_map": true,
+        "score": 22,
+        "reasons": [
+          "goal_filename_match",
+          "imported_by:tests/test_archive_paths.py",
+          "goal_symbol_match:archive,path,paths",
+          "python_source"
+        ],
+        "linked_tests": [
+          "tests/test_archive_paths.py"
+        ],
+        "linked_sources": []
+      },
+      {
+        "path": "docs/archive_paths.md",
+        "in_repo_map": true,
+        "score": 6,
+        "reasons": [
+          "goal_filename_match"
+        ],
+        "linked_tests": [],
+        "linked_sources": []
+      }
+    ]
+  },
+  "rollback": {
+    "applied": false,
+    "files": []
+  },
+  "verification_commands": [
+    "python -m unittest tests.test_archive_paths",
+    "python -m py_compile archive_paths.py"
+  ],
+  "blockers": [],
+  "warnings": [
+    "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker."
+  ]
+}

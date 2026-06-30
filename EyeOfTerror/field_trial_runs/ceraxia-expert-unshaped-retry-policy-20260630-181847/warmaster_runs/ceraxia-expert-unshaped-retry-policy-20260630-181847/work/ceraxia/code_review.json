@@ -1,0 +1,310 @@
+{
+  "status": "passed",
+  "approved": true,
+  "role_policy": {
+    "role": "critic",
+    "authority": "read_only_package_review_and_revision_ordering",
+    "may_mutate_source": false,
+    "required_evidence": [
+      "review_status",
+      "findings",
+      "revision_plan"
+    ],
+    "forbidden_actions": [
+      "source_mutation",
+      "approving_without_verification_evidence"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 2,
+    "risk_flags": [
+      "test_diagnostic_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "code_review",
+    "worker": "JudicatorCodicis",
+    "purpose": "Review the implementation package for scope, test evidence, and unsafe assumptions.",
+    "brief": "Judge scope, evidence, verification, and revision needs.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 2,
+      "risk_flags": [
+        "test_diagnostic_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+      ]
+    },
+    "must_produce": [
+      "approved flag",
+      "findings",
+      "patch_scope_review",
+      "revision_plan"
+    ],
+    "handoff_question": "Can the final packager mark this ready?",
+    "authority_boundary": "read_only_package_review_and_revision_ordering"
+  },
+  "repair_loop_status": "passed",
+  "patch_scope_review": {
+    "status": "needs_attention",
+    "changed_file_count": 2,
+    "mapped_changed_file_count": 1,
+    "unmapped_changed_file_count": 1,
+    "unmapped_changed_files": [
+      "docs/client.md"
+    ],
+    "source_without_linked_tests": []
+  },
+  "engineering_readiness_review": {
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    },
+    "acceptance_criteria_count": 5,
+    "risk_count": 0,
+    "high_risk_count": 0,
+    "impact_file_count": 2
+  },
+  "repository_investigation_review": {
+    "status": "covered",
+    "checks": [
+      {
+        "check": "ranked_repo_map_present",
+        "status": "pass",
+        "evidence": {
+          "ranked_file_count": 2,
+          "explicit_output_surface": false,
+          "planned_output_paths": [
+            "tests/test_client.py",
+            "client.py",
+            "docs/client.md"
+          ]
+        }
+      },
+      {
+        "check": "targeted_reading_plan_present",
+        "status": "pass",
+        "evidence": {
+          "targeted_read_count": 2,
+          "recommended_read_count": 2,
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "hypotheses_present",
+        "status": "pass",
+        "evidence": {
+          "hypothesis_count": 2
+        }
+      },
+      {
+        "check": "impact_matrix_present",
+        "status": "pass",
+        "evidence": {
+          "impact_file_count": 2,
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "pre_mutation_source_reads_present",
+        "status": "pass",
+        "evidence": {
+          "read_excerpt_count": 2,
+          "read_paths": [
+            "client.py",
+            "tests/test_client.py"
+          ],
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "changed_files_mapped_to_survey",
+        "status": "pass",
+        "evidence": {
+          "changed_file_count": 2,
+          "preexisting_changed_file_count": 2,
+          "mapped_changed_file_count": 1,
+          "created_changes_allowed_as_explicit_outputs": [],
+          "unmapped_preexisting_changed_files": []
+        }
+      }
+    ],
+    "blockers": [],
+    "summary": "Repository investigation evidence is sufficient."
+  },
+  "decision_record": [
+    {
+      "check": "patch_applied",
+      "status": "pass",
+      "evidence": "applied"
+    },
+    {
+      "check": "verification_passed",
+      "status": "pass",
+      "evidence": "passed"
+    },
+    {
+      "check": "scope_review",
+      "status": "needs_attention",
+      "evidence": {
+        "status": "needs_attention",
+        "changed_file_count": 2,
+        "mapped_changed_file_count": 1,
+        "unmapped_changed_file_count": 1,
+        "unmapped_changed_files": [
+          "docs/client.md"
+        ],
+        "source_without_linked_tests": []
+      }
+    },
+    {
+      "check": "diagnostic_linkage",
+      "status": "pass",
+      "evidence": {
+        "kind": "test_inferred_retry_policy",
+        "test_path": "tests/test_client.py",
+        "source_path": "client.py",
+        "function_name": "publish_event",
+        "retry_exception": "ConnectionError",
+        "non_retry_exception": "ValueError",
+        "max_attempts": 3,
+        "docs_path": "docs/client.md"
+      }
+    },
+    {
+      "check": "readiness_model_present",
+      "status": "pass",
+      "evidence": {
+        "has_ranked_sources": true,
+        "has_acceptance_criteria": true,
+        "has_test_strategy": true,
+        "high_risk_count": 0
+      }
+    },
+    {
+      "check": "impact_matrix_present",
+      "status": "pass",
+      "evidence": {
+        "impact_file_count": 2
+      }
+    },
+    {
+      "check": "repository_investigation_review",
+      "status": "pass",
+      "evidence": {
+        "status": "covered",
+        "checks": [
+          {
+            "check": "ranked_repo_map_present",
+            "status": "pass",
+            "evidence": {
+              "ranked_file_count": 2,
+              "explicit_output_surface": false,
+              "planned_output_paths": [
+                "tests/test_client.py",
+                "client.py",
+                "docs/client.md"
+              ]
+            }
+          },
+          {
+            "check": "targeted_reading_plan_present",
+            "status": "pass",
+            "evidence": {
+              "targeted_read_count": 2,
+              "recommended_read_count": 2,
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "hypotheses_present",
+            "status": "pass",
+            "evidence": {
+              "hypothesis_count": 2
+            }
+          },
+          {
+            "check": "impact_matrix_present",
+            "status": "pass",
+            "evidence": {
+              "impact_file_count": 2,
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "pre_mutation_source_reads_present",
+            "status": "pass",
+            "evidence": {
+              "read_excerpt_count": 2,
+              "read_paths": [
+                "client.py",
+                "tests/test_client.py"
+              ],
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "changed_files_mapped_to_survey",
+            "status": "pass",
+            "evidence": {
+              "changed_file_count": 2,
+              "preexisting_changed_file_count": 2,
+              "mapped_changed_file_count": 1,
+              "created_changes_allowed_as_explicit_outputs": [],
+              "unmapped_preexisting_changed_files": []
+            }
+          }
+        ],
+        "blockers": [],
+        "summary": "Repository investigation evidence is sufficient."
+      }
+    }
+  ],
+  "findings": [],
+  "warnings": [
+    {
+      "severity": "warning",
+      "message": "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker."
+    },
+    {
+      "severity": "warning",
+      "message": "Changed file(s) outside ranked repo map should be manually checked for scope drift: docs/client.md"
+    },
+    {
+      "severity": "warning",
+      "message": "Ceraxia currently supports only explicit patch operations; autonomous code synthesis is not enabled yet."
+    }
+  ],
+  "revision_plan": {
+    "required": false,
+    "focused_context": {},
+    "steps": []
+  }
+}

@@ -1,0 +1,374 @@
+{
+  "status": "applied",
+  "mode": "explicit_patch_apply",
+  "task_id": "ceraxia-expert-unshaped-retry-policy-20260630-181847:implementation",
+  "summary": "Ceraxia applied explicit patch operations.",
+  "intended_actions": [
+    "read concrete target files before editing",
+    "apply minimal scoped patch",
+    "run verification commands from verification_report.json",
+    "return focused revision steps on failure"
+  ],
+  "plan_excerpt": "# Ceraxia Change Plan\n\nGoal: кодовая expert-задача без structured retry marker: исправь integration client retry policy. Выведи контракт из tests и docs: ConnectionError transient failures retry до bounded max attempts, ValueError validation failures не retry, sleep/ослабление тестов запрещены.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260630-181847/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_client\nCERAXIA_VERIFY: python -m py_compile client.py\n\n## Scope\n- Inspect the named task and constrain edits to the smallest coherent module set.\n- Preserve user changes and expose blockers instead of guessing.\n\n## Candidate Files\n- client.py\n- tests/test_client.py\n\n## Ranked Repo Map\n- client.py: score=20 reasons=[goal_filename_match, imported_by:tests/test_client.py, goal_symbol_match:client, python_source]\n- tests/test_client.py: score=19 reasons=[goal_filename_match, test_surface, linked_test, goal_symbol_match:client,test,tests,unittest,validation]\n\n## Test Source Links\n- tests/test_client.py -> client.py\n\n## Recommended Read Order\n- inspect_source: client.py (goal_filename_match, imported_by:tests/test_client.py, goal_symbol_match:client)\n- inspect_test: tests/test_client.py (goal_filename_match, test_surface, linked_test)\n\n## Targeted Reading Plan\n- client.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=1\n- tests/test_client.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=0\n\n## Hypothesis Log\n- [high] client.py is likely relevant to the requested code change. evidence=[goal_filename_match, imported_by:tests/test_client.py, goal_symbol_match:client, python_source] risk=public behavior may affect dependents\n- [high] tests/test_client.py is likely relevant to the requested code change. evidence=[goal_filename_match, test_surface, linked_test, goal_symbol_match:client,test,tests,unittest,validation] risk=local change risk appears limited\n\n## Design Decision Seed\n- Prefer the smallest patch that satisfies the failing test or explicit user contract.\n- Inspect dependents before changing public functions or modules with reverse dependencies.\n- If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation.\n\n## File Impact Matrix\n- client.py: impact=medium dependents=1 tests=[tests/test_client.py]\n- tests/test_client.py: impact=medium dependents=0 tests=[]\n\n## Risk Register\n\n## Acceptance Criteria\n- requested_behavior_addressed: patch candidate selected from explicit contract, task text, or test evidence\n- source_scope_is_explained: changed files map back to repo survey or review warns about drift\n- changed_python_compiles: py_compile runs for changed Python files\n- task_verification_passes: requested or inferred verification commands return zero\n- review_has_no_blockers: code_review decision record approves final package\n\n## Test Strate",
+  "role_policy": {
+    "role": "patchwright",
+    "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unsafe_overwrite",
+      "duplicate_function_append"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 2,
+    "risk_flags": [
+      "test_diagnostic_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "implementation",
+    "worker": "FerrumPatchwright",
+    "purpose": "Prepare an auditable patch manifest and implementation handoff for code changes.",
+    "brief": "Apply only explicit or safely inferred scoped patch operations.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 2,
+      "risk_flags": [
+        "test_diagnostic_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+      ]
+    },
+    "must_produce": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "handoff_question": "What exactly changed, and what should verification run?",
+    "authority_boundary": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+  },
+  "dirty_worktree": {
+    "git_repo": false,
+    "dirty_targets": []
+  },
+  "ambiguity_analysis": {},
+  "patch_spec_present": true,
+  "patch_source": "test_inferred_retry_policy",
+  "patch_candidates": [
+    {
+      "source": "explicit_json_patch",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "marker_synthesis",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_api_deprecation",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_data_migration",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_security_boundary",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_cache_concurrency",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_flaky_ordering",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_retry_policy",
+      "status": "selected",
+      "operation_count": 2,
+      "verification_command_count": 2,
+      "diagnostics": {
+        "kind": "test_inferred_retry_policy",
+        "test_path": "tests/test_client.py",
+        "source_path": "client.py",
+        "function_name": "publish_event",
+        "retry_exception": "ConnectionError",
+        "non_retry_exception": "ValueError",
+        "max_attempts": 3,
+        "docs_path": "docs/client.md"
+      }
+    }
+  ],
+  "selected_patch_candidate": {
+    "source": "test_inferred_retry_policy",
+    "status": "selected",
+    "operation_count": 2,
+    "verification_command_count": 2,
+    "diagnostics": {
+      "kind": "test_inferred_retry_policy",
+      "test_path": "tests/test_client.py",
+      "source_path": "client.py",
+      "function_name": "publish_event",
+      "retry_exception": "ConnectionError",
+      "non_retry_exception": "ValueError",
+      "max_attempts": 3,
+      "docs_path": "docs/client.md"
+    }
+  },
+  "source_excerpt_pack": [
+    {
+      "path": "client.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, imported_by:tests/test_client.py, goal_symbol_match:client",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 1,
+      "bytes": 70,
+      "status": "read",
+      "excerpt": "def publish_event(transport, event):\n    return transport.send(event)\n",
+      "truncated": false
+    },
+    {
+      "path": "tests/test_client.py",
+      "phase": "inspect_test",
+      "reason": "goal_filename_match, test_surface, linked_test",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 0,
+      "bytes": 1033,
+      "status": "read",
+      "excerpt": "import unittest\nfrom client import publish_event\n\nclass FlakyTransport:\n    def __init__(self):\n        self.calls = 0\n    def send(self, event):\n        self.calls += 1\n        if self.calls < 3:\n            raise ConnectionError('temporary outage')\n        return {'ok': True, 'event': event}\n\nclass ValidationTransport:\n    def __init__(self):\n        self.calls = 0\n    def send(self, event):\n        self.calls += 1\n        raise ValueError('invalid event')\n\nclass ClientTest(unittest.TestCase):\n    def test_retries_transient_connection_errors(self):\n        transport = FlakyTransport()\n        self.assertEqual(publish_event(transport, {'id': 'evt-1'}), {'ok': True, 'event': {'id': 'evt-1'}})\n        self.assertEqual(transport.calls, 3)\n\n    def test_validation_errors_are_not_retried(self):\n        transport = ValidationTransport()\n        with self.assertRaises(ValueError):\n            publish_event(transport, {'bad': True})\n        self.assertEqual(transport.calls, 1)\n\nif __name__ == '__main__':\n    unittest.main()\n",
+      "truncated": false
+    }
+  ],
+  "source_excerpt_summary": [
+    {
+      "path": "client.py",
+      "status": "read",
+      "bytes": 70,
+      "truncated": false
+    },
+    {
+      "path": "tests/test_client.py",
+      "status": "read",
+      "bytes": 1033,
+      "truncated": false
+    }
+  ],
+  "implementation_decision_record": [
+    {
+      "check": "source_evidence_loaded",
+      "status": "pass",
+      "detail": "2 targeted files read"
+    },
+    {
+      "check": "patch_candidate_selected",
+      "status": "pass",
+      "detail": "test_inferred_retry_policy"
+    },
+    {
+      "check": "mutation_authority",
+      "status": "pass",
+      "detail": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+    }
+  ],
+  "diagnostics": {
+    "kind": "test_inferred_retry_policy",
+    "test_path": "tests/test_client.py",
+    "source_path": "client.py",
+    "function_name": "publish_event",
+    "retry_exception": "ConnectionError",
+    "non_retry_exception": "ValueError",
+    "max_attempts": 3,
+    "docs_path": "docs/client.md"
+  },
+  "operation_count": 2,
+  "changed_files": [
+    {
+      "path": "client.py",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "05cb4e3528c08540f4e8a25275dab5df2ecffb7d93f616d135b83c4f18e1975d",
+      "after_sha256": "aef928853a1466b75834f042286336461370e3236bd2b53954193f613e105832",
+      "changed": true
+    },
+    {
+      "path": "docs/client.md",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "07669b126c14e49682140bc7797c250cc727a07f62fd955cdd2be9f1e69884b5",
+      "after_sha256": "ed7354aed9eb3cfad68b4e87f1b6a59cf89272c6d30c250bbbaf9eaca2c6ab4e",
+      "changed": true
+    }
+  ],
+  "recommended_read_order": [
+    {
+      "path": "client.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, imported_by:tests/test_client.py, goal_symbol_match:client"
+    },
+    {
+      "path": "tests/test_client.py",
+      "phase": "inspect_test",
+      "reason": "goal_filename_match, test_surface, linked_test"
+    }
+  ],
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "client.py",
+        "impact_level": "medium",
+        "rank_score": 20,
+        "dependent_count": 1,
+        "linked_tests": [
+          "tests/test_client.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "tests/test_client.py",
+        "impact_level": "medium",
+        "rank_score": 19,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      }
+    ],
+    "risk_register": [],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [
+        "python -m unittest discover",
+        "python -m unittest tests.test_client"
+      ],
+      "linked_test_targets": [
+        "tests/test_client.py"
+      ],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "patch_scope_evidence": {
+    "changed_files_in_repo_map": [
+      "client.py"
+    ],
+    "changed_files_outside_repo_map": [
+      "docs/client.md"
+    ],
+    "changed_sources_with_linked_tests": [
+      {
+        "path": "client.py",
+        "tests": [
+          "tests/test_client.py"
+        ]
+      }
+    ],
+    "changed_tests_with_linked_sources": [],
+    "evidence": [
+      {
+        "path": "client.py",
+        "in_repo_map": true,
+        "score": 20,
+        "reasons": [
+          "goal_filename_match",
+          "imported_by:tests/test_client.py",
+          "goal_symbol_match:client",
+          "python_source"
+        ],
+        "linked_tests": [
+          "tests/test_client.py"
+        ],
+        "linked_sources": []
+      },
+      {
+        "path": "docs/client.md",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      }
+    ]
+  },
+  "rollback": {
+    "applied": false,
+    "files": []
+  },
+  "verification_commands": [
+    "python -m unittest tests.test_client",
+    "python -m py_compile client.py"
+  ],
+  "blockers": [],
+  "warnings": [
+    "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker."
+  ]
+}
