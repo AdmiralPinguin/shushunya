@@ -899,6 +899,46 @@ def fixture_expert_unshaped_concurrency_cache(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_flaky_root_cause(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "docs").mkdir(parents=True, exist_ok=True)
+    (repo / "scheduler.py").write_text(
+        "def schedule_order(items):\n"
+        "    return sorted(items, key=lambda item: item['priority'])\n",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "scheduler.md").write_text(
+        "# Scheduler\n\n"
+        "Items should be ordered by priority; equal-priority order must be stable and deterministic.\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_scheduler.py").write_text(
+        "import unittest\n"
+        "from scheduler import schedule_order\n\n"
+        "class SchedulerTest(unittest.TestCase):\n"
+        "    def test_stable_order_for_equal_priority(self):\n"
+        "        items = [{'id': 'b', 'priority': 1}, {'id': 'a', 'priority': 1}]\n"
+        "        self.assertEqual([item['id'] for item in schedule_order(items)], ['a', 'b'])\n\n"
+        "    def test_repeated_stability(self):\n"
+        "        for _ in range(20):\n"
+        "            items = [{'id': 'c', 'priority': 2}, {'id': 'a', 'priority': 1}, {'id': 'b', 'priority': 1}]\n"
+        "            self.assertEqual([item['id'] for item in schedule_order(items)], ['a', 'b', 'c'])\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured flaky marker: расследуй intermittent ordering failure. "
+        "Выведи контракт из repeated tests и docs: equal-priority items должны иметь deterministic tie-breaker, "
+        "skip/sleep/ослабление тестов запрещены.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_scheduler\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_scheduler\n"
+        "CERAXIA_VERIFY: python -m py_compile scheduler.py\n"
+    )
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
@@ -913,6 +953,7 @@ FIXTURES = {
     "ceraxia-expert-unshaped-api-evolution": fixture_expert_unshaped_api_evolution,
     "ceraxia-expert-unshaped-concurrency-cache": fixture_expert_unshaped_concurrency_cache,
     "ceraxia-expert-unshaped-data-migration": fixture_expert_unshaped_data_migration,
+    "ceraxia-expert-unshaped-flaky-root-cause": fixture_expert_unshaped_flaky_root_cause,
     "ceraxia-expert-unshaped-security-boundary": fixture_expert_unshaped_security_boundary,
     "ceraxia-field-integration-contract": fixture_integration_contract,
     "ceraxia-field-large-file-restraint": fixture_large_file_restraint,
@@ -1222,6 +1263,37 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and "sleep(" not in test_text
                     and "sleep(" not in source_text
                     and ("lock" in docs_text.lower() or "concurrent" in docs_text.lower())
+                    and str(manifest.get("patch_source") or "") not in {
+                        "multi_file_marker_synthesis",
+                        "explicit_json_patch",
+                    }
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-unshaped-flaky-root-cause":
+        source_path = repo / "scheduler.py"
+        test_path = repo / "tests" / "test_scheduler.py"
+        docs_path = repo / "docs" / "scheduler.md"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        return {
+            "expert_unshaped_flaky_root_cause": {
+                "deterministic_tie_breaker": "item['id']" in source_text,
+                "priority_preserved": "item['priority']" in source_text,
+                "repeated_verification_test": "range(20)" in test_text,
+                "does_not_skip_or_sleep": all(marker not in (source_text + test_text).lower() for marker in ("skip", "xfail", "sleep(")),
+                "root_cause_doc": "tie-breaker" in docs_text or "deterministic" in docs_text,
+                "not_marker_synthesized": str(manifest.get("patch_source") or "") not in {
+                    "multi_file_marker_synthesis",
+                    "explicit_json_patch",
+                },
+                "passed": (
+                    "item['id']" in source_text
+                    and "item['priority']" in source_text
+                    and "range(20)" in test_text
+                    and all(marker not in (source_text + test_text).lower() for marker in ("skip", "xfail", "sleep("))
+                    and ("tie-breaker" in docs_text or "deterministic" in docs_text)
                     and str(manifest.get("patch_source") or "") not in {
                         "multi_file_marker_synthesis",
                         "explicit_json_patch",

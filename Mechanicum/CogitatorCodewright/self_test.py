@@ -148,6 +148,14 @@ CERAXIA_VERIFY: python -m py_compile cache_store.py
 """
 
 
+def test_inferred_flaky_ordering_goal() -> str:
+    return """кодовая задача без structured flaky marker: исправь intermittent ordering failure. Выведи контракт из repeated tests и docs: equal-priority items need deterministic id tie-breaker; skip/sleep запрещены.
+CERAXIA_VERIFY: python -m unittest tests.test_scheduler
+CERAXIA_VERIFY: python -m unittest tests.test_scheduler
+CERAXIA_VERIFY: python -m py_compile scheduler.py
+"""
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -1112,6 +1120,48 @@ def main() -> int:
             raise AssertionError("cache concurrency inference did not add lock/idempotent invalidation cleanly")
         if "RLock" not in docs or "sleep-based" not in docs:
             raise AssertionError("cache concurrency inference did not update concurrency docs")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "tests").mkdir()
+        (target_repo / "docs").mkdir()
+        (target_repo / "scheduler.py").write_text(
+            "def schedule_order(items):\n"
+            "    return sorted(items, key=lambda item: item['priority'])\n",
+            encoding="utf-8",
+        )
+        (target_repo / "docs" / "scheduler.md").write_text(
+            "# Scheduler\n\nEqual-priority item ordering must be deterministic.\n",
+            encoding="utf-8",
+        )
+        (target_repo / "tests" / "test_scheduler.py").write_text(
+            "import unittest\n"
+            "from scheduler import schedule_order\n\n"
+            "class SchedulerTest(unittest.TestCase):\n"
+            "    def test_stable_order_for_equal_priority(self):\n"
+            "        items = [{'id': 'b', 'priority': 1}, {'id': 'a', 'priority': 1}]\n"
+            "        self.assertEqual([item['id'] for item in schedule_order(items)], ['a', 'b'])\n\n"
+            "    def test_repeated_stability(self):\n"
+            "        for _ in range(20):\n"
+            "            items = [{'id': 'c', 'priority': 2}, {'id': 'a', 'priority': 1}, {'id': 'b', 'priority': 1}]\n"
+            "            self.assertEqual([item['id'] for item in schedule_order(items)], ['a', 'b', 'c'])\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=test_inferred_flaky_ordering_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready" or final.get("patch_source") != "test_inferred_flaky_ordering":
+            raise AssertionError(f"flaky ordering should be inferred from repeated tests without marker: {final}")
+        diagnostics = final.get("diagnostics", {})
+        if diagnostics.get("function_name") != "schedule_order" or diagnostics.get("tie_breaker") != "id":
+            raise AssertionError(f"flaky ordering diagnostics should identify deterministic tie-breaker: {final}")
+        scheduler = (target_repo / "scheduler.py").read_text(encoding="utf-8")
+        docs = (target_repo / "docs" / "scheduler.md").read_text(encoding="utf-8")
+        if "(item['priority'], item['id'])" not in scheduler or "sleep(" in scheduler:
+            raise AssertionError("flaky ordering inference did not add deterministic tie-breaker cleanly")
+        if "Root cause" not in docs or "tie-breaker" not in docs:
+            raise AssertionError("flaky ordering inference did not document root cause")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
