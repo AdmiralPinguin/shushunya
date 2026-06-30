@@ -61,6 +61,10 @@ def main() -> int:
     report_payload = json.loads(report.stdout)
     if report_payload.get("target_met") is True and not ledger.get("entries"):
         raise AssertionError(f"empty Ceraxia ledger must not prove target completion: {report_payload}")
+    if report_payload.get("accepted_trial_count", 0) and report_payload.get("target_met") is not True:
+        low_entries = report_payload.get("gaps", {}).get("low_score_entries", {})
+        if not isinstance(low_entries, dict):
+            raise AssertionError(f"Ceraxia report must expose low score entries after accepted reviews: {report_payload}")
     strict_report = subprocess.run(
         [sys.executable, str(REPORTER), "--require-target"],
         cwd=str(ROOT.parent),
@@ -125,6 +129,7 @@ def main() -> int:
     if len(ledger.get("entries", [])) > 1 and ambiguous_review.returncode == 0:
         raise AssertionError("Ceraxia review helper must require --all or a narrow selector for multiple entries")
     if ledger.get("entries"):
+        accepted_before_dry_run = sum(1 for entry in ledger.get("entries", []) if entry.get("accepted_for_rolling_score") is True)
         first_entry = ledger["entries"][0]
         bad_review_path = ROOT / "tmp_bad_ceraxia_review.json"
         good_review_path = ROOT / "tmp_good_ceraxia_review.json"
@@ -182,10 +187,11 @@ def main() -> int:
             if good_accept.returncode != 0:
                 raise AssertionError(f"Ceraxia accept helper rejected complete dry-run review: {good_accept.stdout} {good_accept.stderr}")
             good_payload = json.loads(good_accept.stdout)
-            if good_payload.get("dry_run") is not True or good_payload.get("report", {}).get("accepted_trial_count") != 1:
+            expected_accepted = accepted_before_dry_run if first_entry.get("accepted_for_rolling_score") is True else accepted_before_dry_run + 1
+            if good_payload.get("dry_run") is not True or good_payload.get("report", {}).get("accepted_trial_count") != expected_accepted:
                 raise AssertionError(f"Ceraxia accept helper dry-run report is wrong: {good_payload}")
             ledger_after_dry_run = json.loads(LEDGER.read_text(encoding="utf-8"))
-            if any(entry.get("accepted_for_rolling_score") for entry in ledger_after_dry_run.get("entries", [])):
+            if ledger_after_dry_run != ledger:
                 raise AssertionError("Ceraxia accept helper dry-run mutated the ledger")
         finally:
             bad_review_path.unlink(missing_ok=True)

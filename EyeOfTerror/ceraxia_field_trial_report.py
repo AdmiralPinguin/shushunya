@@ -71,7 +71,9 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     entries = [item for item in ledger.get("entries", []) if isinstance(item, dict)]
     accepted = [item for item in entries if item.get("accepted_for_rolling_score") is True]
     scores_by_dimension: dict[str, list[float]] = {dimension: [] for dimension in dimensions}
+    low_score_entries: dict[str, list[dict[str, Any]]] = {dimension: [] for dimension in dimensions}
     classes: set[str] = set()
+    dimension_min = float(target.get("dimension_average_min") or 0)
     for entry in accepted:
         trial = trial_by_id.get(str(entry.get("trial_id") or ""), {})
         if trial.get("class"):
@@ -81,13 +83,24 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
             value = scores.get(dimension)
             if isinstance(value, (int, float)):
                 scores_by_dimension[dimension].append(float(value))
+                if float(value) < dimension_min:
+                    low_score_entries[dimension].append(
+                        {
+                            "trial_id": entry.get("trial_id", ""),
+                            "run_id": entry.get("run_id", ""),
+                            "class": trial.get("class", ""),
+                            "score": float(value),
+                            "follow_up_changes": entry.get("follow_up_changes", []),
+                            "generalizable_failures": entry.get("generalizable_failures", []),
+                        }
+                    )
     dimension_averages = {
         dimension: average(values)
         for dimension, values in scores_by_dimension.items()
     }
     overall = average(list(dimension_averages.values())) if dimension_averages else 0.0
     enough_trials = len(accepted) >= int(target.get("minimum_representative_trials") or 0)
-    enough_dimensions = all(value >= float(target.get("dimension_average_min") or 0) for value in dimension_averages.values())
+    enough_dimensions = all(value >= dimension_min for value in dimension_averages.values())
     enough_overall = overall >= float(target.get("rolling_average_min") or 0)
     target_met = bool(enough_trials and enough_dimensions and enough_overall)
     return {
@@ -104,8 +117,13 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
             "needs_higher_dimension_scores": [
                 dimension
                 for dimension, value in dimension_averages.items()
-                if value < float(target.get("dimension_average_min") or 0)
+                if value < dimension_min
             ],
+            "low_score_entries": {
+                dimension: items
+                for dimension, items in low_score_entries.items()
+                if items
+            },
         },
     }
 
