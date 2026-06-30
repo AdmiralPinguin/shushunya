@@ -15,6 +15,7 @@ PROTOCOL = ROOT / "InnerCircle" / "Ceraxia" / "EVALUATION.md"
 LEDGER = ROOT / "InnerCircle" / "Ceraxia" / "field_trial_ledger.json"
 REPORTER = ROOT / "ceraxia_field_trial_report.py"
 RUNNER = ROOT / "ceraxia_field_trial_runner.py"
+REVIEWER = ROOT / "ceraxia_field_trial_review.py"
 
 
 def main() -> int:
@@ -95,6 +96,33 @@ def main() -> int:
     }
     if not required_runner_trials.issubset(runner_trials):
         raise AssertionError(f"Ceraxia field trial runner lacks first reproducible trial: {runner_payload}")
+    review_all = subprocess.run(
+        [sys.executable, str(REVIEWER), "--all"],
+        cwd=str(ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if review_all.returncode != 0:
+        raise AssertionError(f"Ceraxia field trial review helper failed: {review_all.stdout} {review_all.stderr}")
+    review_payload = json.loads(review_all.stdout)
+    if ledger.get("entries") and len(review_payload) != len(ledger.get("entries", [])):
+        raise AssertionError(f"Ceraxia review helper did not cover ledger entries: {len(review_payload)} {len(ledger.get('entries', []))}")
+    if review_payload:
+        sample = review_payload[0]
+        if set(sample.get("score_sheet", {})) != set(dimensions):
+            raise AssertionError(f"Ceraxia review helper score sheet drifts from dimensions: {sample}")
+        if not sample.get("review_questions") or not sample.get("acceptance_requirements"):
+            raise AssertionError(f"Ceraxia review helper must expose questions and requirements: {sample}")
+    ambiguous_review = subprocess.run(
+        [sys.executable, str(REVIEWER)],
+        cwd=str(ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if len(ledger.get("entries", [])) > 1 and ambiguous_review.returncode == 0:
+        raise AssertionError("Ceraxia review helper must require --all or a narrow selector for multiple entries")
     blocked_outcome = classify_trial_outcome(
         "ceraxia-field-ambiguous-task",
         {"ok": False, "phase": "revision_cycle_limit"},
