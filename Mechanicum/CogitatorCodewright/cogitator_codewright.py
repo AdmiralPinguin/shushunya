@@ -705,6 +705,90 @@ def extracted_assertion_diagnostics_from_text(text: str) -> list[dict[str, Any]]
     return diagnostics
 
 
+def literal_preview(node: ast.AST | None) -> str:
+    if node is None:
+        return ""
+    try:
+        return repr(ast.literal_eval(node))
+    except (ValueError, TypeError):
+        try:
+            return ast.unparse(node)
+        except Exception:
+            return ""
+
+
+def call_symbol_name(node: ast.AST | None) -> str:
+    if isinstance(node, ast.Call):
+        node = node.func
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def imported_symbol_map_from_tree(tree: ast.Module) -> dict[str, dict[str, str]]:
+    imports: dict[str, dict[str, str]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        for alias in node.names:
+            local_name = alias.asname or alias.name
+            imports[local_name] = {
+                "imported_symbol": alias.name,
+                "local_symbol": local_name,
+                "module": node.module,
+                "source_path": f"{node.module.replace('.', '/')}.py",
+            }
+    return imports
+
+
+def test_symbol_links_from_goal(repo_root: Path, goal: str) -> list[dict[str, Any]]:
+    links: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for test_path in discovered_test_paths(repo_root, goal):
+        path = safe_repo_path(repo_root, test_path)
+        if not path.exists():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        imports = imported_symbol_map_from_tree(tree)
+        for class_node in [item for item in tree.body if isinstance(item, ast.ClassDef)]:
+            for func_node in [item for item in class_node.body if isinstance(item, ast.FunctionDef) and item.name.startswith("test")]:
+                for call in [item for item in ast.walk(func_node) if isinstance(item, ast.Call)]:
+                    method = call_symbol_name(call.func)
+                    if method not in {"assertEqual", "assertNotEqual", "assertTrue", "assertFalse"}:
+                        continue
+                    actual_node = call.args[0] if call.args else None
+                    actual_symbol = call_symbol_name(actual_node)
+                    imported = imports.get(actual_symbol)
+                    if not imported:
+                        continue
+                    expected_node = call.args[1] if method in {"assertEqual", "assertNotEqual"} and len(call.args) > 1 else None
+                    key = (test_path, func_node.name, imported["source_path"], imported["imported_symbol"])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    links.append(
+                        {
+                            "test_path": test_path,
+                            "test_class": class_node.name,
+                            "test_function": func_node.name,
+                            "assertion": method,
+                            "actual_expression": literal_preview(actual_node),
+                            "expected_expression": literal_preview(expected_node),
+                            "imported_symbol": imported["imported_symbol"],
+                            "local_symbol": imported["local_symbol"],
+                            "source_module": imported["module"],
+                            "source_path": imported["source_path"],
+                            "source_exists": safe_repo_path(repo_root, imported["source_path"]).exists(),
+                        }
+                    )
+    return links[:50]
+
+
 def static_diagnostic_hypotheses_from_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     hypotheses: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -750,6 +834,8 @@ def unshaped_repair_plan_from_resolution(
     excerpts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     patch_source = str(patch_spec.get("source") or "")
+    repo_root = target_repo_root(request)
+    test_symbol_links = test_symbol_links_from_goal(repo_root, request_goal(request))
     candidates = patch_resolution.get("candidates") if isinstance(patch_resolution.get("candidates"), list) else []
     selected = patch_resolution.get("selected_candidate") if isinstance(patch_resolution.get("selected_candidate"), dict) else {}
     source_paths: list[str] = []
@@ -788,6 +874,7 @@ def unshaped_repair_plan_from_resolution(
         "selected_source": patch_source,
         "selected_candidate": selected,
         "files_to_read": source_paths[:20],
+        "test_symbol_links": test_symbol_links,
         "commands_to_run": patch_spec.get("verification_commands", [])
         if isinstance(patch_spec.get("verification_commands"), list)
         else [],
@@ -799,8 +886,10 @@ def unshaped_repair_plan_from_resolution(
             else [],
             "source_must_change": True,
             "tests_must_not_be_edited_for_test_inferred_repairs": True,
+            "test_to_source_linkage_required": is_unshaped_patch_source(patch_source),
             "review_gates": [
                 "diagnostic_linkage",
+                "test_symbol_linkage",
                 "patch_scope_review",
                 "verification_passed",
                 "review_discipline_findings",

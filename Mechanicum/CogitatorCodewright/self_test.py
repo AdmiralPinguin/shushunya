@@ -1234,6 +1234,16 @@ def main() -> int:
             or not repair_plan.get("proof_plan", {}).get("focused_verification")
         ):
             raise AssertionError(f"test-inferred arithmetic should preserve an unshaped repair plan: {final}")
+        symbol_links = repair_plan.get("test_symbol_links", [])
+        if not any(
+            isinstance(item, dict)
+            and item.get("test_function") == "test_add"
+            and item.get("imported_symbol") == "add"
+            and item.get("source_path") == "calc.py"
+            and item.get("expected_expression") == "5"
+            for item in symbol_links
+        ):
+            raise AssertionError(f"test-inferred arithmetic should link test function to imported source symbol: {final}")
         if (
             diagnostic_extraction.get("status") != "recorded"
             or diagnostic_extraction.get("parser_coverage", {}).get("static_test_expectations", 0) < 1
@@ -1291,6 +1301,16 @@ def main() -> int:
             )
         ):
             raise AssertionError(f"delegated arithmetic should preserve wrapper-aware repair plan: {final}")
+        symbol_links = repair_plan.get("test_symbol_links", [])
+        if not any(
+            isinstance(item, dict)
+            and item.get("test_function") == "test_percentage_discount"
+            and item.get("imported_symbol") == "total_after_discount"
+            and item.get("source_path") == "checkout.py"
+            and item.get("expected_expression") == "150"
+            for item in symbol_links
+        ):
+            raise AssertionError(f"delegated arithmetic should link public test assertion to imported caller symbol: {final}")
         if (
             ast_patch_plan.get("status") != "recorded"
             or ast_patch_plan.get("planned_operations", [{}])[0].get("path") != "pricing.py"

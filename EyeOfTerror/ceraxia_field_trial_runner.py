@@ -1238,6 +1238,7 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
         test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
         diagnostics = manifest.get("diagnostics") if isinstance(manifest.get("diagnostics"), dict) else {}
         repair_plan = manifest.get("unshaped_repair_plan") if isinstance(manifest.get("unshaped_repair_plan"), dict) else {}
+        test_symbol_links = repair_plan.get("test_symbol_links") if isinstance(repair_plan.get("test_symbol_links"), list) else []
         diagnostic_extraction = manifest.get("diagnostic_extraction") if isinstance(manifest.get("diagnostic_extraction"), dict) else {}
         ast_patch_plan = manifest.get("ast_patch_plan") if isinstance(manifest.get("ast_patch_plan"), dict) else {}
         changed_paths = [
@@ -1261,6 +1262,13 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                 "unshaped_repair_plan": repair_plan.get("mode") == "unshaped_repo_repair"
                 and bool(repair_plan.get("defect_hypotheses"))
                 and bool(repair_plan.get("minimal_patch_candidates")),
+                "test_symbol_linkage": any(
+                    isinstance(item, dict)
+                    and item.get("test_function") == "test_percentage_discount"
+                    and item.get("imported_symbol") == "total_after_discount"
+                    and item.get("source_path") == "checkout.py"
+                    for item in test_symbol_links
+                ),
                 "diagnostic_extraction": diagnostic_extraction.get("status") == "recorded"
                 and diagnostic_extraction.get("parser_coverage", {}).get("static_test_expectations", 0) >= 1
                 if isinstance(diagnostic_extraction.get("parser_coverage"), dict)
@@ -1280,6 +1288,13 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and repair_plan.get("mode") == "unshaped_repo_repair"
                     and bool(repair_plan.get("defect_hypotheses"))
                     and bool(repair_plan.get("minimal_patch_candidates"))
+                    and any(
+                        isinstance(item, dict)
+                        and item.get("test_function") == "test_percentage_discount"
+                        and item.get("imported_symbol") == "total_after_discount"
+                        and item.get("source_path") == "checkout.py"
+                        for item in test_symbol_links
+                    )
                     and diagnostic_extraction.get("status") == "recorded"
                     and ast_patch_plan.get("status") == "recorded"
                 ),
