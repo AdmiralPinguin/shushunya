@@ -110,9 +110,35 @@ def fixture_ambiguous_task(repo: Path) -> str:
     )
 
 
+def fixture_multifile_feature(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "README.md").write_text("# Billing helpers\n\nExisting billing helper package.\n", encoding="utf-8")
+    return f"""кодовая задача: добавь небольшую multi-file feature с реализацией, тестом, документацией и caller update.
+CERAXIA_TARGET_REPO: {repo}
+CERAXIA_FEATURE:
+{{
+  "module_path": "billing/discounts.py",
+  "function_name": "apply_discount",
+  "arguments": ["price", "percent"],
+  "return_expression": "price - (price * percent / 100)",
+  "test_path": "tests/test_discounts.py",
+  "test_cases": [
+    {{"inputs": [200, 25], "expected": 150.0}},
+    {{"inputs": [80, 10], "expected": 72.0}}
+  ],
+  "docs_path": "docs/discounts.md",
+  "docs_title": "Discount helpers",
+  "caller_path": "billing/api.py",
+  "caller_function": "discounted_total",
+  "verification_commands": ["python -m unittest tests.test_discounts"]
+}}
+"""
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
+    "ceraxia-field-multifile-feature": fixture_multifile_feature,
     "ceraxia-field-safety-dirty-worktree": fixture_safety_dirty_worktree,
 }
 
@@ -180,6 +206,11 @@ def run_trial(trial_id: str, root: Path, keep: bool, ledger_draft: bool) -> dict
         },
         "pricing_py": (repo / "pricing.py").read_text(encoding="utf-8") if (repo / "pricing.py").exists() else "",
         "settings_py": (repo / "settings.py").read_text(encoding="utf-8") if (repo / "settings.py").exists() else "",
+        "fixture_files": sorted(
+            str(path.relative_to(repo))
+            for path in repo.rglob("*")
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+        ),
         "kept": keep,
     }
     report_path = trial_root / "trial_result.json"

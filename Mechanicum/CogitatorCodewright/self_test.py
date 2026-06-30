@@ -197,6 +197,29 @@ CERAXIA_FILES:
 """
 
 
+def feature_goal() -> str:
+    return """добавь multi-file feature с source, tests, docs, caller
+
+CERAXIA_FEATURE:
+{
+  "module_path": "billing/discounts.py",
+  "function_name": "apply_discount",
+  "arguments": ["price", "percent"],
+  "return_expression": "price - (price * percent / 100)",
+  "test_path": "tests/test_discounts.py",
+  "test_cases": [
+    {"inputs": [200, 25], "expected": 150.0},
+    {"inputs": [80, 10], "expected": 72.0}
+  ],
+  "docs_path": "docs/discounts.md",
+  "docs_title": "Discount helpers",
+  "caller_path": "billing/api.py",
+  "caller_function": "discounted_total",
+  "verification_commands": ["python -m unittest tests.test_discounts"]
+}
+"""
+
+
 def repair_colon_goal() -> str:
     return """создай python файл и исправь если проверка найдет синтаксис
 
@@ -810,6 +833,23 @@ def main() -> int:
         repeated_files = repeated.get("changed_files", [])
         if not repeated_files or not all(item.get("idempotent") for item in repeated_files if isinstance(item, dict)):
             raise AssertionError(f"repeated multi-file marker should report idempotent writes: {repeated}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        final = run_pipeline(root / "work", goal=feature_goal(), target_repo_root=target_repo)
+        expected_paths = {"billing/discounts.py", "tests/test_discounts.py", "docs/discounts.md", "billing/api.py"}
+        changed_paths = {item.get("path") for item in final.get("changed_files", []) if isinstance(item, dict)}
+        if final.get("status") != "ready" or final.get("patch_source") != "feature_marker_synthesis":
+            raise AssertionError(f"feature marker task should be ready: {final}")
+        if changed_paths != expected_paths:
+            raise AssertionError(f"feature marker should write source/test/docs/caller: {final}")
+        if "def apply_discount" not in (target_repo / "billing" / "discounts.py").read_text(encoding="utf-8"):
+            raise AssertionError("feature marker did not write source function")
+        if "Discount helpers" not in (target_repo / "docs" / "discounts.md").read_text(encoding="utf-8"):
+            raise AssertionError("feature marker did not write docs")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 2:
+            raise AssertionError(f"feature marker final manifest should preserve verification evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

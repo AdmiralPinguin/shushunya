@@ -420,6 +420,7 @@ def marker_block(text: str, marker: str) -> str:
     stop_markers = [
         "\nCERAXIA_TARGET_REPO:",
         "\nCERAXIA_PATCH:",
+        "\nCERAXIA_FEATURE:",
         "\nCERAXIA_FILES:",
         "\nCERAXIA_CREATE_FILE:",
         "\nCERAXIA_FILE_CONTENT:",
@@ -935,6 +936,83 @@ def infer_missing_function_from_tests(request: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def patch_spec_from_feature_marker(goal: str) -> dict[str, Any]:
+    payload = extract_json_after_marker(goal, "CERAXIA_FEATURE:")
+    if not payload:
+        return {}
+    module_path = str(payload.get("module_path") or "").strip()
+    function_name = str(payload.get("function_name") or "").strip()
+    test_path = str(payload.get("test_path") or "").strip()
+    docs_path = str(payload.get("docs_path") or "").strip()
+    caller_path = str(payload.get("caller_path") or "").strip()
+    if not module_path or not function_name or not test_path or not docs_path or not caller_path:
+        raise ValueError("CERAXIA_FEATURE requires module_path, function_name, test_path, docs_path, and caller_path")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", function_name):
+        raise ValueError("CERAXIA_FEATURE function_name must be a valid Python identifier")
+    arguments = payload.get("arguments")
+    if not isinstance(arguments, list) or not arguments or not all(isinstance(item, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item) for item in arguments):
+        raise ValueError("CERAXIA_FEATURE arguments must be a non-empty list of Python identifiers")
+    expression = str(payload.get("return_expression") or "").strip()
+    if not expression or "\n" in expression or not re.fullmatch(r"[A-Za-z0-9_ +\-*/().]+", expression):
+        raise ValueError("CERAXIA_FEATURE return_expression must be a simple arithmetic expression")
+    test_cases = payload.get("test_cases")
+    if not isinstance(test_cases, list) or not test_cases:
+        raise ValueError("CERAXIA_FEATURE test_cases must be a non-empty list")
+    rendered_cases: list[str] = []
+    for index, item in enumerate(test_cases):
+        if not isinstance(item, dict):
+            raise ValueError(f"CERAXIA_FEATURE test case {index} must be an object")
+        inputs = item.get("inputs")
+        expected = item.get("expected")
+        if not isinstance(inputs, list) or len(inputs) != len(arguments):
+            raise ValueError(f"CERAXIA_FEATURE test case {index} inputs must match arguments")
+        if not all(isinstance(value, (int, float)) for value in inputs) or not isinstance(expected, (int, float)):
+            raise ValueError(f"CERAXIA_FEATURE test case {index} supports only numeric inputs and expected values")
+        rendered_cases.append(f"        self.assertEqual({function_name}({', '.join(str(value) for value in inputs)}), {expected})")
+    module_content = f"def {function_name}({', '.join(arguments)}):\n    return {expression}\n"
+    class_name = "".join(part.capitalize() for part in function_name.split("_")) + "Test"
+    test_content = (
+        f"import unittest\nfrom {module_path[:-3].replace('/', '.')} import {function_name}\n\n"
+        f"class {class_name}(unittest.TestCase):\n"
+        f"    def test_{function_name}(self):\n"
+        + "\n".join(rendered_cases)
+        + "\n\nif __name__ == '__main__':\n    unittest.main()\n"
+    )
+    docs_title = str(payload.get("docs_title") or function_name.replace("_", " ").title())
+    docs_content = f"# {docs_title}\n\nFunction `{function_name}` is available in `{module_path}` and is covered by `{test_path}`.\n"
+    caller_function = str(payload.get("caller_function") or f"use_{function_name}").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", caller_function):
+        raise ValueError("CERAXIA_FEATURE caller_function must be a valid Python identifier")
+    caller_content = (
+        f"from {module_path[:-3].replace('/', '.')} import {function_name}\n\n"
+        f"def {caller_function}({', '.join(arguments)}):\n"
+        f"    return {function_name}({', '.join(arguments)})\n"
+    )
+    verification_commands = payload.get("verification_commands")
+    if verification_commands is None:
+        verification_commands = [f"python -m unittest {test_path[:-3].replace('/', '.')}"]
+    if not isinstance(verification_commands, list) or not all(isinstance(item, str) for item in verification_commands):
+        raise ValueError("CERAXIA_FEATURE verification_commands must be a list of strings")
+    return {
+        "source": "feature_marker_synthesis",
+        "diagnostics": {
+            "kind": "feature_marker_synthesis",
+            "function_name": function_name,
+            "module_path": module_path,
+            "test_path": test_path,
+            "docs_path": docs_path,
+            "caller_path": caller_path,
+        },
+        "operations": [
+            {"type": "write_file", "path": module_path, "content": module_content},
+            {"type": "write_file", "path": test_path, "content": test_content},
+            {"type": "write_file", "path": docs_path, "content": docs_content},
+            {"type": "write_file", "path": caller_path, "content": caller_content},
+        ],
+        "verification_commands": verification_commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -973,6 +1051,9 @@ def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
 
 
 def synthesized_patch_spec_from_markers(goal: str) -> dict[str, Any]:
+    feature = patch_spec_from_feature_marker(goal)
+    if feature:
+        return feature
     multi_file = patch_spec_from_multi_file_marker(goal)
     if multi_file:
         return multi_file
