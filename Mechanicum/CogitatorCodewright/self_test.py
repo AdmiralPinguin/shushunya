@@ -120,6 +120,13 @@ def test_inferred_delegated_arithmetic_goal() -> str:
     return "кодовая задача: python тесты падают, источник ошибки не указан. Найди причину и исправь реализацию."
 
 
+def test_inferred_api_deprecation_goal() -> str:
+    return """кодовая задача без structured patch marker: публичный API payments должен перейти с positional fee на preferred keyword-only service_fee, но старые positional callers должны продолжить работать с DeprecationWarning. Не угадывай: используй тесты, docs и caller evidence.
+CERAXIA_VERIFY: python -m unittest tests.test_api_evolution
+CERAXIA_VERIFY: python -m py_compile payments/api.py payments/client.py
+"""
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -874,6 +881,64 @@ def main() -> int:
             raise AssertionError(f"delegated arithmetic diagnostics should explain wrapper traversal: {final}")
         if "return price - (price * percent / 100)" not in pricing.read_text(encoding="utf-8"):
             raise AssertionError("delegated arithmetic did not update the implementation source")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "payments").mkdir()
+        (target_repo / "tests").mkdir()
+        (target_repo / "docs").mkdir()
+        (target_repo / "payments" / "api.py").write_text(
+            "def calculate_total(gross, fee):\n"
+            "    return gross - fee\n",
+            encoding="utf-8",
+        )
+        (target_repo / "payments" / "client.py").write_text(
+            "from payments.api import calculate_total\n\n"
+            "def client_total(gross, fee):\n"
+            "    return calculate_total(gross, fee)\n",
+            encoding="utf-8",
+        )
+        (target_repo / "docs" / "payments_api.md").write_text(
+            "# Payments API\n\n"
+            "`calculate_total(gross, fee)` subtracts fee from gross.\n",
+            encoding="utf-8",
+        )
+        (target_repo / "tests" / "test_api_evolution.py").write_text(
+            "import warnings\n"
+            "import unittest\n"
+            "from payments.api import calculate_total\n"
+            "from payments.client import client_total\n\n"
+            "class ApiEvolutionTest(unittest.TestCase):\n"
+            "    def test_old_positional_fee_still_works_with_warning(self):\n"
+            "        with warnings.catch_warnings(record=True) as caught:\n"
+            "            warnings.simplefilter('always')\n"
+            "            self.assertEqual(calculate_total(100, 15), 85)\n"
+            "        self.assertTrue(any(item.category is DeprecationWarning for item in caught))\n\n"
+            "    def test_new_keyword_service_fee_path(self):\n"
+            "        self.assertEqual(calculate_total(80, service_fee=5), 75)\n"
+            "        self.assertEqual(client_total(80, service_fee=5), 75)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=test_inferred_api_deprecation_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready" or final.get("patch_source") != "test_inferred_api_deprecation":
+            raise AssertionError(f"API deprecation should be inferred from tests without marker: {final}")
+        diagnostics = final.get("diagnostics", {})
+        if (
+            diagnostics.get("function_name") != "calculate_total"
+            or diagnostics.get("old_param") != "fee"
+            or diagnostics.get("new_param") != "service_fee"
+            or diagnostics.get("caller", {}).get("caller_path") != "payments/client.py"
+            or diagnostics.get("docs_path") != "docs/payments_api.md"
+        ):
+            raise AssertionError(f"API deprecation diagnostics should identify source/caller/docs: {final}")
+        source = (target_repo / "payments" / "api.py").read_text(encoding="utf-8")
+        caller = (target_repo / "payments" / "client.py").read_text(encoding="utf-8")
+        docs = (target_repo / "docs" / "payments_api.md").read_text(encoding="utf-8")
+        if "DeprecationWarning" not in source or "service_fee=service_fee" not in caller or "service_fee" not in docs:
+            raise AssertionError("API deprecation inference did not update source, caller, and docs")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

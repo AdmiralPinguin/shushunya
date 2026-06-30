@@ -711,6 +711,56 @@ def fixture_expert_failed_review_revision(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_api_evolution(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "payments").mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "docs").mkdir(parents=True, exist_ok=True)
+    (repo / "payments" / "api.py").write_text(
+        "def calculate_total(gross, fee):\n"
+        "    return gross - fee\n",
+        encoding="utf-8",
+    )
+    (repo / "payments" / "client.py").write_text(
+        "from payments.api import calculate_total\n\n"
+        "def client_total(gross, fee):\n"
+        "    return calculate_total(gross, fee)\n",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "payments_api.md").write_text(
+        "# Payments API\n\n"
+        "`calculate_total(gross, fee)` subtracts the service fee from the gross amount.\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_api_evolution.py").write_text(
+        "import warnings\n"
+        "import unittest\n"
+        "from payments.api import calculate_total\n"
+        "from payments.client import client_total\n\n"
+        "class ApiEvolutionTest(unittest.TestCase):\n"
+        "    def test_old_positional_fee_still_works_with_warning(self):\n"
+        "        with warnings.catch_warnings(record=True) as caught:\n"
+        "            warnings.simplefilter('always')\n"
+        "            self.assertEqual(calculate_total(100, 15), 85)\n"
+        "        self.assertTrue(any(item.category is DeprecationWarning for item in caught))\n\n"
+        "    def test_new_keyword_service_fee_path(self):\n"
+        "        self.assertEqual(calculate_total(80, service_fee=5), 75)\n"
+        "        self.assertEqual(client_total(80, service_fee=5), 75)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured patch marker: публичный API payments должен перейти "
+        "с positional fee на preferred keyword-only service_fee, но старые positional callers должны "
+        "продолжить работать с DeprecationWarning. Найди и обнови implementation, caller, docs и tests "
+        "по evidence из репозитория, не угадывай и не переписывай unrelated files.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_api_evolution\n"
+        "CERAXIA_VERIFY: python -m py_compile payments/api.py payments/client.py\n"
+    )
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
@@ -722,6 +772,7 @@ FIXTURES = {
     "ceraxia-expert-legacy-migration": fixture_expert_legacy_migration,
     "ceraxia-expert-public-api-deprecation": fixture_expert_public_api_deprecation,
     "ceraxia-expert-security-boundary": fixture_expert_security_boundary,
+    "ceraxia-expert-unshaped-api-evolution": fixture_expert_unshaped_api_evolution,
     "ceraxia-field-integration-contract": fixture_integration_contract,
     "ceraxia-field-large-file-restraint": fixture_large_file_restraint,
     "ceraxia-field-multifile-feature": fixture_multifile_feature,
@@ -894,6 +945,42 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and "'reduced'" in test_text
                     and "invoice_tax" in test_text
                     and ("hard-coded" in docs_text or "compatibility" in docs_text)
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-unshaped-api-evolution":
+        source_path = repo / "payments" / "api.py"
+        caller_path = repo / "payments" / "client.py"
+        test_path = repo / "tests" / "test_api_evolution.py"
+        docs_path = repo / "docs" / "payments_api.md"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        caller_text = caller_path.read_text(encoding="utf-8") if caller_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        return {
+            "expert_unshaped_api_evolution": {
+                "source_supports_old_and_new": "service_fee=None" in source_text and "DeprecationWarning" in source_text,
+                "caller_supports_keyword": "service_fee" in caller_text,
+                "tests_warning_and_keyword": "DeprecationWarning" in test_text and "service_fee=5" in test_text,
+                "docs_updated": "service_fee" in docs_text and ("deprecated" in docs_text.lower() or "DeprecationWarning" in docs_text),
+                "not_marker_synthesized": str(manifest.get("patch_source") or "") not in {
+                    "multi_file_marker_synthesis",
+                    "public_api_compat_marker_synthesis",
+                    "explicit_json_patch",
+                },
+                "passed": (
+                    "service_fee=None" in source_text
+                    and "DeprecationWarning" in source_text
+                    and "service_fee" in caller_text
+                    and "DeprecationWarning" in test_text
+                    and "service_fee=5" in test_text
+                    and "service_fee" in docs_text
+                    and ("deprecated" in docs_text.lower() or "DeprecationWarning" in docs_text)
+                    and str(manifest.get("patch_source") or "") not in {
+                        "multi_file_marker_synthesis",
+                        "public_api_compat_marker_synthesis",
+                        "explicit_json_patch",
+                    }
                 ),
             }
         }

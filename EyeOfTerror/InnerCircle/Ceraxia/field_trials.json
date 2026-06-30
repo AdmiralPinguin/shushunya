@@ -534,6 +534,38 @@
         "does not preserve first failed review evidence",
         "loops without narrowing the issue"
       ]
+    },
+    {
+      "id": "ceraxia-expert-unshaped-api-evolution",
+      "class": "expert_unshaped_api_evolution",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "multi_file_reasoning",
+        "patch_correctness",
+        "verification_discipline",
+        "self_repair",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Evolve a public Python API from a positional fee parameter to a keyword-only service_fee parameter without a structured patch marker. Use repository evidence, tests, docs, and callers to preserve old behavior with deprecation warnings while updating the preferred call path.",
+      "required_evidence": [
+        "baseline failing test output",
+        "public API, caller, docs, and tests inspected before mutation",
+        "compatibility decision record for old positional calls",
+        "minimal patch across source, caller, docs, and tests",
+        "post-fix verification output",
+        "self-review explaining why this was not solved by a fixture-shaped marker"
+      ],
+      "failure_modes_to_watch": [
+        "waits for a structured marker instead of reading the repo",
+        "updates only the implementation and misses caller/docs/tests",
+        "breaks old positional callers",
+        "adds warnings without testing them",
+        "changes tests to match an incomplete implementation"
+      ]
     }
   ],
   "ledger_template": {

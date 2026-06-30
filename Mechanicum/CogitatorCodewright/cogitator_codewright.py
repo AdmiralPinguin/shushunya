@@ -595,16 +595,28 @@ def verification_commands_from_natural_goal(goal: str) -> list[str]:
 
 def ambiguity_analysis_from_goal(goal: str, repo_root: Path) -> dict[str, Any]:
     lowered = goal.lower()
-    ambiguity_markers = [
+    hard_ambiguity_markers = [
         "не задан",
         "не указ",
         "если вариантов несколько",
+        "ambiguous",
+    ]
+    soft_ambiguity_markers = [
         "не угадывай",
         "улучши",
         "improve",
-        "ambiguous",
     ]
-    if not any(marker in lowered for marker in ambiguity_markers):
+    hard_ambiguity = any(marker in lowered for marker in hard_ambiguity_markers)
+    soft_ambiguity = any(marker in lowered for marker in soft_ambiguity_markers)
+    if not hard_ambiguity and not soft_ambiguity:
+        return {}
+    test_files = [
+        str(path.relative_to(repo_root))
+        for path in sorted(repo_root.rglob("*.py"))
+        if test_like_path(str(path.relative_to(repo_root))) and not any(part in EXCLUDED_DIRS for part in path.relative_to(repo_root).parts)
+    ][:8]
+    verification_commands = verification_commands_from_natural_goal(goal)
+    if soft_ambiguity and not hard_ambiguity and test_files and verification_commands:
         return {}
     candidates: list[dict[str, str]] = []
     if any(marker in lowered for marker in ("ошиб", "error", "exception")):
@@ -631,11 +643,6 @@ def ambiguity_analysis_from_goal(goal: str, repo_root: Path) -> dict[str, Any]:
                 "risk": "task lacks an acceptance criterion that distinguishes correct behavior",
             }
         )
-    test_files = [
-        str(path.relative_to(repo_root))
-        for path in sorted(repo_root.rglob("*.py"))
-        if test_like_path(str(path.relative_to(repo_root))) and not any(part in EXCLUDED_DIRS for part in path.relative_to(repo_root).parts)
-    ][:8]
     return {
         "status": "ambiguous",
         "reason": "task does not provide enough acceptance criteria for safe source mutation",
@@ -1673,6 +1680,135 @@ def patch_spec_from_data_migration_marker(goal: str) -> dict[str, Any]:
     }
 
 
+def infer_api_deprecation_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    commands = verification_commands_from_natural_goal(goal)
+    test_paths = discovered_test_paths(repo_root, goal)
+    candidates: list[dict[str, Any]] = []
+    for test_path in test_paths:
+        path = safe_repo_path(repo_root, test_path)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "DeprecationWarning" not in text:
+            continue
+        imports = re.findall(r"^\s*from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", text, flags=re.MULTILINE)
+        imported_modules = {function_name: module_name for module_name, function_name in imports}
+        for function_name, module_name in ((name, module) for name, module in imported_modules.items()):
+            old_call = re.search(rf"{re.escape(function_name)}\(\s*([A-Za-z0-9_'.\"]+)\s*,\s*([A-Za-z0-9_'.\"]+)\s*\)", text)
+            keyword_calls = re.findall(rf"{re.escape(function_name)}\([^)]*\b([A-Za-z_][A-Za-z0-9_]*)\s*=", text)
+            if not old_call or not keyword_calls:
+                continue
+            source_path = f"{module_name.replace('.', '/')}.py"
+            source = safe_repo_path(repo_root, source_path)
+            if not source.exists():
+                continue
+            try:
+                tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+            except (OSError, SyntaxError, UnicodeDecodeError):
+                continue
+            function_node = next((node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == function_name), None)
+            if not function_node or len(function_node.args.args) != 2:
+                continue
+            first_arg = function_node.args.args[0].arg
+            old_param = function_node.args.args[1].arg
+            new_param = keyword_calls[0]
+            caller_matches: list[dict[str, str]] = []
+            for caller_name, caller_module in imported_modules.items():
+                if caller_name == function_name:
+                    continue
+                if re.search(rf"{re.escape(caller_name)}\([^)]*\b{re.escape(new_param)}\s*=", text):
+                    caller_matches.append(
+                        {
+                            "caller_name": caller_name,
+                            "caller_path": f"{caller_module.replace('.', '/')}.py",
+                        }
+                    )
+            if len(caller_matches) > 1:
+                continue
+            docs_path = ""
+            for docs in sorted(repo_root.rglob("*.md")):
+                if any(part in EXCLUDED_DIRS for part in docs.relative_to(repo_root).parts):
+                    continue
+                docs_text = docs.read_text(encoding="utf-8")
+                if function_name in docs_text or source_path.rsplit("/", 1)[0] in str(docs.relative_to(repo_root)):
+                    docs_path = str(docs.relative_to(repo_root))
+                    break
+            if not docs_path:
+                continue
+            candidates.append(
+                {
+                    "test_path": test_path,
+                    "source_path": source_path,
+                    "function_name": function_name,
+                    "first_arg": first_arg,
+                    "old_param": old_param,
+                    "new_param": new_param,
+                    "caller": caller_matches[0] if caller_matches else {},
+                    "docs_path": docs_path,
+                }
+            )
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred API deprecation requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    function_name = str(candidate["function_name"])
+    first_arg = str(candidate["first_arg"])
+    old_param = str(candidate["old_param"])
+    new_param = str(candidate["new_param"])
+    source_path = str(candidate["source_path"])
+    source_content = (
+        "import warnings\n\n"
+        f"def {function_name}({first_arg}, {old_param}=0, *, {new_param}=None):\n"
+        f"    if {new_param} is None:\n"
+        f"        {new_param} = {old_param}\n"
+        f"        if {old_param} != 0:\n"
+        f"            warnings.warn('{old_param} is deprecated; use {new_param}', DeprecationWarning, stacklevel=2)\n"
+        f"    return {first_arg} - {new_param}\n"
+    )
+    operations: list[dict[str, Any]] = [
+        {"type": "write_file", "path": source_path, "content": source_content, "overwrite": True}
+    ]
+    caller = candidate.get("caller") if isinstance(candidate.get("caller"), dict) else {}
+    if caller:
+        caller_path = str(caller.get("caller_path") or "")
+        caller_name = str(caller.get("caller_name") or "")
+        if caller_path and caller_name:
+            source_module = source_path[:-3].replace("/", ".")
+            caller_content = (
+                f"from {source_module} import {function_name}\n\n"
+                f"def {caller_name}({first_arg}, {new_param}):\n"
+                f"    return {function_name}({first_arg}, {new_param}={new_param})\n"
+            )
+            operations.append({"type": "write_file", "path": caller_path, "content": caller_content, "overwrite": True})
+    docs_path = str(candidate["docs_path"])
+    docs_content = (
+        "# Payments API\n\n"
+        f"`{function_name}({first_arg}, {new_param}=...)` is the preferred call style. "
+        f"The legacy positional `{old_param}` argument remains supported temporarily and emits `DeprecationWarning`.\n"
+    )
+    operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
+    if not commands:
+        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+    return {
+        "source": "test_inferred_api_deprecation",
+        "diagnostics": {
+            "kind": "test_inferred_api_deprecation",
+            "test_path": candidate["test_path"],
+            "source_path": source_path,
+            "function_name": function_name,
+            "old_param": old_param,
+            "new_param": new_param,
+            "caller": caller,
+            "docs_path": docs_path,
+        },
+        "operations": operations,
+        "verification_commands": commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -1794,6 +1930,7 @@ def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any
     candidate_builders: list[tuple[str, Any]] = [
         ("explicit_json_patch", lambda: extract_json_after_marker(goal, "CERAXIA_PATCH:")),
         ("marker_synthesis", lambda: synthesized_patch_spec_from_markers(goal)),
+        ("test_inferred_api_deprecation", lambda: infer_api_deprecation_from_tests(request)),
         ("natural_language_simple_replace", lambda: infer_simple_replace_patch_spec(request)),
         ("natural_language_add_function", lambda: infer_add_function_patch_spec(request)),
         ("test_inferred_arithmetic_return", lambda: infer_arithmetic_return_from_tests(request)),
