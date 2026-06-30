@@ -279,6 +279,7 @@ SYSTEM_PROMPT = """Ты Шушуня-агент: практичный локал
 - Если нужно извлечь много страниц из явного оглавления, используй web_extract_link_list вместо ручного цикла web_extract_to_file. Он берет только найденные ссылки и не угадывает URL.
 - Для сборки многих текстовых файлов в один TXT/FB2 используй bundle_text_files вместо Python с большим XML/кодом в JSON.
 - Перед final с готовым текстовым артефактом (.txt/.fb2/.json/.xml/.md и т.п.) обязательно используй verify_text_file с проверками из user task: ожидаемые разделы, диапазоны, ключевые маркеры, порядок, минимальный размер. Не считай задачу завершенной только потому, что файл существует.
+- Для JSON/CSV/TSV артефактов не теряй значимые поля исходных строк. Если входные данные или соседний required artifact описывают строку полями вроде route/service/reason/id/name/status, итоговый структурный артефакт должен сохранять все поля, нужные для однозначной проверки, если user task явно не просит их отбросить.
 - Если пользователь просит отправить готовый файл в Telegram, используй telegram_send_document по sandbox-пути. Не проси оператора отправлять файл вручную.
 - Если web_links показывает мало ссылок, но есть scripts/custom_elements, страница может быть SPA. Если web_links вернул api_candidates, сначала пробуй кандидаты с высоким score; иначе изучи custom_elements и scripts, затем fetch публичных JSON endpoint-ов по видимым id/именам компонентов вместо угадывания URL глав.
 - Для страниц глав Ranobehub можно использовать ranobehub_chapter как более точный адаптер, но общий путь для сайтов — web_extract_to_file.
@@ -391,6 +392,28 @@ ARTIFACT_VERIFY_SYSTEM_PROMPT = """Ты ShushunyaAgent artifact verification mod
 - Выбери ровно один path из missing_required_artifacts.
 - Проверки должны следовать user task: ключевые маркеры, порядок разделов, JSON/CSV смысловые поля через must_contain key=value где это поддерживается.
 - Если сомневаешься в точных проверках, все равно верни verify_text_file с path и min_bytes=1, добавив очевидные must_contain из user task.
+"""
+
+
+STRUCTURED_ARTIFACT_VERIFY_SYSTEM_PROMPT = """Ты ShushunyaAgent structured artifact verification mode: узкий исполнитель проверки JSON/CSV/TSV/JSONL артефактов.
+
+Отвечай только одним валидным JSON-объектом без markdown и пояснений.
+
+Твоя задача: проверить один уже созданный structured artifact как данные.
+
+Разрешенные действия:
+{"action":"python","cwd":"<current workspace>","code":"import json\\ndata=json.load(open('<absolute artifact path>', encoding='utf-8'))\\nassert data['status'] == 'pass'\\nprint('ok')","timeout":60}
+{"action":"shell","cmd":"cd <current workspace> && python3 -c 'import csv; rows=list(csv.DictReader(open(\"file.csv\", encoding=\"utf-8\"))); assert rows; print(\"ok\")'","timeout":60,"reason":"structured artifact verification"}
+
+Правила:
+- Не возвращай final.
+- Не вызывай write_file, append_file, replace_in_file, mkdir, read_file, list_files, verify_text_file.
+- Проверка обязана открыть один path из missing_structured_artifacts, распарсить его через json/csv/tsv/jsonl, и иметь assertions из user task: поля, значения, порядок, группировку, количество строк.
+- Проверка должна ловить потерю значимых полей. Если task, входные файлы или соседние required artifacts описывают строки полями вроде route/service/reason/id/name/status, expected dict/list должен включать эти поля, если task явно не просит их отбросить. Для связанных артефактов сверяй согласованность: одна и та же сущность не должна терять идентификатор/атрибут в JSON, если он есть в CSV или source row.
+- Предпочитай точные сравнения whole-list/whole-dict (`assert rows == expected_rows`, `assert data["items"] == expected_items`). Не используй только `any(...)`/membership checks: они пропускают неправильную форму, лишние строки и сломанную группировку.
+- Счетчики summary/count должны совпадать с ожидаемой длиной соответствующих коллекций. Если task говорит `enabled_route_count=2`, а текст перечисляет `/api -> api 80, worker 20; /pay -> billing 100`, это две enabled route entries с вложенными targets, а не три плоских entries.
+- Если в task указан рабочий каталог, cwd/cd должен быть ровно этим рабочим каталогом. Не используй /work/project как реальный путь.
+- Если проверка падает, основной агент получит stderr/stdout и исправит файл в обычном режиме.
 """
 
 
@@ -1326,6 +1349,9 @@ SUPERVISOR_REJECTION_ERRORS = {
     "swe public contract regression rejected by supervisor",
     "swe repair mode action rejected by supervisor",
     "artifact verification mode action rejected by supervisor",
+    "structured artifact verification mode action rejected by supervisor",
+    "weak structured artifact verification rejected by supervisor",
+    "inconsistent structured artifact verification rejected by supervisor",
     "data source inspection required by supervisor",
     "data source reread rejected by supervisor",
     "web_fetch failed url rejected by supervisor",
@@ -2499,6 +2525,26 @@ def build_artifact_verify_messages(
     ]
 
 
+def build_structured_artifact_verify_messages(
+    original_task: str,
+    missing_structured_artifacts: list[str],
+    structured_verified_paths: set[str],
+) -> list[dict[str, str]]:
+    payload = {
+        "task": truncate(original_task, 5000),
+        "missing_structured_artifacts": missing_structured_artifacts[:20],
+        "already_structured_verified_artifacts": sorted(structured_verified_paths)[:20],
+        "required_next_action": (
+            "Return exactly one python or shell JSON action that parses one path from missing_structured_artifacts "
+            "and asserts task-required fields, values, row counts, grouping, and ordering. Do not final or rewrite files."
+        ),
+    }
+    return [
+        {"role": "system", "content": STRUCTURED_ARTIFACT_VERIFY_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
+    ]
+
+
 def replace_edit_declared_symbols(action: dict[str, Any]) -> set[str]:
     if str(action.get("action") or "") != "replace_in_file":
         return set()
@@ -2644,6 +2690,7 @@ TEXT_VERIFICATION_EXTENSIONS = {
 
 
 STRUCTURED_JSON_EXTENSIONS = {".json", ".jsonl"}
+STRUCTURED_DATA_EXTENSIONS = {".json", ".jsonl", ".csv", ".tsv"}
 REQUIRED_ARTIFACT_EXTENSIONS = TEXT_VERIFICATION_EXTENSIONS | STRUCTURED_JSON_EXTENSIONS
 
 
@@ -2656,9 +2703,104 @@ def missing_text_verifications(paths: list[str], verified_paths: set[str]) -> li
     return [path for path in paths if path_needs_text_verification(path) and path not in verified_paths]
 
 
+def path_needs_structured_verification(path: str) -> bool:
+    lowered = path.lower()
+    return any(lowered.endswith(extension) for extension in STRUCTURED_DATA_EXTENSIONS)
+
+
+def missing_structured_verifications(paths: list[str], verified_paths: set[str]) -> list[str]:
+    return [path for path in paths if path_needs_structured_verification(path) and path not in verified_paths]
+
+
 def path_needs_json_validation(path: str) -> bool:
     lowered = path.lower()
     return any(lowered.endswith(extension) for extension in STRUCTURED_JSON_EXTENSIONS)
+
+
+def action_structurally_validates_path(action_type: str, action: dict[str, Any], path: str) -> bool:
+    if action_type not in {"python", "shell"}:
+        return False
+    text = str(action.get("code") or action.get("cmd") or "")
+    lowered = text.lower()
+    if not action_references_path_text(action, path):
+        return False
+    suffix = Path(path).suffix.lower()
+    if suffix == ".json":
+        parser_markers = ("json.load(", "json.loads(")
+    elif suffix == ".jsonl":
+        parser_markers = ("json.loads(", "json.load(")
+    elif suffix in {".csv", ".tsv"}:
+        parser_markers = ("csv.dictreader(", "csv.reader(", "read_csv(", "splitlines(")
+    else:
+        return False
+    validation_markers = (
+        "assert ",
+        "expected",
+        "!=",
+        "==",
+        "raise systemexit",
+        "exit(1)",
+        "sys.exit(1)",
+    )
+    return any(marker in lowered for marker in parser_markers) and any(marker in lowered for marker in validation_markers)
+
+
+def action_uses_weak_structured_membership_check(action_type: str, action: dict[str, Any], paths: list[str]) -> bool:
+    if action_type not in {"python", "shell"}:
+        return False
+    if not any(action_structurally_validates_path(action_type, action, path) for path in paths):
+        return False
+    text = str(action.get("code") or action.get("cmd") or "")
+    lowered = text.lower()
+    if "any(" not in lowered:
+        return False
+    strong_markers = (
+        "== expected_",
+        "== [",
+        "== {",
+        "assert rows ==",
+    )
+    return not any(marker in lowered for marker in strong_markers)
+
+
+def action_has_structured_expected_count_mismatch(action_type: str, action: dict[str, Any], paths: list[str]) -> bool:
+    if action_type not in {"python", "shell"}:
+        return False
+    if not any(action_structurally_validates_path(action_type, action, path) for path in paths):
+        return False
+    text = str(action.get("code") or action.get("cmd") or "")
+    for match in re.finditer(r"expected_([A-Za-z0-9_]+)\s*=\s*\[(.*?)\]", text, flags=re.S):
+        name = match.group(1)
+        body = match.group(2)
+        expected_len = body.count("{")
+        if expected_len <= 0:
+            continue
+        count_patterns = [
+            rf"{re.escape(name)}[A-Za-z0-9_]*count['\"]?\]?\s*==\s*(\d+)",
+            rf"{re.escape(name.rstrip('s'))}[A-Za-z0-9_]*count['\"]?\]?\s*==\s*(\d+)",
+        ]
+        for pattern in count_patterns:
+            count_match = re.search(pattern, text)
+            if not count_match:
+                continue
+            try:
+                asserted_count = int(count_match.group(1))
+            except ValueError:
+                continue
+            if asserted_count != expected_len:
+                return True
+    return False
+
+
+def action_structurally_validates_paths(
+    action_type: str,
+    action: dict[str, Any],
+    result: dict[str, Any],
+    paths: list[str],
+) -> list[str]:
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        return []
+    return [path for path in paths if action_structurally_validates_path(action_type, action, path)]
 
 
 def task_literal_markers_for_path(task: str, path: str) -> list[str]:
@@ -2808,7 +2950,13 @@ def build_swe_auto_test_action(config: AgentConfig, workspace: str) -> dict[str,
     }
 
 
-def required_artifacts_auto_final(config: AgentConfig, required_paths: list[str], verified_paths: set[str], task: str) -> dict[str, Any] | None:
+def required_artifacts_auto_final(
+    config: AgentConfig,
+    required_paths: list[str],
+    verified_paths: set[str],
+    structured_verified_paths: set[str],
+    task: str,
+) -> dict[str, Any] | None:
     if not required_paths:
         return None
     artifact_validation = validate_artifact_paths(config, required_paths)
@@ -2820,10 +2968,17 @@ def required_artifacts_auto_final(config: AgentConfig, required_paths: list[str]
     missing_verification = missing_text_verifications(required_paths, verified_paths)
     if missing_verification:
         return None
+    missing_structured = missing_structured_verifications(required_paths, structured_verified_paths)
+    if missing_structured:
+        return None
     return {
         "ok": True,
         "message": "Готово: " + ", ".join(required_paths),
-        "artifact_validation": {**artifact_validation, "json_validation": json_validation},
+        "artifact_validation": {
+            **artifact_validation,
+            "json_validation": json_validation,
+            "structured_verification": {"ok": True, "paths": sorted(structured_verified_paths & set(required_paths))},
+        },
     }
 
 
@@ -4742,6 +4897,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
     consecutive_parse_failures = 0
     total_parse_failures = 0
     verified_text_paths: set[str] = set(config.initial_verified_text_paths)
+    structured_verified_paths: set[str] = set()
+    failed_structured_verification_paths: set[str] = set()
     explicit_workspace = explicit_workspace_from_task(original_task)
     restored_required_artifacts = [path for path in config.initial_required_artifact_paths if path_needs_text_verification(path)]
     parsed_required_artifacts = required_artifact_paths_from_task(classification_task_text, explicit_workspace)
@@ -4856,6 +5013,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         step_archive = config.archive_internal_steps or (config.archive_task and step == 1)
         repair_source_path = ""
         artifact_verify_paths: list[str] = []
+        structured_artifact_verify_paths: list[str] = []
         automated_action: dict[str, Any] | None = None
         chat_messages = messages
         if swe_task and pending_failing_tests and not code_mutated_since_last_pytest:
@@ -4959,6 +5117,50 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     },
                 )
                 automated_action = build_required_artifact_verify_action(original_task, artifact_verify_paths[0])
+        if automated_action is None and not repair_source_path and not artifact_verify_paths and required_artifact_paths:
+            artifact_validation = validate_artifact_paths(config, required_artifact_path_list)
+            missing_text_artifact_verification = missing_text_verifications(required_artifact_path_list, verified_text_paths)
+            missing_structured_artifact_verification = missing_structured_verifications(
+                required_artifact_path_list,
+                structured_verified_paths,
+            )
+            missing_structured_artifact_verification = [
+                path for path in missing_structured_artifact_verification
+                if path not in failed_structured_verification_paths
+            ]
+            if (
+                artifact_validation.get("ok")
+                and not missing_text_artifact_verification
+                and missing_structured_artifact_verification
+            ):
+                structured_artifact_verify_paths = missing_structured_artifact_verification
+                chat_messages = build_structured_artifact_verify_messages(
+                    original_task=original_task,
+                    missing_structured_artifacts=structured_artifact_verify_paths,
+                    structured_verified_paths=structured_verified_paths,
+                )
+                step_memory = False
+                step_archive = False
+                emit(
+                    event_sink,
+                    {
+                        "type": "warning",
+                        "code": "structured_artifact_verify_mode",
+                        "step": step,
+                        "message": "Structured artifact verification mode active for unverified JSON/CSV artifacts.",
+                        "display_message": "Артефакты созданы, проверяю JSON/CSV как данные.",
+                        "missing_structured_verification": structured_artifact_verify_paths,
+                    },
+                )
+                write_task_journal(
+                    config,
+                    "structured_artifact_verify_mode",
+                    {
+                        "step": step,
+                        "missing_structured_verification": structured_artifact_verify_paths,
+                        "structured_verified_paths": sorted(structured_verified_paths)[:20],
+                    },
+                )
         if automated_action is not None:
             action = automated_action
             write_task_journal(config, "automated_action", {"step": step, "action": action, "reason": "artifact_verify_mode"})
@@ -5094,6 +5296,18 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         action_type = str(action.get("action", "")).strip().lower()
         if action_type == "python" and explicit_workspace and not (action.get("cwd") or action.get("workdir")):
             action["cwd"] = explicit_workspace
+        if action_type == "python" and explicit_workspace and str(action.get("cwd") or "").strip() == "/work/project":
+            action["cwd"] = explicit_workspace
+            emit(
+                event_sink,
+                {
+                    "type": "warning",
+                    "code": "workspace_cwd_autocorrected",
+                    "step": step,
+                    "message": f"Corrected python cwd from /work/project to {explicit_workspace}",
+                    "display_message": "Исправил шаблонный cwd на рабочий каталог задачи.",
+                },
+            )
         consecutive_parse_failures = 0
         validation = validate_action(action)
         if not validation.get("ok"):
@@ -5311,6 +5525,57 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                         "Do not write, rewrite, list, read, mkdir, or final."
                     ),
                 }
+        if structured_artifact_verify_paths and forced_supervisor_result is None:
+            structured_verify_violation = ""
+            if action_type not in {"python", "shell"}:
+                structured_verify_violation = "Structured artifact verification mode allows only python or shell."
+            elif not any(action_structurally_validates_path(action_type, action, path) for path in structured_artifact_verify_paths):
+                structured_verify_violation = (
+                    "Structured artifact verification must parse one missing structured artifact and include task-derived assertions."
+                )
+            elif action_uses_weak_structured_membership_check(action_type, action, structured_artifact_verify_paths):
+                structured_verify_violation = (
+                    "Structured artifact verification is too weak because it uses any(...) membership checks without exact list/dict equality."
+                )
+            elif action_has_structured_expected_count_mismatch(action_type, action, structured_artifact_verify_paths):
+                structured_verify_violation = (
+                    "Structured artifact verification is internally inconsistent: expected collection length conflicts with a task count assertion."
+                )
+            if structured_verify_violation:
+                error_code = (
+                    "weak structured artifact verification rejected by supervisor"
+                    if "too weak" in structured_verify_violation
+                    else "inconsistent structured artifact verification rejected by supervisor"
+                    if "internally inconsistent" in structured_verify_violation
+                    else "structured artifact verification mode action rejected by supervisor"
+                )
+                warning_payload = {
+                    "error": error_code,
+                    "violation": structured_verify_violation,
+                    "missing_structured_artifacts": structured_artifact_verify_paths,
+                    "action": action,
+                }
+                emit(
+                    event_sink,
+                    {
+                        "type": "warning",
+                        "code": "structured_artifact_verify_mode_rejected",
+                        "step": step,
+                        "message": structured_verify_violation,
+                        "display_message": "Нужна проверка JSON/CSV как данных, а не повторный текстовый шаг.",
+                    },
+                )
+                forced_supervisor_result = {
+                    "ok": False,
+                    **warning_payload,
+                    "instruction": (
+                        "Return python or shell that opens one path from missing_structured_artifacts, parses it with json/csv, "
+                        "and asserts exact task-required whole lists/dicts, values, ordering, grouping, and row counts. "
+                        "Prefer checks like assert data['items'] == expected_items or assert rows == expected_rows. "
+                        "If a summary/count field says N, the expected collection must also contain N logical entries; use nested child lists/targets when the task groups several children under one parent. "
+                        "Do not use any(...) membership-only checks, do not final, and do not rewrite files from this mode."
+                    ),
+                }
         if (
             data_source_paths
             and required_artifact_paths
@@ -5489,6 +5754,33 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                             warning_message
                             + "\nUse verify_text_file on each text artifact with checks derived from the user task "
                             + "(expected sections/ranges/key markers/order/min size), then return final only if verification passes."
+                        ),
+                    }
+                )
+                continue
+            missing_structured_verification = missing_structured_verifications(
+                list(artifact_validation.get("paths") or []),
+                structured_verified_paths,
+            )
+            if missing_structured_verification:
+                warning_payload = {
+                    "missing_structured_verification": missing_structured_verification,
+                    "accepted_verifications": sorted(structured_verified_paths)[:20],
+                }
+                warning_message = (
+                    "Supervisor rejected final because structured artifacts were not parsed and checked as data after their last write: "
+                    + json.dumps(warning_payload, ensure_ascii=False)
+                )
+                emit(event_sink, {"type": "warning", "code": "final_structured_artifact_verification_required", "step": step, "message": warning_message})
+                messages.append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            warning_message
+                            + "\nRun a python or shell verification that opens each missing .json/.jsonl/.csv/.tsv file with json/csv parsing "
+                            "and task-derived assertions for required fields, row counts, grouping, ordering, and values. "
+                            "Then return final only after that structured check succeeds."
                         ),
                     }
                 )
@@ -5910,6 +6202,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 action_type in {"write_file", "append_file", "replace_in_file"}
                 and str(action.get("path") or "") in verified_text_paths
                 and str(action.get("path") or "") not in failed_verification_paths
+                and str(action.get("path") or "") not in failed_structured_verification_paths
             ):
                 result = {
                     "ok": False,
@@ -5927,6 +6220,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and str(action.get("path") or "") in required_artifact_paths
                 and str(action.get("path") or "") in successful_write_file_paths
                 and str(action.get("path") or "") not in failed_verification_paths
+                and str(action.get("path") or "") not in failed_structured_verification_paths
                 and required_artifact_paths.issubset(set(successful_write_file_paths) | verified_text_paths)
             ):
                 missing_verification = missing_text_verifications(required_artifact_path_list, verified_text_paths)
@@ -6133,6 +6427,7 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 and len(str(action.get("content") or "").encode("utf-8"))
                 <= successful_write_file_max_bytes.get(str(action.get("path") or ""), 0)
                 and str(action.get("path") or "") not in failed_verification_paths
+                and str(action.get("path") or "") not in failed_structured_verification_paths
                 and not (
                     swe_task
                     and pending_failing_tests
@@ -6335,6 +6630,28 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 "CLI command with JSON/assert validation so failures propagate as a non-zero tool result."
             )
         if (
+            action_type in {"python", "shell"}
+            and isinstance(result, dict)
+            and result.get("ok") is False
+            and str(result.get("error") or "") not in SUPERVISOR_REJECTION_ERRORS
+        ):
+            failed_structured_paths = [
+                path for path in required_artifact_path_list
+                if action_structurally_validates_path(action_type, action, path)
+            ]
+            if failed_structured_paths:
+                result = dict(result)
+                result["failed_structured_artifacts"] = failed_structured_paths[:10]
+                instruction = (
+                    "This structured artifact verification failed. Do not repeat the same verification immediately. "
+                    "Fix the named JSON/CSV/TSV/JSONL artifact using write_file or python, preserving valid syntax and task-required shape, "
+                    "then run a new structured verification."
+                )
+                if result.get("supervisor_instruction"):
+                    result["supervisor_instruction"] = f"{instruction} {result['supervisor_instruction']}"
+                else:
+                    result["supervisor_instruction"] = instruction
+        if (
             swe_task
             and action_is_cli_verification(action_type, action, original_task, expected_cli_modules, expected_cli_input_paths)
             and isinstance(result, dict)
@@ -6441,6 +6758,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if action_type in {"write_file", "append_file", "replace_in_file"} and isinstance(result, dict) and result.get("ok") is True:
             path = str(action.get("path") or "")
             verified_text_paths.discard(path)
+            structured_verified_paths.discard(path)
+            failed_structured_verification_paths.discard(path)
             failed_verification_paths.discard(path)
             stale_replace_failures_by_path.pop(path, None)
             code_mutated_since_last_pytest = True
@@ -6460,6 +6779,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         python_written_text_paths = python_action_written_text_paths(action_type, action) if isinstance(result, dict) and result.get("ok") is True else []
         for path in python_written_text_paths:
             verified_text_paths.discard(path)
+            structured_verified_paths.discard(path)
+            failed_structured_verification_paths.discard(path)
             failed_verification_paths.discard(path)
             stale_replace_failures_by_path.pop(path, None)
             if path in required_artifact_paths:
@@ -6467,6 +6788,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
         if swe_task and python_written_code_paths:
             for path in python_written_code_paths:
                 verified_text_paths.discard(path)
+                structured_verified_paths.discard(path)
+                failed_structured_verification_paths.discard(path)
                 failed_verification_paths.discard(path)
                 stale_replace_failures_by_path.pop(path, None)
             code_mutated_since_last_pytest = True
@@ -6485,6 +6808,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             for path in result.get("written", []) if isinstance(result.get("written"), list) else []:
                 path = str(path)
                 verified_text_paths.discard(path)
+                structured_verified_paths.discard(path)
+                failed_structured_verification_paths.discard(path)
                 failed_verification_paths.discard(path)
                 stale_replace_failures_by_path.pop(path, None)
         if isinstance(result, dict) and (result.get("passing_tests") or result.get("failing_tests")):
@@ -6616,6 +6941,8 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
             else:
                 verified_text_paths.add(path)
                 failed_verification_paths.discard(path)
+                if path_needs_structured_verification(path) and int(result.get("checks", {}).get("must_contain") or 0) > 0:
+                    structured_verified_paths.add(path)
         elif (
             action_type == "verify_text_file"
             and isinstance(result, dict)
@@ -6631,6 +6958,18 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                 failed_web_fetch_urls.add(url)
             elif url and result.get("ok") is True:
                 failed_web_fetch_urls.discard(url)
+        for path in action_structurally_validates_paths(action_type, action, result if isinstance(result, dict) else {}, required_artifact_path_list):
+            structured_verified_paths.add(path)
+            failed_structured_verification_paths.discard(path)
+        if (
+            action_type in {"python", "shell"}
+            and isinstance(result, dict)
+            and result.get("ok") is False
+            and str(result.get("error") or "") not in SUPERVISOR_REJECTION_ERRORS
+        ):
+            for path in required_artifact_path_list:
+                if action_structurally_validates_path(action_type, action, path):
+                    failed_structured_verification_paths.add(path)
         event_extra: dict[str, Any] = {}
         if isinstance(result, dict):
             if action_type == "web_search":
@@ -6788,7 +7127,13 @@ def run_agent(task: str, config: AgentConfig, event_sink: AgentEventSink | None 
                     read_path = str(action.get("path") or "")
                     if read_path:
                         pending_failing_test_read_paths.add(read_path)
-            auto_final = required_artifacts_auto_final(config, required_artifact_path_list, verified_text_paths, original_task)
+            auto_final = required_artifacts_auto_final(
+                config,
+                required_artifact_path_list,
+                verified_text_paths,
+                structured_verified_paths,
+                original_task,
+            )
             if auto_final is not None:
                 duration_sec = round(time.time() - run_started, 3)
                 final_payload = {

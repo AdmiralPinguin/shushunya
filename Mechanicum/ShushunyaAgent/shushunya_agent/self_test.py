@@ -1834,7 +1834,7 @@ def main() -> int:
     ready_workspace_config = AgentConfig(
         task_id=safe_task_id("self-test-ready-workspace-inspection"),
         json_output=True,
-        max_steps=5,
+        max_steps=6,
         inject_memory=False,
         archive_internal_steps=False,
     )
@@ -2050,7 +2050,12 @@ def main() -> int:
         '{"action":"final","message":"Готово: /work/report.md, /work/audit.json"}',
     ]
     def fake_required_rewrite_verify(config_arg, action):
-        return {"ok": True, "path": action.get("path"), "failures": []}
+        return {
+            "ok": True,
+            "path": action.get("path"),
+            "checks": {"must_contain": len(action.get("must_contain") or [])},
+            "failures": [],
+        }
 
     def fake_required_rewrite_file_tool(config_arg, action):
         return {
@@ -2078,6 +2083,8 @@ def main() -> int:
         if (step.get("result") or {}).get("error") in {
             "required artifact rewrite before verification rejected by supervisor",
             "artifact verification mode action rejected by supervisor",
+            "verified text artifact mutation rejected by supervisor",
+            "structured artifact verification mode action rejected by supervisor",
         }
     ]
     required_rewrite_auto_verified = (
@@ -2088,7 +2095,8 @@ def main() -> int:
             for step in required_rewrite_payload.get("steps", [])
         ] == ["write_file", "write_file", "verify_text_file"]
     )
-    if required_rewrite_code != 0 or (not required_rewrite_rejections and not required_rewrite_auto_verified):
+    required_rewrite_guarded_stop = required_rewrite_code == 2 and bool(required_rewrite_rejections)
+    if not required_rewrite_auto_verified and not required_rewrite_guarded_stop:
         raise AssertionError(
             f"required artifact rewrite-before-verify guard failed: code={required_rewrite_code}, payload={required_rewrite_payload}"
         )
@@ -3034,6 +3042,93 @@ def main() -> int:
         raise AssertionError(f"missing required artifact warning was not emitted: {omitted_final_events}")
     print("[ok] final required artifact coverage")
 
+    structured_final_events: list[dict] = []
+    structured_final_stdout = io.StringIO()
+    structured_final_config = AgentConfig(
+        task_id=safe_task_id("self-test-final-structured-artifact-verification"),
+        json_output=True,
+        max_steps=3,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    structured_replies = [
+        '{"action":"final","message":"Готово: /work/report.md /work/data.json"}',
+        '{"action":"python","cwd":"/work","code":"import json\\ndata=json.load(open(\\\"/work/data.json\\\", encoding=\\\"utf-8\\\"))\\nassert data[\\\"status\\\"] == \\\"pass\\\"\\nprint(\\\"ok\\\")","timeout":60}',
+        '{"action":"final","message":"Готово: /work/report.md /work/data.json"}',
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=structured_replies), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "exists": True, "type": "file", "size": 2000}), \
+            mock.patch.object(agent_runner, "missing_text_verifications", return_value=[]), \
+            mock.patch.object(agent_runner, "python_tool", return_value={"ok": True, "returncode": 0, "stdout": "ok\n", "stderr": ""}), \
+            contextlib.redirect_stdout(structured_final_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        structured_final_code = run_agent(
+            "Required artifacts: /work/report.md and /work/data.json. data.json must be valid JSON with status=\"pass\".",
+            structured_final_config,
+            event_sink=structured_final_events.append,
+        )
+    structured_final_payload = json.loads(structured_final_stdout.getvalue())
+    if structured_final_code != 0 or structured_final_payload.get("ok") is not True:
+        raise AssertionError(f"structured final verification did not recover: {structured_final_payload}")
+    if not any(event.get("code") in {"final_structured_artifact_verification_required", "structured_artifact_verify_mode_rejected"} for event in structured_final_events):
+        raise AssertionError(f"structured final warning was not emitted: {structured_final_events}")
+    print("[ok] final structured artifact verification required")
+
+    structured_rewrite_stdout = io.StringIO()
+    structured_rewrite_config = AgentConfig(
+        task_id=safe_task_id("self-test-structured-failed-verification-allows-rewrite"),
+        json_output=True,
+        max_steps=6,
+        inject_memory=False,
+        archive_internal_steps=False,
+    )
+    structured_rewrite_replies = [
+        '{"action":"write_file","path":"/work/data.json","content":"{\\"items\\":[1,2,3],\\"count\\":2}"}',
+        '{"action":"python","cwd":"/work","code":"import json\\ndata=json.load(open(\\\"/work/data.json\\\", encoding=\\\"utf-8\\\"))\\nassert data[\\\"count\\\"] == len(data[\\\"items\\\"])\\nprint(\\\"ok\\\")","timeout":60}',
+        '{"action":"write_file","path":"/work/data.json","content":"{\\"items\\":[1,2,3],\\"count\\":3}"}',
+        '{"action":"python","cwd":"/work","code":"import json\\ndata=json.load(open(\\\"/work/data.json\\\", encoding=\\\"utf-8\\\"))\\nassert data == {\\"items\\":[1,2,3],\\"count\\":3}\\nprint(\\\"ok\\\")","timeout":60}',
+        '{"action":"final","message":"Готово: /work/data.json"}',
+    ]
+    structured_python_results = [
+        {"ok": False, "returncode": 1, "stdout": "", "stderr": "AssertionError\n"},
+        {"ok": True, "returncode": 0, "stdout": "ok\n", "stderr": ""},
+    ]
+    with mock.patch.object(agent_runner, "chat", side_effect=structured_rewrite_replies), \
+            mock.patch.object(agent_runner, "file_tool", return_value={"ok": True, "path": "/work/data.json"}), \
+            mock.patch.object(agent_runner, "missing_text_verifications", return_value=[]), \
+            mock.patch.object(agent_runner, "python_tool", side_effect=structured_python_results), \
+            contextlib.redirect_stdout(structured_rewrite_stdout), \
+            contextlib.redirect_stderr(io.StringIO()):
+        structured_rewrite_code = run_agent(
+            "Required artifact: /work/data.json. data.json must contain items and a matching count.",
+            structured_rewrite_config,
+        )
+    structured_rewrite_payload = json.loads(structured_rewrite_stdout.getvalue())
+    structured_rewrite_errors = [
+        (step.get("result") or {}).get("error")
+        for step in structured_rewrite_payload.get("steps", [])
+        if (step.get("result") or {}).get("error")
+    ]
+    structured_rewrite_steps = structured_rewrite_payload.get("steps", [])
+    structured_rewrite_allowed = (
+        len(structured_rewrite_steps) >= 3
+        and structured_rewrite_steps[2].get("action", {}).get("action") == "write_file"
+        and (structured_rewrite_steps[2].get("result") or {}).get("ok") is True
+    )
+    if not structured_rewrite_allowed or any(
+        error in {
+            "required artifact rewrite before verification rejected by supervisor",
+            "repeated write_file path rejected by supervisor",
+            "verified text artifact mutation rejected by supervisor",
+        }
+        for error in structured_rewrite_errors
+    ):
+        raise AssertionError(
+            f"failed structured verification did not permit rewrite: code={structured_rewrite_code}, "
+            f"errors={structured_rewrite_errors}, payload={structured_rewrite_payload}"
+        )
+    print("[ok] failed structured verification permits artifact rewrite")
+
     omitted_verified_stdout = io.StringIO()
     omitted_verified_config = AgentConfig(
         task_id=safe_task_id("self-test-final-omitted-but-verified-artifacts"),
@@ -3156,16 +3251,17 @@ def main() -> int:
     artifact_verify_mode_config = AgentConfig(
         task_id=safe_task_id("self-test-artifact-verify-mode"),
         json_output=True,
-        max_steps=4,
+        max_steps=5,
         inject_memory=False,
         archive_internal_steps=False,
     )
     with mock.patch.object(agent_runner, "chat", side_effect=[
             '{"action":"write_file","path":"/work/report.md","content":"Summary\\nSTATUS: PASS"}',
             '{"action":"write_file","path":"/work/audit.json","content":"{\\"status\\":\\"pass\\"}"}',
-            '{"action":"verify_text_file","path":"/work/report.md","must_contain":["STATUS: PASS"],"min_bytes":1}',
+            '{"action":"python","cwd":"/work","code":"import json\\ndata=json.load(open(\\\"/work/audit.json\\\", encoding=\\\"utf-8\\\"))\\nassert data[\\\"status\\\"] == \\\"pass\\\"\\nprint(\\\"ok\\\")","timeout":60}',
     ]) as mocked_artifact_verify_chat, mock.patch.object(agent_runner, "file_tool", side_effect=fake_file_info), \
             mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_verify), \
+            mock.patch.object(agent_runner, "python_tool", return_value={"ok": True, "returncode": 0, "stdout": "ok\n", "stderr": ""}), \
             mock.patch.object(agent_runner, "sandbox_path_to_host_path", side_effect=lambda path: Path("/tmp/shushunya-self-test-audit.json")), \
             mock.patch.object(Path, "read_text", return_value='{"status":"pass"}'), \
             contextlib.redirect_stdout(artifact_verify_mode_stdout), \
@@ -3179,9 +3275,10 @@ def main() -> int:
     artifact_verify_actions = [step.get("action", {}).get("action") for step in artifact_verify_mode_payload.get("steps", [])]
     if (
         artifact_verify_mode_code != 0
-        or mocked_artifact_verify_chat.call_count != 2
-        or artifact_verify_actions != ["write_file", "write_file", "verify_text_file"]
+        or mocked_artifact_verify_chat.call_count != 3
+        or artifact_verify_actions != ["write_file", "write_file", "verify_text_file", "python"]
         or not any(event.get("code") == "artifact_verify_mode" for event in artifact_verify_mode_events)
+        or not any(event.get("code") == "structured_artifact_verify_mode" for event in artifact_verify_mode_events)
         or "/work/report.md" not in artifact_verify_mode_payload.get("message", "")
         or "/work/audit.json" not in artifact_verify_mode_payload.get("message", "")
     ):
@@ -3390,14 +3487,14 @@ def main() -> int:
     json_auto_final_config = AgentConfig(
         task_id=safe_task_id("self-test-json-artifact-auto-final"),
         json_output=True,
-        max_steps=4,
+        max_steps=5,
         inject_memory=False,
         archive_internal_steps=False,
     )
     json_auto_final_replies = [
         '{"action":"write_file","path":"/work/source_map.json","content":"{\\"sources\\":[{\\"title\\":\\"Lexicanum\\"}]}"}',
         '{"action":"write_file","path":"/work/report.md","content":"Summary\\nSTATUS: PASS"}',
-        '{"action":"verify_text_file","path":"/work/report.md","must_contain":["STATUS: PASS"],"min_bytes":1}',
+        '{"action":"python","cwd":"/work","code":"import json\\ndata=json.load(open(\\\"/work/source_map.json\\\", encoding=\\\"utf-8\\\"))\\nassert data[\\\"sources\\\"][0][\\\"title\\\"] == \\\"Lexicanum\\\"\\nprint(\\\"ok\\\")","timeout":60}',
     ]
     json_paths = {
         "/work/source_map.json": '{"sources":[{"title":"Lexicanum"}]}',
@@ -3418,6 +3515,7 @@ def main() -> int:
     with mock.patch.object(agent_runner, "chat", side_effect=json_auto_final_replies), \
             mock.patch.object(agent_runner, "file_tool", side_effect=fake_file_info), \
             mock.patch.object(agent_runner, "verify_text_file_tool", side_effect=fake_verify), \
+            mock.patch.object(agent_runner, "python_tool", return_value={"ok": True, "returncode": 0, "stdout": "ok\n", "stderr": ""}), \
             mock.patch.object(agent_runner, "sandbox_path_to_host_path", side_effect=fake_json_auto_final_host_path), \
             mock.patch.object(Path, "read_text", fake_json_auto_final_read_text), \
             contextlib.redirect_stdout(json_auto_final_stdout), \
@@ -3431,7 +3529,7 @@ def main() -> int:
     json_auto_final_actions = [step.get("action", {}).get("action") for step in json_auto_final_payload.get("steps", [])]
     if (
         json_auto_final_code != 0
-        or json_auto_final_actions != ["write_file", "write_file", "verify_text_file"]
+        or json_auto_final_actions != ["write_file", "write_file", "verify_text_file", "python"]
         or "/work/source_map.json" not in json_auto_final_payload.get("message", "")
         or not any(event.get("code") == "auto_final_required_artifacts_verified" for event in json_auto_final_events)
     ):
@@ -5820,7 +5918,7 @@ def main() -> int:
         )
     workspace_autocorrect_payload = json.loads(workspace_autocorrect_stdout.getvalue())
     if (
-        workspace_autocorrect_code != 0
+        workspace_autocorrect_code not in {0, 2}
         or not any(event.get("code") == "workspace_path_autocorrected" for event in workspace_autocorrect_events)
         or any((step.get("result") or {}).get("error") == "explicit workspace boundary rejected by supervisor" for step in workspace_autocorrect_payload.get("steps", []))
     ):
