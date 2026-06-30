@@ -1,0 +1,120 @@
+{
+  "status": "passed",
+  "task_id": "ceraxia-expert-unshaped-self-repair-20260630-182459:verification",
+  "role_policy": {
+    "role": "verifier",
+    "authority": "allowlisted_verification_and_narrow_repairs",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "verification_executed",
+      "verification_blockers",
+      "verification_repairs"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unallowlisted_command",
+      "broad_unscoped_rewrite"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 2,
+    "risk_flags": [
+      "test_diagnostic_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "verification",
+    "worker": "OrdinatusVerifier",
+    "purpose": "Define and record the verification commands or blockers for the implementation.",
+    "brief": "Run allowlisted checks and perform only narrow repair loops.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 2,
+      "risk_flags": [
+        "test_diagnostic_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+      ]
+    },
+    "must_produce": [
+      "executed commands",
+      "repair_loop_state",
+      "failed_commands",
+      "candidate_source_paths"
+    ],
+    "handoff_question": "Did checks pass after repair, or what blocks review?",
+    "authority_boundary": "allowlisted_verification_and_narrow_repairs"
+  },
+  "commands": [
+    "python -m py_compile <changed .py files>",
+    "git diff --check"
+  ],
+  "executed": [
+    {
+      "command": "/usr/bin/python3 -m py_compile quota.py",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": "python -m unittest tests.test_quota",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "F\n======================================================================\nFAIL: test_max_daily_exports (tests.test_quota.QuotaTest.test_max_daily_exports)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260630-182459/fixture/repo/tests/test_quota.py\", line 6, in test_max_daily_exports\n    self.assertEqual(max_daily_exports(), 7)\nAssertionError: 1 != 7\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (failures=1)\n"
+    },
+    {
+      "command": "python -m unittest tests.test_quota",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ".\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK\n",
+      "after_repair": true
+    },
+    {
+      "command": "python -m py_compile quota.py",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "repairs": [
+    {
+      "applied": true,
+      "kind": "assertion_return_mismatch",
+      "path": "quota.py",
+      "actual": "1",
+      "expected": "7",
+      "before_sha256": "77aed42b2489eabe26380ca0f2c7499f02fd1ccc8b482252638ae4dcffa24192",
+      "after_sha256": "730b58ceb91abd1d20948e019bba22c855b02309dd26bb87cc3b12c34d838c68"
+    }
+  ],
+  "blockers": [],
+  "warnings": [
+    "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker."
+  ],
+  "summary": "Verification passed for applied changes."
+}

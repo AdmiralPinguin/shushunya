@@ -1,0 +1,361 @@
+{
+  "status": "applied",
+  "mode": "explicit_patch_apply",
+  "task_id": "ceraxia-expert-unshaped-self-repair-20260630-182459:implementation",
+  "summary": "Ceraxia applied explicit patch operations.",
+  "intended_actions": [
+    "read concrete target files before editing",
+    "apply minimal scoped patch",
+    "run verification commands from verification_report.json",
+    "return focused revision steps on failure"
+  ],
+  "plan_excerpt": "# Ceraxia Change Plan\n\nGoal: кодовая expert-задача без structured patch marker: проверь self-repair discipline. Выведи цель из tests, сохрани diagnostic от первой failed verification и исправь только source по mismatch. Не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260630-182459/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_quota\nCERAXIA_VERIFY: python -m py_compile quota.py\n\n## Scope\n- Inspect the named task and constrain edits to the smallest coherent module set.\n- Preserve user changes and expose blockers instead of guessing.\n\n## Candidate Files\n- quota.py\n- tests/test_quota.py\n\n## Ranked Repo Map\n- quota.py: score=20 reasons=[goal_filename_match, imported_by:tests/test_quota.py, goal_symbol_match:quota, python_source]\n- tests/test_quota.py: score=19 reasons=[goal_filename_match, test_surface, linked_test, goal_symbol_match:quota,test,tests,unittest]\n\n## Test Source Links\n- tests/test_quota.py -> quota.py\n\n## Recommended Read Order\n- inspect_source: quota.py (goal_filename_match, imported_by:tests/test_quota.py, goal_symbol_match:quota)\n- inspect_test: tests/test_quota.py (goal_filename_match, test_surface, linked_test)\n\n## Targeted Reading Plan\n- quota.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=1\n- tests/test_quota.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=0\n\n## Hypothesis Log\n- [high] quota.py is likely relevant to the requested code change. evidence=[goal_filename_match, imported_by:tests/test_quota.py, goal_symbol_match:quota, python_source] risk=public behavior may affect dependents\n- [high] tests/test_quota.py is likely relevant to the requested code change. evidence=[goal_filename_match, test_surface, linked_test, goal_symbol_match:quota,test,tests,unittest] risk=local change risk appears limited\n\n## Design Decision Seed\n- Prefer the smallest patch that satisfies the failing test or explicit user contract.\n- Inspect dependents before changing public functions or modules with reverse dependencies.\n- If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation.\n\n## File Impact Matrix\n- quota.py: impact=medium dependents=1 tests=[tests/test_quota.py]\n- tests/test_quota.py: impact=medium dependents=0 tests=[]\n\n## Risk Register\n\n## Acceptance Criteria\n- requested_behavior_addressed: patch candidate selected from explicit contract, task text, or test evidence\n- source_scope_is_explained: changed files map back to repo survey or review warns about drift\n- changed_python_compiles: py_compile runs for changed Python files\n- task_verification_passes: requested or inferred verification commands return zero\n- review_has_no_blockers: code_review decision record approves final package\n\n## Test Strategy\n- primary: python -m unittest discover\n- primary: python -m unittest tests.test_quota\n- linked: test",
+  "role_policy": {
+    "role": "patchwright",
+    "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unsafe_overwrite",
+      "duplicate_function_append"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 2,
+    "risk_flags": [
+      "test_diagnostic_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "implementation",
+    "worker": "FerrumPatchwright",
+    "purpose": "Prepare an auditable patch manifest and implementation handoff for code changes.",
+    "brief": "Apply only explicit or safely inferred scoped patch operations.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 2,
+      "risk_flags": [
+        "test_diagnostic_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+      ]
+    },
+    "must_produce": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "handoff_question": "What exactly changed, and what should verification run?",
+    "authority_boundary": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+  },
+  "dirty_worktree": {
+    "git_repo": false,
+    "dirty_targets": []
+  },
+  "ambiguity_analysis": {},
+  "patch_spec_present": true,
+  "patch_source": "test_inferred_self_repair_seed",
+  "patch_candidates": [
+    {
+      "source": "explicit_json_patch",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "marker_synthesis",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_api_deprecation",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_data_migration",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_security_boundary",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_cache_concurrency",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_flaky_ordering",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_retry_policy",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_self_repair_seed",
+      "status": "selected",
+      "operation_count": 1,
+      "verification_command_count": 2,
+      "diagnostics": {
+        "kind": "test_inferred_self_repair_seed",
+        "test_path": "tests/test_quota.py",
+        "module_path": "quota.py",
+        "function_name": "max_daily_exports",
+        "initial_actual": "0",
+        "seed": "1",
+        "expected_after_repair": "7",
+        "repair_expected": true
+      }
+    }
+  ],
+  "selected_patch_candidate": {
+    "source": "test_inferred_self_repair_seed",
+    "status": "selected",
+    "operation_count": 1,
+    "verification_command_count": 2,
+    "diagnostics": {
+      "kind": "test_inferred_self_repair_seed",
+      "test_path": "tests/test_quota.py",
+      "module_path": "quota.py",
+      "function_name": "max_daily_exports",
+      "initial_actual": "0",
+      "seed": "1",
+      "expected_after_repair": "7",
+      "repair_expected": true
+    }
+  },
+  "source_excerpt_pack": [
+    {
+      "path": "quota.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, imported_by:tests/test_quota.py, goal_symbol_match:quota",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 1,
+      "bytes": 38,
+      "status": "read",
+      "excerpt": "def max_daily_exports():\n    return 0\n",
+      "truncated": false
+    },
+    {
+      "path": "tests/test_quota.py",
+      "phase": "inspect_test",
+      "reason": "goal_filename_match, test_surface, linked_test",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 0,
+      "bytes": 224,
+      "status": "read",
+      "excerpt": "import unittest\nfrom quota import max_daily_exports\n\nclass QuotaTest(unittest.TestCase):\n    def test_max_daily_exports(self):\n        self.assertEqual(max_daily_exports(), 7)\n\nif __name__ == '__main__':\n    unittest.main()\n",
+      "truncated": false
+    }
+  ],
+  "source_excerpt_summary": [
+    {
+      "path": "quota.py",
+      "status": "read",
+      "bytes": 38,
+      "truncated": false
+    },
+    {
+      "path": "tests/test_quota.py",
+      "status": "read",
+      "bytes": 224,
+      "truncated": false
+    }
+  ],
+  "implementation_decision_record": [
+    {
+      "check": "source_evidence_loaded",
+      "status": "pass",
+      "detail": "2 targeted files read"
+    },
+    {
+      "check": "patch_candidate_selected",
+      "status": "pass",
+      "detail": "test_inferred_self_repair_seed"
+    },
+    {
+      "check": "mutation_authority",
+      "status": "pass",
+      "detail": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+    }
+  ],
+  "diagnostics": {
+    "kind": "test_inferred_self_repair_seed",
+    "test_path": "tests/test_quota.py",
+    "module_path": "quota.py",
+    "function_name": "max_daily_exports",
+    "initial_actual": "0",
+    "seed": "1",
+    "expected_after_repair": "7",
+    "repair_expected": true
+  },
+  "operation_count": 1,
+  "changed_files": [
+    {
+      "path": "quota.py",
+      "operation": "replace",
+      "created": false,
+      "before_sha256": "1c542b3b0474aaebfff880ff7e5a6aa19dca00650405ed919058f5d9b06e7fbf",
+      "after_sha256": "77aed42b2489eabe26380ca0f2c7499f02fd1ccc8b482252638ae4dcffa24192",
+      "changed": true
+    }
+  ],
+  "recommended_read_order": [
+    {
+      "path": "quota.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, imported_by:tests/test_quota.py, goal_symbol_match:quota"
+    },
+    {
+      "path": "tests/test_quota.py",
+      "phase": "inspect_test",
+      "reason": "goal_filename_match, test_surface, linked_test"
+    }
+  ],
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "quota.py",
+        "impact_level": "medium",
+        "rank_score": 20,
+        "dependent_count": 1,
+        "linked_tests": [
+          "tests/test_quota.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "tests/test_quota.py",
+        "impact_level": "medium",
+        "rank_score": 19,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      }
+    ],
+    "risk_register": [],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [
+        "python -m unittest discover",
+        "python -m unittest tests.test_quota"
+      ],
+      "linked_test_targets": [
+        "tests/test_quota.py"
+      ],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "patch_scope_evidence": {
+    "changed_files_in_repo_map": [
+      "quota.py"
+    ],
+    "changed_files_outside_repo_map": [],
+    "changed_sources_with_linked_tests": [
+      {
+        "path": "quota.py",
+        "tests": [
+          "tests/test_quota.py"
+        ]
+      }
+    ],
+    "changed_tests_with_linked_sources": [],
+    "evidence": [
+      {
+        "path": "quota.py",
+        "in_repo_map": true,
+        "score": 20,
+        "reasons": [
+          "goal_filename_match",
+          "imported_by:tests/test_quota.py",
+          "goal_symbol_match:quota",
+          "python_source"
+        ],
+        "linked_tests": [
+          "tests/test_quota.py"
+        ],
+        "linked_sources": []
+      }
+    ]
+  },
+  "rollback": {
+    "applied": false,
+    "files": []
+  },
+  "verification_commands": [
+    "python -m unittest tests.test_quota",
+    "python -m py_compile quota.py"
+  ],
+  "blockers": [],
+  "warnings": [
+    "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker."
+  ]
+}
