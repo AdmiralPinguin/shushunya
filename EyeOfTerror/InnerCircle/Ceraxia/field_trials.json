@@ -15,6 +15,7 @@
     "dimension_sample_min": 4,
     "minimum_expert_trials": 6,
     "minimum_expert_classes": 6,
+    "minimum_unshaped_expert_trials": 4,
     "minimum_entry_score": 8.0
   },
   "dimensions": [

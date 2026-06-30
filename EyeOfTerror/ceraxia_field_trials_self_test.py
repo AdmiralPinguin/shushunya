@@ -35,6 +35,8 @@ def main() -> int:
         raise AssertionError(f"Ceraxia expert target must represent a real 10/10 gate: {expert_target}")
     if expert_target.get("minimum_expert_trials", 0) < 6:
         raise AssertionError(f"Ceraxia expert target needs enough expert trials: {expert_target}")
+    if expert_target.get("minimum_unshaped_expert_trials", 0) < 4:
+        raise AssertionError(f"Ceraxia expert target must require unshaped expert evidence: {expert_target}")
     if len(trials) < target.get("minimum_representative_trials", 0):
         raise AssertionError(f"Ceraxia field trial suite is undersized: {len(trials)} {target}")
     if len(set(dimensions)) != len(dimensions) or len(dimensions) < 8:
@@ -158,7 +160,7 @@ def main() -> int:
     expert_suite_payload = json.loads(expert_suite.stdout)
     if (
         expert_suite_payload.get("expert_trial_count", 0) < expert_target.get("minimum_expert_trials", 0)
-        or expert_suite_payload.get("unshaped_inferred_count", 0) < 2
+        or expert_suite_payload.get("unshaped_inferred_count", 0) < expert_target.get("minimum_unshaped_expert_trials", 0)
         or expert_suite_payload.get("all_passed") is not True
     ):
         raise AssertionError(f"Ceraxia expert suite runner did not prove current arena health: {expert_suite_payload}")
