@@ -127,6 +127,13 @@ CERAXIA_VERIFY: python -m py_compile payments/api.py payments/client.py
 """
 
 
+def test_inferred_data_migration_goal() -> str:
+    return """кодовая задача без structured data migration marker: records API переходит с amount на total_amount. Выведи контракт из source, docs и tests; reader принимает old/new shape, writer emits new shape.
+CERAXIA_VERIFY: python -m unittest tests.test_records_migration
+CERAXIA_VERIFY: python -m py_compile service/records.py
+"""
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -939,6 +946,50 @@ def main() -> int:
         docs = (target_repo / "docs" / "payments_api.md").read_text(encoding="utf-8")
         if "DeprecationWarning" not in source or "service_fee=service_fee" not in caller or "service_fee" not in docs:
             raise AssertionError("API deprecation inference did not update source, caller, and docs")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "service").mkdir()
+        (target_repo / "tests").mkdir()
+        (target_repo / "docs").mkdir()
+        (target_repo / "service" / "records.py").write_text(
+            "def normalize_record(record):\n"
+            "    return {'id': record['id'], 'amount': record['amount']}\n",
+            encoding="utf-8",
+        )
+        (target_repo / "docs" / "records.md").write_text(
+            "# Records\n\nLegacy records contain `amount`; new records use `total_amount`.\n",
+            encoding="utf-8",
+        )
+        (target_repo / "tests" / "test_records_migration.py").write_text(
+            "import unittest\n"
+            "from service.records import normalize_record, serialize_record\n\n"
+            "class RecordsMigrationTest(unittest.TestCase):\n"
+            "    def test_reads_old_shape(self):\n"
+            "        self.assertEqual(normalize_record({'id': 'a1', 'amount': 12}), {'id': 'a1', 'total_amount': 12})\n\n"
+            "    def test_reads_new_shape(self):\n"
+            "        self.assertEqual(normalize_record({'id': 'b2', 'total_amount': 20}), {'id': 'b2', 'total_amount': 20})\n\n"
+            "    def test_writer_emits_new_shape_only(self):\n"
+            "        self.assertEqual(serialize_record({'id': 'c3', 'amount': 7}), {'id': 'c3', 'total_amount': 7})\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=test_inferred_data_migration_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready" or final.get("patch_source") != "test_inferred_data_migration":
+            raise AssertionError(f"data migration should be inferred from tests without marker: {final}")
+        diagnostics = final.get("diagnostics", {})
+        if (
+            diagnostics.get("read_function") != "normalize_record"
+            or diagnostics.get("write_function") != "serialize_record"
+            or diagnostics.get("old_field") != "amount"
+            or diagnostics.get("new_field") != "total_amount"
+        ):
+            raise AssertionError(f"data migration diagnostics should identify old/new fields: {final}")
+        records = (target_repo / "service" / "records.py").read_text(encoding="utf-8")
+        if "'amount' in record" not in records or "'total_amount' in record" not in records or "def serialize_record" not in records:
+            raise AssertionError("data migration inference did not preserve reader compatibility and writer output")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

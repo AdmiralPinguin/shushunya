@@ -761,6 +761,46 @@ def fixture_expert_unshaped_api_evolution(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_data_migration(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "service").mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "docs").mkdir(parents=True, exist_ok=True)
+    (repo / "service" / "records.py").write_text(
+        "def normalize_record(record):\n"
+        "    return {'id': record['id'], 'amount': record['amount']}\n",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "records.md").write_text(
+        "# Records\n\n"
+        "Legacy records contain `amount`. New API responses should expose `total_amount`.\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_records_migration.py").write_text(
+        "import unittest\n"
+        "from service.records import normalize_record, serialize_record\n\n"
+        "class RecordsMigrationTest(unittest.TestCase):\n"
+        "    def test_reads_old_shape(self):\n"
+        "        self.assertEqual(normalize_record({'id': 'a1', 'amount': 12}), {'id': 'a1', 'total_amount': 12})\n\n"
+        "    def test_reads_new_shape(self):\n"
+        "        self.assertEqual(normalize_record({'id': 'b2', 'total_amount': 20}), {'id': 'b2', 'total_amount': 20})\n\n"
+        "    def test_writer_emits_new_shape_only(self):\n"
+        "        self.assertEqual(serialize_record({'id': 'c3', 'amount': 7}), {'id': 'c3', 'total_amount': 7})\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured data migration marker: records API переходит с поля amount "
+        "на total_amount. Выведи контракт из существующего reader, docs и tests: reader должен принимать "
+        "старую и новую форму, writer должен отдавать только новую форму. Не редактируй tests как способ "
+        "сделать их зелеными.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_records_migration\n"
+        "CERAXIA_VERIFY: python -m py_compile service/records.py\n"
+    )
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
@@ -773,6 +813,7 @@ FIXTURES = {
     "ceraxia-expert-public-api-deprecation": fixture_expert_public_api_deprecation,
     "ceraxia-expert-security-boundary": fixture_expert_security_boundary,
     "ceraxia-expert-unshaped-api-evolution": fixture_expert_unshaped_api_evolution,
+    "ceraxia-expert-unshaped-data-migration": fixture_expert_unshaped_data_migration,
     "ceraxia-field-integration-contract": fixture_integration_contract,
     "ceraxia-field-large-file-restraint": fixture_large_file_restraint,
     "ceraxia-field-multifile-feature": fixture_multifile_feature,
@@ -979,6 +1020,42 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and str(manifest.get("patch_source") or "") not in {
                         "multi_file_marker_synthesis",
                         "public_api_compat_marker_synthesis",
+                        "explicit_json_patch",
+                    }
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-unshaped-data-migration":
+        source_path = repo / "service" / "records.py"
+        test_path = repo / "tests" / "test_records_migration.py"
+        docs_path = repo / "docs" / "records.md"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        return {
+            "expert_unshaped_data_migration": {
+                "reader_accepts_old_field": "'amount' in record" in source_text,
+                "reader_accepts_new_field": "'total_amount' in record" in source_text,
+                "writer_emits_new_field": "def serialize_record" in source_text and "'total_amount'" in source_text,
+                "tests_old_new_writer": all(
+                    marker in test_text
+                    for marker in ("test_reads_old_shape", "test_reads_new_shape", "test_writer_emits_new_shape_only")
+                ),
+                "docs_name_new_field": "total_amount" in docs_text,
+                "not_marker_synthesized": str(manifest.get("patch_source") or "") not in {
+                    "data_migration_marker_synthesis",
+                    "multi_file_marker_synthesis",
+                    "explicit_json_patch",
+                },
+                "passed": (
+                    "'amount' in record" in source_text
+                    and "'total_amount' in record" in source_text
+                    and "def serialize_record" in source_text
+                    and all(marker in test_text for marker in ("test_reads_old_shape", "test_reads_new_shape", "test_writer_emits_new_shape_only"))
+                    and "total_amount" in docs_text
+                    and str(manifest.get("patch_source") or "") not in {
+                        "data_migration_marker_synthesis",
+                        "multi_file_marker_synthesis",
                         "explicit_json_patch",
                     }
                 ),

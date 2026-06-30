@@ -1809,6 +1809,129 @@ def infer_api_deprecation_from_tests(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def infer_data_migration_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    commands = verification_commands_from_natural_goal(goal)
+    test_paths = discovered_test_paths(repo_root, goal)
+    candidates: list[dict[str, Any]] = []
+    for test_path in test_paths:
+        path = safe_repo_path(repo_root, test_path)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "serialize_record" not in text:
+            continue
+        imports = re.findall(r"^\s*from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+(.+?)\s*$", text, flags=re.MULTILINE)
+        imported: dict[str, str] = {}
+        for module_name, names_raw in imports:
+            for name in names_raw.split(","):
+                function_name = name.strip()
+                if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", function_name):
+                    imported[function_name] = module_name
+        read_function = "normalize_record" if "normalize_record" in imported else ""
+        write_function = "serialize_record" if "serialize_record" in imported else ""
+        if not read_function or not write_function:
+            continue
+        if imported[read_function] != imported[write_function]:
+            continue
+        source_path = f"{imported[read_function].replace('.', '/')}.py"
+        source = safe_repo_path(repo_root, source_path)
+        if not source.exists():
+            continue
+        source_text = source.read_text(encoding="utf-8")
+        current_fields = re.findall(r"record\[['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\]", source_text)
+        if len(current_fields) < 2:
+            continue
+        id_field = "id" if "id" in current_fields else current_fields[0]
+        old_field_candidates = [field for field in current_fields if field != id_field]
+        if len(set(old_field_candidates)) != 1:
+            continue
+        old_field = old_field_candidates[0]
+        test_fields = set(re.findall(r"['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\s*:", text))
+        docs_fields: set[str] = set()
+        docs_path = ""
+        for docs in sorted(repo_root.rglob("*.md")):
+            if any(part in EXCLUDED_DIRS for part in docs.relative_to(repo_root).parts):
+                continue
+            docs_text = docs.read_text(encoding="utf-8")
+            if old_field in docs_text or source_path.rsplit("/", 1)[0] in str(docs.relative_to(repo_root)):
+                docs_path = str(docs.relative_to(repo_root))
+                docs_fields.update(re.findall(r"`([A-Za-z_][A-Za-z0-9_]*)`", docs_text))
+                docs_fields.update(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", docs_text))
+                break
+        new_candidates = sorted((test_fields | docs_fields) - {id_field, old_field})
+        new_field = next((field for field in new_candidates if field.endswith(old_field) or old_field in field), "")
+        if not new_field and len(new_candidates) == 1:
+            new_field = new_candidates[0]
+        if not new_field:
+            continue
+        candidates.append(
+            {
+                "test_path": test_path,
+                "source_path": source_path,
+                "read_function": read_function,
+                "write_function": write_function,
+                "id_field": id_field,
+                "old_field": old_field,
+                "new_field": new_field,
+                "docs_path": docs_path,
+            }
+        )
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred data migration requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    source_path = str(candidate["source_path"])
+    read_function = str(candidate["read_function"])
+    write_function = str(candidate["write_function"])
+    id_field = str(candidate["id_field"])
+    old_field = str(candidate["old_field"])
+    new_field = str(candidate["new_field"])
+    source_content = (
+        f"def {read_function}(record):\n"
+        f"    if '{new_field}' in record:\n"
+        f"        value = record['{new_field}']\n"
+        f"    elif '{old_field}' in record:\n"
+        f"        value = record['{old_field}']\n"
+        "    else:\n"
+        f"        raise KeyError('{new_field}')\n"
+        f"    return {{'{id_field}': record['{id_field}'], '{new_field}': value}}\n\n"
+        f"def {write_function}(record):\n"
+        f"    normalized = {read_function}(record)\n"
+        f"    return {{'{id_field}': normalized['{id_field}'], '{new_field}': normalized['{new_field}']}}\n"
+    )
+    operations: list[dict[str, Any]] = [
+        {"type": "write_file", "path": source_path, "content": source_content, "overwrite": True}
+    ]
+    docs_path = str(candidate.get("docs_path") or "")
+    if docs_path:
+        docs_content = (
+            "# Records\n\n"
+            f"Legacy records with `{old_field}` remain readable. Writers emit `{new_field}` so rollback can still read old stored data while new outputs use the new shape.\n"
+        )
+        operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
+    if not commands:
+        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+    return {
+        "source": "test_inferred_data_migration",
+        "diagnostics": {
+            "kind": "test_inferred_data_migration",
+            "test_path": candidate["test_path"],
+            "source_path": source_path,
+            "read_function": read_function,
+            "write_function": write_function,
+            "id_field": id_field,
+            "old_field": old_field,
+            "new_field": new_field,
+            "docs_path": docs_path,
+        },
+        "operations": operations,
+        "verification_commands": commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -1931,6 +2054,7 @@ def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any
         ("explicit_json_patch", lambda: extract_json_after_marker(goal, "CERAXIA_PATCH:")),
         ("marker_synthesis", lambda: synthesized_patch_spec_from_markers(goal)),
         ("test_inferred_api_deprecation", lambda: infer_api_deprecation_from_tests(request)),
+        ("test_inferred_data_migration", lambda: infer_data_migration_from_tests(request)),
         ("natural_language_simple_replace", lambda: infer_simple_replace_patch_spec(request)),
         ("natural_language_add_function", lambda: infer_add_function_patch_spec(request)),
         ("test_inferred_arithmetic_return", lambda: infer_arithmetic_return_from_tests(request)),
