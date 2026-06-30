@@ -27,6 +27,8 @@ def main() -> int:
     target = data.get("target", {})
     if target.get("minimum_representative_trials", 0) < 12:
         raise AssertionError(f"Ceraxia field trials target is too small: {target}")
+    if target.get("dimension_sample_min", 0) < 2:
+        raise AssertionError(f"Ceraxia dimension sample target is too weak: {target}")
     if len(trials) < target.get("minimum_representative_trials", 0):
         raise AssertionError(f"Ceraxia field trial suite is undersized: {len(trials)} {target}")
     if len(set(dimensions)) != len(dimensions) or len(dimensions) < 8:
@@ -41,6 +43,9 @@ def main() -> int:
         classes.add(str(trial.get("class") or ""))
         if not trial.get("task") or not trial.get("required_evidence") or not trial.get("failure_modes_to_watch"):
             raise AssertionError(f"Ceraxia field trial lacks task/evidence/failure modes: {trial}")
+        applicable = trial.get("applicable_dimensions")
+        if not isinstance(applicable, list) or not applicable or not set(applicable).issubset(set(dimensions)):
+            raise AssertionError(f"Ceraxia trial must define applicable dimensions from the rubric: {trial}")
     if len(classes) < 8:
         raise AssertionError(f"Ceraxia field trials are not diverse enough: {classes}")
     ledger_scores = data.get("ledger_template", {}).get("scores", {})
@@ -65,6 +70,9 @@ def main() -> int:
         low_entries = report_payload.get("gaps", {}).get("low_score_entries", {})
         if not isinstance(low_entries, dict):
             raise AssertionError(f"Ceraxia report must expose low score entries after accepted reviews: {report_payload}")
+    sample_counts = report_payload.get("dimension_sample_counts", {})
+    if set(sample_counts) != set(dimensions):
+        raise AssertionError(f"Ceraxia report must expose sample counts for every dimension: {report_payload}")
     strict_report = subprocess.run(
         [sys.executable, str(REPORTER), "--require-target"],
         cwd=str(ROOT.parent),

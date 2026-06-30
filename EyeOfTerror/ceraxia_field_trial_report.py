@@ -74,12 +74,21 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     low_score_entries: dict[str, list[dict[str, Any]]] = {dimension: [] for dimension in dimensions}
     classes: set[str] = set()
     dimension_min = float(target.get("dimension_average_min") or 0)
+    dimension_sample_min = int(target.get("dimension_sample_min") or 0)
     for entry in accepted:
         trial = trial_by_id.get(str(entry.get("trial_id") or ""), {})
         if trial.get("class"):
             classes.add(str(trial.get("class")))
+        applicable = trial.get("applicable_dimensions")
+        applicable_dimensions = (
+            {str(item) for item in applicable}
+            if isinstance(applicable, list) and applicable
+            else set(dimensions)
+        )
         scores = entry.get("scores") if isinstance(entry.get("scores"), dict) else {}
         for dimension in dimensions:
+            if dimension not in applicable_dimensions:
+                continue
             value = scores.get(dimension)
             if isinstance(value, (int, float)):
                 scores_by_dimension[dimension].append(float(value))
@@ -98,15 +107,21 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
         dimension: average(values)
         for dimension, values in scores_by_dimension.items()
     }
+    dimension_sample_counts = {
+        dimension: len(values)
+        for dimension, values in scores_by_dimension.items()
+    }
     overall = average(list(dimension_averages.values())) if dimension_averages else 0.0
     enough_trials = len(accepted) >= int(target.get("minimum_representative_trials") or 0)
     enough_dimensions = all(value >= dimension_min for value in dimension_averages.values())
+    enough_dimension_samples = all(count >= dimension_sample_min for count in dimension_sample_counts.values())
     enough_overall = overall >= float(target.get("rolling_average_min") or 0)
-    target_met = bool(enough_trials and enough_dimensions and enough_overall)
+    target_met = bool(enough_trials and enough_dimensions and enough_dimension_samples and enough_overall)
     return {
         "target_met": target_met,
         "overall_score": overall,
         "dimension_averages": dimension_averages,
+        "dimension_sample_counts": dimension_sample_counts,
         "accepted_trial_count": len(accepted),
         "draft_trial_count": len(entries) - len(accepted),
         "covered_classes": sorted(classes),
@@ -114,6 +129,11 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
         "gaps": {
             "needs_more_accepted_trials": not enough_trials,
             "needs_higher_overall": not enough_overall,
+            "needs_more_dimension_evidence": [
+                dimension
+                for dimension, count in dimension_sample_counts.items()
+                if count < dimension_sample_min
+            ],
             "needs_higher_dimension_scores": [
                 dimension
                 for dimension, value in dimension_averages.items()

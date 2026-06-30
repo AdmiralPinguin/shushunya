@@ -56,7 +56,15 @@ verification output, and relevant source behavior.
 - `10`: exceptional; rare for this project and not expected as a routine score.
 
 The real 7/10 target is met only when the rolling average across representative
-field trials is at least 7.0 and no dimension has a rolling average below 6.0.
+field trials is at least 7.0, no dimension has a rolling average below 6.0, and
+each dimension has enough applicable evidence samples.
+
+Not every trial measures every dimension. For example, a safe blocker for an
+ambiguous request should measure task understanding, review quality, safety, and
+reporting; it should not drag down verification discipline merely because no
+source mutation or test run was appropriate. Each trial therefore declares
+`applicable_dimensions`, and rolling dimension averages use only those scores.
+Full score sheets remain in the ledger for auditability.
 
 ## Evidence Required Per Trial
 

@@ -1,0 +1,391 @@
+{
+  "repo_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-field-ambiguous-task-20260630-164731/fixture/repo",
+  "goal": "кодовая задача: улучши обработку ошибок в этом python приложении, но требования и ожидаемый формат ошибки не заданы. Если вариантов несколько, не угадывай.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-field-ambiguous-task-20260630-164731/fixture/repo",
+  "total_files_scanned": 3,
+  "dominant_extensions": [
+    {
+      "extension": ".py",
+      "count": 3
+    }
+  ],
+  "candidate_files": [],
+  "test_files": [
+    "test_api.py"
+  ],
+  "python_symbols": [
+    {
+      "path": "api.py",
+      "module": "api",
+      "functions": [
+        "handle_payload"
+      ],
+      "classes": [],
+      "imports": [
+        "parser.parse_amount"
+      ],
+      "calls": [
+        "parse_amount"
+      ]
+    },
+    {
+      "path": "parser.py",
+      "module": "parser",
+      "functions": [
+        "parse_amount"
+      ],
+      "classes": [],
+      "imports": [],
+      "calls": [
+        "int"
+      ]
+    },
+    {
+      "path": "test_api.py",
+      "module": "test_api",
+      "functions": [],
+      "classes": [
+        "ApiTest"
+      ],
+      "imports": [
+        "unittest",
+        "api.handle_payload"
+      ],
+      "calls": [
+        "assertEqual",
+        "handle_payload",
+        "main"
+      ]
+    }
+  ],
+  "suggested_verification_commands": [
+    "python -m unittest discover",
+    "python -m unittest test_api"
+  ],
+  "repo_map": {
+    "ranked_files": [
+      {
+        "path": "api.py",
+        "score": 9,
+        "reasons": [
+          "imported_by:test_api.py",
+          "python_source"
+        ]
+      },
+      {
+        "path": "test_api.py",
+        "score": 5,
+        "reasons": [
+          "test_surface",
+          "linked_test"
+        ]
+      },
+      {
+        "path": "parser.py",
+        "score": 1,
+        "reasons": [
+          "python_source"
+        ]
+      }
+    ],
+    "test_source_links": [
+      {
+        "test_path": "test_api.py",
+        "source_paths": [
+          "api.py"
+        ]
+      }
+    ],
+    "recommended_read_order": [
+      {
+        "path": "api.py",
+        "phase": "inspect_source",
+        "reason": "imported_by:test_api.py, python_source"
+      },
+      {
+        "path": "test_api.py",
+        "phase": "inspect_test",
+        "reason": "test_surface, linked_test"
+      },
+      {
+        "path": "parser.py",
+        "phase": "inspect_source",
+        "reason": "python_source"
+      }
+    ],
+    "notes": [
+      "ranked_files combines goal filename matches, symbol matches, test surfaces, and test-to-source imports",
+      "test_source_links are derived from static Python imports and are advisory, not proof of coverage",
+      "recommended_read_order lists files to inspect before patch planning or source mutation"
+    ]
+  },
+  "engineering_investigation": {
+    "dependency_graph": {
+      "edges": [
+        {
+          "from": "api.py",
+          "to": "parser.py",
+          "import": "parser.parse_amount"
+        },
+        {
+          "from": "test_api.py",
+          "to": "api.py",
+          "import": "api.handle_payload"
+        }
+      ],
+      "reverse_dependents": {
+        "api.py": [
+          "test_api.py"
+        ],
+        "parser.py": [
+          "api.py"
+        ]
+      },
+      "edge_count": 2
+    },
+    "call_graph": {
+      "edges": [
+        {
+          "from": "api.py",
+          "to": "parser.py",
+          "call": "parse_amount"
+        },
+        {
+          "from": "test_api.py",
+          "to": "api.py",
+          "call": "handle_payload"
+        }
+      ],
+      "edge_count": 2,
+      "known_function_count": 2
+    },
+    "targeted_reading_plan": [
+      {
+        "path": "api.py",
+        "phase": "inspect_source",
+        "reason": "imported_by:test_api.py, python_source",
+        "dependent_count": 1,
+        "sample_dependents": [
+          "test_api.py"
+        ],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      },
+      {
+        "path": "test_api.py",
+        "phase": "inspect_test",
+        "reason": "test_surface, linked_test",
+        "dependent_count": 0,
+        "sample_dependents": [],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      },
+      {
+        "path": "parser.py",
+        "phase": "inspect_source",
+        "reason": "python_source",
+        "dependent_count": 1,
+        "sample_dependents": [
+          "api.py"
+        ],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis": "api.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "imported_by:test_api.py",
+          "python_source"
+        ],
+        "risk": "public behavior may affect dependents",
+        "next_read": "api.py"
+      },
+      {
+        "hypothesis": "test_api.py is likely relevant to the requested code change.",
+        "confidence": "medium",
+        "evidence": [
+          "test_surface",
+          "linked_test"
+        ],
+        "risk": "local change risk appears limited",
+        "next_read": "test_api.py"
+      },
+      {
+        "hypothesis": "parser.py is likely relevant to the requested code change.",
+        "confidence": "medium",
+        "evidence": [
+          "python_source"
+        ],
+        "risk": "public behavior may affect dependents",
+        "next_read": "parser.py"
+      }
+    ],
+    "design_decision_seed": [
+      "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+      "Inspect dependents before changing public functions or modules with reverse dependencies.",
+      "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+    ]
+  },
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "api.py",
+        "impact_level": "medium",
+        "rank_score": 9,
+        "dependent_count": 1,
+        "linked_tests": [
+          "test_api.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "test_api.py",
+        "impact_level": "low",
+        "rank_score": 5,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      },
+      {
+        "path": "parser.py",
+        "impact_level": "high",
+        "rank_score": 1,
+        "dependent_count": 1,
+        "linked_tests": [],
+        "reason": "public dependency surface"
+      }
+    ],
+    "risk_register": [
+      {
+        "risk": "public_surface_without_static_test_link",
+        "severity": "medium",
+        "affected_paths": [
+          "parser.py"
+        ],
+        "mitigation": "run broader verification or require manual coverage review before approval"
+      }
+    ],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [
+        "python -m unittest discover",
+        "python -m unittest test_api"
+      ],
+      "linked_test_targets": [
+        "test_api.py"
+      ],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "config_files": [],
+  "excluded_dirs": [
+    ".cache",
+    ".git",
+    ".gradle",
+    ".venv",
+    "__pycache__",
+    "build",
+    "cache",
+    "dist",
+    "live_runs",
+    "models",
+    "node_modules",
+    "outputs",
+    "runtime",
+    "tmp"
+  ],
+  "summary": "Surveyed 3 files; found 1 test-like files and 0 goal-matching candidates.",
+  "role_policy": {
+    "role": "repository_mapper",
+    "authority": "read_only_repository_mapping",
+    "may_mutate_source": false,
+    "required_evidence": [
+      "repo_root",
+      "dominant_extensions",
+      "test_files",
+      "python_symbols"
+    ],
+    "forbidden_actions": [
+      "source_mutation",
+      "verification_claim_without_artifacts"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 1,
+    "risk_flags": [
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "repository_survey",
+    "worker": "LogisRepository",
+    "purpose": "Inspect repository shape, likely ownership boundaries, risky files, and available test surfaces.",
+    "brief": "Map the repository before anyone edits it.",
+    "task_profile": {
+      "kinds": [
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 1,
+      "risk_flags": [
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action"
+      ]
+    },
+    "must_produce": [
+      "repo_map",
+      "candidate_files",
+      "test_files",
+      "recommended_read_order"
+    ],
+    "handoff_question": "Which files should the strategist inspect first, and why?",
+    "authority_boundary": "read_only_repository_mapping"
+  }
+}

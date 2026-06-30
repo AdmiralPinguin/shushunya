@@ -346,6 +346,10 @@ def repository_investigation_review(
     explicit_output_surface = bool(planned_output_paths) and all(
         str(item.get("path") or "") in planned_output_path_set
         for item in concrete_changes
+        if item.get("operation") == "write_file" and (item.get("created") or item.get("idempotent"))
+    ) and all(
+        item.get("operation") == "write_file" and (item.get("created") or item.get("idempotent"))
+        for item in concrete_changes
     )
     raw_unmapped_changed_files = (
         scope_review.get("unmapped_changed_files")
