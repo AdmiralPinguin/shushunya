@@ -1145,6 +1145,7 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
         diagnostics = manifest.get("diagnostics") if isinstance(manifest.get("diagnostics"), dict) else {}
         repair_plan = manifest.get("unshaped_repair_plan") if isinstance(manifest.get("unshaped_repair_plan"), dict) else {}
         diagnostic_extraction = manifest.get("diagnostic_extraction") if isinstance(manifest.get("diagnostic_extraction"), dict) else {}
+        ast_patch_plan = manifest.get("ast_patch_plan") if isinstance(manifest.get("ast_patch_plan"), dict) else {}
         changed_paths = [
             str(item.get("path") or "")
             for item in manifest.get("changed_files", [])
@@ -1170,6 +1171,9 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                 and diagnostic_extraction.get("parser_coverage", {}).get("static_test_expectations", 0) >= 1
                 if isinstance(diagnostic_extraction.get("parser_coverage"), dict)
                 else False,
+                "ast_patch_plan": ast_patch_plan.get("status") == "recorded"
+                and ast_patch_plan.get("planned_operations", [{}])[0].get("kind") == "replace_return_expression"
+                and ast_patch_plan.get("planned_operations", [{}])[0].get("function_name") == "discounted_price",
                 "passed": (
                     manifest.get("patch_source") == "test_inferred_arithmetic_return"
                     and changed_paths == ["pricing.py"]
@@ -1183,6 +1187,7 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and bool(repair_plan.get("defect_hypotheses"))
                     and bool(repair_plan.get("minimal_patch_candidates"))
                     and diagnostic_extraction.get("status") == "recorded"
+                    and ast_patch_plan.get("status") == "recorded"
                 ),
             }
         }

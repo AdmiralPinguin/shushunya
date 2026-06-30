@@ -807,6 +807,100 @@ def diagnostic_extraction_from_execution(
     }
 
 
+def ast_patch_plan_required_for_source(patch_source: str) -> bool:
+    return patch_source in {
+        "test_inferred_arithmetic_return",
+        "test_inferred_return_mismatch",
+        "test_inferred_self_repair_seed",
+        "test_inferred_missing_function",
+    }
+
+
+def ast_patch_plan_from_spec(repo_root: Path, patch_spec: dict[str, Any]) -> dict[str, Any]:
+    patch_source = str(patch_spec.get("source") or "")
+    operations = patch_spec.get("operations") if isinstance(patch_spec.get("operations"), list) else []
+    diagnostics = patch_spec.get("diagnostics") if isinstance(patch_spec.get("diagnostics"), dict) else {}
+    planned: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    for operation in operations:
+        if not isinstance(operation, dict):
+            continue
+        path = str(operation.get("path") or "")
+        if not path.endswith(".py"):
+            continue
+        op_type = str(operation.get("type") or "")
+        if op_type == "replace":
+            old = str(operation.get("old") or "")
+            new = str(operation.get("new") or "")
+            function_name = str(diagnostics.get("function_name") or "")
+            module_path = str(diagnostics.get("module_path") or diagnostics.get("source_path") or "")
+            if not function_name or module_path != path or not old.startswith("return ") or not new.startswith("return "):
+                continue
+            source_path = safe_repo_path(repo_root, path)
+            function = simple_function_return_segment(source_path, function_name) if source_path.exists() else {}
+            old_expr = old.removeprefix("return ").strip()
+            new_expr = new.removeprefix("return ").strip()
+            try:
+                ast.parse(new_expr, mode="eval")
+            except SyntaxError as exc:
+                blockers.append(f"replacement expression is not valid Python AST expression for {path}:{function_name}: {exc.msg}")
+                continue
+            if function.get("return_expr") != old_expr:
+                blockers.append(
+                    f"replace operation does not match current AST return expression for {path}:{function_name}"
+                )
+                continue
+            planned.append(
+                {
+                    "kind": "replace_return_expression",
+                    "path": path,
+                    "function_name": function_name,
+                    "line": function.get("line", 0),
+                    "old_expression": old_expr,
+                    "new_expression": new_expr,
+                    "minimality": "single_return_expression",
+                }
+            )
+        elif op_type == "append":
+            function_name = str(operation.get("python_function_name") or diagnostics.get("function_name") or "")
+            content = str(operation.get("content") or "")
+            if not function_name:
+                continue
+            try:
+                tree = ast.parse(content)
+            except SyntaxError as exc:
+                blockers.append(f"append content is not valid Python AST for {path}:{function_name}: {exc.msg}")
+                continue
+            functions = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)]
+            if functions != [function_name]:
+                blockers.append(f"append operation must add exactly function {function_name}, found {functions}")
+                continue
+            planned.append(
+                {
+                    "kind": "append_missing_function",
+                    "path": path,
+                    "function_name": function_name,
+                    "minimality": "single_function_append",
+                }
+            )
+    if blockers:
+        status = "blocked"
+    elif planned:
+        status = "recorded"
+    elif ast_patch_plan_required_for_source(patch_source):
+        status = "missing"
+    else:
+        status = "not_applicable"
+    return {
+        "status": status,
+        "patch_source": patch_source,
+        "planned_operations": planned,
+        "operation_count": len(planned),
+        "blockers": blockers,
+        "strategy": "ast_guided_minimal_patch" if planned else "not_applicable",
+    }
+
+
 def output_path_from_request(request: dict[str, Any]) -> str:
     step = request.get("step") if isinstance(request.get("step"), dict) else {}
     expected = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
@@ -3823,13 +3917,19 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
     patch_resolution = {"patch_spec": {}, "candidates": [], "selected_candidate": {}}
     dirty_worktree = {"git_repo": False, "dirty_targets": []}
     ambiguity_analysis: dict[str, Any] = {}
+    ast_patch_plan: dict[str, Any] = {}
     try:
         patch_resolution = patch_spec_resolution_from_request(request)
         patch_spec = patch_resolution["patch_spec"] if isinstance(patch_resolution.get("patch_spec"), dict) else {}
         if patch_spec:
+            ast_patch_plan = ast_patch_plan_from_spec(repo_root, patch_spec)
+            for blocker in ast_patch_plan.get("blockers", []) if isinstance(ast_patch_plan.get("blockers"), list) else []:
+                blockers.append(str(blocker))
+            if ast_patch_plan.get("status") == "missing" and ast_patch_plan_required_for_source(str(patch_spec.get("source") or "")):
+                blockers.append("AST minimal patch plan is required for this inferred repair but was not produced.")
             if not role_policy_allows_source_mutation(role_policy):
                 blockers.append("role_policy forbids source mutation for this step")
-            else:
+            elif not blockers:
                 operations = patch_spec["operations"] if isinstance(patch_spec.get("operations"), list) else []
                 dirty_worktree = git_dirty_target_evidence(repo_root, operations)
                 dirty_targets = dirty_worktree.get("dirty_targets") if isinstance(dirty_worktree.get("dirty_targets"), list) else []
@@ -3917,6 +4017,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "architecture_decision_record": architecture_decision_record,
         "repo_grade_workflow": repo_grade_workflow,
         "unshaped_repair_plan": unshaped_repair_plan,
+        "ast_patch_plan": ast_patch_plan,
         "diagnostics": patch_spec.get("diagnostics", {}) if isinstance(patch_spec.get("diagnostics"), dict) else {},
         "operation_count": len(patch_spec.get("operations", [])) if isinstance(patch_spec.get("operations"), list) else 0,
         "changed_files": changed_files,
@@ -4160,6 +4261,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     investigation_review = repository_investigation_review(survey, patch, scope_review)
     patch_source = str(patch.get("patch_source") or "")
     diagnostics = patch.get("diagnostics") if isinstance(patch.get("diagnostics"), dict) else {}
+    ast_patch_plan = patch.get("ast_patch_plan") if isinstance(patch.get("ast_patch_plan"), dict) else {}
     changed_files = patch.get("changed_files") if isinstance(patch.get("changed_files"), list) else []
     repo_grade_workflow = patch.get("repo_grade_workflow") if isinstance(patch.get("repo_grade_workflow"), dict) else repo_grade_workflow_from_request(request, changed_files)
     architecture_decision_record = patch.get("architecture_decision_record") if isinstance(patch.get("architecture_decision_record"), dict) else {}
@@ -4169,6 +4271,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     repo_grade_mode = repo_grade_workflow.get("mode") == "repo_grade"
     discipline_findings = code_review_discipline_findings(patch_source, changed_files)
     unshaped_required = is_unshaped_patch_source(patch_source)
+    ast_patch_required = ast_patch_plan_required_for_source(patch_source)
     failed_commands = repair_state.get("failed_commands") if isinstance(repair_state.get("failed_commands"), list) else []
     candidate_source_paths = repair_state.get("candidate_source_paths") if isinstance(repair_state.get("candidate_source_paths"), list) else []
     decision_record: list[dict[str, Any]] = [
@@ -4215,6 +4318,18 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             if (not unshaped_required or diagnostic_extraction.get("status") == "recorded")
             else "blocker",
             "evidence": diagnostic_extraction.get("parser_coverage", {}),
+        },
+        {
+            "check": "ast_minimal_patch_plan_present",
+            "status": "pass"
+            if (not ast_patch_required or ast_patch_plan.get("status") == "recorded")
+            else "blocker",
+            "evidence": {
+                "required": ast_patch_required,
+                "status": ast_patch_plan.get("status", ""),
+                "operation_count": ast_patch_plan.get("operation_count", 0),
+                "blockers": ast_patch_plan.get("blockers", []),
+            },
         },
         {
             "check": "readiness_model_present",
@@ -4292,6 +4407,8 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         blockers = [*blockers, "Unshaped repair lacks a recorded repair plan."]
     if unshaped_required and diagnostic_extraction.get("status") != "recorded":
         blockers = [*blockers, "Unshaped repair lacks diagnostic extraction evidence."]
+    if ast_patch_required and ast_patch_plan.get("status") != "recorded":
+        blockers = [*blockers, "Inferred source repair lacks AST minimal patch plan evidence."]
     if investigation_review.get("status") != "covered":
         for item in investigation_review.get("blockers", []) if isinstance(investigation_review.get("blockers"), list) else []:
             check_name = str(item.get("check") or "repository_investigation")
@@ -4339,6 +4456,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "repo_grade_workflow": repo_grade_workflow,
         "unshaped_repair_plan": unshaped_repair_plan,
         "diagnostic_extraction": diagnostic_extraction,
+        "ast_patch_plan": ast_patch_plan,
         "verification_strategy": verification_strategy,
         "repository_investigation_review": investigation_review,
         "unshaped_repair_review": {
@@ -4348,6 +4466,11 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "hypothesis_count": len(unshaped_repair_plan.get("defect_hypotheses", []))
             if isinstance(unshaped_repair_plan.get("defect_hypotheses"), list)
             else 0,
+        },
+        "ast_patch_review": {
+            "required": ast_patch_required,
+            "plan_present": ast_patch_plan.get("status") == "recorded",
+            "operation_count": ast_patch_plan.get("operation_count", 0),
         },
     }
     revision_steps = [
@@ -4408,6 +4531,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "architecture_options_present": architecture_options.get("status") == "recorded",
             "architecture_decision_record_present": architecture_decision_record.get("status") == "recorded",
         },
+        "ast_patch_review": focused_revision_context.get("ast_patch_review", {}),
         "repository_investigation_review": investigation_review,
         "decision_record": decision_record,
         "review_repair_loop": review_repair_loop,
@@ -4458,6 +4582,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
     changed_files = patch.get("changed_files", []) if isinstance(patch.get("changed_files"), list) else []
     repo_grade_workflow = patch.get("repo_grade_workflow") if isinstance(patch.get("repo_grade_workflow"), dict) else repo_grade_workflow_from_request(request, changed_files)
     architecture_decision_record = patch.get("architecture_decision_record") if isinstance(patch.get("architecture_decision_record"), dict) else {}
+    ast_patch_plan = patch.get("ast_patch_plan") if isinstance(patch.get("ast_patch_plan"), dict) else {}
     verification_strategy = verification.get("verification_strategy") if isinstance(verification.get("verification_strategy"), dict) else {}
     changed_file_paths = [
         str(item.get("path"))
@@ -4491,6 +4616,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "verification_strategy": verification_strategy,
         "unshaped_repair_plan": unshaped_repair_plan,
         "diagnostic_extraction": diagnostic_extraction,
+        "ast_patch_plan": ast_patch_plan,
         "review_decision_record": review.get("decision_record", []),
         "review_repair_loop": review.get("review_repair_loop", {}),
         "pr_summary": pr_summary,
@@ -4523,6 +4649,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "repo_grade_workflow": repo_grade_workflow,
         "unshaped_repair_plan": unshaped_repair_plan,
         "diagnostic_extraction": diagnostic_extraction,
+        "ast_patch_plan": ast_patch_plan,
         "problem_statement": problem_statement,
         "architecture_options": architecture_options,
         "architecture_decision_record": architecture_decision_record,

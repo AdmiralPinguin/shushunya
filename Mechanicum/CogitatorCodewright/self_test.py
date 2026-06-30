@@ -1020,6 +1020,7 @@ def main() -> int:
             raise AssertionError(f"test-inferred arithmetic diagnostics should explain replacement: {final}")
         repair_plan = final.get("unshaped_repair_plan", {})
         diagnostic_extraction = final.get("diagnostic_extraction", {})
+        ast_patch_plan = final.get("ast_patch_plan", {})
         if (
             repair_plan.get("mode") != "unshaped_repo_repair"
             or not repair_plan.get("defect_hypotheses")
@@ -1032,6 +1033,12 @@ def main() -> int:
             or diagnostic_extraction.get("parser_coverage", {}).get("static_test_expectations", 0) < 1
         ):
             raise AssertionError(f"test-inferred arithmetic should preserve diagnostic extraction: {final}")
+        if (
+            ast_patch_plan.get("status") != "recorded"
+            or ast_patch_plan.get("planned_operations", [{}])[0].get("kind") != "replace_return_expression"
+            or ast_patch_plan.get("planned_operations", [{}])[0].get("function_name") != "add"
+        ):
+            raise AssertionError(f"test-inferred arithmetic should preserve AST minimal patch plan: {final}")
         if "return left + right" not in calc.read_text(encoding="utf-8"):
             raise AssertionError("test-inferred arithmetic did not update the return expression")
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -1066,6 +1073,7 @@ def main() -> int:
         ):
             raise AssertionError(f"delegated arithmetic diagnostics should explain wrapper traversal: {final}")
         repair_plan = final.get("unshaped_repair_plan", {})
+        ast_patch_plan = final.get("ast_patch_plan", {})
         if (
             repair_plan.get("mode") != "unshaped_repo_repair"
             or not repair_plan.get("defect_hypotheses")
@@ -1077,6 +1085,12 @@ def main() -> int:
             )
         ):
             raise AssertionError(f"delegated arithmetic should preserve wrapper-aware repair plan: {final}")
+        if (
+            ast_patch_plan.get("status") != "recorded"
+            or ast_patch_plan.get("planned_operations", [{}])[0].get("path") != "pricing.py"
+            or ast_patch_plan.get("planned_operations", [{}])[0].get("function_name") != "discounted_price"
+        ):
+            raise AssertionError(f"delegated arithmetic should preserve source AST patch plan: {final}")
         if "return price - (price * percent / 100)" not in pricing.read_text(encoding="utf-8"):
             raise AssertionError("delegated arithmetic did not update the implementation source")
     with tempfile.TemporaryDirectory() as temp_dir:
