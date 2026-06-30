@@ -63,6 +63,72 @@ def payload_from(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     return payload
 
 
+def task_with_repo_marker(task: str, repo_path: str) -> str:
+    if not repo_path or "CERAXIA_TARGET_REPO:" in task:
+        return task
+    return f"{task.rstrip()}\nCERAXIA_TARGET_REPO: {repo_path}\n"
+
+
+def callable_contract_payload(task: str, task_id: str | None, repo_path: str = "", constraints: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_task = task_with_repo_marker(task, repo_path)
+    plan_payload = payload_with_plan_view(plan_code_task(normalized_task, task_id=task_id).to_dict())
+    final_package_schema = {
+        "required_fields": [
+            "status",
+            "approved",
+            "changed_files",
+            "problem_statement",
+            "architecture_options",
+            "architecture_decision_record",
+            "verification_strategy",
+            "review_decision_record",
+            "patch_package",
+            "pr_summary",
+            "blockers",
+            "next_safe_action",
+        ],
+        "ready_requires": [
+            "status == ready",
+            "approved == true",
+            "review_decision_record has no blocker statuses",
+            "verification_summary.blocker_count == 0",
+            "patch_package.kind == ceraxia_patch_package",
+        ],
+    }
+    return {
+        "ok": bool(plan_payload.get("ok")),
+        "governor": "Ceraxia",
+        "api_version": 1,
+        "callable_kind": "specialized_code_brigade",
+        "task_id": plan_payload.get("contract", {}).get("task_id", task_id or ""),
+        "normalized_task": normalized_task,
+        "input_contract": {
+            "required": ["task"],
+            "optional": ["task_id", "repo_path", "constraints", "run_dir"],
+            "constraints": constraints or {},
+            "repo_path_marker": "CERAXIA_TARGET_REPO",
+        },
+        "execution_flow": [
+            {"step": 1, "method": "POST", "endpoint": "/callable_contract", "purpose": "inspect callable package contract"},
+            {"step": 2, "method": "POST", "endpoint": "/prepare_run", "purpose": "write dispatch and oversight package"},
+            {"step": 3, "method": "POST", "endpoint": "Warmaster /runs/{task_id}/start_*", "purpose": "execute pipeline"},
+            {"step": 4, "method": "GET", "endpoint": "Warmaster /runs/{task_id}/final", "purpose": "retrieve final manifest"},
+        ],
+        "final_package_schema": final_package_schema,
+        "task_profile": plan_payload.get("task_profile", {}),
+        "worker_specialization_briefs": plan_payload.get("worker_specialization_briefs", []),
+        "patch_contract": plan_payload.get("patch_contract", {}),
+        "plan": plan_payload,
+        "next_action": {
+            "kind": "prepare_run",
+            "method": "POST",
+            "endpoint": "POST /prepare_run",
+            "body": {"task": normalized_task, "task_id": plan_payload.get("contract", {}).get("task_id", task_id or ""), "run_dir": "<optional-run-dir>"},
+            "reason": "callable contract is ready; prepare a concrete Ceraxia run package",
+        },
+    }
+
+
 def service_capabilities() -> dict[str, Any]:
     capability_plan = plan_code_task("capabilities", task_id="capabilities").to_dict()
     pipeline = pipeline_summary()
@@ -120,6 +186,7 @@ def service_capabilities() -> dict[str, Any]:
             "GET /health",
             "GET /capabilities",
             "POST /plan",
+            "POST /callable_contract",
             "POST /prepare_run",
         ],
     }
@@ -166,6 +233,11 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                 plan = plan_code_task(task, task_id=task_id)
                 if self.path == "/plan":
                     response(self, 200, payload_with_plan_view(plan.to_dict()))
+                    return
+                if self.path == "/callable_contract":
+                    repo_path = str(payload.get("repo_path") or "").strip()
+                    constraints = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
+                    response(self, 200, callable_contract_payload(task, task_id, repo_path=repo_path, constraints=constraints))
                     return
                 if self.path == "/prepare_run":
                     run_dir = resolve_run_dir(default_run_root, str(payload.get("run_dir") or ""), plan.contract.task_id)

@@ -151,6 +151,25 @@ def main() -> int:
                 or plan.get("resolved_workers", {}).get("FerrumPatchwright", {}).get("role_contract", {}).get("owned_step") != "implementation"
             ):
                 raise AssertionError(f"bad plan: {plan}")
+            callable_contract = request_json(
+                base + "/callable_contract",
+                {
+                    "task": "почини python приложение",
+                    "task_id": "ceraxia-callable-test",
+                    "repo_path": str(root / "sample-repo"),
+                    "constraints": {"allowed_commands": ["python -m unittest discover"]},
+                },
+            )
+            required_final_fields = callable_contract.get("final_package_schema", {}).get("required_fields", [])
+            if (
+                not callable_contract.get("ok")
+                or callable_contract.get("callable_kind") != "specialized_code_brigade"
+                or "CERAXIA_TARGET_REPO:" not in callable_contract.get("normalized_task", "")
+                or "patch_package" not in required_final_fields
+                or "pr_summary" not in required_final_fields
+                or callable_contract.get("next_action", {}).get("endpoint") != "POST /prepare_run"
+            ):
+                raise AssertionError(f"bad callable contract: {callable_contract}")
             run_dir = root / "runs" / "custom-run"
             prepared = request_json(
                 base + "/prepare_run",

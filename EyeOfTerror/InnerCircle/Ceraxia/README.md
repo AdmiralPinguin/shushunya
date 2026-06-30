@@ -104,6 +104,13 @@ The governor exposes the same machine-readable `patch_contract` through
 markers, patch operation types, verification allowlist entries, safety gates,
 and narrow repair loops for Warmaster and client-side planning.
 
+Ceraxia also exposes `POST /callable_contract` for orchestration. That endpoint
+turns a chat task plus optional `repo_path` and constraints into a
+machine-readable specialized-brigade contract: normalized task text, worker
+briefs, patch contract, execution flow, and final package schema. The main
+orchestrator should treat that response as the function signature for invoking
+Ceraxia and then use `/prepare_run` plus Warmaster execution endpoints.
+
 Ceraxia also exposes a machine-readable `task_profile` and
 `worker_specialization_briefs` through `/capabilities`, `/plan`, oversight, and
 dispatch packets. The profile classifies code-task kinds, complexity, risk
