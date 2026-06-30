@@ -1681,6 +1681,8 @@ def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     if not isinstance(files, list) or not files:
         raise ValueError("CERAXIA_FILES must contain a non-empty files list")
     operations: list[dict[str, Any]] = []
+    planned_paths: list[str] = []
+    overwrite_paths: list[str] = []
     for index, item in enumerate(files):
         if not isinstance(item, dict):
             raise ValueError(f"CERAXIA_FILES item {index} must be an object")
@@ -1697,6 +1699,9 @@ def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
         }
         if "overwrite" in item:
             operation["overwrite"] = bool(item.get("overwrite"))
+        planned_paths.append(path)
+        if operation.get("overwrite") is True:
+            overwrite_paths.append(path)
         operations.append(operation)
     verification_commands = payload.get("verification_commands", [])
     if verification_commands is None:
@@ -1705,6 +1710,13 @@ def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
         raise ValueError("CERAXIA_FILES verification_commands must be a list of strings")
     return {
         "source": "multi_file_marker_synthesis",
+        "diagnostics": {
+            "kind": "multi_file_marker_synthesis",
+            "file_count": len(operations),
+            "planned_paths": planned_paths,
+            "overwrite_paths": overwrite_paths,
+            "created_or_updated_paths": planned_paths,
+        },
         "operations": operations,
         "verification_commands": verification_commands,
     }
