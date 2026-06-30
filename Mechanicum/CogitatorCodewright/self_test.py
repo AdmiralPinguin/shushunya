@@ -1545,6 +1545,20 @@ def main() -> int:
             )
         ):
             raise AssertionError(f"runtime diagnostic alias should expose minimal patch candidate evidence: {final}")
+        if not any(
+            isinstance(item, dict)
+            and item.get("path") == "quota.py"
+            and item.get("operation") == "replace_return_expression"
+            for item in final.get("changed_files", [])
+        ):
+            raise AssertionError(f"runtime diagnostic alias should apply an AST return replacement operation: {final}")
+        ast_plan = final.get("ast_patch_plan", {})
+        if (
+            ast_plan.get("status") != "recorded"
+            or ast_plan.get("planned_operations", [{}])[0].get("kind") != "replace_return_expression"
+            or ast_plan.get("planned_operations", [{}])[0].get("function_name") != "max_daily_exports"
+        ):
+            raise AssertionError(f"runtime diagnostic alias should preserve AST replacement plan: {final}")
         if "return 7" not in quota.read_text(encoding="utf-8"):
             raise AssertionError("runtime diagnostic alias task did not patch the source return expression")
     with tempfile.TemporaryDirectory() as temp_dir:

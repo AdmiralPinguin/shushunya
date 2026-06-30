@@ -1316,17 +1316,25 @@ def ast_patch_plan_from_spec(repo_root: Path, patch_spec: dict[str, Any]) -> dic
         if not path.endswith(".py"):
             continue
         op_type = str(operation.get("type") or "")
-        if op_type == "replace":
-            old = str(operation.get("old") or "")
-            new = str(operation.get("new") or "")
+        if op_type in {"replace", "replace_return_expression"}:
+            old = str(operation.get("old") or operation.get("old_expression") or "")
+            new = str(operation.get("new") or operation.get("new_expression") or "")
             function_name = str(diagnostics.get("function_name") or "")
+            if op_type == "replace_return_expression":
+                function_name = str(operation.get("function_name") or function_name)
             module_path = str(diagnostics.get("module_path") or diagnostics.get("source_path") or "")
-            if not function_name or module_path != path or not old.startswith("return ") or not new.startswith("return "):
+            if op_type == "replace":
+                old_expr = old.removeprefix("return ").strip()
+                new_expr = new.removeprefix("return ").strip()
+                has_return_prefix = old.startswith("return ") and new.startswith("return ")
+            else:
+                old_expr = old.strip()
+                new_expr = new.strip()
+                has_return_prefix = True
+            if not function_name or module_path != path or not has_return_prefix:
                 continue
             source_path = safe_repo_path(repo_root, path)
             function = simple_function_return_segment(source_path, function_name) if source_path.exists() else {}
-            old_expr = old.removeprefix("return ").strip()
-            new_expr = new.removeprefix("return ").strip()
             try:
                 ast.parse(new_expr, mode="eval")
             except SyntaxError as exc:
@@ -3818,10 +3826,11 @@ def infer_runtime_diagnostic_return_mismatch_from_tests(request: dict[str, Any])
         },
         "operations": [
             {
-                "type": "replace",
+                "type": "replace_return_expression",
                 "path": path,
-                "old": f"return {old_expression}",
-                "new": f"return {new_expression}",
+                "function_name": candidate.get("function_name", ""),
+                "old_expression": old_expression,
+                "new_expression": new_expression,
             }
         ],
         "verification_commands": commands,
@@ -4017,6 +4026,17 @@ def apply_patch_operation(repo_root: Path, operation: dict[str, Any]) -> dict[st
         if count != 1:
             raise ValueError(f"replace operation requires exactly one match in {operation.get('path')}, found {count}")
         path.write_text(content.replace(old, new, 1), encoding="utf-8")
+    elif op_type == "replace_return_expression":
+        if not before_exists:
+            raise ValueError(f"replace_return_expression target does not exist: {operation.get('path')}")
+        function_name = str(operation.get("function_name") or "").strip()
+        old_expression = str(operation.get("old_expression") or "").strip()
+        new_expression = str(operation.get("new_expression") or "").strip()
+        if not function_name:
+            raise ValueError("replace_return_expression requires function_name")
+        if not old_expression or not new_expression:
+            raise ValueError("replace_return_expression requires old_expression and new_expression")
+        replace_return_expression_in_file(path, function_name, old_expression, new_expression)
     elif op_type == "write_file":
         content = operation.get("content")
         if not isinstance(content, str):
@@ -4125,6 +4145,30 @@ def command_allowed(command: list[str]) -> bool:
     if command[0] in {"python", "python3", sys.executable} and len(command) >= 3 and command[1] == "-m":
         return command[2] in {"py_compile", "pytest", "unittest"}
     return False
+
+
+def replace_return_expression_in_file(source_path: Path, function_name: str, old_expression: str, new_expression: str) -> None:
+    text = source_path.read_text(encoding="utf-8")
+    function = simple_function_return_segment(source_path, function_name)
+    if function.get("return_expr") != old_expression:
+        raise ValueError(f"current return expression for {function_name} does not match expected expression")
+    try:
+        ast.parse(new_expression, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"new return expression is not valid Python: {exc.msg}") from exc
+    line_number = int(function.get("line") or 0)
+    lines = text.splitlines(keepends=True)
+    if line_number < 1 or line_number > len(lines):
+        raise ValueError(f"return line for {function_name} is out of range")
+    line = lines[line_number - 1]
+    match = re.match(r"^(\s*)return\s+(.+?)(\r?\n)?$", line)
+    if not match:
+        raise ValueError(f"return line for {function_name} is not a simple single-line return")
+    if match.group(2).strip() != old_expression:
+        raise ValueError(f"return line for {function_name} does not match expected expression")
+    newline = match.group(3) or ""
+    lines[line_number - 1] = f"{match.group(1)}return {new_expression}{newline}"
+    source_path.write_text("".join(lines), encoding="utf-8")
 
 
 def pytest_fallback_test_paths(command: list[str]) -> list[str]:
