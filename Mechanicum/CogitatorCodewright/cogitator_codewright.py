@@ -422,6 +422,7 @@ def marker_block(text: str, marker: str) -> str:
         "\nCERAXIA_PATCH:",
         "\nCERAXIA_FEATURE:",
         "\nCERAXIA_INTEGRATION_CONTRACT:",
+        "\nCERAXIA_PUBLIC_API_COMPAT:",
         "\nCERAXIA_CONFIG_RUNTIME:",
         "\nCERAXIA_REFACTOR:",
         "\nCERAXIA_EDGE_FIX:",
@@ -1133,6 +1134,98 @@ def patch_spec_from_integration_contract_marker(goal: str) -> dict[str, Any]:
     }
 
 
+def patch_spec_from_public_api_compat_marker(goal: str) -> dict[str, Any]:
+    payload = extract_json_after_marker(goal, "CERAXIA_PUBLIC_API_COMPAT:")
+    if not payload:
+        return {}
+    source_path = str(payload.get("source_path") or "").strip()
+    caller_path = str(payload.get("caller_path") or "").strip()
+    docs_path = str(payload.get("docs_path") or "").strip()
+    test_path = str(payload.get("test_path") or "").strip()
+    function_name = str(payload.get("function_name") or "").strip()
+    caller_function = str(payload.get("caller_function") or "").strip()
+    expression = str(payload.get("return_expression") or "").strip()
+    if not all([source_path, caller_path, docs_path, test_path, function_name, caller_function, expression]):
+        raise ValueError("CERAXIA_PUBLIC_API_COMPAT requires source_path, caller_path, docs_path, test_path, function_name, caller_function, and return_expression")
+    if not source_path.endswith(".py") or not caller_path.endswith(".py") or not test_path.endswith(".py"):
+        raise ValueError("CERAXIA_PUBLIC_API_COMPAT source, caller, and test paths must be Python files")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", function_name) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", caller_function):
+        raise ValueError("CERAXIA_PUBLIC_API_COMPAT function names must be valid identifiers")
+    arguments = payload.get("arguments")
+    if not isinstance(arguments, list) or not arguments or not all(isinstance(item, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item) for item in arguments):
+        raise ValueError("CERAXIA_PUBLIC_API_COMPAT arguments must be a non-empty list of identifiers")
+    if "\n" in expression or not re.fullmatch(r"[A-Za-z0-9_ +\-*/().]+", expression):
+        raise ValueError("CERAXIA_PUBLIC_API_COMPAT return_expression must be a simple arithmetic expression")
+    test_cases = payload.get("test_cases")
+    if not isinstance(test_cases, list) or not test_cases:
+        raise ValueError("CERAXIA_PUBLIC_API_COMPAT test_cases must be a non-empty list")
+    signature = f"{function_name}({', '.join(arguments)})"
+    source_content = (
+        f"def {signature}:\n"
+        f"    \"\"\"Public API: keep signature `{signature}` stable.\"\"\"\n"
+        f"    return {expression}\n"
+    )
+    source_module = source_path[:-3].replace("/", ".")
+    caller_content = (
+        f"from {source_module} import {function_name}\n\n"
+        f"def {caller_function}({', '.join(arguments)}):\n"
+        f"    return {function_name}({', '.join(arguments)})\n"
+    )
+    docs_content = (
+        f"# Public API Compatibility\n\n"
+        f"`{signature}` is the stable public function. Callers must keep using the same positional arguments.\n"
+    )
+    rendered_cases: list[str] = []
+    for index, item in enumerate(test_cases):
+        if not isinstance(item, dict):
+            raise ValueError(f"CERAXIA_PUBLIC_API_COMPAT test case {index} must be an object")
+        inputs = item.get("inputs")
+        expected = item.get("expected")
+        if not isinstance(inputs, list) or len(inputs) != len(arguments):
+            raise ValueError(f"CERAXIA_PUBLIC_API_COMPAT test case {index} inputs must match arguments")
+        if not all(isinstance(value, (int, float)) for value in inputs) or not isinstance(expected, (int, float)):
+            raise ValueError(f"CERAXIA_PUBLIC_API_COMPAT test case {index} supports only numeric values")
+        args_literal = ", ".join(repr(value) for value in inputs)
+        rendered_cases.append(f"        self.assertEqual({function_name}({args_literal}), {expected!r})")
+        rendered_cases.append(f"        self.assertEqual({caller_function}({args_literal}), {expected!r})")
+    caller_module = caller_path[:-3].replace("/", ".")
+    class_name = "".join(part.capitalize() for part in function_name.split("_")) + "CompatTest"
+    test_content = (
+        f"import inspect\nimport unittest\nfrom {source_module} import {function_name}\nfrom {caller_module} import {caller_function}\n\n"
+        f"class {class_name}(unittest.TestCase):\n"
+        "    def test_public_signature_stays_compatible(self):\n"
+        f"        self.assertEqual(list(inspect.signature({function_name}).parameters), {arguments!r})\n\n"
+        "    def test_behavior_and_callers(self):\n"
+        + "\n".join(rendered_cases)
+        + "\n\nif __name__ == '__main__':\n    unittest.main()\n"
+    )
+    verification_commands = payload.get("verification_commands")
+    if verification_commands is None:
+        verification_commands = [f"python -m unittest {test_path[:-3].replace('/', '.')}"]
+    if not isinstance(verification_commands, list) or not all(isinstance(item, str) for item in verification_commands):
+        raise ValueError("CERAXIA_PUBLIC_API_COMPAT verification_commands must be a list of strings")
+    return {
+        "source": "public_api_compat_marker_synthesis",
+        "diagnostics": {
+            "kind": "public_api_compat_marker_synthesis",
+            "source_path": source_path,
+            "caller_path": caller_path,
+            "docs_path": docs_path,
+            "test_path": test_path,
+            "function_name": function_name,
+            "public_signature": signature,
+            "caller_function": caller_function,
+        },
+        "operations": [
+            {"type": "write_file", "path": source_path, "content": source_content, "overwrite": True},
+            {"type": "write_file", "path": caller_path, "content": caller_content, "overwrite": True},
+            {"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True},
+            {"type": "write_file", "path": test_path, "content": test_content, "overwrite": True},
+        ],
+        "verification_commands": verification_commands,
+    }
+
+
 def patch_spec_from_config_runtime_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_CONFIG_RUNTIME:")
     if not payload:
@@ -1489,6 +1582,9 @@ def synthesized_patch_spec_from_markers(goal: str) -> dict[str, Any]:
     integration_contract = patch_spec_from_integration_contract_marker(goal)
     if integration_contract:
         return integration_contract
+    public_api_compat = patch_spec_from_public_api_compat_marker(goal)
+    if public_api_compat:
+        return public_api_compat
     config_runtime = patch_spec_from_config_runtime_marker(goal)
     if config_runtime:
         return config_runtime

@@ -337,6 +337,28 @@ CERAXIA_INTEGRATION_CONTRACT:
 """
 
 
+def public_api_compat_goal() -> str:
+    return """измени поведение публичной функции, сохрани ее сигнатуру и caller compatibility
+
+CERAXIA_PUBLIC_API_COMPAT:
+{
+  "source_path": "billing/public_api.py",
+  "caller_path": "billing/client.py",
+  "docs_path": "docs/public_api.md",
+  "test_path": "tests/test_public_api.py",
+  "function_name": "calculate_total",
+  "caller_function": "client_total",
+  "arguments": ["gross", "fee"],
+  "return_expression": "gross - fee",
+  "test_cases": [
+    {"inputs": [100, 15], "expected": 85},
+    {"inputs": [80, 5], "expected": 75}
+  ],
+  "verification_commands": ["python -m unittest tests.test_public_api", "python -m py_compile billing/public_api.py billing/client.py"]
+}
+"""
+
+
 def repair_colon_goal() -> str:
     return """создай python файл и исправь если проверка найдет синтаксис
 
@@ -1095,6 +1117,33 @@ def main() -> int:
             raise AssertionError("integration contract marker did not write caller")
         if final.get("verification_summary", {}).get("executed_count", 0) < 3:
             raise AssertionError(f"integration contract final manifest should preserve verification evidence: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        final = run_pipeline(root / "work", goal=public_api_compat_goal(), target_repo_root=target_repo)
+        expected_paths = {
+            "billing/public_api.py",
+            "billing/client.py",
+            "docs/public_api.md",
+            "tests/test_public_api.py",
+        }
+        changed_paths = {item.get("path") for item in final.get("changed_files", []) if isinstance(item, dict)}
+        diagnostics = final.get("diagnostics", {})
+        if final.get("status") != "ready" or final.get("patch_source") != "public_api_compat_marker_synthesis":
+            raise AssertionError(f"public API compat marker task should be ready: {final}")
+        if changed_paths != expected_paths:
+            raise AssertionError(f"public API compat marker should touch source/caller/docs/test: {final}")
+        if diagnostics.get("public_signature") != "calculate_total(gross, fee)":
+            raise AssertionError(f"public API compat diagnostics should preserve signature evidence: {final}")
+        source_text = (target_repo / "billing" / "public_api.py").read_text(encoding="utf-8")
+        test_text = (target_repo / "tests" / "test_public_api.py").read_text(encoding="utf-8")
+        if "def calculate_total(gross, fee):" not in source_text:
+            raise AssertionError("public API compat marker changed public signature")
+        if "inspect.signature" not in test_text:
+            raise AssertionError("public API compat marker did not write signature regression test")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 3:
+            raise AssertionError(f"public API compat final manifest should preserve verification evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

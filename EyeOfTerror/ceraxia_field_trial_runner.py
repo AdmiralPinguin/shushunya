@@ -335,6 +335,29 @@ CERAXIA_INTEGRATION_CONTRACT:
 """
 
 
+def fixture_public_api_compat(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    return f"""кодовая задача: измени поведение публичной функции за API, но сохрани публичную сигнатуру, caller assumptions и документацию.
+CERAXIA_TARGET_REPO: {repo}
+CERAXIA_PUBLIC_API_COMPAT:
+{{
+  "source_path": "billing/public_api.py",
+  "caller_path": "billing/client.py",
+  "docs_path": "docs/public_api.md",
+  "test_path": "tests/test_public_api.py",
+  "function_name": "calculate_total",
+  "caller_function": "client_total",
+  "arguments": ["gross", "fee"],
+  "return_expression": "gross - fee",
+  "test_cases": [
+    {{"inputs": [100, 15], "expected": 85}},
+    {{"inputs": [80, 5], "expected": 75}}
+  ],
+  "verification_commands": ["python -m unittest tests.test_public_api", "python -m py_compile billing/public_api.py billing/client.py"]
+}}
+"""
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
@@ -344,6 +367,7 @@ FIXTURES = {
     "ceraxia-field-large-file-restraint": fixture_large_file_restraint,
     "ceraxia-field-multifile-feature": fixture_multifile_feature,
     "ceraxia-field-negative-test": fixture_negative_test,
+    "ceraxia-field-public-api-compat": fixture_public_api_compat,
     "ceraxia-field-refactor-preserve-behavior": fixture_refactor_preserve_behavior,
     "ceraxia-field-repair-after-bad-first-patch": fixture_repair_after_bad_first_patch,
     "ceraxia-field-safety-dirty-worktree": fixture_safety_dirty_worktree,
@@ -375,6 +399,44 @@ def sha256_text(path: Path) -> str:
 
 
 def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    if trial_id == "ceraxia-field-public-api-compat":
+        expected_paths = {
+            "billing/public_api.py",
+            "billing/client.py",
+            "docs/public_api.md",
+            "tests/test_public_api.py",
+        }
+        changed_paths = {
+            str(item.get("path") or "")
+            for item in manifest.get("changed_files", [])
+            if isinstance(item, dict)
+        }
+        source_path = repo / "billing" / "public_api.py"
+        caller_path = repo / "billing" / "client.py"
+        docs_path = repo / "docs" / "public_api.md"
+        test_path = repo / "tests" / "test_public_api.py"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        caller_text = caller_path.read_text(encoding="utf-8") if caller_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        return {
+            "public_api_compat": {
+                "expected_paths": sorted(expected_paths),
+                "changed_paths": sorted(changed_paths),
+                "all_surfaces_changed": changed_paths == expected_paths,
+                "signature_preserved": "def calculate_total(gross, fee):" in source_text,
+                "caller_uses_public_api": "calculate_total(gross, fee)" in caller_text,
+                "docs_name_signature": "calculate_total(gross, fee)" in docs_text,
+                "tests_signature": "inspect.signature" in test_text,
+                "passed": (
+                    changed_paths == expected_paths
+                    and "def calculate_total(gross, fee):" in source_text
+                    and "calculate_total(gross, fee)" in caller_text
+                    and "calculate_total(gross, fee)" in docs_text
+                    and "inspect.signature" in test_text
+                ),
+            }
+        }
     if trial_id == "ceraxia-field-integration-contract":
         expected_paths = {
             "contracts/invoice.json",

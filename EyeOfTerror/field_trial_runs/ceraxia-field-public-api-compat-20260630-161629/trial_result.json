@@ -1,0 +1,106 @@
+{
+  "trial_id": "ceraxia-field-public-api-compat",
+  "run_id": "ceraxia-field-public-api-compat-20260630-161629",
+  "trial_root": "EyeOfTerror/field_trial_runs/ceraxia-field-public-api-compat-20260630-161629",
+  "prepared_governor": "Ceraxia",
+  "result": {
+    "ok": true,
+    "phase": "completed"
+  },
+  "trial_outcome": {
+    "status": "passed",
+    "expected": true,
+    "reason": "task completed with ready final manifest"
+  },
+  "trial_checks": {
+    "public_api_compat": {
+      "expected_paths": [
+        "billing/client.py",
+        "billing/public_api.py",
+        "docs/public_api.md",
+        "tests/test_public_api.py"
+      ],
+      "changed_paths": [
+        "billing/client.py",
+        "billing/public_api.py",
+        "docs/public_api.md",
+        "tests/test_public_api.py"
+      ],
+      "all_surfaces_changed": true,
+      "signature_preserved": true,
+      "caller_uses_public_api": true,
+      "docs_name_signature": true,
+      "tests_signature": true,
+      "passed": true
+    }
+  },
+  "final_manifest": "EyeOfTerror/field_trial_runs/ceraxia-field-public-api-compat-20260630-161629/warmaster_runs/ceraxia-field-public-api-compat-20260630-161629/work/ceraxia/final_manifest.json",
+  "manifest_summary": {
+    "status": "ready",
+    "patch_source": "public_api_compat_marker_synthesis",
+    "changed_files": [
+      {
+        "path": "billing/public_api.py",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "c6880649ed6345cd33b42fda5e25a2d90a2c18fad26bd50c8a3d621297e82a40",
+        "changed": true
+      },
+      {
+        "path": "billing/client.py",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "32c6c857b1622ca6b8976d114eab170bc2a6627e80a756d64fee6be3f464eed2",
+        "changed": true
+      },
+      {
+        "path": "docs/public_api.md",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "e2bb2fd0d23562ed5e91f0e513ca60a875f48752f3657ff886a50a45aef475d2",
+        "changed": true
+      },
+      {
+        "path": "tests/test_public_api.py",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "f3bdcd336804a275bc40ed88a93648bac9b9838b836a31b997b42c63c4e9d5cf",
+        "changed": true
+      }
+    ],
+    "diagnostics": {
+      "kind": "public_api_compat_marker_synthesis",
+      "source_path": "billing/public_api.py",
+      "caller_path": "billing/client.py",
+      "docs_path": "docs/public_api.md",
+      "test_path": "tests/test_public_api.py",
+      "function_name": "calculate_total",
+      "public_signature": "calculate_total(gross, fee)",
+      "caller_function": "client_total"
+    },
+    "dirty_worktree": {
+      "git_repo": false,
+      "dirty_targets": []
+    },
+    "ambiguity_analysis": {},
+    "verification_summary": {
+      "executed_count": 3,
+      "repair_count": 0,
+      "blocker_count": 0
+    },
+    "blockers": []
+  },
+  "pricing_py": "",
+  "settings_py": "",
+  "fixture_files": [
+    "billing/client.py",
+    "billing/public_api.py",
+    "docs/public_api.md",
+    "tests/test_public_api.py"
+  ],
+  "kept": true
+}

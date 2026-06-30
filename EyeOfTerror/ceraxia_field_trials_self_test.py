@@ -88,6 +88,7 @@ def main() -> int:
         "ceraxia-field-large-file-restraint",
         "ceraxia-field-multifile-feature",
         "ceraxia-field-negative-test",
+        "ceraxia-field-public-api-compat",
         "ceraxia-field-refactor-preserve-behavior",
         "ceraxia-field-repair-after-bad-first-patch",
         "ceraxia-field-safety-dirty-worktree",
@@ -126,6 +127,12 @@ def main() -> int:
     )
     if integration_checked_outcome.get("status") != "failed" or integration_checked_outcome.get("expected") is not False:
         raise AssertionError(f"failed integration-specific check did not fail the trial: {integration_checked_outcome}")
+    public_api_checked_outcome = apply_trial_checks_to_outcome(
+        {"status": "passed", "expected": True, "reason": "base outcome passed"},
+        {"public_api_compat": {"passed": False}},
+    )
+    if public_api_checked_outcome.get("status") != "failed" or public_api_checked_outcome.get("expected") is not False:
+        raise AssertionError(f"failed public-api-specific check did not fail the trial: {public_api_checked_outcome}")
     required_phrases = [
         "A scripted self-test proves only that a known scenario still works.",
         "The real 7/10 target is met only when",
