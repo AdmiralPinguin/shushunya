@@ -6,6 +6,13 @@ Current project focus: Ceraxia and her code brigade are the active development
 track. Treat standalone ShushunyaAgent work as parked unless the user
 explicitly reactivates it.
 
+Current evaluation status: Ceraxia has stronger planning, readiness, patch,
+verification, repair, and review artifacts than the original prototype, but a
+real 7/10 engineering score is not considered proven by self-tests. The
+evaluation protocol lives in `EVALUATION.md`; representative field trials live
+in `field_trials.json`. Regression tests may prevent known breakage, but only
+reviewed field-trial ledger entries can support the real 7/10 claim.
+
 She owns code-task decomposition, repository survey, scoped implementation
 planning, patch manifest handoff, verification planning, code review, and final
 handoff packaging.

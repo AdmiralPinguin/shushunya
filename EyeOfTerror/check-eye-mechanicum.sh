@@ -12,6 +12,7 @@ PYTHONPATH=EyeOfTerror python3 EyeOfTerror/warmaster_api_contract_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/start_brigade_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ledger_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_service_self_test.py
+PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_field_trials_self_test.py
 PYTHONPATH=EyeOfTerror:Mechanicum python3 EyeOfTerror/ceraxia_patch_pipeline_self_test.py
 PYTHONPATH=Mechanicum/Lexmechanic python3 Mechanicum/Lexmechanic/self_test.py
 PYTHONPATH=Mechanicum/AuspexBrowser python3 Mechanicum/AuspexBrowser/self_test.py
