@@ -1562,6 +1562,11 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                 "loader_uses_env_override": "os.environ.get('SERVICE_URL'" in loader_text,
                 "entrypoint_exports_same_env": "export SERVICE_URL" in entrypoint_text,
                 "tests_preserved": "assertEqual(load_settings()['service_url']" in test_text and "SERVICE_URL" in test_text,
+                "config_negative_tests_present": (
+                    "test_default_service_url" in test_text
+                    and "test_env_override" in test_text
+                    and "os.environ.pop('SERVICE_URL', None)" in test_text
+                ),
                 "changed_expected_surfaces": set(changed_paths) == {"app/settings.json", "app/config_loader.py", "bin/run-app.sh"},
                 "repair_artifacts": repair_plan.get("mode") == "unshaped_repo_repair"
                 and diagnostic_extraction.get("status") == "recorded",
@@ -1577,6 +1582,9 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and "os.environ.get('SERVICE_URL'" in loader_text
                     and "export SERVICE_URL" in entrypoint_text
                     and "assertEqual(load_settings()['service_url']" in test_text
+                    and "test_default_service_url" in test_text
+                    and "test_env_override" in test_text
+                    and "os.environ.pop('SERVICE_URL', None)" in test_text
                     and set(changed_paths) == {"app/settings.json", "app/config_loader.py", "bin/run-app.sh"}
                     and repair_plan.get("mode") == "unshaped_repo_repair"
                     and diagnostic_extraction.get("status") == "recorded"

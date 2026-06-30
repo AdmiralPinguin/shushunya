@@ -1056,6 +1056,121 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
+        (target_repo / "tests").mkdir(parents=True)
+        (target_repo / "app").mkdir(parents=True)
+        (target_repo / "app" / "config_loader.py").write_text(
+            "def load_settings():\n"
+            "    return {'service_url': 'https://prod.example'}\n",
+            encoding="utf-8",
+        )
+        (target_repo / "tests" / "test_config_loader.py").write_text(
+            "import os\nimport unittest\nfrom app.config_loader import load_settings\n\n"
+            "class ConfigLoaderTest(unittest.TestCase):\n"
+            "    def test_env_override(self):\n"
+            "        os.environ['SERVICE_URL'] = 'https://prod.example'\n"
+            "        try:\n"
+            "            self.assertEqual(load_settings()['service_url'], 'https://prod.example')\n"
+            "        finally:\n"
+            "            os.environ.pop('SERVICE_URL', None)\n",
+            encoding="utf-8",
+        )
+        work = root / "work"
+        (work / "code").mkdir(parents=True)
+        readiness = {
+            "acceptance_criteria": [{"criterion": "preserve default and env override runtime config", "verification": "negative tests"}],
+            "test_strategy": {"fallback_checks": ["python -m unittest tests.test_config_loader"]},
+            "readiness_checks": {"has_acceptance_criteria": True, "has_test_strategy": True},
+        }
+        (work / "code" / "repo_survey.json").write_text(
+            json.dumps(
+                {
+                    "repo_map": {
+                        "ranked_files": [
+                            {"path": "app/config_loader.py", "score": 10},
+                            {"path": "tests/test_config_loader.py", "score": 9},
+                        ]
+                    },
+                    "engineering_readiness": readiness,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "problem_statement.json").write_text(json.dumps({"status": "recorded"}) + "\n", encoding="utf-8")
+        (work / "code" / "architecture_options.json").write_text(json.dumps({"status": "recorded"}) + "\n", encoding="utf-8")
+        diagnostics = {
+            "kind": "test_inferred_config_runtime",
+            "test_path": "tests/test_config_loader.py",
+            "loader_path": "app/config_loader.py",
+            "config_path": "app/settings.json",
+            "entrypoint_path": "bin/run-app.sh",
+            "setting_key": "service_url",
+            "env_var": "SERVICE_URL",
+        }
+        (work / "code" / "patch_manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "applied",
+                    "patch_source": "test_inferred_config_runtime",
+                    "diagnostics": diagnostics,
+                    "changed_files": [{"path": "app/config_loader.py", "changed": True}],
+                    "patch_scope_evidence": {
+                        "changed_files_in_repo_map": ["app/config_loader.py"],
+                        "changed_files_outside_repo_map": [],
+                    },
+                    "engineering_readiness": readiness,
+                    "warnings": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "unshaped_repair_plan.json").write_text(
+            json.dumps(
+                {
+                    "status": "recorded",
+                    "mode": "unshaped_repo_repair",
+                    "defect_hypotheses": [{"source": "test_inferred_config_runtime", "evidence": diagnostics}],
+                    "minimal_patch_candidates": [{"source": "test_inferred_config_runtime", "status": "selected"}],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "diagnostic_extraction.json").write_text(
+            json.dumps({"status": "recorded", "parser_coverage": {"static_test_expectations": 1}}) + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "verification_report.json").write_text(
+            json.dumps(
+                {
+                    "status": "passed",
+                    "blockers": [],
+                    "warnings": [],
+                    "executed": [{"command": "python -m unittest tests.test_config_loader", "returncode": 0}],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "repair_loop_state.json").write_text(
+            json.dumps({"status": "passed", "next_action": "continue_to_code_review"}) + "\n",
+            encoding="utf-8",
+        )
+        result = run(request("code_review", "/work/code/code_review.json", target_repo_root=target_repo), work)
+        if not result.get("ok"):
+            raise AssertionError(f"config negative-test review gate should write a report: {result}")
+        review = json.loads((work / "code" / "code_review.json").read_text(encoding="utf-8"))
+        discipline_findings = review.get("code_review_discipline", {}).get("findings", [])
+        if (
+            review.get("approved") is not False
+            or not any(item.get("check") == "risk_patch_has_negative_tests" for item in discipline_findings if isinstance(item, dict))
+            or review.get("code_review_discipline", {}).get("blocker_count") != 1
+        ):
+            raise AssertionError(f"code review should block config-runtime repairs without default/fallback tests: {review}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
         (target_repo / "payments").mkdir(parents=True)
         (target_repo / "docs").mkdir(parents=True)
         (target_repo / "tests").mkdir(parents=True)
