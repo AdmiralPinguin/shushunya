@@ -1113,6 +1113,33 @@ def fixture_expert_unshaped_self_repair(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_runtime_alias(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "quota.py").write_text(
+        "def max_daily_exports():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_quota_alias.py").write_text(
+        "import unittest\n"
+        "from quota import max_daily_exports as limit\n\n"
+        "class QuotaAliasTest(unittest.TestCase):\n"
+        "    def test_alias_limit(self):\n"
+        "        self.assertEqual(limit(), 7)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured patch marker: тест падает через alias import. "
+        "Используй runtime diagnostic, traceback и import linkage; не редактируй tests и не hardcode вне source.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_quota_alias\n"
+        "CERAXIA_VERIFY: python -m py_compile quota.py\n"
+    )
+
+
 def fixture_expert_repo_grade_workflow(repo: Path) -> str:
     repo.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -1191,6 +1218,7 @@ FIXTURES = {
     "ceraxia-expert-unshaped-flaky-root-cause": fixture_expert_unshaped_flaky_root_cause,
     "ceraxia-expert-unshaped-retry-policy": fixture_expert_unshaped_retry_policy,
     "ceraxia-expert-repo-grade-workflow": fixture_expert_repo_grade_workflow,
+    "ceraxia-expert-unshaped-runtime-alias": fixture_expert_unshaped_runtime_alias,
     "ceraxia-expert-unshaped-self-repair": fixture_expert_unshaped_self_repair,
     "ceraxia-expert-unshaped-security-boundary": fixture_expert_unshaped_security_boundary,
     "ceraxia-field-integration-contract": fixture_integration_contract,
@@ -1820,6 +1848,46 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and "return 7" in source_text
                     and "return 1" not in source_text
                     and "assertEqual(max_daily_exports(), 7)" in test_text
+                    and changed_paths == ["quota.py"]
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-unshaped-runtime-alias":
+        source_path = repo / "quota.py"
+        test_path = repo / "tests" / "test_quota_alias.py"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        diagnostics = manifest.get("diagnostics") if isinstance(manifest.get("diagnostics"), dict) else {}
+        runtime_diagnostic = diagnostics.get("runtime_diagnostic_extraction") if isinstance(diagnostics.get("runtime_diagnostic_extraction"), dict) else {}
+        runtime_candidates = runtime_diagnostic.get("runtime_minimal_patch_candidates") if isinstance(runtime_diagnostic.get("runtime_minimal_patch_candidates"), list) else []
+        changed_paths = [
+            str(item.get("path") or "")
+            for item in manifest.get("changed_files", [])
+            if isinstance(item, dict)
+        ]
+        has_runtime_candidate = any(
+            isinstance(item, dict)
+            and item.get("kind") == "replace_return_expression"
+            and item.get("path") == "quota.py"
+            and item.get("function_name") == "max_daily_exports"
+            and item.get("old_expression") == "1"
+            and item.get("new_expression") == "7"
+            for item in runtime_candidates
+        )
+        return {
+            "expert_unshaped_runtime_alias": {
+                "patch_source": manifest.get("patch_source", ""),
+                "source_repaired": "return 7" in source_text and "return 1" not in source_text,
+                "alias_test_preserved": "from quota import max_daily_exports as limit" in test_text and "assertEqual(limit(), 7)" in test_text,
+                "runtime_candidate": has_runtime_candidate,
+                "only_source_changed": changed_paths == ["quota.py"],
+                "passed": (
+                    manifest.get("patch_source") == "runtime_diagnostic_return_mismatch"
+                    and "return 7" in source_text
+                    and "return 1" not in source_text
+                    and "from quota import max_daily_exports as limit" in test_text
+                    and "assertEqual(limit(), 7)" in test_text
+                    and has_runtime_candidate
                     and changed_paths == ["quota.py"]
                 ),
             }

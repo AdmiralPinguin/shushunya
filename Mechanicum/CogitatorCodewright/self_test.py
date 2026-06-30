@@ -170,6 +170,13 @@ CERAXIA_VERIFY: python -m py_compile quota.py
 """
 
 
+def runtime_diagnostic_alias_goal() -> str:
+    return """кодовая задача без structured patch marker: тест падает через alias import. Используй runtime diagnostic, traceback и import linkage, не редактируй тест.
+CERAXIA_VERIFY: python -m unittest tests.test_quota_alias
+CERAXIA_VERIFY: python -m py_compile quota.py
+"""
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -1197,6 +1204,43 @@ def main() -> int:
             raise AssertionError(f"test-inferred return mismatch should preserve recommended read order: {final}")
         if sample.read_text(encoding="utf-8") != "def value():\n    return 42\n":
             raise AssertionError("test-inferred return mismatch task did not update the return value")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        (target_repo / "tests").mkdir(parents=True)
+        quota = target_repo / "quota.py"
+        quota.write_text("def max_daily_exports():\n    return 1\n", encoding="utf-8")
+        (target_repo / "tests" / "test_quota_alias.py").write_text(
+            "import unittest\n"
+            "from quota import max_daily_exports as limit\n\n"
+            "class QuotaAliasTest(unittest.TestCase):\n"
+            "    def test_alias_limit(self):\n"
+            "        self.assertEqual(limit(), 7)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=runtime_diagnostic_alias_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready" or final.get("patch_source") != "runtime_diagnostic_return_mismatch":
+            raise AssertionError(f"runtime diagnostic alias task should be repaired by generic runtime candidate: {final}")
+        diagnostics = final.get("diagnostics", {})
+        runtime_diagnostic = diagnostics.get("runtime_diagnostic_extraction", {})
+        runtime_candidates = runtime_diagnostic.get("runtime_minimal_patch_candidates", [])
+        if (
+            diagnostics.get("function_name") != "max_daily_exports"
+            or diagnostics.get("actual") != "1"
+            or diagnostics.get("expected") != "7"
+            or not any(
+                isinstance(item, dict)
+                and item.get("path") == "quota.py"
+                and item.get("function_name") == "max_daily_exports"
+                and item.get("application_status") == "pending"
+                for item in runtime_candidates
+            )
+        ):
+            raise AssertionError(f"runtime diagnostic alias should expose minimal patch candidate evidence: {final}")
+        if "return 7" not in quota.read_text(encoding="utf-8"):
+            raise AssertionError("runtime diagnostic alias task did not patch the source return expression")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

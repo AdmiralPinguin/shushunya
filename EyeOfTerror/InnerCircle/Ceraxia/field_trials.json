@@ -829,6 +829,38 @@
       ]
     },
     {
+      "id": "ceraxia-expert-unshaped-runtime-alias",
+      "class": "expert_unshaped_runtime_diagnostic",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "multi_file_reasoning",
+        "patch_correctness",
+        "verification_discipline",
+        "self_repair",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Repair a failing unittest without a structured patch marker where the tested function is imported through an alias. Static name matching is insufficient; Ceraxia must run the test, parse runtime traceback/assertion evidence, link the alias import back to the source function, and apply the minimal source patch without editing tests.",
+      "required_evidence": [
+        "failed runtime traceback parsed",
+        "test function linked to alias import",
+        "alias import linked to source function",
+        "runtime-derived minimal patch candidate recorded",
+        "only implementation source changed",
+        "post-fix verification passes"
+      ],
+      "failure_modes_to_watch": [
+        "falls back to hardcoded test edits",
+        "cannot resolve alias imports",
+        "requires a structured marker",
+        "patches the wrong symbol",
+        "drops runtime diagnostic candidate evidence"
+      ]
+    },
+    {
       "id": "ceraxia-expert-repo-grade-workflow",
       "class": "expert_repo_grade_workflow",
       "difficulty": "expert",

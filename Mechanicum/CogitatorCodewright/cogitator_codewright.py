@@ -667,7 +667,11 @@ def code_review_discipline_findings(
 
 
 def is_unshaped_patch_source(patch_source: str) -> bool:
-    return patch_source.startswith("test_inferred_") or patch_source.startswith("natural_language_")
+    return (
+        patch_source.startswith("test_inferred_")
+        or patch_source.startswith("natural_language_")
+        or patch_source.startswith("runtime_diagnostic_")
+    )
 
 
 def extracted_assertion_diagnostics_from_text(text: str) -> list[dict[str, Any]]:
@@ -1124,6 +1128,7 @@ def ast_patch_plan_required_for_source(patch_source: str) -> bool:
         "test_inferred_arithmetic_return",
         "test_inferred_return_mismatch",
         "test_inferred_self_repair_seed",
+        "runtime_diagnostic_return_mismatch",
         "test_inferred_missing_function",
         "test_inferred_security_boundary",
     }
@@ -3576,6 +3581,92 @@ def infer_retry_policy_from_tests(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def runtime_verification_commands_from_goal(repo_root: Path, goal: str) -> list[str]:
+    commands = verification_commands_from_natural_goal(goal)
+    if commands:
+        return commands[:5]
+    inferred: list[str] = []
+    for test_path in discovered_test_paths(repo_root, goal):
+        if not test_path.endswith(".py"):
+            continue
+        module = test_path[:-3].replace("/", ".")
+        command = f"python -m unittest {module}"
+        if command not in inferred:
+            inferred.append(command)
+    return inferred[:5]
+
+
+def infer_runtime_diagnostic_return_mismatch_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    commands = runtime_verification_commands_from_goal(repo_root, goal)
+    if not commands:
+        return {}
+    executed: list[dict[str, Any]] = []
+    candidate_source_paths: list[str] = []
+    for command in commands:
+        try:
+            result = run_verification_command(repo_root, command)
+        except subprocess.TimeoutExpired:
+            result = {"command": command, "returncode": 124, "stdout": "", "stderr": "verification command timed out"}
+        executed.append(result)
+        if int(result.get("returncode") or 0) == 0:
+            continue
+        output = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+        for candidate in source_candidates_from_traceback_text(output, repo_root):
+            if candidate not in candidate_source_paths:
+                candidate_source_paths.append(candidate)
+    if not any(int(item.get("returncode") or 0) != 0 for item in executed if isinstance(item, dict)):
+        return {}
+    diagnostic = diagnostic_extraction_from_execution(
+        {"patch_source": "runtime_diagnostic_return_mismatch", "patch_candidates": []},
+        executed,
+        candidate_source_paths,
+        repo_root,
+    )
+    runtime_candidates = diagnostic.get("runtime_minimal_patch_candidates") if isinstance(diagnostic.get("runtime_minimal_patch_candidates"), list) else []
+    viable = [
+        item
+        for item in runtime_candidates
+        if isinstance(item, dict)
+        and item.get("kind") == "replace_return_expression"
+        and item.get("application_status") == "pending"
+        and item.get("path")
+        and item.get("old_expression")
+        and item.get("new_expression")
+    ]
+    if not viable:
+        return {}
+    if len(viable) != 1:
+        raise ValueError(f"runtime diagnostic return mismatch requires exactly one viable candidate, found {len(viable)}")
+    candidate = viable[0]
+    path = str(candidate["path"])
+    old_expression = str(candidate["old_expression"])
+    new_expression = str(candidate["new_expression"])
+    return {
+        "source": "runtime_diagnostic_return_mismatch",
+        "diagnostics": {
+            "kind": "runtime_diagnostic_return_mismatch",
+            "test_path": candidate.get("test_path", ""),
+            "test_function": candidate.get("test_function", ""),
+            "module_path": path,
+            "function_name": candidate.get("function_name", ""),
+            "actual": old_expression,
+            "expected": new_expression,
+            "runtime_diagnostic_extraction": diagnostic,
+        },
+        "operations": [
+            {
+                "type": "replace",
+                "path": path,
+                "old": f"return {old_expression}",
+                "new": f"return {new_expression}",
+            }
+        ],
+        "verification_commands": commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -3710,6 +3801,7 @@ def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any
         ("natural_language_add_function", lambda: infer_add_function_patch_spec(request)),
         ("test_inferred_arithmetic_return", lambda: infer_arithmetic_return_from_tests(request)),
         ("test_inferred_return_mismatch", lambda: infer_return_mismatch_from_tests(request)),
+        ("runtime_diagnostic_return_mismatch", lambda: infer_runtime_diagnostic_return_mismatch_from_tests(request)),
         ("test_inferred_missing_function", lambda: infer_missing_function_from_tests(request)),
     ]
     candidates: list[dict[str, Any]] = []
