@@ -1757,6 +1757,9 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
         verification = manifest.get("verification_summary") if isinstance(manifest.get("verification_summary"), dict) else {}
         repairs = manifest.get("verification_repairs") if isinstance(manifest.get("verification_repairs"), list) else []
         repair_state = manifest.get("repair_loop_state") if isinstance(manifest.get("repair_loop_state"), dict) else {}
+        diagnostic_extraction = manifest.get("diagnostic_extraction") if isinstance(manifest.get("diagnostic_extraction"), dict) else {}
+        parser_coverage = diagnostic_extraction.get("parser_coverage") if isinstance(diagnostic_extraction.get("parser_coverage"), dict) else {}
+        runtime_failures = diagnostic_extraction.get("runtime_test_failures") if isinstance(diagnostic_extraction.get("runtime_test_failures"), list) else []
         failed_commands = repair_state.get("failed_commands") if isinstance(repair_state.get("failed_commands"), list) else []
         changed_paths = [
             str(item.get("path") or "")
@@ -1770,6 +1773,14 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                 "single_repair": len(repairs) == 1,
                 "repair_kind": repairs[0].get("kind") if repairs and isinstance(repairs[0], dict) else "",
                 "failed_evidence_preserved": bool(failed_commands),
+                "runtime_traceback_parsed": parser_coverage.get("traceback_frames", 0) >= 1
+                and parser_coverage.get("runtime_test_failures", 0) >= 1
+                and any(
+                    isinstance(item, dict)
+                    and item.get("test_function") == "test_max_daily_exports"
+                    and "quota.py" in item.get("candidate_source_paths", [])
+                    for item in runtime_failures
+                ),
                 "source_repaired": "return 7" in source_text and "return 1" not in source_text,
                 "tests_preserved": "assertEqual(max_daily_exports(), 7)" in test_text,
                 "only_source_changed": changed_paths == ["quota.py"],
@@ -1784,6 +1795,14 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and len(repairs) == 1
                     and repairs[0].get("kind") == "assertion_return_mismatch"
                     and bool(failed_commands)
+                    and parser_coverage.get("traceback_frames", 0) >= 1
+                    and parser_coverage.get("runtime_test_failures", 0) >= 1
+                    and any(
+                        isinstance(item, dict)
+                        and item.get("test_function") == "test_max_daily_exports"
+                        and "quota.py" in item.get("candidate_source_paths", [])
+                        for item in runtime_failures
+                    )
                     and "return 7" in source_text
                     and "return 1" not in source_text
                     and "assertEqual(max_daily_exports(), 7)" in test_text

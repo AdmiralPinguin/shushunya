@@ -789,6 +789,94 @@ def test_symbol_links_from_goal(repo_root: Path, goal: str) -> list[dict[str, An
     return links[:50]
 
 
+def repo_relative_traceback_path(repo_root: Path, raw_path: str) -> str:
+    path = Path(raw_path)
+    try:
+        if path.is_absolute():
+            return str(path.resolve().relative_to(repo_root.resolve()))
+    except (OSError, ValueError):
+        pass
+    return raw_path.replace("\\", "/")
+
+
+def traceback_frames_from_text(text: str, repo_root: Path) -> list[dict[str, Any]]:
+    frames: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, str]] = set()
+    pattern = re.compile(r'^\s*File "([^"]+)", line (\d+), in ([A-Za-z_][A-Za-z0-9_]*)\s*$', re.MULTILINE)
+    for match in pattern.finditer(text):
+        rel_path = repo_relative_traceback_path(repo_root, match.group(1))
+        line = int(match.group(2))
+        function_name = match.group(3)
+        key = (rel_path, line, function_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        frames.append(
+            {
+                "path": rel_path,
+                "line": line,
+                "function_name": function_name,
+                "is_test": test_like_path(rel_path) or function_name.startswith("test"),
+            }
+        )
+    return frames
+
+
+def repo_relative_python_file_exists(repo_root: Path, path: str) -> bool:
+    if not path.endswith(".py") or Path(path).is_absolute() or path.startswith(".."):
+        return False
+    try:
+        return safe_repo_path(repo_root, path).exists()
+    except ValueError:
+        return False
+
+
+def runtime_test_failures_from_traceback(
+    frames: list[dict[str, Any]],
+    assertions: list[dict[str, Any]],
+    repo_root: Path,
+) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    test_frames = [frame for frame in frames if isinstance(frame, dict) and frame.get("is_test")]
+    source_frames = [
+        frame
+        for frame in frames
+        if isinstance(frame, dict)
+        and not frame.get("is_test")
+        and str(frame.get("path") or "").endswith(".py")
+        and repo_relative_python_file_exists(repo_root, str(frame.get("path") or ""))
+    ]
+    for test_frame in test_frames[-3:]:
+        links = test_symbol_links_from_goal(repo_root, f"`{test_frame.get('path')}`")
+        matching_links = [
+            link
+            for link in links
+            if isinstance(link, dict) and link.get("test_function") == test_frame.get("function_name")
+        ]
+        linked_source_paths = [
+            str(link.get("source_path"))
+            for link in matching_links
+            if isinstance(link.get("source_path"), str)
+        ]
+        frame_source_paths = [
+            str(frame.get("path"))
+            for frame in source_frames
+            if isinstance(frame.get("path"), str)
+        ]
+        failures.append(
+            {
+                "test_path": test_frame.get("path", ""),
+                "test_function": test_frame.get("function_name", ""),
+                "line": test_frame.get("line", 0),
+                "assertions": assertions[:5],
+                "imported_symbol_links": matching_links[:10],
+                "source_frames": source_frames[-5:],
+                "candidate_source_paths": list(dict.fromkeys([*frame_source_paths, *linked_source_paths]))[-10:],
+            }
+        )
+    return failures
+
+
 def static_diagnostic_hypotheses_from_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     hypotheses: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -907,22 +995,31 @@ def diagnostic_extraction_from_execution(
     patch: dict[str, Any],
     executed: list[dict[str, Any]],
     candidate_source_paths: list[str],
+    repo_root: Path,
 ) -> dict[str, Any]:
     candidates = patch.get("patch_candidates") if isinstance(patch.get("patch_candidates"), list) else []
     runtime_failures: list[dict[str, Any]] = []
     assertions: list[dict[str, Any]] = []
+    traceback_frames: list[dict[str, Any]] = []
+    runtime_test_failures: list[dict[str, Any]] = []
     traceback_sources: list[str] = []
     for item in executed:
         if not isinstance(item, dict) or int(item.get("returncode") or 0) == 0:
             continue
         output = f"{item.get('stdout', '')}\n{item.get('stderr', '')}"
         parsed_assertions = extracted_assertion_diagnostics_from_text(output)
+        parsed_frames = traceback_frames_from_text(output, repo_root)
+        parsed_failures = runtime_test_failures_from_traceback(parsed_frames, parsed_assertions, repo_root)
         assertions.extend(parsed_assertions)
+        traceback_frames.extend(parsed_frames)
+        runtime_test_failures.extend(parsed_failures)
         runtime_failures.append(
             {
                 "command": item.get("command", ""),
                 "returncode": item.get("returncode"),
                 "assertion_count": len(parsed_assertions),
+                "traceback_frame_count": len(parsed_frames),
+                "test_failure_count": len(parsed_failures),
                 "stderr_excerpt": str(item.get("stderr") or "")[-1200:],
                 "stdout_excerpt": str(item.get("stdout") or "")[-1200:],
             }
@@ -938,11 +1035,24 @@ def diagnostic_extraction_from_execution(
         "patch_source": patch.get("patch_source", ""),
         "runtime_failures": runtime_failures,
         "assertions": assertions,
+        "traceback_frames": traceback_frames[:50],
+        "runtime_test_failures": runtime_test_failures[:20],
         "traceback_source_candidates": traceback_sources[:20],
+        "runtime_source_candidates": sorted(
+            {
+                str(path)
+                for failure in runtime_test_failures
+                if isinstance(failure, dict)
+                for path in failure.get("candidate_source_paths", [])
+                if isinstance(path, str)
+            }
+        )[:20],
         "static_test_expectations": static_hypotheses,
         "selected_diagnostics": patch.get("diagnostics", {}) if isinstance(patch.get("diagnostics"), dict) else {},
         "parser_coverage": {
             "unittest_assertions": len(assertions),
+            "traceback_frames": len(traceback_frames),
+            "runtime_test_failures": len(runtime_test_failures),
             "traceback_source_candidates": len(traceback_sources),
             "static_test_expectations": len(static_hypotheses),
         },
@@ -4766,7 +4876,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         "next_action": "inspect_blockers_or_revision_plan" if blockers else "continue_to_code_review",
         "summary": "Repair loop state recorded for verification step.",
     }
-    diagnostic_extraction = diagnostic_extraction_from_execution(patch, executed, candidate_source_paths)
+    diagnostic_extraction = diagnostic_extraction_from_execution(patch, executed, candidate_source_paths, repo_root)
     write_json(workspace_root, output_path, report)
     write_json(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"), repair_state)
     write_json(workspace_root, sibling_artifact(output_path, "diagnostic_extraction.json"), diagnostic_extraction)

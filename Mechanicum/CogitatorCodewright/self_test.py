@@ -1671,6 +1671,20 @@ def main() -> int:
         repairs = final.get("verification_repairs", [])
         if not repairs or repairs[0].get("kind") != "assertion_return_mismatch":
             raise AssertionError(f"self-repair seed should repair from AssertionError mismatch: {final}")
+        diagnostic_extraction = final.get("diagnostic_extraction", {})
+        runtime_failures = diagnostic_extraction.get("runtime_test_failures", [])
+        if (
+            diagnostic_extraction.get("parser_coverage", {}).get("traceback_frames", 0) < 1
+            or diagnostic_extraction.get("parser_coverage", {}).get("runtime_test_failures", 0) < 1
+            or not any(
+                isinstance(item, dict)
+                and item.get("test_path") == "tests/test_quota.py"
+                and item.get("test_function") == "test_max_daily_exports"
+                and "quota.py" in item.get("candidate_source_paths", [])
+                for item in runtime_failures
+            )
+        ):
+            raise AssertionError(f"self-repair seed should preserve runtime traceback diagnostic extraction: {final}")
         quota = (target_repo / "quota.py").read_text(encoding="utf-8")
         if "return 7" not in quota or "return 1" in quota:
             raise AssertionError("self-repair seed did not leave the repaired expected value")
