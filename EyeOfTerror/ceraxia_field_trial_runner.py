@@ -801,6 +801,60 @@ def fixture_expert_unshaped_data_migration(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_config_runtime(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "app").mkdir(parents=True, exist_ok=True)
+    (repo / "bin").mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "docs").mkdir(parents=True, exist_ok=True)
+    (repo / "app" / "settings.json").write_text(
+        json.dumps({"serviceUrl": "http://wrong.local"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (repo / "app" / "config_loader.py").write_text(
+        "import json\n"
+        "from pathlib import Path\n\n"
+        "CONFIG_PATH = Path(__file__).resolve().parent / 'settings.json'\n\n"
+        "def load_settings():\n"
+        "    data = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))\n"
+        "    return {'serviceUrl': data['serviceUrl']}\n",
+        encoding="utf-8",
+    )
+    (repo / "bin" / "run-app.sh").write_text(
+        "#!/usr/bin/env sh\nset -eu\nexport APP_URL=\"${APP_URL:-http://wrong.local}\"\npython -m app.config_loader\n",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "config_runtime.md").write_text(
+        "# Runtime Config\n\n"
+        "Tests define the public runtime contract: JSON key `service_url` and env override `SERVICE_URL` must agree.\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_config_loader.py").write_text(
+        "import os\nimport unittest\nfrom app.config_loader import load_settings\n\n"
+        "class ConfigLoaderTest(unittest.TestCase):\n"
+        "    def test_default_service_url(self):\n"
+        "        os.environ.pop('SERVICE_URL', None)\n"
+        "        self.assertEqual(load_settings()['service_url'], 'http://localhost:8080')\n\n"
+        "    def test_env_override(self):\n"
+        "        os.environ['SERVICE_URL'] = 'https://prod.example'\n"
+        "        try:\n"
+        "            self.assertEqual(load_settings()['service_url'], 'https://prod.example')\n"
+        "        finally:\n"
+        "            os.environ.pop('SERVICE_URL', None)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured config marker: исправь runtime config mismatch. "
+        "Выведи контракт из tests/docs/repo: JSON config должен называться service_url, loader должен "
+        "читать SERVICE_URL override, shell entrypoint должен экспортировать тот же env var. Не редактируй tests.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_config_loader\n"
+        "CERAXIA_VERIFY: python -m py_compile app/config_loader.py\n"
+    )
+
+
 def fixture_expert_unshaped_security_boundary(repo: Path) -> str:
     repo.mkdir(parents=True, exist_ok=True)
     (repo / "tests").mkdir(parents=True, exist_ok=True)
@@ -1092,6 +1146,7 @@ FIXTURES = {
     "ceraxia-expert-public-api-deprecation": fixture_expert_public_api_deprecation,
     "ceraxia-expert-security-boundary": fixture_expert_security_boundary,
     "ceraxia-expert-unshaped-api-evolution": fixture_expert_unshaped_api_evolution,
+    "ceraxia-expert-unshaped-config-runtime": fixture_expert_unshaped_config_runtime,
     "ceraxia-expert-unshaped-concurrency-cache": fixture_expert_unshaped_concurrency_cache,
     "ceraxia-expert-unshaped-data-migration": fixture_expert_unshaped_data_migration,
     "ceraxia-expert-unshaped-flaky-root-cause": fixture_expert_unshaped_flaky_root_cause,
@@ -1399,6 +1454,50 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                         "multi_file_marker_synthesis",
                         "explicit_json_patch",
                     }
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-unshaped-config-runtime":
+        config_path = repo / "app" / "settings.json"
+        loader_path = repo / "app" / "config_loader.py"
+        entrypoint_path = repo / "bin" / "run-app.sh"
+        test_path = repo / "tests" / "test_config_loader.py"
+        config_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+        loader_text = loader_path.read_text(encoding="utf-8") if loader_path.exists() else ""
+        entrypoint_text = entrypoint_path.read_text(encoding="utf-8") if entrypoint_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        changed_paths = [
+            str(item.get("path") or "")
+            for item in manifest.get("changed_files", [])
+            if isinstance(item, dict)
+        ]
+        repair_plan = manifest.get("unshaped_repair_plan") if isinstance(manifest.get("unshaped_repair_plan"), dict) else {}
+        diagnostic_extraction = manifest.get("diagnostic_extraction") if isinstance(manifest.get("diagnostic_extraction"), dict) else {}
+        return {
+            "expert_unshaped_config_runtime": {
+                "patch_source": manifest.get("patch_source", ""),
+                "config_key_normalized": '"service_url"' in config_text and "serviceUrl" not in config_text,
+                "loader_uses_env_override": "os.environ.get('SERVICE_URL'" in loader_text,
+                "entrypoint_exports_same_env": "export SERVICE_URL" in entrypoint_text,
+                "tests_preserved": "assertEqual(load_settings()['service_url']" in test_text and "SERVICE_URL" in test_text,
+                "changed_expected_surfaces": set(changed_paths) == {"app/settings.json", "app/config_loader.py", "bin/run-app.sh"},
+                "repair_artifacts": repair_plan.get("mode") == "unshaped_repo_repair"
+                and diagnostic_extraction.get("status") == "recorded",
+                "not_marker_synthesized": str(manifest.get("patch_source") or "") not in {
+                    "config_runtime_marker_synthesis",
+                    "multi_file_marker_synthesis",
+                    "explicit_json_patch",
+                },
+                "passed": (
+                    manifest.get("patch_source") == "test_inferred_config_runtime"
+                    and '"service_url"' in config_text
+                    and "serviceUrl" not in config_text
+                    and "os.environ.get('SERVICE_URL'" in loader_text
+                    and "export SERVICE_URL" in entrypoint_text
+                    and "assertEqual(load_settings()['service_url']" in test_text
+                    and set(changed_paths) == {"app/settings.json", "app/config_loader.py", "bin/run-app.sh"}
+                    and repair_plan.get("mode") == "unshaped_repo_repair"
+                    and diagnostic_extraction.get("status") == "recorded"
                 ),
             }
         }

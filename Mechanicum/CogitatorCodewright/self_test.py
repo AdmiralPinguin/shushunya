@@ -340,6 +340,14 @@ CERAXIA_CONFIG_RUNTIME:
 """
 
 
+def unshaped_config_runtime_goal() -> str:
+    return """исправь runtime config mismatch: tests describe service_url defaults and SERVICE_URL override, loader and shell entrypoint must agree with JSON config
+
+CERAXIA_VERIFY: python -m unittest tests.test_config_loader
+CERAXIA_VERIFY: python -m py_compile app/config_loader.py
+"""
+
+
 def refactor_goal() -> str:
     return """вынеси дублированный расчет в общий helper, не меняя публичные функции
 
@@ -1721,6 +1729,60 @@ def main() -> int:
             raise AssertionError("config/runtime marker did not write JSON config")
         if final.get("verification_summary", {}).get("executed_count", 0) < 3:
             raise AssertionError(f"config/runtime final manifest should preserve verification evidence: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        (target_repo / "app").mkdir(parents=True)
+        (target_repo / "bin").mkdir(parents=True)
+        (target_repo / "tests").mkdir(parents=True)
+        (target_repo / "app" / "settings.json").write_text(
+            json.dumps({"serviceUrl": "http://wrong.local"}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        (target_repo / "app" / "config_loader.py").write_text(
+            "import json\n"
+            "from pathlib import Path\n\n"
+            "CONFIG_PATH = Path(__file__).resolve().parent / 'settings.json'\n\n"
+            "def load_settings():\n"
+            "    data = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))\n"
+            "    return {'serviceUrl': data['serviceUrl']}\n",
+            encoding="utf-8",
+        )
+        (target_repo / "bin" / "run-app.sh").write_text(
+            "#!/usr/bin/env sh\nset -eu\nexport APP_URL=\"${APP_URL:-http://wrong.local}\"\npython -m app.config_loader\n",
+            encoding="utf-8",
+        )
+        (target_repo / "tests" / "test_config_loader.py").write_text(
+            "import os\nimport unittest\nfrom app.config_loader import load_settings\n\n"
+            "class ConfigLoaderTest(unittest.TestCase):\n"
+            "    def test_default_service_url(self):\n"
+            "        os.environ.pop('SERVICE_URL', None)\n"
+            "        self.assertEqual(load_settings()['service_url'], 'http://localhost:8080')\n\n"
+            "    def test_env_override(self):\n"
+            "        os.environ['SERVICE_URL'] = 'https://prod.example'\n"
+            "        try:\n"
+            "            self.assertEqual(load_settings()['service_url'], 'https://prod.example')\n"
+            "        finally:\n"
+            "            os.environ.pop('SERVICE_URL', None)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=unshaped_config_runtime_goal(), target_repo_root=target_repo)
+        changed_paths = {item.get("path") for item in final.get("changed_files", []) if isinstance(item, dict)}
+        expected_paths = {"app/settings.json", "app/config_loader.py", "bin/run-app.sh"}
+        if final.get("status") != "ready" or final.get("patch_source") != "test_inferred_config_runtime":
+            raise AssertionError(f"unshaped config/runtime task should be ready through inferred repair: {final}")
+        if changed_paths != expected_paths:
+            raise AssertionError(f"unshaped config/runtime should mutate config, loader, and entrypoint only: {final}")
+        if "SERVICE_URL" not in (target_repo / "bin" / "run-app.sh").read_text(encoding="utf-8"):
+            raise AssertionError("unshaped config/runtime did not align entrypoint env var")
+        if '"service_url"' not in (target_repo / "app" / "settings.json").read_text(encoding="utf-8"):
+            raise AssertionError("unshaped config/runtime did not normalize JSON setting")
+        if "assertEqual(load_settings()['service_url']" not in (target_repo / "tests" / "test_config_loader.py").read_text(encoding="utf-8"):
+            raise AssertionError("unshaped config/runtime should not edit tests")
+        if final.get("unshaped_repair_plan", {}).get("mode") != "unshaped_repo_repair":
+            raise AssertionError(f"unshaped config/runtime should preserve repair plan: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

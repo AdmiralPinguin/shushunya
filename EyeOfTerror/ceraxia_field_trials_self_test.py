@@ -148,6 +148,7 @@ def main() -> int:
         "ceraxia-expert-public-api-deprecation",
         "ceraxia-expert-repo-grade-workflow",
         "ceraxia-expert-security-boundary",
+        "ceraxia-expert-unshaped-config-runtime",
         "ceraxia-field-integration-contract",
         "ceraxia-field-large-file-restraint",
         "ceraxia-field-multifile-feature",

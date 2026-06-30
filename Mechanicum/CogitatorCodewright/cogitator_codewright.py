@@ -2031,6 +2031,174 @@ def patch_spec_from_config_runtime_marker(goal: str) -> dict[str, Any]:
     }
 
 
+def normalized_identifier(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def safe_literal_eval(raw: str) -> Any:
+    try:
+        return ast.literal_eval(raw)
+    except (SyntaxError, ValueError):
+        if raw == "True":
+            return True
+        if raw == "False":
+            return False
+        return raw
+
+
+def infer_config_runtime_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    commands = verification_commands_from_natural_goal(goal)
+    candidates: list[dict[str, Any]] = []
+    for test_path in discovered_test_paths(repo_root, goal):
+        path = safe_repo_path(repo_root, test_path)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "load_settings" not in text or "os.environ" not in text:
+            continue
+        imports = re.findall(
+            r"^\s*from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+(load_settings)\s*$",
+            text,
+            flags=re.MULTILINE,
+        )
+        if len(imports) != 1:
+            continue
+        module_name, function_name = imports[0]
+        loader_path = f"{module_name.replace('.', '/')}.py"
+        loader = safe_repo_path(repo_root, loader_path)
+        if not loader.exists():
+            continue
+        key_matches = re.findall(r"load_settings\(\)\[['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\]", text)
+        env_matches = re.findall(r"os\.environ(?:\.pop)?\(\s*['\"]([A-Z_][A-Z0-9_]*)['\"]", text)
+        env_matches.extend(re.findall(r"os\.environ\[['\"]([A-Z_][A-Z0-9_]*)['\"]\]", text))
+        default_match = re.search(
+            r"assertEqual\(\s*load_settings\(\)\[['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\]\s*,\s*(['\"][^'\"]+['\"]|[0-9]+|True|False)\s*\)",
+            text,
+        )
+        if not key_matches or not env_matches or not default_match:
+            continue
+        setting_key = key_matches[0]
+        env_var = env_matches[0]
+        default_value = safe_literal_eval(default_match.group(2))
+        config_path = ""
+        loader_text = loader.read_text(encoding="utf-8")
+        config_ref = re.search(r"CONFIG_PATH\s*=\s*.+?['\"]([^'\"]+\.json)['\"]", loader_text)
+        if config_ref:
+            raw_config_path = config_ref.group(1)
+            raw_config = PurePosixPath(raw_config_path)
+            if len(raw_config.parts) == 1:
+                loader_parent = PurePosixPath(loader_path).parent
+                config_path = str(loader_parent / raw_config)
+            else:
+                config_path = raw_config_path
+        if not config_path:
+            for config in sorted(repo_root.rglob("*.json")):
+                if any(part in EXCLUDED_DIRS for part in config.relative_to(repo_root).parts):
+                    continue
+                try:
+                    payload = json.loads(config.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+                    continue
+                if isinstance(payload, dict) and (
+                    setting_key in payload
+                    or any(normalized_identifier(str(key)) == normalized_identifier(setting_key) for key in payload)
+                ):
+                    config_path = str(config.relative_to(repo_root))
+                    break
+        if not config_path:
+            continue
+        entrypoint_path = ""
+        for candidate in sorted(repo_root.rglob("*.sh")):
+            if any(part in EXCLUDED_DIRS for part in candidate.relative_to(repo_root).parts):
+                continue
+            script = candidate.read_text(encoding="utf-8")
+            if env_var in script or function_name in script or module_name in script:
+                entrypoint_path = str(candidate.relative_to(repo_root))
+                break
+        if not entrypoint_path:
+            for candidate in sorted(repo_root.rglob("*")):
+                if not candidate.is_file() or any(part in EXCLUDED_DIRS for part in candidate.relative_to(repo_root).parts):
+                    continue
+                rel = str(candidate.relative_to(repo_root))
+                if rel.startswith("bin/"):
+                    entrypoint_path = rel
+                    break
+        if not entrypoint_path:
+            continue
+        candidates.append(
+            {
+                "test_path": test_path,
+                "loader_path": loader_path,
+                "config_path": config_path,
+                "entrypoint_path": entrypoint_path,
+                "function_name": function_name,
+                "module_name": module_name,
+                "setting_key": setting_key,
+                "env_var": env_var,
+                "default_value": default_value,
+            }
+        )
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred config/runtime requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    config_path = str(candidate["config_path"])
+    loader_path = str(candidate["loader_path"])
+    entrypoint_path = str(candidate["entrypoint_path"])
+    setting_key = str(candidate["setting_key"])
+    env_var = str(candidate["env_var"])
+    default_value = candidate["default_value"]
+    loader_module = loader_path[:-3].replace("/", ".")
+    config_literal = repr(config_path)
+    loader_parent_depth = len(PurePosixPath(loader_path).parent.parts)
+    config_root_steps = "\n".join(["CONFIG_ROOT = CONFIG_ROOT.parent" for _ in range(loader_parent_depth)])
+    if config_root_steps:
+        config_root_steps += "\n"
+    config_content = json.dumps({setting_key: default_value}, ensure_ascii=False, indent=2) + "\n"
+    loader_content = (
+        "import json\n"
+        "import os\n"
+        "from pathlib import Path\n\n"
+        "CONFIG_ROOT = Path(__file__).resolve().parent\n"
+        f"{config_root_steps}"
+        f"CONFIG_PATH = CONFIG_ROOT / {config_literal}\n\n"
+        "def load_settings():\n"
+        "    data = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))\n"
+        f"    value = os.environ.get('{env_var}', data.get('{setting_key}', {default_value!r}))\n"
+        f"    return {{'{setting_key}': value}}\n"
+    )
+    entrypoint_content = (
+        "#!/usr/bin/env sh\n"
+        "set -eu\n"
+        f"export {env_var}=\"${{{env_var}:-{default_value}}}\"\n"
+        f"python -m {loader_module}\n"
+    )
+    if not commands:
+        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+    return {
+        "source": "test_inferred_config_runtime",
+        "diagnostics": {
+            "kind": "test_inferred_config_runtime",
+            "test_path": candidate["test_path"],
+            "loader_path": loader_path,
+            "config_path": config_path,
+            "entrypoint_path": entrypoint_path,
+            "setting_key": setting_key,
+            "env_var": env_var,
+            "default_value": default_value,
+        },
+        "operations": [
+            {"type": "write_file", "path": config_path, "content": config_content, "overwrite": True},
+            {"type": "write_file", "path": loader_path, "content": loader_content, "overwrite": True},
+            {"type": "write_file", "path": entrypoint_path, "content": entrypoint_content, "overwrite": True},
+        ],
+        "verification_commands": commands,
+    }
+
+
 def patch_spec_from_refactor_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_REFACTOR:")
     if not payload:
@@ -3034,6 +3202,7 @@ def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any
         ("marker_synthesis", lambda: synthesized_patch_spec_from_markers(goal)),
         ("test_inferred_api_deprecation", lambda: infer_api_deprecation_from_tests(request)),
         ("test_inferred_data_migration", lambda: infer_data_migration_from_tests(request)),
+        ("test_inferred_config_runtime", lambda: infer_config_runtime_from_tests(request)),
         ("test_inferred_security_boundary", lambda: infer_security_boundary_from_tests(request)),
         ("test_inferred_cache_concurrency", lambda: infer_cache_concurrency_from_tests(request)),
         ("test_inferred_flaky_ordering", lambda: infer_flaky_ordering_from_tests(request)),
