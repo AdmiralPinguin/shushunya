@@ -89,6 +89,10 @@ CERAXIA_PATCH:
             or summary_manifest.get("execution_report", {}).get("changed_file_count") != 1
             or summary_manifest.get("next_safe_action") != "inspect_final_package"
             or summary_manifest.get("review_decision_count", 0) < 4
+            or summary_manifest.get("selected_patch_source") != "explicit_json_patch"
+            or summary_manifest.get("patch_candidate_count", 0) < 1
+            or summary_manifest.get("source_excerpt_count", 0) < 1
+            or summary_manifest.get("implementation_decision_count", 0) < 3
             or summary_manifest.get("engineering_investigation", {}).get("dependency_edge_count", 0) < 2
             or summary_manifest.get("engineering_investigation", {}).get("hypothesis_count", 0) < 1
         ):
@@ -252,6 +256,11 @@ CERAXIA_TARGET_REPO: {target_repo}
             raise AssertionError(f"Ceraxia arithmetic-inferred manifest should be ready: {manifest}")
         if manifest.get("patch_source") != "test_inferred_arithmetic_return" or manifest.get("diagnostics", {}).get("replacement_expression") != "left + right":
             raise AssertionError(f"Ceraxia arithmetic-inferred manifest should expose diagnostics: {manifest}")
+        if (
+            manifest.get("selected_patch_candidate", {}).get("source") != "test_inferred_arithmetic_return"
+            or manifest.get("execution_report", {}).get("patch_candidate_count", 0) < 5
+        ):
+            raise AssertionError(f"Ceraxia arithmetic-inferred manifest should expose candidate resolution: {manifest}")
         if "return left + right" not in calc.read_text(encoding="utf-8"):
             raise AssertionError("Ceraxia arithmetic-inferred pipeline did not update the return expression")
     with tempfile.TemporaryDirectory() as temp_dir:

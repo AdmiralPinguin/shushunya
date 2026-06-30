@@ -3094,6 +3094,20 @@ def compact_manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:
             else 0,
         },
         "patch_source": str(manifest.get("patch_source") or ""),
+        "selected_patch_source": str(
+            manifest.get("selected_patch_candidate", {}).get("source") or manifest.get("patch_source") or ""
+        )
+        if isinstance(manifest.get("selected_patch_candidate", {}), dict)
+        else str(manifest.get("patch_source") or ""),
+        "patch_candidate_count": len(manifest.get("patch_candidates", []) if isinstance(manifest.get("patch_candidates"), list) else []),
+        "source_excerpt_count": len(
+            manifest.get("source_excerpt_summary", []) if isinstance(manifest.get("source_excerpt_summary"), list) else []
+        ),
+        "implementation_decision_count": len(
+            manifest.get("implementation_decision_record", [])
+            if isinstance(manifest.get("implementation_decision_record"), list)
+            else []
+        ),
         "operation_count": int(manifest.get("operation_count") or 0),
         "verification_status": str(manifest.get("verification_status") or ""),
         "verification_summary": manifest.get("verification_summary", {}) if isinstance(manifest.get("verification_summary"), dict) else {},

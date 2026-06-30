@@ -139,6 +139,71 @@ def recommended_read_order_from_survey(workspace_root: Path, output_path: str) -
     return [item for item in read_order if isinstance(item, dict)][:30]
 
 
+def source_excerpt_pack(workspace_root: Path, output_path: str, repo_root: Path) -> list[dict[str, Any]]:
+    survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
+    investigation = survey.get("engineering_investigation") if isinstance(survey.get("engineering_investigation"), dict) else {}
+    targeted = investigation.get("targeted_reading_plan") if isinstance(investigation.get("targeted_reading_plan"), list) else []
+    repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
+    read_order = repo_map.get("recommended_read_order") if isinstance(repo_map.get("recommended_read_order"), list) else []
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source in (targeted, read_order):
+        for item in source:
+            if not isinstance(item, dict):
+                continue
+            rel = str(item.get("path") or "")
+            if not rel or rel in seen:
+                continue
+            seen.add(rel)
+            candidates.append(item)
+            if len(candidates) >= 8:
+                break
+        if len(candidates) >= 8:
+            break
+    excerpts: list[dict[str, Any]] = []
+    for item in candidates:
+        rel = str(item.get("path") or "")
+        record: dict[str, Any] = {
+            "path": rel,
+            "phase": item.get("phase", ""),
+            "reason": item.get("reason", ""),
+            "question": item.get("question", ""),
+            "dependent_count": int(item.get("dependent_count") or 0),
+        }
+        try:
+            path = safe_repo_path(repo_root, rel)
+        except ValueError as exc:
+            record.update({"status": "blocked", "diagnostic": str(exc)})
+            excerpts.append(record)
+            continue
+        if not path.exists() or not path.is_file():
+            record.update({"status": "missing"})
+            excerpts.append(record)
+            continue
+        size = path.stat().st_size
+        record["bytes"] = size
+        if size > 40_000:
+            record.update({"status": "skipped_large_file"})
+            excerpts.append(record)
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            record.update({"status": "skipped_non_utf8"})
+            excerpts.append(record)
+            continue
+        excerpt = text[:12_000]
+        record.update(
+            {
+                "status": "read",
+                "excerpt": excerpt,
+                "truncated": len(text) > len(excerpt),
+            }
+        )
+        excerpts.append(record)
+    return excerpts
+
+
 def patch_scope_evidence(workspace_root: Path, output_path: str, changed_files: list[dict[str, Any]]) -> dict[str, Any]:
     survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
     repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
@@ -772,29 +837,57 @@ def synthesized_patch_spec_from_markers(goal: str) -> dict[str, Any]:
     return {}
 
 
-def patch_spec_from_request(request: dict[str, Any]) -> dict[str, Any]:
-    goal = request_goal(request)
-    payload = extract_json_after_marker(goal, "CERAXIA_PATCH:")
-    if not payload:
-        payload = synthesized_patch_spec_from_markers(goal)
-    if not payload:
-        payload = infer_simple_replace_patch_spec(request)
-    if not payload:
-        payload = infer_add_function_patch_spec(request)
-    if not payload:
-        payload = infer_arithmetic_return_from_tests(request)
-    if not payload:
-        payload = infer_return_mismatch_from_tests(request)
-    if not payload:
-        payload = infer_missing_function_from_tests(request)
-    if not payload:
-        return {}
+def normalize_patch_payload(payload: dict[str, Any], source: str) -> dict[str, Any]:
     if isinstance(payload.get("ceraxia_patch"), dict):
         payload = payload["ceraxia_patch"]
     operations = payload.get("operations")
     if not isinstance(operations, list) or not operations:
-        raise ValueError("CERAXIA_PATCH must contain a non-empty operations list")
+        raise ValueError(f"{source} must contain a non-empty operations list")
     return payload
+
+
+def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    candidate_builders: list[tuple[str, Any]] = [
+        ("explicit_json_patch", lambda: extract_json_after_marker(goal, "CERAXIA_PATCH:")),
+        ("marker_synthesis", lambda: synthesized_patch_spec_from_markers(goal)),
+        ("natural_language_simple_replace", lambda: infer_simple_replace_patch_spec(request)),
+        ("natural_language_add_function", lambda: infer_add_function_patch_spec(request)),
+        ("test_inferred_arithmetic_return", lambda: infer_arithmetic_return_from_tests(request)),
+        ("test_inferred_return_mismatch", lambda: infer_return_mismatch_from_tests(request)),
+        ("test_inferred_missing_function", lambda: infer_missing_function_from_tests(request)),
+    ]
+    candidates: list[dict[str, Any]] = []
+    for source, builder in candidate_builders:
+        try:
+            payload = builder()
+            if not payload:
+                candidates.append({"source": source, "status": "unavailable", "diagnostic": "no matching evidence found"})
+                continue
+            normalized = normalize_patch_payload(payload, source)
+        except ValueError as exc:
+            candidates.append({"source": source, "status": "blocked", "diagnostic": str(exc)})
+            continue
+        operations = normalized.get("operations") if isinstance(normalized.get("operations"), list) else []
+        verification_commands = (
+            normalized.get("verification_commands") if isinstance(normalized.get("verification_commands"), list) else []
+        )
+        diagnostics = normalized.get("diagnostics") if isinstance(normalized.get("diagnostics"), dict) else {}
+        candidates.append(
+            {
+                "source": source,
+                "status": "selected",
+                "operation_count": len(operations),
+                "verification_command_count": len(verification_commands),
+                "diagnostics": diagnostics,
+            }
+        )
+        return {"patch_spec": normalized, "candidates": candidates, "selected_candidate": candidates[-1]}
+    return {"patch_spec": {}, "candidates": candidates, "selected_candidate": {}}
+
+
+def patch_spec_from_request(request: dict[str, Any]) -> dict[str, Any]:
+    return patch_spec_resolution_from_request(request)["patch_spec"]
 
 
 def apply_patch_operation(repo_root: Path, operation: dict[str, Any]) -> dict[str, Any]:
@@ -1489,17 +1582,20 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
     changed_files: list[dict[str, Any]] = []
     rolled_back_files: list[dict[str, Any]] = []
     patch_spec: dict[str, Any] = {}
+    repo_root = target_repo_root(request)
+    excerpts = source_excerpt_pack(workspace_root, output_path, repo_root)
+    patch_resolution = {"patch_spec": {}, "candidates": [], "selected_candidate": {}}
     try:
-        patch_spec = patch_spec_from_request(request)
+        patch_resolution = patch_spec_resolution_from_request(request)
+        patch_spec = patch_resolution["patch_spec"] if isinstance(patch_resolution.get("patch_spec"), dict) else {}
         if patch_spec:
             if not role_policy_allows_source_mutation(role_policy):
                 blockers.append("role_policy forbids source mutation for this step")
             else:
-                repo_root = target_repo_root(request)
                 changed_files.extend(apply_patch_operations_atomically(repo_root, patch_spec["operations"]))
         else:
             blockers.append(
-                "No CERAXIA_PATCH operations were provided; direct source mutation requires an explicit patch specification."
+                "No patch candidate could be selected from explicit contract, task text, or test evidence."
             )
     except PatchApplyError as exc:
         blockers.append(str(exc))
@@ -1524,6 +1620,44 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "worker_brief": worker_brief,
         "patch_spec_present": bool(patch_spec),
         "patch_source": str(patch_spec.get("source") or "explicit_json_patch") if patch_spec else "",
+        "patch_candidates": patch_resolution.get("candidates", []) if isinstance(patch_resolution.get("candidates"), list) else [],
+        "selected_patch_candidate": patch_resolution.get("selected_candidate", {})
+        if isinstance(patch_resolution.get("selected_candidate"), dict)
+        else {},
+        "source_excerpt_pack": excerpts,
+        "source_excerpt_summary": [
+            {
+                "path": item.get("path", ""),
+                "status": item.get("status", ""),
+                "bytes": item.get("bytes", 0),
+                "truncated": item.get("truncated", False),
+            }
+            for item in excerpts
+        ],
+        "implementation_decision_record": [
+            {
+                "check": "source_evidence_loaded",
+                "status": "pass" if any(item.get("status") == "read" for item in excerpts) else "warn",
+                "detail": f"{sum(1 for item in excerpts if item.get('status') == 'read')} targeted files read",
+            },
+            {
+                "check": "patch_candidate_selected",
+                "status": "pass" if patch_spec else "fail",
+                "detail": str(
+                    (
+                        patch_resolution.get("selected_candidate", {})
+                        if isinstance(patch_resolution.get("selected_candidate"), dict)
+                        else {}
+                    ).get("source")
+                    or "none"
+                ),
+            },
+            {
+                "check": "mutation_authority",
+                "status": "pass" if role_policy_allows_source_mutation(role_policy) else "blocked",
+                "detail": str(role_policy.get("authority") or "default_source_mutation_allowed"),
+            },
+        ],
         "diagnostics": patch_spec.get("diagnostics", {}) if isinstance(patch_spec.get("diagnostics"), dict) else {},
         "operation_count": len(patch_spec.get("operations", [])) if isinstance(patch_spec.get("operations"), list) else 0,
         "changed_files": changed_files,
@@ -1883,6 +2017,10 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "engineering_investigation": survey.get("engineering_investigation", {}) if isinstance(survey.get("engineering_investigation"), dict) else {},
         "patch_scope_evidence": patch.get("patch_scope_evidence", {}),
         "patch_source": patch.get("patch_source", ""),
+        "patch_candidates": patch.get("patch_candidates", []),
+        "selected_patch_candidate": patch.get("selected_patch_candidate", {}),
+        "source_excerpt_summary": patch.get("source_excerpt_summary", []),
+        "implementation_decision_record": patch.get("implementation_decision_record", []),
         "diagnostics": patch.get("diagnostics", {}),
         "operation_count": patch.get("operation_count", 0),
         "verification_status": verification.get("status", "unknown"),
@@ -1907,6 +2045,8 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             "changed_file_count": len(patch.get("changed_files", [])) if isinstance(patch.get("changed_files"), list) else 0,
             "verification_command_count": len(verification.get("executed", [])) if isinstance(verification.get("executed"), list) else 0,
             "repair_attempt_count": len(repair_state.get("repair_attempts", [])) if isinstance(repair_state.get("repair_attempts"), list) else 0,
+            "patch_candidate_count": len(patch.get("patch_candidates", [])) if isinstance(patch.get("patch_candidates"), list) else 0,
+            "source_excerpt_count": len(patch.get("source_excerpt_summary", [])) if isinstance(patch.get("source_excerpt_summary"), list) else 0,
             "blocker_count": len([item.get("message") for item in review.get("findings", []) if isinstance(item, dict)]),
             "revision_required": bool(review.get("revision_plan", {}).get("required")) if isinstance(review.get("revision_plan"), dict) else False,
         },

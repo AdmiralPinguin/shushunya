@@ -293,6 +293,26 @@ def main() -> int:
         plan_text = (root / "work" / "code" / "change_plan.md").read_text(encoding="utf-8")
         if "## Hypothesis Log" not in plan_text or "## Targeted Reading Plan" not in plan_text:
             raise AssertionError(f"change plan should include engineering investigation sections: {plan_text}")
+        patch_manifest = json.loads((root / "work" / "code" / "patch_manifest.json").read_text(encoding="utf-8"))
+        candidates = patch_manifest.get("patch_candidates", [])
+        if (
+            not candidates
+            or candidates[0].get("source") != "explicit_json_patch"
+            or candidates[0].get("status") != "selected"
+            or patch_manifest.get("selected_patch_candidate", {}).get("source") != "explicit_json_patch"
+        ):
+            raise AssertionError(f"implementation should preserve selected patch candidate journal: {patch_manifest}")
+        source_excerpts = patch_manifest.get("source_excerpt_pack", [])
+        if not any(item.get("path") == "sample.py" and item.get("status") == "read" for item in source_excerpts):
+            raise AssertionError(f"implementation should read targeted source excerpts: {patch_manifest}")
+        implementation_record = final.get("implementation_decision_record", [])
+        if (
+            not any(item.get("check") == "source_evidence_loaded" and item.get("status") == "pass" for item in implementation_record)
+            or final.get("selected_patch_candidate", {}).get("source") != "explicit_json_patch"
+            or final.get("execution_report", {}).get("patch_candidate_count", 0) < 1
+            or final.get("execution_report", {}).get("source_excerpt_count", 0) < 1
+        ):
+            raise AssertionError(f"final manifest should preserve implementation decision evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
@@ -607,6 +627,11 @@ def main() -> int:
             raise AssertionError(f"test-inferred arithmetic task should be ready: {final}")
         if final.get("patch_source") != "test_inferred_arithmetic_return" or final.get("operation_count") != 1:
             raise AssertionError(f"test-inferred arithmetic should expose patch audit fields: {final}")
+        if (
+            final.get("selected_patch_candidate", {}).get("source") != "test_inferred_arithmetic_return"
+            or final.get("execution_report", {}).get("patch_candidate_count", 0) < 5
+        ):
+            raise AssertionError(f"test-inferred arithmetic should preserve candidate resolution chain: {final}")
         if final.get("diagnostics", {}).get("replacement_expression") != "left + right":
             raise AssertionError(f"test-inferred arithmetic diagnostics should explain replacement: {final}")
         if "return left + right" not in calc.read_text(encoding="utf-8"):
