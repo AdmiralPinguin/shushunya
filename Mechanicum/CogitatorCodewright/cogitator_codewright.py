@@ -337,6 +337,40 @@ def invalidate_python_cache(path: Path) -> None:
         cached.unlink(missing_ok=True)
 
 
+def git_dirty_target_evidence(repo_root: Path, operations: list[Any]) -> dict[str, Any]:
+    if not (repo_root / ".git").exists():
+        return {"git_repo": False, "dirty_targets": []}
+    target_paths: list[str] = []
+    seen: set[str] = set()
+    for operation in operations:
+        if not isinstance(operation, dict):
+            continue
+        try:
+            path = safe_repo_path(repo_root, str(operation.get("path") or ""))
+        except ValueError:
+            continue
+        rel = str(path.relative_to(repo_root))
+        if rel not in seen:
+            seen.add(rel)
+            target_paths.append(rel)
+    dirty_targets: list[dict[str, Any]] = []
+    for rel in target_paths:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain", "--", rel],
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            dirty_targets.append({"path": rel, "status": "unknown", "diagnostic": completed.stderr[-1000:]})
+            continue
+        lines = [line for line in completed.stdout.splitlines() if line.strip()]
+        if lines:
+            dirty_targets.append({"path": rel, "status": "dirty", "porcelain": lines})
+    return {"git_repo": True, "target_paths": target_paths, "dirty_targets": dirty_targets}
+
+
 def target_repo_root(request: dict[str, Any]) -> Path:
     raw = str(request.get("target_repo_root") or request.get("code_workspace_root") or "").strip()
     if not raw:
@@ -1810,6 +1844,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
     repo_root = target_repo_root(request)
     excerpts = source_excerpt_pack(workspace_root, output_path, repo_root)
     patch_resolution = {"patch_spec": {}, "candidates": [], "selected_candidate": {}}
+    dirty_worktree = {"git_repo": False, "dirty_targets": []}
     try:
         patch_resolution = patch_spec_resolution_from_request(request)
         patch_spec = patch_resolution["patch_spec"] if isinstance(patch_resolution.get("patch_spec"), dict) else {}
@@ -1817,7 +1852,14 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
             if not role_policy_allows_source_mutation(role_policy):
                 blockers.append("role_policy forbids source mutation for this step")
             else:
-                changed_files.extend(apply_patch_operations_atomically(repo_root, patch_spec["operations"]))
+                operations = patch_spec["operations"] if isinstance(patch_spec.get("operations"), list) else []
+                dirty_worktree = git_dirty_target_evidence(repo_root, operations)
+                dirty_targets = dirty_worktree.get("dirty_targets") if isinstance(dirty_worktree.get("dirty_targets"), list) else []
+                if dirty_targets:
+                    dirty_paths = ", ".join(str(item.get("path")) for item in dirty_targets if isinstance(item, dict))
+                    blockers.append(f"target file has uncommitted user changes; refusing source mutation: {dirty_paths}")
+                else:
+                    changed_files.extend(apply_patch_operations_atomically(repo_root, operations))
         else:
             blockers.append(
                 "No patch candidate could be selected from explicit contract, task text, or test evidence."
@@ -1843,6 +1885,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "role_policy": role_policy,
         "task_profile": task_profile,
         "worker_brief": worker_brief,
+        "dirty_worktree": dirty_worktree,
         "patch_spec_present": bool(patch_spec),
         "patch_source": str(patch_spec.get("source") or "explicit_json_patch") if patch_spec else "",
         "patch_candidates": patch_resolution.get("candidates", []) if isinstance(patch_resolution.get("candidates"), list) else [],
@@ -2282,6 +2325,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "patch_source": patch.get("patch_source", ""),
         "patch_candidates": patch.get("patch_candidates", []),
         "selected_patch_candidate": patch.get("selected_patch_candidate", {}),
+        "dirty_worktree": patch.get("dirty_worktree", {}),
         "source_excerpt_summary": patch.get("source_excerpt_summary", []),
         "implementation_decision_record": patch.get("implementation_decision_record", []),
         "diagnostics": patch.get("diagnostics", {}),

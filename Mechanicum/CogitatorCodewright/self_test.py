@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -138,6 +139,24 @@ CERAXIA_PATCH:
     }
   ],
   "verification_commands": ["python -m py_compile created_before_failure.py"]
+}
+"""
+
+
+def dirty_worktree_goal() -> str:
+    return """кодовая задача: не перетирай пользовательские изменения
+
+CERAXIA_PATCH:
+{
+  "operations": [
+    {
+      "type": "replace",
+      "path": "settings.py",
+      "old": "return 30",
+      "new": "return 60"
+    }
+  ],
+  "verification_commands": ["python -m py_compile settings.py"]
 }
 """
 
@@ -702,6 +721,31 @@ def main() -> int:
         rollback = patch_manifest.get("rollback", {})
         if not rollback.get("applied") or rollback.get("files", [{}])[0].get("path") != "created_before_failure.py":
             raise AssertionError(f"partial patch failure should record rollback evidence: {patch_manifest}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        settings = target_repo / "settings.py"
+        settings.write_text("def timeout_seconds():\n    return 30\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=target_repo, check=True)
+        subprocess.run(["git", "config", "user.email", "ceraxia-test@example.invalid"], cwd=target_repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Ceraxia Test"], cwd=target_repo, check=True)
+        subprocess.run(["git", "add", "settings.py"], cwd=target_repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=target_repo, check=True)
+        settings.write_text(
+            "def timeout_seconds():\n"
+            "    # user local experiment, must not be overwritten\n"
+            "    return 45\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=dirty_worktree_goal(), target_repo_root=target_repo)
+        if final.get("status") != "blocked" or not any("uncommitted user changes" in item for item in final.get("blockers", [])):
+            raise AssertionError(f"dirty worktree target should block mutation with safety evidence: {final}")
+        if "return 45" not in settings.read_text(encoding="utf-8"):
+            raise AssertionError("dirty worktree guard overwrote user changes")
+        dirty = final.get("dirty_worktree", {})
+        if not dirty.get("dirty_targets") or dirty.get("dirty_targets", [{}])[0].get("path") != "settings.py":
+            raise AssertionError(f"dirty worktree evidence missing target path: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
