@@ -10,6 +10,11 @@
 - Ceraxia exposes task profiling, risk flags, worker specialization briefs,
   dispatch-level worker briefs, and Warmaster-visible final execution reports
   for code tasks.
+- Ceraxia code workers now preserve engineering investigation records: import
+  dependency graph, simple call graph, targeted reading plan, hypothesis log,
+  design-decision seed, review decision records, and focused revision context.
+- Ceraxia can infer a narrow arithmetic return-expression patch from a
+  two-argument unittest assertion when the candidate is unique and verified.
 
 ## Working
 

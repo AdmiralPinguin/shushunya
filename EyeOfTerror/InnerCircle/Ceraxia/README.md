@@ -50,6 +50,10 @@ suggests safe verification commands from discovered test files. `MagosStrategos`
 includes those symbol and verification sections in the change plan. The repo
 map also includes `recommended_read_order`, a ranked source/test inspection
 sequence that patch workers should consume before mutation.
+The repository survey now records `engineering_investigation`: import
+dependency edges, simple AST call edges, targeted reading questions, hypothesis
+logs, and design-decision seed rules. `MagosStrategos` writes those sections
+into `change_plan.md`, and final manifests preserve them for Warmaster review.
 
 `FerrumPatchwright` can apply explicit patch operations embedded in the task:
 
@@ -108,6 +112,10 @@ Final manifests preserve an `execution_report` with task profile, worker brief
 presence, changed-file count, verification command count, repair attempt count,
 blocker count, and revision requirement. Warmaster compact run summaries expose
 the same code-task evidence through `final_manifest_summary`.
+`JudicatorCodicis` also writes a `review_decision_record`, including patch
+application, verification, scope review, and diagnostic-linkage checks. Blocked
+reviews preserve focused revision context with changed files, failed commands,
+candidate source paths, patch source, and diagnostics.
 
 Verification commands run without a shell and must match Ceraxia's allowlist:
 `pytest`, `python -m pytest`, `python -m unittest`, or
@@ -205,3 +213,8 @@ Another narrow repair handles `ImportError: cannot import name 'f' from 'm'`
 when the changed file is `m.py` and stderr or target test files expose exactly
 one `assertEqual(f(), literal)`: Ceraxia appends
 `def f(): return literal`, reruns verification, and records the repair.
+
+For small arithmetic unittest tasks, Ceraxia can infer a return-expression patch
+from exactly one two-argument `assertEqual(function(a, b), expected)` when the
+target function exists and a single arithmetic expression (`+`, `-`, reversed
+`-`, or `*`) uniquely satisfies the observed expectation.
