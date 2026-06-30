@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -149,6 +150,117 @@ def step_role_policy(step_id: str) -> dict[str, Any]:
     )
 
 
+def classify_code_task(goal: str) -> dict[str, Any]:
+    lowered = goal.lower()
+    markers = {
+        "explicit_patch": ["ceraxia_patch", "ceraxia_replace_in_file", "ceraxia_create_file", "ceraxia_files"],
+        "test_repair": ["почини тест", "fix test", "pytest", "unittest", "assert", "traceback", "ошибка тест"],
+        "api_contract": ["api", "endpoint", "contract", "schema", "http", "request", "response"],
+        "multi_file": ["multi-file", "несколько файлов", "ceraxia_files", "files", "package", "module"],
+        "new_feature": ["добавь", "add ", "implement", "feature", "создай", "create"],
+        "bugfix": ["почини", "fix", "bug", "ошибка", "исправь", "repair"],
+    }
+    detected = [
+        kind
+        for kind, needles in markers.items()
+        if any(needle in lowered for needle in needles)
+    ]
+    if not detected:
+        detected = ["general_code_change"]
+    complexity_score = 1
+    if "multi_file" in detected:
+        complexity_score += 2
+    if "test_repair" in detected:
+        complexity_score += 1
+    if "api_contract" in detected:
+        complexity_score += 1
+    if len(re.findall(r"`[^`]+`", goal)) >= 4:
+        complexity_score += 1
+    if len(goal) > 1500:
+        complexity_score += 1
+    complexity = "high" if complexity_score >= 5 else ("medium" if complexity_score >= 3 else "low")
+    required_governor_checks = [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+    ]
+    if "test_repair" in detected:
+        required_governor_checks.append("test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair")
+    if "multi_file" in detected:
+        required_governor_checks.append("multi-file tasks must keep changed-file scope evidence for every mutated file")
+    if "api_contract" in detected:
+        required_governor_checks.append("API/contract tasks must preserve public response shape and schema compatibility evidence")
+    return {
+        "kinds": detected,
+        "complexity": complexity,
+        "complexity_score": complexity_score,
+        "risk_flags": [
+            flag
+            for flag, enabled in {
+                "multi_file_scope_drift": "multi_file" in detected,
+                "test_diagnostic_required": "test_repair" in detected,
+                "public_contract_regression": "api_contract" in detected,
+                "natural_language_patch_inference": "explicit_patch" not in detected,
+            }.items()
+            if enabled
+        ],
+        "required_governor_checks": required_governor_checks,
+    }
+
+
+def worker_specialization_briefs(contract: TaskContract, task_profile: dict[str, Any]) -> list[dict[str, Any]]:
+    by_step = {
+        "repository_survey": {
+            "brief": "Map the repository before anyone edits it.",
+            "must_produce": ["repo_map", "candidate_files", "test_files", "recommended_read_order"],
+            "handoff_question": "Which files should the strategist inspect first, and why?",
+        },
+        "change_planning": {
+            "brief": "Convert repo evidence into a scoped implementation plan.",
+            "must_produce": ["candidate file rationale", "test surface", "verification suggestions", "risk notes"],
+            "handoff_question": "What is the narrowest safe patch path?",
+        },
+        "implementation": {
+            "brief": "Apply only explicit or safely inferred scoped patch operations.",
+            "must_produce": ["patch_source", "operation_count", "changed_files", "rollback"],
+            "handoff_question": "What exactly changed, and what should verification run?",
+        },
+        "verification": {
+            "brief": "Run allowlisted checks and perform only narrow repair loops.",
+            "must_produce": ["executed commands", "repair_loop_state", "failed_commands", "candidate_source_paths"],
+            "handoff_question": "Did checks pass after repair, or what blocks review?",
+        },
+        "code_review": {
+            "brief": "Judge scope, evidence, verification, and revision needs.",
+            "must_produce": ["approved flag", "findings", "patch_scope_review", "revision_plan"],
+            "handoff_question": "Can the final packager mark this ready?",
+        },
+        "finalize": {
+            "brief": "Package final evidence for Warmaster and chat clients.",
+            "must_produce": ["deliverables", "execution_report", "next_safe_action", "blockers"],
+            "handoff_question": "What should the operator or Warmaster do next?",
+        },
+    }
+    briefs: list[dict[str, Any]] = []
+    for step in contract.worker_plan:
+        defaults = by_step.get(step.step_id, {})
+        briefs.append(
+            {
+                "step_id": step.step_id,
+                "worker": step.worker,
+                "purpose": step.purpose,
+                "brief": defaults.get("brief", step.purpose),
+                "task_profile": task_profile,
+                "must_produce": defaults.get("must_produce", step.expected_artifacts),
+                "handoff_question": defaults.get("handoff_question", "What evidence should the next step consume?"),
+                "authority_boundary": step_role_policy(step.step_id).get("authority", ""),
+            }
+        )
+    return briefs
+
+
 def step_quality_matrix(contract: TaskContract) -> list[dict[str, Any]]:
     final_steps = ["code_review", "finalize"]
     matrix: list[dict[str, Any]] = []
@@ -241,6 +353,8 @@ def patch_contract_capabilities() -> dict[str, Any]:
 
 def oversight_plan(contract: TaskContract) -> dict[str, Any]:
     planned_step_ids = [step.step_id for step in contract.worker_plan]
+    task_profile = classify_code_task(contract.goal)
+    specialization_briefs = worker_specialization_briefs(contract, task_profile)
     artifacts_by_role = {
         "survey": [artifact for artifact in contract.required_artifacts if artifact.endswith("/repo_survey.json")],
         "plan": [artifact for artifact in contract.required_artifacts if artifact.endswith("/change_plan.md")],
@@ -265,6 +379,8 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
         "non_goals": contract.non_goals,
         "artifact_roles": artifacts_by_role,
         "handoffs": handoffs,
+        "task_profile": task_profile,
+        "worker_specialization_briefs": specialization_briefs,
         "step_quality_matrix": step_quality_matrix(contract),
         "final_review": {
             "critic_step": "code_review",
@@ -306,6 +422,13 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
                 "patch intent is traceable to task scope",
                 "final package files exist and are readable",
             ],
+        },
+        "reporting_policy": {
+            "requires_worker_briefs": True,
+            "requires_execution_report": True,
+            "requires_changed_file_scope_evidence": True,
+            "requires_command_evidence": True,
+            "requires_blocker_visibility": True,
         },
         "patch_contract": patch_contract_capabilities(),
     }
@@ -381,6 +504,8 @@ class CeraxiaPlan:
 
     def to_dict(self) -> dict[str, Any]:
         contract = self.contract.to_dict()
+        task_profile = classify_code_task(self.contract.goal)
+        specialization_briefs = worker_specialization_briefs(self.contract, task_profile)
         validation_errors = validate_task_contract_payload(contract)
         missing_workers: list[str] = []
         unavailable_workers: list[dict[str, Any]] = []
@@ -415,6 +540,8 @@ class CeraxiaPlan:
             "contract": contract,
             "validation": {"ok": not validation_errors, "errors": validation_errors},
             "pipeline": pipeline_status(self.contract, build_dispatch_packets(self.contract)),
+            "task_profile": task_profile,
+            "worker_specialization_briefs": specialization_briefs,
             "patch_contract": patch_contract_capabilities(),
             "resolved_workers": resolved_workers,
             "missing_workers": missing_workers,

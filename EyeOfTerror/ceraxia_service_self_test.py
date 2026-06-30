@@ -53,6 +53,8 @@ def main() -> int:
         or oversight.get("final_review", {}).get("critic_step") != "code_review"
         or oversight.get("revision_policy", {}).get("final_steps") != ["code_review", "finalize"]
         or len(oversight.get("step_quality_matrix", [])) != 6
+        or oversight.get("task_profile", {}).get("complexity") not in {"low", "medium", "high"}
+        or len(oversight.get("worker_specialization_briefs", [])) != 6
         or "multi_file_json_marker" not in oversight.get("patch_contract", {}).get("synthesis_modes", [])
     ):
         raise AssertionError(f"bad Ceraxia oversight template: {oversight}")
@@ -68,6 +70,12 @@ def main() -> int:
     ):
         raise AssertionError(f"bad Ceraxia role policies: {oversight}")
     local_plan = plan_code_task("почини python приложение", task_id="ceraxia-local-plan-test").to_dict()
+    if (
+        local_plan.get("task_profile", {}).get("kinds") != ["bugfix"]
+        or len(local_plan.get("worker_specialization_briefs", [])) != 6
+        or local_plan.get("worker_specialization_briefs", [])[2].get("worker") != "FerrumPatchwright"
+    ):
+        raise AssertionError(f"Ceraxia plan should expose task profile and worker briefs: {local_plan}")
     patch_contract = local_plan.get("patch_contract", {})
     if (
         "CERAXIA_FILES" not in patch_contract.get("input_markers", [])
@@ -105,6 +113,7 @@ def main() -> int:
                 capabilities.get("governor") != "Ceraxia"
                 or capabilities.get("summary", {}).get("step_count") != 6
                 or capabilities.get("worker_availability", {}).get("ok") is not True
+                or len(capabilities.get("worker_specialization_briefs", [])) != 6
                 or "write_file" not in capabilities.get("patch_contract", {}).get("operation_types", [])
             ):
                 raise AssertionError(f"bad capabilities: {capabilities}")
@@ -114,6 +123,8 @@ def main() -> int:
                 or plan.get("contract", {}).get("assigned_governor") != "Ceraxia"
                 or plan.get("pipeline", {}).get("step_count") != 6
                 or plan.get("phase") != "plan_ready"
+                or plan.get("task_profile", {}).get("kinds") != ["bugfix"]
+                or plan.get("worker_specialization_briefs", [])[5].get("worker") != "SealwrightFinalis"
                 or plan.get("actions", {}).get("next_action", {}).get("kind") != "prepare_run"
                 or "explicit_json_patch" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or "natural_language_simple_replace" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
@@ -135,6 +146,14 @@ def main() -> int:
                 or not (run_dir / "oversight.json").exists()
             ):
                 raise AssertionError(f"bad prepared run: {prepared}")
+            implementation_dispatch = json.loads((run_dir / "dispatch" / "implementation.json").read_text(encoding="utf-8"))
+            expectations = implementation_dispatch.get("request", {}).get("quality_expectations", {})
+            if (
+                expectations.get("task_profile", {}).get("kinds") != ["bugfix"]
+                or expectations.get("worker_brief", {}).get("worker") != "FerrumPatchwright"
+                or not expectations.get("worker_brief", {}).get("must_produce")
+            ):
+                raise AssertionError(f"Ceraxia dispatch should carry task profile and worker brief: {implementation_dispatch}")
             try:
                 request_json(
                     base + "/prepare_run",

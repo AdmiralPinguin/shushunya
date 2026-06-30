@@ -7,6 +7,9 @@
 - Parked: standalone ShushunyaAgent stress testing and AgentArena tuning. Do
   not switch back to ShushunyaAgent from old context unless the user gives a
   fresh explicit ShushunyaAgent task.
+- Ceraxia exposes task profiling, risk flags, worker specialization briefs,
+  dispatch-level worker briefs, and Warmaster-visible final execution reports
+  for code tasks.
 
 ## Working
 

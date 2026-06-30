@@ -66,6 +66,22 @@ CERAXIA_PATCH:
             raise AssertionError(f"Ceraxia final manifest should preserve repair loop state: {manifest}")
         if manifest.get("role_policies", {}).get("verification", {}).get("authority") != "allowlisted_verification_and_narrow_repairs":
             raise AssertionError(f"Ceraxia final manifest should preserve role policies: {manifest}")
+        execution_report = manifest.get("execution_report", {})
+        if (
+            manifest.get("task_profile", {}).get("kinds") != ["explicit_patch", "bugfix"]
+            or not execution_report.get("worker_briefs_present", {}).get("implementation")
+            or execution_report.get("verification_command_count", 0) < 2
+            or execution_report.get("changed_file_count") != 1
+        ):
+            raise AssertionError(f"Ceraxia final manifest should preserve profile/report evidence: {manifest}")
+        summary_manifest = result.get("run_summary", {}).get("final_manifest_summary", {})
+        if (
+            summary_manifest.get("patch_source") != "explicit_json_patch"
+            or summary_manifest.get("task_profile", {}).get("kinds") != ["explicit_patch", "bugfix"]
+            or summary_manifest.get("execution_report", {}).get("changed_file_count") != 1
+            or summary_manifest.get("next_safe_action") != "inspect_final_package"
+        ):
+            raise AssertionError(f"Warmaster summary should expose Ceraxia final evidence: {result}")
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
         target_repo = temp_root / "repo"
@@ -341,6 +357,13 @@ CERAXIA_FILES:
             raise AssertionError("Ceraxia multi-file pipeline did not write both target files")
         if manifest.get("verification_summary", {}).get("executed_count", 0) < 2:
             raise AssertionError(f"Ceraxia multi-file manifest lacks verification evidence: {manifest}")
+        if (
+            manifest.get("task_profile", {}).get("complexity") not in {"medium", "high"}
+            or "multi_file" not in manifest.get("task_profile", {}).get("kinds", [])
+            or manifest.get("execution_report", {}).get("changed_file_count") != 2
+            or not manifest.get("execution_report", {}).get("worker_briefs_present", {}).get("finalize")
+        ):
+            raise AssertionError(f"Ceraxia multi-file manifest lacks task profile/report evidence: {manifest}")
         repeated_task_id = "ceraxia-multi-file-marker-pipeline-repeat"
         repeated_prepared = prepare_task(task, repeated_task_id, run_root, governor_transport="local")
         if not repeated_prepared.get("ok") or repeated_prepared.get("governor") != "Ceraxia":

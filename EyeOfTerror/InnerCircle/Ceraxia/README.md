@@ -82,6 +82,13 @@ The governor exposes the same machine-readable `patch_contract` through
 markers, patch operation types, verification allowlist entries, safety gates,
 and narrow repair loops for Warmaster and client-side planning.
 
+Ceraxia also exposes a machine-readable `task_profile` and
+`worker_specialization_briefs` through `/capabilities`, `/plan`, oversight, and
+dispatch packets. The profile classifies code-task kinds, complexity, risk
+flags, and required governor checks. Each worker brief states the worker's
+concrete duty, required evidence, handoff question, and authority boundary for
+the current task.
+
 Patch and final manifests expose `patch_source` and `operation_count`, so
 callers can distinguish explicit JSON patches from marker-synthesized or
 natural-language-inferred patches. Test-inferred patches also expose
@@ -96,6 +103,11 @@ changes pass as covered, unmapped files or source files without linked tests are
 reported as warnings for manual review. Final packages preserve
 `recommended_read_order` and `patch_scope_review` so the governor can inspect
 scope and test evidence without reopening every intermediate artifact.
+
+Final manifests preserve an `execution_report` with task profile, worker brief
+presence, changed-file count, verification command count, repair attempt count,
+blocker count, and revision requirement. Warmaster compact run summaries expose
+the same code-task evidence through `final_manifest_summary`.
 
 Verification commands run without a shell and must match Ceraxia's allowlist:
 `pytest`, `python -m pytest`, `python -m unittest`, or

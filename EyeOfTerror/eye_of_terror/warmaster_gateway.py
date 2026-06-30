@@ -1627,6 +1627,8 @@ def compact_oversight_summary(oversight: dict[str, Any]) -> dict[str, Any]:
     final_review = oversight.get("final_review") if isinstance(oversight.get("final_review"), dict) else {}
     revision_policy = oversight.get("revision_policy") if isinstance(oversight.get("revision_policy"), dict) else {}
     iteration_policy = oversight.get("iteration_policy") if isinstance(oversight.get("iteration_policy"), dict) else {}
+    task_profile = oversight.get("task_profile") if isinstance(oversight.get("task_profile"), dict) else {}
+    worker_briefs = oversight.get("worker_specialization_briefs") if isinstance(oversight.get("worker_specialization_briefs"), list) else []
     quality_gates = oversight.get("quality_gates") if isinstance(oversight.get("quality_gates"), list) else []
     completion_criteria = oversight.get("completion_criteria") if isinstance(oversight.get("completion_criteria"), list) else []
     handoffs = oversight.get("handoffs") if isinstance(oversight.get("handoffs"), list) else []
@@ -1643,6 +1645,12 @@ def compact_oversight_summary(oversight: dict[str, Any]) -> dict[str, Any]:
             if isinstance(item, dict)
         ),
         "step_quality_matrix_count": len(step_quality_matrix),
+        "task_profile": {
+            "kinds": task_profile.get("kinds", []) if isinstance(task_profile.get("kinds"), list) else [],
+            "complexity": str(task_profile.get("complexity") or ""),
+            "risk_flags": task_profile.get("risk_flags", []) if isinstance(task_profile.get("risk_flags"), list) else [],
+        },
+        "worker_specialization_brief_count": len(worker_briefs),
         "artifact_roles": {
             "draft": artifact_roles.get("draft", []),
             "critic": artifact_roles.get("critic", []),
@@ -3063,6 +3071,14 @@ def compact_manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:
         "package_file_errors": manifest.get("package_file_errors", []) if isinstance(manifest.get("package_file_errors"), list) else [],
         "readiness_checks": manifest.get("readiness_checks", {}) if isinstance(manifest.get("readiness_checks"), dict) else {},
         "revision_focus": manifest.get("revision_focus", {}),
+        "task_profile": manifest.get("task_profile", {}) if isinstance(manifest.get("task_profile"), dict) else {},
+        "execution_report": manifest.get("execution_report", {}) if isinstance(manifest.get("execution_report"), dict) else {},
+        "patch_source": str(manifest.get("patch_source") or ""),
+        "operation_count": int(manifest.get("operation_count") or 0),
+        "verification_status": str(manifest.get("verification_status") or ""),
+        "verification_summary": manifest.get("verification_summary", {}) if isinstance(manifest.get("verification_summary"), dict) else {},
+        "review_status": str(manifest.get("review_status") or ""),
+        "next_safe_action": str(manifest.get("next_safe_action") or ""),
         "warning_count": len(warnings),
         "blocker_count": len(blockers),
         "file_count": len(files),

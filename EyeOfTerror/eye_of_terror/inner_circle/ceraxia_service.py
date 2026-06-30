@@ -89,6 +89,8 @@ def service_capabilities() -> dict[str, Any]:
         "pipeline": pipeline,
         "patch_contract": patch_contract_capabilities(),
         "oversight": oversight,
+        "task_profile": capability_plan.get("task_profile", {}),
+        "worker_specialization_briefs": capability_plan.get("worker_specialization_briefs", []),
         "summary": {
             "pipeline_kind": str(pipeline.get("kind") or ""),
             "step_count": int(pipeline.get("step_count") or 0),
@@ -97,6 +99,7 @@ def service_capabilities() -> dict[str, Any]:
             "handoff_count": len(oversight.get("handoffs") if isinstance(oversight.get("handoffs"), list) else []),
             "step_quality_matrix_count": len(oversight.get("step_quality_matrix") if isinstance(oversight.get("step_quality_matrix"), list) else []),
             "worker_availability_ok": not capability_plan.get("missing_workers") and not capability_plan.get("unavailable_workers"),
+            "task_profile_complexity": str(capability_plan.get("task_profile", {}).get("complexity", "")) if isinstance(capability_plan.get("task_profile"), dict) else "",
         },
         "display": {
             "headline": "Ceraxia capabilities",

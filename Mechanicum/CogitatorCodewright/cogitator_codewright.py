@@ -102,6 +102,18 @@ def role_policy_from_request(request: dict[str, Any]) -> dict[str, Any]:
     return role_policy
 
 
+def task_profile_from_request(request: dict[str, Any]) -> dict[str, Any]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    profile = expectations.get("task_profile") if isinstance(expectations.get("task_profile"), dict) else {}
+    return profile
+
+
+def worker_brief_from_request(request: dict[str, Any]) -> dict[str, Any]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    brief = expectations.get("worker_brief") if isinstance(expectations.get("worker_brief"), dict) else {}
+    return brief
+
+
 def role_policy_allows_source_mutation(role_policy: dict[str, Any]) -> bool:
     return not role_policy or role_policy.get("may_mutate_source") is not False
 
@@ -1045,6 +1057,8 @@ def run_repository_survey(request: dict[str, Any], workspace_root: Path, output_
     goal = request_goal(request)
     survey = repo_survey(target_repo_root(request), goal)
     survey["role_policy"] = role_policy_from_request(request)
+    survey["task_profile"] = task_profile_from_request(request)
+    survey["worker_brief"] = worker_brief_from_request(request)
     write_json(workspace_root, output_path, survey)
     return {
         "ok": True,
@@ -1061,6 +1075,8 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
     survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
     goal = request_goal(request) or str(survey.get("goal") or "")
     role_policy = role_policy_from_request(request)
+    task_profile = task_profile_from_request(request)
+    worker_brief = worker_brief_from_request(request)
     candidates = survey.get("candidate_files") if isinstance(survey.get("candidate_files"), list) else []
     tests = survey.get("test_files") if isinstance(survey.get("test_files"), list) else []
     symbols = survey.get("python_symbols") if isinstance(survey.get("python_symbols"), list) else []
@@ -1131,6 +1147,22 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             "- Produce an auditable patch manifest before mutating source files.",
             "- Require verification commands or explicit blockers before final readiness.",
             "",
+            "## Task Profile",
+            f"- kinds: {', '.join(str(item) for item in task_profile.get('kinds', [])) if isinstance(task_profile.get('kinds'), list) else ''}",
+            f"- complexity: {task_profile.get('complexity', '')}",
+            *[
+                f"- risk: {item}"
+                for item in (task_profile.get("risk_flags") if isinstance(task_profile.get("risk_flags"), list) else [])
+            ],
+            "",
+            "## Worker Brief",
+            f"- brief: {worker_brief.get('brief', '')}",
+            f"- handoff_question: {worker_brief.get('handoff_question', '')}",
+            *[
+                f"- must_produce: {item}"
+                for item in (worker_brief.get("must_produce") if isinstance(worker_brief.get("must_produce"), list) else [])
+            ],
+            "",
             "## Role Policy",
             f"- role: {role_policy.get('role', '')}",
             f"- authority: {role_policy.get('authority', '')}",
@@ -1156,6 +1188,8 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
 def run_implementation(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     plan = read_text_optional(workspace_root, sibling_artifact(output_path, "change_plan.md"))
     role_policy = role_policy_from_request(request)
+    task_profile = task_profile_from_request(request)
+    worker_brief = worker_brief_from_request(request)
     blockers: list[str] = []
     changed_files: list[dict[str, Any]] = []
     rolled_back_files: list[dict[str, Any]] = []
@@ -1191,6 +1225,8 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         ],
         "plan_excerpt": plan[:3000],
         "role_policy": role_policy,
+        "task_profile": task_profile,
+        "worker_brief": worker_brief,
         "patch_spec_present": bool(patch_spec),
         "patch_source": str(patch_spec.get("source") or "explicit_json_patch") if patch_spec else "",
         "diagnostics": patch_spec.get("diagnostics", {}) if isinstance(patch_spec.get("diagnostics"), dict) else {},
@@ -1225,6 +1261,8 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
 def run_verification(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     role_policy = role_policy_from_request(request)
+    task_profile = task_profile_from_request(request)
+    worker_brief = worker_brief_from_request(request)
     blockers = [str(item) for item in patch.get("blockers", [])] if isinstance(patch.get("blockers"), list) else []
     executed: list[dict[str, Any]] = []
     repo_root = target_repo_root(request)
@@ -1336,6 +1374,8 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         "status": "blocked" if blockers else "passed",
         "task_id": request.get("task_id"),
         "role_policy": role_policy,
+        "task_profile": task_profile,
+        "worker_brief": worker_brief,
         "commands": [
             "python -m py_compile <changed .py files>",
             "git diff --check",
@@ -1355,6 +1395,8 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         "status": "blocked" if blockers else "passed",
         "task_id": request.get("task_id"),
         "role_policy": role_policy,
+        "task_profile": task_profile,
+        "worker_brief": worker_brief,
         "repairs_allowed": repairs_allowed,
         "repair_attempts": repairs,
         "blocked_repairs": blocked_repairs,
@@ -1383,6 +1425,8 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
     repair_state = load_json_optional(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"))
     role_policy = role_policy_from_request(request)
+    task_profile = task_profile_from_request(request)
+    worker_brief = worker_brief_from_request(request)
     blockers = verification.get("blockers") if isinstance(verification.get("blockers"), list) else []
     warnings = verification.get("warnings") if isinstance(verification.get("warnings"), list) else []
     scope = patch.get("patch_scope_evidence") if isinstance(patch.get("patch_scope_evidence"), dict) else {}
@@ -1415,6 +1459,8 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "status": "blocked" if blockers else "passed",
         "approved": not blockers,
         "role_policy": role_policy,
+        "task_profile": task_profile,
+        "worker_brief": worker_brief,
         "repair_loop_status": repair_state.get("status", "unknown"),
         "patch_scope_review": scope_review,
         "findings": [
@@ -1467,11 +1513,15 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
     repair_state = load_json_optional(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"))
     review = load_json_optional(workspace_root, sibling_artifact(output_path, "code_review.json"))
     role_policy = role_policy_from_request(request)
+    task_profile = task_profile_from_request(request)
+    worker_brief = worker_brief_from_request(request)
     status = "blocked" if review.get("approved") is False else "ready"
     manifest = {
         "status": status,
         "approved": review.get("approved") is True,
         "role_policy": role_policy,
+        "task_profile": task_profile,
+        "worker_brief": worker_brief,
         "role_policies": {
             "implementation": patch.get("role_policy", {}),
             "verification": verification.get("role_policy", {}),
@@ -1501,6 +1551,21 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             "executed_count": len(verification.get("executed", [])) if isinstance(verification.get("executed"), list) else 0,
             "repair_count": len(verification.get("repairs", [])) if isinstance(verification.get("repairs"), list) else 0,
             "blocker_count": len(verification.get("blockers", [])) if isinstance(verification.get("blockers"), list) else 0,
+        },
+        "execution_report": {
+            "task_profile": task_profile,
+            "worker_briefs_present": {
+                "repository_survey": bool(load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json")).get("worker_brief")),
+                "implementation": bool(patch.get("worker_brief")),
+                "verification": bool(verification.get("worker_brief")),
+                "code_review": bool(review.get("worker_brief")),
+                "finalize": bool(worker_brief),
+            },
+            "changed_file_count": len(patch.get("changed_files", [])) if isinstance(patch.get("changed_files"), list) else 0,
+            "verification_command_count": len(verification.get("executed", [])) if isinstance(verification.get("executed"), list) else 0,
+            "repair_attempt_count": len(repair_state.get("repair_attempts", [])) if isinstance(repair_state.get("repair_attempts"), list) else 0,
+            "blocker_count": len([item.get("message") for item in review.get("findings", []) if isinstance(item, dict)]),
+            "revision_required": bool(review.get("revision_plan", {}).get("required")) if isinstance(review.get("revision_plan"), dict) else False,
         },
         "review_status": review.get("status", "unknown"),
         "patch_scope_review": review.get("patch_scope_review", {}),
