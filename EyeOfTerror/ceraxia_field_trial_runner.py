@@ -297,6 +297,19 @@ def fixture_large_file_restraint(repo: Path) -> str:
     )
 
 
+def fixture_repair_after_bad_first_patch(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    return f"""кодовая задача: примени первый патч, проверь, затем исправь только нужную строку если verification покажет syntax error.
+CERAXIA_TARGET_REPO: {repo}
+CERAXIA_CREATE_FILE: repair_me.py
+CERAXIA_FILE_CONTENT:
+def repaired_value()
+    return 42
+
+CERAXIA_VERIFY: python -m py_compile repair_me.py
+"""
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
@@ -306,6 +319,7 @@ FIXTURES = {
     "ceraxia-field-multifile-feature": fixture_multifile_feature,
     "ceraxia-field-negative-test": fixture_negative_test,
     "ceraxia-field-refactor-preserve-behavior": fixture_refactor_preserve_behavior,
+    "ceraxia-field-repair-after-bad-first-patch": fixture_repair_after_bad_first_patch,
     "ceraxia-field-safety-dirty-worktree": fixture_safety_dirty_worktree,
 }
 
@@ -335,6 +349,20 @@ def sha256_text(path: Path) -> str:
 
 
 def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    if trial_id == "ceraxia-field-repair-after-bad-first-patch":
+        repair_me = repo / "repair_me.py"
+        verification = manifest.get("verification_summary") if isinstance(manifest.get("verification_summary"), dict) else {}
+        repair_count = verification.get("repair_count")
+        content = repair_me.read_text(encoding="utf-8") if repair_me.exists() else ""
+        return {
+            "repair_after_bad_first_patch": {
+                "repair_count": repair_count,
+                "file_path": "repair_me.py",
+                "contains_repaired_signature": "def repaired_value():\n" in content,
+                "contains_expected_return": "return 42" in content,
+                "passed": repair_count == 1 and "def repaired_value():\n" in content and "return 42" in content,
+            }
+        }
     if trial_id != "ceraxia-field-large-file-restraint":
         return {}
     generated_path = repo / "generated" / "huge_report.json"

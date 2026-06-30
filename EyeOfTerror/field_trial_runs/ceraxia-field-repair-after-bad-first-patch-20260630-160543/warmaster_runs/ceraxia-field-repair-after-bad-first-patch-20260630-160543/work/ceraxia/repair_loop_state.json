@@ -1,0 +1,94 @@
+{
+  "status": "passed",
+  "task_id": "ceraxia-field-repair-after-bad-first-patch-20260630-160543:verification",
+  "role_policy": {
+    "role": "verifier",
+    "authority": "allowlisted_verification_and_narrow_repairs",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "verification_executed",
+      "verification_blockers",
+      "verification_repairs"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unallowlisted_command",
+      "broad_unscoped_rewrite"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "explicit_patch",
+      "new_feature",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 1,
+    "risk_flags": [],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "verification",
+    "worker": "OrdinatusVerifier",
+    "purpose": "Define and record the verification commands or blockers for the implementation.",
+    "brief": "Run allowlisted checks and perform only narrow repair loops.",
+    "task_profile": {
+      "kinds": [
+        "explicit_patch",
+        "new_feature",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 1,
+      "risk_flags": [],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action"
+      ]
+    },
+    "must_produce": [
+      "executed commands",
+      "repair_loop_state",
+      "failed_commands",
+      "candidate_source_paths"
+    ],
+    "handoff_question": "Did checks pass after repair, or what blocks review?",
+    "authority_boundary": "allowlisted_verification_and_narrow_repairs"
+  },
+  "repairs_allowed": true,
+  "repair_attempts": [
+    {
+      "applied": true,
+      "kind": "expected_colon",
+      "path": "repair_me.py",
+      "line": 1,
+      "before_sha256": "6f1ac6f54e0bbb3a835689f6825c2bb3aef3925f3fc040465bd03c7a4a39d8dd",
+      "after_sha256": "73430f82cf3aa626071c42b947d573c250d62877d20351fd908b698596e78e17"
+    }
+  ],
+  "blocked_repairs": [],
+  "commands_executed_count": 3,
+  "failed_commands": [
+    {
+      "command": "/usr/bin/python3 -m py_compile repair_me.py",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "  File \"repair_me.py\", line 1\n    def repaired_value()\n                        ^\nSyntaxError: expected ':'\n"
+    }
+  ],
+  "candidate_source_paths": [
+    "repair_me.py"
+  ],
+  "pending_blockers": [],
+  "next_action": "continue_to_code_review",
+  "summary": "Repair loop state recorded for verification step."
+}

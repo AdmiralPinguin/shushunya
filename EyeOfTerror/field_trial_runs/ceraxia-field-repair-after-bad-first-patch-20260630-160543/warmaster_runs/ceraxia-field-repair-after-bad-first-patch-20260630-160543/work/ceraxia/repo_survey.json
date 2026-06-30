@@ -1,0 +1,182 @@
+{
+  "repo_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-field-repair-after-bad-first-patch-20260630-160543/fixture/repo",
+  "goal": "кодовая задача: примени первый патч, проверь, затем исправь только нужную строку если verification покажет syntax error.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-field-repair-after-bad-first-patch-20260630-160543/fixture/repo\nCERAXIA_CREATE_FILE: repair_me.py\nCERAXIA_FILE_CONTENT:\ndef repaired_value()\n    return 42\n\nCERAXIA_VERIFY: python -m py_compile repair_me.py",
+  "total_files_scanned": 0,
+  "dominant_extensions": [],
+  "candidate_files": [],
+  "test_files": [],
+  "python_symbols": [],
+  "suggested_verification_commands": [],
+  "repo_map": {
+    "ranked_files": [],
+    "test_source_links": [],
+    "recommended_read_order": [],
+    "notes": [
+      "ranked_files combines goal filename matches, symbol matches, test surfaces, and test-to-source imports",
+      "test_source_links are derived from static Python imports and are advisory, not proof of coverage",
+      "recommended_read_order lists files to inspect before patch planning or source mutation"
+    ]
+  },
+  "engineering_investigation": {
+    "dependency_graph": {
+      "edges": [],
+      "reverse_dependents": {},
+      "edge_count": 0
+    },
+    "call_graph": {
+      "edges": [],
+      "edge_count": 0,
+      "known_function_count": 0
+    },
+    "targeted_reading_plan": [],
+    "hypotheses": [
+      {
+        "hypothesis": "No strong source candidate was found from filenames, symbols, or tests.",
+        "confidence": "low",
+        "evidence": [
+          "repository map has no high-signal ranked files"
+        ],
+        "risk": "manual task clarification or broader survey may be required",
+        "next_read": ""
+      }
+    ],
+    "design_decision_seed": [
+      "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+      "Inspect dependents before changing public functions or modules with reverse dependencies.",
+      "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+    ]
+  },
+  "engineering_readiness": {
+    "impact_matrix": [],
+    "risk_register": [
+      {
+        "risk": "no_ranked_source_candidate",
+        "severity": "high",
+        "mitigation": "block broad source mutation until a focused file or failing test identifies the target"
+      },
+      {
+        "risk": "no_test_surface_detected",
+        "severity": "medium",
+        "mitigation": "require syntax checks and task-specific verification commands"
+      }
+    ],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [],
+      "linked_test_targets": [],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": false,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 1
+    }
+  },
+  "config_files": [],
+  "excluded_dirs": [
+    ".cache",
+    ".git",
+    ".gradle",
+    ".venv",
+    "__pycache__",
+    "build",
+    "cache",
+    "dist",
+    "live_runs",
+    "models",
+    "node_modules",
+    "outputs",
+    "runtime",
+    "tmp"
+  ],
+  "summary": "Surveyed 0 files; found 0 test-like files and 0 goal-matching candidates.",
+  "role_policy": {
+    "role": "repository_mapper",
+    "authority": "read_only_repository_mapping",
+    "may_mutate_source": false,
+    "required_evidence": [
+      "repo_root",
+      "dominant_extensions",
+      "test_files",
+      "python_symbols"
+    ],
+    "forbidden_actions": [
+      "source_mutation",
+      "verification_claim_without_artifacts"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "explicit_patch",
+      "new_feature",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 1,
+    "risk_flags": [],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "repository_survey",
+    "worker": "LogisRepository",
+    "purpose": "Inspect repository shape, likely ownership boundaries, risky files, and available test surfaces.",
+    "brief": "Map the repository before anyone edits it.",
+    "task_profile": {
+      "kinds": [
+        "explicit_patch",
+        "new_feature",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 1,
+      "risk_flags": [],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action"
+      ]
+    },
+    "must_produce": [
+      "repo_map",
+      "candidate_files",
+      "test_files",
+      "recommended_read_order"
+    ],
+    "handoff_question": "Which files should the strategist inspect first, and why?",
+    "authority_boundary": "read_only_repository_mapping"
+  }
+}

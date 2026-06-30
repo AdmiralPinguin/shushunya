@@ -1,0 +1,57 @@
+{
+  "trial_id": "ceraxia-field-repair-after-bad-first-patch",
+  "run_id": "ceraxia-field-repair-after-bad-first-patch-20260630-160543",
+  "trial_root": "EyeOfTerror/field_trial_runs/ceraxia-field-repair-after-bad-first-patch-20260630-160543",
+  "prepared_governor": "Ceraxia",
+  "result": {
+    "ok": true,
+    "phase": "completed"
+  },
+  "trial_outcome": {
+    "status": "passed",
+    "expected": true,
+    "reason": "task completed with ready final manifest"
+  },
+  "trial_checks": {
+    "repair_after_bad_first_patch": {
+      "repair_count": 1,
+      "file_path": "repair_me.py",
+      "contains_repaired_signature": true,
+      "contains_expected_return": true,
+      "passed": true
+    }
+  },
+  "final_manifest": "EyeOfTerror/field_trial_runs/ceraxia-field-repair-after-bad-first-patch-20260630-160543/warmaster_runs/ceraxia-field-repair-after-bad-first-patch-20260630-160543/work/ceraxia/final_manifest.json",
+  "manifest_summary": {
+    "status": "ready",
+    "patch_source": "marker_synthesis",
+    "changed_files": [
+      {
+        "path": "repair_me.py",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "6f1ac6f54e0bbb3a835689f6825c2bb3aef3925f3fc040465bd03c7a4a39d8dd",
+        "changed": true
+      }
+    ],
+    "diagnostics": {},
+    "dirty_worktree": {
+      "git_repo": false,
+      "dirty_targets": []
+    },
+    "ambiguity_analysis": {},
+    "verification_summary": {
+      "executed_count": 3,
+      "repair_count": 1,
+      "blocker_count": 0
+    },
+    "blockers": []
+  },
+  "pricing_py": "",
+  "settings_py": "",
+  "fixture_files": [
+    "repair_me.py"
+  ],
+  "kept": true
+}

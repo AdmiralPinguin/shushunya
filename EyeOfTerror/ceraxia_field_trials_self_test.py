@@ -88,6 +88,7 @@ def main() -> int:
         "ceraxia-field-multifile-feature",
         "ceraxia-field-negative-test",
         "ceraxia-field-refactor-preserve-behavior",
+        "ceraxia-field-repair-after-bad-first-patch",
         "ceraxia-field-safety-dirty-worktree",
     }
     if not required_runner_trials.issubset(runner_trials):
@@ -112,6 +113,12 @@ def main() -> int:
     )
     if checked_outcome.get("status") != "failed" or checked_outcome.get("expected") is not False:
         raise AssertionError(f"failed trial-specific check did not fail the trial: {checked_outcome}")
+    repair_checked_outcome = apply_trial_checks_to_outcome(
+        {"status": "passed", "expected": True, "reason": "base outcome passed"},
+        {"repair_after_bad_first_patch": {"passed": False}},
+    )
+    if repair_checked_outcome.get("status") != "failed" or repair_checked_outcome.get("expected") is not False:
+        raise AssertionError(f"failed repair-specific check did not fail the trial: {repair_checked_outcome}")
     required_phrases = [
         "A scripted self-test proves only that a known scenario still works.",
         "The real 7/10 target is met only when",

@@ -226,6 +226,31 @@
       "generalizable_failures": [],
       "follow_up_changes": [],
       "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-field-repair-after-bad-first-patch",
+      "run_id": "ceraxia-field-repair-after-bad-first-patch-20260630-160543",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-field-repair-after-bad-first-patch-20260630-160543/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-field-repair-after-bad-first-patch-20260630-160543/warmaster_runs/ceraxia-field-repair-after-bad-first-patch-20260630-160543/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
     }
   ]
 }
