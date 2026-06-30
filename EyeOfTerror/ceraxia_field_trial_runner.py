@@ -841,6 +841,64 @@ def fixture_expert_unshaped_security_boundary(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_concurrency_cache(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "docs").mkdir(parents=True, exist_ok=True)
+    (repo / "cache_store.py").write_text(
+        "class CacheStore:\n"
+        "    def __init__(self):\n"
+        "        self._values = {}\n\n"
+        "    def get_or_load(self, key, loader):\n"
+        "        if key not in self._values:\n"
+        "            self._values[key] = loader()\n"
+        "        return self._values[key]\n",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "cache_store.md").write_text(
+        "# Cache Store\n\n"
+        "Cache invalidation should be safe for concurrent readers and writers.\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_cache_store.py").write_text(
+        "import threading\n"
+        "import unittest\n"
+        "from cache_store import CacheStore\n\n"
+        "class CacheStoreTest(unittest.TestCase):\n"
+        "    def test_invalidate_is_idempotent_and_reloadable(self):\n"
+        "        store = CacheStore()\n"
+        "        self.assertEqual(store.get_or_load('a', lambda: 'old'), 'old')\n"
+        "        self.assertEqual(store.invalidate('a'), 1)\n"
+        "        self.assertEqual(store.invalidate('a'), 2)\n"
+        "        self.assertEqual(store.get_or_load('a', lambda: 'new'), 'new')\n\n"
+        "    def test_concurrent_readers_share_loaded_value(self):\n"
+        "        store = CacheStore()\n"
+        "        calls = []\n"
+        "        def loader():\n"
+        "            calls.append(1)\n"
+        "            return 'value'\n"
+        "        results = []\n"
+        "        threads = [threading.Thread(target=lambda: results.append(store.get_or_load('k', loader))) for _ in range(8)]\n"
+        "        for thread in threads:\n"
+        "            thread.start()\n"
+        "        for thread in threads:\n"
+        "            thread.join()\n"
+        "        self.assertEqual(results, ['value'] * 8)\n"
+        "        self.assertEqual(len(calls), 1)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured concurrency marker: исправь cache invalidation/concurrent readers. "
+        "Выведи контракт из tests и docs: invalidate idempotent, reload works, concurrent readers share one loaded value, "
+        "sleep-based synchronization нельзя использовать.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_cache_store\n"
+        "CERAXIA_VERIFY: python -m py_compile cache_store.py\n"
+    )
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
@@ -853,6 +911,7 @@ FIXTURES = {
     "ceraxia-expert-public-api-deprecation": fixture_expert_public_api_deprecation,
     "ceraxia-expert-security-boundary": fixture_expert_security_boundary,
     "ceraxia-expert-unshaped-api-evolution": fixture_expert_unshaped_api_evolution,
+    "ceraxia-expert-unshaped-concurrency-cache": fixture_expert_unshaped_concurrency_cache,
     "ceraxia-expert-unshaped-data-migration": fixture_expert_unshaped_data_migration,
     "ceraxia-expert-unshaped-security-boundary": fixture_expert_unshaped_security_boundary,
     "ceraxia-field-integration-contract": fixture_integration_contract,
@@ -1132,6 +1191,38 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and ("archive root" in docs_text.lower() or "traversal" in docs_text.lower())
                     and str(manifest.get("patch_source") or "") not in {
                         "edge_fix_marker_synthesis",
+                        "multi_file_marker_synthesis",
+                        "explicit_json_patch",
+                    }
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-unshaped-concurrency-cache":
+        source_path = repo / "cache_store.py"
+        test_path = repo / "tests" / "test_cache_store.py"
+        docs_path = repo / "docs" / "cache_store.md"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        return {
+            "expert_unshaped_concurrency_cache": {
+                "uses_lock": "RLock" in source_text or "Lock" in source_text,
+                "invalidates_idempotently": "pop(key, None)" in source_text,
+                "tests_threads": "threading.Thread" in test_text,
+                "no_sleep_based_test": "sleep(" not in test_text and "sleep(" not in source_text,
+                "risk_doc": "lock" in docs_text.lower() or "concurrent" in docs_text.lower(),
+                "not_marker_synthesized": str(manifest.get("patch_source") or "") not in {
+                    "multi_file_marker_synthesis",
+                    "explicit_json_patch",
+                },
+                "passed": (
+                    ("RLock" in source_text or "Lock" in source_text)
+                    and "pop(key, None)" in source_text
+                    and "threading.Thread" in test_text
+                    and "sleep(" not in test_text
+                    and "sleep(" not in source_text
+                    and ("lock" in docs_text.lower() or "concurrent" in docs_text.lower())
+                    and str(manifest.get("patch_source") or "") not in {
                         "multi_file_marker_synthesis",
                         "explicit_json_patch",
                     }

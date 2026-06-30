@@ -141,6 +141,13 @@ CERAXIA_VERIFY: python -m py_compile archive_paths.py
 """
 
 
+def test_inferred_cache_concurrency_goal() -> str:
+    return """кодовая задача без structured concurrency marker: исправь CacheStore concurrency. Выведи контракт из tests и docs: invalidate idempotent, reload works, concurrent readers share one loaded value, sleep нельзя.
+CERAXIA_VERIFY: python -m unittest tests.test_cache_store
+CERAXIA_VERIFY: python -m py_compile cache_store.py
+"""
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -1044,6 +1051,67 @@ def main() -> int:
             raise AssertionError("security boundary inference did not reject traversal and normalize relative paths")
         if "archive-root" not in docs and "archive root" not in docs:
             raise AssertionError("security boundary inference did not update audit docs")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "tests").mkdir()
+        (target_repo / "docs").mkdir()
+        (target_repo / "cache_store.py").write_text(
+            "class CacheStore:\n"
+            "    def __init__(self):\n"
+            "        self._values = {}\n\n"
+            "    def get_or_load(self, key, loader):\n"
+            "        if key not in self._values:\n"
+            "            self._values[key] = loader()\n"
+            "        return self._values[key]\n",
+            encoding="utf-8",
+        )
+        (target_repo / "docs" / "cache_store.md").write_text(
+            "# Cache Store\n\nConcurrent readers should share loaded values safely.\n",
+            encoding="utf-8",
+        )
+        (target_repo / "tests" / "test_cache_store.py").write_text(
+            "import threading\n"
+            "import unittest\n"
+            "from cache_store import CacheStore\n\n"
+            "class CacheStoreTest(unittest.TestCase):\n"
+            "    def test_invalidate_is_idempotent_and_reloadable(self):\n"
+            "        store = CacheStore()\n"
+            "        self.assertEqual(store.get_or_load('a', lambda: 'old'), 'old')\n"
+            "        self.assertEqual(store.invalidate('a'), 1)\n"
+            "        self.assertEqual(store.invalidate('a'), 2)\n"
+            "        self.assertEqual(store.get_or_load('a', lambda: 'new'), 'new')\n\n"
+            "    def test_concurrent_readers_share_loaded_value(self):\n"
+            "        store = CacheStore()\n"
+            "        calls = []\n"
+            "        def loader():\n"
+            "            calls.append(1)\n"
+            "            return 'value'\n"
+            "        results = []\n"
+            "        threads = [threading.Thread(target=lambda: results.append(store.get_or_load('k', loader))) for _ in range(8)]\n"
+            "        for thread in threads:\n"
+            "            thread.start()\n"
+            "        for thread in threads:\n"
+            "            thread.join()\n"
+            "        self.assertEqual(results, ['value'] * 8)\n"
+            "        self.assertEqual(len(calls), 1)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=test_inferred_cache_concurrency_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready" or final.get("patch_source") != "test_inferred_cache_concurrency":
+            raise AssertionError(f"cache concurrency should be inferred from tests without marker: {final}")
+        diagnostics = final.get("diagnostics", {})
+        if diagnostics.get("class_name") != "CacheStore" or diagnostics.get("source_path") != "cache_store.py":
+            raise AssertionError(f"cache concurrency diagnostics should identify class/source: {final}")
+        cache_store = (target_repo / "cache_store.py").read_text(encoding="utf-8")
+        docs = (target_repo / "docs" / "cache_store.md").read_text(encoding="utf-8")
+        if "RLock" not in cache_store or "pop(key, None)" not in cache_store or "sleep(" in cache_store:
+            raise AssertionError("cache concurrency inference did not add lock/idempotent invalidation cleanly")
+        if "RLock" not in docs or "sleep-based" not in docs:
+            raise AssertionError("cache concurrency inference did not update concurrency docs")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

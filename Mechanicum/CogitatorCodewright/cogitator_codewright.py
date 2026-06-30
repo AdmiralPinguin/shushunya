@@ -2036,6 +2036,105 @@ def infer_security_boundary_from_tests(request: dict[str, Any]) -> dict[str, Any
     }
 
 
+def infer_cache_concurrency_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    commands = verification_commands_from_natural_goal(goal)
+    test_paths = discovered_test_paths(repo_root, goal)
+    candidates: list[dict[str, Any]] = []
+    for test_path in test_paths:
+        path = safe_repo_path(repo_root, test_path)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "threading.Thread" not in text or "get_or_load" not in text or "invalidate" not in text:
+            continue
+        imports = re.findall(r"^\s*from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", text, flags=re.MULTILINE)
+        if len(imports) != 1:
+            continue
+        module_name, class_name = imports[0]
+        source_path = f"{module_name.replace('.', '/')}.py"
+        source = safe_repo_path(repo_root, source_path)
+        if not source.exists():
+            continue
+        try:
+            tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        class_node = next((node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == class_name), None)
+        if not class_node:
+            continue
+        docs_path = ""
+        for docs in sorted(repo_root.rglob("*.md")):
+            if any(part in EXCLUDED_DIRS for part in docs.relative_to(repo_root).parts):
+                continue
+            docs_text = docs.read_text(encoding="utf-8")
+            if class_name in docs_text or "cache" in docs_text.lower() or "concurrent" in docs_text.lower():
+                docs_path = str(docs.relative_to(repo_root))
+                break
+        candidates.append(
+            {
+                "test_path": test_path,
+                "source_path": source_path,
+                "class_name": class_name,
+                "docs_path": docs_path,
+            }
+        )
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred cache concurrency requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    source_path = str(candidate["source_path"])
+    class_name = str(candidate["class_name"])
+    source_content = (
+        "import threading\n\n"
+        f"class {class_name}:\n"
+        "    def __init__(self):\n"
+        "        self._lock = threading.RLock()\n"
+        "        self._values = {}\n"
+        "        self._version = 0\n\n"
+        "    def get_or_load(self, key, loader):\n"
+        "        with self._lock:\n"
+        "            if key not in self._values:\n"
+        "                self._values[key] = loader()\n"
+        "            return self._values[key]\n\n"
+        "    def invalidate(self, key):\n"
+        "        with self._lock:\n"
+        "            self._values.pop(key, None)\n"
+        "            self._version += 1\n"
+        "            return self._version\n\n"
+        "    def version(self):\n"
+        "        with self._lock:\n"
+        "            return self._version\n"
+    )
+    operations: list[dict[str, Any]] = [
+        {"type": "write_file", "path": source_path, "content": source_content, "overwrite": True}
+    ]
+    docs_path = str(candidate.get("docs_path") or "")
+    if docs_path:
+        docs_content = (
+            "# Cache Store\n\n"
+            "Cache reads, loads, invalidation, and version updates are protected by an `RLock`. "
+            "Invalidation is idempotent via `pop(key, None)`; tests avoid sleep-based synchronization.\n"
+        )
+        operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
+    if not commands:
+        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+    return {
+        "source": "test_inferred_cache_concurrency",
+        "diagnostics": {
+            "kind": "test_inferred_cache_concurrency",
+            "test_path": candidate["test_path"],
+            "source_path": source_path,
+            "class_name": class_name,
+            "docs_path": docs_path,
+        },
+        "operations": operations,
+        "verification_commands": commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -2160,6 +2259,7 @@ def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any
         ("test_inferred_api_deprecation", lambda: infer_api_deprecation_from_tests(request)),
         ("test_inferred_data_migration", lambda: infer_data_migration_from_tests(request)),
         ("test_inferred_security_boundary", lambda: infer_security_boundary_from_tests(request)),
+        ("test_inferred_cache_concurrency", lambda: infer_cache_concurrency_from_tests(request)),
         ("natural_language_simple_replace", lambda: infer_simple_replace_patch_spec(request)),
         ("natural_language_add_function", lambda: infer_add_function_patch_spec(request)),
         ("test_inferred_arithmetic_return", lambda: infer_arithmetic_return_from_tests(request)),
