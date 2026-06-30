@@ -1135,6 +1135,44 @@ def sha256_text(path: Path) -> str:
 
 
 def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    if trial_id == "ceraxia-field-bugfix-unnamed-source":
+        pricing_path = repo / "pricing.py"
+        checkout_path = repo / "checkout.py"
+        test_path = repo / "test_checkout.py"
+        pricing_text = pricing_path.read_text(encoding="utf-8") if pricing_path.exists() else ""
+        checkout_text = checkout_path.read_text(encoding="utf-8") if checkout_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        diagnostics = manifest.get("diagnostics") if isinstance(manifest.get("diagnostics"), dict) else {}
+        changed_paths = [
+            str(item.get("path") or "")
+            for item in manifest.get("changed_files", [])
+            if isinstance(item, dict)
+        ]
+        architect_review = manifest.get("architect_review") if isinstance(manifest.get("architect_review"), dict) else {}
+        return {
+            "bugfix_unnamed_source": {
+                "patch_source": manifest.get("patch_source", ""),
+                "delegated_from_caller": diagnostics.get("delegated_from", {}).get("module_path") == "checkout.py"
+                if isinstance(diagnostics.get("delegated_from"), dict)
+                else False,
+                "only_source_changed": changed_paths == ["pricing.py"],
+                "percentage_formula": "price - (price * percent / 100)" in pricing_text,
+                "caller_preserved": "total_after_discount" in checkout_text and "discounted_price(price, percent)" in checkout_text,
+                "test_preserved": "assertEqual(total_after_discount(200, 25), 150)" in test_text,
+                "architect_evidence": architect_review.get("problem_statement_present") is True
+                and architect_review.get("architecture_options_present") is True,
+                "passed": (
+                    manifest.get("patch_source") == "test_inferred_arithmetic_return"
+                    and changed_paths == ["pricing.py"]
+                    and "price - (price * percent / 100)" in pricing_text
+                    and isinstance(diagnostics.get("delegated_from"), dict)
+                    and diagnostics.get("delegated_from", {}).get("module_path") == "checkout.py"
+                    and "assertEqual(total_after_discount(200, 25), 150)" in test_text
+                    and architect_review.get("problem_statement_present") is True
+                    and architect_review.get("architecture_options_present") is True
+                ),
+            }
+        }
     if trial_id == "ceraxia-expert-legacy-migration":
         source_path = repo / "service" / "records.py"
         test_path = repo / "tests" / "test_records_migration.py"

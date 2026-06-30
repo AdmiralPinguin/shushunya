@@ -48,6 +48,7 @@
       "required_evidence": [
         "failing test output before mutation",
         "source files read before mutation",
+        "problem statement and architecture options before mutation",
         "final diff",
         "focused test output after final mutation",
         "broad regression output after final mutation",
