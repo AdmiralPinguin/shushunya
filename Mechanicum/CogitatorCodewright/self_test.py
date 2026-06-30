@@ -940,6 +940,101 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
+        (target_repo / "payments").mkdir(parents=True)
+        (target_repo / "docs").mkdir(parents=True)
+        (target_repo / "tests").mkdir(parents=True)
+        (target_repo / "payments" / "api.py").write_text(
+            "def calculate_total(gross, fee=0, *, service_fee=None):\n"
+            "    return gross - (service_fee if service_fee is not None else fee)\n",
+            encoding="utf-8",
+        )
+        work = root / "work"
+        (work / "code").mkdir(parents=True)
+        readiness = {
+            "acceptance_criteria": [{"criterion": "public API compatibility", "verification": "review"}],
+            "test_strategy": {"fallback_checks": ["python -m py_compile <changed .py files>"]},
+            "readiness_checks": {"has_acceptance_criteria": True, "has_test_strategy": True},
+            "impact_matrix": [{"path": "payments/api.py"}],
+        }
+        (work / "code" / "repo_survey.json").write_text(
+            json.dumps({"repo_map": {"ranked_files": [{"path": "payments/api.py", "score": 10}]}, "engineering_readiness": readiness})
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "problem_statement.json").write_text(json.dumps({"status": "recorded"}) + "\n", encoding="utf-8")
+        (work / "code" / "architecture_options.json").write_text(json.dumps({"status": "recorded"}) + "\n", encoding="utf-8")
+        diagnostics = {
+            "kind": "test_inferred_api_deprecation",
+            "test_path": "tests/test_api.py",
+            "source_path": "payments/api.py",
+            "function_name": "calculate_total",
+            "old_param": "fee",
+            "new_param": "service_fee",
+            "docs_path": "docs/payments_api.md",
+            "caller": {"caller_path": "payments/client.py", "caller_name": "client_total"},
+        }
+        (work / "code" / "patch_manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "applied",
+                    "patch_source": "test_inferred_api_deprecation",
+                    "diagnostics": diagnostics,
+                    "changed_files": [{"path": "payments/api.py", "changed": True}],
+                    "patch_scope_evidence": {"changed_files_in_repo_map": ["payments/api.py"], "changed_files_outside_repo_map": []},
+                    "engineering_readiness": readiness,
+                    "warnings": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "unshaped_repair_plan.json").write_text(
+            json.dumps(
+                {
+                    "status": "recorded",
+                    "mode": "unshaped_repo_repair",
+                    "defect_hypotheses": [{"source": "test_inferred_api_deprecation", "evidence": diagnostics}],
+                    "minimal_patch_candidates": [{"source": "test_inferred_api_deprecation", "status": "selected"}],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "diagnostic_extraction.json").write_text(
+            json.dumps({"status": "recorded", "parser_coverage": {"static_test_expectations": 1}}) + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "verification_report.json").write_text(
+            json.dumps(
+                {
+                    "status": "passed",
+                    "blockers": [],
+                    "warnings": [],
+                    "executed": [{"command": "python -m unittest tests.test_api", "returncode": 0}],
+                    "verification_strategy": {"focused_commands": ["python -m unittest tests.test_api"], "broad_commands": []},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "repair_loop_state.json").write_text(
+            json.dumps({"status": "passed", "next_action": "continue_to_code_review"}) + "\n",
+            encoding="utf-8",
+        )
+        result = run(request("code_review", "/work/code/code_review.json", target_repo_root=target_repo), work)
+        if not result.get("ok"):
+            raise AssertionError(f"public surface review gate test should write a report: {result}")
+        review = json.loads((work / "code" / "code_review.json").read_text(encoding="utf-8"))
+        public_review = review.get("public_surface_review", {})
+        if (
+            review.get("approved") is not False
+            or public_review.get("status") != "blocked"
+            or not any("public_surface" in item.get("message", "") or "Public surface review failed" in item.get("message", "") for item in review.get("findings", []) if isinstance(item, dict))
+        ):
+            raise AssertionError(f"code review should block incomplete public surface evidence: {review}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
         target_repo.mkdir()
         sample = target_repo / "sample.py"
         sample.write_text("def value():\n    return 1\n", encoding="utf-8")

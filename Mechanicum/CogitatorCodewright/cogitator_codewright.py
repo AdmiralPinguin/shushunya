@@ -954,6 +954,57 @@ def ast_patch_plan_from_spec(repo_root: Path, patch_spec: dict[str, Any]) -> dic
     }
 
 
+def public_surface_review_from_evidence(
+    patch_source: str,
+    diagnostics: dict[str, Any],
+    changed_files: list[dict[str, Any]],
+    broad_commands: list[Any],
+) -> dict[str, Any]:
+    requires_review = patch_source in {
+        "test_inferred_api_deprecation",
+        "public_api_compat_marker_synthesis",
+    }
+    changed_paths = [
+        str(item.get("path") or "")
+        for item in changed_files
+        if isinstance(item, dict) and item.get("path")
+    ]
+    docs_path = str(diagnostics.get("docs_path") or "")
+    caller_path = str(diagnostics.get("caller_path") or "")
+    caller = diagnostics.get("caller") if isinstance(diagnostics.get("caller"), dict) else {}
+    if not caller_path:
+        caller_path = str(caller.get("caller_path") or "")
+    checks = [
+        {
+            "check": "public_surface_review_required",
+            "status": "pass" if requires_review else "not_applicable",
+            "evidence": {"patch_source": patch_source},
+        },
+        {
+            "check": "docs_surface_updated",
+            "status": "pass" if (not requires_review or (docs_path and docs_path in changed_paths)) else "blocker",
+            "evidence": {"docs_path": docs_path, "changed": docs_path in changed_paths if docs_path else False},
+        },
+        {
+            "check": "caller_surface_updated_or_not_required",
+            "status": "pass" if (not requires_review or not caller_path or caller_path in changed_paths) else "blocker",
+            "evidence": {"caller_path": caller_path, "changed": caller_path in changed_paths if caller_path else False},
+        },
+        {
+            "check": "public_surface_broad_verification",
+            "status": "pass" if (not requires_review or bool(broad_commands)) else "blocker",
+            "evidence": {"broad_commands": broad_commands},
+        },
+    ]
+    blockers = [item for item in checks if item.get("status") == "blocker"]
+    return {
+        "status": "blocked" if blockers else "covered",
+        "required": requires_review,
+        "checks": checks,
+        "blockers": blockers,
+    }
+
+
 def output_path_from_request(request: dict[str, Any]) -> str:
     step = request.get("step") if isinstance(request.get("step"), dict) else {}
     expected = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
@@ -1925,6 +1976,8 @@ def patch_spec_from_public_api_compat_marker(goal: str) -> dict[str, Any]:
         verification_commands = [f"python -m unittest {test_path[:-3].replace('/', '.')}"]
     if not isinstance(verification_commands, list) or not all(isinstance(item, str) for item in verification_commands):
         raise ValueError("CERAXIA_PUBLIC_API_COMPAT verification_commands must be a list of strings")
+    if not any("unittest discover" in command for command in verification_commands):
+        verification_commands.append("python -m unittest discover -s tests")
     return {
         "source": "public_api_compat_marker_synthesis",
         "diagnostics": {
@@ -2542,6 +2595,8 @@ def infer_api_deprecation_from_tests(request: dict[str, Any]) -> dict[str, Any]:
     operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
     if not commands:
         commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+    if not any("unittest discover" in command for command in commands):
+        commands.append("python -m unittest discover -s tests")
     return {
         "source": "test_inferred_api_deprecation",
         "diagnostics": {
@@ -4491,6 +4546,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     focused_commands = verification_strategy.get("focused_commands") if isinstance(verification_strategy.get("focused_commands"), list) else []
     broad_commands = verification_strategy.get("broad_commands") if isinstance(verification_strategy.get("broad_commands"), list) else []
     repo_grade_mode = repo_grade_workflow.get("mode") == "repo_grade"
+    public_surface_review = public_surface_review_from_evidence(patch_source, diagnostics, changed_files, broad_commands)
     discipline_findings = code_review_discipline_findings(
         patch_source,
         changed_files,
@@ -4600,6 +4656,11 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "evidence": broad_commands,
         },
         {
+            "check": "public_surface_review",
+            "status": "pass" if public_surface_review.get("status") == "covered" else "blocker",
+            "evidence": public_surface_review,
+        },
+        {
             "check": "review_discipline_findings",
             "status": "pass" if not discipline_findings else "blocker",
             "evidence": discipline_findings,
@@ -4653,6 +4714,9 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         blockers = [*blockers, "Repo-grade task lacks architecture decision record."]
     if repo_grade_mode and not broad_commands:
         blockers = [*blockers, "Repo-grade task lacks broad verification evidence."]
+    if public_surface_review.get("status") != "covered":
+        for item in public_surface_review.get("blockers", []) if isinstance(public_surface_review.get("blockers"), list) else []:
+            blockers = [*blockers, f"Public surface review failed: {item.get('check', 'unknown')}."]
     for finding in discipline_findings:
         blockers = [*blockers, str(finding.get("message") or finding.get("check") or "Code review discipline finding.")]
     high_risks = [item for item in risk_register if isinstance(item, dict) and item.get("severity") == "high"]
@@ -4687,6 +4751,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "ast_patch_plan": ast_patch_plan,
         "verification_strategy": verification_strategy,
         "repository_investigation_review": investigation_review,
+        "public_surface_review": public_surface_review,
         "unshaped_repair_review": {
             "required": unshaped_required,
             "plan_present": unshaped_repair_plan.get("mode") == "unshaped_repo_repair",
@@ -4761,6 +4826,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         },
         "ast_patch_review": focused_revision_context.get("ast_patch_review", {}),
         "repository_investigation_review": investigation_review,
+        "public_surface_review": public_surface_review,
         "decision_record": decision_record,
         "review_repair_loop": review_repair_loop,
         "findings": [
