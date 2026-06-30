@@ -607,6 +607,16 @@ def code_review_discipline_findings(
                 "evidence": {"changed_tests": changed_tests},
                 }
             )
+    risk_negative_tests = negative_test_evidence_for_risk_patch(repo_root, patch_source, diagnostics)
+    if risk_negative_tests.get("required") and not risk_negative_tests.get("present"):
+        findings.append(
+            {
+                "check": "risk_patch_has_negative_tests",
+                "status": "blocker",
+                "message": "Risk-sensitive repairs must be covered by negative tests for the boundary they change.",
+                "evidence": risk_negative_tests,
+            }
+        )
     example = diagnostics.get("example") if isinstance(diagnostics.get("example"), dict) else {}
     expected = example.get("expected")
     function_name = str(diagnostics.get("function_name") or "")
@@ -664,6 +674,49 @@ def code_review_discipline_findings(
                 }
             )
     return findings
+
+
+def negative_test_evidence_for_risk_patch(repo_root: Path | None, patch_source: str, diagnostics: dict[str, Any]) -> dict[str, Any]:
+    if patch_source not in {"test_inferred_security_boundary", "test_inferred_config_runtime"}:
+        return {"required": False, "present": True, "reason": "patch source does not require risk negative-test evidence"}
+    test_path = str(diagnostics.get("test_path") or "")
+    evidence: dict[str, Any] = {
+        "required": True,
+        "patch_source": patch_source,
+        "test_path": test_path,
+        "present": False,
+    }
+    if repo_root is None or not test_path:
+        evidence["missing"] = "test path evidence is absent"
+        return evidence
+    try:
+        test_text = safe_repo_path(repo_root, test_path).read_text(encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        evidence["missing"] = f"test file could not be read: {exc}"
+        return evidence
+    if patch_source == "test_inferred_security_boundary":
+        exception_assertion = "assertRaises" in test_text or "pytest.raises" in test_text
+        malicious_input = any(marker in test_text for marker in ("../", "..\\", "/etc/", "passwd", "traversal", "absolute"))
+        evidence.update(
+            {
+                "exception_assertion": exception_assertion,
+                "malicious_input": malicious_input,
+                "present": exception_assertion and malicious_input,
+            }
+        )
+        return evidence
+    env_override = "SERVICE_URL" in test_text or "os.environ" in test_text or "monkeypatch" in test_text
+    default_or_fallback = "pop(" in test_text or "default" in test_text.lower() or "fallback" in test_text.lower()
+    multiple_cases = len(re.findall(r"\bdef\s+test_", test_text)) >= 2
+    evidence.update(
+        {
+            "env_override_case": env_override,
+            "default_or_fallback_case": default_or_fallback,
+            "multiple_cases": multiple_cases,
+            "present": env_override and default_or_fallback and multiple_cases,
+        }
+    )
+    return evidence
 
 
 def is_unshaped_patch_source(patch_source: str) -> bool:

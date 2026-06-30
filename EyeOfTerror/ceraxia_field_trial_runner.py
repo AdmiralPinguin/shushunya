@@ -1653,6 +1653,7 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                 "rejects_absolute": "startswith('/')" in source_text,
                 "normalizes_relative_path": "'/'.join(parts)" in source_text,
                 "tests_malicious_inputs": "../secret.txt" in test_text and "/etc/passwd" in test_text,
+                "negative_tests_present": "assertRaises(ValueError)" in test_text and "../secret.txt" in test_text and "/etc/passwd" in test_text,
                 "tests_valid_edges": "./books//chapter2.txt" in test_text,
                 "docs_security_boundary": "archive root" in docs_text.lower() or "traversal" in docs_text.lower(),
                 "ast_validation_branch": has_validation_branch,
@@ -1667,6 +1668,7 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and "'/'.join(parts)" in source_text
                     and "../secret.txt" in test_text
                     and "/etc/passwd" in test_text
+                    and "assertRaises(ValueError)" in test_text
                     and "./books//chapter2.txt" in test_text
                     and ("archive root" in docs_text.lower() or "traversal" in docs_text.lower())
                     and has_validation_branch
