@@ -12,6 +12,7 @@ SPEC = ROOT / "InnerCircle" / "Ceraxia" / "field_trials.json"
 PROTOCOL = ROOT / "InnerCircle" / "Ceraxia" / "EVALUATION.md"
 LEDGER = ROOT / "InnerCircle" / "Ceraxia" / "field_trial_ledger.json"
 REPORTER = ROOT / "ceraxia_field_trial_report.py"
+RUNNER = ROOT / "ceraxia_field_trial_runner.py"
 
 
 def main() -> int:
@@ -65,6 +66,18 @@ def main() -> int:
     )
     if not ledger.get("entries") and strict_report.returncode == 0:
         raise AssertionError("strict Ceraxia field trial report must fail while no accepted trials exist")
+    runner_list = subprocess.run(
+        [sys.executable, str(RUNNER), "--list"],
+        cwd=str(ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if runner_list.returncode != 0:
+        raise AssertionError(f"Ceraxia field trial runner list failed: {runner_list.stdout} {runner_list.stderr}")
+    runner_payload = json.loads(runner_list.stdout)
+    if "ceraxia-field-bugfix-unnamed-source" not in runner_payload.get("trials", []):
+        raise AssertionError(f"Ceraxia field trial runner lacks first reproducible trial: {runner_payload}")
     required_phrases = [
         "A scripted self-test proves only that a known scenario still works.",
         "The real 7/10 target is met only when",

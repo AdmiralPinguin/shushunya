@@ -115,6 +115,10 @@ def test_inferred_arithmetic_goal() -> str:
     return "почини тест `test_calc.py`."
 
 
+def test_inferred_delegated_arithmetic_goal() -> str:
+    return "кодовая задача: python тесты падают, источник ошибки не указан. Найди причину и исправь реализацию."
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -652,6 +656,39 @@ def main() -> int:
             raise AssertionError(f"test-inferred arithmetic diagnostics should explain replacement: {final}")
         if "return left + right" not in calc.read_text(encoding="utf-8"):
             raise AssertionError("test-inferred arithmetic did not update the return expression")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        pricing = target_repo / "pricing.py"
+        pricing.write_text("def discounted_price(price, percent):\n    return price - percent\n", encoding="utf-8")
+        (target_repo / "checkout.py").write_text(
+            "from pricing import discounted_price\n\n"
+            "def total_after_discount(price, percent):\n"
+            "    return discounted_price(price, percent)\n",
+            encoding="utf-8",
+        )
+        (target_repo / "test_checkout.py").write_text(
+            "import unittest\nfrom checkout import total_after_discount\n\n"
+            "class CheckoutTest(unittest.TestCase):\n"
+            "    def test_percentage_discount(self):\n"
+            "        self.assertEqual(total_after_discount(200, 25), 150)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=test_inferred_delegated_arithmetic_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready" or final.get("patch_source") != "test_inferred_arithmetic_return":
+            raise AssertionError(f"delegated arithmetic task should be ready: {final}")
+        diagnostics = final.get("diagnostics", {})
+        if (
+            diagnostics.get("module_path") != "pricing.py"
+            or diagnostics.get("delegated_from", {}).get("module_path") != "checkout.py"
+            or diagnostics.get("replacement_expression") != "price - (price * percent / 100)"
+        ):
+            raise AssertionError(f"delegated arithmetic diagnostics should explain wrapper traversal: {final}")
+        if "return price - (price * percent / 100)" not in pricing.read_text(encoding="utf-8"):
+            raise AssertionError("delegated arithmetic did not update the implementation source")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

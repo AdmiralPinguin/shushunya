@@ -11,6 +11,9 @@ def main() -> int:
     code = route_message("почини баг в python приложении")
     if not code.ok or code.kind != "code" or code.governor != "Ceraxia":
         raise AssertionError(code)
+    code_with_research_word = route_message("кодовая задача: python тесты падают, источник ошибки не указан, почини приложение")
+    if not code_with_research_word.ok or code_with_research_word.kind != "code" or code_with_research_word.governor != "Ceraxia":
+        raise AssertionError(code_with_research_word)
     image = route_message("сделай рисовалку stable diffusion")
     if image.ok or image.kind != "image_generation" or image.governor != "ForgeMasterGovernor":
         raise AssertionError(image)

@@ -497,9 +497,23 @@ def test_paths_from_goal(goal: str) -> list[str]:
     return paths
 
 
+def discovered_test_paths(repo_root: Path, goal: str) -> list[str]:
+    paths = test_paths_from_goal(goal)
+    lowered = goal.lower()
+    if paths or not any(marker in lowered for marker in ("тест", "test", "pytest", "unittest")):
+        return paths
+    for path in sorted(repo_root.rglob("*.py")):
+        if any(part in EXCLUDED_DIRS for part in path.relative_to(repo_root).parts):
+            continue
+        rel = str(path.relative_to(repo_root))
+        if test_like_path(rel):
+            paths.append(rel)
+    return paths[:20]
+
+
 def test_expectation_candidates(repo_root: Path, goal: str) -> list[dict[str, str]]:
     candidates: list[dict[str, str]] = []
-    for test_path in test_paths_from_goal(goal):
+    for test_path in discovered_test_paths(repo_root, goal):
         path = safe_repo_path(repo_root, test_path)
         if not path.exists():
             continue
@@ -601,7 +615,7 @@ def infer_return_mismatch_from_tests(request: dict[str, Any]) -> dict[str, Any]:
 
 def arithmetic_test_expectation_candidates(repo_root: Path, goal: str) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
-    for test_path in test_paths_from_goal(goal):
+    for test_path in discovered_test_paths(repo_root, goal):
         path = safe_repo_path(repo_root, test_path)
         if not path.exists():
             continue
@@ -630,7 +644,74 @@ def arithmetic_test_expectation_candidates(repo_root: Path, goal: str) -> list[d
                     "expected": int(expected_raw),
                 }
             )
+            delegated = delegated_arithmetic_candidate(
+                repo_root,
+                test_path,
+                module_path,
+                function_name,
+                int(left_raw),
+                int(right_raw),
+                int(expected_raw),
+            )
+            if delegated:
+                candidates.append(delegated)
     return candidates
+
+
+def delegated_arithmetic_candidate(
+    repo_root: Path,
+    test_path: str,
+    module_path: str,
+    function_name: str,
+    left: int,
+    right: int,
+    expected: int,
+) -> dict[str, Any]:
+    source_path = safe_repo_path(repo_root, module_path)
+    try:
+        text = source_path.read_text(encoding="utf-8")
+        tree = ast.parse(text, filename=str(source_path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return {}
+    imports: dict[str, str] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        for alias in node.names:
+            imports[alias.asname or alias.name] = f"{node.module.replace('.', '/')}.py"
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef) or node.name != function_name:
+            continue
+        args = [arg.arg for arg in node.args.args]
+        returns = [item for item in ast.walk(node) if isinstance(item, ast.Return)]
+        if len(args) != 2 or len(returns) != 1:
+            return {}
+        value = returns[0].value
+        if not isinstance(value, ast.Call) or not isinstance(value.func, ast.Name):
+            return {}
+        if len(value.args) != 2 or not all(isinstance(item, ast.Name) for item in value.args):
+            return {}
+        call_args = [item.id for item in value.args if isinstance(item, ast.Name)]
+        if call_args != args:
+            return {}
+        target_module_path = imports.get(value.func.id)
+        if not target_module_path:
+            return {}
+        target_path = safe_repo_path(repo_root, target_module_path)
+        if not target_path.exists():
+            return {}
+        return {
+            "test_path": test_path,
+            "module_path": target_module_path,
+            "function_name": value.func.id,
+            "left": left,
+            "right": right,
+            "expected": expected,
+            "delegated_from": {
+                "module_path": module_path,
+                "function_name": function_name,
+            },
+        }
 
 
 def simple_function_return_segment(source_path: Path, function_name: str) -> dict[str, Any]:
@@ -672,12 +753,15 @@ def infer_arithmetic_return_from_tests(request: dict[str, Any]) -> dict[str, Any
             (f"{left_name} - {right_name}", left - right),
             (f"{right_name} - {left_name}", right - left),
             (f"{left_name} * {right_name}", left * right),
+            (f"{left_name} - ({left_name} * {right_name} / 100)", left - (left * right / 100)),
         ]
         matching = [expr for expr, value in options if value == expected]
         if len(matching) != 1:
             continue
         new_expr = matching[0]
         old_expr = str(function.get("return_expr") or "")
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*\(", old_expr):
+            continue
         if old_expr == new_expr:
             continue
         content = source_path.read_text(encoding="utf-8")
@@ -709,6 +793,7 @@ def infer_arithmetic_return_from_tests(request: dict[str, Any]) -> dict[str, Any
                 "right": candidate["right"],
                 "expected": candidate["expected"],
             },
+            "delegated_from": candidate.get("delegated_from", {}),
         },
         "operations": [
             {

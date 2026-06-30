@@ -14,11 +14,17 @@ class RouteDecision:
 
 def route_message(message: str) -> RouteDecision:
     lowered = message.lower()
+    candidates = []
     for governor in governor_refs():
-        if not governor.route_terms or not any(term.lower() in lowered for term in governor.route_terms):
+        matched_terms = [term for term in governor.route_terms if term.lower() in lowered]
+        if not matched_terms:
             continue
-        kind = governor.task_kinds[0] if governor.task_kinds else "general"
-        if governor.active():
-            return RouteDecision(True, governor.name, kind, f"route terms matched for {governor.name}")
-        return RouteDecision(False, governor.name, kind, f"governor is not active: {governor.name}")
-    return RouteDecision(False, "", "general", "no supported governor matched")
+        candidates.append((len(matched_terms), governor, matched_terms))
+    if not candidates:
+        return RouteDecision(False, "", "general", "no supported governor matched")
+    _, governor, matched_terms = max(candidates, key=lambda item: item[0])
+    kind = governor.task_kinds[0] if governor.task_kinds else "general"
+    reason = f"route terms matched for {governor.name}: {', '.join(matched_terms[:5])}"
+    if governor.active():
+        return RouteDecision(True, governor.name, kind, reason)
+    return RouteDecision(False, governor.name, kind, f"governor is not active: {governor.name}")
