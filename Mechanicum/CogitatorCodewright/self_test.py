@@ -282,6 +282,7 @@ def main() -> int:
         ):
             raise AssertionError(f"final manifest should preserve review decision record: {final}")
         investigation = final.get("engineering_investigation", {})
+        readiness = final.get("engineering_readiness", {})
         dependency_edges = investigation.get("dependency_graph", {}).get("edges", [])
         if not any(edge.get("from") == "helper.py" and edge.get("to") == "sample.py" for edge in dependency_edges):
             raise AssertionError(f"engineering investigation should include import dependency graph: {final}")
@@ -291,8 +292,23 @@ def main() -> int:
         if not investigation.get("hypotheses"):
             raise AssertionError(f"engineering investigation should preserve hypothesis log: {final}")
         plan_text = (root / "work" / "code" / "change_plan.md").read_text(encoding="utf-8")
-        if "## Hypothesis Log" not in plan_text or "## Targeted Reading Plan" not in plan_text:
+        if (
+            "## Hypothesis Log" not in plan_text
+            or "## Targeted Reading Plan" not in plan_text
+            or "## File Impact Matrix" not in plan_text
+            or "## Acceptance Criteria" not in plan_text
+            or "## Test Strategy" not in plan_text
+        ):
             raise AssertionError(f"change plan should include engineering investigation sections: {plan_text}")
+        if (
+            len(readiness.get("acceptance_criteria", [])) < 5
+            or not readiness.get("test_strategy", {}).get("fallback_checks")
+            or not readiness.get("impact_matrix")
+            or final.get("engineering_readiness_review", {}).get("acceptance_criteria_count", 0) < 5
+        ):
+            raise AssertionError(f"final manifest should preserve engineering readiness model: {final}")
+        if not any(item.get("check") == "readiness_model_present" and item.get("status") == "pass" for item in decision_record):
+            raise AssertionError(f"review decision record should gate engineering readiness: {final}")
         patch_manifest = json.loads((root / "work" / "code" / "patch_manifest.json").read_text(encoding="utf-8"))
         candidates = patch_manifest.get("patch_candidates", [])
         if (

@@ -3093,6 +3093,31 @@ def compact_manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:
             and isinstance(manifest.get("engineering_investigation", {}).get("dependency_graph"), dict)
             else 0,
         },
+        "engineering_readiness": {
+            "acceptance_criteria_count": len(
+                manifest.get("engineering_readiness", {}).get("acceptance_criteria", [])
+                if isinstance(manifest.get("engineering_readiness", {}), dict)
+                and isinstance(manifest.get("engineering_readiness", {}).get("acceptance_criteria"), list)
+                else []
+            ),
+            "risk_count": len(
+                manifest.get("engineering_readiness", {}).get("risk_register", [])
+                if isinstance(manifest.get("engineering_readiness", {}), dict)
+                and isinstance(manifest.get("engineering_readiness", {}).get("risk_register"), list)
+                else []
+            ),
+            "impact_file_count": len(
+                manifest.get("engineering_readiness", {}).get("impact_matrix", [])
+                if isinstance(manifest.get("engineering_readiness", {}), dict)
+                and isinstance(manifest.get("engineering_readiness", {}).get("impact_matrix"), list)
+                else []
+            ),
+            "high_risk_count": int(
+                manifest.get("engineering_readiness_review", {}).get("high_risk_count") or 0
+            )
+            if isinstance(manifest.get("engineering_readiness_review", {}), dict)
+            else 0,
+        },
         "patch_source": str(manifest.get("patch_source") or ""),
         "selected_patch_source": str(
             manifest.get("selected_patch_candidate", {}).get("source") or manifest.get("patch_source") or ""

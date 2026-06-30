@@ -93,6 +93,8 @@ CERAXIA_PATCH:
             or summary_manifest.get("patch_candidate_count", 0) < 1
             or summary_manifest.get("source_excerpt_count", 0) < 1
             or summary_manifest.get("implementation_decision_count", 0) < 3
+            or summary_manifest.get("engineering_readiness", {}).get("acceptance_criteria_count", 0) < 5
+            or summary_manifest.get("engineering_readiness", {}).get("impact_file_count", 0) < 1
             or summary_manifest.get("engineering_investigation", {}).get("dependency_edge_count", 0) < 2
             or summary_manifest.get("engineering_investigation", {}).get("hypothesis_count", 0) < 1
         ):

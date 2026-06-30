@@ -142,6 +142,7 @@ def recommended_read_order_from_survey(workspace_root: Path, output_path: str) -
 def source_excerpt_pack(workspace_root: Path, output_path: str, repo_root: Path) -> list[dict[str, Any]]:
     survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
     investigation = survey.get("engineering_investigation") if isinstance(survey.get("engineering_investigation"), dict) else {}
+    readiness = survey.get("engineering_readiness") if isinstance(survey.get("engineering_readiness"), dict) else {}
     targeted = investigation.get("targeted_reading_plan") if isinstance(investigation.get("targeted_reading_plan"), list) else []
     repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
     read_order = repo_map.get("recommended_read_order") if isinstance(repo_map.get("recommended_read_order"), list) else []
@@ -1353,6 +1354,99 @@ def suggested_verification_commands(test_files: list[str]) -> list[str]:
     return commands[:8]
 
 
+def engineering_readiness_model(goal: str, repo_map: dict[str, Any], dependency_graph: dict[str, Any], test_files: list[str]) -> dict[str, Any]:
+    ranked_files = repo_map.get("ranked_files") if isinstance(repo_map.get("ranked_files"), list) else []
+    links = repo_map.get("test_source_links") if isinstance(repo_map.get("test_source_links"), list) else []
+    reverse = dependency_graph.get("reverse_dependents") if isinstance(dependency_graph.get("reverse_dependents"), dict) else {}
+    linked_tests_by_source: dict[str, list[str]] = {}
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        test_path = str(link.get("test_path") or "")
+        for source_path in link.get("source_paths", []) if isinstance(link.get("source_paths"), list) else []:
+            linked_tests_by_source.setdefault(str(source_path), [])
+            if test_path and test_path not in linked_tests_by_source[str(source_path)]:
+                linked_tests_by_source[str(source_path)].append(test_path)
+    impact_matrix: list[dict[str, Any]] = []
+    for item in ranked_files[:12]:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        if not path:
+            continue
+        dependents = [str(value) for value in reverse.get(path, [])] if isinstance(reverse.get(path), list) else []
+        linked_tests = linked_tests_by_source.get(path, [])
+        score = int(item.get("score") or 0)
+        if dependents and not linked_tests:
+            impact_level = "high"
+        elif dependents or score >= 8:
+            impact_level = "medium"
+        else:
+            impact_level = "low"
+        impact_matrix.append(
+            {
+                "path": path,
+                "impact_level": impact_level,
+                "rank_score": score,
+                "dependent_count": len(dependents),
+                "linked_tests": linked_tests[:8],
+                "reason": "public dependency surface" if dependents else "ranked task relevance",
+            }
+        )
+    risk_register: list[dict[str, Any]] = []
+    if not ranked_files:
+        risk_register.append(
+            {
+                "risk": "no_ranked_source_candidate",
+                "severity": "high",
+                "mitigation": "block broad source mutation until a focused file or failing test identifies the target",
+            }
+        )
+    uncovered_public = [item for item in impact_matrix if item.get("dependent_count", 0) and not item.get("linked_tests")]
+    if uncovered_public:
+        risk_register.append(
+            {
+                "risk": "public_surface_without_static_test_link",
+                "severity": "medium",
+                "affected_paths": [str(item.get("path")) for item in uncovered_public[:8]],
+                "mitigation": "run broader verification or require manual coverage review before approval",
+            }
+        )
+    if not test_files:
+        risk_register.append(
+            {
+                "risk": "no_test_surface_detected",
+                "severity": "medium",
+                "mitigation": "require syntax checks and task-specific verification commands",
+            }
+        )
+    acceptance_criteria = [
+        {"criterion": "requested_behavior_addressed", "verification": "patch candidate selected from explicit contract, task text, or test evidence"},
+        {"criterion": "source_scope_is_explained", "verification": "changed files map back to repo survey or review warns about drift"},
+        {"criterion": "changed_python_compiles", "verification": "py_compile runs for changed Python files"},
+        {"criterion": "task_verification_passes", "verification": "requested or inferred verification commands return zero"},
+        {"criterion": "review_has_no_blockers", "verification": "code_review decision record approves final package"},
+    ]
+    test_strategy = {
+        "primary_commands": suggested_verification_commands(test_files),
+        "linked_test_targets": sorted({test for tests in linked_tests_by_source.values() for test in tests})[:12],
+        "fallback_checks": ["python -m py_compile <changed .py files>", "git diff --check"],
+        "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present.",
+    }
+    return {
+        "impact_matrix": impact_matrix,
+        "risk_register": risk_register,
+        "acceptance_criteria": acceptance_criteria,
+        "test_strategy": test_strategy,
+        "readiness_checks": {
+            "has_ranked_sources": bool(ranked_files),
+            "has_acceptance_criteria": bool(acceptance_criteria),
+            "has_test_strategy": bool(test_strategy.get("primary_commands") or test_strategy.get("fallback_checks")),
+            "high_risk_count": sum(1 for item in risk_register if item.get("severity") == "high"),
+        },
+    }
+
+
 def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
     extension_counts: Counter[str] = Counter()
     candidate_files: list[str] = []
@@ -1388,6 +1482,7 @@ def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
     call_graph = call_graph_summary(python_symbols)
     reading_plan = targeted_reading_plan(repo_map, dependency_graph)
     hypotheses = engineering_hypotheses(goal, repo_map, dependency_graph)
+    readiness_model = engineering_readiness_model(goal, repo_map, dependency_graph, test_files[:80])
     return {
         "repo_root": str(repo_root),
         "goal": goal,
@@ -1409,6 +1504,7 @@ def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
                 "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation.",
             ],
         },
+        "engineering_readiness": readiness_model,
         "config_files": config_files[:40],
         "excluded_dirs": sorted(EXCLUDED_DIRS),
         "summary": f"Surveyed {total_files} files; found {len(test_files)} test-like files and {len(candidate_files)} goal-matching candidates.",
@@ -1445,12 +1541,17 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
     suggested_commands = survey.get("suggested_verification_commands") if isinstance(survey.get("suggested_verification_commands"), list) else []
     repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
     investigation = survey.get("engineering_investigation") if isinstance(survey.get("engineering_investigation"), dict) else {}
+    readiness = survey.get("engineering_readiness") if isinstance(survey.get("engineering_readiness"), dict) else {}
     ranked_files = repo_map.get("ranked_files") if isinstance(repo_map.get("ranked_files"), list) else []
     test_source_links = repo_map.get("test_source_links") if isinstance(repo_map.get("test_source_links"), list) else []
     read_order = repo_map.get("recommended_read_order") if isinstance(repo_map.get("recommended_read_order"), list) else []
     targeted_reads = investigation.get("targeted_reading_plan") if isinstance(investigation.get("targeted_reading_plan"), list) else []
     hypotheses = investigation.get("hypotheses") if isinstance(investigation.get("hypotheses"), list) else []
     decision_seed = investigation.get("design_decision_seed") if isinstance(investigation.get("design_decision_seed"), list) else []
+    impact_matrix = readiness.get("impact_matrix") if isinstance(readiness.get("impact_matrix"), list) else []
+    risk_register = readiness.get("risk_register") if isinstance(readiness.get("risk_register"), list) else []
+    acceptance_criteria = readiness.get("acceptance_criteria") if isinstance(readiness.get("acceptance_criteria"), list) else []
+    test_strategy = readiness.get("test_strategy") if isinstance(readiness.get("test_strategy"), dict) else {}
     symbol_lines: list[str] = []
     for item in symbols[:20]:
         if not isinstance(item, dict):
@@ -1491,6 +1592,31 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             continue
         evidence = ", ".join(str(value) for value in item.get("evidence", [])[:4]) if isinstance(item.get("evidence"), list) else ""
         hypothesis_lines.append(f"- [{item.get('confidence')}] {item.get('hypothesis')} evidence=[{evidence}] risk={item.get('risk')}")
+    impact_lines: list[str] = []
+    for item in impact_matrix[:12]:
+        if not isinstance(item, dict):
+            continue
+        tests_for_item = ", ".join(str(value) for value in item.get("linked_tests", [])[:5]) if isinstance(item.get("linked_tests"), list) else ""
+        impact_lines.append(
+            f"- {item.get('path')}: impact={item.get('impact_level')} dependents={item.get('dependent_count', 0)} tests=[{tests_for_item}]"
+        )
+    risk_lines: list[str] = []
+    for item in risk_register[:12]:
+        if not isinstance(item, dict):
+            continue
+        risk_lines.append(f"- [{item.get('severity')}] {item.get('risk')}: {item.get('mitigation')}")
+    acceptance_lines: list[str] = []
+    for item in acceptance_criteria[:12]:
+        if not isinstance(item, dict):
+            continue
+        acceptance_lines.append(f"- {item.get('criterion')}: {item.get('verification')}")
+    test_strategy_lines: list[str] = []
+    if isinstance(test_strategy.get("primary_commands"), list):
+        test_strategy_lines.extend(f"- primary: {item}" for item in test_strategy.get("primary_commands", [])[:8])
+    if isinstance(test_strategy.get("linked_test_targets"), list):
+        test_strategy_lines.extend(f"- linked: {item}" for item in test_strategy.get("linked_test_targets", [])[:8])
+    if isinstance(test_strategy.get("fallback_checks"), list):
+        test_strategy_lines.extend(f"- fallback: {item}" for item in test_strategy.get("fallback_checks", [])[:8])
     content = "\n".join(
         [
             "# Ceraxia Change Plan",
@@ -1521,6 +1647,18 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             "",
             "## Design Decision Seed",
             *[f"- {item}" for item in decision_seed[:12]],
+            "",
+            "## File Impact Matrix",
+            *impact_lines,
+            "",
+            "## Risk Register",
+            *risk_lines,
+            "",
+            "## Acceptance Criteria",
+            *acceptance_lines,
+            "",
+            "## Test Strategy",
+            *test_strategy_lines,
             "",
             "## Test Surface",
             *[f"- {item}" for item in tests[:30]],
@@ -1575,6 +1713,8 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
 
 def run_implementation(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     plan = read_text_optional(workspace_root, sibling_artifact(output_path, "change_plan.md"))
+    survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
+    readiness = survey.get("engineering_readiness") if isinstance(survey.get("engineering_readiness"), dict) else {}
     role_policy = role_policy_from_request(request)
     task_profile = task_profile_from_request(request)
     worker_brief = worker_brief_from_request(request)
@@ -1662,6 +1802,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "operation_count": len(patch_spec.get("operations", [])) if isinstance(patch_spec.get("operations"), list) else 0,
         "changed_files": changed_files,
         "recommended_read_order": recommended_read_order_from_survey(workspace_root, output_path),
+        "engineering_readiness": readiness,
         "patch_scope_evidence": patch_scope_evidence(workspace_root, output_path, changed_files),
         "rollback": {
             "applied": bool(rolled_back_files),
@@ -1859,6 +2000,11 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     blockers = verification.get("blockers") if isinstance(verification.get("blockers"), list) else []
     warnings = verification.get("warnings") if isinstance(verification.get("warnings"), list) else []
     scope = patch.get("patch_scope_evidence") if isinstance(patch.get("patch_scope_evidence"), dict) else {}
+    readiness = patch.get("engineering_readiness") if isinstance(patch.get("engineering_readiness"), dict) else {}
+    readiness_checks = readiness.get("readiness_checks") if isinstance(readiness.get("readiness_checks"), dict) else {}
+    acceptance_criteria = readiness.get("acceptance_criteria") if isinstance(readiness.get("acceptance_criteria"), list) else []
+    risk_register = readiness.get("risk_register") if isinstance(readiness.get("risk_register"), list) else []
+    impact_matrix = readiness.get("impact_matrix") if isinstance(readiness.get("impact_matrix"), list) else []
     scope_review = patch_scope_review(scope)
     patch_source = str(patch.get("patch_source") or "")
     diagnostics = patch.get("diagnostics") if isinstance(patch.get("diagnostics"), dict) else {}
@@ -1885,6 +2031,16 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "check": "diagnostic_linkage",
             "status": "pass" if (not patch_source.startswith("test_inferred_") or diagnostics) else "blocker",
             "evidence": diagnostics,
+        },
+        {
+            "check": "readiness_model_present",
+            "status": "pass" if readiness_checks.get("has_acceptance_criteria") and readiness_checks.get("has_test_strategy") else "blocker",
+            "evidence": readiness_checks,
+        },
+        {
+            "check": "impact_matrix_present",
+            "status": "pass" if impact_matrix else "warning",
+            "evidence": {"impact_file_count": len(impact_matrix)},
         },
     ]
     review_warnings = [
@@ -1913,6 +2069,13 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         blockers = [*blockers, "Verification did not pass."]
     if patch_source.startswith("test_inferred_") and not diagnostics:
         blockers = [*blockers, "Test-inferred patch lacks diagnostics linking test evidence to source mutation."]
+    if not acceptance_criteria:
+        blockers = [*blockers, "Engineering readiness model lacks acceptance criteria."]
+    if not readiness_checks.get("has_test_strategy"):
+        blockers = [*blockers, "Engineering readiness model lacks test strategy."]
+    high_risks = [item for item in risk_register if isinstance(item, dict) and item.get("severity") == "high"]
+    if high_risks and not changed_files:
+        blockers = [*blockers, "High-risk task has no applied source change or explicit handoff resolution."]
     focused_revision_context = {
         "candidate_source_paths": [str(item) for item in candidate_source_paths[:12]],
         "changed_files": [
@@ -1927,6 +2090,12 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         ][:8],
         "patch_source": patch_source,
         "diagnostics": diagnostics,
+        "engineering_readiness": {
+            "acceptance_criteria": acceptance_criteria,
+            "risk_register": risk_register,
+            "impact_matrix": impact_matrix,
+            "readiness_checks": readiness_checks,
+        },
     }
     review = {
         "status": "blocked" if blockers else "passed",
@@ -1936,6 +2105,13 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "worker_brief": worker_brief,
         "repair_loop_status": repair_state.get("status", "unknown"),
         "patch_scope_review": scope_review,
+        "engineering_readiness_review": {
+            "readiness_checks": readiness_checks,
+            "acceptance_criteria_count": len(acceptance_criteria),
+            "risk_count": len(risk_register),
+            "high_risk_count": len(high_risks),
+            "impact_file_count": len(impact_matrix),
+        },
         "decision_record": decision_record,
         "findings": [
             {"severity": "blocker", "message": str(item)}
@@ -2015,6 +2191,8 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "changed_files": patch.get("changed_files", []),
         "recommended_read_order": patch.get("recommended_read_order", []),
         "engineering_investigation": survey.get("engineering_investigation", {}) if isinstance(survey.get("engineering_investigation"), dict) else {},
+        "engineering_readiness": patch.get("engineering_readiness", {}),
+        "engineering_readiness_review": review.get("engineering_readiness_review", {}),
         "patch_scope_evidence": patch.get("patch_scope_evidence", {}),
         "patch_source": patch.get("patch_source", ""),
         "patch_candidates": patch.get("patch_candidates", []),
@@ -2047,6 +2225,24 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             "repair_attempt_count": len(repair_state.get("repair_attempts", [])) if isinstance(repair_state.get("repair_attempts"), list) else 0,
             "patch_candidate_count": len(patch.get("patch_candidates", [])) if isinstance(patch.get("patch_candidates"), list) else 0,
             "source_excerpt_count": len(patch.get("source_excerpt_summary", [])) if isinstance(patch.get("source_excerpt_summary"), list) else 0,
+            "acceptance_criteria_count": len(
+                patch.get("engineering_readiness", {}).get("acceptance_criteria", [])
+                if isinstance(patch.get("engineering_readiness", {}), dict)
+                and isinstance(patch.get("engineering_readiness", {}).get("acceptance_criteria"), list)
+                else []
+            ),
+            "risk_count": len(
+                patch.get("engineering_readiness", {}).get("risk_register", [])
+                if isinstance(patch.get("engineering_readiness", {}), dict)
+                and isinstance(patch.get("engineering_readiness", {}).get("risk_register"), list)
+                else []
+            ),
+            "impact_file_count": len(
+                patch.get("engineering_readiness", {}).get("impact_matrix", [])
+                if isinstance(patch.get("engineering_readiness", {}), dict)
+                and isinstance(patch.get("engineering_readiness", {}).get("impact_matrix"), list)
+                else []
+            ),
             "blocker_count": len([item.get("message") for item in review.get("findings", []) if isinstance(item, dict)]),
             "revision_required": bool(review.get("revision_plan", {}).get("required")) if isinstance(review.get("revision_plan"), dict) else False,
         },
