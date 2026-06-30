@@ -95,3 +95,24 @@ The goal "Ceraxia is really 7/10" is not complete until:
 - Any severe or repeated failure mode has been addressed by a general change.
 - The final state is committed and pushed.
 
+## Ledger Reporting
+
+Field-trial results are recorded in `field_trial_ledger.json`. Only entries
+with `accepted_for_rolling_score=true`, complete scores, evidence paths, and
+human review notes are counted.
+
+To inspect current progress without claiming completion:
+
+```bash
+PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_field_trial_report.py
+```
+
+To enforce the real target in a release gate:
+
+```bash
+PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_field_trial_report.py --require-target
+```
+
+The strict command must fail until the ledger proves the target. This is
+intentional; an empty or draft-only ledger is not evidence of engineering
+ability.

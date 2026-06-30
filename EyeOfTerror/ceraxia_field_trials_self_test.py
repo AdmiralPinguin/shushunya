@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
 SPEC = ROOT / "InnerCircle" / "Ceraxia" / "field_trials.json"
 PROTOCOL = ROOT / "InnerCircle" / "Ceraxia" / "EVALUATION.md"
+LEDGER = ROOT / "InnerCircle" / "Ceraxia" / "field_trial_ledger.json"
+REPORTER = ROOT / "ceraxia_field_trial_report.py"
 
 
 def main() -> int:
@@ -37,6 +41,30 @@ def main() -> int:
     ledger_scores = data.get("ledger_template", {}).get("scores", {})
     if set(ledger_scores) != set(dimensions):
         raise AssertionError(f"Ceraxia ledger scores drift from dimensions: {ledger_scores} {dimensions}")
+    ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
+    if not isinstance(ledger.get("entries"), list):
+        raise AssertionError(f"Ceraxia field trial ledger must expose entries list: {ledger}")
+    report = subprocess.run(
+        [sys.executable, str(REPORTER)],
+        cwd=str(ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if report.returncode != 0:
+        raise AssertionError(f"Ceraxia field trial reporter failed: {report.stdout} {report.stderr}")
+    report_payload = json.loads(report.stdout)
+    if report_payload.get("target_met") is True and not ledger.get("entries"):
+        raise AssertionError(f"empty Ceraxia ledger must not prove target completion: {report_payload}")
+    strict_report = subprocess.run(
+        [sys.executable, str(REPORTER), "--require-target"],
+        cwd=str(ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if not ledger.get("entries") and strict_report.returncode == 0:
+        raise AssertionError("strict Ceraxia field trial report must fail while no accepted trials exist")
     required_phrases = [
         "A scripted self-test proves only that a known scenario still works.",
         "The real 7/10 target is met only when",
