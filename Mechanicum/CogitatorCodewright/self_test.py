@@ -11,6 +11,7 @@ from cogitator_codewright import (
     runtime_minimal_patch_candidates_from_failures,
     runtime_test_failures_from_traceback,
     runtime_verification_commands_from_goal,
+    run_verification_command,
     run,
     test_symbol_links_from_goal,
     traceback_frames_from_text,
@@ -563,6 +564,13 @@ def main() -> int:
         commands = runtime_verification_commands_from_goal(target_repo, "почини pytest test")
         if commands != ["python -m pytest test_maths.py"]:
             raise AssertionError(f"top-level pytest tests should infer pytest runtime command: {commands}")
+        fallback_result = run_verification_command(target_repo, commands[0])
+        if (
+            fallback_result.get("returncode") != 1
+            or fallback_result.get("fallback") != "simple_pytest_runner"
+            or "E       assert 6 == 8" not in fallback_result.get("stdout", "")
+        ):
+            raise AssertionError(f"pytest fallback runner should expose assertion diagnostics: {fallback_result}")
         pytest_output = (
             "_______________________________ test_double _______________________________\n"
             "    def test_double():\n"

@@ -4127,6 +4127,116 @@ def command_allowed(command: list[str]) -> bool:
     return False
 
 
+def pytest_fallback_test_paths(command: list[str]) -> list[str]:
+    if command[:3] == [sys.executable, "-m", "pytest"] or command[:3] in (["python", "-m", "pytest"], ["python3", "-m", "pytest"]):
+        args = command[3:]
+    elif command and command[0] == "pytest":
+        args = command[1:]
+    else:
+        return []
+    paths = [arg for arg in args if arg.endswith(".py") and not arg.startswith("-")]
+    return paths[:10]
+
+
+def run_pytest_fallback_command(repo_root: Path, raw_command: str, command: list[str]) -> dict[str, Any]:
+    test_paths = pytest_fallback_test_paths(command)
+    if not test_paths:
+        return {
+            "command": raw_command,
+            "returncode": 127,
+            "stdout": "",
+            "stderr": "pytest is unavailable and no explicit pytest file paths were provided",
+        }
+    script = r"""
+import ast
+import importlib.util
+import linecache
+import sys
+import traceback
+from pathlib import Path
+
+root = Path.cwd()
+failures = []
+passed = 0
+
+def value_preview(node, frame):
+    try:
+        return repr(eval(compile(ast.Expression(node), str(frame.f_code.co_filename), "eval"), frame.f_globals, frame.f_locals))
+    except Exception:
+        return ast.unparse(node) if hasattr(ast, "unparse") else "<expr>"
+
+for index, raw_path in enumerate(sys.argv[1:]):
+    path = root / raw_path
+    module_name = "_ceraxia_pytest_fallback_%s" % index
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(root))
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        failures.append((raw_path, "<module>", traceback.format_exc()))
+        continue
+    for name, func in sorted(module.__dict__.items()):
+        if not name.startswith("test") or not callable(func):
+            continue
+        try:
+            func()
+            passed += 1
+        except AssertionError:
+            _, _, tb = sys.exc_info()
+            frames = traceback.extract_tb(tb)
+            last = frames[-1]
+            traceback_text = traceback.format_exc()
+            line = linecache.getline(last.filename, last.lineno).strip()
+            detail = ""
+            tb_cursor = tb
+            while tb_cursor and tb_cursor.tb_next:
+                tb_cursor = tb_cursor.tb_next
+            if line.startswith("assert ") and tb_cursor is not None:
+                try:
+                    parsed = ast.parse(line).body[0]
+                    if isinstance(parsed, ast.Assert) and isinstance(parsed.test, ast.Compare) and len(parsed.test.ops) == 1 and len(parsed.test.comparators) == 1:
+                        left = value_preview(parsed.test.left, tb_cursor.tb_frame)
+                        right = value_preview(parsed.test.comparators[0], tb_cursor.tb_frame)
+                        op = "==" if isinstance(parsed.test.ops[0], ast.Eq) else "!="
+                        detail = "E       assert %s %s %s\n" % (left, op, right)
+                except Exception:
+                    detail = ""
+            pytest_text = "_______________________________ %s _______________________________\n%s:%s: AssertionError\n%s" % (
+                name,
+                raw_path,
+                last.lineno,
+                detail,
+            )
+            failures.append((raw_path, name, traceback_text + pytest_text))
+        except Exception:
+            failures.append((raw_path, name, traceback.format_exc()))
+
+if failures:
+    for _, _, text in failures:
+        sys.stdout.write(text)
+        if not text.endswith("\n"):
+            sys.stdout.write("\n")
+    sys.exit(1)
+print("%s passed" % passed)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script, *test_paths],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    return {
+        "command": raw_command,
+        "returncode": completed.returncode,
+        "stdout": completed.stdout[-4000:],
+        "stderr": completed.stderr[-4000:],
+        "fallback": "simple_pytest_runner",
+    }
+
+
 def run_verification_command(repo_root: Path, raw_command: str) -> dict[str, Any]:
     try:
         command = shlex.split(raw_command)
@@ -4142,6 +4252,14 @@ def run_verification_command(repo_root: Path, raw_command: str) -> dict[str, Any
     if command[0] in {"python", "python3"}:
         command[0] = sys.executable
     completed = subprocess.run(command, cwd=repo_root, text=True, capture_output=True, timeout=120, check=False)
+    if (
+        completed.returncode != 0
+        and len(command) >= 3
+        and command[0] == sys.executable
+        and command[1:3] == ["-m", "pytest"]
+        and "No module named pytest" in completed.stderr
+    ):
+        return run_pytest_fallback_command(repo_root, raw_command, command)
     return {
         "command": raw_command,
         "returncode": completed.returncode,

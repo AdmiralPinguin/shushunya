@@ -1140,6 +1140,29 @@ def fixture_expert_unshaped_runtime_alias(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_pytest_runtime(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "quota.py").write_text(
+        "def max_daily_exports():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_quota_pytest.py").write_text(
+        "from quota import max_daily_exports\n\n"
+        "def test_pytest_limit():\n"
+        "    assert max_daily_exports() == 7\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured patch marker и без явного CERAXIA_VERIFY: "
+        "pytest-style top-level test падает. Выведи runtime verification command из test surface, "
+        "распарси pytest failure output, свяжи test function с imported source function и сделай "
+        "минимальный source patch. Tests не редактировать.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+    )
+
+
 def fixture_expert_repo_grade_workflow(repo: Path) -> str:
     repo.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -1219,6 +1242,7 @@ FIXTURES = {
     "ceraxia-expert-unshaped-retry-policy": fixture_expert_unshaped_retry_policy,
     "ceraxia-expert-repo-grade-workflow": fixture_expert_repo_grade_workflow,
     "ceraxia-expert-unshaped-runtime-alias": fixture_expert_unshaped_runtime_alias,
+    "ceraxia-expert-unshaped-pytest-runtime": fixture_expert_unshaped_pytest_runtime,
     "ceraxia-expert-unshaped-self-repair": fixture_expert_unshaped_self_repair,
     "ceraxia-expert-unshaped-security-boundary": fixture_expert_unshaped_security_boundary,
     "ceraxia-field-integration-contract": fixture_integration_contract,
@@ -1897,6 +1921,62 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and "return 1" not in source_text
                     and "from quota import max_daily_exports as limit" in test_text
                     and "assertEqual(limit(), 7)" in test_text
+                    and has_runtime_candidate
+                    and changed_paths == ["quota.py"]
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-unshaped-pytest-runtime":
+        source_path = repo / "quota.py"
+        test_path = repo / "tests" / "test_quota_pytest.py"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        diagnostics = manifest.get("diagnostics") if isinstance(manifest.get("diagnostics"), dict) else {}
+        runtime_diagnostic = diagnostics.get("runtime_diagnostic_extraction") if isinstance(diagnostics.get("runtime_diagnostic_extraction"), dict) else {}
+        runtime_candidates = runtime_diagnostic.get("runtime_minimal_patch_candidates") if isinstance(runtime_diagnostic.get("runtime_minimal_patch_candidates"), list) else []
+        parser_coverage = runtime_diagnostic.get("parser_coverage") if isinstance(runtime_diagnostic.get("parser_coverage"), dict) else {}
+        verification_executed = manifest.get("verification_executed") if isinstance(manifest.get("verification_executed"), list) else []
+        executed_commands = [
+            str(item.get("command") or "")
+            for item in verification_executed
+            if isinstance(item, dict)
+        ]
+        changed_paths = [
+            str(item.get("path") or "")
+            for item in manifest.get("changed_files", [])
+            if isinstance(item, dict)
+        ]
+        has_runtime_candidate = any(
+            isinstance(item, dict)
+            and item.get("kind") == "replace_return_expression"
+            and item.get("path") == "quota.py"
+            and item.get("function_name") == "max_daily_exports"
+            and item.get("old_expression") == "1"
+            and item.get("new_expression") == "7"
+            and item.get("test_function") == "test_pytest_limit"
+            for item in runtime_candidates
+        )
+        return {
+            "expert_unshaped_pytest_runtime": {
+                "patch_source": manifest.get("patch_source", ""),
+                "source_repaired": "return 7" in source_text and "return 1" not in source_text,
+                "pytest_test_preserved": "def test_pytest_limit" in test_text and "assert max_daily_exports() == 7" in test_text,
+                "pytest_command_inferred": any("python -m pytest tests/test_quota_pytest.py" == command for command in executed_commands),
+                "pytest_runtime_parsed": parser_coverage.get("traceback_frames", 0) >= 1
+                and parser_coverage.get("runtime_test_failures", 0) >= 1
+                and parser_coverage.get("runtime_minimal_patch_candidates", 0) >= 1,
+                "runtime_candidate": has_runtime_candidate,
+                "only_source_changed": changed_paths == ["quota.py"],
+                "passed": (
+                    manifest.get("patch_source") == "runtime_diagnostic_return_mismatch"
+                    and "return 7" in source_text
+                    and "return 1" not in source_text
+                    and "def test_pytest_limit" in test_text
+                    and "assert max_daily_exports() == 7" in test_text
+                    and any("python -m pytest tests/test_quota_pytest.py" == command for command in executed_commands)
+                    and parser_coverage.get("traceback_frames", 0) >= 1
+                    and parser_coverage.get("runtime_test_failures", 0) >= 1
+                    and parser_coverage.get("runtime_minimal_patch_candidates", 0) >= 1
                     and has_runtime_candidate
                     and changed_paths == ["quota.py"]
                 ),

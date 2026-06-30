@@ -861,6 +861,38 @@
       ]
     },
     {
+      "id": "ceraxia-expert-unshaped-pytest-runtime",
+      "class": "expert_unshaped_runtime_diagnostic",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "patch_correctness",
+        "verification_discipline",
+        "self_repair",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Repair a failing pytest-style top-level test without a structured patch marker and without an explicit verification command. Ceraxia must infer the pytest command from the test surface, parse pytest assertion output, link the test function to the imported source function, and apply the minimal source patch without editing tests.",
+      "required_evidence": [
+        "pytest verification command inferred from repository tests",
+        "pytest failure location parsed",
+        "pytest assertion expected and actual values parsed",
+        "test function linked to imported source function",
+        "runtime-derived minimal patch candidate recorded",
+        "only implementation source changed",
+        "post-fix pytest verification passes"
+      ],
+      "failure_modes_to_watch": [
+        "uses unittest discovery for top-level pytest tests",
+        "cannot parse pytest assertion output",
+        "edits pytest tests instead of source",
+        "requires a structured marker",
+        "drops runtime diagnostic candidate evidence"
+      ]
+    },
+    {
       "id": "ceraxia-expert-repo-grade-workflow",
       "class": "expert_repo_grade_workflow",
       "difficulty": "expert",

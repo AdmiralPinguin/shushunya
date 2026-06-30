@@ -150,6 +150,7 @@ def main() -> int:
         "ceraxia-expert-security-boundary",
         "ceraxia-expert-unshaped-config-runtime",
         "ceraxia-expert-unshaped-design-choice",
+        "ceraxia-expert-unshaped-pytest-runtime",
         "ceraxia-expert-unshaped-runtime-alias",
         "ceraxia-field-integration-contract",
         "ceraxia-field-large-file-restraint",
