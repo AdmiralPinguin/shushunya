@@ -16,6 +16,7 @@ LEDGER = ROOT / "InnerCircle" / "Ceraxia" / "field_trial_ledger.json"
 REPORTER = ROOT / "ceraxia_field_trial_report.py"
 RUNNER = ROOT / "ceraxia_field_trial_runner.py"
 REVIEWER = ROOT / "ceraxia_field_trial_review.py"
+ACCEPTER = ROOT / "ceraxia_field_trial_accept.py"
 
 
 def main() -> int:
@@ -123,6 +124,72 @@ def main() -> int:
     )
     if len(ledger.get("entries", [])) > 1 and ambiguous_review.returncode == 0:
         raise AssertionError("Ceraxia review helper must require --all or a narrow selector for multiple entries")
+    if ledger.get("entries"):
+        first_entry = ledger["entries"][0]
+        bad_review_path = ROOT / "tmp_bad_ceraxia_review.json"
+        good_review_path = ROOT / "tmp_good_ceraxia_review.json"
+        try:
+            bad_review_path.write_text(
+                json.dumps(
+                    {
+                        "trial_id": first_entry.get("trial_id"),
+                        "run_id": first_entry.get("run_id"),
+                        "reviewer": "",
+                        "scores": {},
+                        "human_review_notes": "too short",
+                        "accepted_for_rolling_score": True,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            bad_accept = subprocess.run(
+                [sys.executable, str(ACCEPTER), "--review-file", str(bad_review_path), "--dry-run"],
+                cwd=str(ROOT.parent),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if bad_accept.returncode == 0:
+                raise AssertionError(f"Ceraxia accept helper accepted incomplete review: {bad_accept.stdout}")
+            good_review_path.write_text(
+                json.dumps(
+                    {
+                        "trial_id": first_entry.get("trial_id"),
+                        "run_id": first_entry.get("run_id"),
+                        "reviewer": "self-test reviewer",
+                        "scores": {dimension: 7 for dimension in dimensions},
+                        "human_review_notes": "Self-test dry run confirms complete review payload validation without mutating the ledger.",
+                        "generalizable_failures": [],
+                        "follow_up_changes": [],
+                        "accepted_for_rolling_score": True,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            good_accept = subprocess.run(
+                [sys.executable, str(ACCEPTER), "--review-file", str(good_review_path), "--dry-run"],
+                cwd=str(ROOT.parent),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if good_accept.returncode != 0:
+                raise AssertionError(f"Ceraxia accept helper rejected complete dry-run review: {good_accept.stdout} {good_accept.stderr}")
+            good_payload = json.loads(good_accept.stdout)
+            if good_payload.get("dry_run") is not True or good_payload.get("report", {}).get("accepted_trial_count") != 1:
+                raise AssertionError(f"Ceraxia accept helper dry-run report is wrong: {good_payload}")
+            ledger_after_dry_run = json.loads(LEDGER.read_text(encoding="utf-8"))
+            if any(entry.get("accepted_for_rolling_score") for entry in ledger_after_dry_run.get("entries", [])):
+                raise AssertionError("Ceraxia accept helper dry-run mutated the ledger")
+        finally:
+            bad_review_path.unlink(missing_ok=True)
+            good_review_path.unlink(missing_ok=True)
     blocked_outcome = classify_trial_outcome(
         "ceraxia-field-ambiguous-task",
         {"ok": False, "phase": "revision_cycle_limit"},
