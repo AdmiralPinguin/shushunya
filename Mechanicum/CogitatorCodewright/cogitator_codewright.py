@@ -186,6 +186,84 @@ def architecture_decision_record_from_evidence(
     }
 
 
+def problem_statement_from_evidence(request: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request) or str(survey.get("goal") or "")
+    repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
+    investigation = survey.get("engineering_investigation") if isinstance(survey.get("engineering_investigation"), dict) else {}
+    readiness = survey.get("engineering_readiness") if isinstance(survey.get("engineering_readiness"), dict) else {}
+    ranked_files = repo_map.get("ranked_files") if isinstance(repo_map.get("ranked_files"), list) else []
+    hypotheses = investigation.get("hypotheses") if isinstance(investigation.get("hypotheses"), list) else []
+    test_strategy = readiness.get("test_strategy") if isinstance(readiness.get("test_strategy"), dict) else {}
+    verification_candidates: list[str] = []
+    for key in ("primary_commands", "linked_test_targets", "fallback_checks"):
+        values = test_strategy.get(key) if isinstance(test_strategy.get(key), list) else []
+        verification_candidates.extend(str(item) for item in values[:6])
+    return {
+        "status": "recorded",
+        "goal": goal,
+        "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+        "success_criteria": [
+            "changed files directly address the requested behavior",
+            "source scope is justified by repo survey or explicit patch contract",
+            "verification evidence is preserved after the final mutation",
+            "review either approves with evidence or blocks with focused revision steps",
+        ],
+        "evidence_to_inspect": [
+            str(item.get("path"))
+            for item in ranked_files[:10]
+            if isinstance(item, dict) and item.get("path")
+        ],
+        "working_hypotheses": [
+            str(item.get("hypothesis"))
+            for item in hypotheses[:8]
+            if isinstance(item, dict) and item.get("hypothesis")
+        ],
+        "verification_candidates": verification_candidates[:12],
+        "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation.",
+    }
+
+
+def architecture_options_from_evidence(request: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
+    problem_statement = problem_statement_from_evidence(request, survey)
+    readiness = survey.get("engineering_readiness") if isinstance(survey.get("engineering_readiness"), dict) else {}
+    impact_matrix = readiness.get("impact_matrix") if isinstance(readiness.get("impact_matrix"), list) else []
+    high_impact_paths = [
+        str(item.get("path"))
+        for item in impact_matrix
+        if isinstance(item, dict) and item.get("impact_level") in {"high", "medium"} and item.get("path")
+    ][:10]
+    return {
+        "status": "recorded",
+        "problem_status": problem_statement.get("status"),
+        "options": [
+            {
+                "id": "minimal_targeted_patch",
+                "summary": "Patch the narrowest source surface that satisfies the observed behavior gap.",
+                "recommended": True,
+                "tradeoffs": ["lowest churn", "requires focused verification to prove behavior"],
+                "applies_to": high_impact_paths,
+            },
+            {
+                "id": "compatibility_wrapper",
+                "summary": "Preserve old callers while adding the new behavior behind a compatible boundary.",
+                "recommended": any("api" in str(kind) for kind in task_profile_from_request(request).get("kinds", []))
+                if isinstance(task_profile_from_request(request).get("kinds"), list)
+                else False,
+                "tradeoffs": ["safer public API evolution", "may require deprecation docs and caller tests"],
+                "applies_to": high_impact_paths,
+            },
+            {
+                "id": "broad_rewrite",
+                "summary": "Rewrite the surrounding module or subsystem.",
+                "recommended": False,
+                "tradeoffs": ["higher regression risk", "harder review", "should be rejected unless the task explicitly demands it"],
+                "applies_to": high_impact_paths,
+            },
+        ],
+        "selection_rule": "Choose the first option that satisfies the task with the least public-surface churn and adequate verification.",
+    }
+
+
 def role_policy_allows_source_mutation(role_policy: dict[str, Any]) -> bool:
     return not role_policy or role_policy.get("may_mutate_source") is not False
 
@@ -3290,6 +3368,8 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
     acceptance_criteria = readiness.get("acceptance_criteria") if isinstance(readiness.get("acceptance_criteria"), list) else []
     test_strategy = readiness.get("test_strategy") if isinstance(readiness.get("test_strategy"), dict) else {}
     repo_grade_workflow = repo_grade_workflow_from_request(request)
+    problem_statement = problem_statement_from_evidence(request, survey)
+    architecture_options = architecture_options_from_evidence(request, survey)
     architecture_decision_record = architecture_decision_record_from_evidence(request, survey)
     symbol_lines: list[str] = []
     for item in symbols[:20]:
@@ -3384,8 +3464,26 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             "## Hypothesis Log",
             *hypothesis_lines,
             "",
+            "## Problem Statement",
+            f"- status: {problem_statement.get('status')}",
+            f"- observed_problem: {problem_statement.get('observed_problem')}",
+            *[
+                f"- success_criteria: {item}"
+                for item in problem_statement.get("success_criteria", [])
+                if isinstance(item, str)
+            ],
+            f"- ambiguity_policy: {problem_statement.get('ambiguity_policy')}",
+            "",
             "## Design Decision Seed",
             *[f"- {item}" for item in decision_seed[:12]],
+            "",
+            "## Architecture Options",
+            *[
+                f"- {item.get('id')}: recommended={item.get('recommended')} summary={item.get('summary')}"
+                for item in architecture_options.get("options", [])
+                if isinstance(item, dict)
+            ],
+            f"- selection_rule: {architecture_options.get('selection_rule')}",
             "",
             "## Architecture Decision Record",
             f"- status: {architecture_decision_record.get('status')}",
@@ -3465,13 +3563,19 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
         ]
     )
     write_text(workspace_root, output_path, content + "\n")
+    write_json(workspace_root, sibling_artifact(output_path, "problem_statement.json"), problem_statement)
+    write_json(workspace_root, sibling_artifact(output_path, "architecture_options.json"), architecture_options)
     return {
         "ok": True,
         "worker": worker_name(),
         "task_id": request.get("task_id"),
         "status": "completed",
         "summary": "Code change plan written.",
-        "artifacts": [output_path],
+        "artifacts": [
+            output_path,
+            sibling_artifact(output_path, "problem_statement.json"),
+            sibling_artifact(output_path, "architecture_options.json"),
+        ],
         "confidence": "medium",
     }
 
@@ -3479,6 +3583,8 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
 def run_implementation(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     plan = read_text_optional(workspace_root, sibling_artifact(output_path, "change_plan.md"))
     survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
+    problem_statement = load_json_optional(workspace_root, sibling_artifact(output_path, "problem_statement.json"))
+    architecture_options = load_json_optional(workspace_root, sibling_artifact(output_path, "architecture_options.json"))
     readiness = survey.get("engineering_readiness") if isinstance(survey.get("engineering_readiness"), dict) else {}
     role_policy = role_policy_from_request(request)
     task_profile = task_profile_from_request(request)
@@ -3535,6 +3641,8 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
             "return focused revision steps on failure",
         ],
         "plan_excerpt": plan[:3000],
+        "problem_statement": problem_statement,
+        "architecture_options": architecture_options,
         "role_policy": role_policy,
         "task_profile": task_profile,
         "worker_brief": worker_brief,
@@ -3794,9 +3902,13 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
 
 def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
+    problem_statement = load_json_optional(workspace_root, sibling_artifact(output_path, "problem_statement.json"))
+    architecture_options = load_json_optional(workspace_root, sibling_artifact(output_path, "architecture_options.json"))
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
     repair_state = load_json_optional(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"))
+    problem_statement = load_json_optional(workspace_root, sibling_artifact(output_path, "problem_statement.json"))
+    architecture_options = load_json_optional(workspace_root, sibling_artifact(output_path, "architecture_options.json"))
     role_policy = role_policy_from_request(request)
     task_profile = task_profile_from_request(request)
     worker_brief = worker_brief_from_request(request)
@@ -3858,6 +3970,16 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "evidence": investigation_review,
         },
         {
+            "check": "problem_statement_present",
+            "status": "pass" if problem_statement.get("status") == "recorded" else "blocker",
+            "evidence": problem_statement,
+        },
+        {
+            "check": "architecture_options_present",
+            "status": "pass" if architecture_options.get("status") == "recorded" else "blocker",
+            "evidence": architecture_options,
+        },
+        {
             "check": "architecture_decision_record_present",
             "status": "pass" if (not repo_grade_mode or architecture_decision_record.get("status") == "recorded") else "blocker",
             "evidence": architecture_decision_record,
@@ -3907,6 +4029,10 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         blockers = [*blockers, "Engineering readiness model lacks acceptance criteria."]
     if not readiness_checks.get("has_test_strategy"):
         blockers = [*blockers, "Engineering readiness model lacks test strategy."]
+    if problem_statement.get("status") != "recorded":
+        blockers = [*blockers, "Change plan lacks machine-readable problem_statement evidence."]
+    if architecture_options.get("status") != "recorded":
+        blockers = [*blockers, "Change plan lacks machine-readable architecture_options evidence."]
     if repo_grade_mode and architecture_decision_record.get("status") != "recorded":
         blockers = [*blockers, "Repo-grade task lacks architecture decision record."]
     if repo_grade_mode and not broad_commands:
@@ -3935,6 +4061,8 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "readiness_checks": readiness_checks,
         },
         "architecture_decision_record": architecture_decision_record,
+        "problem_statement": problem_statement,
+        "architecture_options": architecture_options,
         "repo_grade_workflow": repo_grade_workflow,
         "verification_strategy": verification_strategy,
         "repository_investigation_review": investigation_review,
@@ -3959,6 +4087,11 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "architecture_decision_record_present": architecture_decision_record.get("status") == "recorded",
             "focused_verification_count": len(focused_commands),
             "broad_verification_count": len(broad_commands),
+        },
+        "architect_review": {
+            "problem_statement_present": problem_statement.get("status") == "recorded",
+            "architecture_options_present": architecture_options.get("status") == "recorded",
+            "architecture_decision_record_present": architecture_decision_record.get("status") == "recorded",
         },
         "repository_investigation_review": investigation_review,
         "decision_record": decision_record,
@@ -4009,6 +4142,8 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
 
 def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
+    problem_statement = load_json_optional(workspace_root, sibling_artifact(output_path, "problem_statement.json"))
+    architecture_options = load_json_optional(workspace_root, sibling_artifact(output_path, "architecture_options.json"))
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
     repair_state = load_json_optional(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"))
@@ -4047,6 +4182,8 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "changed_files": changed_files,
         "patch_source": patch.get("patch_source", ""),
         "operation_count": patch.get("operation_count", 0),
+        "problem_statement": problem_statement,
+        "architecture_options": architecture_options,
         "architecture_decision_record": architecture_decision_record,
         "verification_strategy": verification_strategy,
         "review_decision_record": review.get("decision_record", []),
@@ -4066,6 +4203,8 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         },
         "deliverables": [
             sibling_artifact(output_path, "repo_survey.json"),
+            sibling_artifact(output_path, "problem_statement.json"),
+            sibling_artifact(output_path, "architecture_options.json"),
             sibling_artifact(output_path, "change_plan.md"),
             sibling_artifact(output_path, "patch_manifest.json"),
             sibling_artifact(output_path, "verification_report.json"),
@@ -4074,6 +4213,8 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         ],
         "changed_files": changed_files,
         "repo_grade_workflow": repo_grade_workflow,
+        "problem_statement": problem_statement,
+        "architecture_options": architecture_options,
         "architecture_decision_record": architecture_decision_record,
         "verification_strategy": verification_strategy,
         "patch_package": patch_package,
@@ -4082,6 +4223,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "engineering_investigation": survey.get("engineering_investigation", {}) if isinstance(survey.get("engineering_investigation"), dict) else {},
         "engineering_readiness": patch.get("engineering_readiness", {}),
         "engineering_readiness_review": review.get("engineering_readiness_review", {}),
+        "architect_review": review.get("architect_review", {}),
         "repository_investigation_review": review.get("repository_investigation_review", {}),
         "patch_scope_evidence": patch.get("patch_scope_evidence", {}),
         "patch_source": patch.get("patch_source", ""),

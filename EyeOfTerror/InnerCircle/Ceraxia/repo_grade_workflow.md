@@ -27,6 +27,8 @@ compatibility, real repo work, or a broad 8-15 file change.
 A repo-grade run is not ready unless the final manifest contains:
 
 - `repo_grade_workflow`
+- `problem_statement`
+- `architecture_options`
 - `architecture_decision_record`
 - `verification_strategy`
 - `review_decision_record`

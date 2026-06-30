@@ -587,11 +587,23 @@ def main() -> int:
         if (
             "## Hypothesis Log" not in plan_text
             or "## Targeted Reading Plan" not in plan_text
+            or "## Problem Statement" not in plan_text
+            or "## Architecture Options" not in plan_text
             or "## File Impact Matrix" not in plan_text
             or "## Acceptance Criteria" not in plan_text
             or "## Test Strategy" not in plan_text
         ):
             raise AssertionError(f"change plan should include engineering investigation sections: {plan_text}")
+        problem_statement = final.get("problem_statement", {})
+        architecture_options = final.get("architecture_options", {})
+        if (
+            problem_statement.get("status") != "recorded"
+            or not problem_statement.get("success_criteria")
+            or architecture_options.get("status") != "recorded"
+            or not architecture_options.get("options")
+            or final.get("architect_review", {}).get("problem_statement_present") is not True
+        ):
+            raise AssertionError(f"final manifest should preserve architect planning evidence: {final}")
         if (
             len(readiness.get("acceptance_criteria", [])) < 5
             or not readiness.get("test_strategy", {}).get("fallback_checks")
@@ -1462,6 +1474,12 @@ def main() -> int:
         plan_text = (root / "work" / "code" / "change_plan.md").read_text(encoding="utf-8")
         if "## Architecture Decision Record" not in plan_text or "## Repo-Grade Workflow" not in plan_text:
             raise AssertionError(f"repo-grade change plan should expose ADR and workflow sections: {plan_text}")
+        if (
+            final.get("problem_statement", {}).get("status") != "recorded"
+            or final.get("architecture_options", {}).get("status") != "recorded"
+            or final.get("architect_review", {}).get("architecture_options_present") is not True
+        ):
+            raise AssertionError(f"repo-grade final manifest should preserve architect evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

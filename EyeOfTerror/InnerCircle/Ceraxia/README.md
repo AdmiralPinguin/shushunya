@@ -67,6 +67,10 @@ The repository survey now records `engineering_investigation`: import
 dependency edges, simple AST call edges, targeted reading questions, hypothesis
 logs, and design-decision seed rules. `MagosStrategos` writes those sections
 into `change_plan.md`, and final manifests preserve them for Warmaster review.
+`MagosStrategos` also writes machine-readable `problem_statement.json` and
+`architecture_options.json`. `JudicatorCodicis` blocks final readiness if those
+architect planning artifacts are missing, so code work cannot silently skip the
+problem-definition and design-option pass.
 
 `FerrumPatchwright` can apply explicit patch operations embedded in the task:
 
@@ -132,7 +136,8 @@ reviews preserve focused revision context with changed files, failed commands,
 candidate source paths, patch source, and diagnostics.
 
 For repo-grade tasks, final manifests additionally preserve
-`repo_grade_workflow`, `architecture_decision_record`,
+`repo_grade_workflow`, `problem_statement`, `architecture_options`,
+`architecture_decision_record`,
 `verification_strategy`, `patch_package`, and `pr_summary`. `JudicatorCodicis`
 gates architecture evidence and broad verification before `SealwrightFinalis`
 can package the result as ready.
