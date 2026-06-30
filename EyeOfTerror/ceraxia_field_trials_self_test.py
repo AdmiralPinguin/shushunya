@@ -17,6 +17,7 @@ REPORTER = ROOT / "ceraxia_field_trial_report.py"
 RUNNER = ROOT / "ceraxia_field_trial_runner.py"
 EXPERT_SUITE = ROOT / "ceraxia_expert_suite.py"
 REVIEWER = ROOT / "ceraxia_field_trial_review.py"
+EXPERT_REVIEWER = ROOT / "ceraxia_expert_review.py"
 ACCEPTER = ROOT / "ceraxia_field_trial_accept.py"
 
 
@@ -80,7 +81,14 @@ def main() -> int:
     if report_payload.get("target_met") is True and not ledger.get("entries"):
         raise AssertionError(f"empty Ceraxia ledger must not prove target completion: {report_payload}")
     if report_payload.get("expert_target_met") is True:
-        raise AssertionError(f"current Ceraxia evidence must not accidentally satisfy the 10/10 gate: {report_payload}")
+        expert_gaps = report_payload.get("expert_gaps", {})
+        if (
+            expert_gaps.get("expert_trial_count", 0) < expert_target.get("minimum_expert_trials", 0)
+            or expert_gaps.get("expert_class_count", 0) < expert_target.get("minimum_expert_classes", 0)
+            or expert_gaps.get("unshaped_expert_trial_count", 0) < expert_target.get("minimum_unshaped_expert_trials", 0)
+            or report_payload.get("expert_overall_score", 0) < expert_target.get("rolling_average_min", 0)
+        ):
+            raise AssertionError(f"Ceraxia expert target cannot pass without required evidence: {report_payload}")
     if report_payload.get("accepted_trial_count", 0) and report_payload.get("target_met") is not True:
         low_entries = report_payload.get("gaps", {}).get("low_score_entries", {})
         if not isinstance(low_entries, dict):
@@ -110,7 +118,9 @@ def main() -> int:
         capture_output=True,
         check=False,
     )
-    if expert_strict_report.returncode == 0:
+    if report_payload.get("expert_target_met") is True and expert_strict_report.returncode != 0:
+        raise AssertionError(f"strict Ceraxia expert report rejected proven expert target: {expert_strict_report.stdout}")
+    if report_payload.get("expert_target_met") is not True and expert_strict_report.returncode == 0:
         raise AssertionError("strict Ceraxia expert report must fail until expert evidence proves 10/10")
     runner_list = subprocess.run(
         [sys.executable, str(RUNNER), "--list"],
@@ -164,6 +174,40 @@ def main() -> int:
         or expert_suite_payload.get("all_passed") is not True
     ):
         raise AssertionError(f"Ceraxia expert suite runner did not prove current arena health: {expert_suite_payload}")
+    expert_review = subprocess.run(
+        [sys.executable, str(EXPERT_REVIEWER), "--dry-run"],
+        cwd=str(ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if expert_review.returncode != 0:
+        raise AssertionError(f"Ceraxia strict expert reviewer failed: {expert_review.stdout} {expert_review.stderr}")
+    expert_review_payload = json.loads(expert_review.stdout)
+    if "review_count" not in expert_review_payload or "report" not in expert_review_payload:
+        raise AssertionError(f"Ceraxia strict expert reviewer returned malformed payload: {expert_review_payload}")
+    unshaped_draft_count = sum(
+        1
+        for entry in ledger.get("entries", [])
+        if isinstance(entry, dict)
+        and entry.get("accepted_for_rolling_score") is not True
+        and str(entry.get("trial_id") or "").startswith("ceraxia-expert-unshaped-")
+    )
+    if unshaped_draft_count:
+        expert_review_unshaped = subprocess.run(
+            [sys.executable, str(EXPERT_REVIEWER), "--unshaped-only", "--dry-run"],
+            cwd=str(ROOT.parent),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if expert_review_unshaped.returncode != 0:
+            raise AssertionError(f"Ceraxia unshaped expert reviewer failed: {expert_review_unshaped.stdout} {expert_review_unshaped.stderr}")
+        unshaped_payload = json.loads(expert_review_unshaped.stdout)
+        if unshaped_payload.get("review_count", 0) < expert_target.get("minimum_unshaped_expert_trials", 0):
+            raise AssertionError(f"Ceraxia unshaped expert reviewer lacks enough drafts: {unshaped_payload}")
+        if unshaped_payload.get("report", {}).get("expert_target_met") is not True:
+            raise AssertionError(f"Ceraxia unshaped expert reviewer should prove the strict expert target before acceptance: {unshaped_payload}")
     review_all = subprocess.run(
         [sys.executable, str(REVIEWER), "--all"],
         cwd=str(ROOT.parent),
