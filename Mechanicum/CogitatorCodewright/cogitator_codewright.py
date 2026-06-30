@@ -423,6 +423,7 @@ def marker_block(text: str, marker: str) -> str:
         "\nCERAXIA_FEATURE:",
         "\nCERAXIA_CONFIG_RUNTIME:",
         "\nCERAXIA_REFACTOR:",
+        "\nCERAXIA_EDGE_FIX:",
         "\nCERAXIA_FILES:",
         "\nCERAXIA_CREATE_FILE:",
         "\nCERAXIA_FILE_CONTENT:",
@@ -1169,6 +1170,94 @@ def patch_spec_from_refactor_marker(goal: str) -> dict[str, Any]:
     }
 
 
+def patch_spec_from_edge_fix_marker(goal: str) -> dict[str, Any]:
+    payload = extract_json_after_marker(goal, "CERAXIA_EDGE_FIX:")
+    if not payload:
+        return {}
+    source_path = str(payload.get("source_path") or "").strip()
+    function_name = str(payload.get("function_name") or "").strip()
+    test_path = str(payload.get("test_path") or "").strip()
+    if not source_path or not function_name or not test_path:
+        raise ValueError("CERAXIA_EDGE_FIX requires source_path, function_name, and test_path")
+    if not source_path.endswith(".py") or not test_path.endswith(".py"):
+        raise ValueError("CERAXIA_EDGE_FIX source_path and test_path must be Python files")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", function_name):
+        raise ValueError("CERAXIA_EDGE_FIX function_name must be a valid Python identifier")
+    arguments = payload.get("arguments")
+    if not isinstance(arguments, list) or not arguments or not all(isinstance(item, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item) for item in arguments):
+        raise ValueError("CERAXIA_EDGE_FIX arguments must be a non-empty list of Python identifiers")
+    body_lines = payload.get("body_lines")
+    if not isinstance(body_lines, list) or not body_lines or not all(isinstance(item, str) and item.strip() for item in body_lines):
+        raise ValueError("CERAXIA_EDGE_FIX body_lines must be a non-empty list of strings")
+    forbidden_body = re.compile(r"\b(import|open|exec|eval|subprocess|socket|requests)\b")
+    if any(forbidden_body.search(line) for line in body_lines):
+        raise ValueError("CERAXIA_EDGE_FIX body_lines contain unsafe statements")
+    positive_cases = payload.get("positive_cases")
+    negative_cases = payload.get("negative_cases")
+    if not isinstance(positive_cases, list) or not positive_cases:
+        raise ValueError("CERAXIA_EDGE_FIX positive_cases must be a non-empty list")
+    if not isinstance(negative_cases, list) or not negative_cases:
+        raise ValueError("CERAXIA_EDGE_FIX negative_cases must be a non-empty list")
+    source_content = f"def {function_name}({', '.join(arguments)}):\n" + "".join(f"    {line}\n" for line in body_lines)
+    ast.parse(source_content)
+    test_module = source_path[:-3].replace("/", ".")
+    class_name = "".join(part.capitalize() for part in function_name.split("_")) + "EdgeTest"
+    rendered_positive: list[str] = []
+    for index, item in enumerate(positive_cases):
+        if not isinstance(item, dict):
+            raise ValueError(f"CERAXIA_EDGE_FIX positive case {index} must be an object")
+        inputs = item.get("inputs")
+        expected = item.get("expected")
+        if not isinstance(inputs, list) or len(inputs) != len(arguments):
+            raise ValueError(f"CERAXIA_EDGE_FIX positive case {index} inputs must match arguments")
+        rendered_positive.append(f"        self.assertEqual({function_name}({', '.join(repr(value) for value in inputs)}), {expected!r})")
+    rendered_negative: list[str] = []
+    for index, item in enumerate(negative_cases):
+        if not isinstance(item, dict):
+            raise ValueError(f"CERAXIA_EDGE_FIX negative case {index} must be an object")
+        inputs = item.get("inputs")
+        exception = str(item.get("exception") or "ValueError")
+        if not isinstance(inputs, list) or len(inputs) != len(arguments):
+            raise ValueError(f"CERAXIA_EDGE_FIX negative case {index} inputs must match arguments")
+        if exception not in {"ValueError", "TypeError", "KeyError"}:
+            raise ValueError(f"CERAXIA_EDGE_FIX negative case {index} uses unsupported exception")
+        rendered_negative.append(
+            f"        with self.assertRaises({exception}):\n"
+            f"            {function_name}({', '.join(repr(value) for value in inputs)})"
+        )
+    test_content = (
+        f"import unittest\nfrom {test_module} import {function_name}\n\n"
+        f"class {class_name}(unittest.TestCase):\n"
+        "    def test_positive_cases(self):\n"
+        + "\n".join(rendered_positive)
+        + "\n\n"
+        "    def test_negative_cases(self):\n"
+        + "\n".join(rendered_negative)
+        + "\n\nif __name__ == '__main__':\n    unittest.main()\n"
+    )
+    verification_commands = payload.get("verification_commands")
+    if verification_commands is None:
+        verification_commands = [f"python -m unittest {test_path[:-3].replace('/', '.')}"]
+    if not isinstance(verification_commands, list) or not all(isinstance(item, str) for item in verification_commands):
+        raise ValueError("CERAXIA_EDGE_FIX verification_commands must be a list of strings")
+    return {
+        "source": "edge_fix_marker_synthesis",
+        "diagnostics": {
+            "kind": "edge_fix_marker_synthesis",
+            "source_path": source_path,
+            "test_path": test_path,
+            "function_name": function_name,
+            "positive_case_count": len(positive_cases),
+            "negative_case_count": len(negative_cases),
+        },
+        "operations": [
+            {"type": "write_file", "path": source_path, "content": source_content, "overwrite": True},
+            {"type": "write_file", "path": test_path, "content": test_content, "overwrite": True},
+        ],
+        "verification_commands": verification_commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -1213,6 +1302,9 @@ def synthesized_patch_spec_from_markers(goal: str) -> dict[str, Any]:
     refactor = patch_spec_from_refactor_marker(goal)
     if refactor:
         return refactor
+    edge_fix = patch_spec_from_edge_fix_marker(goal)
+    if edge_fix:
+        return edge_fix
     feature = patch_spec_from_feature_marker(goal)
     if feature:
         return feature

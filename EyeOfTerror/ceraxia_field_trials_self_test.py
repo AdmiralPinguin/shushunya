@@ -82,6 +82,7 @@ def main() -> int:
         "ceraxia-field-bugfix-unnamed-source",
         "ceraxia-field-cross-language-config",
         "ceraxia-field-multifile-feature",
+        "ceraxia-field-negative-test",
         "ceraxia-field-refactor-preserve-behavior",
         "ceraxia-field-safety-dirty-worktree",
     }

@@ -204,11 +204,48 @@ CERAXIA_REFACTOR:
 """
 
 
+def fixture_negative_test(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "retry_policy.py").write_text(
+        "def parse_retry_count(raw):\n"
+        "    return int(raw)\n",
+        encoding="utf-8",
+    )
+    return f"""кодовая задача: исправь retry parsing так, чтобы простой happy-path фикс не был достаточным; добавь негативные edge-case тесты.
+CERAXIA_TARGET_REPO: {repo}
+CERAXIA_EDGE_FIX:
+{{
+  "source_path": "retry_policy.py",
+  "function_name": "parse_retry_count",
+  "arguments": ["raw"],
+  "body_lines": [
+    "value = int(raw)",
+    "if value < 0 or value > 10:",
+    "    raise ValueError('retry count must be between 0 and 10')",
+    "return value"
+  ],
+  "test_path": "test_retry_policy.py",
+  "positive_cases": [
+    {{"inputs": ["0"], "expected": 0}},
+    {{"inputs": ["3"], "expected": 3}},
+    {{"inputs": ["10"], "expected": 10}}
+  ],
+  "negative_cases": [
+    {{"inputs": ["-1"], "exception": "ValueError"}},
+    {{"inputs": ["11"], "exception": "ValueError"}},
+    {{"inputs": ["bad"], "exception": "ValueError"}}
+  ],
+  "verification_commands": ["python -m unittest test_retry_policy", "python -m py_compile retry_policy.py"]
+}}
+"""
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
     "ceraxia-field-cross-language-config": fixture_cross_language_config,
     "ceraxia-field-multifile-feature": fixture_multifile_feature,
+    "ceraxia-field-negative-test": fixture_negative_test,
     "ceraxia-field-refactor-preserve-behavior": fixture_refactor_preserve_behavior,
     "ceraxia-field-safety-dirty-worktree": fixture_safety_dirty_worktree,
 }

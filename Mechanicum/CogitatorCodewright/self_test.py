@@ -266,6 +266,36 @@ CERAXIA_REFACTOR:
 """
 
 
+def edge_fix_goal() -> str:
+    return """исправь функцию так, чтобы были проверены happy path и негативные edge cases
+
+CERAXIA_EDGE_FIX:
+{
+  "source_path": "retry_policy.py",
+  "function_name": "parse_retry_count",
+  "arguments": ["raw"],
+  "body_lines": [
+    "value = int(raw)",
+    "if value < 0 or value > 10:",
+    "    raise ValueError('retry count must be between 0 and 10')",
+    "return value"
+  ],
+  "test_path": "test_retry_policy.py",
+  "positive_cases": [
+    {"inputs": ["0"], "expected": 0},
+    {"inputs": ["3"], "expected": 3},
+    {"inputs": ["10"], "expected": 10}
+  ],
+  "negative_cases": [
+    {"inputs": ["-1"], "exception": "ValueError"},
+    {"inputs": ["11"], "exception": "ValueError"},
+    {"inputs": ["bad"], "exception": "ValueError"}
+  ],
+  "verification_commands": ["python -m unittest test_retry_policy", "python -m py_compile retry_policy.py"]
+}
+"""
+
+
 def repair_colon_goal() -> str:
     return """создай python файл и исправь если проверка найдет синтаксис
 
@@ -951,6 +981,29 @@ def main() -> int:
             raise AssertionError(f"refactor marker should preserve public function evidence: {final}")
         if final.get("verification_summary", {}).get("executed_count", 0) < 3:
             raise AssertionError(f"refactor final manifest should preserve verification evidence: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "retry_policy.py").write_text(
+            "def parse_retry_count(raw):\n"
+            "    return int(raw)\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=edge_fix_goal(), target_repo_root=target_repo)
+        expected_paths = {"retry_policy.py", "test_retry_policy.py"}
+        changed_paths = {item.get("path") for item in final.get("changed_files", []) if isinstance(item, dict)}
+        diagnostics = final.get("diagnostics", {})
+        if final.get("status") != "ready" or final.get("patch_source") != "edge_fix_marker_synthesis":
+            raise AssertionError(f"edge-fix marker task should be ready: {final}")
+        if changed_paths != expected_paths:
+            raise AssertionError(f"edge-fix marker should touch source and test only: {final}")
+        if diagnostics.get("positive_case_count") != 3 or diagnostics.get("negative_case_count") != 3:
+            raise AssertionError(f"edge-fix marker should preserve positive/negative evidence: {final}")
+        if "assertRaises" not in (target_repo / "test_retry_policy.py").read_text(encoding="utf-8"):
+            raise AssertionError("edge-fix marker did not write negative tests")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 3:
+            raise AssertionError(f"edge-fix final manifest should preserve verification evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
