@@ -6,7 +6,15 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from cogitator_codewright import extracted_assertion_diagnostics_from_text, run, test_symbol_links_from_goal
+from cogitator_codewright import (
+    extracted_assertion_diagnostics_from_text,
+    runtime_minimal_patch_candidates_from_failures,
+    runtime_test_failures_from_traceback,
+    runtime_verification_commands_from_goal,
+    run,
+    test_symbol_links_from_goal,
+    traceback_frames_from_text,
+)
 
 
 def role_policy(step_id: str) -> dict:
@@ -533,7 +541,7 @@ def main() -> int:
         root = Path(temp_dir)
         target_repo = root / "repo"
         target_repo.mkdir()
-        (target_repo / "maths.py").write_text("def double(value):\n    return value * 2\n", encoding="utf-8")
+        (target_repo / "maths.py").write_text("def double(value):\n    return 6\n", encoding="utf-8")
         (target_repo / "test_maths.py").write_text(
             "from maths import double\n\n"
             "def test_double():\n"
@@ -552,6 +560,30 @@ def main() -> int:
             if isinstance(item, dict)
         ):
             raise AssertionError(f"top-level assert tests should link to imported source symbols: {links}")
+        commands = runtime_verification_commands_from_goal(target_repo, "почини pytest test")
+        if commands != ["python -m pytest test_maths.py"]:
+            raise AssertionError(f"top-level pytest tests should infer pytest runtime command: {commands}")
+        pytest_output = (
+            "_______________________________ test_double _______________________________\n"
+            "    def test_double():\n"
+            ">       assert double(4) == 8\n"
+            "E       assert 6 == 8\n"
+            "test_maths.py:4: AssertionError\n"
+        )
+        frames = traceback_frames_from_text(pytest_output, target_repo)
+        assertions = extracted_assertion_diagnostics_from_text(pytest_output)
+        failures = runtime_test_failures_from_traceback(frames, assertions, target_repo)
+        candidates = runtime_minimal_patch_candidates_from_failures(failures, target_repo)
+        if not any(
+            item.get("path") == "maths.py"
+            and item.get("function_name") == "double"
+            and item.get("old_expression") == "6"
+            and item.get("new_expression") == "8"
+            and item.get("test_function") == "test_double"
+            for item in candidates
+            if isinstance(item, dict)
+        ):
+            raise AssertionError(f"pytest runtime diagnostics should produce a source patch candidate: {candidates}")
     pytest_assertions = extracted_assertion_diagnostics_from_text(
         "E       assert 6 == 8\n"
         "E       assert 'old' != 'old'\n"

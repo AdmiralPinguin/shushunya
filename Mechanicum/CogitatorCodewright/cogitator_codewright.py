@@ -944,6 +944,31 @@ def traceback_frames_from_text(text: str, repo_root: Path) -> list[dict[str, Any
                 "is_test": test_like_path(rel_path) or function_name.startswith("test"),
             }
         )
+    current_pytest_function = ""
+    for line in text.splitlines():
+        header = re.match(r"^_+\s+([A-Za-z_][A-Za-z0-9_]*)\s+_+$", line.strip())
+        if header:
+            current_pytest_function = header.group(1)
+            continue
+        match = re.match(r"^([^:\s][^:]*\.py):(\d+):\s+(?:AssertionError|Failed)", line.strip())
+        if not match:
+            continue
+        rel_path = repo_relative_traceback_path(repo_root, match.group(1))
+        line_number = int(match.group(2))
+        function_name = current_pytest_function
+        key = (rel_path, line_number, function_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        frames.append(
+            {
+                "path": rel_path,
+                "line": line_number,
+                "function_name": function_name,
+                "is_test": test_like_path(rel_path) or function_name.startswith("test"),
+                "source": "pytest_failure_location",
+            }
+        )
     return frames
 
 
@@ -1766,6 +1791,18 @@ def discovered_test_paths(repo_root: Path, goal: str) -> list[str]:
         if test_like_path(rel):
             paths.append(rel)
     return paths[:20]
+
+
+def pytest_style_test_file(repo_root: Path, test_path: str) -> bool:
+    try:
+        text = safe_repo_path(repo_root, test_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return False
+    return any(isinstance(node, ast.FunctionDef) and node.name.startswith("test") for node in tree.body)
 
 
 def test_expectation_candidates(repo_root: Path, goal: str) -> list[dict[str, str]]:
@@ -3710,8 +3747,11 @@ def runtime_verification_commands_from_goal(repo_root: Path, goal: str) -> list[
     for test_path in discovered_test_paths(repo_root, goal):
         if not test_path.endswith(".py"):
             continue
-        module = test_path[:-3].replace("/", ".")
-        command = f"python -m unittest {module}"
+        if pytest_style_test_file(repo_root, test_path):
+            command = f"python -m pytest {test_path}"
+        else:
+            module = test_path[:-3].replace("/", ".")
+            command = f"python -m unittest {module}"
         if command not in inferred:
             inferred.append(command)
     return inferred[:5]
