@@ -85,6 +85,7 @@ def main() -> int:
         or "natural language add-function inference blocks duplicate Python function definitions" not in patch_contract.get("safety_gates", [])
         or "test-inferred return mismatch mode requires exactly one import/assertEqual literal candidate and one simple source return literal" not in patch_contract.get("safety_gates", [])
         or "test-inferred missing function mode requires exactly one import/assertEqual literal candidate" not in patch_contract.get("safety_gates", [])
+        or "test-inferred arithmetic return mode requires exactly one two-argument assertEqual arithmetic candidate" not in patch_contract.get("safety_gates", [])
         or "python -m unittest" not in patch_contract.get("verification_allowlist", [])
         or "python_symbol_extraction" not in patch_contract.get("repository_intelligence", [])
         or "append" not in patch_contract.get("operation_types", [])
@@ -131,6 +132,7 @@ def main() -> int:
                 or "natural_language_add_function" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or "test_inferred_return_mismatch" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or "test_inferred_missing_function" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
+                or "test_inferred_arithmetic_return" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or plan.get("resolved_workers", {}).get("FerrumPatchwright", {}).get("role_contract", {}).get("owned_step") != "implementation"
             ):
                 raise AssertionError(f"bad plan: {plan}")

@@ -317,6 +317,7 @@ def patch_contract_capabilities() -> dict[str, Any]:
             "natural_language_add_function",
             "test_inferred_return_mismatch",
             "test_inferred_missing_function",
+            "test_inferred_arithmetic_return",
         ],
         "verification_allowlist": [
             "pytest",
@@ -336,6 +337,7 @@ def patch_contract_capabilities() -> dict[str, Any]:
             "natural language add-function inference blocks duplicate Python function definitions",
             "test-inferred return mismatch mode requires exactly one import/assertEqual literal candidate and one simple source return literal",
             "test-inferred missing function mode requires exactly one import/assertEqual literal candidate",
+            "test-inferred arithmetic return mode requires exactly one two-argument assertEqual arithmetic candidate",
         ],
         "repair_loops": [
             "expected_colon_py_compile",

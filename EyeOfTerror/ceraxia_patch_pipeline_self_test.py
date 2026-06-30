@@ -222,6 +222,41 @@ CERAXIA_TARGET_REPO: {target_repo}
         temp_root = Path(temp_dir)
         target_repo = temp_root / "repo"
         target_repo.mkdir()
+        calc = target_repo / "calc.py"
+        calc.write_text("def add(left, right):\n    return left - right\n", encoding="utf-8")
+        (target_repo / "test_calc.py").write_text(
+            "import unittest\nfrom calc import add\n\n"
+            "class CalcTest(unittest.TestCase):\n"
+            "    def test_add(self):\n"
+            "        self.assertEqual(add(2, 3), 5)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        task = f"""почини python приложение
+CERAXIA_TARGET_REPO: {target_repo}
+Почини тест `test_calc.py`.
+"""
+        run_root = temp_root / "runs"
+        task_id = "ceraxia-test-inferred-arithmetic-pipeline"
+        prepared = prepare_task(task, task_id, run_root, governor_transport="local")
+        if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
+            raise AssertionError(f"Ceraxia arithmetic-inferred task did not prepare correctly: {prepared}")
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        if not result.get("ok") or result.get("phase") != "completed":
+            raise AssertionError(f"Ceraxia arithmetic-inferred pipeline did not complete: {result}")
+        manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("status") != "ready":
+            raise AssertionError(f"Ceraxia arithmetic-inferred manifest should be ready: {manifest}")
+        if manifest.get("patch_source") != "test_inferred_arithmetic_return" or manifest.get("diagnostics", {}).get("replacement_expression") != "left + right":
+            raise AssertionError(f"Ceraxia arithmetic-inferred manifest should expose diagnostics: {manifest}")
+        if "return left + right" not in calc.read_text(encoding="utf-8"):
+            raise AssertionError("Ceraxia arithmetic-inferred pipeline did not update the return expression")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_root = Path(temp_dir)
+        target_repo = temp_root / "repo"
+        target_repo.mkdir()
         sample = target_repo / "sample.py"
         sample.write_text("def value():\n    return 1\n", encoding="utf-8")
         (target_repo / "test_sample.py").write_text(

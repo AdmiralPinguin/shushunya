@@ -111,6 +111,10 @@ def test_inferred_missing_function_goal() -> str:
     return "почини тест `test_sample.py`."
 
 
+def test_inferred_arithmetic_goal() -> str:
+    return "почини тест `test_calc.py`."
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -567,6 +571,30 @@ def main() -> int:
             raise AssertionError(f"test-inferred return mismatch should preserve recommended read order: {final}")
         if sample.read_text(encoding="utf-8") != "def value():\n    return 42\n":
             raise AssertionError("test-inferred return mismatch task did not update the return value")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        calc = target_repo / "calc.py"
+        calc.write_text("def add(left, right):\n    return left - right\n", encoding="utf-8")
+        (target_repo / "test_calc.py").write_text(
+            "import unittest\nfrom calc import add\n\n"
+            "class CalcTest(unittest.TestCase):\n"
+            "    def test_add(self):\n"
+            "        self.assertEqual(add(2, 3), 5)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=test_inferred_arithmetic_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready":
+            raise AssertionError(f"test-inferred arithmetic task should be ready: {final}")
+        if final.get("patch_source") != "test_inferred_arithmetic_return" or final.get("operation_count") != 1:
+            raise AssertionError(f"test-inferred arithmetic should expose patch audit fields: {final}")
+        if final.get("diagnostics", {}).get("replacement_expression") != "left + right":
+            raise AssertionError(f"test-inferred arithmetic diagnostics should explain replacement: {final}")
+        if "return left + right" not in calc.read_text(encoding="utf-8"):
+            raise AssertionError("test-inferred arithmetic did not update the return expression")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

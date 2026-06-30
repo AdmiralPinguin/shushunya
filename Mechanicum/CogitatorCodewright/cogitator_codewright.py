@@ -533,6 +533,129 @@ def infer_return_mismatch_from_tests(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def arithmetic_test_expectation_candidates(repo_root: Path, goal: str) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for test_path in test_paths_from_goal(goal):
+        path = safe_repo_path(repo_root, test_path)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        imports = re.findall(r"^\s*from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", text, flags=re.MULTILINE)
+        imported_modules = {function_name: module_name for module_name, function_name in imports}
+        for match in re.finditer(
+            r"assertEqual\(\s*([A-Za-z_][A-Za-z0-9_]*)\(\s*([+-]?\d+)\s*,\s*([+-]?\d+)\s*\)\s*,\s*([+-]?\d+)\s*\)",
+            text,
+        ):
+            function_name, left_raw, right_raw, expected_raw = match.groups()
+            module_name = imported_modules.get(function_name, "")
+            if not module_name:
+                continue
+            module_path = f"{module_name.replace('.', '/')}.py"
+            source_path = safe_repo_path(repo_root, module_path)
+            if not source_path.exists():
+                continue
+            candidates.append(
+                {
+                    "test_path": test_path,
+                    "module_path": module_path,
+                    "function_name": function_name,
+                    "left": int(left_raw),
+                    "right": int(right_raw),
+                    "expected": int(expected_raw),
+                }
+            )
+    return candidates
+
+
+def simple_function_return_segment(source_path: Path, function_name: str) -> dict[str, Any]:
+    text = source_path.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(text, filename=str(source_path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return {}
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef) or node.name != function_name:
+            continue
+        returns = [item for item in ast.walk(node) if isinstance(item, ast.Return)]
+        if len(returns) != 1 or returns[0].value is None:
+            return {}
+        args = [arg.arg for arg in node.args.args]
+        segment = ast.get_source_segment(text, returns[0].value) or ""
+        if not segment or "\n" in segment:
+            return {}
+        return {"args": args, "return_expr": segment, "line": returns[0].lineno}
+    return {}
+
+
+def infer_arithmetic_return_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    candidates: list[dict[str, Any]] = []
+    for candidate in arithmetic_test_expectation_candidates(repo_root, goal):
+        source_path = safe_repo_path(repo_root, candidate["module_path"])
+        function = simple_function_return_segment(source_path, str(candidate["function_name"]))
+        args = function.get("args") if isinstance(function.get("args"), list) else []
+        if len(args) != 2:
+            continue
+        left_name, right_name = str(args[0]), str(args[1])
+        left = int(candidate["left"])
+        right = int(candidate["right"])
+        expected = int(candidate["expected"])
+        options = [
+            (f"{left_name} + {right_name}", left + right),
+            (f"{left_name} - {right_name}", left - right),
+            (f"{right_name} - {left_name}", right - left),
+            (f"{left_name} * {right_name}", left * right),
+        ]
+        matching = [expr for expr, value in options if value == expected]
+        if len(matching) != 1:
+            continue
+        new_expr = matching[0]
+        old_expr = str(function.get("return_expr") or "")
+        if old_expr == new_expr:
+            continue
+        content = source_path.read_text(encoding="utf-8")
+        old = f"return {old_expr}"
+        new = f"return {new_expr}"
+        if content.count(old) != 1:
+            continue
+        candidates.append({**candidate, "actual_expression": old_expr, "replacement_expression": new_expr})
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred arithmetic return requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    commands = verification_commands_from_natural_goal(goal)
+    if not commands:
+        test_module = str(candidate["test_path"])[:-3].replace("/", ".")
+        commands = [f"python -m unittest {test_module}"]
+    return {
+        "source": "test_inferred_arithmetic_return",
+        "diagnostics": {
+            "kind": "test_inferred_arithmetic_return",
+            "test_path": candidate["test_path"],
+            "module_path": candidate["module_path"],
+            "function_name": candidate["function_name"],
+            "actual_expression": candidate["actual_expression"],
+            "replacement_expression": candidate["replacement_expression"],
+            "example": {
+                "left": candidate["left"],
+                "right": candidate["right"],
+                "expected": candidate["expected"],
+            },
+        },
+        "operations": [
+            {
+                "type": "replace",
+                "path": candidate["module_path"],
+                "old": f"return {candidate['actual_expression']}",
+                "new": f"return {candidate['replacement_expression']}",
+            }
+        ],
+        "verification_commands": commands,
+    }
+
+
 def infer_missing_function_from_tests(request: dict[str, Any]) -> dict[str, Any]:
     goal = request_goal(request)
     repo_root = target_repo_root(request)
@@ -658,6 +781,8 @@ def patch_spec_from_request(request: dict[str, Any]) -> dict[str, Any]:
         payload = infer_simple_replace_patch_spec(request)
     if not payload:
         payload = infer_add_function_patch_spec(request)
+    if not payload:
+        payload = infer_arithmetic_return_from_tests(request)
     if not payload:
         payload = infer_return_mismatch_from_tests(request)
     if not payload:
