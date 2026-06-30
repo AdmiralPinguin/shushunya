@@ -582,12 +582,20 @@ def repository_investigation_review(
     }
 
 
-def code_review_discipline_findings(patch_source: str, changed_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def code_review_discipline_findings(
+    patch_source: str,
+    changed_files: list[dict[str, Any]],
+    repo_root: Path | None = None,
+    diagnostics: dict[str, Any] | None = None,
+    ast_patch_plan: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     changed_paths = [
         str(item.get("path") or "")
         for item in changed_files
         if isinstance(item, dict) and item.get("path")
     ]
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    ast_patch_plan = ast_patch_plan if isinstance(ast_patch_plan, dict) else {}
     findings: list[dict[str, Any]] = []
     changed_tests = [path for path in changed_paths if test_like_path(path)]
     if patch_source.startswith("test_inferred_") and changed_tests:
@@ -597,8 +605,53 @@ def code_review_discipline_findings(patch_source: str, changed_files: list[dict[
                 "status": "blocker",
                 "message": "Test-inferred repairs must not edit tests to fit the patch.",
                 "evidence": {"changed_tests": changed_tests},
-            }
-        )
+                }
+            )
+    example = diagnostics.get("example") if isinstance(diagnostics.get("example"), dict) else {}
+    expected = example.get("expected")
+    function_name = str(diagnostics.get("function_name") or "")
+    module_path = str(diagnostics.get("module_path") or "")
+    if (
+        patch_source.startswith("test_inferred_")
+        and repo_root is not None
+        and expected is not None
+        and function_name
+        and module_path
+        and module_path in changed_paths
+        and not test_like_path(module_path)
+    ):
+        planned_operations = ast_patch_plan.get("planned_operations") if isinstance(ast_patch_plan.get("planned_operations"), list) else []
+        replacement_ops = [
+            item
+            for item in planned_operations
+            if isinstance(item, dict)
+            and item.get("kind") == "replace_return_expression"
+            and item.get("path") == module_path
+            and item.get("function_name") == function_name
+        ]
+        if replacement_ops:
+            replacement = str(replacement_ops[0].get("new_expression") or "").strip()
+            expected_literal = repr(expected) if isinstance(expected, str) else str(expected)
+            try:
+                function = simple_function_return_segment(safe_repo_path(repo_root, module_path), function_name)
+            except (OSError, ValueError):
+                function = {}
+            args = function.get("args") if isinstance(function.get("args"), list) else []
+            if args and replacement == expected_literal:
+                findings.append(
+                    {
+                        "check": "inferred_patch_did_not_hardcode_example_expected",
+                        "status": "blocker",
+                        "message": "Test-inferred repair hardcodes the example expected value instead of deriving behavior from inputs.",
+                        "evidence": {
+                            "module_path": module_path,
+                            "function_name": function_name,
+                            "argument_count": len(args),
+                            "replacement_expression": replacement,
+                            "example_expected": expected,
+                        },
+                    }
+                )
     if patch_source in {"test_inferred_security_boundary", "test_inferred_retry_policy"}:
         changed_non_tests = [path for path in changed_paths if not test_like_path(path)]
         if not changed_non_tests:
@@ -4269,7 +4322,13 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     focused_commands = verification_strategy.get("focused_commands") if isinstance(verification_strategy.get("focused_commands"), list) else []
     broad_commands = verification_strategy.get("broad_commands") if isinstance(verification_strategy.get("broad_commands"), list) else []
     repo_grade_mode = repo_grade_workflow.get("mode") == "repo_grade"
-    discipline_findings = code_review_discipline_findings(patch_source, changed_files)
+    discipline_findings = code_review_discipline_findings(
+        patch_source,
+        changed_files,
+        target_repo_root(request),
+        diagnostics,
+        ast_patch_plan,
+    )
     unshaped_required = is_unshaped_patch_source(patch_source)
     ast_patch_required = ast_patch_plan_required_for_source(patch_source)
     failed_commands = repair_state.get("failed_commands") if isinstance(repair_state.get("failed_commands"), list) else []

@@ -830,6 +830,109 @@ def main() -> int:
         root = Path(temp_dir)
         target_repo = root / "repo"
         target_repo.mkdir()
+        (target_repo / "calc.py").write_text("def add(left, right):\n    return 150\n", encoding="utf-8")
+        work = root / "work"
+        (work / "code").mkdir(parents=True)
+        (work / "code" / "repo_survey.json").write_text(
+            json.dumps(
+                {
+                    "repo_map": {"ranked_files": [{"path": "calc.py", "score": 10}, {"path": "test_calc.py", "score": 9}]},
+                    "engineering_investigation": {"hypotheses": [{"hypothesis": "calc.py likely relevant"}]},
+                    "engineering_readiness": {
+                        "acceptance_criteria": [{"criterion": "derive behavior from inputs", "verification": "review"}],
+                        "test_strategy": {"fallback_checks": ["python -m py_compile <changed .py files>"]},
+                        "readiness_checks": {"has_acceptance_criteria": True, "has_test_strategy": True},
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "problem_statement.json").write_text(json.dumps({"status": "recorded"}) + "\n", encoding="utf-8")
+        (work / "code" / "architecture_options.json").write_text(json.dumps({"status": "recorded"}) + "\n", encoding="utf-8")
+        diagnostics = {
+            "kind": "test_inferred_arithmetic_return",
+            "test_path": "test_calc.py",
+            "module_path": "calc.py",
+            "function_name": "add",
+            "actual_expression": "left - right",
+            "replacement_expression": "150",
+            "example": {"left": 200, "right": 50, "expected": 150},
+        }
+        (work / "code" / "patch_manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "applied",
+                    "patch_source": "test_inferred_arithmetic_return",
+                    "diagnostics": diagnostics,
+                    "changed_files": [{"path": "calc.py", "changed": True}],
+                    "patch_scope_evidence": {
+                        "changed_files_in_repo_map": ["calc.py"],
+                        "changed_files_outside_repo_map": [],
+                        "evidence": [{"path": "calc.py", "in_repo_map": True}],
+                    },
+                    "engineering_readiness": {
+                        "acceptance_criteria": [{"criterion": "derive behavior from inputs", "verification": "review"}],
+                        "test_strategy": {"fallback_checks": ["python -m py_compile <changed .py files>"]},
+                        "readiness_checks": {"has_acceptance_criteria": True, "has_test_strategy": True},
+                    },
+                    "ast_patch_plan": {
+                        "status": "recorded",
+                        "patch_source": "test_inferred_arithmetic_return",
+                        "planned_operations": [
+                            {
+                                "kind": "replace_return_expression",
+                                "path": "calc.py",
+                                "function_name": "add",
+                                "new_expression": "150",
+                            }
+                        ],
+                        "operation_count": 1,
+                    },
+                    "warnings": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "unshaped_repair_plan.json").write_text(
+            json.dumps(
+                {
+                    "status": "recorded",
+                    "mode": "unshaped_repo_repair",
+                    "defect_hypotheses": [{"source": "test_inferred_arithmetic_return", "evidence": diagnostics}],
+                    "minimal_patch_candidates": [{"source": "test_inferred_arithmetic_return", "status": "selected"}],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "diagnostic_extraction.json").write_text(
+            json.dumps({"status": "recorded", "parser_coverage": {"static_test_expectations": 1}}) + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "verification_report.json").write_text(
+            json.dumps({"status": "passed", "blockers": [], "warnings": [], "executed": []}) + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "repair_loop_state.json").write_text(
+            json.dumps({"status": "passed", "next_action": "continue_to_code_review"}) + "\n",
+            encoding="utf-8",
+        )
+        result = run(request("code_review", "/work/code/code_review.json", target_repo_root=target_repo), work)
+        if not result.get("ok"):
+            raise AssertionError(f"hardcode review discipline test should write a report: {result}")
+        review = json.loads((work / "code" / "code_review.json").read_text(encoding="utf-8"))
+        if (
+            review.get("approved") is not False
+            or not any("hardcodes the example expected value" in item.get("message", "") for item in review.get("findings", []) if isinstance(item, dict))
+            or review.get("code_review_discipline", {}).get("blocker_count") != 1
+        ):
+            raise AssertionError(f"code review should block hardcoded inferred example values: {review}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
         sample = target_repo / "sample.py"
         sample.write_text("def value():\n    return 1\n", encoding="utf-8")
         final = run_pipeline(root / "work", goal=forbidden_verify_goal(), target_repo_root=target_repo)
