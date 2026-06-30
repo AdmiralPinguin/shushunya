@@ -300,6 +300,134 @@ def patch_scope_review(scope: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def repository_investigation_review(
+    survey: dict[str, Any],
+    patch: dict[str, Any],
+    scope_review: dict[str, Any],
+) -> dict[str, Any]:
+    repo_map = survey.get("repo_map") if isinstance(survey.get("repo_map"), dict) else {}
+    investigation = survey.get("engineering_investigation") if isinstance(survey.get("engineering_investigation"), dict) else {}
+    readiness = survey.get("engineering_readiness") if isinstance(survey.get("engineering_readiness"), dict) else {}
+    ranked_files = repo_map.get("ranked_files") if isinstance(repo_map.get("ranked_files"), list) else []
+    read_order = repo_map.get("recommended_read_order") if isinstance(repo_map.get("recommended_read_order"), list) else []
+    targeted_reads = investigation.get("targeted_reading_plan") if isinstance(investigation.get("targeted_reading_plan"), list) else []
+    hypotheses = investigation.get("hypotheses") if isinstance(investigation.get("hypotheses"), list) else []
+    impact_matrix = readiness.get("impact_matrix") if isinstance(readiness.get("impact_matrix"), list) else []
+    source_excerpt_summary = (
+        patch.get("source_excerpt_summary")
+        if isinstance(patch.get("source_excerpt_summary"), list)
+        else []
+    )
+    read_excerpts = [
+        item
+        for item in source_excerpt_summary
+        if isinstance(item, dict) and item.get("status") == "read"
+    ]
+    changed_files = patch.get("changed_files") if isinstance(patch.get("changed_files"), list) else []
+    concrete_changes = [item for item in changed_files if isinstance(item, dict) and item.get("path")]
+    changed_file_count = len(concrete_changes)
+    preexisting_changed_file_count = len([item for item in concrete_changes if not item.get("created")])
+    mapped_changed_file_count = int(scope_review.get("mapped_changed_file_count") or 0)
+    diagnostics = patch.get("diagnostics") if isinstance(patch.get("diagnostics"), dict) else {}
+    planned_output_paths = [
+        str(value)
+        for key, value in diagnostics.items()
+        if key.endswith("_path") and isinstance(value, str) and value
+    ]
+    marker_write_outputs = [
+        str(item.get("path") or "")
+        for item in concrete_changes
+        if item.get("operation") == "write_file" and (item.get("created") or item.get("idempotent"))
+    ]
+    for path in marker_write_outputs:
+        if path and path not in planned_output_paths:
+            planned_output_paths.append(path)
+    planned_output_path_set = set(planned_output_paths)
+    explicit_output_surface = bool(planned_output_paths) and all(
+        str(item.get("path") or "") in planned_output_path_set
+        for item in concrete_changes
+    )
+    raw_unmapped_changed_files = (
+        scope_review.get("unmapped_changed_files")
+        if isinstance(scope_review.get("unmapped_changed_files"), list)
+        else []
+    )
+    unmapped_changed_files = {str(path) for path in raw_unmapped_changed_files}
+    unmapped_preexisting = [
+        str(item.get("path") or "")
+        for item in concrete_changes
+        if not item.get("created")
+        and not item.get("idempotent")
+        and str(item.get("path") or "") not in planned_output_path_set
+        and str(item.get("path") or "") in unmapped_changed_files
+    ]
+    created_changes = [str(item.get("path") or "") for item in concrete_changes if item.get("created")]
+    checks = [
+        {
+            "check": "ranked_repo_map_present",
+            "status": "pass" if ranked_files or explicit_output_surface else "blocker",
+            "evidence": {
+                "ranked_file_count": len(ranked_files),
+                "explicit_output_surface": explicit_output_surface,
+                "planned_output_paths": planned_output_paths[:12],
+            },
+        },
+        {
+            "check": "targeted_reading_plan_present",
+            "status": "pass" if (targeted_reads and read_order) or explicit_output_surface else "blocker",
+            "evidence": {
+                "targeted_read_count": len(targeted_reads),
+                "recommended_read_count": len(read_order),
+                "explicit_output_surface": explicit_output_surface,
+            },
+        },
+        {
+            "check": "hypotheses_present",
+            "status": "pass" if hypotheses else "blocker",
+            "evidence": {"hypothesis_count": len(hypotheses)},
+        },
+        {
+            "check": "impact_matrix_present",
+            "status": "pass" if impact_matrix or explicit_output_surface else "blocker",
+            "evidence": {
+                "impact_file_count": len(impact_matrix),
+                "explicit_output_surface": explicit_output_surface,
+            },
+        },
+        {
+            "check": "pre_mutation_source_reads_present",
+            "status": "pass" if read_excerpts or explicit_output_surface else "blocker",
+            "evidence": {
+                "read_excerpt_count": len(read_excerpts),
+                "read_paths": [str(item.get("path") or "") for item in read_excerpts[:12]],
+                "explicit_output_surface": explicit_output_surface,
+            },
+        },
+        {
+            "check": "changed_files_mapped_to_survey",
+            "status": "pass" if preexisting_changed_file_count == 0 or not unmapped_preexisting else "blocker",
+            "evidence": {
+                "changed_file_count": changed_file_count,
+                "preexisting_changed_file_count": preexisting_changed_file_count,
+                "mapped_changed_file_count": mapped_changed_file_count,
+                "created_changes_allowed_as_explicit_outputs": created_changes[:12],
+                "unmapped_preexisting_changed_files": unmapped_preexisting[:12],
+            },
+        },
+    ]
+    blockers = [
+        check
+        for check in checks
+        if check.get("status") == "blocker"
+    ]
+    return {
+        "status": "blocked" if blockers else "covered",
+        "checks": checks,
+        "blockers": blockers,
+        "summary": "Repository investigation evidence is sufficient." if not blockers else "Repository investigation evidence is incomplete.",
+    }
+
+
 def output_path_from_request(request: dict[str, Any]) -> str:
     step = request.get("step") if isinstance(request.get("step"), dict) else {}
     expected = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
@@ -2804,6 +2932,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
 
 
 def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
+    survey = load_json_optional(workspace_root, sibling_artifact(output_path, "repo_survey.json"))
     patch = load_json_optional(workspace_root, sibling_artifact(output_path, "patch_manifest.json"))
     verification = load_json_optional(workspace_root, sibling_artifact(output_path, "verification_report.json"))
     repair_state = load_json_optional(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"))
@@ -2819,6 +2948,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     risk_register = readiness.get("risk_register") if isinstance(readiness.get("risk_register"), list) else []
     impact_matrix = readiness.get("impact_matrix") if isinstance(readiness.get("impact_matrix"), list) else []
     scope_review = patch_scope_review(scope)
+    investigation_review = repository_investigation_review(survey, patch, scope_review)
     patch_source = str(patch.get("patch_source") or "")
     diagnostics = patch.get("diagnostics") if isinstance(patch.get("diagnostics"), dict) else {}
     changed_files = patch.get("changed_files") if isinstance(patch.get("changed_files"), list) else []
@@ -2855,6 +2985,11 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "status": "pass" if impact_matrix else "warning",
             "evidence": {"impact_file_count": len(impact_matrix)},
         },
+        {
+            "check": "repository_investigation_review",
+            "status": "pass" if investigation_review.get("status") == "covered" else "blocker",
+            "evidence": investigation_review,
+        },
     ]
     review_warnings = [
         {"severity": "warning", "message": str(item)}
@@ -2882,6 +3017,10 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         blockers = [*blockers, "Verification did not pass."]
     if patch_source.startswith("test_inferred_") and not diagnostics:
         blockers = [*blockers, "Test-inferred patch lacks diagnostics linking test evidence to source mutation."]
+    if investigation_review.get("status") != "covered":
+        for item in investigation_review.get("blockers", []) if isinstance(investigation_review.get("blockers"), list) else []:
+            check_name = str(item.get("check") or "repository_investigation")
+            blockers = [*blockers, f"Repository investigation is incomplete: {check_name}."]
     if not acceptance_criteria:
         blockers = [*blockers, "Engineering readiness model lacks acceptance criteria."]
     if not readiness_checks.get("has_test_strategy"):
@@ -2909,6 +3048,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "impact_matrix": impact_matrix,
             "readiness_checks": readiness_checks,
         },
+        "repository_investigation_review": investigation_review,
     }
     review = {
         "status": "blocked" if blockers else "passed",
@@ -2925,6 +3065,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "high_risk_count": len(high_risks),
             "impact_file_count": len(impact_matrix),
         },
+        "repository_investigation_review": investigation_review,
         "decision_record": decision_record,
         "findings": [
             {"severity": "blocker", "message": str(item)}
@@ -3006,6 +3147,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "engineering_investigation": survey.get("engineering_investigation", {}) if isinstance(survey.get("engineering_investigation"), dict) else {},
         "engineering_readiness": patch.get("engineering_readiness", {}),
         "engineering_readiness_review": review.get("engineering_readiness_review", {}),
+        "repository_investigation_review": review.get("repository_investigation_review", {}),
         "patch_scope_evidence": patch.get("patch_scope_evidence", {}),
         "patch_source": patch.get("patch_source", ""),
         "patch_candidates": patch.get("patch_candidates", []),
