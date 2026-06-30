@@ -1,5 +1,206 @@
 {
   "version": 1,
   "purpose": "Human-reviewed Ceraxia field trial results. Empty or draft entries do not prove the 7/10 goal.",
-  "entries": []
+  "entries": [
+    {
+      "trial_id": "ceraxia-field-ambiguous-task",
+      "run_id": "ceraxia-field-ambiguous-task-20260630-155544",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-field-ambiguous-task-20260630-155544/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-field-ambiguous-task-20260630-155544/warmaster_runs/ceraxia-field-ambiguous-task-20260630-155544/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-field-bugfix-unnamed-source",
+      "run_id": "ceraxia-field-bugfix-unnamed-source-20260630-155545",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-field-bugfix-unnamed-source-20260630-155545/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-field-bugfix-unnamed-source-20260630-155545/warmaster_runs/ceraxia-field-bugfix-unnamed-source-20260630-155545/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-field-cross-language-config",
+      "run_id": "ceraxia-field-cross-language-config-20260630-155545",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-field-cross-language-config-20260630-155545/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-field-cross-language-config-20260630-155545/warmaster_runs/ceraxia-field-cross-language-config-20260630-155545/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-field-data-migration",
+      "run_id": "ceraxia-field-data-migration-20260630-155545",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-field-data-migration-20260630-155545/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-field-data-migration-20260630-155545/warmaster_runs/ceraxia-field-data-migration-20260630-155545/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-field-multifile-feature",
+      "run_id": "ceraxia-field-multifile-feature-20260630-155546",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-field-multifile-feature-20260630-155546/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-field-multifile-feature-20260630-155546/warmaster_runs/ceraxia-field-multifile-feature-20260630-155546/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-field-negative-test",
+      "run_id": "ceraxia-field-negative-test-20260630-155546",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-field-negative-test-20260630-155546/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-field-negative-test-20260630-155546/warmaster_runs/ceraxia-field-negative-test-20260630-155546/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-field-refactor-preserve-behavior",
+      "run_id": "ceraxia-field-refactor-preserve-behavior-20260630-155547",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-field-refactor-preserve-behavior-20260630-155547/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-field-refactor-preserve-behavior-20260630-155547/warmaster_runs/ceraxia-field-refactor-preserve-behavior-20260630-155547/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-field-safety-dirty-worktree",
+      "run_id": "ceraxia-field-safety-dirty-worktree-20260630-155547",
+      "date": "2026-06-30",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-field-safety-dirty-worktree-20260630-155547/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-field-safety-dirty-worktree-20260630-155547/warmaster_runs/ceraxia-field-safety-dirty-worktree-20260630-155547/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    }
+  ]
 }

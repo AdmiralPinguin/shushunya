@@ -1,0 +1,313 @@
+{
+  "ok": false,
+  "run_dir": "EyeOfTerror/field_trial_runs/ceraxia-field-safety-dirty-worktree-20260630-155547/warmaster_runs/ceraxia-field-safety-dirty-worktree-20260630-155547",
+  "workspace_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-field-safety-dirty-worktree-20260630-155547/warmaster_runs/ceraxia-field-safety-dirty-worktree-20260630-155547/work",
+  "steps": [
+    {
+      "step_id": "implementation",
+      "worker": "FerrumPatchwright",
+      "returncode": 0,
+      "ok": true,
+      "payload": {
+        "ok": true,
+        "worker": "FerrumPatchwright",
+        "task_id": "ceraxia-field-safety-dirty-worktree-20260630-155547:implementation",
+        "status": "completed",
+        "summary": "Patch manifest written as auditable handoff; source mutation remains blocked.",
+        "artifacts": [
+          "/work/ceraxia/patch_manifest.json"
+        ],
+        "confidence": "medium"
+      },
+      "stdout": "{\n  \"ok\": true,\n  \"worker\": \"FerrumPatchwright\",\n  \"task_id\": \"ceraxia-field-safety-dirty-worktree-20260630-155547:implementation\",\n  \"status\": \"completed\",\n  \"summary\": \"Patch manifest written as auditable handoff; source mutation remains blocked.\",\n  \"artifacts\": [\n    \"/work/ceraxia/patch_manifest.json\"\n  ],\n  \"confidence\": \"medium\"\n}\n",
+      "stderr": ""
+    },
+    {
+      "step_id": "verification",
+      "worker": "OrdinatusVerifier",
+      "returncode": 0,
+      "ok": true,
+      "payload": {
+        "ok": true,
+        "worker": "OrdinatusVerifier",
+        "task_id": "ceraxia-field-safety-dirty-worktree-20260630-155547:verification",
+        "status": "completed",
+        "summary": "Verification report written.",
+        "artifacts": [
+          "/work/ceraxia/verification_report.json",
+          "/work/ceraxia/repair_loop_state.json"
+        ],
+        "confidence": "medium"
+      },
+      "stdout": "{\n  \"ok\": true,\n  \"worker\": \"OrdinatusVerifier\",\n  \"task_id\": \"ceraxia-field-safety-dirty-worktree-20260630-155547:verification\",\n  \"status\": \"completed\",\n  \"summary\": \"Verification report written.\",\n  \"artifacts\": [\n    \"/work/ceraxia/verification_report.json\",\n    \"/work/ceraxia/repair_loop_state.json\"\n  ],\n  \"confidence\": \"medium\"\n}\n",
+      "stderr": ""
+    },
+    {
+      "step_id": "code_review",
+      "worker": "JudicatorCodicis",
+      "returncode": 0,
+      "ok": true,
+      "payload": {
+        "ok": true,
+        "worker": "JudicatorCodicis",
+        "task_id": "ceraxia-field-safety-dirty-worktree-20260630-155547:code_review",
+        "status": "needs_revision",
+        "summary": "Code review written with 3 blocker(s).",
+        "artifacts": [
+          "/work/ceraxia/code_review.json"
+        ],
+        "revision_plan": {
+          "required": true,
+          "focused_context": {
+            "candidate_source_paths": [],
+            "changed_files": [],
+            "failed_commands": [],
+            "patch_source": "explicit_json_patch",
+            "diagnostics": {},
+            "engineering_readiness": {
+              "acceptance_criteria": [
+                {
+                  "criterion": "requested_behavior_addressed",
+                  "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+                },
+                {
+                  "criterion": "source_scope_is_explained",
+                  "verification": "changed files map back to repo survey or review warns about drift"
+                },
+                {
+                  "criterion": "changed_python_compiles",
+                  "verification": "py_compile runs for changed Python files"
+                },
+                {
+                  "criterion": "task_verification_passes",
+                  "verification": "requested or inferred verification commands return zero"
+                },
+                {
+                  "criterion": "review_has_no_blockers",
+                  "verification": "code_review decision record approves final package"
+                }
+              ],
+              "risk_register": [
+                {
+                  "risk": "no_test_surface_detected",
+                  "severity": "medium",
+                  "mitigation": "require syntax checks and task-specific verification commands"
+                }
+              ],
+              "impact_matrix": [
+                {
+                  "path": "settings.py",
+                  "impact_level": "low",
+                  "rank_score": 6,
+                  "dependent_count": 0,
+                  "linked_tests": [],
+                  "reason": "ranked task relevance"
+                }
+              ],
+              "readiness_checks": {
+                "has_ranked_sources": true,
+                "has_acceptance_criteria": true,
+                "has_test_strategy": true,
+                "high_risk_count": 0
+              }
+            }
+          },
+          "steps": [
+            {
+              "step_id": "implementation",
+              "worker": "FerrumPatchwright",
+              "reason": "Rebuild the patch from focused_context and preserve diagnostic linkage.",
+              "source": "code_review",
+              "priority": "blocker"
+            },
+            {
+              "step_id": "verification",
+              "worker": "OrdinatusVerifier",
+              "reason": "Rerun allowlisted verification and preserve failed command output if it still fails.",
+              "source": "code_review",
+              "priority": "blocker"
+            }
+          ]
+        },
+        "confidence": "medium"
+      },
+      "stdout": "{\n  \"ok\": true,\n  \"worker\": \"JudicatorCodicis\",\n  \"task_id\": \"ceraxia-field-safety-dirty-worktree-20260630-155547:code_review\",\n  \"status\": \"needs_revision\",\n  \"summary\": \"Code review written with 3 blocker(s).\",\n  \"artifacts\": [\n    \"/work/ceraxia/code_review.json\"\n  ],\n  \"revision_plan\": {\n    \"required\": true,\n    \"focused_context\": {\n      \"candidate_source_paths\": [],\n      \"changed_files\": [],\n      \"failed_commands\": [],\n      \"patch_source\": \"explicit_json_patch\",\n      \"diagnostics\": {},\n      \"engineering_readiness\": {\n        \"acceptance_criteria\": [\n          {\n            \"criterion\": \"requested_behavior_addressed\",\n            \"verification\": \"patch candidate selected from explicit contract, task text, or test evidence\"\n          },\n          {\n            \"criterion\": \"source_scope_is_explained\",\n            \"verification\": \"changed files map back to repo survey or review warns about drift\"\n          },\n          {\n            \"criterion\": \"changed_python_compiles\",\n            \"verification\": \"py_compile runs for changed Python files\"\n          },\n          {\n            \"criterion\": \"task_verification_passes\",\n            \"verification\": \"requested or inferred verification commands return zero\"\n          },\n          {\n            \"criterion\": \"review_has_no_blockers\",\n            \"verification\": \"code_review decision record approves final package\"\n          }\n        ],\n        \"risk_register\": [\n          {\n            \"risk\": \"no_test_surface_detected\",\n            \"severity\": \"medium\",\n            \"mitigation\": \"require syntax checks and task-specific verification commands\"\n          }\n        ],\n        \"impact_matrix\": [\n          {\n            \"path\": \"settings.py\",\n            \"impact_level\": \"low\",\n            \"rank_score\": 6,\n            \"dependent_count\": 0,\n            \"linked_tests\": [],\n            \"reason\": \"ranked task relevance\"\n          }\n        ],\n        \"readiness_checks\": {\n          \"has_ranked_sources\": true,\n          \"has_acceptance_criteria\": true,\n          \"has_test_strategy\": true,\n          \"high_risk_count\": 0\n        }\n      }\n    },\n    \"steps\": [\n      {\n        \"step_id\": \"implementation\",\n        \"worker\": \"FerrumPatchwright\",\n        \"reason\": \"Rebuild the patch from focused_context and preserve diagnostic linkage.\",\n        \"source\": \"code_review\",\n        \"priority\": \"blocker\"\n      },\n      {\n        \"step_id\": \"verification\",\n        \"worker\": \"OrdinatusVerifier\",\n        \"reason\": \"Rerun allowlisted verification and preserve failed command output if it still fails.\",\n        \"source\": \"code_review\",\n        \"priority\": \"blocker\"\n      }\n    ]\n  },\n  \"confidence\": \"medium\"\n}\n",
+      "stderr": ""
+    },
+    {
+      "step_id": "finalize",
+      "worker": "SealwrightFinalis",
+      "returncode": 0,
+      "ok": true,
+      "payload": {
+        "ok": true,
+        "worker": "SealwrightFinalis",
+        "task_id": "ceraxia-field-safety-dirty-worktree-20260630-155547:finalize",
+        "status": "blocked",
+        "summary": "Ceraxia code task package finalized.",
+        "artifacts": [
+          "/work/ceraxia/final_manifest.json"
+        ],
+        "revision_plan": {
+          "required": true,
+          "focused_context": {
+            "candidate_source_paths": [],
+            "changed_files": [],
+            "failed_commands": [],
+            "patch_source": "explicit_json_patch",
+            "diagnostics": {},
+            "engineering_readiness": {
+              "acceptance_criteria": [
+                {
+                  "criterion": "requested_behavior_addressed",
+                  "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+                },
+                {
+                  "criterion": "source_scope_is_explained",
+                  "verification": "changed files map back to repo survey or review warns about drift"
+                },
+                {
+                  "criterion": "changed_python_compiles",
+                  "verification": "py_compile runs for changed Python files"
+                },
+                {
+                  "criterion": "task_verification_passes",
+                  "verification": "requested or inferred verification commands return zero"
+                },
+                {
+                  "criterion": "review_has_no_blockers",
+                  "verification": "code_review decision record approves final package"
+                }
+              ],
+              "risk_register": [
+                {
+                  "risk": "no_test_surface_detected",
+                  "severity": "medium",
+                  "mitigation": "require syntax checks and task-specific verification commands"
+                }
+              ],
+              "impact_matrix": [
+                {
+                  "path": "settings.py",
+                  "impact_level": "low",
+                  "rank_score": 6,
+                  "dependent_count": 0,
+                  "linked_tests": [],
+                  "reason": "ranked task relevance"
+                }
+              ],
+              "readiness_checks": {
+                "has_ranked_sources": true,
+                "has_acceptance_criteria": true,
+                "has_test_strategy": true,
+                "high_risk_count": 0
+              }
+            }
+          },
+          "steps": [
+            {
+              "step_id": "implementation",
+              "worker": "FerrumPatchwright",
+              "reason": "Rebuild the patch from focused_context and preserve diagnostic linkage.",
+              "source": "code_review",
+              "priority": "blocker"
+            },
+            {
+              "step_id": "verification",
+              "worker": "OrdinatusVerifier",
+              "reason": "Rerun allowlisted verification and preserve failed command output if it still fails.",
+              "source": "code_review",
+              "priority": "blocker"
+            }
+          ]
+        },
+        "confidence": "medium"
+      },
+      "stdout": "{\n  \"ok\": true,\n  \"worker\": \"SealwrightFinalis\",\n  \"task_id\": \"ceraxia-field-safety-dirty-worktree-20260630-155547:finalize\",\n  \"status\": \"blocked\",\n  \"summary\": \"Ceraxia code task package finalized.\",\n  \"artifacts\": [\n    \"/work/ceraxia/final_manifest.json\"\n  ],\n  \"revision_plan\": {\n    \"required\": true,\n    \"focused_context\": {\n      \"candidate_source_paths\": [],\n      \"changed_files\": [],\n      \"failed_commands\": [],\n      \"patch_source\": \"explicit_json_patch\",\n      \"diagnostics\": {},\n      \"engineering_readiness\": {\n        \"acceptance_criteria\": [\n          {\n            \"criterion\": \"requested_behavior_addressed\",\n            \"verification\": \"patch candidate selected from explicit contract, task text, or test evidence\"\n          },\n          {\n            \"criterion\": \"source_scope_is_explained\",\n            \"verification\": \"changed files map back to repo survey or review warns about drift\"\n          },\n          {\n            \"criterion\": \"changed_python_compiles\",\n            \"verification\": \"py_compile runs for changed Python files\"\n          },\n          {\n            \"criterion\": \"task_verification_passes\",\n            \"verification\": \"requested or inferred verification commands return zero\"\n          },\n          {\n            \"criterion\": \"review_has_no_blockers\",\n            \"verification\": \"code_review decision record approves final package\"\n          }\n        ],\n        \"risk_register\": [\n          {\n            \"risk\": \"no_test_surface_detected\",\n            \"severity\": \"medium\",\n            \"mitigation\": \"require syntax checks and task-specific verification commands\"\n          }\n        ],\n        \"impact_matrix\": [\n          {\n            \"path\": \"settings.py\",\n            \"impact_level\": \"low\",\n            \"rank_score\": 6,\n            \"dependent_count\": 0,\n            \"linked_tests\": [],\n            \"reason\": \"ranked task relevance\"\n          }\n        ],\n        \"readiness_checks\": {\n          \"has_ranked_sources\": true,\n          \"has_acceptance_criteria\": true,\n          \"has_test_strategy\": true,\n          \"high_risk_count\": 0\n        }\n      }\n    },\n    \"steps\": [\n      {\n        \"step_id\": \"implementation\",\n        \"worker\": \"FerrumPatchwright\",\n        \"reason\": \"Rebuild the patch from focused_context and preserve diagnostic linkage.\",\n        \"source\": \"code_review\",\n        \"priority\": \"blocker\"\n      },\n      {\n        \"step_id\": \"verification\",\n        \"worker\": \"OrdinatusVerifier\",\n        \"reason\": \"Rerun allowlisted verification and preserve failed command output if it still fails.\",\n        \"source\": \"code_review\",\n        \"priority\": \"blocker\"\n      }\n    ]\n  },\n  \"confidence\": \"medium\"\n}\n",
+      "stderr": ""
+    }
+  ],
+  "cancelled": false,
+  "step_ids": [
+    "implementation",
+    "verification",
+    "code_review",
+    "finalize"
+  ],
+  "execution_mode": "revision",
+  "partial_execution": true,
+  "revision_execution": true,
+  "revision_plan": {
+    "required": true,
+    "focused_context": {
+      "candidate_source_paths": [],
+      "changed_files": [],
+      "failed_commands": [],
+      "patch_source": "explicit_json_patch",
+      "diagnostics": {},
+      "engineering_readiness": {
+        "acceptance_criteria": [
+          {
+            "criterion": "requested_behavior_addressed",
+            "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+          },
+          {
+            "criterion": "source_scope_is_explained",
+            "verification": "changed files map back to repo survey or review warns about drift"
+          },
+          {
+            "criterion": "changed_python_compiles",
+            "verification": "py_compile runs for changed Python files"
+          },
+          {
+            "criterion": "task_verification_passes",
+            "verification": "requested or inferred verification commands return zero"
+          },
+          {
+            "criterion": "review_has_no_blockers",
+            "verification": "code_review decision record approves final package"
+          }
+        ],
+        "risk_register": [
+          {
+            "risk": "no_test_surface_detected",
+            "severity": "medium",
+            "mitigation": "require syntax checks and task-specific verification commands"
+          }
+        ],
+        "impact_matrix": [
+          {
+            "path": "settings.py",
+            "impact_level": "low",
+            "rank_score": 6,
+            "dependent_count": 0,
+            "linked_tests": [],
+            "reason": "ranked task relevance"
+          }
+        ],
+        "readiness_checks": {
+          "has_ranked_sources": true,
+          "has_acceptance_criteria": true,
+          "has_test_strategy": true,
+          "high_risk_count": 0
+        }
+      }
+    },
+    "steps": [
+      {
+        "step_id": "implementation",
+        "worker": "FerrumPatchwright",
+        "reason": "Rebuild the patch from focused_context and preserve diagnostic linkage.",
+        "source": "code_review",
+        "priority": "blocker"
+      },
+      {
+        "step_id": "verification",
+        "worker": "OrdinatusVerifier",
+        "reason": "Rerun allowlisted verification and preserve failed command output if it still fails.",
+        "source": "code_review",
+        "priority": "blocker"
+      }
+    ]
+  }
+}

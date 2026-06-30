@@ -1,0 +1,66 @@
+{
+  "trial_id": "ceraxia-field-data-migration",
+  "run_id": "ceraxia-field-data-migration-20260630-155545",
+  "trial_root": "EyeOfTerror/field_trial_runs/ceraxia-field-data-migration-20260630-155545",
+  "prepared_governor": "Ceraxia",
+  "result": {
+    "ok": true,
+    "phase": "completed"
+  },
+  "trial_outcome": {
+    "status": "passed",
+    "expected": true,
+    "reason": "task completed with ready final manifest"
+  },
+  "final_manifest": "EyeOfTerror/field_trial_runs/ceraxia-field-data-migration-20260630-155545/warmaster_runs/ceraxia-field-data-migration-20260630-155545/work/ceraxia/final_manifest.json",
+  "manifest_summary": {
+    "status": "ready",
+    "patch_source": "data_migration_marker_synthesis",
+    "changed_files": [
+      {
+        "path": "records.py",
+        "operation": "write_file",
+        "created": false,
+        "before_sha256": "dc379ed2d99e4b0ca35268f9a732294397029a18f1d8997da393a684b45f22ba",
+        "after_sha256": "c95ba6ac7574e0062216a300d8b7c5136c783a081f1774bf04799dfb429bd803",
+        "changed": true
+      },
+      {
+        "path": "test_records.py",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "d6fea00ab0e4c293d620409c0435d69885dd4e2a1d6127c63ef72a43eaa0d413",
+        "changed": true
+      }
+    ],
+    "diagnostics": {
+      "kind": "data_migration_marker_synthesis",
+      "source_path": "records.py",
+      "test_path": "test_records.py",
+      "read_function": "normalize_record",
+      "write_function": "serialize_record",
+      "old_field": "amount",
+      "new_field": "total_amount",
+      "compatibility": "reader accepts old and new shapes; writer emits new shape"
+    },
+    "dirty_worktree": {
+      "git_repo": false,
+      "dirty_targets": []
+    },
+    "ambiguity_analysis": {},
+    "verification_summary": {
+      "executed_count": 3,
+      "repair_count": 0,
+      "blocker_count": 0
+    },
+    "blockers": []
+  },
+  "pricing_py": "",
+  "settings_py": "",
+  "fixture_files": [
+    "records.py",
+    "test_records.py"
+  ],
+  "kept": true
+}

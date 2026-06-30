@@ -1,0 +1,402 @@
+{
+  "repo_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-field-refactor-preserve-behavior-20260630-155547/fixture/repo",
+  "goal": "кодовая задача: отрефактори duplicated business logic без изменения публичных функций и поведения.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-field-refactor-preserve-behavior-20260630-155547/fixture/repo\nCERAXIA_REFACTOR:\n{\n  \"helper_path\": \"common/calculations.py\",\n  \"helper_function\": \"net_amount\",\n  \"arguments\": [\"gross\", \"fee\"],\n  \"return_expression\": \"gross - fee\",\n  \"baseline_verification_commands\": [\"python -m unittest discover\"],\n  \"replacements\": [\n    {\n      \"path\": \"orders.py\",\n      \"public_function\": \"order_total\",\n      \"old\": \"def order_total(gross, fee):\\n    return gross - fee\\n\",\n      \"new\": \"from common.calculations import net_amount\\n\\n\\ndef order_total(gross, fee):\\n    return net_amount(gross, fee)\\n\"\n    },\n    {\n      \"path\": \"refunds.py\",\n      \"public_function\": \"refund_total\",\n      \"old\": \"def refund_total(gross, fee):\\n    return gross - fee\\n\",\n      \"new\": \"from common.calculations import net_amount\\n\\n\\ndef refund_total(gross, fee):\\n    return net_amount(gross, fee)\\n\"\n    }\n  ],\n  \"verification_commands\": [\"python -m unittest discover\", \"python -m py_compile orders.py refunds.py common/calculations.py\"]\n}",
+  "total_files_scanned": 3,
+  "dominant_extensions": [
+    {
+      "extension": ".py",
+      "count": 3
+    }
+  ],
+  "candidate_files": [
+    "orders.py",
+    "refunds.py"
+  ],
+  "test_files": [
+    "test_totals.py"
+  ],
+  "python_symbols": [
+    {
+      "path": "orders.py",
+      "module": "orders",
+      "functions": [
+        "order_total"
+      ],
+      "classes": [],
+      "imports": [],
+      "calls": []
+    },
+    {
+      "path": "refunds.py",
+      "module": "refunds",
+      "functions": [
+        "refund_total"
+      ],
+      "classes": [],
+      "imports": [],
+      "calls": []
+    },
+    {
+      "path": "test_totals.py",
+      "module": "test_totals",
+      "functions": [],
+      "classes": [
+        "TotalsTest"
+      ],
+      "imports": [
+        "unittest",
+        "orders.order_total",
+        "refunds.refund_total"
+      ],
+      "calls": [
+        "assertEqual",
+        "main",
+        "order_total",
+        "refund_total"
+      ]
+    }
+  ],
+  "suggested_verification_commands": [
+    "python -m unittest discover",
+    "python -m unittest test_totals"
+  ],
+  "repo_map": {
+    "ranked_files": [
+      {
+        "path": "orders.py",
+        "score": 22,
+        "reasons": [
+          "goal_filename_match",
+          "imported_by:test_totals.py",
+          "goal_symbol_match:order,orders,total",
+          "python_source"
+        ]
+      },
+      {
+        "path": "refunds.py",
+        "score": 22,
+        "reasons": [
+          "goal_filename_match",
+          "imported_by:test_totals.py",
+          "goal_symbol_match:refund,refunds,total",
+          "python_source"
+        ]
+      },
+      {
+        "path": "test_totals.py",
+        "score": 13,
+        "reasons": [
+          "test_surface",
+          "linked_test",
+          "goal_symbol_match:order,orders,refund,refunds,total"
+        ]
+      }
+    ],
+    "test_source_links": [
+      {
+        "test_path": "test_totals.py",
+        "source_paths": [
+          "orders.py",
+          "refunds.py"
+        ]
+      }
+    ],
+    "recommended_read_order": [
+      {
+        "path": "orders.py",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match, imported_by:test_totals.py, goal_symbol_match:order,orders,total"
+      },
+      {
+        "path": "refunds.py",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match, imported_by:test_totals.py, goal_symbol_match:refund,refunds,total"
+      },
+      {
+        "path": "test_totals.py",
+        "phase": "inspect_test",
+        "reason": "test_surface, linked_test, goal_symbol_match:order,orders,refund,refunds,total"
+      }
+    ],
+    "notes": [
+      "ranked_files combines goal filename matches, symbol matches, test surfaces, and test-to-source imports",
+      "test_source_links are derived from static Python imports and are advisory, not proof of coverage",
+      "recommended_read_order lists files to inspect before patch planning or source mutation"
+    ]
+  },
+  "engineering_investigation": {
+    "dependency_graph": {
+      "edges": [
+        {
+          "from": "test_totals.py",
+          "to": "orders.py",
+          "import": "orders.order_total"
+        },
+        {
+          "from": "test_totals.py",
+          "to": "refunds.py",
+          "import": "refunds.refund_total"
+        }
+      ],
+      "reverse_dependents": {
+        "orders.py": [
+          "test_totals.py"
+        ],
+        "refunds.py": [
+          "test_totals.py"
+        ]
+      },
+      "edge_count": 2
+    },
+    "call_graph": {
+      "edges": [
+        {
+          "from": "test_totals.py",
+          "to": "orders.py",
+          "call": "order_total"
+        },
+        {
+          "from": "test_totals.py",
+          "to": "refunds.py",
+          "call": "refund_total"
+        }
+      ],
+      "edge_count": 2,
+      "known_function_count": 2
+    },
+    "targeted_reading_plan": [
+      {
+        "path": "orders.py",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match, imported_by:test_totals.py, goal_symbol_match:order,orders,total",
+        "dependent_count": 1,
+        "sample_dependents": [
+          "test_totals.py"
+        ],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      },
+      {
+        "path": "refunds.py",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match, imported_by:test_totals.py, goal_symbol_match:refund,refunds,total",
+        "dependent_count": 1,
+        "sample_dependents": [
+          "test_totals.py"
+        ],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      },
+      {
+        "path": "test_totals.py",
+        "phase": "inspect_test",
+        "reason": "test_surface, linked_test, goal_symbol_match:order,orders,refund,refunds,total",
+        "dependent_count": 0,
+        "sample_dependents": [],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis": "orders.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "goal_filename_match",
+          "imported_by:test_totals.py",
+          "goal_symbol_match:order,orders,total",
+          "python_source"
+        ],
+        "risk": "public behavior may affect dependents",
+        "next_read": "orders.py"
+      },
+      {
+        "hypothesis": "refunds.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "goal_filename_match",
+          "imported_by:test_totals.py",
+          "goal_symbol_match:refund,refunds,total",
+          "python_source"
+        ],
+        "risk": "public behavior may affect dependents",
+        "next_read": "refunds.py"
+      },
+      {
+        "hypothesis": "test_totals.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "test_surface",
+          "linked_test",
+          "goal_symbol_match:order,orders,refund,refunds,total"
+        ],
+        "risk": "local change risk appears limited",
+        "next_read": "test_totals.py"
+      }
+    ],
+    "design_decision_seed": [
+      "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+      "Inspect dependents before changing public functions or modules with reverse dependencies.",
+      "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+    ]
+  },
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "orders.py",
+        "impact_level": "medium",
+        "rank_score": 22,
+        "dependent_count": 1,
+        "linked_tests": [
+          "test_totals.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "refunds.py",
+        "impact_level": "medium",
+        "rank_score": 22,
+        "dependent_count": 1,
+        "linked_tests": [
+          "test_totals.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "test_totals.py",
+        "impact_level": "medium",
+        "rank_score": 13,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      }
+    ],
+    "risk_register": [],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [
+        "python -m unittest discover",
+        "python -m unittest test_totals"
+      ],
+      "linked_test_targets": [
+        "test_totals.py"
+      ],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "config_files": [],
+  "excluded_dirs": [
+    ".cache",
+    ".git",
+    ".gradle",
+    ".venv",
+    "__pycache__",
+    "build",
+    "cache",
+    "dist",
+    "live_runs",
+    "models",
+    "node_modules",
+    "outputs",
+    "runtime",
+    "tmp"
+  ],
+  "summary": "Surveyed 3 files; found 1 test-like files and 2 goal-matching candidates.",
+  "role_policy": {
+    "role": "repository_mapper",
+    "authority": "read_only_repository_mapping",
+    "may_mutate_source": false,
+    "required_evidence": [
+      "repo_root",
+      "dominant_extensions",
+      "test_files",
+      "python_symbols"
+    ],
+    "forbidden_actions": [
+      "source_mutation",
+      "verification_claim_without_artifacts"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 2,
+    "risk_flags": [
+      "test_diagnostic_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "repository_survey",
+    "worker": "LogisRepository",
+    "purpose": "Inspect repository shape, likely ownership boundaries, risky files, and available test surfaces.",
+    "brief": "Map the repository before anyone edits it.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 2,
+      "risk_flags": [
+        "test_diagnostic_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+      ]
+    },
+    "must_produce": [
+      "repo_map",
+      "candidate_files",
+      "test_files",
+      "recommended_read_order"
+    ],
+    "handoff_question": "Which files should the strategist inspect first, and why?",
+    "authority_boundary": "read_only_repository_mapping"
+  }
+}

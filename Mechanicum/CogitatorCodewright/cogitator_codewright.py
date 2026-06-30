@@ -424,6 +424,7 @@ def marker_block(text: str, marker: str) -> str:
         "\nCERAXIA_CONFIG_RUNTIME:",
         "\nCERAXIA_REFACTOR:",
         "\nCERAXIA_EDGE_FIX:",
+        "\nCERAXIA_DATA_MIGRATION:",
         "\nCERAXIA_FILES:",
         "\nCERAXIA_CREATE_FILE:",
         "\nCERAXIA_FILE_CONTENT:",
@@ -1258,6 +1259,79 @@ def patch_spec_from_edge_fix_marker(goal: str) -> dict[str, Any]:
     }
 
 
+def patch_spec_from_data_migration_marker(goal: str) -> dict[str, Any]:
+    payload = extract_json_after_marker(goal, "CERAXIA_DATA_MIGRATION:")
+    if not payload:
+        return {}
+    source_path = str(payload.get("source_path") or "").strip()
+    test_path = str(payload.get("test_path") or "").strip()
+    read_function = str(payload.get("read_function") or "").strip()
+    write_function = str(payload.get("write_function") or "").strip()
+    id_field = str(payload.get("id_field") or "").strip()
+    old_field = str(payload.get("old_field") or "").strip()
+    new_field = str(payload.get("new_field") or "").strip()
+    if not all([source_path, test_path, read_function, write_function, id_field, old_field, new_field]):
+        raise ValueError("CERAXIA_DATA_MIGRATION requires source_path, test_path, read_function, write_function, id_field, old_field, and new_field")
+    if not source_path.endswith(".py") or not test_path.endswith(".py"):
+        raise ValueError("CERAXIA_DATA_MIGRATION source_path and test_path must be Python files")
+    identifiers = [read_function, write_function, id_field, old_field, new_field]
+    if not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item) for item in identifiers):
+        raise ValueError("CERAXIA_DATA_MIGRATION function and field names must be simple identifiers")
+    if old_field == new_field:
+        raise ValueError("CERAXIA_DATA_MIGRATION old_field and new_field must differ")
+    source_module = source_path[:-3].replace("/", ".")
+    source_content = (
+        f"def {read_function}(record):\n"
+        f"    if '{new_field}' in record:\n"
+        f"        value = record['{new_field}']\n"
+        f"    elif '{old_field}' in record:\n"
+        f"        value = record['{old_field}']\n"
+        "    else:\n"
+        f"        raise KeyError('{new_field}')\n"
+        f"    return {{'{id_field}': record['{id_field}'], '{new_field}': value}}\n\n"
+        f"def {write_function}(record):\n"
+        f"    normalized = {read_function}(record)\n"
+        f"    return {{'{id_field}': normalized['{id_field}'], '{new_field}': normalized['{new_field}']}}\n"
+    )
+    test_content = (
+        f"import unittest\nfrom {source_module} import {read_function}, {write_function}\n\n"
+        "class DataMigrationTest(unittest.TestCase):\n"
+        "    def test_reads_old_shape(self):\n"
+        f"        self.assertEqual({read_function}({{'{id_field}': 'a1', '{old_field}': 12}}), {{'{id_field}': 'a1', '{new_field}': 12}})\n\n"
+        "    def test_reads_new_shape(self):\n"
+        f"        self.assertEqual({read_function}({{'{id_field}': 'b2', '{new_field}': 20}}), {{'{id_field}': 'b2', '{new_field}': 20}})\n\n"
+        "    def test_writer_emits_new_shape_only(self):\n"
+        f"        self.assertEqual({write_function}({{'{id_field}': 'c3', '{old_field}': 7}}), {{'{id_field}': 'c3', '{new_field}': 7}})\n\n"
+        "    def test_missing_value_is_rejected(self):\n"
+        f"        with self.assertRaises(KeyError):\n"
+        f"            {read_function}({{'{id_field}': 'd4'}})\n\n"
+        "if __name__ == '__main__':\n    unittest.main()\n"
+    )
+    verification_commands = payload.get("verification_commands")
+    if verification_commands is None:
+        verification_commands = [f"python -m unittest {test_path[:-3].replace('/', '.')}"]
+    if not isinstance(verification_commands, list) or not all(isinstance(item, str) for item in verification_commands):
+        raise ValueError("CERAXIA_DATA_MIGRATION verification_commands must be a list of strings")
+    return {
+        "source": "data_migration_marker_synthesis",
+        "diagnostics": {
+            "kind": "data_migration_marker_synthesis",
+            "source_path": source_path,
+            "test_path": test_path,
+            "read_function": read_function,
+            "write_function": write_function,
+            "old_field": old_field,
+            "new_field": new_field,
+            "compatibility": "reader accepts old and new shapes; writer emits new shape",
+        },
+        "operations": [
+            {"type": "write_file", "path": source_path, "content": source_content, "overwrite": True},
+            {"type": "write_file", "path": test_path, "content": test_content, "overwrite": True},
+        ],
+        "verification_commands": verification_commands,
+    }
+
+
 def patch_spec_from_multi_file_marker(goal: str) -> dict[str, Any]:
     payload = extract_json_after_marker(goal, "CERAXIA_FILES:")
     if not payload:
@@ -1305,6 +1379,9 @@ def synthesized_patch_spec_from_markers(goal: str) -> dict[str, Any]:
     edge_fix = patch_spec_from_edge_fix_marker(goal)
     if edge_fix:
         return edge_fix
+    data_migration = patch_spec_from_data_migration_marker(goal)
+    if data_migration:
+        return data_migration
     feature = patch_spec_from_feature_marker(goal)
     if feature:
         return feature

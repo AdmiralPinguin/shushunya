@@ -1,0 +1,228 @@
+{
+  "task_id": "ceraxia-field-refactor-preserve-behavior-20260630-155547",
+  "goal": "кодовая задача: отрефактори duplicated business logic без изменения публичных функций и поведения.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-field-refactor-preserve-behavior-20260630-155547/fixture/repo\nCERAXIA_REFACTOR:\n{\n  \"helper_path\": \"common/calculations.py\",\n  \"helper_function\": \"net_amount\",\n  \"arguments\": [\"gross\", \"fee\"],\n  \"return_expression\": \"gross - fee\",\n  \"baseline_verification_commands\": [\"python -m unittest discover\"],\n  \"replacements\": [\n    {\n      \"path\": \"orders.py\",\n      \"public_function\": \"order_total\",\n      \"old\": \"def order_total(gross, fee):\\n    return gross - fee\\n\",\n      \"new\": \"from common.calculations import net_amount\\n\\n\\ndef order_total(gross, fee):\\n    return net_amount(gross, fee)\\n\"\n    },\n    {\n      \"path\": \"refunds.py\",\n      \"public_function\": \"refund_total\",\n      \"old\": \"def refund_total(gross, fee):\\n    return gross - fee\\n\",\n      \"new\": \"from common.calculations import net_amount\\n\\n\\ndef refund_total(gross, fee):\\n    return net_amount(gross, fee)\\n\"\n    }\n  ],\n  \"verification_commands\": [\"python -m unittest discover\", \"python -m py_compile orders.py refunds.py common/calculations.py\"]\n}",
+  "governor": "Ceraxia",
+  "status": "completed",
+  "created_at": "2026-06-30T06:55:47.180437+00:00",
+  "updated_at": "2026-06-30T06:55:47.500303+00:00",
+  "steps": [
+    {
+      "step_id": "repository_survey",
+      "worker": "LogisRepository",
+      "status": "completed",
+      "artifacts": [
+        "/work/ceraxia/repo_survey.json"
+      ],
+      "summary": "Surveyed 3 files; found 1 test-like files and 2 goal-matching candidates.",
+      "updated_at": "2026-06-30T06:55:47.219640+00:00",
+      "created_at": "2026-06-30T06:55:47.219640+00:00"
+    },
+    {
+      "step_id": "change_planning",
+      "worker": "MagosStrategos",
+      "status": "completed",
+      "artifacts": [
+        "/work/ceraxia/change_plan.md"
+      ],
+      "summary": "Code change plan written.",
+      "updated_at": "2026-06-30T06:55:47.255190+00:00",
+      "created_at": "2026-06-30T06:55:47.255190+00:00"
+    },
+    {
+      "step_id": "implementation",
+      "worker": "FerrumPatchwright",
+      "status": "completed",
+      "artifacts": [
+        "/work/ceraxia/patch_manifest.json"
+      ],
+      "summary": "Patch manifest written with applied changes.",
+      "updated_at": "2026-06-30T06:55:47.294045+00:00",
+      "created_at": "2026-06-30T06:55:47.294045+00:00"
+    },
+    {
+      "step_id": "verification",
+      "worker": "OrdinatusVerifier",
+      "status": "completed",
+      "artifacts": [
+        "/work/ceraxia/verification_report.json",
+        "/work/ceraxia/repair_loop_state.json"
+      ],
+      "summary": "Verification report written.",
+      "updated_at": "2026-06-30T06:55:47.415683+00:00",
+      "created_at": "2026-06-30T06:55:47.415683+00:00"
+    },
+    {
+      "step_id": "code_review",
+      "worker": "JudicatorCodicis",
+      "status": "passed",
+      "artifacts": [
+        "/work/ceraxia/code_review.json"
+      ],
+      "summary": "Code review written with 0 blocker(s).",
+      "updated_at": "2026-06-30T06:55:47.451043+00:00",
+      "created_at": "2026-06-30T06:55:47.451043+00:00"
+    },
+    {
+      "step_id": "finalize",
+      "worker": "SealwrightFinalis",
+      "status": "ready",
+      "artifacts": [
+        "/work/ceraxia/final_manifest.json"
+      ],
+      "summary": "Ceraxia code task package finalized.",
+      "updated_at": "2026-06-30T06:55:47.488513+00:00",
+      "created_at": "2026-06-30T06:55:47.488513+00:00"
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-06-30T06:55:47.180449+00:00",
+      "type": "task_created",
+      "payload": {
+        "governor": "Ceraxia"
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.180650+00:00",
+      "type": "research_loop_started",
+      "payload": {
+        "mode": "research_loop_local",
+        "max_revision_cycles": 1,
+        "allow_resume": true
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.182253+00:00",
+      "type": "research_loop_cycle_started",
+      "payload": {
+        "cycle": 0,
+        "operation": "full",
+        "revision_cycle": 0
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.182704+00:00",
+      "type": "status_changed",
+      "payload": {
+        "status": "running"
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.219650+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "repository_survey",
+        "worker": "LogisRepository",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.255199+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "change_planning",
+        "worker": "MagosStrategos",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.294061+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "implementation",
+        "worker": "FerrumPatchwright",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.415695+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "verification",
+        "worker": "OrdinatusVerifier",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.451058+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "code_review",
+        "worker": "JudicatorCodicis",
+        "status": "passed"
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.488528+00:00",
+      "type": "step_recorded",
+      "payload": {
+        "step_id": "finalize",
+        "worker": "SealwrightFinalis",
+        "status": "ready"
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.489934+00:00",
+      "type": "result_recorded",
+      "payload": {
+        "ok": true,
+        "final_step": "finalize",
+        "artifacts": [
+          "/work/ceraxia/final_manifest.json"
+        ],
+        "workspace_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-field-refactor-preserve-behavior-20260630-155547/warmaster_runs/ceraxia-field-refactor-preserve-behavior-20260630-155547/work",
+        "status": "ready",
+        "summary": "Ceraxia code task package finalized.",
+        "revision_plan": {
+          "required": false,
+          "focused_context": {},
+          "steps": []
+        }
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.490728+00:00",
+      "type": "status_changed",
+      "payload": {
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.491834+00:00",
+      "type": "research_loop_cycle_finished",
+      "payload": {
+        "cycle": 0,
+        "operation": "full",
+        "ok": true,
+        "status": "",
+        "step_ids": []
+      }
+    },
+    {
+      "at": "2026-06-30T06:55:47.499908+00:00",
+      "type": "research_loop_finished",
+      "payload": {
+        "ok": true,
+        "stop_reason": "completed",
+        "cycles": 2,
+        "revision_cycles": 0,
+        "final_status": "completed"
+      }
+    }
+  ],
+  "result": {
+    "ok": true,
+    "final_step": "finalize",
+    "artifacts": [
+      "/work/ceraxia/final_manifest.json"
+    ],
+    "workspace_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-field-refactor-preserve-behavior-20260630-155547/warmaster_runs/ceraxia-field-refactor-preserve-behavior-20260630-155547/work",
+    "status": "ready",
+    "summary": "Ceraxia code task package finalized.",
+    "revision_plan": {
+      "required": false,
+      "focused_context": {},
+      "steps": []
+    }
+  }
+}

@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from ceraxia_field_trial_runner import classify_trial_outcome
+
 
 ROOT = Path(__file__).resolve().parent
 SPEC = ROOT / "InnerCircle" / "Ceraxia" / "field_trials.json"
@@ -81,6 +83,7 @@ def main() -> int:
         "ceraxia-field-ambiguous-task",
         "ceraxia-field-bugfix-unnamed-source",
         "ceraxia-field-cross-language-config",
+        "ceraxia-field-data-migration",
         "ceraxia-field-multifile-feature",
         "ceraxia-field-negative-test",
         "ceraxia-field-refactor-preserve-behavior",
@@ -88,6 +91,20 @@ def main() -> int:
     }
     if not required_runner_trials.issubset(runner_trials):
         raise AssertionError(f"Ceraxia field trial runner lacks first reproducible trial: {runner_payload}")
+    blocked_outcome = classify_trial_outcome(
+        "ceraxia-field-ambiguous-task",
+        {"ok": False, "phase": "revision_cycle_limit"},
+        {"status": "blocked", "blockers": ["requirements are ambiguous"]},
+    )
+    if blocked_outcome.get("status") != "expected_blocked" or blocked_outcome.get("expected") is not True:
+        raise AssertionError(f"expected blocker trial outcome was not classified correctly: {blocked_outcome}")
+    failed_outcome = classify_trial_outcome(
+        "ceraxia-field-bugfix-unnamed-source",
+        {"ok": False, "phase": "revision_cycle_limit"},
+        {"status": "blocked", "blockers": ["unexpected blocker"]},
+    )
+    if failed_outcome.get("status") != "failed" or failed_outcome.get("expected") is not False:
+        raise AssertionError(f"unexpected blocker trial outcome was not classified as failed: {failed_outcome}")
     required_phrases = [
         "A scripted self-test proves only that a known scenario still works.",
         "The real 7/10 target is met only when",

@@ -1,0 +1,299 @@
+{
+  "status": "applied",
+  "mode": "explicit_patch_apply",
+  "task_id": "ceraxia-field-negative-test-20260630-155546:implementation",
+  "summary": "Ceraxia applied explicit patch operations.",
+  "intended_actions": [
+    "read concrete target files before editing",
+    "apply minimal scoped patch",
+    "run verification commands from verification_report.json",
+    "return focused revision steps on failure"
+  ],
+  "plan_excerpt": "# Ceraxia Change Plan\n\nGoal: кодовая задача: исправь retry parsing так, чтобы простой happy-path фикс не был достаточным; добавь негативные edge-case тесты.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-field-negative-test-20260630-155546/fixture/repo\nCERAXIA_EDGE_FIX:\n{\n  \"source_path\": \"retry_policy.py\",\n  \"function_name\": \"parse_retry_count\",\n  \"arguments\": [\"raw\"],\n  \"body_lines\": [\n    \"value = int(raw)\",\n    \"if value < 0 or value > 10:\",\n    \"    raise ValueError('retry count must be between 0 and 10')\",\n    \"return value\"\n  ],\n  \"test_path\": \"test_retry_policy.py\",\n  \"positive_cases\": [\n    {\"inputs\": [\"0\"], \"expected\": 0},\n    {\"inputs\": [\"3\"], \"expected\": 3},\n    {\"inputs\": [\"10\"], \"expected\": 10}\n  ],\n  \"negative_cases\": [\n    {\"inputs\": [\"-1\"], \"exception\": \"ValueError\"},\n    {\"inputs\": [\"11\"], \"exception\": \"ValueError\"},\n    {\"inputs\": [\"bad\"], \"exception\": \"ValueError\"}\n  ],\n  \"verification_commands\": [\"python -m unittest test_retry_policy\", \"python -m py_compile retry_policy.py\"]\n}\n\n## Scope\n- Inspect the named task and constrain edits to the smallest coherent module set.\n- Preserve user changes and expose blockers instead of guessing.\n\n## Candidate Files\n- retry_policy.py\n\n## Ranked Repo Map\n- retry_policy.py: score=15 reasons=[goal_filename_match, goal_symbol_match:count,parse,policy,retry, python_source]\n\n## Test Source Links\n\n## Recommended Read Order\n- inspect_source: retry_policy.py (goal_filename_match, goal_symbol_match:count,parse,policy,retry, python_source)\n\n## Targeted Reading Plan\n- retry_policy.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=0\n\n## Hypothesis Log\n- [high] retry_policy.py is likely relevant to the requested code change. evidence=[goal_filename_match, goal_symbol_match:count,parse,policy,retry, python_source] risk=local change risk appears limited\n\n## Design Decision Seed\n- Prefer the smallest patch that satisfies the failing test or explicit user contract.\n- Inspect dependents before changing public functions or modules with reverse dependencies.\n- If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation.\n\n## File Impact Matrix\n- retry_policy.py: impact=medium dependents=0 tests=[]\n\n## Risk Register\n- [medium] no_test_surface_detected: require syntax checks and task-specific verification commands\n\n## Acceptance Criteria\n- requested_behavior_addressed: patch candidate selected from explicit contract, task text, or test evidence\n- source_scope_is_explained: changed files map back to repo survey or review warns about drift\n- changed_python_compiles: py_compile runs for changed Python files\n- task_verification_passes: requested or inferred verification commands return zero\n- review_has_no_blockers: code_review decision record approves final package\n\n## Test Strategy\n- fallback: python -m py_compile <changed .py files>\n- fallback: git diff --check\n\n## Test Surface\n\n## Python Symbol Surfa",
+  "role_policy": {
+    "role": "patchwright",
+    "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unsafe_overwrite",
+      "duplicate_function_append"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "new_feature",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 2,
+    "risk_flags": [
+      "test_diagnostic_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "implementation",
+    "worker": "FerrumPatchwright",
+    "purpose": "Prepare an auditable patch manifest and implementation handoff for code changes.",
+    "brief": "Apply only explicit or safely inferred scoped patch operations.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "new_feature",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 2,
+      "risk_flags": [
+        "test_diagnostic_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+      ]
+    },
+    "must_produce": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "handoff_question": "What exactly changed, and what should verification run?",
+    "authority_boundary": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+  },
+  "dirty_worktree": {
+    "git_repo": false,
+    "dirty_targets": []
+  },
+  "ambiguity_analysis": {},
+  "patch_spec_present": true,
+  "patch_source": "edge_fix_marker_synthesis",
+  "patch_candidates": [
+    {
+      "source": "explicit_json_patch",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "marker_synthesis",
+      "status": "selected",
+      "operation_count": 2,
+      "verification_command_count": 2,
+      "diagnostics": {
+        "kind": "edge_fix_marker_synthesis",
+        "source_path": "retry_policy.py",
+        "test_path": "test_retry_policy.py",
+        "function_name": "parse_retry_count",
+        "positive_case_count": 3,
+        "negative_case_count": 3
+      }
+    }
+  ],
+  "selected_patch_candidate": {
+    "source": "marker_synthesis",
+    "status": "selected",
+    "operation_count": 2,
+    "verification_command_count": 2,
+    "diagnostics": {
+      "kind": "edge_fix_marker_synthesis",
+      "source_path": "retry_policy.py",
+      "test_path": "test_retry_policy.py",
+      "function_name": "parse_retry_count",
+      "positive_case_count": 3,
+      "negative_case_count": 3
+    }
+  },
+  "source_excerpt_pack": [
+    {
+      "path": "retry_policy.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, goal_symbol_match:count,parse,policy,retry, python_source",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 0,
+      "bytes": 48,
+      "status": "read",
+      "excerpt": "def parse_retry_count(raw):\n    return int(raw)\n",
+      "truncated": false
+    }
+  ],
+  "source_excerpt_summary": [
+    {
+      "path": "retry_policy.py",
+      "status": "read",
+      "bytes": 48,
+      "truncated": false
+    }
+  ],
+  "implementation_decision_record": [
+    {
+      "check": "source_evidence_loaded",
+      "status": "pass",
+      "detail": "1 targeted files read"
+    },
+    {
+      "check": "patch_candidate_selected",
+      "status": "pass",
+      "detail": "marker_synthesis"
+    },
+    {
+      "check": "mutation_authority",
+      "status": "pass",
+      "detail": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+    }
+  ],
+  "diagnostics": {
+    "kind": "edge_fix_marker_synthesis",
+    "source_path": "retry_policy.py",
+    "test_path": "test_retry_policy.py",
+    "function_name": "parse_retry_count",
+    "positive_case_count": 3,
+    "negative_case_count": 3
+  },
+  "operation_count": 2,
+  "changed_files": [
+    {
+      "path": "retry_policy.py",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "cf416d6c9424926b5f102f9d3af51a19bca0f10507c5b7f647e71f07d5cc7a3a",
+      "after_sha256": "f138fb4889400d0996fff2b589fdf256e692bacd296b5ae698fc2844f4342c41",
+      "changed": true
+    },
+    {
+      "path": "test_retry_policy.py",
+      "operation": "write_file",
+      "created": true,
+      "before_sha256": "",
+      "after_sha256": "41849af20b55c31987e140f0cf9f7d77726efb26601f72e781f5cba4357341c8",
+      "changed": true
+    }
+  ],
+  "recommended_read_order": [
+    {
+      "path": "retry_policy.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, goal_symbol_match:count,parse,policy,retry, python_source"
+    }
+  ],
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "retry_policy.py",
+        "impact_level": "medium",
+        "rank_score": 15,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      }
+    ],
+    "risk_register": [
+      {
+        "risk": "no_test_surface_detected",
+        "severity": "medium",
+        "mitigation": "require syntax checks and task-specific verification commands"
+      }
+    ],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [],
+      "linked_test_targets": [],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "patch_scope_evidence": {
+    "changed_files_in_repo_map": [
+      "retry_policy.py"
+    ],
+    "changed_files_outside_repo_map": [
+      "test_retry_policy.py"
+    ],
+    "changed_sources_with_linked_tests": [],
+    "changed_tests_with_linked_sources": [],
+    "evidence": [
+      {
+        "path": "retry_policy.py",
+        "in_repo_map": true,
+        "score": 15,
+        "reasons": [
+          "goal_filename_match",
+          "goal_symbol_match:count,parse,policy,retry",
+          "python_source"
+        ],
+        "linked_tests": [],
+        "linked_sources": []
+      },
+      {
+        "path": "test_retry_policy.py",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      }
+    ]
+  },
+  "rollback": {
+    "applied": false,
+    "files": []
+  },
+  "verification_commands": [
+    "python -m unittest test_retry_policy",
+    "python -m py_compile retry_policy.py"
+  ],
+  "blockers": [],
+  "warnings": [
+    "Only explicit CERAXIA_PATCH operations are supported by this prototype patch worker."
+  ]
+}

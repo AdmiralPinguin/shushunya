@@ -296,6 +296,23 @@ CERAXIA_EDGE_FIX:
 """
 
 
+def data_migration_goal() -> str:
+    return """введи новую форму record без потери чтения старых записей
+
+CERAXIA_DATA_MIGRATION:
+{
+  "source_path": "records.py",
+  "test_path": "test_records.py",
+  "read_function": "normalize_record",
+  "write_function": "serialize_record",
+  "id_field": "id",
+  "old_field": "amount",
+  "new_field": "total_amount",
+  "verification_commands": ["python -m unittest test_records", "python -m py_compile records.py"]
+}
+"""
+
+
 def repair_colon_goal() -> str:
     return """создай python файл и исправь если проверка найдет синтаксис
 
@@ -1004,6 +1021,30 @@ def main() -> int:
             raise AssertionError("edge-fix marker did not write negative tests")
         if final.get("verification_summary", {}).get("executed_count", 0) < 3:
             raise AssertionError(f"edge-fix final manifest should preserve verification evidence: {final}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "records.py").write_text(
+            "def normalize_record(record):\n"
+            "    return {'id': record['id'], 'amount': record['amount']}\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=data_migration_goal(), target_repo_root=target_repo)
+        expected_paths = {"records.py", "test_records.py"}
+        changed_paths = {item.get("path") for item in final.get("changed_files", []) if isinstance(item, dict)}
+        diagnostics = final.get("diagnostics", {})
+        if final.get("status") != "ready" or final.get("patch_source") != "data_migration_marker_synthesis":
+            raise AssertionError(f"data migration marker task should be ready: {final}")
+        if changed_paths != expected_paths:
+            raise AssertionError(f"data migration marker should touch source and tests only: {final}")
+        if diagnostics.get("old_field") != "amount" or diagnostics.get("new_field") != "total_amount":
+            raise AssertionError(f"data migration diagnostics should preserve schema evidence: {final}")
+        test_text = (target_repo / "test_records.py").read_text(encoding="utf-8")
+        if "test_reads_old_shape" not in test_text or "test_writer_emits_new_shape_only" not in test_text:
+            raise AssertionError("data migration marker did not write compatibility tests")
+        if final.get("verification_summary", {}).get("executed_count", 0) < 3:
+            raise AssertionError(f"data migration final manifest should preserve verification evidence: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
