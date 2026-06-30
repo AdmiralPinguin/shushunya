@@ -1,5 +1,13 @@
 # EyeOfTerror Status
 
+## Active Development Focus
+
+- Current focus: Ceraxia, the code-brigade governor, and her Mechanicum code
+  worker pipeline.
+- Parked: standalone ShushunyaAgent stress testing and AgentArena tuning. Do
+  not switch back to ShushunyaAgent from old context unless the user gives a
+  fresh explicit ShushunyaAgent task.
+
 ## Working
 
 - Iskandar Khayon can build lore reconstruction task contracts and dispatch packets.

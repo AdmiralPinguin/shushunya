@@ -1,5 +1,12 @@
 # ShushunyaAgent Status
 
+Status: parked.
+
+Do not resume ShushunyaAgent arena stress tests, supervisor tuning, or
+standalone agent work from old context. The active project track is Ceraxia and
+the EyeOfTerror/Mechanicum code brigade. Work on ShushunyaAgent only after a
+fresh explicit user request that names ShushunyaAgent.
+
 Last verified: 2026-06-28 20:21 KST.
 
 ## Running Services
