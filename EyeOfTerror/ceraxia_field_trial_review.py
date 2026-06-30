@@ -113,6 +113,7 @@ def build_review_packet(entry: dict[str, Any], spec: dict[str, Any]) -> dict[str
         "observed": {
             "trial_outcome": trial_result.get("trial_outcome", {}),
             "trial_checks": trial_result.get("trial_checks", {}),
+            "honest_evidence": trial_result.get("honest_evidence", {}),
             "manifest_status": manifest.get("status", manifest_summary.get("status", "")),
             "patch_source": manifest.get("patch_source", manifest_summary.get("patch_source", "")),
             "changed_files": changed_files,

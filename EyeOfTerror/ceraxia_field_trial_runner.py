@@ -2165,6 +2165,74 @@ def apply_trial_checks_to_outcome(outcome: dict[str, Any], checks: dict[str, Any
     return outcome
 
 
+def honest_evidence_summary(manifest: dict[str, Any], checks: dict[str, Any]) -> dict[str, Any]:
+    changed_files = manifest.get("changed_files") if isinstance(manifest.get("changed_files"), list) else []
+    changed_paths = [
+        str(item.get("path") or "")
+        for item in changed_files
+        if isinstance(item, dict)
+    ]
+    changed_tests = [
+        path
+        for path in changed_paths
+        if "test" in Path(path).name.lower() or "/tests/" in f"/{path}"
+    ]
+    verification_executed = manifest.get("verification_executed") if isinstance(manifest.get("verification_executed"), list) else []
+    review_record = manifest.get("review_decision_record") if isinstance(manifest.get("review_decision_record"), list) else []
+    ast_plan = manifest.get("ast_patch_plan") if isinstance(manifest.get("ast_patch_plan"), dict) else {}
+    unshaped_plan = manifest.get("unshaped_repair_plan") if isinstance(manifest.get("unshaped_repair_plan"), dict) else {}
+    check_groups = [value for value in checks.values() if isinstance(value, dict)]
+    trial_checks_passed = bool(check_groups) and all(value.get("passed") is True for value in check_groups)
+    returncodes = [
+        int(item.get("returncode") or 0)
+        for item in verification_executed
+        if isinstance(item, dict)
+    ]
+    patch_source = str(manifest.get("patch_source") or "")
+    ast_required = patch_source.startswith(("test_inferred_", "runtime_diagnostic_"))
+    ast_recorded = ast_plan.get("status") == "recorded" and int(ast_plan.get("operation_count") or 0) >= 1
+    evidence_checks = {
+        "source_correct": {
+            "passed": manifest.get("status") == "ready" and trial_checks_passed,
+            "evidence": {"manifest_status": manifest.get("status", ""), "trial_check_groups": sorted(checks.keys())},
+        },
+        "tests_not_adjusted": {
+            "passed": not changed_tests,
+            "evidence": {"changed_tests": changed_tests, "changed_paths": changed_paths},
+        },
+        "patch_minimal": {
+            "passed": bool(changed_paths) and (not ast_required or ast_recorded),
+            "evidence": {
+                "changed_file_count": len(changed_paths),
+                "patch_source": patch_source,
+                "ast_required": ast_required,
+                "ast_plan_status": ast_plan.get("status", ""),
+                "ast_operation_count": ast_plan.get("operation_count", 0),
+            },
+        },
+        "verification_meaningful": {
+            "passed": bool(returncodes) and all(code == 0 for code in returncodes),
+            "evidence": {
+                "executed_count": len(returncodes),
+                "returncodes": returncodes,
+                "commands": [str(item.get("command") or "") for item in verification_executed if isinstance(item, dict)],
+            },
+        },
+        "review_artifacts_present": {
+            "passed": manifest.get("approved") is True and bool(review_record) and unshaped_plan.get("mode") == "unshaped_repo_repair",
+            "evidence": {
+                "approved": manifest.get("approved") is True,
+                "review_decision_count": len(review_record),
+                "unshaped_repair_plan_mode": unshaped_plan.get("mode", ""),
+            },
+        },
+    }
+    return {
+        "status": "passed" if all(item.get("passed") is True for item in evidence_checks.values()) else "failed",
+        "checks": evidence_checks,
+    }
+
+
 def append_draft_ledger_entry(trial_id: str, run_id: str, evidence_paths: list[str]) -> None:
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
     entries = ledger.setdefault("entries", [])
@@ -2211,6 +2279,7 @@ def run_trial(trial_id: str, root: Path, keep: bool, ledger_draft: bool) -> dict
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path else {}
     checks = trial_specific_checks(trial_id, repo, manifest)
     trial_outcome = apply_trial_checks_to_outcome(classify_trial_outcome(trial_id, result, manifest), checks)
+    honest_evidence = honest_evidence_summary(manifest, checks)
     report = {
         "trial_id": trial_id,
         "run_id": run_id,
@@ -2219,6 +2288,7 @@ def run_trial(trial_id: str, root: Path, keep: bool, ledger_draft: bool) -> dict
         "result": {"ok": result.get("ok"), "phase": result.get("phase")},
         "trial_outcome": trial_outcome,
         "trial_checks": checks,
+        "honest_evidence": honest_evidence,
         "final_manifest": str(manifest_path) if manifest_path else "",
         "manifest_summary": {
             "status": manifest.get("status", ""),

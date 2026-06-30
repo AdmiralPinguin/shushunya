@@ -163,6 +163,29 @@ def main() -> int:
     }
     if not required_runner_trials.issubset(runner_trials):
         raise AssertionError(f"Ceraxia field trial runner lacks first reproducible trial: {runner_payload}")
+    smoke_trial = subprocess.run(
+        [sys.executable, str(RUNNER), "--trial", "ceraxia-expert-unshaped-pytest-runtime"],
+        cwd=str(ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if smoke_trial.returncode != 0:
+        raise AssertionError(f"Ceraxia honest-evidence smoke trial failed: {smoke_trial.stdout} {smoke_trial.stderr}")
+    smoke_payload = json.loads(smoke_trial.stdout)
+    honest = smoke_payload.get("honest_evidence") if isinstance(smoke_payload.get("honest_evidence"), dict) else {}
+    honest_checks = honest.get("checks") if isinstance(honest.get("checks"), dict) else {}
+    required_honest_checks = {
+        "source_correct",
+        "tests_not_adjusted",
+        "patch_minimal",
+        "verification_meaningful",
+        "review_artifacts_present",
+    }
+    if honest.get("status") != "passed" or not required_honest_checks.issubset(honest_checks):
+        raise AssertionError(f"Ceraxia trial result must expose honest evidence checks: {smoke_payload}")
+    if not all(isinstance(item, dict) and item.get("passed") is True for item in honest_checks.values()):
+        raise AssertionError(f"Ceraxia honest evidence checks must all pass for accepted smoke trial: {honest}")
     expert_suite = subprocess.run(
         [sys.executable, str(EXPERT_SUITE), "--require-all"],
         cwd=str(ROOT.parent),
