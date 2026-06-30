@@ -768,6 +768,66 @@ def main() -> int:
         root = Path(temp_dir)
         target_repo = root / "repo"
         target_repo.mkdir()
+        work = root / "work"
+        (work / "code").mkdir(parents=True)
+        (work / "code" / "repo_survey.json").write_text(
+            json.dumps(
+                {
+                    "repo_map": {"ranked_files": [{"path": "sample.py", "score": 10}, {"path": "test_sample.py", "score": 9}]},
+                    "engineering_investigation": {"hypotheses": [{"hypothesis": "sample.py likely relevant"}]},
+                    "engineering_readiness": {
+                        "acceptance_criteria": [{"criterion": "tests unchanged", "verification": "review"}],
+                        "test_strategy": {"fallback_checks": ["python -m py_compile <changed .py files>"]},
+                        "readiness_checks": {"has_acceptance_criteria": True, "has_test_strategy": True},
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "problem_statement.json").write_text(json.dumps({"status": "recorded"}) + "\n", encoding="utf-8")
+        (work / "code" / "architecture_options.json").write_text(json.dumps({"status": "recorded"}) + "\n", encoding="utf-8")
+        (work / "code" / "patch_manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "applied",
+                    "patch_source": "test_inferred_return_mismatch",
+                    "changed_files": [{"path": "test_sample.py", "changed": True}],
+                    "patch_scope_evidence": {"changed_files_in_repo_map": ["test_sample.py"], "changed_files_outside_repo_map": [], "evidence": [{"path": "test_sample.py", "in_repo_map": True}]},
+                    "engineering_readiness": {
+                        "acceptance_criteria": [{"criterion": "tests unchanged", "verification": "review"}],
+                        "test_strategy": {"fallback_checks": ["python -m py_compile <changed .py files>"]},
+                        "readiness_checks": {"has_acceptance_criteria": True, "has_test_strategy": True},
+                    },
+                    "warnings": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "verification_report.json").write_text(
+            json.dumps({"status": "passed", "blockers": [], "warnings": [], "executed": []}) + "\n",
+            encoding="utf-8",
+        )
+        (work / "code" / "repair_loop_state.json").write_text(
+            json.dumps({"status": "passed", "next_action": "continue_to_code_review"}) + "\n",
+            encoding="utf-8",
+        )
+        payload = request("code_review", "/work/code/code_review.json", target_repo_root=target_repo)
+        result = run(payload, work)
+        if not result.get("ok"):
+            raise AssertionError(f"review discipline test should write a report: {result}")
+        review = json.loads((work / "code" / "code_review.json").read_text(encoding="utf-8"))
+        if (
+            review.get("approved") is not False
+            or not any("must not edit tests" in item.get("message", "") for item in review.get("findings", []) if isinstance(item, dict))
+            or review.get("code_review_discipline", {}).get("blocker_count") != 1
+        ):
+            raise AssertionError(f"code review should block test-inferred test edits: {review}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
         sample = target_repo / "sample.py"
         sample.write_text("def value():\n    return 1\n", encoding="utf-8")
         final = run_pipeline(root / "work", goal=forbidden_verify_goal(), target_repo_root=target_repo)

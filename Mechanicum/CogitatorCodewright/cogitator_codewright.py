@@ -582,6 +582,37 @@ def repository_investigation_review(
     }
 
 
+def code_review_discipline_findings(patch_source: str, changed_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    changed_paths = [
+        str(item.get("path") or "")
+        for item in changed_files
+        if isinstance(item, dict) and item.get("path")
+    ]
+    findings: list[dict[str, Any]] = []
+    changed_tests = [path for path in changed_paths if test_like_path(path)]
+    if patch_source.startswith("test_inferred_") and changed_tests:
+        findings.append(
+            {
+                "check": "test_inferred_patch_did_not_edit_tests",
+                "status": "blocker",
+                "message": "Test-inferred repairs must not edit tests to fit the patch.",
+                "evidence": {"changed_tests": changed_tests},
+            }
+        )
+    if patch_source in {"test_inferred_security_boundary", "test_inferred_retry_policy"}:
+        changed_non_tests = [path for path in changed_paths if not test_like_path(path)]
+        if not changed_non_tests:
+            findings.append(
+                {
+                    "check": "risk_patch_changed_source_surface",
+                    "status": "blocker",
+                    "message": "Risk-sensitive inferred repairs must mutate the implementation surface, not only supporting artifacts.",
+                    "evidence": {"changed_paths": changed_paths},
+                }
+            )
+    return findings
+
+
 def output_path_from_request(request: dict[str, Any]) -> str:
     step = request.get("step") if isinstance(request.get("step"), dict) else {}
     expected = step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []
@@ -3931,6 +3962,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     focused_commands = verification_strategy.get("focused_commands") if isinstance(verification_strategy.get("focused_commands"), list) else []
     broad_commands = verification_strategy.get("broad_commands") if isinstance(verification_strategy.get("broad_commands"), list) else []
     repo_grade_mode = repo_grade_workflow.get("mode") == "repo_grade"
+    discipline_findings = code_review_discipline_findings(patch_source, changed_files)
     failed_commands = repair_state.get("failed_commands") if isinstance(repair_state.get("failed_commands"), list) else []
     candidate_source_paths = repair_state.get("candidate_source_paths") if isinstance(repair_state.get("candidate_source_paths"), list) else []
     decision_record: list[dict[str, Any]] = [
@@ -3994,6 +4026,11 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "status": "pass" if (not repo_grade_mode or broad_commands) else "blocker",
             "evidence": broad_commands,
         },
+        {
+            "check": "review_discipline_findings",
+            "status": "pass" if not discipline_findings else "blocker",
+            "evidence": discipline_findings,
+        },
     ]
     review_warnings = [
         {"severity": "warning", "message": str(item)}
@@ -4037,6 +4074,8 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         blockers = [*blockers, "Repo-grade task lacks architecture decision record."]
     if repo_grade_mode and not broad_commands:
         blockers = [*blockers, "Repo-grade task lacks broad verification evidence."]
+    for finding in discipline_findings:
+        blockers = [*blockers, str(finding.get("message") or finding.get("check") or "Code review discipline finding.")]
     high_risks = [item for item in risk_register if isinstance(item, dict) and item.get("severity") == "high"]
     if high_risks and not changed_files:
         blockers = [*blockers, "High-risk task has no applied source change or explicit handoff resolution."]
@@ -4087,6 +4126,10 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             "architecture_decision_record_present": architecture_decision_record.get("status") == "recorded",
             "focused_verification_count": len(focused_commands),
             "broad_verification_count": len(broad_commands),
+        },
+        "code_review_discipline": {
+            "findings": discipline_findings,
+            "blocker_count": len([item for item in discipline_findings if item.get("status") == "blocker"]),
         },
         "architect_review": {
             "problem_statement_present": problem_statement.get("status") == "recorded",
@@ -4224,6 +4267,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "engineering_readiness": patch.get("engineering_readiness", {}),
         "engineering_readiness_review": review.get("engineering_readiness_review", {}),
         "architect_review": review.get("architect_review", {}),
+        "code_review_discipline": review.get("code_review_discipline", {}),
         "repository_investigation_review": review.get("repository_investigation_review", {}),
         "patch_scope_evidence": patch.get("patch_scope_evidence", {}),
         "patch_source": patch.get("patch_source", ""),
