@@ -163,6 +163,13 @@ CERAXIA_VERIFY: python -m py_compile client.py
 """
 
 
+def test_inferred_self_repair_seed_goal() -> str:
+    return """кодовая expert-задача без structured patch marker: проверь self-repair discipline. Выведи цель из tests, сохрани diagnostic от первой failed verification и исправь только source по mismatch.
+CERAXIA_VERIFY: python -m unittest tests.test_quota
+CERAXIA_VERIFY: python -m py_compile quota.py
+"""
+
+
 def partial_failure_goal() -> str:
     return """проверь что частично сломанный патч не оставляет мусор
 
@@ -1227,6 +1234,38 @@ def main() -> int:
             raise AssertionError("retry policy inference did not keep retry boundary clean")
         if "Retry policy" not in docs or "Validation" not in docs:
             raise AssertionError("retry policy inference did not document retry boundary")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        target_repo = root / "repo"
+        target_repo.mkdir()
+        (target_repo / "tests").mkdir()
+        (target_repo / "quota.py").write_text(
+            "def max_daily_exports():\n"
+            "    return 0\n",
+            encoding="utf-8",
+        )
+        (target_repo / "tests" / "test_quota.py").write_text(
+            "import unittest\n"
+            "from quota import max_daily_exports\n\n"
+            "class QuotaTest(unittest.TestCase):\n"
+            "    def test_max_daily_exports(self):\n"
+            "        self.assertEqual(max_daily_exports(), 7)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+        final = run_pipeline(root / "work", goal=test_inferred_self_repair_seed_goal(), target_repo_root=target_repo)
+        if final.get("status") != "ready" or final.get("patch_source") != "test_inferred_self_repair_seed":
+            raise AssertionError(f"self-repair seed should be inferred without marker: {final}")
+        summary = final.get("verification_summary", {})
+        if summary.get("repair_count") != 1 or summary.get("blocker_count") != 0:
+            raise AssertionError(f"self-repair seed should preserve exactly one successful repair: {final}")
+        repairs = final.get("verification_repairs", [])
+        if not repairs or repairs[0].get("kind") != "assertion_return_mismatch":
+            raise AssertionError(f"self-repair seed should repair from AssertionError mismatch: {final}")
+        quota = (target_repo / "quota.py").read_text(encoding="utf-8")
+        if "return 7" not in quota or "return 1" in quota:
+            raise AssertionError("self-repair seed did not leave the repaired expected value")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

@@ -845,6 +845,66 @@ def infer_return_mismatch_from_tests(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def infer_self_repair_seed_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    lowered = goal.lower()
+    if not any(marker in lowered for marker in ("self-repair", "self repair", "самоисправ", "diagnostic", "диагност", "revision")):
+        return {}
+    repo_root = target_repo_root(request)
+    candidates: list[dict[str, str]] = []
+    for candidate in test_expectation_candidates(repo_root, goal):
+        source_path = safe_repo_path(repo_root, candidate["module_path"])
+        current = source_path.read_text(encoding="utf-8")
+        function_name = candidate["function_name"]
+        if not re.search(rf"^\s*def\s+{re.escape(function_name)}\s*\(", current, flags=re.MULTILINE):
+            continue
+        actual = ast_return_literal_for_function(source_path, function_name)
+        expected = candidate["literal"]
+        if not actual or actual == expected:
+            continue
+        if current.count(f"return {actual}") != 1:
+            continue
+        if not re.fullmatch(r"[+-]?\d+", actual) or not re.fullmatch(r"[+-]?\d+", expected):
+            continue
+        seed = str(int(actual) + 1)
+        if seed == expected:
+            seed = str(int(actual) - 1)
+        if seed == actual or seed == expected:
+            continue
+        candidates.append({**candidate, "actual": actual, "seed": seed})
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred self-repair seed requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    commands = verification_commands_from_natural_goal(goal)
+    if not commands:
+        test_module = candidate["test_path"][:-3].replace("/", ".")
+        commands = [f"python -m unittest {test_module}"]
+    return {
+        "source": "test_inferred_self_repair_seed",
+        "diagnostics": {
+            "kind": "test_inferred_self_repair_seed",
+            "test_path": candidate["test_path"],
+            "module_path": candidate["module_path"],
+            "function_name": candidate["function_name"],
+            "initial_actual": candidate["actual"],
+            "seed": candidate["seed"],
+            "expected_after_repair": candidate["literal"],
+            "repair_expected": True,
+        },
+        "operations": [
+            {
+                "type": "replace",
+                "path": candidate["module_path"],
+                "old": f"return {candidate['actual']}",
+                "new": f"return {candidate['seed']}",
+            }
+        ],
+        "verification_commands": commands,
+    }
+
+
 def arithmetic_test_expectation_candidates(repo_root: Path, goal: str) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for test_path in discovered_test_paths(repo_root, goal):
@@ -2456,6 +2516,7 @@ def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any
         ("test_inferred_cache_concurrency", lambda: infer_cache_concurrency_from_tests(request)),
         ("test_inferred_flaky_ordering", lambda: infer_flaky_ordering_from_tests(request)),
         ("test_inferred_retry_policy", lambda: infer_retry_policy_from_tests(request)),
+        ("test_inferred_self_repair_seed", lambda: infer_self_repair_seed_from_tests(request)),
         ("natural_language_simple_replace", lambda: infer_simple_replace_patch_spec(request)),
         ("natural_language_add_function", lambda: infer_add_function_patch_spec(request)),
         ("test_inferred_arithmetic_return", lambda: infer_arithmetic_return_from_tests(request)),

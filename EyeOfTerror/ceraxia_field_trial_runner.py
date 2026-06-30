@@ -993,6 +993,34 @@ def fixture_expert_unshaped_retry_policy(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_self_repair(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "quota.py").write_text(
+        "def max_daily_exports():\n"
+        "    return 0\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_quota.py").write_text(
+        "import unittest\n"
+        "from quota import max_daily_exports\n\n"
+        "class QuotaTest(unittest.TestCase):\n"
+        "    def test_max_daily_exports(self):\n"
+        "        self.assertEqual(max_daily_exports(), 7)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured patch marker: проверь self-repair discipline. "
+        "Выведи цель из tests, сохрани diagnostic от первой failed verification и исправь только source по mismatch. "
+        "Не редактируй tests.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_quota\n"
+        "CERAXIA_VERIFY: python -m py_compile quota.py\n"
+    )
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
@@ -1009,6 +1037,7 @@ FIXTURES = {
     "ceraxia-expert-unshaped-data-migration": fixture_expert_unshaped_data_migration,
     "ceraxia-expert-unshaped-flaky-root-cause": fixture_expert_unshaped_flaky_root_cause,
     "ceraxia-expert-unshaped-retry-policy": fixture_expert_unshaped_retry_policy,
+    "ceraxia-expert-unshaped-self-repair": fixture_expert_unshaped_self_repair,
     "ceraxia-expert-unshaped-security-boundary": fixture_expert_unshaped_security_boundary,
     "ceraxia-field-integration-contract": fixture_integration_contract,
     "ceraxia-field-large-file-restraint": fixture_large_file_restraint,
@@ -1389,6 +1418,48 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                         "multi_file_marker_synthesis",
                         "explicit_json_patch",
                     }
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-unshaped-self-repair":
+        source_path = repo / "quota.py"
+        test_path = repo / "tests" / "test_quota.py"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        verification = manifest.get("verification_summary") if isinstance(manifest.get("verification_summary"), dict) else {}
+        repairs = manifest.get("verification_repairs") if isinstance(manifest.get("verification_repairs"), list) else []
+        repair_state = manifest.get("repair_loop_state") if isinstance(manifest.get("repair_loop_state"), dict) else {}
+        failed_commands = repair_state.get("failed_commands") if isinstance(repair_state.get("failed_commands"), list) else []
+        changed_paths = [
+            str(item.get("path") or "")
+            for item in manifest.get("changed_files", [])
+            if isinstance(item, dict)
+        ]
+        return {
+            "expert_unshaped_self_repair": {
+                "patch_source": manifest.get("patch_source", ""),
+                "repair_count": verification.get("repair_count"),
+                "single_repair": len(repairs) == 1,
+                "repair_kind": repairs[0].get("kind") if repairs and isinstance(repairs[0], dict) else "",
+                "failed_evidence_preserved": bool(failed_commands),
+                "source_repaired": "return 7" in source_text and "return 1" not in source_text,
+                "tests_preserved": "assertEqual(max_daily_exports(), 7)" in test_text,
+                "only_source_changed": changed_paths == ["quota.py"],
+                "not_marker_synthesized": str(manifest.get("patch_source") or "") not in {
+                    "marker_synthesis",
+                    "multi_file_marker_synthesis",
+                    "explicit_json_patch",
+                },
+                "passed": (
+                    manifest.get("patch_source") == "test_inferred_self_repair_seed"
+                    and verification.get("repair_count") == 1
+                    and len(repairs) == 1
+                    and repairs[0].get("kind") == "assertion_return_mismatch"
+                    and bool(failed_commands)
+                    and "return 7" in source_text
+                    and "return 1" not in source_text
+                    and "assertEqual(max_daily_exports(), 7)" in test_text
+                    and changed_paths == ["quota.py"]
                 ),
             }
         }

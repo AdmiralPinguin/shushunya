@@ -727,6 +727,38 @@
         "edits tests instead of source",
         "does not document retry policy"
       ]
+    },
+    {
+      "id": "ceraxia-expert-unshaped-self-repair",
+      "class": "expert_unshaped_self_repair",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "multi_file_reasoning",
+        "patch_correctness",
+        "verification_discipline",
+        "self_repair",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Exercise self-repair without a structured patch marker. Infer the target from tests, allow the first implementation attempt to be corrected only by verification diagnostics, preserve the failing evidence, and finish with a focused repaired source patch.",
+      "required_evidence": [
+        "test expectation inspected",
+        "first verification failure preserved",
+        "repair loop applies exactly one focused source repair",
+        "post-repair verification passes",
+        "final source contains the expected value",
+        "repair diagnostics name the mismatch"
+      ],
+      "failure_modes_to_watch": [
+        "directly patches to the final answer without exercising repair",
+        "drops failed verification evidence",
+        "repairs more than one file",
+        "edits tests instead of source",
+        "finalizes while verification is still blocked"
+      ]
     }
   ],
   "ledger_template": {
