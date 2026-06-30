@@ -141,6 +141,8 @@ the same code-task evidence through `final_manifest_summary`.
 application, verification, scope review, and diagnostic-linkage checks. Blocked
 reviews preserve focused revision context with changed files, failed commands,
 candidate source paths, patch source, and diagnostics.
+Blocked reviews also expose `review_repair_loop`: the triggering checks,
+focused context, rerun steps, and completion gate for the next revision cycle.
 
 For repo-grade tasks, final manifests additionally preserve
 `repo_grade_workflow`, `problem_statement`, `architecture_options`,

@@ -4106,6 +4106,34 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "verification_strategy": verification_strategy,
         "repository_investigation_review": investigation_review,
     }
+    revision_steps = [
+        {
+            "step_id": "implementation",
+            "worker": "FerrumPatchwright",
+            "reason": "Rebuild the patch from focused_context and preserve diagnostic linkage.",
+            "source": "code_review",
+            "priority": "blocker",
+        },
+        {
+            "step_id": "verification",
+            "worker": "OrdinatusVerifier",
+            "reason": "Rerun allowlisted verification and preserve failed command output if it still fails.",
+            "source": "code_review",
+            "priority": "blocker",
+        },
+    ] if blockers else []
+    review_repair_loop = {
+        "required": bool(blockers),
+        "trigger": "code_review_blockers" if blockers else "",
+        "blocked_checks": [
+            str(item.get("check"))
+            for item in decision_record
+            if isinstance(item, dict) and item.get("status") == "blocker"
+        ],
+        "rerun_steps": revision_steps,
+        "focused_context": focused_revision_context if blockers else {},
+        "completion_gate": "rerun implementation and verification, then rerun code_review and finalize",
+    }
     review = {
         "status": "blocked" if blockers else "passed",
         "approved": not blockers,
@@ -4138,6 +4166,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         },
         "repository_investigation_review": investigation_review,
         "decision_record": decision_record,
+        "review_repair_loop": review_repair_loop,
         "findings": [
             {"severity": "blocker", "message": str(item)}
             for item in blockers
@@ -4152,22 +4181,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "revision_plan": {
             "required": bool(blockers),
             "focused_context": focused_revision_context if blockers else {},
-            "steps": [
-                {
-                    "step_id": "implementation",
-                    "worker": "FerrumPatchwright",
-                    "reason": "Rebuild the patch from focused_context and preserve diagnostic linkage.",
-                    "source": "code_review",
-                    "priority": "blocker",
-                },
-                {
-                    "step_id": "verification",
-                    "worker": "OrdinatusVerifier",
-                    "reason": "Rerun allowlisted verification and preserve failed command output if it still fails.",
-                    "source": "code_review",
-                    "priority": "blocker",
-                },
-            ] if blockers else [],
+            "steps": revision_steps,
         },
     }
     write_json(workspace_root, output_path, review)
@@ -4230,6 +4244,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "architecture_decision_record": architecture_decision_record,
         "verification_strategy": verification_strategy,
         "review_decision_record": review.get("decision_record", []),
+        "review_repair_loop": review.get("review_repair_loop", {}),
         "pr_summary": pr_summary,
     }
     manifest = {
@@ -4327,6 +4342,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "review_status": review.get("status", "unknown"),
         "patch_scope_review": review.get("patch_scope_review", {}),
         "review_decision_record": review.get("decision_record", []),
+        "review_repair_loop": review.get("review_repair_loop", {}),
         "blockers": [item.get("message") for item in review.get("findings", []) if isinstance(item, dict)],
         "next_safe_action": "handoff_to_patch_worker" if status == "blocked" else "inspect_final_package",
         "summary": "Ceraxia code task package finalized.",

@@ -822,6 +822,8 @@ def main() -> int:
             review.get("approved") is not False
             or not any("must not edit tests" in item.get("message", "") for item in review.get("findings", []) if isinstance(item, dict))
             or review.get("code_review_discipline", {}).get("blocker_count") != 1
+            or review.get("review_repair_loop", {}).get("required") is not True
+            or "implementation" not in [item.get("step_id") for item in review.get("review_repair_loop", {}).get("rerun_steps", []) if isinstance(item, dict)]
         ):
             raise AssertionError(f"code review should block test-inferred test edits: {review}")
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -835,6 +837,8 @@ def main() -> int:
             raise AssertionError(f"forbidden verification command should block final readiness: {final}")
         if final.get("verification_summary", {}).get("blocker_count", 0) < 1:
             raise AssertionError(f"blocked final manifest should preserve verification blockers: {final}")
+        if final.get("review_repair_loop", {}).get("required") is not True:
+            raise AssertionError(f"blocked final manifest should preserve review repair loop: {final}")
         focused_context = final.get("revision_plan", {}).get("focused_context", {})
         if (
             focused_context.get("patch_source") != "explicit_json_patch"
