@@ -6,7 +6,7 @@ regression tests with real engineering ability.
 ## Principle
 
 A scripted self-test proves only that a known scenario still works. It does not
-prove that Ceraxia is a 7/10 code engineer. A real score requires field trials:
+prove that Ceraxia is a strong code engineer. A real score requires field trials:
 tasks that are not shaped around the current implementation, independent
 evidence review, and failure analysis that leads to general improvements.
 
@@ -66,6 +66,16 @@ source mutation or test run was appropriate. Each trial therefore declares
 `applicable_dimensions`, and rolling dimension averages use only those scores.
 Full score sheets remain in the ledger for auditability.
 
+The 10/10 target is a separate expert gate, not a renamed 7/10 gate. It requires
+expert-grade trials, a much higher rolling average, higher per-dimension
+minimums, enough expert task classes, and no accepted applicable score below the
+expert floor. Current mid-level evidence may prove the 7/10 target while still
+correctly failing the 10/10 gate.
+
+Scripted expert fixtures are only an arena and regression harness. They become
+expert evidence only after an actual run package is reviewed and accepted in the
+ledger; passing the fixture runner alone is not a 10/10 claim.
+
 ## Evidence Required Per Trial
 
 A completed trial must include:
@@ -91,6 +101,9 @@ The field suite should mix these task classes:
 - Safety case with forbidden mutation, partial failure, or dirty worktree.
 - Ambiguous task where Ceraxia should ask for clarification or block rather than
   invent a solution.
+- Expert trials for legacy migrations, concurrency/cache behavior, public API
+  evolution, security boundaries, flaky root-cause analysis, and review-driven
+  revision after green tests.
 
 ## Completion Rule
 
@@ -102,6 +115,17 @@ The goal "Ceraxia is really 7/10" is not complete until:
 - The current rolling scores meet the 7/10 target.
 - Any severe or repeated failure mode has been addressed by a general change.
 - The final state is committed and pushed.
+
+The goal "Ceraxia is really 10/10" is not complete until:
+
+- The expert target in `field_trials.json` is met by accepted expert evidence.
+- The expert strict command succeeds:
+  `PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_field_trial_report.py --require-expert-target`
+- No applicable accepted score is below the expert entry floor.
+- Expert evidence includes enough distinct expert classes and samples per
+  dimension.
+- Any expert-trial failure mode has led to a general architectural or behavioral
+  improvement, not a patch tailored to one fixture.
 
 ## Ledger Reporting
 
@@ -119,6 +143,12 @@ To enforce the real target in a release gate:
 
 ```bash
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_field_trial_report.py --require-target
+```
+
+To enforce the 10/10 expert target:
+
+```bash
+PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_field_trial_report.py --require-expert-target
 ```
 
 The strict command must fail until the ledger proves the target. This is

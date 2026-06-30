@@ -7,6 +7,16 @@
     "minimum_representative_trials": 12,
     "dimension_sample_min": 2
   },
+  "expert_target": {
+    "level": 10,
+    "rolling_average_min": 9.5,
+    "dimension_average_min": 9.0,
+    "minimum_representative_trials": 12,
+    "dimension_sample_min": 4,
+    "minimum_expert_trials": 6,
+    "minimum_expert_classes": 6,
+    "minimum_entry_score": 8.0
+  },
   "dimensions": [
     "task_understanding",
     "repository_investigation",
@@ -343,6 +353,186 @@
         "reads or rewrites generated output",
         "creates broad formatting churn",
         "misses the small source target"
+      ]
+    },
+    {
+      "id": "ceraxia-expert-legacy-migration",
+      "class": "expert_legacy_migration",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "multi_file_reasoning",
+        "patch_correctness",
+        "verification_discipline",
+        "self_repair",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Migrate a legacy multi-module Python service from an old data model to a new compatibility-preserving model while keeping old records readable, updating writers, callers, documentation, and regression coverage.",
+      "required_evidence": [
+        "baseline failing and passing behavior separated before mutation",
+        "reader/writer/caller dependency map",
+        "migration compatibility matrix for old, new, and mixed records",
+        "minimal multi-file diff with rollback notes",
+        "focused and broad verification after final mutation",
+        "self-review rejecting any unverified compatibility claim"
+      ],
+      "failure_modes_to_watch": [
+        "supports only the new shape",
+        "updates reader but misses writer or caller",
+        "passes narrow tests while breaking mixed-record compatibility",
+        "claims rollback safety without evidence"
+      ]
+    },
+    {
+      "id": "ceraxia-expert-concurrency-cache",
+      "class": "expert_concurrency",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "multi_file_reasoning",
+        "patch_correctness",
+        "verification_discipline",
+        "self_repair",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Diagnose and fix a race-prone cache invalidation bug with tests that expose stale reads, idempotent invalidation, and concurrent caller behavior.",
+      "required_evidence": [
+        "baseline race or stale-cache reproduction",
+        "call graph of readers, writers, and invalidators",
+        "concurrency-safe patch rationale",
+        "negative tests that fail on the old behavior",
+        "broad regression after final mutation",
+        "review note covering remaining concurrency risk"
+      ],
+      "failure_modes_to_watch": [
+        "fixes only a single deterministic happy path",
+        "adds sleeps instead of deterministic synchronization",
+        "breaks idempotent invalidation",
+        "does not explain residual race risk"
+      ]
+    },
+    {
+      "id": "ceraxia-expert-public-api-deprecation",
+      "class": "expert_api_evolution",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "multi_file_reasoning",
+        "patch_correctness",
+        "verification_discipline",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Evolve a public API with a deprecated parameter, preserve old callers with warnings, update new callers and docs, and prove compatibility through tests.",
+      "required_evidence": [
+        "public API and caller inventory",
+        "deprecation compatibility policy",
+        "tests for old and new call styles",
+        "documentation update",
+        "review note on migration risk and removal boundary"
+      ],
+      "failure_modes_to_watch": [
+        "breaks old callers",
+        "changes the public signature without compatibility path",
+        "adds warning behavior but no tests",
+        "updates code but not documentation"
+      ]
+    },
+    {
+      "id": "ceraxia-expert-security-boundary",
+      "class": "expert_security",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "multi_file_reasoning",
+        "patch_correctness",
+        "verification_discipline",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Fix a path traversal or command boundary bug without weakening legitimate behavior, including malicious inputs, valid edge cases, and audit-friendly reporting.",
+      "required_evidence": [
+        "threat model for the vulnerable boundary",
+        "negative tests for malicious inputs",
+        "positive tests for legitimate edge cases",
+        "small patch preserving public behavior",
+        "review note naming residual security assumptions"
+      ],
+      "failure_modes_to_watch": [
+        "blocks legitimate paths while fixing malicious paths",
+        "uses fragile string filtering",
+        "does not test malicious inputs",
+        "claims security without naming assumptions"
+      ]
+    },
+    {
+      "id": "ceraxia-expert-flaky-test-root-cause",
+      "class": "expert_test_discipline",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "multi_file_reasoning",
+        "patch_correctness",
+        "verification_discipline",
+        "self_repair",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Investigate an intermittent failing test, identify whether the source or test is wrong, fix the root cause without masking the failure, and prove stability with repeated verification.",
+      "required_evidence": [
+        "baseline repeated verification showing intermittent behavior",
+        "root cause note separating source bug from test bug",
+        "minimal fix",
+        "repeated post-fix verification",
+        "review note rejecting masked or skipped tests"
+      ],
+      "failure_modes_to_watch": [
+        "skips or weakens the test",
+        "treats the first pass as proof",
+        "changes unrelated timing",
+        "does not preserve repeated verification evidence"
+      ]
+    },
+    {
+      "id": "ceraxia-expert-failed-review-revision",
+      "class": "expert_review_revision",
+      "difficulty": "expert",
+      "applicable_dimensions": [
+        "task_understanding",
+        "repository_investigation",
+        "multi_file_reasoning",
+        "patch_correctness",
+        "verification_discipline",
+        "self_repair",
+        "review_quality",
+        "safety",
+        "reporting"
+      ],
+      "task": "Complete a code task where the first implementation passes tests but fails review because of an architectural or compatibility issue, then produce a targeted revision and prove it.",
+      "required_evidence": [
+        "first implementation evidence",
+        "review blocker explaining the non-test issue",
+        "focused revision plan",
+        "second patch addressing the blocker only",
+        "verification and review evidence after revision"
+      ],
+      "failure_modes_to_watch": [
+        "treats green tests as sufficient despite review blockers",
+        "rewrites broadly during revision",
+        "does not preserve first failed review evidence",
+        "loops without narrowing the issue"
       ]
     }
   ],

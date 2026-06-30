@@ -358,11 +358,370 @@ CERAXIA_PUBLIC_API_COMPAT:
 """
 
 
+def fixture_expert_legacy_migration(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "source_path": "service/records.py",
+        "test_path": "tests/test_records_migration.py",
+        "read_function": "normalize_record",
+        "write_function": "serialize_record",
+        "id_field": "id",
+        "old_field": "amount",
+        "new_field": "total_amount",
+        "verification_commands": [
+            "python -m unittest tests.test_records_migration",
+            "python -m py_compile service/records.py",
+        ],
+    }
+    (repo / "service").mkdir(parents=True, exist_ok=True)
+    (repo / "service" / "records.py").write_text(
+        "def normalize_record(record):\n"
+        "    return {'id': record['id'], 'amount': record['amount']}\n",
+        encoding="utf-8",
+    )
+    (repo / "README.md").write_text(
+        "# Legacy Records\n\nRecords currently use `amount`; migrate to `total_amount` without breaking old data.\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача: мигрируй legacy records на новую форму, сохрани чтение старых записей, "
+        "добавь writer для новой формы, тесты старой/новой/mixed совместимости и отчет о rollback risk.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_DATA_MIGRATION:\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
+    )
+
+
+def fixture_expert_concurrency_cache(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "files": [
+            {
+                "path": "cache_store.py",
+                "overwrite": True,
+                "content": (
+                    "import threading\n\n"
+                    "class CacheStore:\n"
+                    "    def __init__(self):\n"
+                    "        self._lock = threading.RLock()\n"
+                    "        self._values = {}\n"
+                    "        self._version = 0\n\n"
+                    "    def get_or_load(self, key, loader):\n"
+                    "        with self._lock:\n"
+                    "            if key not in self._values:\n"
+                    "                self._values[key] = loader()\n"
+                    "            return self._values[key]\n\n"
+                    "    def invalidate(self, key):\n"
+                    "        with self._lock:\n"
+                    "            self._values.pop(key, None)\n"
+                    "            self._version += 1\n"
+                    "            return self._version\n\n"
+                    "    def version(self):\n"
+                    "        with self._lock:\n"
+                    "            return self._version\n"
+                ),
+            },
+            {
+                "path": "tests/test_cache_store.py",
+                "content": (
+                    "import threading\n"
+                    "import unittest\n"
+                    "from cache_store import CacheStore\n\n"
+                    "class CacheStoreTest(unittest.TestCase):\n"
+                    "    def test_invalidate_is_idempotent_and_reloadable(self):\n"
+                    "        store = CacheStore()\n"
+                    "        calls = []\n"
+                    "        self.assertEqual(store.get_or_load('a', lambda: 'old'), 'old')\n"
+                    "        self.assertEqual(store.invalidate('a'), 1)\n"
+                    "        self.assertEqual(store.invalidate('a'), 2)\n"
+                    "        self.assertEqual(store.get_or_load('a', lambda: 'new'), 'new')\n\n"
+                    "    def test_concurrent_readers_share_loaded_value(self):\n"
+                    "        store = CacheStore()\n"
+                    "        calls = []\n"
+                    "        def loader():\n"
+                    "            calls.append(1)\n"
+                    "            return 'value'\n"
+                    "        results = []\n"
+                    "        threads = [threading.Thread(target=lambda: results.append(store.get_or_load('k', loader))) for _ in range(8)]\n"
+                    "        for thread in threads:\n"
+                    "            thread.start()\n"
+                    "        for thread in threads:\n"
+                    "            thread.join()\n"
+                    "        self.assertEqual(results, ['value'] * 8)\n"
+                    "        self.assertEqual(len(calls), 1)\n\n"
+                    "if __name__ == '__main__':\n"
+                    "    unittest.main()\n"
+                ),
+            },
+            {
+                "path": "docs/cache_risk.md",
+                "content": "# Cache Concurrency Risk\n\nUses an RLock around read, load, invalidate, and version updates.\n",
+            },
+        ],
+        "verification_commands": [
+            "python -m unittest tests.test_cache_store",
+            "python -m py_compile cache_store.py",
+        ],
+    }
+    (repo / "cache_store.py").write_text(
+        "class CacheStore:\n"
+        "    def __init__(self):\n"
+        "        self._values = {}\n\n"
+        "    def get_or_load(self, key, loader):\n"
+        "        if key not in self._values:\n"
+        "            self._values[key] = loader()\n"
+        "        return self._values[key]\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача: исправь race-prone cache invalidation, докажи stale-read и concurrent behavior тестами, "
+        "не используй sleep как синхронизацию и опиши residual concurrency risk.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_FILES:\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
+    )
+
+
+def fixture_expert_public_api_deprecation(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "files": [
+            {
+                "path": "payments/api.py",
+                "overwrite": True,
+                "content": (
+                    "import warnings\n\n"
+                    "def calculate_total(gross, fee=0, *, service_fee=None):\n"
+                    "    if service_fee is None:\n"
+                    "        service_fee = fee\n"
+                    "        if fee != 0:\n"
+                    "            warnings.warn('fee is deprecated; use service_fee', DeprecationWarning, stacklevel=2)\n"
+                    "    return gross - service_fee\n"
+                ),
+            },
+            {
+                "path": "payments/client.py",
+                "content": (
+                    "from payments.api import calculate_total\n\n"
+                    "def client_total(gross, service_fee):\n"
+                    "    return calculate_total(gross, service_fee=service_fee)\n"
+                ),
+            },
+            {
+                "path": "tests/test_api_deprecation.py",
+                "content": (
+                    "import warnings\n"
+                    "import unittest\n"
+                    "from payments.api import calculate_total\n"
+                    "from payments.client import client_total\n\n"
+                    "class ApiDeprecationTest(unittest.TestCase):\n"
+                    "    def test_old_positional_fee_still_works_with_warning(self):\n"
+                    "        with warnings.catch_warnings(record=True) as caught:\n"
+                    "            warnings.simplefilter('always')\n"
+                    "            self.assertEqual(calculate_total(100, 15), 85)\n"
+                    "        self.assertTrue(any(item.category is DeprecationWarning for item in caught))\n\n"
+                    "    def test_new_keyword_path_and_caller(self):\n"
+                    "        self.assertEqual(calculate_total(80, service_fee=5), 75)\n"
+                    "        self.assertEqual(client_total(80, 5), 75)\n\n"
+                    "if __name__ == '__main__':\n"
+                    "    unittest.main()\n"
+                ),
+            },
+            {
+                "path": "docs/api_deprecation.md",
+                "content": "# API Deprecation\n\n`fee` remains supported with a warning; new callers use `service_fee`.\n",
+            },
+        ],
+        "verification_commands": [
+            "python -m unittest tests.test_api_deprecation",
+            "python -m py_compile payments/api.py payments/client.py",
+        ],
+    }
+    (repo / "payments").mkdir(parents=True, exist_ok=True)
+    (repo / "payments" / "api.py").write_text(
+        "def calculate_total(gross, fee):\n"
+        "    return gross - fee\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача: проведи public API evolution с deprecated параметром, сохрани старых callers через warning, "
+        "обнови нового caller, docs и tests old/new call styles.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_FILES:\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
+    )
+
+
+def fixture_expert_security_boundary(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "source_path": "archive_paths.py",
+        "function_name": "safe_archive_path",
+        "arguments": ["raw"],
+        "body_lines": [
+            "candidate = str(raw).replace('\\\\\\\\', '/')",
+            "parts = [part for part in candidate.split('/') if part not in ('', '.')]",
+            "if candidate.startswith('/') or '..' in parts:",
+            "    raise ValueError('archive path escapes root')",
+            "if not parts:",
+            "    raise ValueError('archive path is empty')",
+            "return '/'.join(parts)",
+        ],
+        "test_path": "tests/test_archive_paths.py",
+        "positive_cases": [
+            {"inputs": ["books/chapter1.txt"], "expected": "books/chapter1.txt"},
+            {"inputs": ["./books//chapter2.txt"], "expected": "books/chapter2.txt"},
+        ],
+        "negative_cases": [
+            {"inputs": ["../secret.txt"], "exception": "ValueError"},
+            {"inputs": ["/etc/passwd"], "exception": "ValueError"},
+            {"inputs": ["books/../../secret.txt"], "exception": "ValueError"},
+        ],
+        "verification_commands": [
+            "python -m unittest tests.test_archive_paths",
+            "python -m py_compile archive_paths.py",
+        ],
+    }
+    (repo / "archive_paths.py").write_text(
+        "def safe_archive_path(raw):\n"
+        "    return str(raw)\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача: исправь path traversal boundary без поломки легитимных относительных путей, "
+        "добавь malicious и positive edge-case tests, укажи security assumptions.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_EDGE_FIX:\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
+    )
+
+
+def fixture_expert_flaky_test_root_cause(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "files": [
+            {
+                "path": "scheduler.py",
+                "overwrite": True,
+                "content": (
+                    "def schedule_order(items):\n"
+                    "    return sorted(items, key=lambda item: (item['priority'], item['id']))\n"
+                ),
+            },
+            {
+                "path": "tests/test_scheduler.py",
+                "content": (
+                    "import unittest\n"
+                    "from scheduler import schedule_order\n\n"
+                    "class SchedulerTest(unittest.TestCase):\n"
+                    "    def test_stable_order_for_equal_priority(self):\n"
+                    "        items = [{'id': 'b', 'priority': 1}, {'id': 'a', 'priority': 1}]\n"
+                    "        self.assertEqual([item['id'] for item in schedule_order(items)], ['a', 'b'])\n\n"
+                    "    def test_repeated_stability(self):\n"
+                    "        for _ in range(20):\n"
+                    "            items = [{'id': 'c', 'priority': 2}, {'id': 'a', 'priority': 1}, {'id': 'b', 'priority': 1}]\n"
+                    "            self.assertEqual([item['id'] for item in schedule_order(items)], ['a', 'b', 'c'])\n\n"
+                    "if __name__ == '__main__':\n"
+                    "    unittest.main()\n"
+                ),
+            },
+            {
+                "path": "docs/flaky_root_cause.md",
+                "content": "# Flaky Root Cause\n\nOrdering by priority alone left equal-priority items unstable; id is the deterministic tie-breaker.\n",
+            },
+        ],
+        "verification_commands": [
+            "python -m unittest tests.test_scheduler",
+            "python -m unittest tests.test_scheduler",
+            "python -m py_compile scheduler.py",
+        ],
+    }
+    (repo / "scheduler.py").write_text(
+        "def schedule_order(items):\n"
+        "    return sorted(items, key=lambda item: item['priority'])\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача: расследуй intermittent/flaky ordering failure, исправь root cause без skip/xfail, "
+        "докажи стабильность repeated verification.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_FILES:\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
+    )
+
+
+def fixture_expert_failed_review_revision(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "files": [
+            {
+                "path": "tax/rates.py",
+                "overwrite": True,
+                "content": (
+                    "RATES = {'standard': 0.20, 'reduced': 0.05}\n\n"
+                    "def tax_for(amount, category='standard'):\n"
+                    "    return amount * RATES[category]\n"
+                ),
+            },
+            {
+                "path": "tax/invoice.py",
+                "content": (
+                    "from tax.rates import tax_for\n\n"
+                    "def invoice_tax(amount, category='standard'):\n"
+                    "    return tax_for(amount, category)\n"
+                ),
+            },
+            {
+                "path": "tests/test_tax_rates.py",
+                "content": (
+                    "import unittest\n"
+                    "from tax.invoice import invoice_tax\n"
+                    "from tax.rates import tax_for\n\n"
+                    "class TaxRatesTest(unittest.TestCase):\n"
+                    "    def test_standard_and_reduced_rates(self):\n"
+                    "        self.assertEqual(tax_for(100), 20)\n"
+                    "        self.assertEqual(tax_for(100, 'reduced'), 5)\n"
+                    "        self.assertEqual(invoice_tax(100, 'reduced'), 5)\n\n"
+                    "if __name__ == '__main__':\n"
+                    "    unittest.main()\n"
+                ),
+            },
+            {
+                "path": "docs/review_revision.md",
+                "content": "# Review Revision\n\nThe final shape avoids hard-coded branch logic and keeps caller compatibility through `invoice_tax`.\n",
+            },
+        ],
+        "verification_commands": [
+            "python -m unittest tests.test_tax_rates",
+            "python -m py_compile tax/rates.py tax/invoice.py",
+        ],
+    }
+    (repo / "tax").mkdir(parents=True, exist_ok=True)
+    (repo / "tax" / "rates.py").write_text(
+        "def tax_for(amount):\n"
+        "    return amount * 0.2\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача: первая зеленая реализация с hardcoded branch должна считаться review failure; "
+        "сделай targeted revision с расширяемой архитектурой, caller compatibility и сохраненной evidence.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_FILES:\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
+    )
+
+
 FIXTURES = {
     "ceraxia-field-ambiguous-task": fixture_ambiguous_task,
     "ceraxia-field-bugfix-unnamed-source": fixture_bugfix_unnamed_source,
     "ceraxia-field-cross-language-config": fixture_cross_language_config,
     "ceraxia-field-data-migration": fixture_data_migration,
+    "ceraxia-expert-concurrency-cache": fixture_expert_concurrency_cache,
+    "ceraxia-expert-failed-review-revision": fixture_expert_failed_review_revision,
+    "ceraxia-expert-flaky-test-root-cause": fixture_expert_flaky_test_root_cause,
+    "ceraxia-expert-legacy-migration": fixture_expert_legacy_migration,
+    "ceraxia-expert-public-api-deprecation": fixture_expert_public_api_deprecation,
+    "ceraxia-expert-security-boundary": fixture_expert_security_boundary,
     "ceraxia-field-integration-contract": fixture_integration_contract,
     "ceraxia-field-large-file-restraint": fixture_large_file_restraint,
     "ceraxia-field-multifile-feature": fixture_multifile_feature,
@@ -399,6 +758,145 @@ def sha256_text(path: Path) -> str:
 
 
 def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    if trial_id == "ceraxia-expert-legacy-migration":
+        source_path = repo / "service" / "records.py"
+        test_path = repo / "tests" / "test_records_migration.py"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        return {
+            "expert_legacy_migration": {
+                "reader_accepts_old_field": "'amount' in record" in source_text,
+                "reader_accepts_new_field": "'total_amount' in record" in source_text,
+                "writer_emits_new_field": "def serialize_record" in source_text and "'total_amount'" in source_text,
+                "tests_old_new_writer": all(
+                    marker in test_text
+                    for marker in ("test_reads_old_shape", "test_reads_new_shape", "test_writer_emits_new_shape_only")
+                ),
+                "passed": (
+                    "'amount' in record" in source_text
+                    and "'total_amount' in record" in source_text
+                    and "def serialize_record" in source_text
+                    and all(marker in test_text for marker in ("test_reads_old_shape", "test_reads_new_shape", "test_writer_emits_new_shape_only"))
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-concurrency-cache":
+        source_path = repo / "cache_store.py"
+        test_path = repo / "tests" / "test_cache_store.py"
+        docs_path = repo / "docs" / "cache_risk.md"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        return {
+            "expert_concurrency_cache": {
+                "uses_lock": "RLock" in source_text or "Lock" in source_text,
+                "invalidates_idempotently": "pop(key, None)" in source_text,
+                "tests_threads": "threading.Thread" in test_text,
+                "no_sleep_based_test": "sleep(" not in test_text,
+                "risk_doc": "RLock" in docs_text or "risk" in docs_text.lower(),
+                "passed": (
+                    ("RLock" in source_text or "Lock" in source_text)
+                    and "pop(key, None)" in source_text
+                    and "threading.Thread" in test_text
+                    and "sleep(" not in test_text
+                    and ("RLock" in docs_text or "risk" in docs_text.lower())
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-public-api-deprecation":
+        source_path = repo / "payments" / "api.py"
+        caller_path = repo / "payments" / "client.py"
+        test_path = repo / "tests" / "test_api_deprecation.py"
+        docs_path = repo / "docs" / "api_deprecation.md"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        caller_text = caller_path.read_text(encoding="utf-8") if caller_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        return {
+            "expert_public_api_deprecation": {
+                "old_parameter_preserved": "def calculate_total(gross, fee=0, *, service_fee=None):" in source_text,
+                "warning_emitted": "DeprecationWarning" in source_text,
+                "new_caller_uses_keyword": "service_fee=service_fee" in caller_text,
+                "tests_old_and_new_paths": "test_old_positional_fee_still_works_with_warning" in test_text and "test_new_keyword_path_and_caller" in test_text,
+                "docs_deprecation": "deprecated" in docs_text.lower() or "warning" in docs_text.lower(),
+                "passed": (
+                    "def calculate_total(gross, fee=0, *, service_fee=None):" in source_text
+                    and "DeprecationWarning" in source_text
+                    and "service_fee=service_fee" in caller_text
+                    and "test_old_positional_fee_still_works_with_warning" in test_text
+                    and "test_new_keyword_path_and_caller" in test_text
+                    and ("deprecated" in docs_text.lower() or "warning" in docs_text.lower())
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-security-boundary":
+        source_path = repo / "archive_paths.py"
+        test_path = repo / "tests" / "test_archive_paths.py"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        return {
+            "expert_security_boundary": {
+                "rejects_parent_traversal": "'..' in parts" in source_text,
+                "rejects_absolute": "startswith('/')" in source_text,
+                "normalizes_relative_path": "'/'.join(parts)" in source_text,
+                "tests_malicious_inputs": "../secret.txt" in test_text and "/etc/passwd" in test_text,
+                "tests_valid_edges": "./books//chapter2.txt" in test_text,
+                "passed": (
+                    "'..' in parts" in source_text
+                    and "startswith('/')" in source_text
+                    and "'/'.join(parts)" in source_text
+                    and "../secret.txt" in test_text
+                    and "/etc/passwd" in test_text
+                    and "./books//chapter2.txt" in test_text
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-flaky-test-root-cause":
+        source_path = repo / "scheduler.py"
+        test_path = repo / "tests" / "test_scheduler.py"
+        docs_path = repo / "docs" / "flaky_root_cause.md"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        return {
+            "expert_flaky_test_root_cause": {
+                "deterministic_tie_breaker": "item['id']" in source_text,
+                "repeated_verification_test": "range(20)" in test_text,
+                "does_not_skip": "skip" not in test_text.lower() and "xfail" not in test_text.lower(),
+                "root_cause_doc": "tie-breaker" in docs_text or "unstable" in docs_text,
+                "passed": (
+                    "item['id']" in source_text
+                    and "range(20)" in test_text
+                    and "skip" not in test_text.lower()
+                    and "xfail" not in test_text.lower()
+                    and ("tie-breaker" in docs_text or "unstable" in docs_text)
+                ),
+            }
+        }
+    if trial_id == "ceraxia-expert-failed-review-revision":
+        source_path = repo / "tax" / "rates.py"
+        caller_path = repo / "tax" / "invoice.py"
+        test_path = repo / "tests" / "test_tax_rates.py"
+        docs_path = repo / "docs" / "review_revision.md"
+        source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+        caller_text = caller_path.read_text(encoding="utf-8") if caller_path.exists() else ""
+        test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        docs_text = docs_path.read_text(encoding="utf-8") if docs_path.exists() else ""
+        return {
+            "expert_failed_review_revision": {
+                "uses_rate_table": "RATES =" in source_text,
+                "caller_compatibility": "def invoice_tax(amount, category='standard')" in caller_text,
+                "tests_multiple_categories": "'reduced'" in test_text and "invoice_tax" in test_text,
+                "review_doc": "hard-coded" in docs_text or "compatibility" in docs_text,
+                "passed": (
+                    "RATES =" in source_text
+                    and "def invoice_tax(amount, category='standard')" in caller_text
+                    and "'reduced'" in test_text
+                    and "invoice_tax" in test_text
+                    and ("hard-coded" in docs_text or "compatibility" in docs_text)
+                ),
+            }
+        }
     if trial_id == "ceraxia-field-public-api-compat":
         expected_paths = {
             "billing/public_api.py",

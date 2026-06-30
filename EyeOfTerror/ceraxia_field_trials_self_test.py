@@ -25,22 +25,30 @@ def main() -> int:
     dimensions = data.get("dimensions", [])
     trials = data.get("trials", [])
     target = data.get("target", {})
+    expert_target = data.get("expert_target", {})
     if target.get("minimum_representative_trials", 0) < 12:
         raise AssertionError(f"Ceraxia field trials target is too small: {target}")
     if target.get("dimension_sample_min", 0) < 2:
         raise AssertionError(f"Ceraxia dimension sample target is too weak: {target}")
+    if expert_target.get("level") != 10 or expert_target.get("rolling_average_min", 0) < 9.5:
+        raise AssertionError(f"Ceraxia expert target must represent a real 10/10 gate: {expert_target}")
+    if expert_target.get("minimum_expert_trials", 0) < 6:
+        raise AssertionError(f"Ceraxia expert target needs enough expert trials: {expert_target}")
     if len(trials) < target.get("minimum_representative_trials", 0):
         raise AssertionError(f"Ceraxia field trial suite is undersized: {len(trials)} {target}")
     if len(set(dimensions)) != len(dimensions) or len(dimensions) < 8:
         raise AssertionError(f"Ceraxia dimensions are missing or duplicated: {dimensions}")
     seen: set[str] = set()
     classes: set[str] = set()
+    expert_classes: set[str] = set()
     for trial in trials:
         trial_id = str(trial.get("id") or "")
         if not trial_id or trial_id in seen:
             raise AssertionError(f"bad or duplicate Ceraxia trial id: {trial}")
         seen.add(trial_id)
         classes.add(str(trial.get("class") or ""))
+        if trial.get("difficulty") == "expert":
+            expert_classes.add(str(trial.get("class") or ""))
         if not trial.get("task") or not trial.get("required_evidence") or not trial.get("failure_modes_to_watch"):
             raise AssertionError(f"Ceraxia field trial lacks task/evidence/failure modes: {trial}")
         applicable = trial.get("applicable_dimensions")
@@ -48,6 +56,8 @@ def main() -> int:
             raise AssertionError(f"Ceraxia trial must define applicable dimensions from the rubric: {trial}")
     if len(classes) < 8:
         raise AssertionError(f"Ceraxia field trials are not diverse enough: {classes}")
+    if len(expert_classes) < expert_target.get("minimum_expert_classes", 0):
+        raise AssertionError(f"Ceraxia expert trials are not diverse enough: {expert_classes}")
     ledger_scores = data.get("ledger_template", {}).get("scores", {})
     if set(ledger_scores) != set(dimensions):
         raise AssertionError(f"Ceraxia ledger scores drift from dimensions: {ledger_scores} {dimensions}")
@@ -66,6 +76,8 @@ def main() -> int:
     report_payload = json.loads(report.stdout)
     if report_payload.get("target_met") is True and not ledger.get("entries"):
         raise AssertionError(f"empty Ceraxia ledger must not prove target completion: {report_payload}")
+    if report_payload.get("expert_target_met") is True:
+        raise AssertionError(f"current Ceraxia evidence must not accidentally satisfy the 10/10 gate: {report_payload}")
     if report_payload.get("accepted_trial_count", 0) and report_payload.get("target_met") is not True:
         low_entries = report_payload.get("gaps", {}).get("low_score_entries", {})
         if not isinstance(low_entries, dict):
@@ -73,6 +85,12 @@ def main() -> int:
     sample_counts = report_payload.get("dimension_sample_counts", {})
     if set(sample_counts) != set(dimensions):
         raise AssertionError(f"Ceraxia report must expose sample counts for every dimension: {report_payload}")
+    expert_sample_counts = report_payload.get("expert_dimension_sample_counts", {})
+    if set(expert_sample_counts) != set(dimensions):
+        raise AssertionError(f"Ceraxia report must expose expert sample counts for every dimension: {report_payload}")
+    expert_dimension_averages = report_payload.get("expert_dimension_averages", {})
+    if set(expert_dimension_averages) != set(dimensions):
+        raise AssertionError(f"Ceraxia report must expose expert averages for every dimension: {report_payload}")
     strict_report = subprocess.run(
         [sys.executable, str(REPORTER), "--require-target"],
         cwd=str(ROOT.parent),
@@ -82,6 +100,15 @@ def main() -> int:
     )
     if not ledger.get("entries") and strict_report.returncode == 0:
         raise AssertionError("strict Ceraxia field trial report must fail while no accepted trials exist")
+    expert_strict_report = subprocess.run(
+        [sys.executable, str(REPORTER), "--require-expert-target"],
+        cwd=str(ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if expert_strict_report.returncode == 0:
+        raise AssertionError("strict Ceraxia expert report must fail until expert evidence proves 10/10")
     runner_list = subprocess.run(
         [sys.executable, str(RUNNER), "--list"],
         cwd=str(ROOT.parent),
@@ -93,11 +120,20 @@ def main() -> int:
         raise AssertionError(f"Ceraxia field trial runner list failed: {runner_list.stdout} {runner_list.stderr}")
     runner_payload = json.loads(runner_list.stdout)
     runner_trials = set(runner_payload.get("trials", []))
+    spec_trial_ids = {str(trial.get("id") or "") for trial in trials}
+    if spec_trial_ids != runner_trials:
+        raise AssertionError(f"Ceraxia runner/spec trial drift: missing={sorted(spec_trial_ids - runner_trials)} extra={sorted(runner_trials - spec_trial_ids)}")
     required_runner_trials = {
         "ceraxia-field-ambiguous-task",
         "ceraxia-field-bugfix-unnamed-source",
         "ceraxia-field-cross-language-config",
         "ceraxia-field-data-migration",
+        "ceraxia-expert-concurrency-cache",
+        "ceraxia-expert-failed-review-revision",
+        "ceraxia-expert-flaky-test-root-cause",
+        "ceraxia-expert-legacy-migration",
+        "ceraxia-expert-public-api-deprecation",
+        "ceraxia-expert-security-boundary",
         "ceraxia-field-integration-contract",
         "ceraxia-field-large-file-restraint",
         "ceraxia-field-multifile-feature",
