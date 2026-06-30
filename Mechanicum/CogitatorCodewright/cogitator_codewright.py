@@ -877,6 +877,63 @@ def runtime_test_failures_from_traceback(
     return failures
 
 
+def runtime_minimal_patch_candidates_from_failures(
+    failures: list[dict[str, Any]],
+    repo_root: Path,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for failure in failures:
+        if not isinstance(failure, dict):
+            continue
+        assertions = failure.get("assertions") if isinstance(failure.get("assertions"), list) else []
+        links = failure.get("imported_symbol_links") if isinstance(failure.get("imported_symbol_links"), list) else []
+        for assertion in assertions:
+            if not isinstance(assertion, dict) or assertion.get("kind") != "assert_not_equal":
+                continue
+            actual = str(assertion.get("actual") or "")
+            expected = str(assertion.get("expected") or "")
+            if not actual or not expected:
+                continue
+            for link in links:
+                if not isinstance(link, dict):
+                    continue
+                source_path = str(link.get("source_path") or "")
+                function_name = str(link.get("imported_symbol") or "")
+                if not source_path or not function_name or not repo_relative_python_file_exists(repo_root, source_path):
+                    continue
+                source = safe_repo_path(repo_root, source_path)
+                function = simple_function_return_segment(source, function_name)
+                current_return = str(function.get("return_expr") or "")
+                if current_return not in {actual, expected}:
+                    continue
+                key = (source_path, function_name, actual, expected)
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidates.append(
+                    {
+                        "source": "runtime_traceback_assertion_mismatch",
+                        "status": "candidate",
+                        "kind": "replace_return_expression",
+                        "path": source_path,
+                        "function_name": function_name,
+                        "old_expression": actual,
+                        "new_expression": expected,
+                        "current_expression": current_return,
+                        "test_path": failure.get("test_path", ""),
+                        "test_function": failure.get("test_function", ""),
+                        "minimality": "single_return_expression_from_runtime_assertion",
+                        "application_status": "already_applied" if current_return == expected else "pending",
+                        "proof": {
+                            "assertion": assertion,
+                            "line": failure.get("line", 0),
+                        },
+                    }
+                )
+    return candidates[:20]
+
+
 def static_diagnostic_hypotheses_from_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     hypotheses: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -1029,6 +1086,7 @@ def diagnostic_extraction_from_execution(
         if path_str not in traceback_sources:
             traceback_sources.append(path_str)
     static_hypotheses = static_diagnostic_hypotheses_from_candidates(candidates)
+    runtime_patch_candidates = runtime_minimal_patch_candidates_from_failures(runtime_test_failures, repo_root)
     return {
         "status": "recorded",
         "mode": "unshaped_repo_repair" if is_unshaped_patch_source(str(patch.get("patch_source") or "")) else "structured_patch",
@@ -1047,12 +1105,14 @@ def diagnostic_extraction_from_execution(
                 if isinstance(path, str)
             }
         )[:20],
+        "runtime_minimal_patch_candidates": runtime_patch_candidates,
         "static_test_expectations": static_hypotheses,
         "selected_diagnostics": patch.get("diagnostics", {}) if isinstance(patch.get("diagnostics"), dict) else {},
         "parser_coverage": {
             "unittest_assertions": len(assertions),
             "traceback_frames": len(traceback_frames),
             "runtime_test_failures": len(runtime_test_failures),
+            "runtime_minimal_patch_candidates": len(runtime_patch_candidates),
             "traceback_source_candidates": len(traceback_sources),
             "static_test_expectations": len(static_hypotheses),
         },

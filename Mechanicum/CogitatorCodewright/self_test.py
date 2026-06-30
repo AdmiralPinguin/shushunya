@@ -1673,15 +1673,26 @@ def main() -> int:
             raise AssertionError(f"self-repair seed should repair from AssertionError mismatch: {final}")
         diagnostic_extraction = final.get("diagnostic_extraction", {})
         runtime_failures = diagnostic_extraction.get("runtime_test_failures", [])
+        runtime_candidates = diagnostic_extraction.get("runtime_minimal_patch_candidates", [])
         if (
             diagnostic_extraction.get("parser_coverage", {}).get("traceback_frames", 0) < 1
             or diagnostic_extraction.get("parser_coverage", {}).get("runtime_test_failures", 0) < 1
+            or diagnostic_extraction.get("parser_coverage", {}).get("runtime_minimal_patch_candidates", 0) < 1
             or not any(
                 isinstance(item, dict)
                 and item.get("test_path") == "tests/test_quota.py"
                 and item.get("test_function") == "test_max_daily_exports"
                 and "quota.py" in item.get("candidate_source_paths", [])
                 for item in runtime_failures
+            )
+            or not any(
+                isinstance(item, dict)
+                and item.get("kind") == "replace_return_expression"
+                and item.get("path") == "quota.py"
+                and item.get("function_name") == "max_daily_exports"
+                and item.get("old_expression") == "1"
+                and item.get("new_expression") == "7"
+                for item in runtime_candidates
             )
         ):
             raise AssertionError(f"self-repair seed should preserve runtime traceback diagnostic extraction: {final}")
