@@ -15,6 +15,7 @@ PROTOCOL = ROOT / "InnerCircle" / "Ceraxia" / "EVALUATION.md"
 LEDGER = ROOT / "InnerCircle" / "Ceraxia" / "field_trial_ledger.json"
 REPORTER = ROOT / "ceraxia_field_trial_report.py"
 RUNNER = ROOT / "ceraxia_field_trial_runner.py"
+EXPERT_SUITE = ROOT / "ceraxia_expert_suite.py"
 REVIEWER = ROOT / "ceraxia_field_trial_review.py"
 ACCEPTER = ROOT / "ceraxia_field_trial_accept.py"
 
@@ -145,6 +146,22 @@ def main() -> int:
     }
     if not required_runner_trials.issubset(runner_trials):
         raise AssertionError(f"Ceraxia field trial runner lacks first reproducible trial: {runner_payload}")
+    expert_suite = subprocess.run(
+        [sys.executable, str(EXPERT_SUITE), "--require-all"],
+        cwd=str(ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if expert_suite.returncode != 0:
+        raise AssertionError(f"Ceraxia expert suite runner failed: {expert_suite.stdout} {expert_suite.stderr}")
+    expert_suite_payload = json.loads(expert_suite.stdout)
+    if (
+        expert_suite_payload.get("expert_trial_count", 0) < expert_target.get("minimum_expert_trials", 0)
+        or expert_suite_payload.get("unshaped_inferred_count", 0) < 2
+        or expert_suite_payload.get("all_passed") is not True
+    ):
+        raise AssertionError(f"Ceraxia expert suite runner did not prove current arena health: {expert_suite_payload}")
     review_all = subprocess.run(
         [sys.executable, str(REVIEWER), "--all"],
         cwd=str(ROOT.parent),
