@@ -745,6 +745,38 @@ def extracted_assertion_diagnostics_from_text(text: str) -> list[dict[str, Any]]
                 "excerpt": match.group(0)[:500],
             }
         )
+    for match in re.finditer(r"^\s*(?:E\s+)?assert\s+(.+?)\s*==\s*(.+?)\s*$", text, flags=re.MULTILINE):
+        actual = match.group(1).strip()
+        expected = match.group(2).strip()
+        key = ("not_equal", actual, expected)
+        if key in seen:
+            continue
+        seen.add(key)
+        diagnostics.append(
+            {
+                "kind": "assert_not_equal",
+                "actual": actual[:200],
+                "expected": expected[:200],
+                "excerpt": match.group(0)[:500],
+                "source": "pytest_assert_equal",
+            }
+        )
+    for match in re.finditer(r"^\s*(?:E\s+)?assert\s+(.+?)\s*!=\s*(.+?)\s*$", text, flags=re.MULTILINE):
+        actual = match.group(1).strip()
+        expected = match.group(2).strip()
+        key = ("unexpected_equal", actual, expected)
+        if key in seen:
+            continue
+        seen.add(key)
+        diagnostics.append(
+            {
+                "kind": "assert_unexpected_equal",
+                "actual": actual[:200],
+                "expected": expected[:200],
+                "excerpt": match.group(0)[:500],
+                "source": "pytest_assert_not_equal",
+            }
+        )
     for match in re.finditer(r"AssertionError:\s+(.+?)\s+is not true", text, flags=re.IGNORECASE):
         expression = match.group(1).strip()
         key = ("truthy", expression, "true")

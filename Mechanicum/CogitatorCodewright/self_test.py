@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from cogitator_codewright import run, test_symbol_links_from_goal
+from cogitator_codewright import extracted_assertion_diagnostics_from_text, run, test_symbol_links_from_goal
 
 
 def role_policy(step_id: str) -> dict:
@@ -552,6 +552,25 @@ def main() -> int:
             if isinstance(item, dict)
         ):
             raise AssertionError(f"top-level assert tests should link to imported source symbols: {links}")
+    pytest_assertions = extracted_assertion_diagnostics_from_text(
+        "E       assert 6 == 8\n"
+        "E       assert 'old' != 'old'\n"
+    )
+    if not any(
+        item.get("kind") == "assert_not_equal"
+        and item.get("actual") == "6"
+        and item.get("expected") == "8"
+        and item.get("source") == "pytest_assert_equal"
+        for item in pytest_assertions
+    ):
+        raise AssertionError(f"pytest equality assertion output should be parsed: {pytest_assertions}")
+    if not any(
+        item.get("kind") == "assert_unexpected_equal"
+        and item.get("actual") == "'old'"
+        and item.get("expected") == "'old'"
+        for item in pytest_assertions
+    ):
+        raise AssertionError(f"pytest inequality assertion output should be parsed: {pytest_assertions}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
