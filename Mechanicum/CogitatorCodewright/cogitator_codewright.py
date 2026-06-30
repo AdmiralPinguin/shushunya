@@ -1726,6 +1726,33 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     warnings = verification.get("warnings") if isinstance(verification.get("warnings"), list) else []
     scope = patch.get("patch_scope_evidence") if isinstance(patch.get("patch_scope_evidence"), dict) else {}
     scope_review = patch_scope_review(scope)
+    patch_source = str(patch.get("patch_source") or "")
+    diagnostics = patch.get("diagnostics") if isinstance(patch.get("diagnostics"), dict) else {}
+    changed_files = patch.get("changed_files") if isinstance(patch.get("changed_files"), list) else []
+    failed_commands = repair_state.get("failed_commands") if isinstance(repair_state.get("failed_commands"), list) else []
+    candidate_source_paths = repair_state.get("candidate_source_paths") if isinstance(repair_state.get("candidate_source_paths"), list) else []
+    decision_record: list[dict[str, Any]] = [
+        {
+            "check": "patch_applied",
+            "status": "pass" if patch.get("status") == "applied" else "blocker",
+            "evidence": patch.get("status", "unknown"),
+        },
+        {
+            "check": "verification_passed",
+            "status": "pass" if verification.get("status") == "passed" else "blocker",
+            "evidence": verification.get("status", "unknown"),
+        },
+        {
+            "check": "scope_review",
+            "status": str(scope_review.get("status") or "unknown"),
+            "evidence": scope_review,
+        },
+        {
+            "check": "diagnostic_linkage",
+            "status": "pass" if (not patch_source.startswith("test_inferred_") or diagnostics) else "blocker",
+            "evidence": diagnostics,
+        },
+    ]
     review_warnings = [
         {"severity": "warning", "message": str(item)}
         for item in warnings
@@ -1750,6 +1777,23 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         blockers = [*blockers, "Patch manifest was not applied."]
     if verification.get("status") != "passed":
         blockers = [*blockers, "Verification did not pass."]
+    if patch_source.startswith("test_inferred_") and not diagnostics:
+        blockers = [*blockers, "Test-inferred patch lacks diagnostics linking test evidence to source mutation."]
+    focused_revision_context = {
+        "candidate_source_paths": [str(item) for item in candidate_source_paths[:12]],
+        "changed_files": [
+            str(item.get("path"))
+            for item in changed_files
+            if isinstance(item, dict) and item.get("path")
+        ][:12],
+        "failed_commands": [
+            str(item.get("command"))
+            for item in failed_commands
+            if isinstance(item, dict) and item.get("command")
+        ][:8],
+        "patch_source": patch_source,
+        "diagnostics": diagnostics,
+    }
     review = {
         "status": "blocked" if blockers else "passed",
         "approved": not blockers,
@@ -1758,6 +1802,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "worker_brief": worker_brief,
         "repair_loop_status": repair_state.get("status", "unknown"),
         "patch_scope_review": scope_review,
+        "decision_record": decision_record,
         "findings": [
             {"severity": "blocker", "message": str(item)}
             for item in blockers
@@ -1771,18 +1816,19 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         ],
         "revision_plan": {
             "required": bool(blockers),
+            "focused_context": focused_revision_context if blockers else {},
             "steps": [
                 {
                     "step_id": "implementation",
                     "worker": "FerrumPatchwright",
-                    "reason": "Enable or hand off to a source mutation worker before claiming implementation complete.",
+                    "reason": "Rebuild the patch from focused_context and preserve diagnostic linkage.",
                     "source": "code_review",
                     "priority": "blocker",
                 },
                 {
                     "step_id": "verification",
                     "worker": "OrdinatusVerifier",
-                    "reason": "Run concrete verification after source mutation.",
+                    "reason": "Rerun allowlisted verification and preserve failed command output if it still fails.",
                     "source": "code_review",
                     "priority": "blocker",
                 },
@@ -1866,6 +1912,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         },
         "review_status": review.get("status", "unknown"),
         "patch_scope_review": review.get("patch_scope_review", {}),
+        "review_decision_record": review.get("decision_record", []),
         "blockers": [item.get("message") for item in review.get("findings", []) if isinstance(item, dict)],
         "next_safe_action": "handoff_to_patch_worker" if status == "blocked" else "inspect_final_package",
         "summary": "Ceraxia code task package finalized.",

@@ -3098,6 +3098,7 @@ def compact_manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:
         "verification_status": str(manifest.get("verification_status") or ""),
         "verification_summary": manifest.get("verification_summary", {}) if isinstance(manifest.get("verification_summary"), dict) else {},
         "review_status": str(manifest.get("review_status") or ""),
+        "review_decision_count": len(manifest.get("review_decision_record", []) if isinstance(manifest.get("review_decision_record"), list) else []),
         "next_safe_action": str(manifest.get("next_safe_action") or ""),
         "warning_count": len(warnings),
         "blocker_count": len(blockers),

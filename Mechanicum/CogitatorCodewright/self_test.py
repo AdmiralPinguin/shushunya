@@ -271,6 +271,16 @@ def main() -> int:
             or role_policies.get("finalize", {}).get("may_mutate_source") is not False
         ):
             raise AssertionError(f"final manifest should preserve role policy evidence: {final}")
+        decision_record = final.get("review_decision_record", [])
+        if (
+            len(decision_record) < 4
+            or not any(
+                item.get("check") == "diagnostic_linkage" and item.get("status") == "pass"
+                for item in decision_record
+                if isinstance(item, dict)
+            )
+        ):
+            raise AssertionError(f"final manifest should preserve review decision record: {final}")
         investigation = final.get("engineering_investigation", {})
         dependency_edges = investigation.get("dependency_graph", {}).get("edges", [])
         if not any(edge.get("from") == "helper.py" and edge.get("to") == "sample.py" for edge in dependency_edges):
@@ -425,6 +435,12 @@ def main() -> int:
             raise AssertionError(f"forbidden verification command should block final readiness: {final}")
         if final.get("verification_summary", {}).get("blocker_count", 0) < 1:
             raise AssertionError(f"blocked final manifest should preserve verification blockers: {final}")
+        focused_context = final.get("revision_plan", {}).get("focused_context", {})
+        if (
+            focused_context.get("patch_source") != "explicit_json_patch"
+            or "sample.py" not in focused_context.get("changed_files", [])
+        ):
+            raise AssertionError(f"blocked final manifest should preserve focused revision context: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"

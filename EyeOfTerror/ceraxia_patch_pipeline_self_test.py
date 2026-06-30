@@ -88,6 +88,7 @@ CERAXIA_PATCH:
             or summary_manifest.get("task_profile", {}).get("kinds") != ["explicit_patch", "bugfix"]
             or summary_manifest.get("execution_report", {}).get("changed_file_count") != 1
             or summary_manifest.get("next_safe_action") != "inspect_final_package"
+            or summary_manifest.get("review_decision_count", 0) < 4
             or summary_manifest.get("engineering_investigation", {}).get("dependency_edge_count", 0) < 2
             or summary_manifest.get("engineering_investigation", {}).get("hypothesis_count", 0) < 1
         ):
