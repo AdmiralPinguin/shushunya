@@ -33,7 +33,7 @@ def load_worker_metadata(path: Path) -> dict:
         raise AssertionError(f"worker metadata has unsupported status: {path}")
     if not isinstance(payload["capabilities"], list) or not all(isinstance(item, str) and item for item in payload["capabilities"]):
         raise AssertionError(f"worker metadata capabilities must be non-empty strings: {path}")
-    if payload["api_contract"] != "EyeOfTerror/contracts/worker_api.md":
+    if payload["api_contract"] != "EyeOfTerror/Warmaster/contracts/worker_api.md":
         raise AssertionError(f"worker metadata points to wrong API contract: {path}")
     if payload["name"] in CERAXIA_ROLE_CONTRACTS:
         role_contract = payload.get("role_contract")
@@ -58,7 +58,7 @@ def load_worker_metadata(path: Path) -> dict:
 
 
 def load_port_registry(repo_root: Path) -> dict[str, dict]:
-    payload = json.loads((repo_root / "EyeOfTerror" / "registry" / "ports.json").read_text(encoding="utf-8"))
+    payload = json.loads((repo_root / "EyeOfTerror" / "Warmaster" / "registry" / "ports.json").read_text(encoding="utf-8"))
     mechanicum = payload.get("mechanicum") if isinstance(payload, dict) else None
     if not isinstance(mechanicum, dict):
         raise AssertionError("ports.json must contain a mechanicum object")

@@ -35,8 +35,8 @@ user chat surface.
 
 ## Registries
 
-- `EyeOfTerror/registry/ports.json` is the stable topology source for ports.
-- `EyeOfTerror/registry/governors.json` declares active and planned governors.
+- `EyeOfTerror/Warmaster/registry/ports.json` is the stable topology source for ports.
+- `EyeOfTerror/Warmaster/registry/governors.json` declares active and planned governors.
 - `Mechanicum/*/worker.json` declares worker metadata and capabilities.
 - `Mechanicum/worker_services.json` declares runnable worker services.
 
@@ -80,7 +80,7 @@ Each prepared run package should include:
 
 ## Service Startup
 
-`EyeOfTerror/start_brigade.py` starts the current service-separated stack:
+`EyeOfTerror/Warmaster/start_brigade.py` starts the current service-separated stack:
 Mechanicum worker supervisor, `IskandarKhayon` on `7101`, and Warmaster Gateway
 on `7000` with default HTTP governor transport. It is a lightweight launcher,
 not a durable service manager. `--json` exposes the startup plan for diagnostics

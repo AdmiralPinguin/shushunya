@@ -3,7 +3,7 @@
   "status": "prototype",
   "port": 7017,
   "role": "code patch manifest builder",
-  "api_contract": "EyeOfTerror/contracts/worker_api.md",
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "capabilities": ["patch_manifest", "implementation_handoff", "changed_file_intent", "atomic_patch_apply"],
   "role_contract": {
     "owned_step": "implementation",

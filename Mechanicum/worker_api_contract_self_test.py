@@ -7,7 +7,7 @@ from worker_runtime import worker_api_endpoints
 
 
 def documented_endpoints() -> set[str]:
-    path = Path(__file__).resolve().parents[1] / "EyeOfTerror" / "contracts" / "worker_api.md"
+    path = Path(__file__).resolve().parents[1] / "EyeOfTerror" / "Warmaster" / "contracts" / "worker_api.md"
     endpoints: set[str] = set()
     in_block = False
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -23,7 +23,7 @@ def documented_endpoints() -> set[str]:
 
 
 def contract_text() -> str:
-    path = Path(__file__).resolve().parents[1] / "EyeOfTerror" / "contracts" / "worker_api.md"
+    path = Path(__file__).resolve().parents[1] / "EyeOfTerror" / "Warmaster" / "contracts" / "worker_api.md"
     return path.read_text(encoding="utf-8")
 
 

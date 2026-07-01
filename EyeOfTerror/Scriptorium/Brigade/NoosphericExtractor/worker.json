@@ -4,5 +4,5 @@
   "role": "fact extractor",
   "status": "prototype",
   "capabilities": ["fact_extraction", "confidence_labels", "contradiction_notes", "generic_snapshot_evidence_leads"],
-  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

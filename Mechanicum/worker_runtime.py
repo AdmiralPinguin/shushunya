@@ -128,7 +128,7 @@ def load_worker_metadata(module_path: Path, worker_name: str) -> dict[str, Any]:
         metadata = payload
     metadata.setdefault("name", worker_name)
     metadata.setdefault("capabilities", [])
-    metadata.setdefault("api_contract", "EyeOfTerror/contracts/worker_api.md")
+    metadata.setdefault("api_contract", "EyeOfTerror/Warmaster/contracts/worker_api.md")
     return metadata
 
 
@@ -221,7 +221,7 @@ def make_handler(
     worker_metadata = dict(metadata or {})
     worker_metadata.setdefault("name", worker_name)
     worker_metadata.setdefault("capabilities", [])
-    worker_metadata.setdefault("api_contract", "EyeOfTerror/contracts/worker_api.md")
+    worker_metadata.setdefault("api_contract", "EyeOfTerror/Warmaster/contracts/worker_api.md")
     tasks: dict[str, dict[str, Any]] = {}
     tasks_lock = threading.RLock()
     terminal_statuses = {"completed", "ready", "passed", "passed_with_warnings", "failed", "blocked", "needs_revision", "cancelled"}

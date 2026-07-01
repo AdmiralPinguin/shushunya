@@ -64,7 +64,7 @@
   "split_gates": [
     "role_contracts.json and service_contracts.json agree on role order",
     "every service output appears in a valid planning packet",
-    "service ports are unique and outside active EyeOfTerror/registry/ports.json and Mechanicum/worker_services.json ports",
+    "service ports are unique and outside active EyeOfTerror/Warmaster/registry/ports.json and Mechanicum/worker_services.json ports",
     "all service interfaces remain read-only",
     "Ceraxia remains the authority that approves or revises the final planning packet"
   ]

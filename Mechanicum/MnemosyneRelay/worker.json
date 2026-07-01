@@ -5,5 +5,5 @@
   "status": "planned",
   "backend": "http://127.0.0.1:8090",
   "capabilities": ["memory_search", "memory_read", "memory_write_proposal"],
-  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

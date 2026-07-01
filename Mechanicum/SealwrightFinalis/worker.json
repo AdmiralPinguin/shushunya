@@ -3,7 +3,7 @@
   "status": "prototype",
   "port": 7020,
   "role": "code final handoff packager",
-  "api_contract": "EyeOfTerror/contracts/worker_api.md",
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "capabilities": ["final_handoff", "deliverable_manifest", "blocker_packaging"],
   "role_contract": {
     "owned_step": "finalize",

@@ -4,5 +4,5 @@
   "role": "javascript render and screenshot worker",
   "status": "prototype",
   "capabilities": ["javascript_render", "dom_snapshot", "screenshot", "network_trace", "render_required_sources"],
-  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

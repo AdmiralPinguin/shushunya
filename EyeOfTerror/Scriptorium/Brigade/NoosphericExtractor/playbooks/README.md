@@ -28,5 +28,5 @@ final reconstruction. Required events also need:
 matched against the generated Russian reconstruction, so they should be Russian
 or otherwise match the expected final prose.
 
-Run `python3 EyeOfTerror/doctor.py` after editing a playbook. The full gate is
+Run `python3 EyeOfTerror/Warmaster/doctor.py` after editing a playbook. The full gate is
 `./EyeOfTerror/check-eye-mechanicum.sh`.

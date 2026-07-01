@@ -3,7 +3,7 @@
   "status": "prototype",
   "port": 7019,
   "role": "code review critic",
-  "api_contract": "EyeOfTerror/contracts/worker_api.md",
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "capabilities": ["code_review", "scope_review", "test_evidence_review", "revision_plan_authoring"],
   "role_contract": {
     "owned_step": "code_review",

@@ -4,5 +4,5 @@
   "role": "timeline builder",
   "status": "prototype",
   "capabilities": ["timeline", "sequence_repair", "gap_detection", "uncertainty_summary"],
-  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

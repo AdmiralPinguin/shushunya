@@ -23,5 +23,5 @@ Primary texts that cannot be fetched publicly should still be listed with an
 empty `url`. The pipeline will expose them as `corpus_requirements` and ask the
 operator to provide legitimate local files in `Corpus/`.
 
-Run `python3 EyeOfTerror/doctor.py` after editing a playbook. The full gate is
+Run `python3 EyeOfTerror/Warmaster/doctor.py` after editing a playbook. The full gate is
 `./EyeOfTerror/check-eye-mechanicum.sh`.

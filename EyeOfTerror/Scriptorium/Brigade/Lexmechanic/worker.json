@@ -4,5 +4,5 @@
   "role": "source researcher",
   "status": "prototype",
   "capabilities": ["web_search", "source_map", "reliability_labels"],
-  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

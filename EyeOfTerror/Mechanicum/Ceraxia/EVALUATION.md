@@ -120,7 +120,7 @@ The goal "Ceraxia is really 10/10" is not complete until:
 
 - The expert target in `field_trials.json` is met by accepted expert evidence.
 - The expert strict command succeeds:
-  `PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_field_trial_report.py --require-expert-target`
+  `PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/ceraxia_field_trial_report.py --require-expert-target`
 - No applicable accepted score is below the expert entry floor.
 - Expert evidence includes enough distinct expert classes and samples per
   dimension.
@@ -136,19 +136,19 @@ human review notes are counted.
 To inspect current progress without claiming completion:
 
 ```bash
-PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_field_trial_report.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/ceraxia_field_trial_report.py
 ```
 
 To enforce the real target in a release gate:
 
 ```bash
-PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_field_trial_report.py --require-target
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/ceraxia_field_trial_report.py --require-target
 ```
 
 To enforce the 10/10 expert target:
 
 ```bash
-PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_field_trial_report.py --require-expert-target
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/ceraxia_field_trial_report.py --require-expert-target
 ```
 
 The strict command must fail until the ledger proves the target. This is

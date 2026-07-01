@@ -4,5 +4,5 @@
   "role": "browser worker",
   "status": "prototype",
   "capabilities": ["http_fetch", "source_snapshots", "blocked_source_recording"],
-  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

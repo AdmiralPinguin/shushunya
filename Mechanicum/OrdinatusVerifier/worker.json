@@ -3,7 +3,7 @@
   "status": "prototype",
   "port": 7018,
   "role": "code verification planner",
-  "api_contract": "EyeOfTerror/contracts/worker_api.md",
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "capabilities": ["verification_planning", "test_command_selection", "test_gap_disclosure", "narrow_repair_loops", "repair_loop_state"],
   "role_contract": {
     "owned_step": "verification",

@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "eye_of_terror": {
+    "7000": {
+      "name": "WarmasterGateway",
+      "role": "user-facing chat and orchestration gateway",
+      "path": "EyeOfTerror/Warmaster/eye_of_terror/warmaster_gateway.py"
+    },
+    "7101": {
+      "name": "IskandarKhayon",
+      "role": "lore research and reconstruction governor",
+      "path": "EyeOfTerror/Scriptorium/IskandarKhayon"
+    },
+    "7102": {
+      "name": "CogitatorCodewrightGovernor",
+      "role": "code task governor",
+      "path": "EyeOfTerror/Warmaster/InnerCircle/CogitatorCodewright"
+    },
+    "7103": {
+      "name": "ForgeMasterGovernor",
+      "role": "image generation governor",
+      "path": "EyeOfTerror/Warmaster/InnerCircle/ForgeMasterGovernor"
+    },
+    "7104": {
+      "name": "Ceraxia",
+      "role": "code task governor",
+      "path": "EyeOfTerror/Mechanicum/Ceraxia"
+    }
+  },
+  "mechanicum": {
+    "7001": {
+      "name": "ShushunyaAgent",
+      "role": "general worker",
+      "path": "Mechanicum/ShushunyaAgent"
+    },
+    "7002": {
+      "name": "Lexmechanic",
+      "role": "source researcher",
+      "path": "EyeOfTerror/Scriptorium/Brigade/Lexmechanic"
+    },
+    "7003": {
+      "name": "NoosphericExtractor",
+      "role": "fact extractor",
+      "path": "EyeOfTerror/Scriptorium/Brigade/NoosphericExtractor"
+    },
+    "7004": {
+      "name": "Chronologis",
+      "role": "timeline builder",
+      "path": "EyeOfTerror/Scriptorium/Brigade/Chronologis"
+    },
+    "7005": {
+      "name": "ScriptoriumDaemon",
+      "role": "writer",
+      "path": "EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon"
+    },
+    "7006": {
+      "name": "ReductorVerifier",
+      "role": "critic and verifier",
+      "path": "EyeOfTerror/Scriptorium/Brigade/ReductorVerifier"
+    },
+    "7007": {
+      "name": "FabricatorFinalis",
+      "role": "finalizer, packager, telegram sender",
+      "path": "EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis"
+    },
+    "7009": {
+      "name": "AuspexBrowser",
+      "role": "browser worker",
+      "path": "EyeOfTerror/Scriptorium/Brigade/AuspexBrowser"
+    },
+    "7010": {
+      "name": "ForgeRelay",
+      "role": "DemonsForge adapter",
+      "path": "Mechanicum/ForgeRelay",
+      "backend": "http://127.0.0.1:8110"
+    },
+    "7011": {
+      "name": "MnemosyneRelay",
+      "role": "ArchiveOfHeresy adapter",
+      "path": "Mechanicum/MnemosyneRelay",
+      "backend": "http://127.0.0.1:8090"
+    },
+    "7012": {
+      "name": "OcularisRenderium",
+      "role": "JavaScript render and screenshot worker",
+      "path": "Mechanicum/OcularisRenderium"
+    },
+    "7013": {
+      "name": "CorpusIngestor",
+      "role": "local corpus indexer",
+      "path": "EyeOfTerror/Scriptorium/Brigade/CorpusIngestor"
+    },
+    "7014": {
+      "name": "CogitatorCodewright",
+      "role": "code task worker",
+      "path": "Mechanicum/CogitatorCodewright"
+    },
+    "7015": {
+      "name": "LogisRepository",
+      "role": "code repository surveyor",
+      "path": "Mechanicum/LogisRepository"
+    },
+    "7016": {
+      "name": "MagosStrategos",
+      "role": "code change planner",
+      "path": "Mechanicum/MagosStrategos"
+    },
+    "7017": {
+      "name": "FerrumPatchwright",
+      "role": "code patch manifest builder",
+      "path": "Mechanicum/FerrumPatchwright"
+    },
+    "7018": {
+      "name": "OrdinatusVerifier",
+      "role": "code verification planner",
+      "path": "Mechanicum/OrdinatusVerifier"
+    },
+    "7019": {
+      "name": "JudicatorCodicis",
+      "role": "code review critic",
+      "path": "Mechanicum/JudicatorCodicis"
+    },
+    "7020": {
+      "name": "SealwrightFinalis",
+      "role": "code final handoff packager",
+      "path": "Mechanicum/SealwrightFinalis"
+    }
+  }
+}

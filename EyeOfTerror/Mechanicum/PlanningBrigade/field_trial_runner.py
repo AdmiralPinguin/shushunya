@@ -17,12 +17,12 @@ SERVICE_CONTRACTS = json.loads((ROOT / "service_contracts.json").read_text(encod
 
 def collect_active_ports() -> dict[int, str]:
     active_ports: dict[int, str] = {}
-    registry = json.loads((REPO_ROOT / "EyeOfTerror" / "registry" / "ports.json").read_text(encoding="utf-8"))
+    registry = json.loads((REPO_ROOT / "EyeOfTerror" / "Warmaster" / "registry" / "ports.json").read_text(encoding="utf-8"))
     for section_name in ["eye_of_terror", "mechanicum"]:
         section = registry.get(section_name) if isinstance(registry.get(section_name), dict) else {}
         for port, metadata in section.items():
             name = metadata.get("name", "unknown") if isinstance(metadata, dict) else "unknown"
-            active_ports[int(port)] = f"EyeOfTerror/registry/ports.json:{section_name}:{name}"
+            active_ports[int(port)] = f"EyeOfTerror/Warmaster/registry/ports.json:{section_name}:{name}"
 
     worker_services = json.loads((REPO_ROOT / "Mechanicum" / "worker_services.json").read_text(encoding="utf-8"))
     for name, metadata in worker_services.items():

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+python3 EyeOfTerror/Warmaster/doctor.py --quiet
+PYTHONPATH=EyeOfTerror/Mechanicum python3 EyeOfTerror/Mechanicum/boundary_self_test.py
+PYTHONPATH=EyeOfTerror/Mechanicum python3 EyeOfTerror/Mechanicum/mechanicum_status_self_test.py
+PYTHONPATH=EyeOfTerror/Mechanicum/CodeBrigade python3 EyeOfTerror/Mechanicum/CodeBrigade/self_test.py
+PYTHONPATH=EyeOfTerror/Mechanicum/CodeBrigade python3 EyeOfTerror/Mechanicum/CodeBrigade/verification_self_test.py
+PYTHONPATH=EyeOfTerror/Mechanicum python3 EyeOfTerror/Mechanicum/contracts_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/governors_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/generic_lore_smoke_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/local_corpus_pipeline_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/governor_api_contract_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/routing_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/warmaster_api_contract_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/start_brigade_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/ledger_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/ceraxia_service_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster:Mechanicum python3 EyeOfTerror/Warmaster/ceraxia_patch_pipeline_self_test.py
+PYTHONPATH=EyeOfTerror/Mechanicum/PlanningBrigade python3 EyeOfTerror/Mechanicum/PlanningBrigade/self_test.py
+PYTHONPATH=EyeOfTerror/Mechanicum/PlanningBrigade python3 EyeOfTerror/Mechanicum/PlanningBrigade/field_trial_runner.py >/dev/null
+PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade python3 EyeOfTerror/Mechanicum/Ceraxia/self_test.py
+PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade:EyeOfTerror/Mechanicum/CodeBrigade python3 EyeOfTerror/Mechanicum/Ceraxia/handoff_field_trials.py >/dev/null
+PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/Lexmechanic python3 EyeOfTerror/Scriptorium/Brigade/Lexmechanic/self_test.py
+PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/AuspexBrowser python3 EyeOfTerror/Scriptorium/Brigade/AuspexBrowser/self_test.py
+PYTHONPATH=Mechanicum/OcularisRenderium python3 Mechanicum/OcularisRenderium/self_test.py
+PYTHONPATH=Mechanicum/CogitatorCodewright python3 Mechanicum/CogitatorCodewright/self_test.py
+PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/NoosphericExtractor python3 EyeOfTerror/Scriptorium/Brigade/NoosphericExtractor/self_test.py
+PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/Chronologis python3 EyeOfTerror/Scriptorium/Brigade/Chronologis/self_test.py
+PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon python3 EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon/self_test.py
+PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/ReductorVerifier python3 EyeOfTerror/Scriptorium/Brigade/ReductorVerifier/self_test.py
+PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis python3 EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis/self_test.py
+PYTHONPATH=Mechanicum python3 Mechanicum/worker_runtime_self_test.py
+PYTHONPATH=Mechanicum python3 Mechanicum/worker_api_contract_self_test.py
+PYTHONPATH=Mechanicum python3 Mechanicum/worker_services_self_test.py
+PYTHONPATH=Mechanicum python3 Mechanicum/start_all_workers_self_test.py
+Mechanicum/ShushunyaAgent/scripts/check-agent-offline.sh
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/iskandar_service_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/warmaster_gateway_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster:Mechanicum python3 EyeOfTerror/Warmaster/warmaster_http_execution_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/local_executor_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/http_executor_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster:Mechanicum python3 EyeOfTerror/Warmaster/http_pipeline_self_test.py

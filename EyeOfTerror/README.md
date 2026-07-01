@@ -33,7 +33,7 @@ The gateway should not micromanage individual worker steps.
 Run the gateway:
 
 ```bash
-PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.warmaster_gateway
+PYTHONPATH=EyeOfTerror/Warmaster python3 -m eye_of_terror.warmaster_gateway
 ```
 
 Gateway endpoints:
@@ -80,7 +80,7 @@ Gateway endpoints:
 - `POST /recover_stale`
 
 Client-facing gateway behavior is specified in
-`EyeOfTerror/contracts/warmaster_api.md`.
+`EyeOfTerror/Warmaster/contracts/warmaster_api.md`.
 
 `POST /task_preflight` checks routing, governor planning, contract validation,
 worker availability, and the compact planned step summary without creating run
@@ -150,7 +150,7 @@ plain `/state` remains lightweight.
 Start the current service-separated brigade with:
 
 ```bash
-PYTHONPATH=EyeOfTerror:Mechanicum python3 EyeOfTerror/start_brigade.py --repo-root .
+PYTHONPATH=EyeOfTerror/Warmaster:Mechanicum python3 EyeOfTerror/Warmaster/start_brigade.py --repo-root .
 ```
 
 Use `--dry-run` to print the Mechanicum worker supervisor, Iskandar service, and
@@ -206,7 +206,7 @@ dispatch package.
 Run the first Inner Circle governor:
 
 ```bash
-PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.inner_circle.iskandar_service
+PYTHONPATH=EyeOfTerror/Warmaster python3 -m eye_of_terror.inner_circle.iskandar_service
 ```
 
 It exposes:
@@ -216,14 +216,14 @@ It exposes:
 - `POST /plan`
 - `POST /prepare_run`
 
-Governor services should follow `EyeOfTerror/contracts/governor_api.md`.
+Governor services should follow `EyeOfTerror/Warmaster/contracts/governor_api.md`.
 
 ## Local Prototype Run
 
 Run a fast registry and manifest doctor:
 
 ```bash
-python3 EyeOfTerror/doctor.py
+python3 EyeOfTerror/Warmaster/doctor.py
 ```
 
 ## Local Prototype Run
@@ -231,7 +231,7 @@ python3 EyeOfTerror/doctor.py
 Build an Iskandar run package:
 
 ```bash
-PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.inner_circle.iskandar \
+PYTHONPATH=EyeOfTerror/Warmaster python3 -m eye_of_terror.inner_circle.iskandar \
   'Собери все известное о событиях Скалатракса и сделай реконструкцию.' \
   --task-id test-skalathrax \
   --run-dir runtime/iskandar-test
@@ -240,7 +240,7 @@ PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.inner_circle.iskandar \
 Execute registered local prototype workers:
 
 ```bash
-PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.local_executor \
+PYTHONPATH=EyeOfTerror/Warmaster python3 -m eye_of_terror.local_executor \
   runtime/iskandar-test \
   --workspace-root runtime/eye-local-work
 ```
@@ -248,5 +248,5 @@ PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.local_executor \
 Execute through already running worker services on their dispatch ports:
 
 ```bash
-PYTHONPATH=EyeOfTerror python3 -m eye_of_terror.http_executor runtime/iskandar-test
+PYTHONPATH=EyeOfTerror/Warmaster python3 -m eye_of_terror.http_executor runtime/iskandar-test
 ```

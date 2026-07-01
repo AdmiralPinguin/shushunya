@@ -4,5 +4,5 @@
   "role": "code worker",
   "status": "prototype",
   "capabilities": ["repository_survey", "change_planning", "patch_manifest", "verification_planning", "code_review", "final_handoff"],
-  "api_contract": "EyeOfTerror/contracts/worker_api.md"
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

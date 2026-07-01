@@ -196,7 +196,7 @@
 - Warmaster Gateway can prepare tasks through the local governor path or through
   the active governor's HTTP service.
 - Brigade launcher derives Warmaster and Iskandar service ports from
-  `EyeOfTerror/registry/ports.json`.
+  `EyeOfTerror/Warmaster/registry/ports.json`.
 - Brigade launcher rejects incomplete `Mechanicum/worker_services.json` entries
   instead of silently omitting workers from the startup plan.
 - Warmaster rejects HTTP-governor task preparation when reachable governor
@@ -225,7 +225,7 @@
   non-empty string constraints.
 - Warmaster Gateway can default new task planning to local or HTTP governor
   transport through startup flags, with per-request override.
-- `EyeOfTerror/start_brigade.py` can start the current service-separated
+- `EyeOfTerror/Warmaster/start_brigade.py` can start the current service-separated
   Warmaster + Iskandar + Mechanicum stack, with a dry-run self-test.
 - The brigade launcher can emit a machine-readable startup plan with service
   names, ports, commands, and runtime roots.
@@ -441,7 +441,7 @@
   the ledger.
 - Mechanicum worker manifests are validated for required metadata, stable ports,
   API contract, and service-registry consistency.
-- Inner Circle governors are tracked in `EyeOfTerror/registry/governors.json`; Ceraxia is the active code governor and image governance remains planned.
+- Inner Circle governors are tracked in `EyeOfTerror/Warmaster/registry/governors.json`; Ceraxia is the active code governor and image governance remains planned.
 - Warmaster, Governor, and Worker API contracts are covered by self-tests against
   advertised runtime capabilities/endpoints.
 - `Ceraxia` now owns code-task governance; `CogitatorCodewrightGovernor` remains only as a disabled legacy stub.
@@ -499,7 +499,7 @@ PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/Lexmechanic LEXMECHANIC_LIVE_DISCOVER
 - Event playbook `narrative_ru` and review metadata are preserved through
   `direct_event_notes.json` and `timeline.json`, keeping downstream artifacts
   self-contained.
-- `EyeOfTerror/doctor.py` validates source and event playbook structure so
+- `EyeOfTerror/Warmaster/doctor.py` validates source and event playbook structure so
   broken domain playbooks fail loudly before a run.
 - `ReductorVerifier` uses `source_coverage` diagnostics as source arbitration:
   weak source sets block approval and trigger source-discovery/downstream
