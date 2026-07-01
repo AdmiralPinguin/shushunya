@@ -42,6 +42,25 @@ def assert_architecture_contract() -> None:
         raise AssertionError("EyeOfTerror/Mechanicum must remain the governance root")
     if payload.get("legacy_runtime_root") != "Mechanicum":
         raise AssertionError("top-level Mechanicum must remain marked as legacy/shared runtime")
+    expected_ownership = {
+        "EyeOfTerror/Mechanicum/Ceraxia",
+        "EyeOfTerror/Mechanicum/PlanningBrigade",
+        "EyeOfTerror/Mechanicum/CodeBrigade",
+    }
+    ownership = payload.get("ownership")
+    if not isinstance(ownership, dict):
+        raise AssertionError("architecture_contract.json ownership must be an object")
+    actual_ownership = set(ownership)
+    if actual_ownership != expected_ownership:
+        raise AssertionError(
+            "architecture_contract.json ownership drifted: "
+            f"expected={sorted(expected_ownership)} actual={sorted(actual_ownership)}"
+        )
+    missing_owned_paths = [
+        owned_path for owned_path in sorted(expected_ownership) if not (PROJECT_ROOT / owned_path).is_dir()
+    ]
+    if missing_owned_paths:
+        raise AssertionError(f"architecture_contract.json points at missing owned paths: {missing_owned_paths}")
     rules = payload.get("rules")
     if not isinstance(rules, list) or not any("must not import top-level Mechanicum" in str(rule) for rule in rules):
         raise AssertionError("architecture_contract.json must document the root Mechanicum import boundary")
