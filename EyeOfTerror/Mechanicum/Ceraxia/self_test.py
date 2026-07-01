@@ -749,6 +749,70 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertEqual(validate_planning_packet(replan_packet), [])
         self.assertTrue(any("feedback finding:" in item for item in replan_packet["problem_statement"]["known_constraints"]))
 
+    def test_review_gate_blocks_implemented_worker_without_read_evidence(self) -> None:
+        packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
+        survey = {
+            "repo_exists": True,
+            "repo_path": ".",
+            "candidate_files": ["app.py"],
+            "test_files": ["test_app.py"],
+            "entrypoint_candidates": [],
+            "python_symbols": [],
+            "source_summaries": [],
+            "local_import_edges": [],
+            "generic_import_edges": [],
+            "recommended_read_order": [{"path": "app.py", "reason": "ranked source/config candidate"}],
+            "suggested_verification_commands": ["python -m py_compile app.py"],
+            "truncated": False,
+            "python_symbols_truncated": False,
+            "source_summaries_truncated": False,
+            "max_files_scanned": 1,
+            "max_python_symbol_files": 1,
+            "max_source_summary_files": 1,
+        }
+        brief = build_implementation_brief(packet, survey)
+        worker_report = {
+            "status": "implemented",
+            "dry_run": False,
+            "changed_files": ["app.py"],
+            "implementation_brief_acknowledged": True,
+            "work_package_statuses": [
+                {
+                    "package_id": "evidence_survey_package",
+                    "owner": "CodeBrigade",
+                    "impact_surfaces": ["source_behavior", "test_surface"],
+                    "status": "implemented",
+                    "evidence_source": "worker_report",
+                },
+                {
+                    "package_id": "minimal_patch_package",
+                    "owner": "CodeBrigade",
+                    "impact_surfaces": ["source_behavior"],
+                    "status": "implemented",
+                    "evidence_source": "worker_report",
+                },
+                {
+                    "package_id": "verification_evidence_package",
+                    "owner": "CodeBrigade",
+                    "impact_surfaces": ["source_behavior", "test_surface"],
+                    "status": "implemented",
+                    "evidence_source": "verification_report",
+                },
+            ],
+        }
+        verification_report = {
+            "status": "passed",
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "commands_planned": ["python -m py_compile app.py"],
+            "commands_executed": [{"command": "python -m py_compile app.py", "returncode": 0}],
+            "output_summary": [{"command": "python -m py_compile app.py", "returncode": 0, "signals": ["output_empty"], "diagnostics": []}],
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        self.assertEqual(review["decision"], "blocked")
+        self.assertEqual(review["pre_mutation_read_sufficiency"]["status"], "blocked")
+        self.assertTrue(any("pre-mutation read evidence" in item["finding"] for item in review["findings"]))
+
     def test_review_gate_blocks_missing_investigation_playbook(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
         survey = {

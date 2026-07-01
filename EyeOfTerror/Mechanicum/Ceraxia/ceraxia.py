@@ -1016,6 +1016,32 @@ def worker_output_contract_sufficiency_from_worker(worker_report: dict[str, Any]
     }
 
 
+def pre_mutation_read_sufficiency_from_worker(worker_report: dict[str, Any]) -> dict[str, Any]:
+    evidence = worker_report.get("pre_mutation_read_evidence") if isinstance(worker_report.get("pre_mutation_read_evidence"), dict) else {}
+    blockers: list[str] = []
+    if worker_report.get("status") == "implemented":
+        if not evidence:
+            blockers.append("implemented worker report lacks pre_mutation_read_evidence")
+        elif evidence.get("status") != "complete":
+            blockers.extend(
+                str(item)
+                for item in evidence.get("blockers", [])
+                if isinstance(item, str)
+            )
+            if not blockers:
+                blockers.append("pre_mutation_read_evidence is not complete")
+        elif int(evidence.get("recorded_read_count") or 0) <= 0 and int(evidence.get("planned_new_file_count") or 0) <= 0:
+            blockers.append("pre_mutation_read_evidence has no read or planned-new-file rows")
+    return {
+        "status": "complete" if not blockers else "blocked",
+        "evidence_status": evidence.get("status", "missing") if evidence else "missing",
+        "recorded_read_count": int(evidence.get("recorded_read_count") or 0) if evidence else 0,
+        "planned_new_file_count": int(evidence.get("planned_new_file_count") or 0) if evidence else 0,
+        "required_read_count": int(evidence.get("required_read_count") or 0) if evidence else 0,
+        "blockers": blockers,
+    }
+
+
 def review_gate(
     packet: dict[str, Any],
     brief: dict[str, Any],
@@ -1114,6 +1140,7 @@ def review_gate(
     constraint_trace_sufficiency = constraint_trace_sufficiency_from_worker(worker_report)
     assumption_sufficiency = assumption_sufficiency_from_worker(worker_report)
     worker_output_contract_sufficiency = worker_output_contract_sufficiency_from_worker(worker_report)
+    pre_mutation_read_sufficiency = pre_mutation_read_sufficiency_from_worker(worker_report)
     diagnostic_repair_queue = build_diagnostic_repair_queue(brief, verification_report, worker_report)
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
@@ -1139,6 +1166,8 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "assumption register is incomplete: " + "; ".join(assumption_sufficiency["blockers"])})
     if worker_output_contract_sufficiency["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "worker output contract is incomplete: " + "; ".join(worker_output_contract_sufficiency["blockers"])})
+    if pre_mutation_read_sufficiency["status"] == "blocked":
+        findings.append({"severity": "blocker", "finding": "pre-mutation read evidence is incomplete: " + "; ".join(pre_mutation_read_sufficiency["blockers"])})
     if worker_report["dry_run"] and package_status_counts["planned"]:
         warnings.append({"severity": "warning", "finding": "work packages are planned but not implemented"})
     if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution", "passed"}:
@@ -1195,6 +1224,7 @@ def review_gate(
         "constraint_trace_sufficiency": constraint_trace_sufficiency,
         "assumption_sufficiency": assumption_sufficiency,
         "worker_output_contract_sufficiency": worker_output_contract_sufficiency,
+        "pre_mutation_read_sufficiency": pre_mutation_read_sufficiency,
         "diagnostic_repair_queue": diagnostic_repair_queue,
         "checked_against": [
             "planning packet completeness",
@@ -1210,6 +1240,7 @@ def review_gate(
             "constraint traceability coverage",
             "assumption register coverage",
             "worker output contract coverage",
+            "pre-mutation read evidence",
             "worker report honesty",
         ],
     }
