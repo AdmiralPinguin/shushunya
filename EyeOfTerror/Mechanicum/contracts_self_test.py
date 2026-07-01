@@ -106,6 +106,24 @@ def assert_array_item_required(schema_path: Path, payload: dict, field: str, lab
             raise AssertionError(f"{label}.{field}[{index}] missing schema required fields {missing}: {item}")
 
 
+def assert_execution_policy_matches_result_schema() -> None:
+    policy = json.loads((ROOT / "CodeBrigade" / "execution_policy.json").read_text(encoding="utf-8"))
+    schema = load_schema(ROOT / "CodeBrigade" / "execution_result.schema.json")
+    if policy.get("contract_version") != schema.get("properties", {}).get("contract_version", {}).get("const"):
+        raise AssertionError(f"execution policy version drifted from result schema: {policy}")
+    expected_outputs = sorted(
+        field
+        for field in schema.get("required", [])
+        if field not in {"kind", "contract_version", "status"}
+    )
+    policy_outputs = sorted(policy.get("future_adapter_outputs", []))
+    if policy_outputs != expected_outputs:
+        raise AssertionError(
+            "execution policy future_adapter_outputs drifted from execution_result required fields: "
+            f"policy={policy_outputs} schema={expected_outputs}"
+        )
+
+
 def main() -> int:
     packet = build_planning_packet(
         {
@@ -127,6 +145,7 @@ def main() -> int:
         blocked_execution_result,
         "execution result",
     )
+    assert_execution_policy_matches_result_schema()
     verification = build_verification_report(brief, worker_report)
     review = review_gate(packet, brief, worker_report, verification)
     status = {"state": "finalized"}
