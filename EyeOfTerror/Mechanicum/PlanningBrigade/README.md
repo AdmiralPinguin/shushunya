@@ -25,6 +25,8 @@ Current contract:
 - `impact_analysis` records affected engineering surfaces such as source
   behavior, tests, public API contracts, security boundaries, runtime config,
   data compatibility, and internal architecture.
+- `surface_verification_matrix` maps each impacted surface to planned evidence
+  and blocks handoff when coverage is missing.
 - `acceptance_contract` records what the final package must prove and what
   shortcuts are forbidden.
 - `implementation_brief_blueprint` defines the CodeBrigade handoff sections and

@@ -22,6 +22,11 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief forbidden_approaches is required")
     if not isinstance(brief.get("required_verification"), dict):
         problems.append("brief required_verification is required")
+    surface_matrix = brief.get("surface_verification_matrix") if isinstance(brief.get("surface_verification_matrix"), dict) else {}
+    if not isinstance(surface_matrix.get("rows"), list) or not surface_matrix.get("rows"):
+        problems.append("brief surface_verification_matrix.rows is required")
+    if surface_matrix.get("complete") is False:
+        problems.append("brief surface_verification_matrix is incomplete")
     if not isinstance(brief.get("acceptance_gates"), list) or not brief.get("acceptance_gates"):
         problems.append("brief acceptance_gates are required")
     quality = brief.get("quality_bar") if isinstance(brief.get("quality_bar"), dict) else {}

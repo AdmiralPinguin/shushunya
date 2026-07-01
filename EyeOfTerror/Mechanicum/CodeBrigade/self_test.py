@@ -25,6 +25,19 @@ def valid_brief() -> dict:
         "forbidden_approaches": ["hardcoded one-off behavior"],
         "expected_artifacts": ["worker_report.json", "verification_report.json", "final_report.md"],
         "required_verification": {"targeted_commands": ["rerun failing test command"]},
+        "surface_verification_matrix": {
+            "complete": True,
+            "blockers": [],
+            "rows": [
+                {
+                    "surface": "source_behavior",
+                    "risk": "medium",
+                    "evidence_needed": ["candidate source files"],
+                    "covered_by": ["targeted behavior verification"],
+                    "blockers": [],
+                }
+            ],
+        },
         "acceptance_gates": ["planning packet includes all five planning roles"],
         "quality_bar": {
             "must_have_evidence": [
@@ -159,6 +172,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve mutation preconditions: {plan}")
     if "the original user-visible request is satisfied" not in plan["acceptance_evidence_required"]:
         raise AssertionError(f"implementation plan should preserve acceptance evidence: {plan}")
+    if not plan["surface_verification_complete"] or plan["surface_verification_rows"][0]["surface"] != "source_behavior":
+        raise AssertionError(f"implementation plan should preserve surface verification matrix: {plan}")
     if plan["survey_truncated"]:
         raise AssertionError(f"small survey fixture should not be marked truncated: {plan}")
     if plan["python_symbols_truncated"]:
@@ -253,6 +268,11 @@ def main() -> int:
     missing_impact_report = code_brigade_adapter.build_worker_report(missing_impact, dry_run=True)
     if missing_impact_report["status"] != "blocked" or not any("impact_analysis" in item for item in missing_impact_report["validation_problems"]):
         raise AssertionError(f"missing impact analysis should be blocked: {missing_impact_report}")
+    incomplete_surface_matrix = valid_brief()
+    incomplete_surface_matrix["surface_verification_matrix"] = {"rows": [{"surface": "source_behavior"}], "complete": False}
+    incomplete_surface_matrix_report = code_brigade_adapter.build_worker_report(incomplete_surface_matrix, dry_run=True)
+    if incomplete_surface_matrix_report["status"] != "blocked" or not any("surface_verification_matrix" in item for item in incomplete_surface_matrix_report["validation_problems"]):
+        raise AssertionError(f"incomplete surface verification matrix should be blocked: {incomplete_surface_matrix_report}")
     blocked_review = valid_brief()
     blocked_review["planning_review_gate"] = {"decision": "blocked", "score": 20, "blockers": ["unclear task"]}
     blocked_review_report = code_brigade_adapter.build_worker_report(blocked_review, dry_run=True)

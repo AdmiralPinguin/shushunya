@@ -66,6 +66,8 @@
         "mutation_preconditions",
         "acceptance_evidence_required",
         "verification_commands",
+        "surface_verification_complete",
+        "surface_verification_rows",
         "acceptance_gates",
         "refusal_conditions"
       ],
@@ -146,6 +148,15 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "surface_verification_complete": {
+          "type": "boolean"
+        },
+        "surface_verification_rows": {
+          "type": "array",
+          "items": {
+            "type": "object"
           }
         }
       }

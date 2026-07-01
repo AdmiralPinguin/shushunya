@@ -43,6 +43,8 @@ def main() -> int:
         or "prove_boundary" not in next(phase for phase in security_packet["work_breakdown"]["phases"] if phase["id"] == "review_result")["depends_on"]
         or security_packet["impact_analysis"]["highest_risk_surface"] != "security_boundary"
         or "security_boundary" not in [surface["surface"] for surface in security_packet["impact_analysis"]["surfaces"]]
+        or not security_packet["surface_verification_matrix"]["complete"]
+        or "security_boundary" not in [row["surface"] for row in security_packet["surface_verification_matrix"]["rows"]]
         or security_packet["design_options"]["selected_strategy"] != "boundary_first_patch"
         or "untrusted input is rejected" not in security_packet["verification_strategy"]["negative_tests"]
         or not security_packet["verification_strategy"]["broad_verification_required"]
@@ -74,6 +76,8 @@ def main() -> int:
         or "prove_compatibility" not in [phase["id"] for phase in migration_packet["work_breakdown"]["phases"]]
         or migration_packet["impact_analysis"]["highest_risk_surface"] != "data_compatibility"
         or "runtime_configuration" not in [surface["surface"] for surface in migration_packet["impact_analysis"]["surfaces"]]
+        or not migration_packet["surface_verification_matrix"]["complete"]
+        or "data_compatibility" not in [row["surface"] for row in migration_packet["surface_verification_matrix"]["rows"]]
         or "dependency_critical_path" not in migration_packet["implementation_brief_blueprint"]
         or "work_phases" not in migration_packet["implementation_brief_blueprint"]
         or migration_packet["code_brigade_handoff"]["target"] != "CodeBrigade"

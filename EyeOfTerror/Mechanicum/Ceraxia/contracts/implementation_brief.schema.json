@@ -16,6 +16,7 @@
     "forbidden_approaches",
     "expected_artifacts",
     "required_verification",
+    "surface_verification_matrix",
     "acceptance_gates",
     "quality_bar",
     "acceptance_contract",
@@ -85,6 +86,9 @@
       "minItems": 3
     },
     "required_verification": {
+      "type": "object"
+    },
+    "surface_verification_matrix": {
       "type": "object"
     },
     "acceptance_gates": {

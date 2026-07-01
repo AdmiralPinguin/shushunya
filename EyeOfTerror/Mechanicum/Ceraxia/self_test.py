@@ -79,6 +79,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(len(brief["work_breakdown"]["phases"]), 6)
             self.assertEqual(brief["impact_analysis"]["highest_risk_surface"], "security_boundary")
             self.assertTrue(brief["impact_analysis"]["requires_cross_surface_review"])
+            self.assertTrue(brief["surface_verification_matrix"]["complete"])
+            self.assertTrue(any(row["surface"] == "security_boundary" for row in brief["surface_verification_matrix"]["rows"]))
             self.assertIn("app.py", brief["repo_survey_evidence"]["candidate_files"])
             self.assertEqual(brief["repo_survey_evidence"]["existing_path_hints"], ["app.py", "test_app.py"])
             self.assertEqual(brief["repo_survey_evidence"]["missing_path_hints"], [])
@@ -98,6 +100,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(implementation_plan["existing_path_hints"], ["app.py", "test_app.py"])
             self.assertEqual(implementation_plan["highest_risk_surface"], "security_boundary")
             self.assertTrue(implementation_plan["requires_cross_surface_review"])
+            self.assertTrue(implementation_plan["surface_verification_complete"])
+            self.assertTrue(any(row["surface"] == "security_boundary" for row in implementation_plan["surface_verification_rows"]))
             self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in implementation_plan["dependency_edges_to_check"]))
             self.assertFalse(implementation_plan["survey_truncated"])
             self.assertFalse(implementation_plan["python_symbols_truncated"])
@@ -313,6 +317,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         packet["impact_analysis"]["surfaces"] = []
         packet["design_options"]["options"] = []
         packet["verification_strategy"]["targeted_commands"] = []
+        packet["surface_verification_matrix"] = {"rows": [], "complete": "no"}
         packet["risk_register"]["acceptance_gates"] = []
         packet["quality_bar"]["must_have_evidence"] = []
         packet["acceptance_contract"]["must_prove"] = []
@@ -328,6 +333,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertTrue(any("impact analysis" in problem for problem in problems), problems)
         self.assertTrue(any("reject hardcode" in problem for problem in problems), problems)
         self.assertTrue(any("targeted_commands" in problem for problem in problems), problems)
+        self.assertTrue(any("surface verification matrix" in problem for problem in problems), problems)
         self.assertTrue(any("acceptance_gates" in problem for problem in problems), problems)
         self.assertTrue(any("quality bar" in problem for problem in problems), problems)
         self.assertTrue(any("acceptance contract" in problem for problem in problems), problems)

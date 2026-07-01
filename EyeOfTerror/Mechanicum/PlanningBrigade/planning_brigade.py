@@ -477,6 +477,50 @@ def verification_strategy(triage: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def surface_verification_matrix(impact: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
+    checks = verification.get("checks", []) if isinstance(verification.get("checks"), list) else []
+    negative_tests = verification.get("negative_tests", []) if isinstance(verification.get("negative_tests"), list) else []
+    rows: list[dict[str, Any]] = []
+    for surface in impact.get("surfaces", []):
+        name = surface["surface"]
+        covered_by: list[str] = []
+        blockers: list[str] = []
+        if name == "source_behavior":
+            covered_by.extend(check for check in checks if "behavior" in check)
+        elif name == "test_surface":
+            covered_by.extend(check for check in checks if "test" in check)
+            if not covered_by:
+                covered_by.append("changed-file syntax verification")
+        elif name == "public_api_contract":
+            covered_by.extend(item for item in [*checks, *negative_tests] if "API" in item or "api" in item or "schema" in item or "compatibility" in item)
+        elif name == "security_boundary":
+            covered_by.extend(item for item in negative_tests if "input" in item or "path" in item or "auth" in item or "token" in item)
+        elif name == "runtime_configuration":
+            covered_by.extend(item for item in negative_tests if "config" in item)
+        elif name == "data_compatibility":
+            covered_by.extend(item for item in negative_tests if "round-trip" in item or "round trip" in item or "mixed records" in item)
+        elif name == "internal_architecture":
+            covered_by.extend(item for item in checks if "dependency" in item or "behavior" in item)
+        if not covered_by:
+            blockers.append(f"no planned verification covers {name}")
+        rows.append(
+            {
+                "surface": name,
+                "risk": surface["risk"],
+                "evidence_needed": surface["evidence_needed"],
+                "covered_by": covered_by,
+                "blockers": blockers,
+            }
+        )
+    matrix_blockers = [blocker for row in rows for blocker in row["blockers"]]
+    return {
+        "role": "VerificationArchitect",
+        "rows": rows,
+        "complete": not matrix_blockers,
+        "blockers": matrix_blockers,
+    }
+
+
 def risk_register(triage: dict[str, Any], survey: dict[str, Any], design: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
     risks = [
         {
@@ -554,11 +598,14 @@ def acceptance_contract(
     triage: dict[str, Any],
     verification: dict[str, Any],
     quality: dict[str, Any],
+    surface_matrix: dict[str, Any],
 ) -> dict[str, Any]:
     must_prove = list(problem["definition_of_done"])
     must_prove.extend(quality["must_have_evidence"])
     if verification["negative_tests"]:
         must_prove.append("required negative tests are present, executed, or explicitly blocked")
+    if not surface_matrix["complete"]:
+        must_prove.append("surface verification blockers are resolved or explicitly accepted")
     return {
         "role": "PlanningBrigade",
         "risk_level": triage["risk_level"],
@@ -585,6 +632,7 @@ def implementation_brief_blueprint(
     dependency: dict[str, Any],
     breakdown: dict[str, Any],
     impact: dict[str, Any],
+    surface_matrix: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "role": "PlanningBrigade",
@@ -616,6 +664,7 @@ def implementation_brief_blueprint(
         "dependency_critical_path": dependency["critical_path"],
         "work_phases": [phase["id"] for phase in breakdown["phases"]],
         "impact_surfaces": [surface["surface"] for surface in impact["surfaces"]],
+        "surface_verification_complete": surface_matrix["complete"],
         "mutation_preconditions": [
             "implementation brief validates",
             "execution preflight passes",
@@ -750,10 +799,11 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     impact = impact_analysis(triage, problem, survey)
     design = design_options(payload, triage)
     verification = verification_strategy(triage)
+    surface_matrix = surface_verification_matrix(impact, verification)
     risks = risk_register(triage, survey, design, verification)
     quality = quality_bar(triage, verification)
-    acceptance = acceptance_contract(problem, triage, verification, quality)
-    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact)
+    acceptance = acceptance_contract(problem, triage, verification, quality, surface_matrix)
+    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix)
     review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, acceptance)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
@@ -771,6 +821,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "impact_analysis": impact,
         "design_options": design,
         "verification_strategy": verification,
+        "surface_verification_matrix": surface_matrix,
         "risk_register": risks,
         "quality_bar": quality,
         "acceptance_contract": acceptance,

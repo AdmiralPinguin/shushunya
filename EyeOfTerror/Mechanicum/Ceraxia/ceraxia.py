@@ -103,6 +103,7 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         "impact_analysis",
         "design_options",
         "verification_strategy",
+        "surface_verification_matrix",
         "risk_register",
         "quality_bar",
         "acceptance_contract",
@@ -194,6 +195,13 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("verification strategy must include broad_verification_required boolean")
     if verification.get("handoff_to") != "RiskScribe":
         problems.append("verification strategy must hand off to RiskScribe")
+    surface_matrix = packet.get("surface_verification_matrix") if isinstance(packet.get("surface_verification_matrix"), dict) else {}
+    if not isinstance(surface_matrix.get("rows"), list) or not surface_matrix.get("rows"):
+        problems.append("surface verification matrix must include rows")
+    if not isinstance(surface_matrix.get("complete"), bool):
+        problems.append("surface verification matrix must include complete boolean")
+    if surface_matrix.get("complete") is False:
+        problems.extend(f"surface verification blocker: {item}" for item in surface_matrix.get("blockers", []))
     risks = packet.get("risk_register") if isinstance(packet.get("risk_register"), dict) else {}
     if not isinstance(risks.get("risks"), list) or not risks.get("risks"):
         problems.append("risk register must include risks")
@@ -284,6 +292,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "final_report.md",
         ],
         "required_verification": verification,
+        "surface_verification_matrix": packet.get("surface_verification_matrix", {}),
         "acceptance_gates": risks.get("acceptance_gates") if isinstance(risks.get("acceptance_gates"), list) else [],
         "quality_bar": quality,
         "acceptance_contract": packet.get("acceptance_contract", {}),
