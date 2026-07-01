@@ -76,7 +76,9 @@ for verification. `verification_adapter.py` can run that narrow allowlist
 without a shell, including `py_compile`, `pytest`, `unittest`, and
 `git diff --check`. It blocks non-allowlisted commands, absolute/traversal path
 tokens, and option values that point outside the repository. Its output is
-versioned by `verification_execution.schema.json`; planned verification reports
+versioned by `verification_execution.schema.json`; each result also preserves
+diagnostic hints for tracebacks, assertion failures, syntax errors, and missing
+imports. Planned verification reports
 `status: planned`, while executed checks report `passed`, `failed`, or
 `blocked`. It is safe enough for explicit verification wiring, but source
 mutation remains outside this adapter.

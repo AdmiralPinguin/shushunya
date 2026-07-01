@@ -40,6 +40,8 @@ Current capabilities:
   verification commands when execution is enabled
 - Ceraxia summarizes verification stdout/stderr into output signals and blocks
   inconsistent passed reports that contain failure or traceback evidence
+- verification diagnostics now preserve traceback, assertion, syntax, and
+  missing-import signals for future repair loops and orchestration summaries
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
 - planned read-only service interface contracts for future role split on
@@ -72,7 +74,7 @@ Next useful upgrades:
 - add richer multi-language dependency graphs beyond current JS/TS relative
   import resolution
 - teach review gates to compare command stdout/stderr semantics with each
-  impacted surface more deeply than current output-signal consistency checks
+  impacted surface more deeply than current output-signal and diagnostic counts
 - expand CodeBrigade from explicit and guarded natural-language patch
   operations toward diagnostic autonomous source edits behind the existing
   preflight, verification, rollback, and audit contracts
