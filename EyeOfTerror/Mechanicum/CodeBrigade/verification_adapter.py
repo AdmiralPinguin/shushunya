@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from execution_contract import CONTRACT_VERSION
+
 
 ALLOWED_PREFIXES = [
     ["python", "-m", "py_compile"],
@@ -46,6 +48,7 @@ def run_verification_commands(commands: list[str], repo_path: str, execute: bool
     if not repo.exists() or not repo.is_dir():
         return {
             "kind": "code_brigade_verification_execution",
+            "contract_version": CONTRACT_VERSION,
             "status": "blocked",
             "execute": execute,
             "repo_path": str(repo),
@@ -84,6 +87,7 @@ def run_verification_commands(commands: list[str], repo_path: str, execute: bool
     status = "blocked" if blockers else ("passed" if all(item["status"] in {"planned", "passed", "skipped"} for item in results) else "failed")
     return {
         "kind": "code_brigade_verification_execution",
+        "contract_version": CONTRACT_VERSION,
         "status": status,
         "execute": execute,
         "repo_path": str(repo),

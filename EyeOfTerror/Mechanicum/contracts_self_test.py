@@ -145,6 +145,7 @@ def assert_contract_version_consts() -> None:
         ROOT / "CodeBrigade" / "code_brigade_contract.schema.json",
         ROOT / "CodeBrigade" / "execution_policy.schema.json",
         ROOT / "CodeBrigade" / "execution_result.schema.json",
+        ROOT / "CodeBrigade" / "verification_execution.schema.json",
     ]
     for schema_path in schema_paths:
         schema = load_schema(schema_path)
@@ -190,6 +191,11 @@ def main() -> int:
     )
     assert_execution_policy_matches_result_schema()
     verification = build_verification_report(brief, worker_report)
+    assert_schema_subset(
+        load_schema(ROOT / "CodeBrigade" / "verification_execution.schema.json"),
+        verification["verification_execution"],
+        "verification execution",
+    )
     review = review_gate(packet, brief, worker_report, verification)
     status = {"state": "finalized"}
     readiness = build_execution_readiness(status, brief, verification, review, dry_run=True)

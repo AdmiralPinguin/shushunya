@@ -255,6 +255,7 @@ def build_verification_report(brief: dict[str, Any], worker_report: dict[str, An
     blocked = brief["blocked"] or worker_report["status"] == "blocked"
     execution = run_verification_commands(executable_commands, brief.get("repo_path", ""), execute=execute_verification) if executable_commands and not blocked else {
         "kind": "code_brigade_verification_execution",
+        "contract_version": CONTRACT_VERSION,
         "status": "blocked" if blocked else "passed",
         "execute": execute_verification,
         "repo_path": brief.get("repo_path", ""),

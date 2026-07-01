@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodeBrigade Verification Execution",
+  "type": "object",
+  "required": [
+    "kind",
+    "contract_version",
+    "status",
+    "execute",
+    "repo_path",
+    "results",
+    "blockers"
+  ],
+  "properties": {
+    "kind": {
+      "const": "code_brigade_verification_execution"
+    },
+    "contract_version": {
+      "const": "eye-mechanicum.v1"
+    },
+    "status": {
+      "enum": ["planned", "passed", "failed", "blocked"]
+    },
+    "execute": {
+      "type": "boolean"
+    },
+    "repo_path": {
+      "type": "string"
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "command",
+          "status",
+          "returncode",
+          "stdout",
+          "stderr"
+        ],
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "status": {
+            "enum": ["planned", "passed", "failed", "blocked", "skipped"]
+          },
+          "returncode": {
+            "type": ["integer", "null"]
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

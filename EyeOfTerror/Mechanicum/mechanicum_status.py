@@ -55,6 +55,7 @@ COMPONENTS = {
             "execution_result.schema.json",
             "execution_policy.json",
             "verification_adapter.py",
+            "verification_execution.schema.json",
             "self_test.py",
         ],
         "maturity": "dry_run_handoff_with_blocked_execution_adapter_preflight_and_allowlisted_verification",
