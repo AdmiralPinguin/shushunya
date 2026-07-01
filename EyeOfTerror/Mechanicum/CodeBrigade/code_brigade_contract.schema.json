@@ -80,6 +80,8 @@
         "acceptance_evidence_required",
         "acceptance_trace_rows",
         "acceptance_trace_complete",
+        "constraint_trace_rows",
+        "constraint_trace_complete",
         "expert_quality_level",
         "expert_quality_required",
         "expert_tradeoff_register",
@@ -263,6 +265,16 @@
           }
         },
         "acceptance_trace_complete": {
+          "type": "boolean"
+        },
+        "constraint_trace_rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object"
+          }
+        },
+        "constraint_trace_complete": {
           "type": "boolean"
         },
         "expert_quality_level": {

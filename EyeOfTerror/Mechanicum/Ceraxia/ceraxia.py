@@ -233,6 +233,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "quality_bar": quality,
         "acceptance_contract": packet.get("acceptance_contract", {}),
         "acceptance_trace_matrix": packet.get("acceptance_trace_matrix", {}),
+        "constraint_trace_matrix": packet.get("constraint_trace_matrix", {}),
         "expert_quality_plan": packet.get("expert_quality_plan", {}),
         "change_control_plan": packet.get("change_control_plan", {}),
         "investigation_playbook": packet.get("investigation_playbook", {}),

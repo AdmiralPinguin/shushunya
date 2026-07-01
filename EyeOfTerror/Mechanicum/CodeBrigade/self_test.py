@@ -139,6 +139,27 @@ def valid_brief() -> dict:
             "complete": True,
             "blockers": [],
         },
+        "constraint_trace_matrix": {
+            "rows": [
+                {
+                    "constraint": "preserve public behavior unless the task explicitly asks to change it",
+                    "source": "problem_statement.known_constraints",
+                    "package_ids": ["minimal_patch_package", "verification_evidence_package"],
+                    "planned_evidence": ["targeted behavior verification"],
+                    "status": "planned",
+                },
+                {
+                    "constraint": "prefer repository evidence over guessing candidate files",
+                    "source": "problem_statement.known_constraints",
+                    "package_ids": ["evidence_survey_package", "verification_evidence_package"],
+                    "planned_evidence": ["repo_survey.json", "verification_report.json"],
+                    "status": "planned",
+                },
+            ],
+            "row_count": 2,
+            "complete": True,
+            "blockers": [],
+        },
         "expert_quality_plan": {
             "level": "standard",
             "required_for_expert_gate": False,
@@ -264,6 +285,7 @@ def valid_brief() -> dict:
                 "investigation_playbook",
                 "change_control_plan",
                 "acceptance_trace_matrix",
+                "constraint_trace_matrix",
                 "assumption_register",
             ],
             "mutation_preconditions": [
@@ -521,6 +543,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve acceptance evidence: {plan}")
     if not plan["acceptance_trace_complete"] or plan["acceptance_trace_rows"][0]["requirement"] != "the original user-visible request is satisfied":
         raise AssertionError(f"implementation plan should preserve acceptance trace matrix: {plan}")
+    if not plan["constraint_trace_complete"] or plan["constraint_trace_rows"][0]["constraint"] != "preserve public behavior unless the task explicitly asks to change it":
+        raise AssertionError(f"implementation plan should preserve constraint trace matrix: {plan}")
     if plan["expert_quality_level"] != "standard" or plan["expert_quality_required"]:
         raise AssertionError(f"implementation plan should preserve expert quality level: {plan}")
     if plan["expert_tradeoff_register"][0]["decision"] != "minimal_patch_vs_broad_rewrite":

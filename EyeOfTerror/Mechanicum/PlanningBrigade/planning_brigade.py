@@ -1086,6 +1086,7 @@ def implementation_brief_blueprint(
             "quality_bar",
             "acceptance_contract",
             "acceptance_trace_matrix",
+            "constraint_trace_matrix",
             "assumption_register",
             "repo_survey_evidence",
             "work_breakdown",
@@ -1456,6 +1457,67 @@ def acceptance_trace_matrix(
     }
 
 
+def constraint_trace_matrix(
+    problem: dict[str, Any],
+    work_packages: dict[str, Any],
+    acceptance_trace: dict[str, Any],
+) -> dict[str, Any]:
+    package_ids = [
+        str(package.get("id") or "")
+        for package in work_packages.get("packages", [])
+        if isinstance(package, dict) and package.get("id")
+    ]
+    fallback_packages = [package_id for package_id in ["evidence_survey_package", "verification_evidence_package"] if package_id in package_ids]
+    evidence_items = sorted(
+        {
+            str(item)
+            for row in acceptance_trace.get("rows", [])
+            if isinstance(row, dict)
+            for item in row.get("planned_evidence", [])
+            if str(item)
+        }
+    )
+    rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    for constraint in problem.get("known_constraints", []):
+        text = str(constraint)
+        if not text:
+            continue
+        lowered = text.lower()
+        linked_packages = [
+            package_id
+            for package_id in package_ids
+            if (
+                "verification" in package_id
+                or ("source" in lowered and package_id == "minimal_patch_package")
+                or ("public" in lowered and package_id == "compatibility_package")
+                or ("test" in lowered and package_id == "verification_evidence_package")
+                or ("repo" in lowered and package_id == "evidence_survey_package")
+                or ("behavior" in lowered and package_id in {"minimal_patch_package", "verification_evidence_package"})
+            )
+        ] or fallback_packages or package_ids[:1]
+        planned_evidence = evidence_items[:5] or ["verification_report.json", "final_report.md"]
+        status = "planned" if linked_packages and planned_evidence else "blocked"
+        if status == "blocked":
+            blockers.append(f"constraint lacks trace evidence: {text}")
+        rows.append(
+            {
+                "constraint": text,
+                "source": "problem_statement.known_constraints",
+                "package_ids": linked_packages,
+                "planned_evidence": planned_evidence,
+                "status": status,
+            }
+        )
+    return {
+        "role": "RiskScribe",
+        "rows": rows,
+        "row_count": len(rows),
+        "complete": not blockers and bool(rows),
+        "blockers": blockers,
+    }
+
+
 def planning_review_gate(
     triage: dict[str, Any],
     problem: dict[str, Any],
@@ -1470,6 +1532,7 @@ def planning_review_gate(
     work_packages: dict[str, Any] | None = None,
     package_matrix: dict[str, Any] | None = None,
     acceptance_trace: dict[str, Any] | None = None,
+    constraint_trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -1512,6 +1575,12 @@ def planning_review_gate(
         blockers.extend(str(item) for item in acceptance_trace.get("blockers", []))
         if not acceptance_trace.get("blockers"):
             blockers.append("acceptance trace matrix is incomplete")
+    if constraint_trace is None:
+        blockers.append("constraint trace matrix is missing")
+    elif constraint_trace.get("complete") is not True:
+        blockers.extend(str(item) for item in constraint_trace.get("blockers", []))
+        if not constraint_trace.get("blockers"):
+            blockers.append("constraint trace matrix is incomplete")
     if work_packages is not None:
         packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
         if len(packages) < 3:
@@ -1572,6 +1641,7 @@ def planning_review_gate(
             "implementation work package completeness",
             "acceptance evidence alignment",
             "acceptance traceability",
+            "constraint traceability",
         ],
     }
 
@@ -1667,7 +1737,8 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     work_packages = implementation_work_packages(triage, problem, dependency, impact, verification, risks, forecast)
     package_matrix = surface_package_matrix(surface_matrix, work_packages)
     acceptance_trace = acceptance_trace_matrix(problem, quality, acceptance, verification, surface_matrix, work_packages)
-    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, change_control, work_packages, package_matrix, acceptance_trace)
+    constraint_trace = constraint_trace_matrix(problem, work_packages, acceptance_trace)
+    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, change_control, work_packages, package_matrix, acceptance_trace, constraint_trace)
     handoff = code_brigade_handoff(triage, verification, quality, work_packages, acceptance_trace)
     return {
         "ok": bool(task),
@@ -1695,6 +1766,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "quality_bar": quality,
         "acceptance_contract": acceptance,
         "acceptance_trace_matrix": acceptance_trace,
+        "constraint_trace_matrix": constraint_trace,
         "implementation_brief_blueprint": blueprint,
         "implementation_work_packages": work_packages,
         "planning_review_gate": review,

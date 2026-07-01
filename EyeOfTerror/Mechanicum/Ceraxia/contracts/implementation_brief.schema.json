@@ -24,6 +24,7 @@
     "quality_bar",
     "acceptance_contract",
     "acceptance_trace_matrix",
+    "constraint_trace_matrix",
     "expert_quality_plan",
     "change_control_plan",
     "investigation_playbook",
@@ -151,6 +152,23 @@
           "items": {
             "type": "object",
             "required": ["requirement", "source", "linked_surfaces", "package_ids", "planned_evidence", "status"]
+          }
+        },
+        "complete": {
+          "const": true
+        }
+      }
+    },
+    "constraint_trace_matrix": {
+      "type": "object",
+      "required": ["rows", "row_count", "complete", "blockers"],
+      "properties": {
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["constraint", "source", "package_ids", "planned_evidence", "status"]
           }
         },
         "complete": {

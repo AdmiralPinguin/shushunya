@@ -34,6 +34,7 @@ REQUIRED_PACKET_OBJECTS = [
     "quality_bar",
     "acceptance_contract",
     "acceptance_trace_matrix",
+    "constraint_trace_matrix",
     "implementation_brief_blueprint",
     "implementation_work_packages",
     "planning_review_gate",
@@ -256,6 +257,33 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         if not list_field(row.get("package_ids")):
             problems.append(f"acceptance trace matrix row needs package_ids: {row.get('requirement', '<unknown>')}")
 
+    constraint_trace = object_field(packet, "constraint_trace_matrix")
+    constraint_rows = list_field(constraint_trace.get("rows"))
+    if not constraint_rows:
+        problems.append("constraint trace matrix must include rows")
+    if constraint_trace.get("complete") is not True:
+        problems.extend(f"constraint trace matrix blocked: {item}" for item in list_field(constraint_trace.get("blockers")))
+    known_constraints = list_field(problem.get("known_constraints"))
+    traced_constraints = {
+        row.get("constraint")
+        for row in constraint_rows
+        if isinstance(row, dict) and row.get("constraint")
+    }
+    missing_constraints = sorted(str(item) for item in known_constraints if str(item) not in traced_constraints)
+    if missing_constraints:
+        problems.append("constraint trace matrix must cover every known constraint: " + ", ".join(missing_constraints))
+    for row in constraint_rows:
+        if not isinstance(row, dict):
+            problems.append("constraint trace matrix row must be an object")
+            continue
+        for key in ("constraint", "source", "planned_evidence", "package_ids", "status"):
+            if key not in row:
+                problems.append(f"constraint trace matrix row missing {key}")
+        if not list_field(row.get("planned_evidence")):
+            problems.append(f"constraint trace matrix row needs planned evidence: {row.get('constraint', '<unknown>')}")
+        if not list_field(row.get("package_ids")):
+            problems.append(f"constraint trace matrix row needs package_ids: {row.get('constraint', '<unknown>')}")
+
     blueprint = object_field(packet, "implementation_brief_blueprint")
     if blueprint.get("target") != "CodeBrigade":
         problems.append("implementation brief blueprint must target CodeBrigade")
@@ -269,6 +297,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("implementation brief blueprint must require change_control_plan")
     if "acceptance_trace_matrix" not in list_field(blueprint.get("required_sections")):
         problems.append("implementation brief blueprint must require acceptance_trace_matrix")
+    if "constraint_trace_matrix" not in list_field(blueprint.get("required_sections")):
+        problems.append("implementation brief blueprint must require constraint_trace_matrix")
     if "assumption_register" not in list_field(blueprint.get("required_sections")):
         problems.append("implementation brief blueprint must require assumption_register")
 

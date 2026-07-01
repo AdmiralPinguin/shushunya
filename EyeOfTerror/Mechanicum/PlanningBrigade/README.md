@@ -51,6 +51,8 @@ Current contract:
   shortcuts are forbidden.
 - `acceptance_trace_matrix` maps every definition-of-done, quality-bar, and
   acceptance requirement to planned evidence and CodeBrigade package ids.
+- `constraint_trace_matrix` maps every preserved user/task constraint to
+  planned evidence and CodeBrigade package ids.
 - `implementation_brief_blueprint` defines the CodeBrigade handoff sections and
   mutation preconditions.
 - `implementation_work_packages` turns the plan into reviewable CodeBrigade
@@ -60,7 +62,8 @@ Current contract:
   verification evidence and concrete implementation package ids.
 - `planning_review_gate` scores the planning packet and blocks unclear or
   structurally unsafe plans before they reach CodeBrigade.
-- `code_brigade_handoff` lists the ordered execution/review steps.
+- `code_brigade_handoff` lists the ordered execution/review steps, package
+  review order, global handoff criteria, and acceptance trace requirement.
 
 ```bash
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "почини failing unittest без изменения тестов" --repo-path /repo

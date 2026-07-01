@@ -26,6 +26,8 @@ Current capabilities:
 - risk register, quality bar, acceptance contract, and CodeBrigade handoff
 - acceptance trace matrix mapping definition-of-done, quality-bar, and
   acceptance requirements to package ids and planned evidence
+- constraint trace matrix mapping preserved task/user constraints to package
+  ids and planned evidence
 - implementation work packages with read scope, edit scope, verification
   scope, risk controls, blocking policy, handoff criteria, and review order
 - specialized work packages for compatibility, security boundaries, runtime
@@ -38,7 +40,8 @@ Current capabilities:
   reserved ports 7111-7115
 - field trials for multiple task shapes with coverage gates for task kinds,
   impacted surfaces, implementation work packages, and change-control
-  invariant/proof, acceptance-trace package coverage, and assumption coverage
+  invariant/proof, acceptance-trace package coverage, constraint-trace package
+  coverage, and assumption coverage
 - CLI validation mode
 
 Current boundaries:

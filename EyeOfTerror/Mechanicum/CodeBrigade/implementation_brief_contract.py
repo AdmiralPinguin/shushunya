@@ -85,6 +85,22 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
             problems.append("brief acceptance_trace_matrix row planned_evidence is required")
         if not isinstance(row.get("package_ids"), list) or not row.get("package_ids"):
             problems.append("brief acceptance_trace_matrix row package_ids is required")
+    constraint_trace = brief.get("constraint_trace_matrix") if isinstance(brief.get("constraint_trace_matrix"), dict) else {}
+    constraint_rows = constraint_trace.get("rows") if isinstance(constraint_trace.get("rows"), list) else []
+    if not constraint_rows:
+        problems.append("brief constraint_trace_matrix.rows is required")
+    if constraint_trace.get("complete") is not True:
+        problems.append("brief constraint_trace_matrix must be complete")
+    for row in constraint_rows:
+        if not isinstance(row, dict):
+            problems.append("brief constraint_trace_matrix row must be an object")
+            continue
+        if not row.get("constraint"):
+            problems.append("brief constraint_trace_matrix row constraint is required")
+        if not isinstance(row.get("planned_evidence"), list) or not row.get("planned_evidence"):
+            problems.append("brief constraint_trace_matrix row planned_evidence is required")
+        if not isinstance(row.get("package_ids"), list) or not row.get("package_ids"):
+            problems.append("brief constraint_trace_matrix row package_ids is required")
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     if expert_plan.get("level") not in {"standard", "expert"}:
         problems.append("brief expert_quality_plan.level is required")
@@ -128,6 +144,8 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief implementation_brief_blueprint must require change_control_plan")
     if "acceptance_trace_matrix" not in blueprint.get("required_sections", []):
         problems.append("brief implementation_brief_blueprint must require acceptance_trace_matrix")
+    if "constraint_trace_matrix" not in blueprint.get("required_sections", []):
+        problems.append("brief implementation_brief_blueprint must require constraint_trace_matrix")
     if "assumption_register" not in blueprint.get("required_sections", []):
         problems.append("brief implementation_brief_blueprint must require assumption_register")
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
