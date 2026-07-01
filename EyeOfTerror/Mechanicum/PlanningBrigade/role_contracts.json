@@ -1,0 +1,46 @@
+{
+  "kind": "planning_brigade_role_contracts",
+  "contract_version": "eye-mechanicum.v1",
+  "roles": [
+    {
+      "name": "TaskTriage",
+      "authority": "classify task intent and risk before repository mutation",
+      "inputs": ["task", "constraints"],
+      "outputs": ["problem_statement", "task_triage"],
+      "may_mutate_source": false,
+      "handoff_to": "RepoSurveyor"
+    },
+    {
+      "name": "RepoSurveyor",
+      "authority": "request and consume read-only repository evidence",
+      "inputs": ["problem_statement", "task_triage"],
+      "outputs": ["repo_survey_request", "dependency_map"],
+      "may_mutate_source": false,
+      "handoff_to": "DesignStrategos"
+    },
+    {
+      "name": "DesignStrategos",
+      "authority": "select the smallest coherent design and impacted surfaces",
+      "inputs": ["problem_statement", "repo_survey_request", "dependency_map"],
+      "outputs": ["work_breakdown", "impact_analysis", "design_options", "execution_forecast"],
+      "may_mutate_source": false,
+      "handoff_to": "VerificationArchitect"
+    },
+    {
+      "name": "VerificationArchitect",
+      "authority": "map impacted surfaces to verification evidence",
+      "inputs": ["impact_analysis", "design_options"],
+      "outputs": ["verification_strategy", "surface_verification_matrix"],
+      "may_mutate_source": false,
+      "handoff_to": "RiskScribe"
+    },
+    {
+      "name": "RiskScribe",
+      "authority": "record risks, acceptance gates, and CodeBrigade handoff constraints",
+      "inputs": ["verification_strategy", "surface_verification_matrix", "quality_bar"],
+      "outputs": ["risk_register", "acceptance_contract", "implementation_brief_blueprint", "planning_review_gate", "code_brigade_handoff"],
+      "may_mutate_source": false,
+      "handoff_to": "Ceraxia"
+    }
+  ]
+}

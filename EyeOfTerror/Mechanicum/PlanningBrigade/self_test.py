@@ -26,7 +26,23 @@ def assert_packet_shape(packet: dict) -> None:
         raise AssertionError(f"PlanningBrigade must hand authority back to Ceraxia: {packet}")
 
 
+def assert_role_contracts() -> None:
+    contracts = json.loads((ROOT / "role_contracts.json").read_text(encoding="utf-8"))
+    if contracts.get("contract_version") != "eye-mechanicum.v1":
+        raise AssertionError(f"role contract version drifted: {contracts}")
+    roles = contracts.get("roles") if isinstance(contracts.get("roles"), list) else []
+    names = [role.get("name") for role in roles if isinstance(role, dict)]
+    if names != planning_brigade.ROLE_ORDER:
+        raise AssertionError(f"role contracts must follow PlanningBrigade role order: {contracts}")
+    for role in roles:
+        if role.get("may_mutate_source") is not False:
+            raise AssertionError(f"PlanningBrigade roles must be read-only: {role}")
+        if not role.get("authority") or not role.get("outputs"):
+            raise AssertionError(f"role contract must expose authority and outputs: {role}")
+
+
 def main() -> int:
+    assert_role_contracts()
     security_packet = planning_brigade.build_planning_packet(
         {
             "task": "почини security bug: API token можно обойти через path traversal, добавь pytest negative tests",

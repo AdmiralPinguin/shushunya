@@ -14,6 +14,10 @@ Members:
 - `VerificationArchitect`
 - `RiskScribe`
 
+`role_contracts.json` fixes each role's authority, inputs, outputs, handoff,
+and read-only boundary. The roles remain in-process until field trials prove
+the contracts are stable enough to split into services.
+
 Current contract:
 
 - `problem_statement` restates the user request, known constraints, path hints,
