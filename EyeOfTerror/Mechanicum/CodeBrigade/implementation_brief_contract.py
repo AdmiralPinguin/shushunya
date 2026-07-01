@@ -27,6 +27,11 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief surface_verification_matrix.rows is required")
     if surface_matrix.get("complete") is False:
         problems.append("brief surface_verification_matrix is incomplete")
+    survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
+    if survey_quality.get("decision") == "blocked":
+        problems.append("brief survey_quality_gate is blocked")
+    elif survey_quality.get("decision") not in {"passed"}:
+        problems.append("brief survey_quality_gate decision is required")
     if not isinstance(brief.get("acceptance_gates"), list) or not brief.get("acceptance_gates"):
         problems.append("brief acceptance_gates are required")
     quality = brief.get("quality_bar") if isinstance(brief.get("quality_bar"), dict) else {}

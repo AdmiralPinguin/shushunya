@@ -68,6 +68,8 @@
         "verification_commands",
         "surface_verification_complete",
         "surface_verification_rows",
+        "survey_quality_decision",
+        "survey_quality_warnings",
         "acceptance_gates",
         "refusal_conditions"
       ],
@@ -157,6 +159,15 @@
           "type": "array",
           "items": {
             "type": "object"
+          }
+        },
+        "survey_quality_decision": {
+          "type": "string"
+        },
+        "survey_quality_warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       }

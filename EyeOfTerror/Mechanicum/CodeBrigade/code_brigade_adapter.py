@@ -16,6 +16,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     verification = brief.get("required_verification") if isinstance(brief.get("required_verification"), dict) else {}
     surface_matrix = brief.get("surface_verification_matrix") if isinstance(brief.get("surface_verification_matrix"), dict) else {}
+    survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
     acceptance = brief.get("acceptance_contract") if isinstance(brief.get("acceptance_contract"), dict) else {}
     blueprint = brief.get("implementation_brief_blueprint") if isinstance(brief.get("implementation_brief_blueprint"), dict) else {}
@@ -62,6 +63,8 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "verification_commands": commands,
         "surface_verification_complete": bool(surface_matrix.get("complete")),
         "surface_verification_rows": surface_matrix.get("rows", []) if isinstance(surface_matrix.get("rows"), list) else [],
+        "survey_quality_decision": survey_quality.get("decision", ""),
+        "survey_quality_warnings": survey_quality.get("warnings", []) if isinstance(survey_quality.get("warnings"), list) else [],
         "acceptance_gates": brief.get("acceptance_gates", []) if isinstance(brief.get("acceptance_gates"), list) else [],
         "refusal_conditions": [
             "brief validation fails",

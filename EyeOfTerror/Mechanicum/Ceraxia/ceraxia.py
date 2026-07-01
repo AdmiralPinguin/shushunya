@@ -253,6 +253,46 @@ def build_repo_survey(packet: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
+    triage = packet.get("task_triage") if isinstance(packet.get("task_triage"), dict) else {}
+    task_kinds = set(triage.get("task_kinds", []) if isinstance(triage.get("task_kinds"), list) else [])
+    risk_level = triage.get("risk_level", "high")
+    candidate_files = survey.get("candidate_files") if isinstance(survey.get("candidate_files"), list) else []
+    test_files = survey.get("test_files") if isinstance(survey.get("test_files"), list) else []
+    missing_path_hints = survey.get("missing_path_hints") if isinstance(survey.get("missing_path_hints"), list) else []
+    unsafe_path_hints = survey.get("unsafe_path_hints") if isinstance(survey.get("unsafe_path_hints"), list) else []
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if not survey.get("repo_exists"):
+        blockers.append("repository does not exist")
+    if unsafe_path_hints:
+        blockers.append("unsafe explicit path hints: " + ", ".join(str(item) for item in unsafe_path_hints))
+    if missing_path_hints:
+        blockers.append("explicit path hints were not found: " + ", ".join(str(item) for item in missing_path_hints))
+    if not candidate_files:
+        blockers.append("repository survey found no candidate source/config/documentation files")
+    if risk_level == "high" and not test_files:
+        blockers.append("high-risk task has no discovered test surface")
+    elif not test_files:
+        warnings.append("repository survey found no test files")
+    if survey.get("truncated"):
+        warnings.append("repository survey reached file limit")
+    if survey.get("python_symbols_truncated"):
+        warnings.append("python symbol survey reached file limit")
+    return {
+        "kind": "ceraxia_survey_quality_gate",
+        "decision": "blocked" if blockers else "passed",
+        "risk_level": risk_level,
+        "task_kinds": sorted(task_kinds),
+        "candidate_file_count": len(candidate_files),
+        "test_file_count": len(test_files),
+        "missing_path_hints": missing_path_hints,
+        "unsafe_path_hints": unsafe_path_hints,
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
 def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
     triage = packet.get("task_triage") if isinstance(packet.get("task_triage"), dict) else {}
     verification = packet.get("verification_strategy") if isinstance(packet.get("verification_strategy"), dict) else {}
@@ -261,10 +301,12 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
     handoff = packet.get("code_brigade_handoff") if isinstance(packet.get("code_brigade_handoff"), dict) else {}
     planning_problems = validate_planning_packet(packet)
     planning_review = packet.get("planning_review_gate") if isinstance(packet.get("planning_review_gate"), dict) else {}
-    blocked = bool(planning_problems) or not survey["repo_exists"] or planning_review.get("decision") == "blocked"
+    survey_quality = build_survey_quality_gate(packet, survey)
+    blocked = bool(planning_problems) or not survey["repo_exists"] or planning_review.get("decision") == "blocked" or survey_quality["decision"] == "blocked"
     blockers = [f"planning validation failed: {problem}" for problem in planning_problems]
     if not survey["repo_exists"]:
         blockers.append("repo survey or planning validation is incomplete")
+    blockers.extend(str(item) for item in survey_quality["blockers"])
     return {
         "kind": "ceraxia_code_brigade_implementation_brief",
         "contract_version": CONTRACT_VERSION,
@@ -293,6 +335,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         ],
         "required_verification": verification,
         "surface_verification_matrix": packet.get("surface_verification_matrix", {}),
+        "survey_quality_gate": survey_quality,
         "acceptance_gates": risks.get("acceptance_gates") if isinstance(risks.get("acceptance_gates"), list) else [],
         "quality_bar": quality,
         "acceptance_contract": packet.get("acceptance_contract", {}),
@@ -442,6 +485,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
+    survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     blockers = readiness.get("blockers", [])
@@ -462,6 +506,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Planning review decision: {planning_review.get('decision', '')}",
         f"Planning review score: {planning_review.get('score', '')}",
         f"Planning work phases: {len(work_phases)}",
+        f"Survey quality decision: {survey_quality.get('decision', '')}",
         f"Verification status: {verification['status']}",
         f"Verification commands planned: {len(commands_planned)}",
         f"Verification commands executed: {len(commands_executed)}",
@@ -609,6 +654,12 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     if summary.get("planning_work_phase_count", 0) != len(phases):
         findings.append({"severity": "blocker", "finding": "run_summary planning_work_phase_count disagrees with implementation_brief.json"})
+    survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
+    if summary.get("survey_quality_decision", "") != survey_quality.get("decision", ""):
+        findings.append({"severity": "blocker", "finding": "run_summary survey_quality_decision disagrees with implementation_brief.json"})
+    survey_warnings = survey_quality.get("warnings") if isinstance(survey_quality.get("warnings"), list) else []
+    if summary.get("survey_quality_warning_count", 0) != len(survey_warnings):
+        findings.append({"severity": "blocker", "finding": "run_summary survey_quality_warning_count disagrees with implementation_brief.json"})
     try:
         evidence_matrix = json.loads((run_dir / "evidence_matrix.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -682,6 +733,7 @@ def build_run_summary(
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
+    survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     return {
@@ -698,6 +750,8 @@ def build_run_summary(
         "planning_review_decision": planning_review.get("decision", ""),
         "planning_review_score": planning_review.get("score", 0),
         "planning_work_phase_count": len(work_phases),
+        "survey_quality_decision": survey_quality.get("decision", ""),
+        "survey_quality_warning_count": len(survey_quality.get("warnings", [])) if isinstance(survey_quality.get("warnings"), list) else 0,
         "execution_readiness": readiness.get("decision"),
         "worker_status": worker_report.get("status"),
         "code_brigade_execution_policy_status": worker_report.get("execution_policy_status"),

@@ -218,6 +218,8 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         repo = Path(tmp) / "repo"
         repo.mkdir()
+        (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+        (repo / "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
         result = run_ceraxia(
             CeraxiaInput(
                 task="почини API compatibility pytest",

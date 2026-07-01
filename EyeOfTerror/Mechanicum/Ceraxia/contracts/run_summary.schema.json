@@ -16,6 +16,8 @@
     "planning_review_decision",
     "planning_review_score",
     "planning_work_phase_count",
+    "survey_quality_decision",
+    "survey_quality_warning_count",
     "execution_readiness",
     "worker_status",
     "code_brigade_execution_policy_status",
@@ -68,6 +70,12 @@
       "type": "integer"
     },
     "planning_work_phase_count": {
+      "type": "integer"
+    },
+    "survey_quality_decision": {
+      "type": "string"
+    },
+    "survey_quality_warning_count": {
       "type": "integer"
     },
     "execution_readiness": {

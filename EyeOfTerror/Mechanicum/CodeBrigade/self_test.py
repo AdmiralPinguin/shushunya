@@ -38,6 +38,11 @@ def valid_brief() -> dict:
                 }
             ],
         },
+        "survey_quality_gate": {
+            "decision": "passed",
+            "warnings": [],
+            "blockers": [],
+        },
         "acceptance_gates": ["planning packet includes all five planning roles"],
         "quality_bar": {
             "must_have_evidence": [
@@ -174,6 +179,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve acceptance evidence: {plan}")
     if not plan["surface_verification_complete"] or plan["surface_verification_rows"][0]["surface"] != "source_behavior":
         raise AssertionError(f"implementation plan should preserve surface verification matrix: {plan}")
+    if plan["survey_quality_decision"] != "passed":
+        raise AssertionError(f"implementation plan should preserve survey quality gate: {plan}")
     if plan["survey_truncated"]:
         raise AssertionError(f"small survey fixture should not be marked truncated: {plan}")
     if plan["python_symbols_truncated"]:
@@ -273,6 +280,11 @@ def main() -> int:
     incomplete_surface_matrix_report = code_brigade_adapter.build_worker_report(incomplete_surface_matrix, dry_run=True)
     if incomplete_surface_matrix_report["status"] != "blocked" or not any("surface_verification_matrix" in item for item in incomplete_surface_matrix_report["validation_problems"]):
         raise AssertionError(f"incomplete surface verification matrix should be blocked: {incomplete_surface_matrix_report}")
+    blocked_survey_quality = valid_brief()
+    blocked_survey_quality["survey_quality_gate"] = {"decision": "blocked", "blockers": ["missing path"]}
+    blocked_survey_quality_report = code_brigade_adapter.build_worker_report(blocked_survey_quality, dry_run=True)
+    if blocked_survey_quality_report["status"] != "blocked" or not any("survey_quality_gate" in item for item in blocked_survey_quality_report["validation_problems"]):
+        raise AssertionError(f"blocked survey quality should block CodeBrigade: {blocked_survey_quality_report}")
     blocked_review = valid_brief()
     blocked_review["planning_review_gate"] = {"decision": "blocked", "score": 20, "blockers": ["unclear task"]}
     blocked_review_report = code_brigade_adapter.build_worker_report(blocked_review, dry_run=True)

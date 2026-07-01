@@ -81,6 +81,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(brief["impact_analysis"]["requires_cross_surface_review"])
             self.assertTrue(brief["surface_verification_matrix"]["complete"])
             self.assertTrue(any(row["surface"] == "security_boundary" for row in brief["surface_verification_matrix"]["rows"]))
+            self.assertEqual(brief["survey_quality_gate"]["decision"], "passed")
             self.assertIn("app.py", brief["repo_survey_evidence"]["candidate_files"])
             self.assertEqual(brief["repo_survey_evidence"]["existing_path_hints"], ["app.py", "test_app.py"])
             self.assertEqual(brief["repo_survey_evidence"]["missing_path_hints"], [])
@@ -102,6 +103,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(implementation_plan["requires_cross_surface_review"])
             self.assertTrue(implementation_plan["surface_verification_complete"])
             self.assertTrue(any(row["surface"] == "security_boundary" for row in implementation_plan["surface_verification_rows"]))
+            self.assertEqual(implementation_plan["survey_quality_decision"], "passed")
             self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in implementation_plan["dependency_edges_to_check"]))
             self.assertFalse(implementation_plan["survey_truncated"])
             self.assertFalse(implementation_plan["python_symbols_truncated"])
@@ -138,6 +140,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["planning_review_decision"], "ready_for_ceraxia_review")
             self.assertGreaterEqual(summary["planning_review_score"], 80)
             self.assertGreaterEqual(summary["planning_work_phase_count"], 6)
+            self.assertEqual(summary["survey_quality_decision"], "passed")
+            self.assertEqual(summary["survey_quality_warning_count"], 0)
             self.assertEqual(summary["worker_status"], "dry_run_handoff_ready")
             self.assertEqual(summary["code_brigade_execution_policy_status"], "blocked_until_adapter_is_wired")
             self.assertEqual(summary["code_brigade_execution_result_status"], "")
@@ -159,6 +163,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("Planning review decision: ready_for_ceraxia_review", final_report)
             self.assertIn("Planning review score:", final_report)
             self.assertIn("Planning work phases:", final_report)
+            self.assertIn("Survey quality decision: passed", final_report)
             self.assertIn("Worker status: dry_run_handoff_ready", final_report)
             self.assertIn("Execution policy status: blocked_until_adapter_is_wired", final_report)
             self.assertIn("Execution preflight ok: n/a", final_report)
@@ -188,6 +193,25 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(readiness["decision"], "blocked")
             status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
             self.assertIn("failed", status["lifecycle"])
+
+    def test_missing_explicit_path_hint_blocks_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="почини `missing.py` без изменения API",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            self.assertFalse(result["ok"], result)
+            run_dir = Path(result["run_dir"])
+            brief = json.loads((run_dir / "implementation_brief.json").read_text(encoding="utf-8"))
+            self.assertTrue(brief["blocked"])
+            self.assertEqual(brief["survey_quality_gate"]["decision"], "blocked")
+            self.assertIn("missing.py", brief["survey_quality_gate"]["missing_path_hints"])
 
     def test_execute_verification_runs_allowlisted_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -423,6 +447,27 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(audit["decision"], "blocked")
             self.assertTrue(any("planning_review_decision disagrees" in item["finding"] for item in audit["findings"]))
             self.assertTrue(any("planning_review_score disagrees" in item["finding"] for item in audit["findings"]))
+
+    def test_run_audit_blocks_survey_quality_summary_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="добавь helper в `app.py`",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            run_dir = Path(result["run_dir"])
+            summary_path = run_dir / "run_summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["survey_quality_decision"] = "blocked"
+            summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            audit = audit_run_package(run_dir)
+            self.assertEqual(audit["decision"], "blocked")
+            self.assertTrue(any("survey_quality_decision disagrees" in item["finding"] for item in audit["findings"]))
 
 
 if __name__ == "__main__":
