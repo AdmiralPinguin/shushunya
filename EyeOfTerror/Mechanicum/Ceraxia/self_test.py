@@ -194,6 +194,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("rollback trigger is known before source mutation", implementation_plan["change_mutation_requires"])
             self.assertIn("negative boundary evidence is executed or blocked with a concrete reason", implementation_plan["change_post_change_proofs"])
             self.assertTrue(implementation_plan["acceptance_trace_complete"])
+            self.assertTrue(implementation_plan["definition_of_done_trace_complete"])
+            self.assertEqual(implementation_plan["definition_of_done_count"], implementation_plan["traced_definition_of_done_count"])
+            self.assertEqual(implementation_plan["missing_definition_of_done"], [])
             self.assertTrue(any("security_boundary_package" in row["package_ids"] for row in implementation_plan["acceptance_trace_rows"]))
             self.assertTrue(implementation_plan["constraint_trace_complete"])
             self.assertTrue(any("verification_evidence_package" in row["package_ids"] for row in implementation_plan["constraint_trace_rows"]))
@@ -321,6 +324,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["acceptance_trace_status"], "complete")
             self.assertGreaterEqual(summary["acceptance_trace_row_count"], 4)
             self.assertEqual(summary["acceptance_trace_blocked_row_count"], 0)
+            self.assertTrue(summary["definition_of_done_trace_complete"])
+            self.assertGreaterEqual(summary["definition_of_done_count"], 3)
+            self.assertEqual(summary["definition_of_done_count"], summary["traced_definition_of_done_count"])
+            self.assertEqual(summary["missing_definition_of_done_count"], 0)
             self.assertEqual(summary["constraint_trace_status"], "complete")
             self.assertGreaterEqual(summary["constraint_trace_row_count"], 3)
             self.assertEqual(summary["constraint_trace_blocked_row_count"], 0)
@@ -371,6 +378,12 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("negative security boundary remains closed for bypass inputs", evidence_matrix["implementation_plan_sources"]["change_protected_invariants"])
             self.assertIn("negative boundary evidence is executed or blocked with a concrete reason", evidence_matrix["implementation_plan_sources"]["change_post_change_proofs"])
             self.assertTrue(evidence_matrix["implementation_plan_sources"]["acceptance_trace_complete"])
+            self.assertTrue(evidence_matrix["implementation_plan_sources"]["definition_of_done_trace_complete"])
+            self.assertEqual(
+                evidence_matrix["implementation_plan_sources"]["definition_of_done_count"],
+                evidence_matrix["implementation_plan_sources"]["traced_definition_of_done_count"],
+            )
+            self.assertEqual(evidence_matrix["implementation_plan_sources"]["missing_definition_of_done"], [])
             self.assertTrue(any("security_boundary_package" in row["package_ids"] for row in evidence_matrix["implementation_plan_sources"]["acceptance_trace_rows"]))
             self.assertTrue(evidence_matrix["implementation_plan_sources"]["constraint_trace_complete"])
             self.assertTrue(any("verification_evidence_package" in row["package_ids"] for row in evidence_matrix["implementation_plan_sources"]["constraint_trace_rows"]))
@@ -874,6 +887,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                 "change_post_change_proofs": change["post_change_proofs"],
                 "acceptance_trace_rows": acceptance_trace["rows"],
                 "acceptance_trace_complete": True,
+                "definition_of_done_trace_complete": acceptance_trace["definition_of_done_complete"],
+                "definition_of_done_count": acceptance_trace["definition_of_done_count"],
+                "traced_definition_of_done_count": acceptance_trace["traced_definition_of_done_count"],
+                "missing_definition_of_done": acceptance_trace["missing_definition_of_done"],
                 "constraint_trace_rows": [],
                 "constraint_trace_complete": False,
                 "assumption_rows": assumptions["assumptions"],

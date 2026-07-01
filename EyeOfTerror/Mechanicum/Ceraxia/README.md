@@ -101,7 +101,9 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
   proofs cannot disappear during handoff.
 - `acceptance_trace_matrix` is carried through the same path, so the review
   gate can verify that definition-of-done and quality-bar requirements still
-  map to planned evidence and CodeBrigade package ownership.
+  map to planned evidence and CodeBrigade package ownership. Ceraxia also
+  audits explicit definition-of-done trace counts in `review_gate.json`,
+  `run_summary.json`, and `evidence_matrix.json`.
 - `assumption_register` is also preserved through worker reports, so task,
   repository, verification, and specialized risk assumptions remain visible to
   review and orchestration.

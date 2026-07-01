@@ -848,11 +848,27 @@ def acceptance_trace_sufficiency_from_worker(worker_report: dict[str, Any]) -> d
     implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
     rows = implementation_plan.get("acceptance_trace_rows") if isinstance(implementation_plan.get("acceptance_trace_rows"), list) else []
     complete = implementation_plan.get("acceptance_trace_complete") is True
+    definition_of_done_complete = implementation_plan.get("definition_of_done_trace_complete") is True
+    definition_of_done_count = implementation_plan.get("definition_of_done_count")
+    traced_definition_of_done_count = implementation_plan.get("traced_definition_of_done_count")
+    missing_definition_of_done = implementation_plan.get("missing_definition_of_done") if isinstance(implementation_plan.get("missing_definition_of_done"), list) else []
     blockers: list[str] = []
     if not rows:
         blockers.append("acceptance trace matrix has no rows")
     if not complete:
         blockers.append("acceptance trace matrix is not complete")
+    if not definition_of_done_complete:
+        blockers.append("definition_of_done trace is not complete")
+    if not isinstance(definition_of_done_count, int) or definition_of_done_count < 1:
+        blockers.append("definition_of_done_count is missing")
+        definition_of_done_count = 0
+    if not isinstance(traced_definition_of_done_count, int):
+        blockers.append("traced_definition_of_done_count is missing")
+        traced_definition_of_done_count = 0
+    if traced_definition_of_done_count < definition_of_done_count:
+        blockers.append("not every definition_of_done item is traced")
+    if missing_definition_of_done:
+        blockers.append("missing definition_of_done items: " + ", ".join(str(item) for item in missing_definition_of_done))
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
             blockers.append(f"acceptance trace row {index} is not an object")
@@ -868,6 +884,10 @@ def acceptance_trace_sufficiency_from_worker(worker_report: dict[str, Any]) -> d
         "row_count": len(rows),
         "blocked_row_count": sum(1 for row in rows if isinstance(row, dict) and row.get("status") == "blocked"),
         "complete": complete,
+        "definition_of_done_complete": definition_of_done_complete,
+        "definition_of_done_count": definition_of_done_count,
+        "traced_definition_of_done_count": traced_definition_of_done_count,
+        "missing_definition_of_done": missing_definition_of_done,
         "blockers": blockers,
     }
 
@@ -1246,6 +1266,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Protected invariants: {change_control_sufficiency.get('protected_invariant_count', 0)}",
         f"Acceptance trace status: {acceptance_trace_sufficiency.get('status', '')}",
         f"Acceptance trace rows: {acceptance_trace_sufficiency.get('row_count', 0)}",
+        f"Definition-of-done trace complete: {str(acceptance_trace_sufficiency.get('definition_of_done_complete') is True).lower()}",
+        f"Definition-of-done traced: {acceptance_trace_sufficiency.get('traced_definition_of_done_count', 0)}/{acceptance_trace_sufficiency.get('definition_of_done_count', 0)}",
         f"Constraint trace status: {constraint_trace_sufficiency.get('status', '')}",
         f"Constraint trace rows: {constraint_trace_sufficiency.get('row_count', 0)}",
         f"Assumption register status: {assumption_sufficiency.get('status', '')}",
@@ -1451,6 +1473,12 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": "run_summary acceptance_trace_status disagrees with review_gate.json"})
     if summary.get("acceptance_trace_row_count", 0) != acceptance_trace_sufficiency.get("row_count", 0):
         findings.append({"severity": "blocker", "finding": "run_summary acceptance_trace_row_count disagrees with review_gate.json"})
+    if summary.get("definition_of_done_trace_complete") != acceptance_trace_sufficiency.get("definition_of_done_complete"):
+        findings.append({"severity": "blocker", "finding": "run_summary definition_of_done_trace_complete disagrees with review_gate.json"})
+    if summary.get("definition_of_done_count", 0) != acceptance_trace_sufficiency.get("definition_of_done_count", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary definition_of_done_count disagrees with review_gate.json"})
+    if summary.get("traced_definition_of_done_count", 0) != acceptance_trace_sufficiency.get("traced_definition_of_done_count", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary traced_definition_of_done_count disagrees with review_gate.json"})
     constraint_trace_sufficiency = review.get("constraint_trace_sufficiency") if isinstance(review.get("constraint_trace_sufficiency"), dict) else {}
     if summary.get("constraint_trace_status", "") != constraint_trace_sufficiency.get("status", ""):
         findings.append({"severity": "blocker", "finding": "run_summary constraint_trace_status disagrees with review_gate.json"})
@@ -1591,6 +1619,12 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     acceptance_trace_rows = plan_sources.get("acceptance_trace_rows") if isinstance(plan_sources.get("acceptance_trace_rows"), list) else []
     if summary.get("acceptance_trace_row_count", 0) != len(acceptance_trace_rows):
         findings.append({"severity": "blocker", "finding": "run_summary acceptance_trace_row_count disagrees with evidence_matrix.json"})
+    if summary.get("definition_of_done_trace_complete") != plan_sources.get("definition_of_done_trace_complete"):
+        findings.append({"severity": "blocker", "finding": "run_summary definition_of_done_trace_complete disagrees with evidence_matrix.json"})
+    if summary.get("definition_of_done_count", 0) != plan_sources.get("definition_of_done_count", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary definition_of_done_count disagrees with evidence_matrix.json"})
+    if summary.get("traced_definition_of_done_count", 0) != plan_sources.get("traced_definition_of_done_count", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary traced_definition_of_done_count disagrees with evidence_matrix.json"})
     constraint_trace_rows = plan_sources.get("constraint_trace_rows") if isinstance(plan_sources.get("constraint_trace_rows"), list) else []
     if summary.get("constraint_trace_row_count", 0) != len(constraint_trace_rows):
         findings.append({"severity": "blocker", "finding": "run_summary constraint_trace_row_count disagrees with evidence_matrix.json"})
@@ -1792,6 +1826,10 @@ def build_run_summary(
         "acceptance_trace_status": acceptance_trace_sufficiency.get("status", ""),
         "acceptance_trace_row_count": acceptance_trace_sufficiency.get("row_count", 0),
         "acceptance_trace_blocked_row_count": acceptance_trace_sufficiency.get("blocked_row_count", 0),
+        "definition_of_done_trace_complete": acceptance_trace_sufficiency.get("definition_of_done_complete", False),
+        "definition_of_done_count": acceptance_trace_sufficiency.get("definition_of_done_count", 0),
+        "traced_definition_of_done_count": acceptance_trace_sufficiency.get("traced_definition_of_done_count", 0),
+        "missing_definition_of_done_count": len(acceptance_trace_sufficiency.get("missing_definition_of_done", [])) if isinstance(acceptance_trace_sufficiency.get("missing_definition_of_done"), list) else 0,
         "constraint_trace_status": constraint_trace_sufficiency.get("status", ""),
         "constraint_trace_row_count": constraint_trace_sufficiency.get("row_count", 0),
         "constraint_trace_blocked_row_count": constraint_trace_sufficiency.get("blocked_row_count", 0),
@@ -1923,6 +1961,10 @@ def build_evidence_matrix(
             "change_post_change_proofs": implementation_plan.get("change_post_change_proofs", []),
             "acceptance_trace_rows": implementation_plan.get("acceptance_trace_rows", []),
             "acceptance_trace_complete": implementation_plan.get("acceptance_trace_complete", False),
+            "definition_of_done_trace_complete": implementation_plan.get("definition_of_done_trace_complete", False),
+            "definition_of_done_count": implementation_plan.get("definition_of_done_count", 0),
+            "traced_definition_of_done_count": implementation_plan.get("traced_definition_of_done_count", 0),
+            "missing_definition_of_done": implementation_plan.get("missing_definition_of_done", []),
             "constraint_trace_rows": implementation_plan.get("constraint_trace_rows", []),
             "constraint_trace_complete": implementation_plan.get("constraint_trace_complete", False),
             "assumption_rows": implementation_plan.get("assumption_rows", []),

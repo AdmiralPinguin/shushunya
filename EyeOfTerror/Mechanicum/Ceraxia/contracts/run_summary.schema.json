@@ -51,6 +51,10 @@
     "acceptance_trace_status",
     "acceptance_trace_row_count",
     "acceptance_trace_blocked_row_count",
+    "definition_of_done_trace_complete",
+    "definition_of_done_count",
+    "traced_definition_of_done_count",
+    "missing_definition_of_done_count",
     "constraint_trace_status",
     "constraint_trace_row_count",
     "constraint_trace_blocked_row_count",
@@ -248,6 +252,18 @@
       "type": "integer"
     },
     "acceptance_trace_blocked_row_count": {
+      "type": "integer"
+    },
+    "definition_of_done_trace_complete": {
+      "type": "boolean"
+    },
+    "definition_of_done_count": {
+      "type": "integer"
+    },
+    "traced_definition_of_done_count": {
+      "type": "integer"
+    },
+    "missing_definition_of_done_count": {
       "type": "integer"
     },
     "constraint_trace_status": {
