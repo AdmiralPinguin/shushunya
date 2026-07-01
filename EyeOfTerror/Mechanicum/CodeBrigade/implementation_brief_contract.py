@@ -148,6 +148,8 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief implementation_brief_blueprint must require constraint_trace_matrix")
     if "assumption_register" not in blueprint.get("required_sections", []):
         problems.append("brief implementation_brief_blueprint must require assumption_register")
+    if "worker_output_contract" not in blueprint.get("required_sections", []):
+        problems.append("brief implementation_brief_blueprint must require worker_output_contract")
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
     if len(packages) < 3:
@@ -233,12 +235,42 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
             continue
         if not isinstance(row.get("verification_evidence"), list):
             problems.append(f"brief surface_package_matrix verification_evidence must be a list: {row.get('surface', '<unknown>')}")
-        package_ids = row.get("package_ids") if isinstance(row.get("package_ids"), list) else []
-        if not package_ids:
+        matrix_package_ids = row.get("package_ids") if isinstance(row.get("package_ids"), list) else []
+        if not matrix_package_ids:
             problems.append(f"brief surface_package_matrix package_ids are required: {row.get('surface', '<unknown>')}")
-        missing_ids = sorted(package_id for package_id in package_ids if package_id not in review_order)
+        missing_ids = sorted(package_id for package_id in matrix_package_ids if package_id not in review_order)
         if missing_ids:
             problems.append("brief surface_package_matrix references unknown packages: " + ", ".join(missing_ids))
+    output_contract = brief.get("worker_output_contract") if isinstance(brief.get("worker_output_contract"), dict) else {}
+    if output_contract.get("target") != "CodeBrigade":
+        problems.append("brief worker_output_contract must target CodeBrigade")
+    required_reports = output_contract.get("required_reports") if isinstance(output_contract.get("required_reports"), list) else []
+    if len(required_reports) < 3:
+        problems.append("brief worker_output_contract required_reports are required")
+    required_package_statuses = output_contract.get("required_package_statuses") if isinstance(output_contract.get("required_package_statuses"), list) else []
+    if sorted(required_package_statuses) != sorted(package_ids):
+        problems.append("brief worker_output_contract required_package_statuses must match implementation packages")
+    output_rows = output_contract.get("package_result_contract") if isinstance(output_contract.get("package_result_contract"), list) else []
+    output_package_ids = [
+        row.get("package_id")
+        for row in output_rows
+        if isinstance(row, dict) and isinstance(row.get("package_id"), str) and row.get("package_id")
+    ]
+    if sorted(output_package_ids) != sorted(package_ids):
+        problems.append("brief worker_output_contract package_result_contract must cover every implementation package")
+    for row in output_rows:
+        if not isinstance(row, dict):
+            problems.append("brief worker_output_contract package_result_contract row must be an object")
+            continue
+        for key in ("package_id", "required_status_field", "allowed_statuses", "required_evidence_source", "acceptance_evidence", "blocker_contract"):
+            if key not in row:
+                problems.append(f"brief worker_output_contract row missing {key}: {row.get('package_id', '<unknown>')}")
+        if not isinstance(row.get("acceptance_evidence"), list) or not row.get("acceptance_evidence"):
+            problems.append(f"brief worker_output_contract row acceptance_evidence is required: {row.get('package_id', '<unknown>')}")
+    if len(output_contract.get("final_review_inputs", []) if isinstance(output_contract.get("final_review_inputs"), list) else []) < 4:
+        problems.append("brief worker_output_contract final_review_inputs are required")
+    if len(output_contract.get("failure_contract", []) if isinstance(output_contract.get("failure_contract"), list) else []) < 3:
+        problems.append("brief worker_output_contract failure_contract is required")
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
     if planning_review.get("decision") == "blocked":
         problems.append("brief planning_review_gate is blocked")
@@ -293,4 +325,6 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief code_brigade_handoff steps must include step and owner")
     if (handoff.get("package_dependency_graph") if isinstance(handoff.get("package_dependency_graph"), dict) else {}) != package_graph:
         problems.append("brief code_brigade_handoff package_dependency_graph must match implementation_work_packages")
+    if (handoff.get("worker_output_contract") if isinstance(handoff.get("worker_output_contract"), dict) else {}) != output_contract:
+        problems.append("brief code_brigade_handoff worker_output_contract must match worker_output_contract")
     return problems

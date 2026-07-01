@@ -31,6 +31,7 @@
     "investigation_playbook",
     "implementation_brief_blueprint",
     "implementation_work_packages",
+    "worker_output_contract",
     "planning_review_gate",
     "planning_dependency_map",
     "work_breakdown",
@@ -345,6 +346,54 @@
     },
     "implementation_work_packages": {
       "type": "object"
+    },
+    "worker_output_contract": {
+      "type": "object",
+      "required": ["target", "required_reports", "required_package_statuses", "package_result_contract", "final_review_inputs", "failure_contract", "handoff_to"],
+      "properties": {
+        "target": {
+          "const": "CodeBrigade"
+        },
+        "required_reports": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "required_package_statuses": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "package_result_contract": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "object",
+            "required": ["package_id", "required_status_field", "allowed_statuses", "required_evidence_source", "acceptance_evidence", "blocker_contract"]
+          }
+        },
+        "final_review_inputs": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "failure_contract": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "handoff_to": {
+          "const": "CodeBrigade"
+        }
+      }
     },
     "planning_review_gate": {
       "type": "object"

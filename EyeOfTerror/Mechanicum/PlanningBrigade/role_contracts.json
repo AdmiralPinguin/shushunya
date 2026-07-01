@@ -61,13 +61,14 @@
       "name": "RiskScribe",
       "authority": "record risks, acceptance gates, and CodeBrigade handoff constraints",
       "inputs": ["verification_strategy", "surface_verification_matrix", "impact_analysis", "work_breakdown"],
-      "outputs": ["risk_register", "quality_bar", "acceptance_contract", "acceptance_trace_matrix", "constraint_trace_matrix", "implementation_brief_blueprint", "implementation_work_packages", "surface_package_matrix", "planning_review_gate", "code_brigade_handoff"],
+      "outputs": ["risk_register", "quality_bar", "acceptance_contract", "acceptance_trace_matrix", "constraint_trace_matrix", "implementation_brief_blueprint", "implementation_work_packages", "worker_output_contract", "surface_package_matrix", "planning_review_gate", "code_brigade_handoff"],
       "quality_gates": [
         "acceptance evidence is concrete",
         "acceptance requirements are traced to packages and planned evidence",
         "user constraints are traced to packages and planned evidence",
         "CodeBrigade mutation preconditions are explicit",
         "implementation work packages cover every impacted surface",
+        "worker output contract covers every implementation package",
         "authority returns to Ceraxia"
       ],
       "may_mutate_source": false,

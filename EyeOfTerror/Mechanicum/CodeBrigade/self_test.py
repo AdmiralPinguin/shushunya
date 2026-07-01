@@ -289,6 +289,7 @@ def valid_brief() -> dict:
                 "acceptance_trace_matrix",
                 "constraint_trace_matrix",
                 "assumption_register",
+                "worker_output_contract",
             ],
             "mutation_preconditions": [
                 "implementation brief validates",
@@ -371,6 +372,77 @@ def valid_brief() -> dict:
                 "complete": True,
                 "blockers": [],
             },
+        },
+        "worker_output_contract": {
+            "role": "PlanningBrigade",
+            "target": "CodeBrigade",
+            "required_reports": [
+                "worker_report.json",
+                "verification_report.json",
+                "review_gate.json",
+                "final_report.md",
+            ],
+            "required_package_statuses": [
+                "evidence_survey_package",
+                "minimal_patch_package",
+                "verification_evidence_package",
+            ],
+            "package_result_contract": [
+                {
+                    "package_id": "evidence_survey_package",
+                    "required_status_field": "work_package_statuses[].status",
+                    "allowed_statuses": ["planned", "implemented", "blocked"],
+                    "required_evidence_source": "work_package_statuses[].evidence_source",
+                    "acceptance_evidence": ["worker_report.json", "verification_report.json"],
+                    "constraint_evidence": [],
+                    "blocker_contract": [
+                        "blocked packages must name a concrete blocker",
+                        "blocked packages must preserve dependency context",
+                        "blocked verification packages must return command output or execution blocker",
+                    ],
+                },
+                {
+                    "package_id": "minimal_patch_package",
+                    "required_status_field": "work_package_statuses[].status",
+                    "allowed_statuses": ["planned", "implemented", "blocked"],
+                    "required_evidence_source": "work_package_statuses[].evidence_source",
+                    "acceptance_evidence": ["targeted behavior verification"],
+                    "constraint_evidence": [],
+                    "blocker_contract": [
+                        "blocked packages must name a concrete blocker",
+                        "blocked packages must preserve dependency context",
+                        "blocked verification packages must return command output or execution blocker",
+                    ],
+                },
+                {
+                    "package_id": "verification_evidence_package",
+                    "required_status_field": "work_package_statuses[].status",
+                    "allowed_statuses": ["planned", "implemented", "blocked"],
+                    "required_evidence_source": "work_package_statuses[].evidence_source",
+                    "acceptance_evidence": ["targeted behavior verification"],
+                    "constraint_evidence": ["targeted behavior verification"],
+                    "blocker_contract": [
+                        "blocked packages must name a concrete blocker",
+                        "blocked packages must preserve dependency context",
+                        "blocked verification packages must return command output or execution blocker",
+                    ],
+                },
+            ],
+            "final_review_inputs": [
+                "worker_report.work_package_statuses",
+                "worker_report.changed_files",
+                "verification_report.commands_executed",
+                "review_gate.findings",
+            ],
+            "failure_contract": [
+                "return blocked status instead of claiming partial success",
+                "name residual blockers in worker_report.notes",
+                "queue diagnostic repair when verification output identifies a repo-local failure",
+            ],
+            "diagnostic_repair_required_when": [
+                "same verification failure repeats after a mutation",
+            ],
+            "handoff_to": "CodeBrigade",
         },
         "planning_review_gate": {
             "decision": "ready_for_ceraxia_review",
@@ -513,6 +585,77 @@ def valid_brief() -> dict:
         "suggested_verification_commands": ["python -m pytest test_app.py"],
         "code_brigade_handoff": {
             "target": "CodeBrigade",
+            "worker_output_contract": {
+                "role": "PlanningBrigade",
+                "target": "CodeBrigade",
+                "required_reports": [
+                    "worker_report.json",
+                    "verification_report.json",
+                    "review_gate.json",
+                    "final_report.md",
+                ],
+                "required_package_statuses": [
+                    "evidence_survey_package",
+                    "minimal_patch_package",
+                    "verification_evidence_package",
+                ],
+                "package_result_contract": [
+                    {
+                        "package_id": "evidence_survey_package",
+                        "required_status_field": "work_package_statuses[].status",
+                        "allowed_statuses": ["planned", "implemented", "blocked"],
+                        "required_evidence_source": "work_package_statuses[].evidence_source",
+                        "acceptance_evidence": ["worker_report.json", "verification_report.json"],
+                        "constraint_evidence": [],
+                        "blocker_contract": [
+                            "blocked packages must name a concrete blocker",
+                            "blocked packages must preserve dependency context",
+                            "blocked verification packages must return command output or execution blocker",
+                        ],
+                    },
+                    {
+                        "package_id": "minimal_patch_package",
+                        "required_status_field": "work_package_statuses[].status",
+                        "allowed_statuses": ["planned", "implemented", "blocked"],
+                        "required_evidence_source": "work_package_statuses[].evidence_source",
+                        "acceptance_evidence": ["targeted behavior verification"],
+                        "constraint_evidence": [],
+                        "blocker_contract": [
+                            "blocked packages must name a concrete blocker",
+                            "blocked packages must preserve dependency context",
+                            "blocked verification packages must return command output or execution blocker",
+                        ],
+                    },
+                    {
+                        "package_id": "verification_evidence_package",
+                        "required_status_field": "work_package_statuses[].status",
+                        "allowed_statuses": ["planned", "implemented", "blocked"],
+                        "required_evidence_source": "work_package_statuses[].evidence_source",
+                        "acceptance_evidence": ["targeted behavior verification"],
+                        "constraint_evidence": ["targeted behavior verification"],
+                        "blocker_contract": [
+                            "blocked packages must name a concrete blocker",
+                            "blocked packages must preserve dependency context",
+                            "blocked verification packages must return command output or execution blocker",
+                        ],
+                    },
+                ],
+                "final_review_inputs": [
+                    "worker_report.work_package_statuses",
+                    "worker_report.changed_files",
+                    "verification_report.commands_executed",
+                    "review_gate.findings",
+                ],
+                "failure_contract": [
+                    "return blocked status instead of claiming partial success",
+                    "name residual blockers in worker_report.notes",
+                    "queue diagnostic repair when verification output identifies a repo-local failure",
+                ],
+                "diagnostic_repair_required_when": [
+                    "same verification failure repeats after a mutation",
+                ],
+                "handoff_to": "CodeBrigade",
+            },
             "diagnostic_repair_plan": {
                 "target": "CodeBrigade",
                 "max_repair_attempts": 3,
@@ -674,6 +817,12 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve execution intent: {plan}")
     if plan["diagnostic_repair_plan"]["target"] != "CodeBrigade":
         raise AssertionError(f"implementation plan should preserve diagnostic repair target: {plan}")
+    if plan["worker_output_contract"]["target"] != "CodeBrigade":
+        raise AssertionError(f"implementation plan should preserve worker output contract target: {plan}")
+    if plan["worker_output_contract"]["required_package_statuses"] != plan["work_package_review_order"]:
+        raise AssertionError(f"worker output contract should track package review order: {plan}")
+    if not any(row["package_id"] == "minimal_patch_package" for row in plan["worker_output_contract"]["package_result_contract"]):
+        raise AssertionError(f"worker output contract should require package result rows: {plan}")
     if autonomous_request["repair_loop_contract"]["max_attempts"] != plan["diagnostic_repair_plan"]["max_repair_attempts"]:
         raise AssertionError(f"autonomous request should derive repair attempts from planning: {dry_report}")
     if autonomous_request["repair_loop_contract"]["must_read_before_edit"] != plan["diagnostic_repair_plan"]["read_before_repair"]:

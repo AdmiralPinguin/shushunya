@@ -1145,6 +1145,7 @@ def implementation_brief_blueprint(
             "execution_forecast",
             "expert_quality_plan",
             "implementation_work_packages",
+            "worker_output_contract",
             "planning_review_gate",
             "change_control_plan",
         ],
@@ -1740,6 +1741,7 @@ def code_brigade_handoff(
     work_packages: dict[str, Any],
     acceptance_trace: dict[str, Any],
     repair_plan: dict[str, Any],
+    output_contract: dict[str, Any],
 ) -> dict[str, Any]:
     steps = [
         {
@@ -1798,9 +1800,89 @@ def code_brigade_handoff(
         "package_dependency_graph": work_packages.get("package_dependency_graph", {}),
         "global_handoff_criteria": work_packages.get("global_handoff_criteria", []),
         "diagnostic_repair_plan": repair_plan,
+        "worker_output_contract": output_contract,
         "acceptance_trace_required": acceptance_trace.get("complete") is True,
         "acceptance_trace_row_count": acceptance_trace.get("row_count", 0),
         "required_quality_evidence": quality["must_have_evidence"],
+    }
+
+
+def worker_output_contract(
+    work_packages: dict[str, Any],
+    acceptance_trace: dict[str, Any],
+    constraint_trace: dict[str, Any],
+    repair_plan: dict[str, Any],
+) -> dict[str, Any]:
+    packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
+    trace_rows = acceptance_trace.get("rows") if isinstance(acceptance_trace.get("rows"), list) else []
+    constraint_rows = constraint_trace.get("rows") if isinstance(constraint_trace.get("rows"), list) else []
+    package_rows: list[dict[str, Any]] = []
+    for package in packages:
+        if not isinstance(package, dict):
+            continue
+        package_id = str(package.get("id") or "")
+        if not package_id:
+            continue
+        acceptance_evidence = sorted(
+            {
+                str(item)
+                for row in trace_rows
+                if isinstance(row, dict) and package_id in (row.get("package_ids") if isinstance(row.get("package_ids"), list) else [])
+                for item in (row.get("planned_evidence") if isinstance(row.get("planned_evidence"), list) else [])
+                if str(item)
+            }
+        )
+        constraint_evidence = sorted(
+            {
+                str(item)
+                for row in constraint_rows
+                if isinstance(row, dict) and package_id in (row.get("package_ids") if isinstance(row.get("package_ids"), list) else [])
+                for item in (row.get("planned_evidence") if isinstance(row.get("planned_evidence"), list) else [])
+                if str(item)
+            }
+        )
+        if not acceptance_evidence:
+            acceptance_evidence = ["worker_report.json", "verification_report.json"]
+        package_rows.append(
+            {
+                "package_id": package_id,
+                "required_status_field": "work_package_statuses[].status",
+                "allowed_statuses": ["planned", "implemented", "blocked"],
+                "required_evidence_source": "work_package_statuses[].evidence_source",
+                "acceptance_evidence": acceptance_evidence,
+                "constraint_evidence": constraint_evidence,
+                "blocker_contract": [
+                    "blocked packages must name a concrete blocker",
+                    "blocked packages must preserve dependency context",
+                    "blocked verification packages must return command output or execution blocker",
+                ],
+            }
+        )
+    return {
+        "role": "PlanningBrigade",
+        "target": "CodeBrigade",
+        "required_reports": [
+            "worker_report.json",
+            "verification_report.json",
+            "review_gate.json",
+            "final_report.md",
+        ],
+        "required_package_statuses": [row["package_id"] for row in package_rows],
+        "package_result_contract": package_rows,
+        "final_review_inputs": [
+            "worker_report.work_package_statuses",
+            "worker_report.changed_files",
+            "verification_report.commands_executed",
+            "review_gate.findings",
+            "diagnostic_repair_request.json when verification fails",
+        ],
+        "failure_contract": [
+            "return blocked status instead of claiming partial success",
+            "name residual blockers in worker_report.notes",
+            "queue diagnostic repair when verification output identifies a repo-local failure",
+        ],
+        "diagnostic_repair_required_when": repair_plan.get("stop_conditions", []) if isinstance(repair_plan.get("stop_conditions"), list) else [],
+        "handoff_to": "CodeBrigade",
     }
 
 
@@ -1829,8 +1911,9 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     package_matrix = surface_package_matrix(surface_matrix, work_packages)
     acceptance_trace = acceptance_trace_matrix(problem, quality, acceptance, verification, surface_matrix, work_packages)
     constraint_trace = constraint_trace_matrix(problem, work_packages, acceptance_trace)
+    output_contract = worker_output_contract(work_packages, acceptance_trace, constraint_trace, repair_plan)
     review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, change_control, work_packages, package_matrix, acceptance_trace, constraint_trace)
-    handoff = code_brigade_handoff(triage, verification, quality, work_packages, acceptance_trace, repair_plan)
+    handoff = code_brigade_handoff(triage, verification, quality, work_packages, acceptance_trace, repair_plan, output_contract)
     return {
         "ok": bool(task),
         "contract_version": CONTRACT_VERSION,
@@ -1861,6 +1944,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "constraint_trace_matrix": constraint_trace,
         "implementation_brief_blueprint": blueprint,
         "implementation_work_packages": work_packages,
+        "worker_output_contract": output_contract,
         "planning_review_gate": review,
         "code_brigade_handoff": handoff,
         "next_action": {

@@ -272,6 +272,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "investigation_playbook": packet.get("investigation_playbook", {}),
         "implementation_brief_blueprint": packet.get("implementation_brief_blueprint", {}),
         "implementation_work_packages": packet.get("implementation_work_packages", {}),
+        "worker_output_contract": packet.get("worker_output_contract", {}),
         "planning_review_gate": planning_review,
         "planning_dependency_map": packet.get("dependency_map", {}),
         "work_breakdown": packet.get("work_breakdown", {}),
@@ -825,6 +826,50 @@ def assumption_sufficiency_from_worker(worker_report: dict[str, Any]) -> dict[st
     }
 
 
+def worker_output_contract_sufficiency_from_worker(worker_report: dict[str, Any]) -> dict[str, Any]:
+    implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
+    output_contract = implementation_plan.get("worker_output_contract") if isinstance(implementation_plan.get("worker_output_contract"), dict) else {}
+    package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
+    status_by_package = {
+        str(row.get("package_id") or ""): row
+        for row in package_statuses
+        if isinstance(row, dict) and row.get("package_id")
+    }
+    required_packages = output_contract.get("required_package_statuses") if isinstance(output_contract.get("required_package_statuses"), list) else []
+    contract_rows = output_contract.get("package_result_contract") if isinstance(output_contract.get("package_result_contract"), list) else []
+    allowed_statuses = {"planned", "implemented", "blocked"}
+    blockers: list[str] = []
+    if not output_contract:
+        blockers.append("worker output contract is missing from implementation plan")
+    if len(output_contract.get("required_reports", []) if isinstance(output_contract.get("required_reports"), list) else []) < 3:
+        blockers.append("worker output contract does not name required reports")
+    for package_id in [str(item) for item in required_packages if str(item)]:
+        status_row = status_by_package.get(package_id)
+        if not status_row:
+            blockers.append(f"worker output contract required package status is missing: {package_id}")
+            continue
+        if status_row.get("status") not in allowed_statuses:
+            blockers.append(f"worker output contract package has invalid status: {package_id}")
+        if not status_row.get("evidence_source"):
+            blockers.append(f"worker output contract package has no evidence source: {package_id}")
+        if status_row.get("status") == "blocked" and not worker_report.get("notes"):
+            blockers.append(f"blocked package has no worker_report notes: {package_id}")
+    contract_package_ids = [
+        str(row.get("package_id") or "")
+        for row in contract_rows
+        if isinstance(row, dict) and row.get("package_id")
+    ]
+    if sorted(contract_package_ids) != sorted(str(item) for item in required_packages if str(item)):
+        blockers.append("worker output contract package rows do not match required package statuses")
+    return {
+        "status": "complete" if not blockers else "blocked",
+        "required_package_count": len(required_packages),
+        "reported_package_count": len(package_statuses),
+        "contract_row_count": len(contract_rows),
+        "blockers": blockers,
+    }
+
+
 def review_gate(
     packet: dict[str, Any],
     brief: dict[str, Any],
@@ -913,6 +958,7 @@ def review_gate(
     acceptance_trace_sufficiency = acceptance_trace_sufficiency_from_worker(worker_report)
     constraint_trace_sufficiency = constraint_trace_sufficiency_from_worker(worker_report)
     assumption_sufficiency = assumption_sufficiency_from_worker(worker_report)
+    worker_output_contract_sufficiency = worker_output_contract_sufficiency_from_worker(worker_report)
     diagnostic_repair_queue = build_diagnostic_repair_queue(brief, verification_report, worker_report)
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
@@ -936,6 +982,8 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "constraint trace matrix is incomplete: " + "; ".join(constraint_trace_sufficiency["blockers"])})
     if assumption_sufficiency["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "assumption register is incomplete: " + "; ".join(assumption_sufficiency["blockers"])})
+    if worker_output_contract_sufficiency["status"] == "blocked":
+        findings.append({"severity": "blocker", "finding": "worker output contract is incomplete: " + "; ".join(worker_output_contract_sufficiency["blockers"])})
     if worker_report["dry_run"] and package_status_counts["planned"]:
         warnings.append({"severity": "warning", "finding": "work packages are planned but not implemented"})
     if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution", "passed"}:
@@ -991,6 +1039,7 @@ def review_gate(
         "acceptance_trace_sufficiency": acceptance_trace_sufficiency,
         "constraint_trace_sufficiency": constraint_trace_sufficiency,
         "assumption_sufficiency": assumption_sufficiency,
+        "worker_output_contract_sufficiency": worker_output_contract_sufficiency,
         "diagnostic_repair_queue": diagnostic_repair_queue,
         "checked_against": [
             "planning packet completeness",
@@ -1005,6 +1054,7 @@ def review_gate(
             "acceptance traceability coverage",
             "constraint traceability coverage",
             "assumption register coverage",
+            "worker output contract coverage",
             "worker report honesty",
         ],
     }

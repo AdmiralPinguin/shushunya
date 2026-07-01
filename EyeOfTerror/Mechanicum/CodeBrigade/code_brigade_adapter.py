@@ -29,6 +29,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     playbook = brief.get("investigation_playbook") if isinstance(brief.get("investigation_playbook"), dict) else {}
     blueprint = brief.get("implementation_brief_blueprint") if isinstance(brief.get("implementation_brief_blueprint"), dict) else {}
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
+    output_contract = brief.get("worker_output_contract") if isinstance(brief.get("worker_output_contract"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
     package_blocking_policies = {
         str(package.get("id") or ""): package.get("blocking_policy", [])
@@ -91,6 +92,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "diagnostic_repair_plan": repair_plan,
         "mutation_preconditions": blueprint.get("mutation_preconditions", []) if isinstance(blueprint.get("mutation_preconditions"), list) else [],
         "implementation_work_packages": packages,
+        "worker_output_contract": output_contract,
         "work_package_review_order": work_packages.get("review_order", []) if isinstance(work_packages.get("review_order"), list) else [],
         "work_package_dependency_graph": work_packages.get("package_dependency_graph", {}) if isinstance(work_packages.get("package_dependency_graph"), dict) else {},
         "work_package_blocking_policies": package_blocking_policies,

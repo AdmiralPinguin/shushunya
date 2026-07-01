@@ -189,6 +189,46 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
         }
         for index, package_id in enumerate(ordered_packages)
     ]
+    worker_output_contract = {
+        "role": "PlanningBrigade",
+        "target": "CodeBrigade",
+        "required_reports": [
+            "worker_report.json",
+            "verification_report.json",
+            "review_gate.json",
+            "final_report.md",
+        ],
+        "required_package_statuses": ordered_packages,
+        "package_result_contract": [
+            {
+                "package_id": package_id,
+                "required_status_field": "work_package_statuses[].status",
+                "allowed_statuses": ["planned", "implemented", "blocked"],
+                "required_evidence_source": "work_package_statuses[].evidence_source",
+                "acceptance_evidence": ["execution_result.json", "rerun failed command"],
+                "constraint_evidence": ["changed files exclude tests"],
+                "blocker_contract": [
+                    "blocked packages must name a concrete blocker",
+                    "blocked packages must preserve dependency context",
+                    "blocked verification packages must return command output or execution blocker",
+                ],
+            }
+            for package_id in ordered_packages
+        ],
+        "final_review_inputs": [
+            "worker_report.work_package_statuses",
+            "worker_report.changed_files",
+            "verification_report.commands_executed",
+            "review_gate.findings",
+        ],
+        "failure_contract": [
+            "return blocked status instead of claiming partial success",
+            "name residual blockers in worker_report.notes",
+            "queue diagnostic repair when verification output identifies a repo-local failure",
+        ],
+        "diagnostic_repair_required_when": request.get("diagnostic_repair_plan", {}).get("stop_conditions", []) if isinstance(request.get("diagnostic_repair_plan"), dict) else [],
+        "handoff_to": "CodeBrigade",
+    }
     return {
         "kind": "ceraxia_code_brigade_implementation_brief",
         "contract_version": CONTRACT_VERSION,
@@ -282,7 +322,7 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
         },
         "implementation_brief_blueprint": {
             "target": "CodeBrigade",
-            "required_sections": ["expert_quality_plan", "investigation_playbook", "change_control_plan", "acceptance_trace_matrix", "constraint_trace_matrix", "assumption_register"],
+            "required_sections": ["expert_quality_plan", "investigation_playbook", "change_control_plan", "acceptance_trace_matrix", "constraint_trace_matrix", "assumption_register", "worker_output_contract"],
             "mutation_preconditions": ["diagnostic repair request validates", "execution preflight passes"],
         },
         "implementation_work_packages": {
@@ -298,6 +338,7 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
             },
             "global_handoff_criteria": ["repair item is resolved or blocked", "tests are preserved", "verification command is ready to rerun"],
         },
+        "worker_output_contract": worker_output_contract,
         "planning_review_gate": {"decision": "ready_for_ceraxia_review", "score": 90, "blockers": [], "warnings": []},
         "planning_dependency_map": {"critical_path": ["task_contract", "repo_evidence", "design_decision", "verification_contract", "implementation_brief"]},
         "work_breakdown": {
@@ -327,6 +368,7 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
         "code_brigade_handoff": {
             "target": "CodeBrigade",
             "steps": [{"step": "execute_guarded_diagnostic_repair", "owner": "CodeBrigade"}],
+            "worker_output_contract": worker_output_contract,
             "package_dependency_graph": {
                 "rows": graph_rows,
                 "root_packages": [ordered_packages[0]],

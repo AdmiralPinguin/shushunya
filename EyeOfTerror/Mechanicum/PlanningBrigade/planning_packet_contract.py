@@ -38,6 +38,7 @@ REQUIRED_PACKET_OBJECTS = [
     "constraint_trace_matrix",
     "implementation_brief_blueprint",
     "implementation_work_packages",
+    "worker_output_contract",
     "planning_review_gate",
     "code_brigade_handoff",
 ]
@@ -318,6 +319,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("implementation brief blueprint must require constraint_trace_matrix")
     if "assumption_register" not in list_field(blueprint.get("required_sections")):
         problems.append("implementation brief blueprint must require assumption_register")
+    if "worker_output_contract" not in list_field(blueprint.get("required_sections")):
+        problems.append("implementation brief blueprint must require worker_output_contract")
 
     work_packages = object_field(packet, "implementation_work_packages")
     packages = list_field(work_packages.get("packages"))
@@ -418,6 +421,38 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
     if package_matrix.get("complete") is not True:
         problems.extend(f"surface package matrix blocked: {item}" for item in list_field(package_matrix.get("blockers")))
 
+    output_contract = object_field(packet, "worker_output_contract")
+    if output_contract.get("target") != "CodeBrigade":
+        problems.append("worker output contract must target CodeBrigade")
+    if not isinstance(output_contract.get("required_reports"), list) or len(output_contract.get("required_reports", [])) < 3:
+        problems.append("worker output contract must require reports")
+    required_statuses = list_field(output_contract.get("required_package_statuses"))
+    if sorted(required_statuses) != sorted(package_ids):
+        problems.append("worker output contract package statuses must match implementation packages")
+    package_rows = list_field(output_contract.get("package_result_contract"))
+    package_row_ids = [
+        row.get("package_id")
+        for row in package_rows
+        if isinstance(row, dict) and isinstance(row.get("package_id"), str) and row.get("package_id")
+    ]
+    if sorted(package_row_ids) != sorted(package_ids):
+        problems.append("worker output contract package result rows must match implementation packages")
+    for row in package_rows:
+        if not isinstance(row, dict):
+            problems.append("worker output contract row must be an object")
+            continue
+        for key in ("package_id", "required_status_field", "required_evidence_source", "acceptance_evidence", "blocker_contract"):
+            if key not in row:
+                problems.append(f"worker output contract row missing {key}: {row.get('package_id', '<unknown>')}")
+        if not list_field(row.get("acceptance_evidence")):
+            problems.append(f"worker output contract row needs acceptance evidence: {row.get('package_id', '<unknown>')}")
+    if not isinstance(output_contract.get("final_review_inputs"), list) or len(output_contract.get("final_review_inputs", [])) < 4:
+        problems.append("worker output contract must name final review inputs")
+    if not isinstance(output_contract.get("failure_contract"), list) or len(output_contract.get("failure_contract", [])) < 3:
+        problems.append("worker output contract must name failure contract")
+    if output_contract.get("handoff_to") != "CodeBrigade":
+        problems.append("worker output contract must hand off to CodeBrigade")
+
     planning_review = object_field(packet, "planning_review_gate")
     if planning_review.get("decision") not in {"ready_for_ceraxia_review", "revise", "blocked"}:
         problems.append("planning review gate must include a valid decision")
@@ -439,6 +474,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("code brigade handoff global_handoff_criteria must match implementation work packages")
     if object_field(handoff, "diagnostic_repair_plan") != repair_plan:
         problems.append("code brigade handoff diagnostic_repair_plan must match planning packet")
+    if object_field(handoff, "worker_output_contract") != output_contract:
+        problems.append("code brigade handoff worker_output_contract must match planning packet")
     if handoff.get("acceptance_trace_required") is not True:
         problems.append("code brigade handoff must require acceptance trace")
     if handoff.get("acceptance_trace_row_count") != trace_matrix.get("row_count"):

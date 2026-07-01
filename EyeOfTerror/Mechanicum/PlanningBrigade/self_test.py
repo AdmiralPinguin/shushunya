@@ -155,6 +155,10 @@ def main() -> int:
         or "traceback_files" not in security_packet["diagnostic_repair_plan"]["read_before_repair"]
         or not any("zero-test diagnostics" in item for item in security_packet["diagnostic_repair_plan"]["stop_conditions"])
         or not security_packet["diagnostic_repair_plan"]["requires_ceraxia_review_after_each_attempt"]
+        or security_packet["worker_output_contract"]["target"] != "CodeBrigade"
+        or "worker_report.json" not in security_packet["worker_output_contract"]["required_reports"]
+        or sorted(security_packet["worker_output_contract"]["required_package_statuses"]) != sorted(security_packet["implementation_work_packages"]["review_order"])
+        or not any(row["package_id"] == "security_boundary_package" and row["acceptance_evidence"] for row in security_packet["worker_output_contract"]["package_result_contract"])
         or not security_packet["verification_strategy"]["broad_verification_required"]
         or "negative boundary test or explicit blocker is present" not in security_packet["quality_bar"]["must_have_evidence"]
         or "required negative tests are present, executed, or explicitly blocked" not in security_packet["acceptance_contract"]["must_prove"]
@@ -167,6 +171,7 @@ def main() -> int:
         or security_packet["planning_review_gate"]["score"] < 80
         or "prove_negative_boundary" not in [step["step"] for step in security_packet["code_brigade_handoff"]["steps"]]
         or security_packet["code_brigade_handoff"]["diagnostic_repair_plan"] != security_packet["diagnostic_repair_plan"]
+        or security_packet["code_brigade_handoff"]["worker_output_contract"] != security_packet["worker_output_contract"]
     ):
         raise AssertionError(f"security planning packet is too weak: {security_packet}")
     selected_security_option = next(option for option in security_packet["design_options"]["options"] if option["name"] == security_packet["design_options"]["selected_strategy"])
