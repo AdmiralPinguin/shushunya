@@ -12,7 +12,7 @@ def main() -> int:
         raise AssertionError(f"status should expose the architecture contract: {status}")
     by_name = {item["name"]: item for item in status["components"]}
     code_maturity = by_name["CodeBrigade"]["maturity"]
-    if "explicit_patch_adapter" not in code_maturity or "preflight" not in code_maturity or "allowlisted_verification" not in code_maturity:
+    if "ast_patch_adapter" not in code_maturity or "preflight" not in code_maturity or "allowlisted_verification" not in code_maturity:
         raise AssertionError(f"CodeBrigade should honestly report preflight and verification-adapter maturity: {by_name['CodeBrigade']}")
     ceraxia_maturity = by_name["Ceraxia"]["maturity"]
     if not all(part in ceraxia_maturity for part in ["dry_run_controller", "planning_quality", "survey_gate", "verification"]):

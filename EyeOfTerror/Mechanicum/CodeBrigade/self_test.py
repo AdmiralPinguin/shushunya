@@ -244,6 +244,29 @@ def main() -> int:
         if "return True" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("explicit patch execution did not update app.py")
     with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def total(left, right):\n    return left - right\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import total\n\ndef test_total():\n    assert total(2, 3) == 5\n", encoding="utf-8")
+        ast_patch_brief = valid_brief()
+        ast_patch_brief["repo_path"] = tmp
+        ast_patch_brief["task"] += "\nCERAXIA_PATCH:\n" + json.dumps(
+            {
+                "operations": [
+                    {
+                        "type": "replace_return_expression",
+                        "path": "app.py",
+                        "function_name": "total",
+                        "old_expression": "left - right",
+                        "new_expression": "left + right",
+                    }
+                ]
+            }
+        )
+        ast_patch_report = code_brigade_adapter.build_worker_report(ast_patch_brief, dry_run=False)
+        if ast_patch_report["status"] != "implemented" or ast_patch_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"AST return patch should report implemented changed files: {ast_patch_report}")
+        if "return left + right" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("AST return patch did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
         preflight_brief = valid_brief()

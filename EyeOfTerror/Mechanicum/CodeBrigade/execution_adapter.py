@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import ast
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +50,47 @@ def surveyed_paths(brief: dict[str, Any]) -> set[str]:
     return values
 
 
+def simple_function_return_segment(source_path: Path, function_name: str) -> dict[str, Any]:
+    text = source_path.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.name != function_name:
+            continue
+        returns = [child for child in ast.walk(node) if isinstance(child, ast.Return)]
+        if len(returns) != 1 or returns[0].value is None:
+            return {}
+        try:
+            return_expr = ast.get_source_segment(text, returns[0].value) or ""
+        except Exception:
+            return_expr = ""
+        return {"line": returns[0].lineno, "return_expr": return_expr.strip()}
+    return {}
+
+
+def replace_return_expression_in_file(source_path: Path, function_name: str, old_expression: str, new_expression: str) -> None:
+    text = source_path.read_text(encoding="utf-8")
+    function = simple_function_return_segment(source_path, function_name)
+    if function.get("return_expr") != old_expression:
+        raise ValueError(f"current return expression for {function_name} does not match expected expression")
+    try:
+        ast.parse(new_expression, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"new return expression is not valid Python: {exc.msg}") from exc
+    line_number = int(function.get("line") or 0)
+    lines = text.splitlines(keepends=True)
+    if line_number < 1 or line_number > len(lines):
+        raise ValueError(f"return line for {function_name} is out of range")
+    line = lines[line_number - 1]
+    match = re.match(r"^(\s*)return\s+(.+?)(\r?\n)?$", line)
+    if not match:
+        raise ValueError(f"return line for {function_name} is not a simple single-line return")
+    if match.group(2).strip() != old_expression:
+        raise ValueError(f"return line for {function_name} does not match expected expression")
+    newline = match.group(3) or ""
+    lines[line_number - 1] = f"{match.group(1)}return {new_expression}{newline}"
+    source_path.write_text("".join(lines), encoding="utf-8")
+
+
 def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, Any]) -> tuple[list[str], str]:
     allowed_paths = surveyed_paths(brief)
     originals: dict[Path, str | None] = {}
@@ -85,6 +128,17 @@ def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, A
                 if path.read_text(encoding="utf-8") != content and operation.get("overwrite") is not True:
                     raise ValueError(f"write_file target differs and overwrite is not true: {rel_path}")
                 path.write_text(content, encoding="utf-8")
+            elif op_type == "replace_return_expression":
+                function_name = operation.get("function_name")
+                old_expression = operation.get("old_expression")
+                new_expression = operation.get("new_expression")
+                if not isinstance(function_name, str) or not function_name:
+                    raise ValueError(f"replace_return_expression requires function_name: {rel_path}")
+                if not isinstance(old_expression, str) or not isinstance(new_expression, str):
+                    raise ValueError(f"replace_return_expression requires old_expression and new_expression: {rel_path}")
+                if path.suffix != ".py":
+                    raise ValueError(f"replace_return_expression only supports Python files: {rel_path}")
+                replace_return_expression_in_file(path, function_name, old_expression, new_expression)
             else:
                 raise ValueError(f"unsupported patch operation type: {op_type}")
             if rel_path not in changed:

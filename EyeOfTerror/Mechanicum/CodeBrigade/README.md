@@ -34,9 +34,10 @@ dry-run handoff. Real source execution is intentionally narrow: only explicit
 `implementation_brief_contract.py` owns brief validation shared by the report
 adapter and execution adapter.
 `execution_adapter.py` is that boundary today. It applies explicit
-`CERAXIA_PATCH` `replace` and guarded `write_file` operations only after brief
-validation and read-only preflight; tasks without that marker still return a
-formal `code_brigade_execution_result` blocker.
+`CERAXIA_PATCH` `replace`, `replace_return_expression`, and guarded
+`write_file` operations only after brief validation and read-only preflight;
+tasks without that marker still return a formal `code_brigade_execution_result`
+blocker.
 `execution_contract.py` owns the formal execution result builders so the
 execution boundary does not depend on the full worker-report adapter.
 `execution_preflight.py` performs read-only mutation preflight checks for the
