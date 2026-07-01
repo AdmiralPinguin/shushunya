@@ -59,6 +59,10 @@ def run_dry_security_trial(root: Path) -> dict[str, Any]:
     require(artifacts["summary"]["maturity"] == "dry_run_controller_with_code_brigade_handoff_adapter", "dry handoff maturity should remain honest", artifacts["summary"])
     require(artifacts["brief"]["risk_level"] == "high", "security trial should be high risk", artifacts["brief"])
     require(len(artifacts["brief"]["implementation_work_packages"]["packages"]) >= 5, "security trial should create cross-surface work packages", artifacts["brief"])
+    require(artifacts["brief"]["constraint_trace_matrix"]["complete"], "dry security brief must preserve constraint trace", artifacts["brief"])
+    require(artifacts["worker"]["implementation_plan"]["constraint_trace_complete"], "dry security worker plan must preserve constraint trace", artifacts["worker"])
+    require(artifacts["summary"]["constraint_trace_status"] == "complete", "dry security summary must expose constraint trace status", artifacts["summary"])
+    require(artifacts["review"]["constraint_trace_sufficiency"]["status"] == "complete", "dry security review must audit constraint trace", artifacts["review"])
     require(artifacts["audit"]["decision"] == "passed", "dry security run package audit should pass", artifacts["audit"])
     return {"id": "dry-security-planning-handoff", "result": result, "intent": artifacts["worker"]["execution_intent"]}
 
@@ -95,6 +99,7 @@ def run_explicit_patch_trial(root: Path) -> dict[str, Any]:
     require(artifacts["summary"]["code_brigade_execution_real_supported"] is True, "summary must preserve executable intent", artifacts["summary"])
     require(artifacts["summary"]["maturity"] == "explicit_patch_execution_controller", "explicit patch maturity should show real adapter execution", artifacts["summary"])
     require(artifacts["review"]["decision"] == "ready", "explicit patch review should be ready", artifacts["review"])
+    require(artifacts["review"]["constraint_trace_sufficiency"]["status"] == "complete", "explicit patch review must audit constraint trace", artifacts["review"])
     return {"id": "explicit-patch-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
 
 
