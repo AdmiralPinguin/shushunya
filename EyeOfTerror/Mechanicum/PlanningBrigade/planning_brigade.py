@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -1063,6 +1064,7 @@ def main() -> int:
     parser.add_argument("--task", default="")
     parser.add_argument("--repo-path", default="")
     parser.add_argument("--input-json", type=Path)
+    parser.add_argument("--validate", action="store_true", help="Exit non-zero when the generated planning packet has contract problems.")
     args = parser.parse_args()
     payload: dict[str, Any] = {}
     if args.input_json:
@@ -1074,7 +1076,12 @@ def main() -> int:
         payload["task"] = args.task
     if args.repo_path:
         payload["repo_path"] = args.repo_path
-    print(json.dumps(build_planning_packet(payload), ensure_ascii=False, indent=2))
+    packet = build_planning_packet(payload)
+    problems = validate_planning_packet(packet) if args.validate else []
+    print(json.dumps(packet, ensure_ascii=False, indent=2))
+    if problems:
+        print(json.dumps({"ok": False, "validation_problems": problems}, ensure_ascii=False, indent=2), file=sys.stderr)
+        return 2
     return 0
 
 

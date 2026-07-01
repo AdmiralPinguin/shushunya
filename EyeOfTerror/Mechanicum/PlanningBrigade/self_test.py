@@ -158,6 +158,38 @@ def main() -> int:
     assert_packet_shape(cli_packet)
     if "test_repair" not in cli_packet["task_triage"]["task_kinds"] or "rerun failing test command" not in cli_packet["verification_strategy"]["targeted_commands"]:
         raise AssertionError(f"CLI packet should plan failing-test repair: {cli_packet}")
+    cli_validated = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "planning_brigade.py"),
+            "--task",
+            "почини failing unittest без изменения тестов",
+            "--repo-path",
+            "/repo",
+            "--validate",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if cli_validated.returncode != 0:
+        raise AssertionError(f"valid planning CLI packet should pass validation: {cli_validated.stdout} {cli_validated.stderr}")
+    cli_invalid = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "planning_brigade.py"),
+            "--task",
+            "почини",
+            "--repo-path",
+            "/repo",
+            "--validate",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if cli_invalid.returncode != 2 or "validation_problems" not in cli_invalid.stderr:
+        raise AssertionError(f"invalid planning CLI packet should fail validation: {cli_invalid.stdout} {cli_invalid.stderr}")
 
     path_hint_packet = planning_brigade.build_planning_packet(
         {

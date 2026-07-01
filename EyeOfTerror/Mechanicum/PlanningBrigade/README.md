@@ -43,6 +43,7 @@ Current contract:
 
 ```bash
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "почини failing unittest без изменения тестов" --repo-path /repo
+python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "почини failing unittest без изменения тестов" --repo-path /repo --validate
 ```
 
 The brigade writes one `ceraxia_planning_packet` containing all five planning
