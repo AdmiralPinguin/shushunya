@@ -768,6 +768,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     repo_evidence = brief.get("repo_survey_evidence", {}) if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     work_packages = brief.get("implementation_work_packages", {}) if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
+    package_graph = work_packages.get("package_dependency_graph") if isinstance(work_packages.get("package_dependency_graph"), dict) else {}
+    package_graph_rows = package_graph.get("rows") if isinstance(package_graph.get("rows"), list) else []
     covered_package_surfaces = sorted(
         {
             surface
@@ -795,6 +797,10 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Implementation work packages: {len(packages)}",
         f"Work package covered surfaces: {len(covered_package_surfaces)}",
         f"Work package statuses: planned={package_status_counts['planned']} implemented={package_status_counts['implemented']} blocked={package_status_counts['blocked']}",
+        f"Work package dependency graph complete: {str(package_graph.get('complete') is True).lower()}",
+        f"Work package dependency rows: {len(package_graph_rows)}",
+        f"Work package dependency roots: {len(package_graph.get('root_packages', [])) if isinstance(package_graph.get('root_packages'), list) else 0}",
+        f"Work package dependency terminals: {len(package_graph.get('terminal_packages', [])) if isinstance(package_graph.get('terminal_packages'), list) else 0}",
         f"Investigation playbook status: {investigation_sufficiency.get('status', '')}",
         f"Investigation read stages: {investigation_sufficiency.get('read_stage_count', 0)}",
         f"Change control status: {change_control_sufficiency.get('status', '')}",
