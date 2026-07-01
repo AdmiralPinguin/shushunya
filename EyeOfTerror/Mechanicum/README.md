@@ -24,3 +24,12 @@ workers until a real adapter exists.
 `contracts_self_test.py` checks that generated packets still satisfy the
 required fields declared by the local JSON schema files. It is intentionally
 small and stdlib-only; detailed schema validation can come later.
+
+For fast local iteration inside this folder, run:
+
+```bash
+EyeOfTerror/Mechanicum/check-mechanicum-local.sh
+```
+
+The repository-level `EyeOfTerror/check-eye-mechanicum.sh` remains the full
+integration gate before committing.
