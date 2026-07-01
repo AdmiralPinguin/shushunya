@@ -196,6 +196,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
             self.assertEqual(worker_report["status"], "blocked")
             self.assertTrue(any("real CodeBrigade execution adapter is not configured" in note for note in worker_report["notes"]))
+            self.assertEqual(worker_report["execution_result"]["status"], "blocked")
+            self.assertTrue(worker_report["execution_result"]["blockers"])
 
     def test_review_gate_rejects_incomplete_planning_packet(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
