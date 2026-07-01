@@ -354,6 +354,9 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     review = artifacts["review_gate"]
     verification = artifacts["verification_report"]
     readiness = artifacts["execution_readiness"]
+    worker_report = artifacts.get("worker_report", {}) if isinstance(artifacts.get("worker_report"), dict) else {}
+    execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
+    preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
     blockers = readiness.get("blockers", [])
     warnings = review.get("warnings", [])
     commands_executed = verification.get("commands_executed", [])
@@ -372,6 +375,10 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Verification status: {verification['status']}",
         f"Verification commands planned: {len(commands_planned)}",
         f"Verification commands executed: {len(commands_executed)}",
+        f"Worker status: {worker_report.get('status', '')}",
+        f"Execution policy status: {worker_report.get('execution_policy_status', '')}",
+        f"Execution result status: {execution_result.get('status', '')}",
+        f"Execution preflight ok: {preflight.get('ok') if preflight else 'n/a'}",
         "",
         "## Readiness",
         "",
@@ -724,6 +731,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "status": status,
         "planning_packet": packet,
         "implementation_brief": brief,
+        "worker_report": worker_report,
         "verification_report": verification_report,
         "review_gate": review,
     }

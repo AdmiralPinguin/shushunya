@@ -137,6 +137,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("BLOCKER: real CodeBrigade execution is not wired in this controller yet", final_report)
             self.assertIn("Verification commands planned:", final_report)
             self.assertIn("Verification commands executed: 0", final_report)
+            self.assertIn("Worker status: dry_run_handoff_ready", final_report)
+            self.assertIn("Execution policy status: blocked_until_adapter_is_wired", final_report)
+            self.assertIn("Execution preflight ok: n/a", final_report)
             self.assertIn("WARNING: broad verification is planned but not executed", final_report)
             self.assertIn("- repository survey partial: false", final_report)
             self.assertIn("- python symbol survey partial: false", final_report)
@@ -210,6 +213,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["worker_status"], "blocked")
             self.assertEqual(summary["code_brigade_execution_result_status"], "blocked")
             self.assertTrue(summary["code_brigade_execution_preflight_ok"])
+            final_report = (run_dir / "final_report.md").read_text(encoding="utf-8")
+            self.assertIn("Execution result status: blocked", final_report)
+            self.assertIn("Execution preflight ok: True", final_report)
 
     def test_review_gate_rejects_incomplete_planning_packet(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
