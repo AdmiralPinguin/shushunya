@@ -47,6 +47,12 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     missing_surface_packages = sorted(surface for surface in surfaces if surface not in covered_surfaces)
     if missing_surface_packages:
         raise AssertionError(f"{trial_id}: impact surfaces lack implementation work packages: {missing_surface_packages}; packet={packet}")
+    package_matrix_surfaces = {
+        row.get("surface")
+        for row in packet["surface_package_matrix"]["rows"]
+        if isinstance(row, dict) and row.get("surface") and row.get("package_ids")
+    }
+    require_subset(surfaces, package_matrix_surfaces, "surface package matrix", trial_id)
     require_subset(trial.get("expected_surfaces", []), surfaces, "impact surfaces", trial_id)
     expected_highest_risk_surface = trial.get("expected_highest_risk_surface")
     if expected_highest_risk_surface and packet["impact_analysis"]["highest_risk_surface"] != expected_highest_risk_surface:

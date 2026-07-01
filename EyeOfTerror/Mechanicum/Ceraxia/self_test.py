@@ -95,6 +95,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any(item["path"] == "client.ts" and item["language"] == "typescript" for item in brief["repo_survey_evidence"]["source_summaries"]))
             self.assertTrue(brief["surface_verification_matrix"]["complete"])
             self.assertTrue(any(row["surface"] == "security_boundary" for row in brief["surface_verification_matrix"]["rows"]))
+            self.assertTrue(brief["surface_package_matrix"]["complete"])
+            self.assertTrue(any(row["surface"] == "security_boundary" and "security_boundary_package" in row["package_ids"] for row in brief["surface_package_matrix"]["rows"]))
             self.assertEqual(brief["survey_quality_gate"]["decision"], "passed")
             self.assertIn("app.py", brief["repo_survey_evidence"]["candidate_files"])
             self.assertEqual(brief["repo_survey_evidence"]["existing_path_hints"], ["app.py", "test_app.py"])
@@ -624,6 +626,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         packet["design_options"]["options"] = []
         packet["verification_strategy"]["targeted_commands"] = []
         packet["surface_verification_matrix"] = {"rows": [], "complete": "no"}
+        packet["surface_package_matrix"] = {"rows": [], "complete": "no"}
         packet["risk_register"]["acceptance_gates"] = []
         packet["quality_bar"]["must_have_evidence"] = []
         packet["acceptance_contract"]["must_prove"] = []

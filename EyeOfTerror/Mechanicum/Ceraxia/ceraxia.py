@@ -193,6 +193,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         ],
         "required_verification": verification,
         "surface_verification_matrix": packet.get("surface_verification_matrix", {}),
+        "surface_package_matrix": packet.get("surface_package_matrix", {}),
         "survey_quality_gate": survey_quality,
         "acceptance_gates": risks.get("acceptance_gates") if isinstance(risks.get("acceptance_gates"), list) else [],
         "quality_bar": quality,

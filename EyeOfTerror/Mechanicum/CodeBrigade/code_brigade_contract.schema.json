@@ -79,6 +79,8 @@
         "verification_commands",
         "surface_verification_complete",
         "surface_verification_rows",
+        "surface_package_matrix_complete",
+        "surface_package_matrix_rows",
         "survey_quality_decision",
         "survey_quality_warnings",
         "acceptance_gates",
@@ -222,6 +224,15 @@
           "type": "boolean"
         },
         "surface_verification_rows": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "surface_package_matrix_complete": {
+          "type": "boolean"
+        },
+        "surface_package_matrix_rows": {
           "type": "array",
           "items": {
             "type": "object"

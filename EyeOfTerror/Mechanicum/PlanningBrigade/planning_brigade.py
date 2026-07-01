@@ -737,6 +737,7 @@ def implementation_brief_blueprint(
             "forbidden_approaches",
             "required_verification",
             "surface_verification_matrix",
+            "surface_package_matrix",
             "survey_quality_gate",
             "acceptance_gates",
             "quality_bar",
@@ -950,6 +951,41 @@ def implementation_work_packages(
     }
 
 
+def surface_package_matrix(surface_matrix: dict[str, Any], work_packages: dict[str, Any]) -> dict[str, Any]:
+    packages = work_packages.get("packages", []) if isinstance(work_packages.get("packages"), list) else []
+    rows: list[dict[str, Any]] = []
+    for surface_row in surface_matrix.get("rows", []):
+        if not isinstance(surface_row, dict):
+            continue
+        surface = str(surface_row.get("surface") or "")
+        package_ids = [
+            str(package.get("id") or "")
+            for package in packages
+            if isinstance(package, dict)
+            and surface
+            and surface in [item for item in package.get("impact_surfaces", []) if isinstance(item, str)]
+        ]
+        blockers = [str(item) for item in surface_row.get("blockers", []) if isinstance(item, str)]
+        if not package_ids:
+            blockers.append(f"no implementation work package covers {surface}")
+        rows.append(
+            {
+                "surface": surface,
+                "risk": surface_row.get("risk", ""),
+                "verification_evidence": surface_row.get("covered_by", []) if isinstance(surface_row.get("covered_by"), list) else [],
+                "package_ids": package_ids,
+                "blockers": blockers,
+            }
+        )
+    blockers = [blocker for row in rows for blocker in row["blockers"]]
+    return {
+        "role": "RiskScribe",
+        "rows": rows,
+        "complete": not blockers,
+        "blockers": blockers,
+    }
+
+
 def planning_review_gate(
     triage: dict[str, Any],
     problem: dict[str, Any],
@@ -960,6 +996,7 @@ def planning_review_gate(
     surface_matrix: dict[str, Any],
     acceptance: dict[str, Any],
     work_packages: dict[str, Any] | None = None,
+    package_matrix: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -979,6 +1016,8 @@ def planning_review_gate(
         blockers.append("high-risk task lacks broad verification requirement")
     if surface_matrix.get("complete") is False:
         blockers.extend(str(item) for item in surface_matrix.get("blockers", []))
+    if package_matrix is not None and package_matrix.get("complete") is False:
+        blockers.extend(str(item) for item in package_matrix.get("blockers", []))
     if work_packages is not None:
         packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
         if len(packages) < 3:
@@ -1115,7 +1154,8 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     acceptance = acceptance_contract(problem, triage, verification, quality, surface_matrix)
     blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix, forecast)
     work_packages = implementation_work_packages(triage, problem, dependency, impact, verification, risks, forecast)
-    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, work_packages)
+    package_matrix = surface_package_matrix(surface_matrix, work_packages)
+    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, work_packages, package_matrix)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
         "ok": bool(task),
@@ -1134,6 +1174,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "design_options": design,
         "verification_strategy": verification,
         "surface_verification_matrix": surface_matrix,
+        "surface_package_matrix": package_matrix,
         "risk_register": risks,
         "quality_bar": quality,
         "acceptance_contract": acceptance,

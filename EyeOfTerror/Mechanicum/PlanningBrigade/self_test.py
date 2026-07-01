@@ -83,6 +83,8 @@ def main() -> int:
         or "security_boundary" not in [surface["surface"] for surface in security_packet["impact_analysis"]["surfaces"]]
         or not security_packet["surface_verification_matrix"]["complete"]
         or "security_boundary" not in [row["surface"] for row in security_packet["surface_verification_matrix"]["rows"]]
+        or not security_packet["surface_package_matrix"]["complete"]
+        or not any(row["surface"] == "security_boundary" and "security_boundary_package" in row["package_ids"] for row in security_packet["surface_package_matrix"]["rows"])
         or security_packet["execution_forecast"]["complexity"] != "high"
         or security_packet["execution_forecast"]["expected_code_brigade_iterations"] < 4
         or security_packet["design_options"]["selected_strategy"] != "boundary_first_patch"
@@ -124,6 +126,7 @@ def main() -> int:
         or "runtime_configuration" not in [surface["surface"] for surface in migration_packet["impact_analysis"]["surfaces"]]
         or not migration_packet["surface_verification_matrix"]["complete"]
         or "data_compatibility" not in [row["surface"] for row in migration_packet["surface_verification_matrix"]["rows"]]
+        or not any(row["surface"] == "runtime_configuration" and "runtime_configuration_package" in row["package_ids"] for row in migration_packet["surface_package_matrix"]["rows"])
         or migration_packet["execution_forecast"]["complexity"] != "high"
         or "compatibility_package" not in migration_packet["implementation_work_packages"]["review_order"]
         or "runtime_configuration_package" not in migration_packet["implementation_work_packages"]["review_order"]

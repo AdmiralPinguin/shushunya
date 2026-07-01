@@ -25,6 +25,7 @@ REQUIRED_PACKET_OBJECTS = [
     "design_options",
     "verification_strategy",
     "surface_verification_matrix",
+    "surface_package_matrix",
     "risk_register",
     "quality_bar",
     "acceptance_contract",
@@ -216,6 +217,29 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
     missing_package_surfaces = sorted(surface for surface in planned_surfaces if surface not in covered_surfaces)
     if missing_package_surfaces:
         problems.append("implementation work packages must cover every planned surface: " + ", ".join(missing_package_surfaces))
+
+    package_matrix = object_field(packet, "surface_package_matrix")
+    matrix_rows = list_field(package_matrix.get("rows"))
+    if not matrix_rows:
+        problems.append("surface package matrix must include rows")
+    matrix_surfaces = {
+        row.get("surface")
+        for row in matrix_rows
+        if isinstance(row, dict) and row.get("surface")
+    }
+    missing_matrix_surfaces = sorted(surface for surface in planned_surfaces if surface not in matrix_surfaces)
+    if missing_matrix_surfaces:
+        problems.append("surface package matrix must cover every planned surface: " + ", ".join(missing_matrix_surfaces))
+    for row in matrix_rows:
+        if not isinstance(row, dict):
+            problems.append("surface package matrix row must be an object")
+            continue
+        if not list_field(row.get("package_ids")):
+            problems.append(f"surface package matrix row must include package_ids: {row.get('surface', '<unknown>')}")
+        if not isinstance(row.get("verification_evidence"), list):
+            problems.append(f"surface package matrix row verification_evidence must be a list: {row.get('surface', '<unknown>')}")
+    if package_matrix.get("complete") is not True:
+        problems.extend(f"surface package matrix blocked: {item}" for item in list_field(package_matrix.get("blockers")))
 
     planning_review = object_field(packet, "planning_review_gate")
     if planning_review.get("decision") not in {"ready_for_ceraxia_review", "revise", "blocked"}:

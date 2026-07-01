@@ -27,6 +27,12 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief surface_verification_matrix.rows is required")
     if surface_matrix.get("complete") is False:
         problems.append("brief surface_verification_matrix is incomplete")
+    package_matrix = brief.get("surface_package_matrix") if isinstance(brief.get("surface_package_matrix"), dict) else {}
+    package_matrix_rows = package_matrix.get("rows") if isinstance(package_matrix.get("rows"), list) else []
+    if not package_matrix_rows:
+        problems.append("brief surface_package_matrix.rows is required")
+    if package_matrix.get("complete") is False:
+        problems.append("brief surface_package_matrix is incomplete")
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     if survey_quality.get("decision") == "blocked":
         problems.append("brief survey_quality_gate is blocked")
@@ -87,6 +93,26 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
     missing_package_surfaces = sorted(surface for surface in planned_surfaces if surface not in covered_surfaces)
     if missing_package_surfaces:
         problems.append("brief implementation_work_packages must cover every planned surface: " + ", ".join(missing_package_surfaces))
+    matrix_surfaces = {
+        row.get("surface")
+        for row in package_matrix_rows
+        if isinstance(row, dict) and row.get("surface")
+    }
+    missing_matrix_surfaces = sorted(surface for surface in planned_surfaces if surface not in matrix_surfaces)
+    if missing_matrix_surfaces:
+        problems.append("brief surface_package_matrix must cover every planned surface: " + ", ".join(missing_matrix_surfaces))
+    for row in package_matrix_rows:
+        if not isinstance(row, dict):
+            problems.append("brief surface_package_matrix row must be an object")
+            continue
+        if not isinstance(row.get("verification_evidence"), list):
+            problems.append(f"brief surface_package_matrix verification_evidence must be a list: {row.get('surface', '<unknown>')}")
+        package_ids = row.get("package_ids") if isinstance(row.get("package_ids"), list) else []
+        if not package_ids:
+            problems.append(f"brief surface_package_matrix package_ids are required: {row.get('surface', '<unknown>')}")
+        missing_ids = sorted(package_id for package_id in package_ids if package_id not in review_order)
+        if missing_ids:
+            problems.append("brief surface_package_matrix references unknown packages: " + ", ".join(missing_ids))
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
     if planning_review.get("decision") == "blocked":
         problems.append("brief planning_review_gate is blocked")

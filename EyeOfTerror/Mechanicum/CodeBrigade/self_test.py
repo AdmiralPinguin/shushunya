@@ -45,6 +45,26 @@ def valid_brief() -> dict:
                 }
             ],
         },
+        "surface_package_matrix": {
+            "complete": True,
+            "blockers": [],
+            "rows": [
+                {
+                    "surface": "source_behavior",
+                    "risk": "medium",
+                    "verification_evidence": ["targeted behavior verification"],
+                    "package_ids": ["evidence_survey_package", "minimal_patch_package", "verification_evidence_package"],
+                    "blockers": [],
+                },
+                {
+                    "surface": "test_surface",
+                    "risk": "medium",
+                    "verification_evidence": ["rerun failing test command"],
+                    "package_ids": ["evidence_survey_package", "verification_evidence_package"],
+                    "blockers": [],
+                },
+            ],
+        },
         "survey_quality_gate": {
             "decision": "passed",
             "warnings": [],
@@ -270,6 +290,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve acceptance evidence: {plan}")
     if not plan["surface_verification_complete"] or plan["surface_verification_rows"][0]["surface"] != "source_behavior":
         raise AssertionError(f"implementation plan should preserve surface verification matrix: {plan}")
+    if not plan["surface_package_matrix_complete"] or plan["surface_package_matrix_rows"][0]["package_ids"][0] != "evidence_survey_package":
+        raise AssertionError(f"implementation plan should preserve surface package matrix: {plan}")
     if plan["survey_quality_decision"] != "passed":
         raise AssertionError(f"implementation plan should preserve survey quality gate: {plan}")
     if plan["survey_truncated"]:
@@ -469,6 +491,11 @@ def main() -> int:
     incomplete_surface_matrix_report = code_brigade_adapter.build_worker_report(incomplete_surface_matrix, dry_run=True)
     if incomplete_surface_matrix_report["status"] != "blocked" or not any("surface_verification_matrix" in item for item in incomplete_surface_matrix_report["validation_problems"]):
         raise AssertionError(f"incomplete surface verification matrix should be blocked: {incomplete_surface_matrix_report}")
+    missing_surface_package_matrix = valid_brief()
+    missing_surface_package_matrix["surface_package_matrix"] = {"rows": [], "complete": True, "blockers": []}
+    missing_surface_package_report = code_brigade_adapter.build_worker_report(missing_surface_package_matrix, dry_run=True)
+    if missing_surface_package_report["status"] != "blocked" or not any("surface_package_matrix" in item for item in missing_surface_package_report["validation_problems"]):
+        raise AssertionError(f"missing surface package matrix should be blocked: {missing_surface_package_report}")
     blocked_survey_quality = valid_brief()
     blocked_survey_quality["survey_quality_gate"] = {"decision": "blocked", "blockers": ["missing path"]}
     blocked_survey_quality_report = code_brigade_adapter.build_worker_report(blocked_survey_quality, dry_run=True)

@@ -17,6 +17,7 @@
     "expected_artifacts",
     "required_verification",
     "surface_verification_matrix",
+    "surface_package_matrix",
     "survey_quality_gate",
     "acceptance_gates",
     "quality_bar",
@@ -92,6 +93,9 @@
       "type": "object"
     },
     "surface_verification_matrix": {
+      "type": "object"
+    },
+    "surface_package_matrix": {
       "type": "object"
     },
     "survey_quality_gate": {

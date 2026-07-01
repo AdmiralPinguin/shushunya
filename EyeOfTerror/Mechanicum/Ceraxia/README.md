@@ -71,6 +71,8 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
 - `impact_analysis` names the affected engineering surfaces.
 - `surface_verification_matrix` maps those surfaces to planned evidence and
   blocks incomplete coverage before CodeBrigade handoff.
+- `surface_package_matrix` preserves which CodeBrigade work packages own each
+  impacted surface.
 - `planning_review_gate` scores the packet and blocks unclear or structurally
   unsafe plans.
 - `run_summary.json` and `final_report.md` expose planning review and survey
