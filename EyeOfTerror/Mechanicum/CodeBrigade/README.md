@@ -45,8 +45,8 @@ future real executor: repo availability, scope evidence, survey candidates, and
 verification command counts.
 The worker report must include `implementation_plan`, which preserves survey
 candidate files, test files, local dependency edges, handoff steps,
-verification commands, acceptance gates, and refusal conditions for the future
-real executor.
+verification commands, acceptance gates, package-level blocking policies, and
+refusal conditions for the future real executor.
 It also includes `execution_policy_status`; this remains
 `blocked_until_adapter_is_wired` for dry-run handoffs and blocked execution
 requests, and switches to `real_execution_adapter_active` only when the explicit

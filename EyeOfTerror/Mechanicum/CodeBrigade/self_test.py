@@ -262,6 +262,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve work packages: {plan}")
     if plan["work_package_review_order"][0] != "evidence_survey_package":
         raise AssertionError(f"implementation plan should preserve work package review order: {plan}")
+    if plan["work_package_blocking_policies"].get("minimal_patch_package") != ["block when patch preflight fails"]:
+        raise AssertionError(f"implementation plan should expose work package blocking policies: {plan}")
     if "final report answers the original task rather than only package-local success" not in plan["work_package_handoff_criteria"]:
         raise AssertionError(f"implementation plan should preserve global handoff criteria: {plan}")
     if "the original user-visible request is satisfied" not in plan["acceptance_evidence_required"]:

@@ -73,6 +73,7 @@
         "mutation_preconditions",
         "implementation_work_packages",
         "work_package_review_order",
+        "work_package_blocking_policies",
         "work_package_handoff_criteria",
         "acceptance_evidence_required",
         "verification_commands",
@@ -193,6 +194,16 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "work_package_blocking_policies": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
           }
         },
         "work_package_handoff_criteria": {
