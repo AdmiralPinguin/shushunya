@@ -483,6 +483,11 @@ def main() -> int:
     if not dry_report["work_package_statuses"] or any(item["status"] != "planned" for item in dry_report["work_package_statuses"]):
         raise AssertionError(f"dry-run worker report should mark work packages planned: {dry_report}")
     plan = dry_report["implementation_plan"]
+    report_schema = json.loads((Path(__file__).resolve().parent / "code_brigade_contract.schema.json").read_text(encoding="utf-8"))
+    required_plan_fields = report_schema["properties"]["implementation_plan"]["required"]
+    missing_plan_fields = [field for field in required_plan_fields if field not in plan]
+    if missing_plan_fields:
+        raise AssertionError(f"implementation plan must satisfy schema required fields: missing={missing_plan_fields} plan={plan}")
     if plan["target_files_to_inspect"] != ["app.py"]:
         raise AssertionError(f"implementation plan should preserve survey candidates: {plan}")
     if plan["test_files_to_preserve"] != ["test_app.py"]:
