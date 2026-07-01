@@ -56,6 +56,7 @@ def run_dry_security_trial(root: Path) -> dict[str, Any]:
     require(not result["ready_for_execution"], "dry security handoff must not claim real execution readiness", result)
     require(artifacts["worker"]["execution_intent"]["mode"] == "planning_handoff_only", "dry security worker must expose planning-only intent", artifacts["worker"])
     require(artifacts["summary"]["code_brigade_execution_intent_mode"] == "planning_handoff_only", "summary must preserve planning-only intent", artifacts["summary"])
+    require(artifacts["summary"]["maturity"] == "dry_run_controller_with_code_brigade_handoff_adapter", "dry handoff maturity should remain honest", artifacts["summary"])
     require(artifacts["brief"]["risk_level"] == "high", "security trial should be high risk", artifacts["brief"])
     require(len(artifacts["brief"]["implementation_work_packages"]["packages"]) >= 5, "security trial should create cross-surface work packages", artifacts["brief"])
     require(artifacts["audit"]["decision"] == "passed", "dry security run package audit should pass", artifacts["audit"])
@@ -92,6 +93,7 @@ def run_explicit_patch_trial(root: Path) -> dict[str, Any]:
     require("return True" in (repo / "app.py").read_text(encoding="utf-8"), "explicit patch should mutate app.py")
     require(artifacts["worker"]["execution_intent"]["mode"] == "explicit_patch_execution", "worker must expose explicit patch intent", artifacts["worker"])
     require(artifacts["summary"]["code_brigade_execution_real_supported"] is True, "summary must preserve executable intent", artifacts["summary"])
+    require(artifacts["summary"]["maturity"] == "explicit_patch_execution_controller", "explicit patch maturity should show real adapter execution", artifacts["summary"])
     require(artifacts["review"]["decision"] == "ready", "explicit patch review should be ready", artifacts["review"])
     return {"id": "explicit-patch-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
 
@@ -129,6 +131,7 @@ def run_unshaped_real_execution_trial(root: Path) -> dict[str, Any]:
     require(not result["ok"], "unshaped real execution should block until autonomous adapter exists", result)
     require(artifacts["worker"]["execution_intent"]["mode"] == "planning_handoff_only", "unshaped execution must preserve planning-only intent", artifacts["worker"])
     require(not artifacts["worker"]["execution_intent"]["real_execution_supported"], "unshaped execution must not claim real support", artifacts["worker"])
+    require(artifacts["summary"]["maturity"] == "blocked_controller_with_audited_handoff", "blocked unshaped maturity should be explicit", artifacts["summary"])
     require(any("autonomous execution adapter" in item for item in artifacts["worker"]["notes"]), "worker blocker should name missing autonomous adapter", artifacts["worker"])
     return {"id": "unshaped-real-execution-blocker", "result": result, "intent": artifacts["worker"]["execution_intent"]}
 

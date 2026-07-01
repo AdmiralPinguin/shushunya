@@ -881,6 +881,25 @@ def build_execution_readiness(
     }
 
 
+def build_final_next_action(status: dict[str, Any], worker_report: dict[str, Any], dry_run: bool) -> str:
+    if status.get("state") != "finalized":
+        return "inspect blockers"
+    if dry_run:
+        return "execute with CodeBrigade only when mutation is explicitly intended"
+    execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
+    if worker_report.get("status") == "implemented" and execution_result.get("status") == "implemented":
+        return "expand CodeBrigade from explicit patch execution toward autonomous source edits"
+    return "inspect CodeBrigade execution blockers"
+
+
+def build_maturity_label(worker_report: dict[str, Any], readiness: dict[str, Any]) -> str:
+    if readiness.get("decision") == "ready_for_real_execution" and worker_report.get("status") == "implemented":
+        return "explicit_patch_execution_controller"
+    if worker_report.get("status") == "dry_run_handoff_ready":
+        return "dry_run_controller_with_code_brigade_handoff_adapter"
+    return "blocked_controller_with_audited_handoff"
+
+
 def build_run_summary(
     run_id: str,
     run_dir: Path,
@@ -962,7 +981,7 @@ def build_run_summary(
         },
         "blockers": readiness.get("blockers", []),
         "next_action": status.get("next_action"),
-        "maturity": "dry_run_controller_with_code_brigade_handoff_adapter",
+        "maturity": build_maturity_label(worker_report, readiness),
     }
 
 
@@ -1126,7 +1145,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
 
     status["state"] = "finalized" if status["state"] == "reviewed" else "failed"
     status["lifecycle"].append(status["state"])
-    status["next_action"] = "real CodeBrigade execution can replace dry-run handoff" if status["state"] == "finalized" else "inspect blockers"
+    status["next_action"] = build_final_next_action(status, worker_report, task_input.dry_run)
     artifacts = {
         "status": status,
         "planning_packet": packet,
