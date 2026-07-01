@@ -134,6 +134,8 @@ def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) ->
         warnings.append("repository survey reached file limit")
     if survey.get("python_symbols_truncated"):
         warnings.append("python symbol survey reached file limit")
+    if survey.get("source_summaries_truncated"):
+        warnings.append("source summary survey reached file limit")
     return {
         "kind": "ceraxia_survey_quality_gate",
         "decision": "blocked" if blockers else "passed",

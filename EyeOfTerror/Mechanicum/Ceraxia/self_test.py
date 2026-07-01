@@ -11,6 +11,7 @@ from ceraxia import (
     LIFECYCLE,
     build_implementation_brief,
     build_repo_survey,
+    build_survey_quality_gate,
     audit_run_package,
     review_gate,
     run_ceraxia,
@@ -238,6 +239,22 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(brief["blocked"])
             self.assertEqual(brief["survey_quality_gate"]["decision"], "blocked")
             self.assertIn("missing.py", brief["survey_quality_gate"]["missing_path_hints"])
+
+    def test_survey_quality_reports_source_summary_truncation(self) -> None:
+        packet = build_planning_packet({"task": "добавь helper", "repo_path": "."})
+        survey = {
+            "repo_exists": True,
+            "candidate_files": ["app.ts"],
+            "test_files": ["app.spec.ts"],
+            "missing_path_hints": [],
+            "unsafe_path_hints": [],
+            "truncated": False,
+            "python_symbols_truncated": False,
+            "source_summaries_truncated": True,
+        }
+        quality = build_survey_quality_gate(packet, survey)
+        self.assertEqual(quality["decision"], "passed")
+        self.assertIn("source summary survey reached file limit", quality["warnings"])
 
     def test_unsafe_explicit_path_hint_blocks_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
