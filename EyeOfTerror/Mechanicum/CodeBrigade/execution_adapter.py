@@ -261,6 +261,7 @@ def infer_simple_zero_arg_expected_literal(test_text: str, function_name: str) -
     escaped = re.escape(function_name)
     patterns = [
         rf"\bassert\s+{escaped}\(\)\s*==\s*(?P<literal>[^\n#]+)",
+        rf"\bassert\s+{escaped}\(\)\s+is\s+(?P<literal>True|False|None)\b",
         rf"\bself\.assertEqual\(\s*{escaped}\(\)\s*,\s*(?P<literal>[^,\n\)]+)\s*\)",
     ]
     literals: list[str] = []
@@ -280,6 +281,7 @@ def infer_simple_imported_symbol_expected_literal(test_text: str, symbol_name: s
     escaped = re.escape(symbol_name)
     patterns = [
         rf"\bassert\s+{escaped}\s*==\s*(?P<literal>[^\n#]+)",
+        rf"\bassert\s+{escaped}\s+is\s+(?P<literal>True|False|None)\b",
         rf"\bself\.assertEqual\(\s*{escaped}\s*,\s*(?P<literal>[^,\n\)]+)\s*\)",
     ]
     literals: list[str] = []

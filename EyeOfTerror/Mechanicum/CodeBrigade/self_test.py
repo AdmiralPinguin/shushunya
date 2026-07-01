@@ -698,6 +698,17 @@ def main() -> int:
         if "def value():\n    return 42\n" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("test-inferred missing function did not update app.py")
     with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import enabled\n\ndef test_enabled():\n    assert enabled() is True\n", encoding="utf-8")
+        inferred_bool_brief = valid_brief()
+        inferred_bool_brief["repo_path"] = tmp
+        inferred_bool_brief["task"] = "почини app.py чтобы тест проходил"
+        inferred_bool_report = code_brigade_adapter.build_worker_report(inferred_bool_brief, dry_run=False)
+        if inferred_bool_report["status"] != "implemented" or inferred_bool_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"test-inferred boolean function should report implemented changed files: {inferred_bool_report}")
+        if "def enabled():\n    return True\n" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("test-inferred boolean function did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import value\n\ndef test_value():\n    assert value() == 42\n", encoding="utf-8")
         return_mismatch_brief = valid_brief()
@@ -723,6 +734,17 @@ def main() -> int:
             raise AssertionError(f"test-inferred missing constant should expose patch source: {missing_constant_report}")
         if "ANSWER = 42\n" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("test-inferred missing constant did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import ENABLED\n\ndef test_enabled():\n    assert ENABLED is True\n", encoding="utf-8")
+        missing_bool_constant_brief = valid_brief()
+        missing_bool_constant_brief["repo_path"] = tmp
+        missing_bool_constant_brief["task"] = "почини app.py чтобы тест проходил"
+        missing_bool_constant_report = code_brigade_adapter.build_worker_report(missing_bool_constant_brief, dry_run=False)
+        if missing_bool_constant_report["status"] != "implemented" or missing_bool_constant_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"test-inferred boolean constant should report implemented changed files: {missing_bool_constant_report}")
+        if "ENABLED = True\n" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("test-inferred boolean constant did not update app.py")
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("ANSWER = 1\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import ANSWER\n\ndef test_answer():\n    assert ANSWER == 42\n", encoding="utf-8")
@@ -764,8 +786,8 @@ def main() -> int:
         if Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("ambiguous test-inferred task should not mutate app.py")
     with tempfile.TemporaryDirectory() as tmp:
-        Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
-        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app() is True\n", encoding="utf-8")
+        Path(tmp, "app.py").write_text("def app(value):\n    return False\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app(1) is True\n", encoding="utf-8")
         ambiguous_brief = valid_brief()
         ambiguous_brief["repo_path"] = tmp
         ambiguous_brief["task"] = "почини app.py чтобы тест проходил"
