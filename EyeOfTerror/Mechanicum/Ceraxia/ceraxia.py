@@ -913,7 +913,7 @@ def build_final_next_action(status: dict[str, Any], worker_report: dict[str, Any
         return "execute with CodeBrigade only when mutation is explicitly intended"
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     if worker_report.get("status") == "implemented" and execution_result.get("status") == "implemented":
-        return "expand CodeBrigade from explicit patch execution toward autonomous source edits"
+        return "expand CodeBrigade from guarded execution toward diagnostic autonomous source edits"
     return "inspect CodeBrigade execution blockers"
 
 
