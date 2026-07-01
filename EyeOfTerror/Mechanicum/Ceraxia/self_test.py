@@ -312,6 +312,53 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["surface_verification_status"], "partial")
 
+    def test_real_explicit_patch_pipeline_reaches_execution_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+            patch = {
+                "operations": [
+                    {
+                        "type": "replace_return_expression",
+                        "path": "app.py",
+                        "function_name": "app",
+                        "old_expression": "False",
+                        "new_expression": "True",
+                    }
+                ]
+            }
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="почини bug в `app.py`\nCERAXIA_PATCH:\n" + json.dumps(patch),
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                    dry_run=False,
+                    execute_verification=True,
+                    verification_commands=("python -m py_compile app.py",),
+                )
+            )
+            self.assertTrue(result["ok"], result)
+            self.assertTrue(result["package_ok"], result)
+            self.assertTrue(result["ready_for_execution"], result)
+            self.assertIn("return True", (repo / "app.py").read_text(encoding="utf-8"))
+            run_dir = Path(result["run_dir"])
+            worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(worker_report["status"], "implemented")
+            self.assertEqual(worker_report["execution_policy_status"], "real_execution_adapter_active")
+            self.assertEqual(worker_report["execution_result"]["status"], "implemented")
+            self.assertEqual(worker_report["execution_result"]["operation_results"][0]["status"], "applied")
+            verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(verification["status"], "passed")
+            self.assertTrue(verification["commands_executed"])
+            review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
+            self.assertEqual(review["decision"], "ready")
+            self.assertEqual(review["surface_verification_sufficiency"]["status"], "partial")
+            readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
+            self.assertEqual(readiness["decision"], "ready_for_real_execution")
+            audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
+            self.assertEqual(audit["decision"], "passed")
+
     def test_review_gate_marks_failed_surface_verification(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
         survey = {

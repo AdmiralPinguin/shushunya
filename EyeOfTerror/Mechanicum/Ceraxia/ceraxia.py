@@ -403,6 +403,8 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "worker report is blocked"})
     if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution", "passed"}:
         findings.append({"severity": "blocker", "finding": "negative tests are missing or not planned"})
+    if verification_report.get("status") in {"failed", "blocked"}:
+        findings.append({"severity": "blocker", "finding": f"verification report status is {verification_report.get('status')}"})
     if verification_report.get("broad_verification_required") and not verification_report.get("commands_planned"):
         findings.append({"severity": "blocker", "finding": "broad verification is required but no commands are planned"})
     if verification_report.get("broad_verification_required") and verification_report.get("status") == "planned_only":
