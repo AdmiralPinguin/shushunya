@@ -158,8 +158,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
             self.assertTrue(any("broad verification is planned" in item["finding"] for item in review["warnings"]))
             self.assertTrue(any("high-risk task has no executed verification evidence yet" in item["finding"] for item in review["warnings"]))
+            self.assertTrue(any("work packages are planned but not implemented" in item["finding"] for item in review["warnings"]))
             self.assertEqual(review["verification_sufficiency"]["status"], "planned_only")
             self.assertEqual(review["surface_verification_sufficiency"]["status"], "planned_only")
+            self.assertGreaterEqual(review["package_status_sufficiency"]["status_counts"]["planned"], 1)
             self.assertGreaterEqual(review["surface_verification_sufficiency"]["surface_count"], 1)
             self.assertGreaterEqual(review["verification_sufficiency"]["commands_planned_count"], 1)
             readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
@@ -374,10 +376,59 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
             self.assertEqual(review["decision"], "ready")
             self.assertEqual(review["surface_verification_sufficiency"]["status"], "partial")
+            self.assertGreaterEqual(review["package_status_sufficiency"]["status_counts"]["implemented"], 1)
             readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
             self.assertEqual(readiness["decision"], "ready_for_real_execution")
             audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
             self.assertEqual(audit["decision"], "passed")
+
+    def test_review_gate_blocks_blocked_work_packages(self) -> None:
+        packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
+        survey = {
+            "repo_exists": True,
+            "repo_path": ".",
+            "candidate_files": ["app.py"],
+            "test_files": ["test_app.py"],
+            "entrypoint_candidates": [],
+            "python_symbols": [],
+            "source_summaries": [],
+            "local_import_edges": [],
+            "generic_import_edges": [],
+            "recommended_read_order": [{"path": "app.py", "reason": "ranked source/config candidate"}],
+            "suggested_verification_commands": [],
+            "truncated": False,
+            "python_symbols_truncated": False,
+            "source_summaries_truncated": False,
+            "max_files_scanned": 1,
+            "max_python_symbol_files": 1,
+            "max_source_summary_files": 1,
+        }
+        brief = build_implementation_brief(packet, survey)
+        worker_report = {
+            "status": "dry_run_handoff_ready",
+            "dry_run": True,
+            "changed_files": [],
+            "implementation_brief_acknowledged": True,
+            "work_package_statuses": [
+                {
+                    "package_id": "minimal_patch_package",
+                    "owner": "CodeBrigade",
+                    "impact_surfaces": ["source_behavior"],
+                    "status": "blocked",
+                    "evidence_source": "blockers",
+                }
+            ],
+        }
+        verification_report = {
+            "status": "planned_only",
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "commands_planned": ["python -m py_compile app.py"],
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        self.assertEqual(review["decision"], "blocked")
+        self.assertEqual(review["package_status_sufficiency"]["blocked_package_ids"], ["minimal_patch_package"])
+        self.assertTrue(any("work packages are blocked" in item["finding"] for item in review["findings"]))
 
     def test_review_gate_marks_failed_surface_verification(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})

@@ -396,12 +396,30 @@ def review_gate(
         "executed_evidence": bool(meaningful_commands_executed),
         "surface_evidence": surface_evidence,
     }
+    package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
+    package_status_counts = {
+        status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
+        for status in ("planned", "implemented", "blocked")
+    }
+    package_status_sufficiency = {
+        "package_count": len(package_statuses),
+        "status_counts": package_status_counts,
+        "blocked_package_ids": [
+            str(item.get("package_id") or "")
+            for item in package_statuses
+            if isinstance(item, dict) and item.get("status") == "blocked"
+        ],
+    }
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
     if not worker_report.get("implementation_brief_acknowledged", False):
         findings.append({"severity": "blocker", "finding": "implementation brief was not acknowledged"})
     if worker_report["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "worker report is blocked"})
+    if package_status_sufficiency["blocked_package_ids"]:
+        findings.append({"severity": "blocker", "finding": "work packages are blocked: " + ", ".join(package_status_sufficiency["blocked_package_ids"])})
+    if worker_report["dry_run"] and package_status_counts["planned"]:
+        warnings.append({"severity": "warning", "finding": "work packages are planned but not implemented"})
     if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution", "passed"}:
         findings.append({"severity": "blocker", "finding": "negative tests are missing or not planned"})
     if verification_report.get("status") in {"failed", "blocked"}:
@@ -446,12 +464,14 @@ def review_gate(
         "warnings": warnings,
         "verification_sufficiency": verification_sufficiency,
         "surface_verification_sufficiency": surface_verification_sufficiency,
+        "package_status_sufficiency": package_status_sufficiency,
         "checked_against": [
             "planning packet completeness",
             "strategy approval",
             "scope control",
             "verification strategy",
             "surface verification coverage",
+            "work package status coverage",
             "worker report honesty",
         ],
     }
