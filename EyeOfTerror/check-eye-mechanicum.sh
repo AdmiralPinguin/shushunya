@@ -3,6 +3,7 @@ set -euo pipefail
 
 python3 EyeOfTerror/doctor.py --quiet
 PYTHONPATH=EyeOfTerror/Mechanicum python3 EyeOfTerror/Mechanicum/boundary_self_test.py
+PYTHONPATH=EyeOfTerror/Mechanicum python3 EyeOfTerror/Mechanicum/mechanicum_status_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/governors_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/generic_lore_smoke_self_test.py
