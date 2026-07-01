@@ -29,6 +29,7 @@ if CODE_BRIGADE_PATH not in sys.path:
 from planning_brigade import build_planning_packet  # noqa: E402
 from planning_packet_contract import validate_planning_packet as validate_planning_packet_contract  # noqa: E402
 from code_brigade_adapter import build_worker_report  # noqa: E402
+from execution_adapter import can_infer_guarded_natural_language_patch  # noqa: E402
 from verification_adapter import run_verification_commands  # noqa: E402
 from repo_survey import survey_repository  # noqa: E402
 
@@ -165,22 +166,23 @@ def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) ->
 def build_execution_intent(packet: dict[str, Any], dry_run: bool | None = None) -> dict[str, Any]:
     task = str(packet.get("task") or "")
     has_explicit_patch = "CERAXIA_PATCH:" in task
-    mode = "explicit_patch_execution" if has_explicit_patch else "planning_handoff_only"
+    has_guarded_inferred_patch = False if has_explicit_patch else can_infer_guarded_natural_language_patch(task)
+    mode = "explicit_patch_execution" if has_explicit_patch else ("guarded_inferred_patch_execution" if has_guarded_inferred_patch else "planning_handoff_only")
     blockers: list[str] = []
     if dry_run is True:
         blockers.append("dry run requested; source mutation is intentionally skipped")
-    if not has_explicit_patch:
+    if not has_explicit_patch and not has_guarded_inferred_patch:
         blockers.append("unshaped source mutation requires a future CodeBrigade autonomous execution adapter")
     return {
         "kind": "ceraxia_code_brigade_execution_intent",
         "contract_version": CONTRACT_VERSION,
         "mode": mode,
-        "adapter_capability": "explicit_patch_adapter_only",
+        "adapter_capability": "explicit_or_guarded_inference_adapter" if has_explicit_patch or has_guarded_inferred_patch else "explicit_patch_adapter_only",
         "explicit_patch_present": has_explicit_patch,
-        "real_execution_supported": has_explicit_patch,
+        "real_execution_supported": has_explicit_patch or has_guarded_inferred_patch,
         "dry_run_requested": bool(dry_run) if dry_run is not None else False,
         "blockers": blockers,
-        "required_next_adapter": "" if has_explicit_patch else "autonomous CodeBrigade source-edit adapter",
+        "required_next_adapter": "" if has_explicit_patch or has_guarded_inferred_patch else "autonomous CodeBrigade source-edit adapter",
     }
 
 

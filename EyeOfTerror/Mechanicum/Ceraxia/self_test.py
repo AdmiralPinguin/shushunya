@@ -992,6 +992,36 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("Execution result status: blocked", final_report)
             self.assertIn("Execution preflight ok: True", final_report)
 
+    def test_non_dry_guarded_inferred_patch_has_supported_intent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="В файле `app.py` замени `return False` на `return True`.",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                    dry_run=False,
+                    execute_verification=True,
+                    verification_commands=("python -m py_compile app.py",),
+                )
+            )
+            self.assertTrue(result["ok"], result)
+            self.assertTrue(result["ready_for_execution"], result)
+            self.assertIn("return True", (repo / "app.py").read_text(encoding="utf-8"))
+            run_dir = Path(result["run_dir"])
+            brief = json.loads((run_dir / "implementation_brief.json").read_text(encoding="utf-8"))
+            self.assertEqual(brief["execution_intent"]["mode"], "guarded_inferred_patch_execution")
+            self.assertTrue(brief["execution_intent"]["real_execution_supported"])
+            self.assertEqual(brief["execution_intent"]["blockers"], [])
+            worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(worker_report["execution_intent"]["mode"], "guarded_inferred_patch_execution")
+            self.assertTrue(worker_report["execution_intent"]["real_execution_supported"])
+            summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["maturity"], "guarded_inferred_patch_execution_controller")
+            self.assertEqual(summary["code_brigade_execution_intent_mode"], "guarded_inferred_patch_execution")
+
     def test_review_gate_rejects_incomplete_planning_packet(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
         packet.pop("verification_strategy")
