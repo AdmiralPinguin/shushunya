@@ -50,8 +50,8 @@ Ambiguous tasks still return a formal
 `execution_contract.py` owns the formal execution result builders so the
 execution boundary does not depend on the full worker-report adapter.
 `execution_preflight.py` performs read-only mutation preflight checks for the
-future real executor: repo availability, scope evidence, survey candidates, and
-verification command counts.
+future real executor: repo availability, scope evidence, survey candidates or
+explicit allowed new files, and verification command counts.
 The worker report must include `implementation_plan`, which preserves survey
 candidate files, test files, local dependency edges, investigation playbook
 read stages, caller candidates, contract surface candidates, change-control
