@@ -67,7 +67,9 @@ than edit blindly.
 `diagnostic_repair_contract.py` validates Ceraxia
 `diagnostic_repair_request.json` artifacts and builds a CodeBrigade intake
 summary with impacted surfaces, package ids, target files, preserved tests, and
-blockers. It does not execute source edits yet.
+blockers. Its first executor path is intentionally narrow: assertion-failure
+repair requests may reuse the existing guarded test-inferred source patch
+adapter, while unsupported diagnostics return blocked execution results.
 Use it directly when inspecting a run package:
 
 ```bash

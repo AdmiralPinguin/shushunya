@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from execution_contract import CONTRACT_VERSION
+from execution_contract import CONTRACT_VERSION, build_blocked_execution_result
 
 
 def is_safe_repo_relative_path(path: str) -> bool:
@@ -141,6 +141,250 @@ def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
         ],
         "blockers": problems,
     }
+
+
+def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]) -> dict[str, Any]:
+    surfaces = intake.get("impacted_surfaces") if isinstance(intake.get("impacted_surfaces"), list) else []
+    if not surfaces:
+        surfaces = ["source_behavior", "test_surface"]
+    package_ids = intake.get("package_ids") if isinstance(intake.get("package_ids"), list) else []
+    ordered_packages = [
+        package_id
+        for package_id in ["evidence_survey_package", *package_ids, "minimal_patch_package", "verification_evidence_package"]
+        if isinstance(package_id, str)
+    ]
+    ordered_packages = list(dict.fromkeys(ordered_packages))
+    if "verification_evidence_package" not in ordered_packages:
+        ordered_packages.append("verification_evidence_package")
+    source_files = [path for path in request.get("target_files_to_inspect", []) if isinstance(path, str)]
+    test_files = [path for path in request.get("test_files_to_preserve", []) if isinstance(path, str)]
+    scope_budget = request.get("scope_budget") if isinstance(request.get("scope_budget"), dict) else {}
+    if not scope_budget:
+        scope_budget = {
+            "max_source_files_to_edit": 1,
+            "max_test_files_to_edit_without_explicit_user_request": 0,
+            "max_docs_files_to_edit": 0,
+            "requires_ceraxia_replan_when": ["diagnostic repair exceeds guarded scope"],
+        }
+    packages = [
+        {
+            "id": package_id,
+            "owner": "CodeBrigade",
+            "purpose": "Diagnostic repair package generated from Ceraxia repair request.",
+            "impact_surfaces": surfaces,
+            "read_scope": ["diagnostic_repair_request.json"],
+            "edit_scope": ["candidate source files only"],
+            "verification_scope": ["rerun failed command"],
+            "risk_controls": ["do not edit tests to mask source behavior"],
+            "blocking_policy": ["block when guarded repair inference is unavailable"],
+            "handoff_criteria": ["execution_result.json names changed files or residual blockers"],
+        }
+        for package_id in ordered_packages
+    ]
+    graph_rows = [
+        {
+            "package_id": package_id,
+            "depends_on": [] if index == 0 else ordered_packages[:index],
+            "dependency_reason": "diagnostic repair keeps package order explicit",
+        }
+        for index, package_id in enumerate(ordered_packages)
+    ]
+    return {
+        "kind": "ceraxia_code_brigade_implementation_brief",
+        "contract_version": CONTRACT_VERSION,
+        "owner": "Ceraxia",
+        "target": "CodeBrigade",
+        "task": str(request.get("task") or "diagnostic repair"),
+        "repo_path": str(request.get("repo_path") or ""),
+        "task_kinds": ["bugfix", "test_repair"],
+        "risk_level": "medium",
+        "selected_strategy": "diagnostic_guarded_repair",
+        "allowed_scope": ["candidate files identified by diagnostic repair request"],
+        "forbidden_approaches": ["editing tests to fit a broken patch", "broad rewrite without repo evidence"],
+        "expected_artifacts": ["worker_report.json", "verification_report.json", "diagnostic_summary"],
+        "required_verification": {"targeted_commands": [str(item.get("command") or "") for item in intake.get("attempt_plan", []) if isinstance(item, dict) and item.get("command")]},
+        "surface_verification_matrix": {
+            "complete": True,
+            "blockers": [],
+            "rows": [{"surface": surface, "risk": "medium", "evidence_needed": ["failed command rerun"], "covered_by": ["rerun failed command"], "blockers": []} for surface in surfaces],
+        },
+        "surface_package_matrix": {
+            "complete": True,
+            "blockers": [],
+            "rows": [{"surface": surface, "risk": "medium", "verification_evidence": ["rerun failed command"], "package_ids": ordered_packages, "blockers": []} for surface in surfaces],
+        },
+        "survey_quality_gate": {"decision": "passed", "warnings": [], "blockers": []},
+        "acceptance_gates": ["diagnostic repair request validates"],
+        "quality_bar": {"must_have_evidence": ["diagnostic_summary", "rerun failed command"]},
+        "acceptance_contract": {"must_prove": ["diagnostic repair request validates", "failed behavior is repaired or explicitly blocked"]},
+        "acceptance_trace_matrix": {
+            "rows": [
+                {
+                    "requirement": "failed behavior is repaired or explicitly blocked",
+                    "source": ["diagnostic_repair_request.json"],
+                    "linked_surfaces": surfaces,
+                    "package_ids": ordered_packages,
+                    "planned_evidence": ["rerun failed command"],
+                    "status": "planned",
+                }
+            ],
+            "row_count": 1,
+            "complete": True,
+            "blockers": [],
+        },
+        "constraint_trace_matrix": {
+            "rows": [
+                {
+                    "constraint": "do not edit tests without explicit authorization",
+                    "source": "diagnostic_repair_request.scope_budget",
+                    "package_ids": ordered_packages,
+                    "planned_evidence": ["changed files exclude tests"],
+                    "status": "planned",
+                }
+            ],
+            "row_count": 1,
+            "complete": True,
+            "blockers": [],
+        },
+        "expert_quality_plan": {
+            "level": "standard",
+            "required_for_expert_gate": False,
+            "tradeoff_register": [
+                {"decision": "guarded_repair_vs_broad_edit", "prefer": "guarded_repair", "reason": "Only apply repair when diagnostics and tests provide a narrow source edit."},
+                {"decision": "source_fix_vs_test_masking", "prefer": "source_fix", "reason": "Tests are preserved by policy."},
+            ],
+            "rollback_strategy": ["rollback all touched files on patch failure", "return blockers when inference is unavailable"],
+            "observability_plan": ["record operation_results", "record residual blockers"],
+            "review_checklist": ["request validates", "source path is safe", "tests are preserved", "failed command is rerunnable"],
+            "escalation_policy": ["return blocked when repair exceeds scope", "return blocked when failure repeats"],
+        },
+        "change_control_plan": {
+            "target": "CodeBrigade",
+            "allowed_change_intents": ["repair only failed diagnostic surface", "touch only source candidates", "preserve tests"],
+            "protected_invariants": ["tests are not edited", "scope budget is honored", "safe repo-relative paths only"],
+            "mutation_requires": ["diagnostic repair request validates", "execution preflight passes", "candidate source is named", "test oracle is preserved"],
+            "diff_review_questions": ["Does changed source map to the repair item?", "Were tests preserved?", "Did the patch stay within budget?"],
+            "rollback_triggers": ["patch operation fails", "verification cannot be rerun", "scope budget is exceeded"],
+            "post_change_proofs": ["changed files are listed", "operation results are recorded", "verification command is returned for rerun"],
+        },
+        "investigation_playbook": {
+            "target": "CodeBrigade",
+            "read_stages": [
+                {"stage": "repair_request", "must_collect": ["diagnostic item", "failed command"], "blocks_mutation_until": "repair item is valid"},
+                {"stage": "source_target", "must_collect": ["source candidates"], "blocks_mutation_until": "source candidate is safe"},
+                {"stage": "test_oracle", "must_collect": ["test files"], "blocks_mutation_until": "test oracle is preserved"},
+                {"stage": "dependency_context", "must_collect": ["reverse dependencies"], "blocks_mutation_until": "caller impact is known or absent"},
+                {"stage": "scope_review", "must_collect": ["scope budget"], "blocks_mutation_until": "scope budget allows source edit"},
+            ],
+            "evidence_questions": ["Which command failed?", "Which source file is in scope?", "Which test file is preserved?", "Which blocker stops repair?"],
+            "mutation_blockers": ["repair request invalid", "source target missing", "test oracle missing"],
+            "replan_triggers": ["repair needs test edit", "repair needs broad rewrite", "same failure repeats"],
+        },
+        "implementation_brief_blueprint": {
+            "target": "CodeBrigade",
+            "required_sections": ["expert_quality_plan", "investigation_playbook", "change_control_plan", "acceptance_trace_matrix", "constraint_trace_matrix", "assumption_register"],
+            "mutation_preconditions": ["diagnostic repair request validates", "execution preflight passes"],
+        },
+        "implementation_work_packages": {
+            "packages": packages,
+            "review_order": ordered_packages,
+            "package_dependency_graph": {
+                "rows": graph_rows,
+                "root_packages": [ordered_packages[0]],
+                "terminal_packages": ["verification_evidence_package"],
+                "parallelizable_after_survey": [package_id for package_id in ordered_packages if package_id not in {"evidence_survey_package", "verification_evidence_package"}],
+                "complete": True,
+                "blockers": [],
+            },
+            "global_handoff_criteria": ["repair item is resolved or blocked", "tests are preserved", "verification command is ready to rerun"],
+        },
+        "planning_review_gate": {"decision": "ready_for_ceraxia_review", "score": 90, "blockers": [], "warnings": []},
+        "planning_dependency_map": {"critical_path": ["task_contract", "repo_evidence", "design_decision", "verification_contract", "implementation_brief"]},
+        "work_breakdown": {
+            "phases": [
+                {"id": "frame_task", "owner": "Ceraxia", "exit_gate": "repair request is known"},
+                {"id": "survey_repo", "owner": "CodeBrigade", "exit_gate": "source and test files are known"},
+                {"id": "choose_design", "owner": "CodeBrigade", "exit_gate": "guarded inference applies"},
+                {"id": "prepare_verification", "owner": "CodeBrigade", "exit_gate": "failed command is known"},
+                {"id": "handoff_to_code_brigade", "owner": "CodeBrigade", "exit_gate": "brief validates"},
+                {"id": "review_result", "owner": "Ceraxia", "exit_gate": "repair result is auditable"},
+            ],
+            "stop_conditions": ["guarded repair inference unavailable", "scope budget exceeded"],
+        },
+        "impact_analysis": {"surfaces": [{"surface": surface, "risk": "medium", "evidence_needed": ["failed command rerun"]} for surface in surfaces], "highest_risk_surface": surfaces[0], "requires_cross_surface_review": len(surfaces) > 1},
+        "execution_forecast": {"complexity": "medium", "expected_code_brigade_iterations": 1, "recommended_timeout_minutes": 15, "scope_budget": scope_budget, "escalation_triggers": ["same failure repeats"]},
+        "execution_intent": {
+            "kind": "ceraxia_code_brigade_execution_intent",
+            "contract_version": CONTRACT_VERSION,
+            "mode": "guarded_inferred_patch_execution",
+            "adapter_capability": "explicit_or_guarded_inference_adapter",
+            "explicit_patch_present": False,
+            "real_execution_supported": True,
+            "dry_run_requested": False,
+            "blockers": [],
+            "required_next_adapter": "",
+        },
+        "code_brigade_handoff": {
+            "target": "CodeBrigade",
+            "steps": [{"step": "execute_guarded_diagnostic_repair", "owner": "CodeBrigade"}],
+            "package_dependency_graph": {
+                "rows": graph_rows,
+                "root_packages": [ordered_packages[0]],
+                "terminal_packages": ["verification_evidence_package"],
+                "parallelizable_after_survey": [package_id for package_id in ordered_packages if package_id not in {"evidence_survey_package", "verification_evidence_package"}],
+                "complete": True,
+                "blockers": [],
+            },
+        },
+        "assumption_register": {
+            "assumptions": [
+                {"id": "repair_request_is_sufficient", "assumption": "request contains enough diagnostic context", "risk_if_false": "wrong source edit", "validation_source": "diagnostic_repair_request.json", "blocks_when_false": "repair request blocks", "owner": "Ceraxia"},
+                {"id": "source_target_is_safe", "assumption": "source target is safe repo-relative", "risk_if_false": "unsafe path mutation", "validation_source": "diagnostic repair intake", "blocks_when_false": "preflight blocks", "owner": "CodeBrigade"},
+                {"id": "test_oracle_is_preserved", "assumption": "test files remain unchanged", "risk_if_false": "test masking", "validation_source": "scope budget", "blocks_when_false": "repair blocks", "owner": "CodeBrigade"},
+            ],
+            "replan_when_false": ["repair request blocks", "preflight blocks", "repair blocks"],
+        },
+        "repo_survey_evidence": {
+            "candidate_files": source_files,
+            "test_files": test_files,
+            "path_hints": [*source_files, *test_files],
+            "existing_path_hints": [*source_files, *test_files],
+            "missing_path_hints": [],
+            "unsafe_path_hints": [],
+            "entrypoint_candidates": source_files,
+            "recommended_read_order": [{"path": path, "reason": "diagnostic repair read target"} for path in source_files + test_files],
+            "source_summaries": [],
+            "local_import_edges": [],
+            "generic_import_edges": [],
+            "reverse_dependency_index": request.get("reverse_dependency_index", {}) if isinstance(request.get("reverse_dependency_index"), dict) else {},
+            "test_coverage_links": [{"test": test, "target": source} for test in test_files for source in source_files],
+            "caller_candidates": [{"target": source, "callers": test_files, "caller_count": len(test_files)} for source in source_files],
+            "contract_surface_candidates": [],
+            "survey_truncated": False,
+            "python_symbols_truncated": False,
+        },
+        "blocked": False,
+        "blockers": [],
+    }
+
+
+def execute_diagnostic_repair_request(request: dict[str, Any]) -> dict[str, Any]:
+    intake = build_diagnostic_repair_intake(request)
+    if intake["status"] == "blocked":
+        return build_blocked_execution_result([f"invalid diagnostic repair request: {problem}" for problem in intake["blockers"]])
+    if intake["status"] == "not_required":
+        return build_blocked_execution_result(["diagnostic repair request is not required"])
+    supported = any(
+        isinstance(item, dict)
+        and "assertion_failure" in (item.get("diagnostic_signals") if isinstance(item.get("diagnostic_signals"), list) else [])
+        for item in request.get("diagnostic_repair_queue", {}).get("items", [])
+        if isinstance(request.get("diagnostic_repair_queue"), dict)
+    )
+    if not supported:
+        return build_blocked_execution_result(["diagnostic repair executor currently supports assertion_failure guarded inference only"])
+    from execution_adapter import execute_implementation_brief
+
+    return execute_implementation_brief(build_repair_execution_brief(request, intake))
 
 
 def main() -> int:

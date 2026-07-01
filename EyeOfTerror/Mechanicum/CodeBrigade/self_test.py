@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 import code_brigade_adapter
-from diagnostic_repair_contract import build_diagnostic_repair_intake
+from diagnostic_repair_contract import build_diagnostic_repair_intake, execute_diagnostic_repair_request
 import execution_adapter
 from execution_preflight import build_execution_preflight
 
@@ -764,6 +764,20 @@ def main() -> int:
     unsafe_intake = build_diagnostic_repair_intake(unsafe_repair_request)
     if unsafe_intake["status"] != "blocked" or not any("safe repo-relative path" in blocker for blocker in unsafe_intake["blockers"]):
         raise AssertionError(f"diagnostic repair intake should block unsafe paths: {unsafe_intake}")
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        (repo / "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+        test_text = "import app\n\n\ndef test_value():\n    assert app.value() == 2\n"
+        (repo / "test_app.py").write_text(test_text, encoding="utf-8")
+        executable_request = dict(repair_request)
+        executable_request.update({"repo_path": str(repo), "target_files_to_inspect": ["app.py"], "test_files_to_preserve": ["test_app.py"]})
+        execution = execute_diagnostic_repair_request(executable_request)
+        if execution["status"] != "implemented" or execution["changed_files"] != ["app.py"]:
+            raise AssertionError(f"diagnostic repair executor should apply guarded source repair: {execution}")
+        if "return 2" not in (repo / "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("diagnostic repair executor should update source return literal")
+        if (repo / "test_app.py").read_text(encoding="utf-8") != test_text:
+            raise AssertionError("diagnostic repair executor must preserve test file content")
     with tempfile.TemporaryDirectory() as tmp:
         request_path = Path(tmp) / "diagnostic_repair_request.json"
         request_path.write_text(json.dumps(repair_request), encoding="utf-8")

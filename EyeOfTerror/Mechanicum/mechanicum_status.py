@@ -68,7 +68,7 @@ COMPONENTS = {
             "verification_execution.schema.json",
             "self_test.py",
         ],
-        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_preflight_explicit_text_ast_guarded_natural_language_test_inferred_literal_patch_adapter_package_statuses_allowlisted_verification_and_diagnostic_repair_intake",
+        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_preflight_explicit_text_ast_guarded_natural_language_test_inferred_literal_patch_adapter_package_statuses_allowlisted_verification_diagnostic_repair_intake_and_guarded_assertion_repair_executor",
     },
 }
 
@@ -77,7 +77,7 @@ ROADMAP = [
     {
         "priority": 1,
         "item": "expand CodeBrigade from guarded inference to diagnostic autonomous source edits",
-        "reason": "PlanningBrigade now emits a diagnostic repair plan, Ceraxia writes diagnostic repair request artifacts, and CodeBrigade validates repair intake, but the broader source-edit adapter still needs to execute diagnostic repair loops against repo evidence, verification feedback, scope budgets, and refusal controls.",
+        "reason": "PlanningBrigade now emits a diagnostic repair plan, Ceraxia writes diagnostic repair request artifacts, and CodeBrigade validates repair intake plus executes narrow assertion-failure guarded repairs, but the broader source-edit adapter still needs to handle more diagnostic classes against repo evidence, verification feedback, scope budgets, and refusal controls.",
         "owner": "CodeBrigade",
     },
     {
