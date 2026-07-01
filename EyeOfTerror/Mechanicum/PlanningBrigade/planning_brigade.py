@@ -1142,64 +1142,63 @@ def implementation_work_packages(
     targeted_commands = verification.get("targeted_commands", []) if isinstance(verification.get("targeted_commands"), list) else []
     negative_tests = verification.get("negative_tests", []) if isinstance(verification.get("negative_tests"), list) else []
     risk_items = risks.get("risks", []) if isinstance(risks.get("risks"), list) else []
-    packages: list[dict[str, Any]] = [
-        {
-            "id": "evidence_survey_package",
-            "owner": "CodeBrigade",
-            "purpose": "Confirm candidate files, dependent callers, and tests before choosing an edit.",
-            "impact_surfaces": [surface.get("surface", "") for surface in surfaces if isinstance(surface, dict) and surface.get("surface")],
-            "read_scope": [
-                "repo_survey_evidence.recommended_read_order",
-                "repo_survey_evidence.candidate_files",
-                "repo_survey_evidence.test_files",
-                "repo_survey_evidence.local_import_edges",
-                "repo_survey_evidence.generic_import_edges",
-            ],
-            "edit_scope": [],
-            "verification_scope": ["no mutation; evidence only"],
-            "risk_controls": ["block if candidate files or required path hints are missing"],
-            "blocking_policy": [
-                "block when repo survey has no candidate files",
-                "block when explicit path hints are missing or unsafe",
-            ],
-            "handoff_criteria": ["candidate file decision is grounded in repo_survey.json"],
-        },
-        {
-            "id": "minimal_patch_package",
-            "owner": "CodeBrigade",
-            "purpose": "Apply the smallest source change that satisfies the selected strategy.",
-            "impact_surfaces": ["source_behavior"],
-            "read_scope": ["implementation_brief_blueprint", "planning_dependency_map", "impact_analysis"],
-            "edit_scope": ["candidate files identified by repository survey"],
-            "verification_scope": targeted_commands,
-            "risk_controls": [
-                "preserve public behavior unless the task explicitly changes it",
-                "do not edit tests to mask broken source behavior",
-                "rollback or block when patch preflight fails",
-            ],
-            "blocking_policy": [
-                "block when requested edit is outside allowed scope",
-                "block when patch preflight fails",
-                "block when the smallest coherent patch cannot satisfy the task contract",
-            ],
-            "handoff_criteria": ["worker_report.json lists changed files, blockers, and execution result"],
-        },
-        {
-            "id": "verification_evidence_package",
-            "owner": "CodeBrigade",
-            "purpose": "Prove each planned impact surface or return concrete blockers.",
-            "impact_surfaces": [surface.get("surface", "") for surface in surfaces if isinstance(surface, dict) and surface.get("surface")],
-            "read_scope": ["surface_verification_matrix", "required_verification", "acceptance_contract"],
-            "edit_scope": [],
-            "verification_scope": targeted_commands + negative_tests,
-            "risk_controls": ["do not treat syntax-only checks as behavior proof"],
-            "blocking_policy": [
-                "block when planned verification cannot run and no explicit blocker is recorded",
-                "block when high-risk surfaces have only partial executed evidence",
-            ],
-            "handoff_criteria": ["verification_report.json names executed, skipped, failed, or blocked checks"],
-        },
-    ]
+    evidence_package = {
+        "id": "evidence_survey_package",
+        "owner": "CodeBrigade",
+        "purpose": "Confirm candidate files, dependent callers, and tests before choosing an edit.",
+        "impact_surfaces": [surface.get("surface", "") for surface in surfaces if isinstance(surface, dict) and surface.get("surface")],
+        "read_scope": [
+            "repo_survey_evidence.recommended_read_order",
+            "repo_survey_evidence.candidate_files",
+            "repo_survey_evidence.test_files",
+            "repo_survey_evidence.local_import_edges",
+            "repo_survey_evidence.generic_import_edges",
+        ],
+        "edit_scope": [],
+        "verification_scope": ["no mutation; evidence only"],
+        "risk_controls": ["block if candidate files or required path hints are missing"],
+        "blocking_policy": [
+            "block when repo survey has no candidate files",
+            "block when explicit path hints are missing or unsafe",
+        ],
+        "handoff_criteria": ["candidate file decision is grounded in repo_survey.json"],
+    }
+    minimal_patch_package = {
+        "id": "minimal_patch_package",
+        "owner": "CodeBrigade",
+        "purpose": "Apply the smallest source change that satisfies the selected strategy.",
+        "impact_surfaces": ["source_behavior"],
+        "read_scope": ["implementation_brief_blueprint", "planning_dependency_map", "impact_analysis"],
+        "edit_scope": ["candidate files identified by repository survey"],
+        "verification_scope": targeted_commands,
+        "risk_controls": [
+            "preserve public behavior unless the task explicitly changes it",
+            "do not edit tests to mask broken source behavior",
+            "rollback or block when patch preflight fails",
+        ],
+        "blocking_policy": [
+            "block when requested edit is outside allowed scope",
+            "block when patch preflight fails",
+            "block when the smallest coherent patch cannot satisfy the task contract",
+        ],
+        "handoff_criteria": ["worker_report.json lists changed files, blockers, and execution result"],
+    }
+    verification_package = {
+        "id": "verification_evidence_package",
+        "owner": "CodeBrigade",
+        "purpose": "Prove each planned impact surface or return concrete blockers.",
+        "impact_surfaces": [surface.get("surface", "") for surface in surfaces if isinstance(surface, dict) and surface.get("surface")],
+        "read_scope": ["surface_verification_matrix", "required_verification", "acceptance_contract"],
+        "edit_scope": [],
+        "verification_scope": targeted_commands + negative_tests,
+        "risk_controls": ["do not treat syntax-only checks as behavior proof"],
+        "blocking_policy": [
+            "block when planned verification cannot run and no explicit blocker is recorded",
+            "block when high-risk surfaces have only partial executed evidence",
+        ],
+        "handoff_criteria": ["verification_report.json names executed, skipped, failed, or blocked checks"],
+    }
+    packages: list[dict[str, Any]] = [evidence_package]
     if task_kinds & {"api_compatibility", "migration"}:
         packages.append(
             {
@@ -1290,6 +1289,34 @@ def implementation_work_packages(
                 "handoff_criteria": ["refactor evidence shows behavior preservation and dependency impact"],
             }
         )
+    packages.extend([minimal_patch_package, verification_package])
+    package_ids = [package["id"] for package in packages]
+    special_package_ids = [
+        package_id
+        for package_id in package_ids
+        if package_id not in {"evidence_survey_package", "minimal_patch_package", "verification_evidence_package"}
+    ]
+    dependency_rows: list[dict[str, Any]] = []
+    for package_id in package_ids:
+        if package_id == "evidence_survey_package":
+            depends_on: list[str] = []
+            reason = "root package; establishes repository evidence before mutation"
+        elif package_id in special_package_ids:
+            depends_on = ["evidence_survey_package"]
+            reason = "specialized boundary planning needs repository evidence before it can constrain edits"
+        elif package_id == "minimal_patch_package":
+            depends_on = ["evidence_survey_package", *special_package_ids]
+            reason = "source mutation waits for repository evidence and all specialized boundary constraints"
+        else:
+            depends_on = [item for item in package_ids if item != "verification_evidence_package"]
+            reason = "final verification waits for every evidence, boundary, and mutation package"
+        dependency_rows.append(
+            {
+                "package_id": package_id,
+                "depends_on": depends_on,
+                "dependency_reason": reason,
+            }
+        )
     return {
         "role": "PlanningBrigade",
         "risk_level": triage["risk_level"],
@@ -1300,11 +1327,20 @@ def implementation_work_packages(
         "expected_iterations": forecast.get("expected_code_brigade_iterations", 1),
         "packages": packages,
         "package_count": len(packages),
-        "review_order": [package["id"] for package in packages],
+        "review_order": package_ids,
+        "package_dependency_graph": {
+            "rows": dependency_rows,
+            "root_packages": ["evidence_survey_package"],
+            "terminal_packages": ["verification_evidence_package"],
+            "parallelizable_after_survey": special_package_ids or ["minimal_patch_package"],
+            "complete": True,
+            "blockers": [],
+        },
         "global_handoff_criteria": [
             "each package is passed, blocked, or explicitly deferred",
             "package blockers are reflected in review_gate.json",
             "final report answers the original task rather than only package-local success",
+            "package_dependency_graph dependencies are respected before source mutation or final verification",
         ],
         "risk_focus": [item.get("risk", "") for item in risk_items if isinstance(item, dict) and item.get("risk")],
         "definition_of_done": problem.get("definition_of_done", []),
@@ -1707,6 +1743,7 @@ def code_brigade_handoff(
         "task_kinds": triage["task_kinds"],
         "steps": steps,
         "package_review_order": work_packages.get("review_order", []),
+        "package_dependency_graph": work_packages.get("package_dependency_graph", {}),
         "global_handoff_criteria": work_packages.get("global_handoff_criteria", []),
         "acceptance_trace_required": acceptance_trace.get("complete") is True,
         "acceptance_trace_row_count": acceptance_trace.get("row_count", 0),

@@ -59,13 +59,14 @@ Current contract:
   mutation preconditions.
 - `implementation_work_packages` turns the plan into reviewable CodeBrigade
   work packages with read scope, edit scope, verification scope, risk controls,
-  blocking policy, and handoff criteria.
+  blocking policy, handoff criteria, and a package dependency graph.
 - `surface_package_matrix` traces every impacted surface to planned
   verification evidence and concrete implementation package ids.
 - `planning_review_gate` scores the planning packet and blocks unclear or
   structurally unsafe plans before they reach CodeBrigade.
 - `code_brigade_handoff` lists the ordered execution/review steps, package
-  review order, global handoff criteria, and acceptance trace requirement.
+  review order, package dependency graph, global handoff criteria, and
+  acceptance trace requirement.
 
 ```bash
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "почини failing unittest без изменения тестов" --repo-path /repo

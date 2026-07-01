@@ -174,6 +174,17 @@ def main() -> int:
         for row in security_packet["acceptance_trace_matrix"]["rows"]
     ):
         raise AssertionError(f"security acceptance trace must map boundary evidence to security package: {security_packet}")
+    security_package_graph = security_packet["implementation_work_packages"]["package_dependency_graph"]
+    minimal_patch_dependency = next(row for row in security_package_graph["rows"] if row["package_id"] == "minimal_patch_package")
+    verification_dependency = next(row for row in security_package_graph["rows"] if row["package_id"] == "verification_evidence_package")
+    if (
+        security_package_graph["root_packages"] != ["evidence_survey_package"]
+        or security_package_graph["terminal_packages"] != ["verification_evidence_package"]
+        or "security_boundary_package" not in minimal_patch_dependency["depends_on"]
+        or "minimal_patch_package" not in verification_dependency["depends_on"]
+        or security_packet["code_brigade_handoff"]["package_dependency_graph"] != security_package_graph
+    ):
+        raise AssertionError(f"security package dependency graph must constrain CodeBrigade handoff: {security_packet}")
 
     migration_packet = planning_brigade.build_planning_packet(
         {

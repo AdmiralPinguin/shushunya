@@ -125,6 +125,20 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError(f"{trial_id}: work packages missing blocking_policy: {missing_blocking_policy}; packet={packet}")
     if packet["implementation_work_packages"]["review_order"] != work_package_ids:
         raise AssertionError(f"{trial_id}: work package review_order must match package order: {packet}")
+    package_graph = packet["implementation_work_packages"].get("package_dependency_graph") if isinstance(packet["implementation_work_packages"].get("package_dependency_graph"), dict) else {}
+    dependency_rows = package_graph.get("rows") if isinstance(package_graph.get("rows"), list) else []
+    graph_package_ids = [row.get("package_id") for row in dependency_rows if isinstance(row, dict)]
+    if sorted(graph_package_ids) != sorted(work_package_ids):
+        raise AssertionError(f"{trial_id}: package dependency graph must cover every package: {packet}")
+    if "evidence_survey_package" not in package_graph.get("root_packages", []):
+        raise AssertionError(f"{trial_id}: package dependency graph must root at evidence survey: {packet}")
+    if "verification_evidence_package" not in package_graph.get("terminal_packages", []):
+        raise AssertionError(f"{trial_id}: package dependency graph must terminate at verification evidence: {packet}")
+    verification_row = next((row for row in dependency_rows if isinstance(row, dict) and row.get("package_id") == "verification_evidence_package"), {})
+    verification_dependencies = verification_row.get("depends_on") if isinstance(verification_row.get("depends_on"), list) else []
+    missing_verification_dependencies = sorted(package_id for package_id in work_package_ids if package_id != "verification_evidence_package" and package_id not in verification_dependencies)
+    if missing_verification_dependencies:
+        raise AssertionError(f"{trial_id}: verification package must depend on every earlier package: {missing_verification_dependencies}")
     surfaces = [surface["surface"] for surface in packet["impact_analysis"]["surfaces"]]
     covered_surfaces = {
         surface
@@ -169,6 +183,8 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     handoff = packet.get("code_brigade_handoff") if isinstance(packet.get("code_brigade_handoff"), dict) else {}
     if handoff.get("package_review_order") != packet["implementation_work_packages"]["review_order"]:
         raise AssertionError(f"{trial_id}: CodeBrigade handoff must carry package review order: {packet}")
+    if handoff.get("package_dependency_graph") != package_graph:
+        raise AssertionError(f"{trial_id}: CodeBrigade handoff must carry package dependency graph: {packet}")
     if handoff.get("global_handoff_criteria") != packet["implementation_work_packages"]["global_handoff_criteria"]:
         raise AssertionError(f"{trial_id}: CodeBrigade handoff must carry global handoff criteria: {packet}")
     if handoff.get("acceptance_trace_required") is not True:
@@ -192,6 +208,11 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "task_kinds": packet["task_triage"]["task_kinds"],
         "phases": phases,
         "work_packages": work_package_ids,
+        "package_dependency_graph_packages": graph_package_ids,
+        "package_dependency_graph_roots": package_graph.get("root_packages", []) if isinstance(package_graph.get("root_packages"), list) else [],
+        "package_dependency_graph_terminals": package_graph.get("terminal_packages", []) if isinstance(package_graph.get("terminal_packages"), list) else [],
+        "package_dependency_graph_parallelizable_after_survey": package_graph.get("parallelizable_after_survey", []) if isinstance(package_graph.get("parallelizable_after_survey"), list) else [],
+        "package_dependency_graph_complete": package_graph.get("complete"),
         "surfaces": surfaces,
         "highest_risk_surface": packet["impact_analysis"]["highest_risk_surface"],
         "negative_tests": packet["verification_strategy"]["negative_tests"],
@@ -244,6 +265,11 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     kinds: Counter[str] = Counter()
     phases: Counter[str] = Counter()
     work_packages: Counter[str] = Counter()
+    graph_packages: Counter[str] = Counter()
+    graph_roots: Counter[str] = Counter()
+    graph_terminals: Counter[str] = Counter()
+    graph_parallelizable_after_survey: Counter[str] = Counter()
+    graph_complete_values: Counter[str] = Counter()
     surfaces: Counter[str] = Counter()
     highest_risk_surfaces: Counter[str] = Counter()
     decisions: Counter[str] = Counter()
@@ -275,6 +301,11 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         kinds.update(str(item) for item in result.get("task_kinds", []))
         phases.update(str(item) for item in result.get("phases", []))
         work_packages.update(str(item) for item in result.get("work_packages", []))
+        graph_packages.update(str(item) for item in result.get("package_dependency_graph_packages", []))
+        graph_roots.update(str(item) for item in result.get("package_dependency_graph_roots", []))
+        graph_terminals.update(str(item) for item in result.get("package_dependency_graph_terminals", []))
+        graph_parallelizable_after_survey.update(str(item) for item in result.get("package_dependency_graph_parallelizable_after_survey", []))
+        graph_complete_values.update([str(result.get("package_dependency_graph_complete"))])
         surfaces.update(str(item) for item in result.get("surfaces", []))
         if result.get("highest_risk_surface"):
             highest_risk_surfaces.update([str(result["highest_risk_surface"])])
@@ -322,6 +353,11 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "task_kind_counts": dict(sorted(kinds.items())),
         "phase_counts": dict(sorted(phases.items())),
         "work_package_counts": dict(sorted(work_packages.items())),
+        "package_dependency_graph_package_counts": dict(sorted(graph_packages.items())),
+        "package_dependency_graph_root_counts": dict(sorted(graph_roots.items())),
+        "package_dependency_graph_terminal_counts": dict(sorted(graph_terminals.items())),
+        "package_dependency_graph_parallelizable_after_survey_counts": dict(sorted(graph_parallelizable_after_survey.items())),
+        "package_dependency_graph_complete_value_counts": dict(sorted(graph_complete_values.items())),
         "surface_counts": dict(sorted(surfaces.items())),
         "highest_risk_surface_counts": dict(sorted(highest_risk_surfaces.items())),
         "negative_test_counts": dict(sorted(negative_tests.items())),
@@ -400,12 +436,25 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     missing_kinds = sorted(kind for kind in required_kinds if kind not in kind_counts)
     missing_surfaces = sorted(surface for surface in required_surfaces if surface not in surface_counts)
     missing_work_packages = sorted(package for package in required_work_packages if package not in work_package_counts)
+    graph_package_counts = summary.get("package_dependency_graph_package_counts") if isinstance(summary.get("package_dependency_graph_package_counts"), dict) else {}
+    graph_root_counts = summary.get("package_dependency_graph_root_counts") if isinstance(summary.get("package_dependency_graph_root_counts"), dict) else {}
+    graph_terminal_counts = summary.get("package_dependency_graph_terminal_counts") if isinstance(summary.get("package_dependency_graph_terminal_counts"), dict) else {}
+    graph_complete_counts = summary.get("package_dependency_graph_complete_value_counts") if isinstance(summary.get("package_dependency_graph_complete_value_counts"), dict) else {}
+    missing_graph_packages = sorted(package for package in required_work_packages if package not in graph_package_counts)
     if missing_kinds:
         raise AssertionError(f"field trials are missing task kind coverage: {missing_kinds}")
     if missing_surfaces:
         raise AssertionError(f"field trials are missing surface coverage: {missing_surfaces}")
     if missing_work_packages:
         raise AssertionError(f"field trials are missing implementation work package coverage: {missing_work_packages}")
+    if missing_graph_packages:
+        raise AssertionError(f"field trials are missing package dependency graph coverage: {missing_graph_packages}")
+    if "evidence_survey_package" not in graph_root_counts:
+        raise AssertionError(f"field trials must root package dependency graphs at evidence_survey_package: {summary}")
+    if "verification_evidence_package" not in graph_terminal_counts:
+        raise AssertionError(f"field trials must terminate package dependency graphs at verification_evidence_package: {summary}")
+    if graph_complete_counts != {"True": summary["trial_count"]}:
+        raise AssertionError(f"field trials must prove package dependency graphs are complete: {summary}")
     decision_counts = summary.get("decision_counts") if isinstance(summary.get("decision_counts"), dict) else {}
     if "blocked" not in decision_counts or "ready_for_ceraxia_review" not in decision_counts:
         raise AssertionError(f"field trials must cover blocked and ready decisions: {summary}")

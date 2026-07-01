@@ -30,6 +30,8 @@ Current capabilities:
   ids and planned evidence
 - implementation work packages with read scope, edit scope, verification
   scope, risk controls, blocking policy, handoff criteria, and review order
+- package dependency graphs that force evidence and specialized boundary
+  packages before source mutation and final verification
 - specialized work packages for compatibility, security boundaries, runtime
   configuration, concurrency runtime, and architecture refactors
 - package-to-surface traceability: every planned verification surface must be

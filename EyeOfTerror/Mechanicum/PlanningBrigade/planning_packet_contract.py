@@ -330,6 +330,38 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
     review_order = [item for item in list_field(work_packages.get("review_order")) if isinstance(item, str)]
     if review_order and sorted(review_order) != sorted(package_ids):
         problems.append("implementation work package review_order must match package ids")
+    package_graph = object_field(work_packages, "package_dependency_graph")
+    graph_rows = list_field(package_graph.get("rows"))
+    graph_package_ids = [
+        row.get("package_id")
+        for row in graph_rows
+        if isinstance(row, dict) and isinstance(row.get("package_id"), str) and row.get("package_id")
+    ]
+    if sorted(graph_package_ids) != sorted(package_ids):
+        problems.append("implementation work package dependency graph must cover every package")
+    if package_graph.get("complete") is not True:
+        problems.extend(f"implementation work package dependency graph blocked: {item}" for item in list_field(package_graph.get("blockers")))
+    if "evidence_survey_package" not in list_field(package_graph.get("root_packages")):
+        problems.append("implementation work package dependency graph must root at evidence_survey_package")
+    if "verification_evidence_package" not in list_field(package_graph.get("terminal_packages")):
+        problems.append("implementation work package dependency graph must terminate at verification_evidence_package")
+    package_id_set = set(package_ids)
+    for row in graph_rows:
+        if not isinstance(row, dict):
+            problems.append("implementation work package dependency graph row must be an object")
+            continue
+        for key in ("package_id", "depends_on", "dependency_reason"):
+            if key not in row:
+                problems.append(f"implementation work package dependency graph row missing {key}")
+        for dependency_id in list_field(row.get("depends_on")):
+            if dependency_id not in package_id_set:
+                problems.append(f"implementation work package dependency graph references unknown package: {dependency_id}")
+        if row.get("package_id") == "minimal_patch_package" and "evidence_survey_package" not in list_field(row.get("depends_on")):
+            problems.append("minimal_patch_package must depend on evidence_survey_package")
+        if row.get("package_id") == "verification_evidence_package":
+            missing_verification_dependencies = sorted(package_id for package_id in package_ids if package_id != "verification_evidence_package" and package_id not in list_field(row.get("depends_on")))
+            if missing_verification_dependencies:
+                problems.append("verification_evidence_package must depend on every earlier package: " + ", ".join(missing_verification_dependencies))
     planned_surfaces = {
         row.get("surface")
         for row in list_field(surface_matrix.get("rows"))
@@ -384,6 +416,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("code brigade handoff must include steps")
     if list_field(handoff.get("package_review_order")) != list_field(work_packages.get("review_order")):
         problems.append("code brigade handoff package_review_order must match implementation work packages")
+    if object_field(handoff, "package_dependency_graph") != package_graph:
+        problems.append("code brigade handoff package_dependency_graph must match implementation work packages")
     if list_field(handoff.get("global_handoff_criteria")) != list_field(work_packages.get("global_handoff_criteria")):
         problems.append("code brigade handoff global_handoff_criteria must match implementation work packages")
     if handoff.get("acceptance_trace_required") is not True:
