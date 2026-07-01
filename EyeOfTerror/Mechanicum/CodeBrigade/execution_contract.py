@@ -7,8 +7,8 @@ from typing import Any
 CONTRACT_VERSION = "eye-mechanicum.v1"
 
 
-def build_blocked_execution_result(blockers: list[str]) -> dict[str, Any]:
-    return {
+def build_blocked_execution_result(blockers: list[str], preflight: dict[str, Any] | None = None) -> dict[str, Any]:
+    result: dict[str, Any] = {
         "kind": "code_brigade_execution_result",
         "contract_version": CONTRACT_VERSION,
         "status": "blocked",
@@ -18,3 +18,6 @@ def build_blocked_execution_result(blockers: list[str]) -> dict[str, Any]:
         "blockers": blockers,
         "rollback_notes": "",
     }
+    if preflight is not None:
+        result["preflight"] = preflight
+    return result

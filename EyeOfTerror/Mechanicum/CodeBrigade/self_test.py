@@ -83,6 +83,8 @@ def main() -> int:
     direct_execution = execution_adapter.execute_implementation_brief(valid_brief())
     if direct_execution["status"] != "blocked" or not direct_execution["blockers"]:
         raise AssertionError(f"execution adapter stub should return a formal blocker: {direct_execution}")
+    if direct_execution["preflight"]["candidate_file_count"] != 1:
+        raise AssertionError(f"execution preflight should summarize survey evidence: {direct_execution}")
     invalid = valid_brief()
     invalid.pop("allowed_scope")
     invalid_report = code_brigade_adapter.build_worker_report(invalid, dry_run=True)

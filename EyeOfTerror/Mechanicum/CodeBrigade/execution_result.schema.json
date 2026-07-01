@@ -45,6 +45,52 @@
     },
     "rollback_notes": {
       "type": "string"
+    },
+    "preflight": {
+      "type": "object",
+      "required": [
+        "kind",
+        "repo_path",
+        "repo_exists",
+        "repo_is_dir",
+        "candidate_file_count",
+        "targeted_command_count",
+        "suggested_command_count",
+        "blockers",
+        "ok"
+      ],
+      "properties": {
+        "kind": {
+          "const": "code_brigade_execution_preflight"
+        },
+        "repo_path": {
+          "type": "string"
+        },
+        "repo_exists": {
+          "type": "boolean"
+        },
+        "repo_is_dir": {
+          "type": "boolean"
+        },
+        "candidate_file_count": {
+          "type": "integer"
+        },
+        "targeted_command_count": {
+          "type": "integer"
+        },
+        "suggested_command_count": {
+          "type": "integer"
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "additionalProperties": true

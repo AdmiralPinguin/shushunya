@@ -47,6 +47,7 @@ COMPONENTS = {
             "code_brigade_adapter.py",
             "execution_adapter.py",
             "execution_contract.py",
+            "execution_preflight.py",
             "implementation_brief_contract.py",
             "execution_policy.schema.json",
             "execution_result.schema.json",

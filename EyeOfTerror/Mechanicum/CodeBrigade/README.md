@@ -38,6 +38,9 @@ it returns a formal `code_brigade_execution_result` blocker rather than
 mutating source.
 `execution_contract.py` owns the formal execution result builders so the
 execution boundary does not depend on the full worker-report adapter.
+`execution_preflight.py` performs read-only mutation preflight checks for the
+future real executor: repo availability, scope evidence, survey candidates, and
+verification command counts.
 The worker report must include `implementation_plan`, which preserves survey
 candidate files, test files, local dependency edges, handoff steps,
 verification commands, acceptance gates, and refusal conditions for the future
