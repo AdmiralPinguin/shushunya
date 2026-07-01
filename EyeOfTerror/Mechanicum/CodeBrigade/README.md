@@ -31,6 +31,9 @@ Workers return `worker_report.json` using
 local adapter: it validates the implementation brief and can acknowledge a
 dry-run handoff, but real source execution remains blocked until an execution
 adapter is intentionally wired.
+`execution_adapter.py` is that boundary today, but it is still a blocked stub:
+it returns a formal `code_brigade_execution_result` blocker rather than
+mutating source.
 The worker report must include `implementation_plan`, which preserves survey
 candidate files, test files, local dependency edges, handoff steps,
 verification commands, acceptance gates, and refusal conditions for the future
