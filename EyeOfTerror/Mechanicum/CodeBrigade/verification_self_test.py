@@ -30,6 +30,16 @@ def main() -> int:
         unittest_executed = verification_adapter.run_verification_commands(["python -m unittest test_ok.py"], str(repo), execute=True)
         if unittest_executed["status"] != "passed" or unittest_executed["results"][0]["returncode"] != 0:
             raise AssertionError(f"unittest should execute successfully: {unittest_executed}")
+        (repo / "test_fail.py").write_text(
+            "import unittest\n\nclass FailTest(unittest.TestCase):\n    def test_fail(self):\n        self.assertEqual(1, 2)\n",
+            encoding="utf-8",
+        )
+        failing_unittest = verification_adapter.run_verification_commands(["python -m unittest test_fail.py"], str(repo), execute=True)
+        diagnostics = failing_unittest["results"][0]["diagnostics"]
+        if failing_unittest["status"] != "failed" or not diagnostics["has_assertion_failure"]:
+            raise AssertionError(f"failing unittest should expose assertion diagnostics: {failing_unittest}")
+        if not any(item.startswith("test_fail.py:") for item in diagnostics["traceback_files"]):
+            raise AssertionError(f"failing unittest should expose repo-relative traceback files: {failing_unittest}")
         git_diff = verification_adapter.run_verification_commands(["git diff --check"], str(repo), execute=False)
         if git_diff["status"] != "planned" or git_diff["results"][0]["status"] != "planned":
             raise AssertionError(f"git diff --check should be allowlisted as planned: {git_diff}")

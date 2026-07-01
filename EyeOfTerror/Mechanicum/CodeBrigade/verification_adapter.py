@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -60,6 +61,28 @@ def is_pytest_command(tokens: list[str]) -> bool:
     return bool(tokens and (tokens[0] == "pytest" or (len(tokens) >= 3 and tokens[1:3] == ["-m", "pytest"])))
 
 
+def verification_diagnostics(stdout: str, stderr: str, repo: Path) -> dict[str, Any]:
+    combined = f"{stdout}\n{stderr}"
+    traceback_files: list[str] = []
+    for match in re.finditer(r'File "([^"]+)", line (\d+)', combined):
+        raw_path = Path(match.group(1))
+        try:
+            rel_path = raw_path.resolve().relative_to(repo.resolve())
+        except ValueError:
+            continue
+        value = f"{rel_path}:{match.group(2)}"
+        if value not in traceback_files:
+            traceback_files.append(value)
+    missing_imports = sorted(set(re.findall(r"No module named ['\"]([^'\"]+)['\"]", combined)))
+    return {
+        "has_traceback": "Traceback (most recent call last)" in combined,
+        "traceback_files": traceback_files[:20],
+        "missing_imports": missing_imports[:20],
+        "has_assertion_failure": "AssertionError" in combined or "FAILED" in combined or "FAIL:" in combined,
+        "has_syntax_error": "SyntaxError" in combined,
+    }
+
+
 def run_verification_commands(commands: list[str], repo_path: str, execute: bool = False, timeout_sec: int = 30) -> dict[str, Any]:
     repo = Path(repo_path)
     results: list[dict[str, Any]] = []
@@ -78,44 +101,56 @@ def run_verification_commands(commands: list[str], repo_path: str, execute: bool
         tokens = split_command(command)
         if not command_allowed(tokens):
             blockers.append(f"command is not allowlisted: {command}")
-            results.append({"command": command, "status": "blocked", "returncode": None, "stdout": "", "stderr": "not allowlisted"})
+            stderr = "not allowlisted"
+            results.append({"command": command, "status": "blocked", "returncode": None, "stdout": "", "stderr": stderr, "diagnostics": verification_diagnostics("", stderr, repo)})
             continue
         if command_has_unsafe_path_tokens(tokens):
             blockers.append(f"command contains unsafe path token: {command}")
-            results.append({"command": command, "status": "blocked", "returncode": None, "stdout": "", "stderr": "unsafe path token"})
+            stderr = "unsafe path token"
+            results.append({"command": command, "status": "blocked", "returncode": None, "stdout": "", "stderr": stderr, "diagnostics": verification_diagnostics("", stderr, repo)})
             continue
         if not execute:
-            results.append({"command": command, "status": "planned", "returncode": None, "stdout": "", "stderr": ""})
+            results.append({"command": command, "status": "planned", "returncode": None, "stdout": "", "stderr": "", "diagnostics": verification_diagnostics("", "", repo)})
             continue
         if tokens == ["git", "diff", "--check"] and not (repo / ".git").exists():
-            results.append({"command": command, "status": "skipped", "returncode": None, "stdout": "", "stderr": "not a git repository"})
+            stderr = "not a git repository"
+            results.append({"command": command, "status": "skipped", "returncode": None, "stdout": "", "stderr": stderr, "diagnostics": verification_diagnostics("", stderr, repo)})
             continue
         try:
             completed = subprocess.run(normalize_tokens(tokens), cwd=repo, text=True, capture_output=True, timeout=timeout_sec, check=False)
         except FileNotFoundError as exc:
-            results.append({"command": command, "status": "failed", "returncode": None, "stdout": "", "stderr": str(exc)})
+            stderr = str(exc)
+            results.append({"command": command, "status": "failed", "returncode": None, "stdout": "", "stderr": stderr, "diagnostics": verification_diagnostics("", stderr, repo)})
             continue
         except subprocess.TimeoutExpired as exc:
-            results.append({"command": command, "status": "failed", "returncode": None, "stdout": exc.stdout or "", "stderr": "verification command timed out"})
+            stdout = exc.stdout or ""
+            stderr = "verification command timed out"
+            results.append({"command": command, "status": "failed", "returncode": None, "stdout": stdout, "stderr": stderr, "diagnostics": verification_diagnostics(stdout, stderr, repo)})
             continue
         if is_pytest_command(tokens) and completed.returncode == 1 and "No module named pytest" in completed.stderr:
+            stdout = completed.stdout[-4000:]
+            stderr = "pytest unavailable"
             results.append(
                 {
                     "command": command,
                     "status": "skipped",
                     "returncode": completed.returncode,
-                    "stdout": completed.stdout[-4000:],
-                    "stderr": "pytest unavailable",
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "diagnostics": verification_diagnostics(stdout, stderr, repo),
                 }
             )
             continue
+        stdout = completed.stdout[-4000:]
+        stderr = completed.stderr[-4000:]
         results.append(
             {
                 "command": command,
                 "status": "passed" if completed.returncode == 0 else "failed",
                 "returncode": completed.returncode,
-                "stdout": completed.stdout[-4000:],
-                "stderr": completed.stderr[-4000:],
+                "stdout": stdout,
+                "stderr": stderr,
+                "diagnostics": verification_diagnostics(stdout, stderr, repo),
             }
         )
     if blockers:

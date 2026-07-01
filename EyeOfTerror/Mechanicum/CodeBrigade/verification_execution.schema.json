@@ -53,6 +53,33 @@
           },
           "stderr": {
             "type": "string"
+          },
+          "diagnostics": {
+            "type": "object",
+            "properties": {
+              "has_traceback": {
+                "type": "boolean"
+              },
+              "traceback_files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "missing_imports": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "has_assertion_failure": {
+                "type": "boolean"
+              },
+              "has_syntax_error": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
           }
         }
       }
