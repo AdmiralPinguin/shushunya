@@ -140,6 +140,10 @@ def valid_brief() -> dict:
                 },
             ],
             "row_count": 2,
+            "definition_of_done_count": 2,
+            "traced_definition_of_done_count": 2,
+            "definition_of_done_complete": True,
+            "missing_definition_of_done": [],
             "complete": True,
             "blockers": [],
         },
@@ -987,6 +991,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve acceptance evidence: {plan}")
     if not plan["acceptance_trace_complete"] or plan["acceptance_trace_rows"][0]["requirement"] != "the original user-visible request is satisfied":
         raise AssertionError(f"implementation plan should preserve acceptance trace matrix: {plan}")
+    if not plan["definition_of_done_trace_complete"] or plan["definition_of_done_count"] != 2 or plan["traced_definition_of_done_count"] != 2:
+        raise AssertionError(f"implementation plan should preserve definition_of_done trace coverage: {plan}")
     if not plan["constraint_trace_complete"] or plan["constraint_trace_rows"][0]["constraint"] != "preserve public behavior unless the task explicitly asks to change it":
         raise AssertionError(f"implementation plan should preserve constraint trace matrix: {plan}")
     if plan["expert_quality_level"] != "standard" or plan["expert_quality_required"]:

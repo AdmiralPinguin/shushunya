@@ -271,7 +271,7 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
             "rows": [
                 {
                     "requirement": "failed behavior is repaired or explicitly blocked",
-                    "source": ["diagnostic_repair_request.json"],
+                    "source": ["problem_statement.definition_of_done", "diagnostic_repair_request.json"],
                     "linked_surfaces": surfaces,
                     "package_ids": ordered_packages,
                     "planned_evidence": ["rerun failed command"],
@@ -279,6 +279,10 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
                 }
             ],
             "row_count": 1,
+            "definition_of_done_count": 1,
+            "traced_definition_of_done_count": 1,
+            "definition_of_done_complete": True,
+            "missing_definition_of_done": [],
             "complete": True,
             "blockers": [],
         },

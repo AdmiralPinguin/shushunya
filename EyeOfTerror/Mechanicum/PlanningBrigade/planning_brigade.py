@@ -1506,6 +1506,11 @@ def acceptance_trace_matrix(
             requirement = str(item)
             if requirement:
                 requirement_sources.setdefault(requirement, []).append(source)
+    definition_of_done_items = [
+        str(item)
+        for item in problem.get("definition_of_done", [])
+        if isinstance(item, str) and item
+    ]
     rows: list[dict[str, Any]] = []
     blockers: list[str] = []
     fallback_packages = ["verification_evidence_package"] if "verification_evidence_package" in {
@@ -1547,10 +1552,33 @@ def acceptance_trace_matrix(
                 "status": status,
             }
         )
+    traced_definition_of_done = sorted(
+        {
+            str(row["requirement"])
+            for row in rows
+            if isinstance(row.get("source"), list)
+            and "problem_statement.definition_of_done" in row["source"]
+            and row.get("status") == "planned"
+        }
+    )
+    missing_definition_of_done = sorted(
+        item
+        for item in definition_of_done_items
+        if item not in traced_definition_of_done
+    )
+    if missing_definition_of_done:
+        blockers.extend(
+            f"definition_of_done lacks acceptance trace: {item}"
+            for item in missing_definition_of_done
+        )
     return {
         "role": "RiskScribe",
         "rows": rows,
         "row_count": len(rows),
+        "definition_of_done_count": len(definition_of_done_items),
+        "traced_definition_of_done_count": len(traced_definition_of_done),
+        "definition_of_done_complete": not missing_definition_of_done and bool(definition_of_done_items),
+        "missing_definition_of_done": missing_definition_of_done,
         "complete": not blockers and bool(rows),
         "blockers": blockers,
     }
@@ -1814,6 +1842,9 @@ def code_brigade_handoff(
         "worker_output_contract": output_contract,
         "acceptance_trace_required": acceptance_trace.get("complete") is True,
         "acceptance_trace_row_count": acceptance_trace.get("row_count", 0),
+        "definition_of_done_trace_required": acceptance_trace.get("definition_of_done_complete") is True,
+        "definition_of_done_count": acceptance_trace.get("definition_of_done_count", 0),
+        "traced_definition_of_done_count": acceptance_trace.get("traced_definition_of_done_count", 0),
         "required_quality_evidence": quality["must_have_evidence"],
     }
 

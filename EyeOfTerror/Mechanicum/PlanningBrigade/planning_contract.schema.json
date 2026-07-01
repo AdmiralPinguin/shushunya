@@ -271,7 +271,7 @@
     },
     "acceptance_trace_matrix": {
       "type": "object",
-      "required": ["rows", "row_count", "complete", "blockers"],
+      "required": ["rows", "row_count", "definition_of_done_count", "traced_definition_of_done_count", "definition_of_done_complete", "missing_definition_of_done", "complete", "blockers"],
       "properties": {
         "rows": {
           "type": "array",
@@ -280,6 +280,11 @@
             "type": "object",
             "required": ["requirement", "source", "linked_surfaces", "package_ids", "planned_evidence", "status"]
           }
+        },
+        "definition_of_done_complete": {"const": true},
+        "missing_definition_of_done": {
+          "type": "array",
+          "maxItems": 0
         },
         "complete": {"const": true}
       }
@@ -456,7 +461,7 @@
     },
     "code_brigade_handoff": {
       "type": "object",
-      "required": ["target", "steps", "package_review_order", "package_dependency_graph", "global_handoff_criteria", "diagnostic_repair_plan", "worker_output_contract", "acceptance_trace_required", "acceptance_trace_row_count", "required_quality_evidence"],
+      "required": ["target", "steps", "package_review_order", "package_dependency_graph", "global_handoff_criteria", "diagnostic_repair_plan", "worker_output_contract", "acceptance_trace_required", "acceptance_trace_row_count", "definition_of_done_trace_required", "definition_of_done_count", "traced_definition_of_done_count", "required_quality_evidence"],
       "properties": {
         "target": {"const": "CodeBrigade"},
         "steps": {
@@ -480,7 +485,16 @@
         "diagnostic_repair_plan": {"type": "object"},
         "worker_output_contract": {"type": "object"},
         "acceptance_trace_required": {"const": true},
+        "definition_of_done_trace_required": {"const": true},
         "acceptance_trace_row_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "definition_of_done_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "traced_definition_of_done_count": {
           "type": "integer",
           "minimum": 1
         },

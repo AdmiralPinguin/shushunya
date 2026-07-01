@@ -176,6 +176,14 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     trace_rows = acceptance_trace.get("rows") if isinstance(acceptance_trace.get("rows"), list) else []
     if acceptance_trace.get("complete") is not True or not trace_rows:
         raise AssertionError(f"{trial_id}: acceptance trace matrix must be complete: {packet}")
+    if acceptance_trace.get("definition_of_done_complete") is not True:
+        raise AssertionError(f"{trial_id}: acceptance trace matrix must cover every definition_of_done item: {packet}")
+    if acceptance_trace.get("definition_of_done_count") != len(packet["problem_statement"]["definition_of_done"]):
+        raise AssertionError(f"{trial_id}: definition_of_done trace count must match the problem statement: {packet}")
+    if acceptance_trace.get("traced_definition_of_done_count") != acceptance_trace.get("definition_of_done_count"):
+        raise AssertionError(f"{trial_id}: every definition_of_done item must be traced: {packet}")
+    if acceptance_trace.get("missing_definition_of_done"):
+        raise AssertionError(f"{trial_id}: definition_of_done trace must not have missing items: {packet}")
     constraint_trace = packet.get("constraint_trace_matrix") if isinstance(packet.get("constraint_trace_matrix"), dict) else {}
     constraint_rows = constraint_trace.get("rows") if isinstance(constraint_trace.get("rows"), list) else []
     if constraint_trace.get("complete") is not True or not constraint_rows:
@@ -191,6 +199,12 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError(f"{trial_id}: CodeBrigade handoff must require acceptance trace: {packet}")
     if handoff.get("acceptance_trace_row_count") != acceptance_trace.get("row_count"):
         raise AssertionError(f"{trial_id}: CodeBrigade handoff acceptance row count drifted: {packet}")
+    if handoff.get("definition_of_done_trace_required") is not True:
+        raise AssertionError(f"{trial_id}: CodeBrigade handoff must require definition_of_done trace: {packet}")
+    if handoff.get("definition_of_done_count") != acceptance_trace.get("definition_of_done_count"):
+        raise AssertionError(f"{trial_id}: CodeBrigade handoff definition_of_done count drifted: {packet}")
+    if handoff.get("traced_definition_of_done_count") != acceptance_trace.get("traced_definition_of_done_count"):
+        raise AssertionError(f"{trial_id}: CodeBrigade handoff traced definition_of_done count drifted: {packet}")
     output_contract = packet.get("worker_output_contract") if isinstance(packet.get("worker_output_contract"), dict) else {}
     if output_contract.get("target") != "CodeBrigade":
         raise AssertionError(f"{trial_id}: worker output contract must target CodeBrigade: {packet}")
@@ -270,9 +284,15 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
             if isinstance(package_id, str)
         ],
         "acceptance_trace_row_count": len(trace_rows),
+        "definition_of_done_count": acceptance_trace.get("definition_of_done_count"),
+        "traced_definition_of_done_count": acceptance_trace.get("traced_definition_of_done_count"),
+        "definition_of_done_complete": acceptance_trace.get("definition_of_done_complete"),
         "handoff_package_review_order": handoff.get("package_review_order", []) if isinstance(handoff.get("package_review_order"), list) else [],
         "handoff_acceptance_trace_required": handoff.get("acceptance_trace_required"),
         "handoff_acceptance_trace_row_count": handoff.get("acceptance_trace_row_count"),
+        "handoff_definition_of_done_trace_required": handoff.get("definition_of_done_trace_required"),
+        "handoff_definition_of_done_count": handoff.get("definition_of_done_count"),
+        "handoff_traced_definition_of_done_count": handoff.get("traced_definition_of_done_count"),
         "brief_required_sections": [str(item) for item in brief_required_sections if isinstance(item, str)],
         "brief_mutation_preconditions": [str(item) for item in brief_mutation_preconditions if isinstance(item, str)],
         "brief_required_section_count": len(brief_required_sections),
@@ -333,9 +353,15 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     acceptance_trace_packages: Counter[str] = Counter()
     acceptance_trace_requirements: Counter[str] = Counter()
     acceptance_trace_row_counts: list[int] = []
+    definition_of_done_counts: list[int] = []
+    traced_definition_of_done_counts: list[int] = []
+    definition_of_done_complete_values: Counter[str] = Counter()
     handoff_package_review_orders: list[list[str]] = []
     handoff_acceptance_trace_required: Counter[str] = Counter()
     handoff_acceptance_trace_row_counts: list[int] = []
+    handoff_definition_of_done_trace_required: Counter[str] = Counter()
+    handoff_definition_of_done_counts: list[int] = []
+    handoff_traced_definition_of_done_counts: list[int] = []
     brief_required_sections: Counter[str] = Counter()
     brief_mutation_preconditions: Counter[str] = Counter()
     brief_required_section_counts: list[int] = []
@@ -382,12 +408,22 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         acceptance_trace_requirements.update(str(item) for item in result.get("acceptance_trace_requirements", []))
         if isinstance(result.get("acceptance_trace_row_count"), int):
             acceptance_trace_row_counts.append(result["acceptance_trace_row_count"])
+        if isinstance(result.get("definition_of_done_count"), int):
+            definition_of_done_counts.append(result["definition_of_done_count"])
+        if isinstance(result.get("traced_definition_of_done_count"), int):
+            traced_definition_of_done_counts.append(result["traced_definition_of_done_count"])
+        definition_of_done_complete_values.update([str(result.get("definition_of_done_complete"))])
         handoff_order = result.get("handoff_package_review_order")
         if isinstance(handoff_order, list):
             handoff_package_review_orders.append([str(item) for item in handoff_order])
         handoff_acceptance_trace_required.update([str(result.get("handoff_acceptance_trace_required"))])
         if isinstance(result.get("handoff_acceptance_trace_row_count"), int):
             handoff_acceptance_trace_row_counts.append(result["handoff_acceptance_trace_row_count"])
+        handoff_definition_of_done_trace_required.update([str(result.get("handoff_definition_of_done_trace_required"))])
+        if isinstance(result.get("handoff_definition_of_done_count"), int):
+            handoff_definition_of_done_counts.append(result["handoff_definition_of_done_count"])
+        if isinstance(result.get("handoff_traced_definition_of_done_count"), int):
+            handoff_traced_definition_of_done_counts.append(result["handoff_traced_definition_of_done_count"])
         brief_required_sections.update(str(item) for item in result.get("brief_required_sections", []))
         brief_mutation_preconditions.update(str(item) for item in result.get("brief_mutation_preconditions", []))
         if isinstance(result.get("brief_required_section_count"), int):
@@ -448,9 +484,15 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "acceptance_trace_package_counts": dict(sorted(acceptance_trace_packages.items())),
         "acceptance_trace_requirement_counts": dict(sorted(acceptance_trace_requirements.items())),
         "minimum_acceptance_trace_row_count": min(acceptance_trace_row_counts) if acceptance_trace_row_counts else 0,
+        "minimum_definition_of_done_count": min(definition_of_done_counts) if definition_of_done_counts else 0,
+        "minimum_traced_definition_of_done_count": min(traced_definition_of_done_counts) if traced_definition_of_done_counts else 0,
+        "definition_of_done_complete_value_counts": dict(sorted(definition_of_done_complete_values.items())),
         "handoff_package_review_orders": handoff_package_review_orders,
         "handoff_acceptance_trace_required_counts": dict(sorted(handoff_acceptance_trace_required.items())),
         "minimum_handoff_acceptance_trace_row_count": min(handoff_acceptance_trace_row_counts) if handoff_acceptance_trace_row_counts else 0,
+        "handoff_definition_of_done_trace_required_counts": dict(sorted(handoff_definition_of_done_trace_required.items())),
+        "minimum_handoff_definition_of_done_count": min(handoff_definition_of_done_counts) if handoff_definition_of_done_counts else 0,
+        "minimum_handoff_traced_definition_of_done_count": min(handoff_traced_definition_of_done_counts) if handoff_traced_definition_of_done_counts else 0,
         "brief_required_section_counts": dict(sorted(brief_required_sections.items())),
         "brief_mutation_precondition_counts": dict(sorted(brief_mutation_preconditions.items())),
         "minimum_brief_required_section_count": min(brief_required_section_counts) if brief_required_section_counts else 0,
@@ -519,6 +561,8 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     rollback_counts = summary.get("change_rollback_trigger_counts") if isinstance(summary.get("change_rollback_trigger_counts"), dict) else {}
     acceptance_trace_package_counts = summary.get("acceptance_trace_package_counts") if isinstance(summary.get("acceptance_trace_package_counts"), dict) else {}
     handoff_acceptance_required_counts = summary.get("handoff_acceptance_trace_required_counts") if isinstance(summary.get("handoff_acceptance_trace_required_counts"), dict) else {}
+    definition_of_done_complete_counts = summary.get("definition_of_done_complete_value_counts") if isinstance(summary.get("definition_of_done_complete_value_counts"), dict) else {}
+    handoff_definition_of_done_required_counts = summary.get("handoff_definition_of_done_trace_required_counts") if isinstance(summary.get("handoff_definition_of_done_trace_required_counts"), dict) else {}
     brief_required_section_counts = summary.get("brief_required_section_counts") if isinstance(summary.get("brief_required_section_counts"), dict) else {}
     brief_mutation_precondition_counts = summary.get("brief_mutation_precondition_counts") if isinstance(summary.get("brief_mutation_precondition_counts"), dict) else {}
     worker_output_required_package_counts = summary.get("worker_output_required_package_counts") if isinstance(summary.get("worker_output_required_package_counts"), dict) else {}
@@ -598,10 +642,22 @@ def assert_coverage(summary: dict[str, Any]) -> None:
             raise AssertionError(f"field trials are missing acceptance trace package coverage for {package}: {summary}")
     if int(summary.get("minimum_acceptance_trace_row_count") or 0) < 3:
         raise AssertionError(f"field trials have too few acceptance trace rows: {summary}")
+    if definition_of_done_complete_counts != {"True": summary["trial_count"]}:
+        raise AssertionError(f"field trials must prove definition_of_done trace completeness: {summary}")
+    if int(summary.get("minimum_definition_of_done_count") or 0) < 3:
+        raise AssertionError(f"field trials have too few definition_of_done items: {summary}")
+    if int(summary.get("minimum_traced_definition_of_done_count") or 0) < int(summary.get("minimum_definition_of_done_count") or 0):
+        raise AssertionError(f"field trials show untraced definition_of_done items: {summary}")
     if handoff_acceptance_required_counts != {"True": summary["trial_count"]}:
         raise AssertionError(f"field trials must prove handoff requires acceptance trace: {summary}")
     if int(summary.get("minimum_handoff_acceptance_trace_row_count") or 0) < int(summary.get("minimum_acceptance_trace_row_count") or 0):
         raise AssertionError(f"field trials show handoff acceptance trace row count drift: {summary}")
+    if handoff_definition_of_done_required_counts != {"True": summary["trial_count"]}:
+        raise AssertionError(f"field trials must prove handoff requires definition_of_done trace: {summary}")
+    if int(summary.get("minimum_handoff_definition_of_done_count") or 0) < int(summary.get("minimum_definition_of_done_count") or 0):
+        raise AssertionError(f"field trials show handoff definition_of_done count drift: {summary}")
+    if int(summary.get("minimum_handoff_traced_definition_of_done_count") or 0) < int(summary.get("minimum_traced_definition_of_done_count") or 0):
+        raise AssertionError(f"field trials show handoff traced definition_of_done count drift: {summary}")
     required_brief_sections = {
         "surface_verification_matrix",
         "surface_package_matrix",

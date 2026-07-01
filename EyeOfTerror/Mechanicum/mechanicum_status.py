@@ -48,7 +48,7 @@ COMPONENTS = {
             "VerificationArchitect/README.md",
             "RiskScribe/README.md",
         ],
-        "maturity": "contracted_planning_department_with_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_surface_output_evidence_implementation_brief_blueprint_field_trial_coverage_code_work_packages_worker_output_contracts_and_ceraxia_feedback_intake",
+        "maturity": "contracted_planning_department_with_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_definition_of_done_trace_surface_output_evidence_implementation_brief_blueprint_field_trial_coverage_code_work_packages_worker_output_contracts_and_ceraxia_feedback_intake",
     },
     "CodeBrigade": {
         "kind": "implementation_brigade_contract",
@@ -98,7 +98,7 @@ ROADMAP = [
     {
         "priority": 4,
         "item": "split PlanningBrigade roles into callable services after more field trials",
-        "reason": "PlanningBrigade now emits problem framing, path hints, assumption registers, investigation playbooks, change-control plans, diagnostic repair plans, acceptance trace matrices, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, CodeBrigade brief blueprints, implementation work packages, and worker-output contracts; role services should wait until these contracts survive more real tasks.",
+        "reason": "PlanningBrigade now emits problem framing, path hints, assumption registers, investigation playbooks, change-control plans, diagnostic repair plans, acceptance trace matrices with explicit definition-of-done coverage, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, CodeBrigade brief blueprints, implementation work packages, and worker-output contracts; role services should wait until these contracts survive more real tasks.",
         "owner": "PlanningBrigade",
     },
 ]

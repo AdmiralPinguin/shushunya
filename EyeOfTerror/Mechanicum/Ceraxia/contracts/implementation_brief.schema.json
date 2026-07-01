@@ -208,7 +208,7 @@
     },
     "acceptance_trace_matrix": {
       "type": "object",
-      "required": ["rows", "row_count", "complete", "blockers"],
+      "required": ["rows", "row_count", "definition_of_done_count", "traced_definition_of_done_count", "definition_of_done_complete", "missing_definition_of_done", "complete", "blockers"],
       "properties": {
         "rows": {
           "type": "array",
@@ -217,6 +217,13 @@
             "type": "object",
             "required": ["requirement", "source", "linked_surfaces", "package_ids", "planned_evidence", "status"]
           }
+        },
+        "definition_of_done_complete": {
+          "const": true
+        },
+        "missing_definition_of_done": {
+          "type": "array",
+          "maxItems": 0
         },
         "complete": {
           "const": true

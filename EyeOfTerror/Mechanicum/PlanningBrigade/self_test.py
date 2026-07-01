@@ -306,6 +306,10 @@ def main() -> int:
         for row in security_packet["acceptance_trace_matrix"]["rows"]
     ):
         raise AssertionError(f"security acceptance trace must map boundary evidence to security package: {security_packet}")
+    if not security_packet["acceptance_trace_matrix"]["definition_of_done_complete"]:
+        raise AssertionError(f"security acceptance trace must cover every definition_of_done item: {security_packet}")
+    if security_packet["code_brigade_handoff"]["definition_of_done_count"] != security_packet["acceptance_trace_matrix"]["definition_of_done_count"]:
+        raise AssertionError(f"security handoff must preserve definition_of_done trace count: {security_packet}")
     security_package_graph = security_packet["implementation_work_packages"]["package_dependency_graph"]
     minimal_patch_dependency = next(row for row in security_package_graph["rows"] if row["package_id"] == "minimal_patch_package")
     verification_dependency = next(row for row in security_package_graph["rows"] if row["package_id"] == "verification_evidence_package")
@@ -362,6 +366,8 @@ def main() -> int:
         for row in migration_packet["acceptance_trace_matrix"]["rows"]
     ):
         raise AssertionError(f"migration acceptance trace must map compatibility evidence to compatibility package: {migration_packet}")
+    if not migration_packet["acceptance_trace_matrix"]["definition_of_done_complete"]:
+        raise AssertionError(f"migration acceptance trace must cover every definition_of_done item: {migration_packet}")
     required_brief_sections = migration_packet["implementation_brief_blueprint"]["required_sections"]
     for section in ["surface_verification_matrix", "survey_quality_gate", "execution_forecast", "expert_quality_plan", "implementation_work_packages", "planning_review_gate"]:
         if section not in required_brief_sections:

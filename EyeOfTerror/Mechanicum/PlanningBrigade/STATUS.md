@@ -28,6 +28,8 @@ Current capabilities:
 - risk register, quality bar, acceptance contract, and CodeBrigade handoff
 - acceptance trace matrix mapping definition-of-done, quality-bar, and
   acceptance requirements to package ids and planned evidence
+- separate definition-of-done trace completeness counts that block incomplete
+  original-task fulfillment before CodeBrigade handoff
 - constraint trace matrix mapping preserved task/user constraints to package
   ids and planned evidence
 - implementation work packages with read scope, edit scope, verification
@@ -61,8 +63,9 @@ Current capabilities:
 - field trials for multiple task shapes with coverage gates for task kinds,
   impacted surfaces, implementation work packages, and change-control
   invariant/proof, acceptance-trace package coverage, constraint-trace package
-  coverage, assumption coverage, surface-output evidence coverage, and
-  implementation-brief blueprint coverage
+  coverage, definition-of-done trace completeness, assumption coverage,
+  surface-output evidence coverage, and implementation-brief blueprint
+  coverage
 - CLI validation mode
 
 Current boundaries:

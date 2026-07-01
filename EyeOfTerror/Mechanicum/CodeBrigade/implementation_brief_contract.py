@@ -82,6 +82,14 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief acceptance_trace_matrix.rows is required")
     if trace_matrix.get("complete") is not True:
         problems.append("brief acceptance_trace_matrix must be complete")
+    if trace_matrix.get("definition_of_done_complete") is not True:
+        problems.append("brief acceptance_trace_matrix must completely trace definition_of_done")
+    if not isinstance(trace_matrix.get("definition_of_done_count"), int) or trace_matrix.get("definition_of_done_count", 0) < 1:
+        problems.append("brief acceptance_trace_matrix definition_of_done_count is required")
+    if trace_matrix.get("traced_definition_of_done_count") != trace_matrix.get("definition_of_done_count"):
+        problems.append("brief acceptance_trace_matrix traced_definition_of_done_count must match definition_of_done_count")
+    if trace_matrix.get("missing_definition_of_done") not in ([], None):
+        problems.append("brief acceptance_trace_matrix missing_definition_of_done must be empty")
     for row in trace_rows:
         if not isinstance(row, dict):
             problems.append("brief acceptance_trace_matrix row must be an object")

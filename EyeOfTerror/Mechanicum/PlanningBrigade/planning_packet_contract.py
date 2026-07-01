@@ -269,6 +269,26 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("acceptance trace matrix must include rows")
     if trace_matrix.get("complete") is not True:
         problems.extend(f"acceptance trace matrix blocked: {item}" for item in list_field(trace_matrix.get("blockers")))
+    definition_of_done = [str(item) for item in list_field(problem.get("definition_of_done")) if str(item)]
+    traced_definition_of_done = {
+        str(row.get("requirement"))
+        for row in trace_rows
+        if isinstance(row, dict)
+        and "problem_statement.definition_of_done" in list_field(row.get("source"))
+        and row.get("status") == "planned"
+        and row.get("requirement")
+    }
+    missing_definition_of_done = sorted(item for item in definition_of_done if item not in traced_definition_of_done)
+    if trace_matrix.get("definition_of_done_complete") is not True:
+        problems.append("acceptance trace matrix must mark definition_of_done_complete")
+    if trace_matrix.get("definition_of_done_count") != len(definition_of_done):
+        problems.append("acceptance trace matrix definition_of_done_count must match problem statement")
+    if trace_matrix.get("traced_definition_of_done_count") != len(traced_definition_of_done):
+        problems.append("acceptance trace matrix traced_definition_of_done_count must match traced rows")
+    if list_field(trace_matrix.get("missing_definition_of_done")) != missing_definition_of_done:
+        problems.append("acceptance trace matrix missing_definition_of_done must match untraced definition_of_done items")
+    if missing_definition_of_done:
+        problems.append("acceptance trace matrix must cover every definition_of_done item: " + ", ".join(missing_definition_of_done))
     for row in trace_rows:
         if not isinstance(row, dict):
             problems.append("acceptance trace matrix row must be an object")
@@ -486,6 +506,12 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("code brigade handoff must require acceptance trace")
     if handoff.get("acceptance_trace_row_count") != trace_matrix.get("row_count"):
         problems.append("code brigade handoff acceptance_trace_row_count must match acceptance trace matrix")
+    if handoff.get("definition_of_done_trace_required") is not True:
+        problems.append("code brigade handoff must require definition_of_done trace")
+    if handoff.get("definition_of_done_count") != trace_matrix.get("definition_of_done_count"):
+        problems.append("code brigade handoff definition_of_done_count must match acceptance trace matrix")
+    if handoff.get("traced_definition_of_done_count") != trace_matrix.get("traced_definition_of_done_count"):
+        problems.append("code brigade handoff traced_definition_of_done_count must match acceptance trace matrix")
     if packet.get("next_action", {}).get("owner") != "Ceraxia":
         problems.append("next action must be owned by Ceraxia")
     return problems

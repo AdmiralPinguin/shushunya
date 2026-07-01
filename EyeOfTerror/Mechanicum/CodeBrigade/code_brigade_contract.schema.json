@@ -83,6 +83,10 @@
         "acceptance_evidence_required",
         "acceptance_trace_rows",
         "acceptance_trace_complete",
+        "definition_of_done_trace_complete",
+        "definition_of_done_count",
+        "traced_definition_of_done_count",
+        "missing_definition_of_done",
         "constraint_trace_rows",
         "constraint_trace_complete",
         "expert_quality_level",
@@ -361,6 +365,23 @@
         },
         "acceptance_trace_complete": {
           "type": "boolean"
+        },
+        "definition_of_done_trace_complete": {
+          "type": "boolean"
+        },
+        "definition_of_done_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "traced_definition_of_done_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing_definition_of_done": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "constraint_trace_rows": {
           "type": "array",

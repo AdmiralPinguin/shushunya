@@ -62,7 +62,9 @@ Current contract:
 - `acceptance_contract` records what the final package must prove and what
   shortcuts are forbidden.
 - `acceptance_trace_matrix` maps every definition-of-done, quality-bar, and
-  acceptance requirement to planned evidence and CodeBrigade package ids.
+  acceptance requirement to planned evidence and CodeBrigade package ids. It
+  also reports separate `definition_of_done` coverage counts so incomplete
+  original-task fulfillment blocks the packet and CodeBrigade handoff.
 - `constraint_trace_matrix` maps every preserved user/task constraint to
   planned evidence and CodeBrigade package ids.
 - `implementation_brief_blueprint` defines the CodeBrigade handoff sections and
@@ -82,7 +84,8 @@ Current contract:
   structurally unsafe plans before they reach CodeBrigade.
 - `code_brigade_handoff` lists the ordered execution/review steps, package
   review order, package dependency graph, global handoff criteria, and
-  acceptance trace requirement, including the diagnostic repair plan that
+  acceptance and definition-of-done trace requirements, including the
+  diagnostic repair plan that
   CodeBrigade must preserve. It also carries the worker-output contract that
   the worker report and review gate must satisfy.
 
