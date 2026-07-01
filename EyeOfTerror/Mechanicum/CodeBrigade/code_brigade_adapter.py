@@ -114,14 +114,15 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
 def build_autonomous_execution_request(brief: dict[str, Any], implementation_plan: dict[str, Any], execution_intent: dict[str, Any] | None = None) -> dict[str, Any]:
     if execution_intent is None:
         execution_intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
+    request_required = execution_intent.get("real_execution_supported") is False
     return {
         "kind": "code_brigade_autonomous_execution_request",
         "contract_version": CONTRACT_VERSION,
-        "status": "required" if execution_intent.get("real_execution_supported") is False else "not_required",
+        "status": "required" if request_required else "not_required",
         "target_adapter": "autonomous CodeBrigade source-edit adapter",
         "repo_path": brief.get("repo_path", ""),
         "task": brief.get("task", ""),
-        "reason": "unshaped task has no explicit CERAXIA_PATCH payload",
+        "reason": "unshaped task has no executable guarded patch path" if request_required else "current CodeBrigade guarded adapter supports this execution path",
         "scope_budget": implementation_plan.get("scope_budget", {}),
         "target_files_to_inspect": implementation_plan.get("target_files_to_inspect", []),
         "test_files_to_preserve": implementation_plan.get("test_files_to_preserve", []),

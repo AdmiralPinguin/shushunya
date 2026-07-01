@@ -431,6 +431,8 @@ def main() -> int:
             raise AssertionError(f"explicit patch execution should expose executable intent: {patch_report}")
         if patch_report["autonomous_execution_request"]["status"] != "not_required":
             raise AssertionError(f"explicit patch execution should not request autonomous adapter: {patch_report}")
+        if "supports this execution path" not in patch_report["autonomous_execution_request"]["reason"]:
+            raise AssertionError(f"explicit patch execution should explain why autonomous adapter is not required: {patch_report}")
         if not patch_report["work_package_statuses"] or any(item["status"] != "implemented" for item in patch_report["work_package_statuses"]):
             raise AssertionError(f"implemented patch should mark work packages implemented: {patch_report}")
         if patch_report["execution_result"]["status"] != "implemented":
@@ -450,6 +452,8 @@ def main() -> int:
             raise AssertionError(f"guarded inferred replace should expose inferred intent: {inferred_replace_report}")
         if inferred_replace_report["autonomous_execution_request"]["status"] != "not_required":
             raise AssertionError(f"guarded inferred replace should not request autonomous adapter: {inferred_replace_report}")
+        if "supports this execution path" not in inferred_replace_report["autonomous_execution_request"]["reason"]:
+            raise AssertionError(f"guarded inferred replace should explain why autonomous adapter is not required: {inferred_replace_report}")
         if "natural_language_simple_replace" not in inferred_replace_report["execution_result"]["patch_summary"]:
             raise AssertionError(f"guarded inferred replace should expose patch source: {inferred_replace_report}")
         if "return True" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
@@ -540,6 +544,8 @@ def main() -> int:
         ambiguous_report = code_brigade_adapter.build_worker_report(ambiguous_brief, dry_run=False)
         if ambiguous_report["status"] != "blocked" or ambiguous_report["autonomous_execution_request"]["status"] != "required":
             raise AssertionError(f"ambiguous unshaped task should still request autonomous adapter: {ambiguous_report}")
+        if "no executable guarded patch path" not in ambiguous_report["autonomous_execution_request"]["reason"]:
+            raise AssertionError(f"ambiguous unshaped task should explain why autonomous adapter is required: {ambiguous_report}")
         if "return False" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("ambiguous unshaped task should not mutate app.py")
     with tempfile.TemporaryDirectory() as tmp:
