@@ -492,6 +492,30 @@ def main() -> int:
         if "def value():\n    return 42\n" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("test-inferred missing function did not update app.py")
     with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import value\n\ndef test_value():\n    assert value() == 42\n", encoding="utf-8")
+        return_mismatch_brief = valid_brief()
+        return_mismatch_brief["repo_path"] = tmp
+        return_mismatch_brief["task"] = "почини app.py чтобы тест проходил"
+        return_mismatch_report = code_brigade_adapter.build_worker_report(return_mismatch_brief, dry_run=False)
+        if return_mismatch_report["status"] != "implemented" or return_mismatch_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"test-inferred return mismatch should report implemented changed files: {return_mismatch_report}")
+        if "test_inferred_return_mismatch" not in return_mismatch_report["execution_result"]["patch_summary"]:
+            raise AssertionError(f"test-inferred return mismatch should expose patch source: {return_mismatch_report}")
+        if "return 42" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("test-inferred return mismatch did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def value():\n    return 42\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import value\n\ndef test_value():\n    assert value() == 42\n", encoding="utf-8")
+        matching_return_brief = valid_brief()
+        matching_return_brief["repo_path"] = tmp
+        matching_return_brief["task"] = "почини app.py чтобы тест проходил"
+        matching_return_report = code_brigade_adapter.build_worker_report(matching_return_brief, dry_run=False)
+        if matching_return_report["status"] != "blocked" or matching_return_report["autonomous_execution_request"]["status"] != "required":
+            raise AssertionError(f"matching return should not trigger a no-op inferred mutation: {matching_return_report}")
+        if Path(tmp, "app.py").read_text(encoding="utf-8").count("return 42") != 1:
+            raise AssertionError("matching return should not mutate app.py")
+    with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("", encoding="utf-8")
         Path(tmp, "test_app.py").write_text(
             "from app import value\nfrom app import other\n\n"

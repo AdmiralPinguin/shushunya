@@ -9,6 +9,7 @@ from pathlib import Path
 from ceraxia import (
     CeraxiaInput,
     LIFECYCLE,
+    allocate_run_dir,
     build_implementation_brief,
     build_repo_survey,
     build_survey_quality_gate,
@@ -28,6 +29,17 @@ from planning_brigade import build_planning_packet  # noqa: E402
 
 
 class CeraxiaLifecycleTests(unittest.TestCase):
+    def test_run_dir_allocator_avoids_same_second_collisions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = "ceraxia-20260701-000000-same-task"
+            first_id, first_dir = allocate_run_dir(root, base)
+            self.assertEqual(first_id, base)
+            first_dir.mkdir(parents=True)
+            second_id, second_dir = allocate_run_dir(root, base)
+            self.assertEqual(second_id, f"{base}-2")
+            self.assertNotEqual(first_dir, second_dir)
+
     def test_full_dry_run_pipeline_writes_required_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"

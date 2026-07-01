@@ -78,11 +78,22 @@ def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
-def task_slug(task: str) -> str:
+def task_slug(task: str, repo_path: str = "") -> str:
     words = re.findall(r"[a-zA-Z0-9а-яА-ЯёЁ]+", task.lower())
     slug = "-".join(words[:6]) or "task"
-    digest = hashlib.sha1(task.encode("utf-8")).hexdigest()[:8]
+    digest = hashlib.sha1(f"{task}\n{repo_path}".encode("utf-8")).hexdigest()[:8]
     return f"{slug}-{digest}"
+
+
+def allocate_run_dir(runs_root: Path, base_run_id: str) -> tuple[str, Path]:
+    run_id = base_run_id
+    run_dir = runs_root / run_id
+    counter = 2
+    while run_dir.exists():
+        run_id = f"{base_run_id}-{counter}"
+        run_dir = runs_root / run_id
+        counter += 1
+    return run_id, run_dir
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -1116,8 +1127,10 @@ def build_evidence_matrix(
 
 
 def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
-    run_id = f"ceraxia-{utc_stamp()}-{task_slug(task_input.task)}"
-    run_dir = task_input.runs_root / run_id
+    run_id, run_dir = allocate_run_dir(
+        task_input.runs_root,
+        f"ceraxia-{utc_stamp()}-{task_slug(task_input.task, task_input.repo_path)}",
+    )
     status = {
         "run_id": run_id,
         "state": "received",

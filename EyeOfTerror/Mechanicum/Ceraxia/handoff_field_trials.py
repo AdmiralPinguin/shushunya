@@ -157,6 +157,33 @@ def run_test_inferred_missing_function_trial(root: Path) -> dict[str, Any]:
     return {"id": "test-inferred-missing-function-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
 
 
+def run_test_inferred_return_mismatch_trial(root: Path) -> dict[str, Any]:
+    repo = root / "test-inferred-return-mismatch-repo"
+    write_repo(
+        repo,
+        {
+            "app.py": "def value():\n    return 1\n",
+            "test_app.py": "from app import value\n\ndef test_value():\n    assert value() == 42\n",
+        },
+    )
+    result = run_ceraxia(
+        CeraxiaInput(
+            task="почини app.py чтобы тест проходил",
+            repo_path=str(repo),
+            runs_root=root / "runs",
+            dry_run=False,
+            execute_verification=True,
+            verification_commands=("python -m py_compile app.py",),
+        )
+    )
+    artifacts = load_run_artifacts(Path(result["run_dir"]))
+    require(result["ok"], "test-inferred return-mismatch handoff should complete", result)
+    require(result["ready_for_execution"], "test-inferred return-mismatch handoff should be ready after real adapter execution", result)
+    require("return 42" in (repo / "app.py").read_text(encoding="utf-8"), "test-inferred return mismatch should mutate app.py")
+    require("test_inferred_return_mismatch" in artifacts["worker"]["execution_result"]["patch_summary"], "worker result should expose return-mismatch patch source", artifacts["worker"])
+    return {"id": "test-inferred-return-mismatch-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
+
+
 def run_missing_path_trial(root: Path) -> dict[str, Any]:
     repo = root / "missing-path-repo"
     write_repo(repo, {"app.py": "def app():\n    return True\n"})
@@ -203,6 +230,7 @@ def main() -> int:
             run_explicit_patch_trial(root),
             run_guarded_inferred_patch_trial(root),
             run_test_inferred_missing_function_trial(root),
+            run_test_inferred_return_mismatch_trial(root),
             run_missing_path_trial(root),
             run_unshaped_real_execution_trial(root),
         ]

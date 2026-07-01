@@ -87,6 +87,50 @@ def can_infer_guarded_natural_language_patch(task: str) -> bool:
 
 
 def infer_test_missing_function_patch(repo: Path, brief: dict[str, Any]) -> dict[str, Any]:
+    candidate = infer_single_test_literal_candidate(repo, brief)
+    if not candidate:
+        return {}
+    source_rel, source_path, function_name, literal = candidate
+    if python_function_exists(source_path, function_name):
+        return {}
+    return {
+        "source": "test_inferred_missing_function",
+        "operations": [
+            {
+                "type": "append_python_function",
+                "path": source_rel,
+                "function_name": function_name,
+                "return_literal": literal,
+            }
+        ],
+    }
+
+
+def infer_test_return_mismatch_patch(repo: Path, brief: dict[str, Any]) -> dict[str, Any]:
+    candidate = infer_single_test_literal_candidate(repo, brief)
+    if not candidate:
+        return {}
+    source_rel, source_path, function_name, literal = candidate
+    current_return = simple_function_return_segment(source_path, function_name).get("return_expr", "")
+    if not isinstance(current_return, str) or not current_return or current_return == literal:
+        return {}
+    validate_safe_return_literal(current_return)
+    validate_safe_return_literal(literal)
+    return {
+        "source": "test_inferred_return_mismatch",
+        "operations": [
+            {
+                "type": "replace_return_expression",
+                "path": source_rel,
+                "function_name": function_name,
+                "old_expression": current_return,
+                "new_expression": literal,
+            }
+        ],
+    }
+
+
+def infer_single_test_literal_candidate(repo: Path, brief: dict[str, Any]) -> tuple[str, Path, str, str] | None:
     candidate_files = sorted(
         path
         for path in surveyed_paths(brief)
@@ -112,22 +156,10 @@ def infer_test_missing_function_patch(repo: Path, brief: dict[str, Any]) -> dict
                 candidates.append((function_name, literal))
     unique_candidates = sorted(set(candidates))
     if len(unique_candidates) != 1:
-        return {}
+        return None
     function_name, literal = unique_candidates[0]
     validate_safe_return_literal(literal)
-    if python_function_exists(source_path, function_name):
-        return {}
-    return {
-        "source": "test_inferred_missing_function",
-        "operations": [
-            {
-                "type": "append_python_function",
-                "path": source_rel,
-                "function_name": function_name,
-                "return_literal": literal,
-            }
-        ],
-    }
+    return source_rel, source_path, function_name, literal
 
 
 def can_infer_guarded_execution(brief: dict[str, Any]) -> bool:
@@ -138,7 +170,8 @@ def can_infer_guarded_execution(brief: dict[str, Any]) -> bool:
     if not repo_path:
         return False
     try:
-        return bool(infer_test_missing_function_patch(Path(repo_path), brief))
+        repo = Path(repo_path)
+        return bool(infer_test_missing_function_patch(repo, brief) or infer_test_return_mismatch_patch(repo, brief))
     except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
         return False
 
@@ -424,7 +457,8 @@ def execute_implementation_brief(brief: dict[str, Any]) -> dict[str, Any]:
         except ValueError as exc:
             if "future CodeBrigade autonomous execution adapter" not in str(exc):
                 raise
-            patch = infer_test_missing_function_patch(Path(str(brief.get("repo_path") or "")), brief)
+            repo = Path(str(brief.get("repo_path") or ""))
+            patch = infer_test_missing_function_patch(repo, brief) or infer_test_return_mismatch_patch(repo, brief)
             if not patch:
                 raise
         changed_files, patch_summary, operation_results, rollback_notes = apply_patch_operations(Path(str(brief.get("repo_path") or "")), brief, patch)

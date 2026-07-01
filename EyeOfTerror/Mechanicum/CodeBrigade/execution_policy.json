@@ -9,7 +9,7 @@
     "execution preflight passes before source mutation",
     "repository survey evidence exists for candidate files before source mutation",
     "guarded natural-language inference requires explicit backtick-delimited path and edit literals",
-    "test-inferred missing-function execution requires a single source candidate, test import, and simple literal expectation",
+    "test-inferred execution requires a single source candidate, test import, and simple literal expectation",
     "verification strategy names focused checks before source mutation",
     "dirty worktree or unknown ownership requires explicit blocker instead of overwrite"
   ],
