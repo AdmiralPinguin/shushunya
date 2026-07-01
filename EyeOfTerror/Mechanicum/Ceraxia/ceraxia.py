@@ -441,6 +441,11 @@ def build_diagnostic_repair_queue(
     stop_conditions = repair_plan.get("stop_conditions") if isinstance(repair_plan.get("stop_conditions"), list) else []
     repair_evidence = repair_plan.get("repair_evidence_required") if isinstance(repair_plan.get("repair_evidence_required"), list) else []
     default_targets = implementation_plan.get("target_files_to_inspect") if isinstance(implementation_plan.get("target_files_to_inspect"), list) else []
+    surface_matrix = brief.get("surface_verification_matrix") if isinstance(brief.get("surface_verification_matrix"), dict) else {}
+    surface_rows = surface_matrix.get("rows") if isinstance(surface_matrix.get("rows"), list) else []
+    surface_evidence = surface_evidence_rows(surface_rows, verification_report)
+    package_matrix = brief.get("surface_package_matrix") if isinstance(brief.get("surface_package_matrix"), dict) else {}
+    package_rows = package_matrix.get("rows") if isinstance(package_matrix.get("rows"), list) else []
     items: list[dict[str, Any]] = []
     for item in output_summary:
         if not isinstance(item, dict):
@@ -454,12 +459,35 @@ def build_diagnostic_repair_queue(
         concrete_read_targets = [str(path) for path in traceback_files if isinstance(path, str)]
         if not concrete_read_targets:
             concrete_read_targets = [str(path) for path in default_targets if isinstance(path, str)]
+        command = str(item.get("command") or "")
+        impacted_surfaces = [
+            str(row.get("surface") or "")
+            for row in surface_evidence
+            if isinstance(row, dict) and command in (row.get("matched_commands") if isinstance(row.get("matched_commands"), list) else [])
+        ]
+        if not impacted_surfaces and command_status in {"failed", "blocked"}:
+            impacted_surfaces = [
+                str(row.get("surface") or "")
+                for row in surface_evidence
+                if isinstance(row, dict) and row.get("status") in {"failed", "blocked"}
+            ]
+        package_ids = sorted(
+            {
+                str(package_id)
+                for row in package_rows
+                if isinstance(row, dict) and str(row.get("surface") or "") in impacted_surfaces
+                for package_id in (row.get("package_ids") if isinstance(row.get("package_ids"), list) else [])
+                if isinstance(package_id, str)
+            }
+        )
         items.append(
             {
-                "command": str(item.get("command") or ""),
+                "command": command,
                 "status": command_status,
                 "priority": "high" if "traceback" in signals or "syntax_error" in signals else "normal",
                 "diagnostic_signals": signals,
+                "impacted_surfaces": impacted_surfaces,
+                "package_ids": package_ids,
                 "traceback_files": traceback_files,
                 "missing_imports": missing_imports,
                 "read_before_repair": read_before_repair,

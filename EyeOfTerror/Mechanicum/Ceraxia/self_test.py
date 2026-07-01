@@ -866,6 +866,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertEqual(review["diagnostic_repair_queue"]["item_count"], 1)
         repair_item = review["diagnostic_repair_queue"]["items"][0]
         self.assertIn("assertion_failure", repair_item["diagnostic_signals"])
+        self.assertIn("source_behavior", repair_item["impacted_surfaces"])
+        self.assertIn("minimal_patch_package", repair_item["package_ids"])
         self.assertEqual(repair_item["max_repair_attempts"], brief["diagnostic_repair_plan"]["max_repair_attempts"])
         self.assertEqual(repair_item["stop_conditions"], brief["diagnostic_repair_plan"]["stop_conditions"])
 

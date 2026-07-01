@@ -63,8 +63,10 @@ warning.
 listed, but Python symbol/import evidence is partial.
 When verification output contains failed, blocked, traceback, assertion,
 syntax, missing-import, or zero-test diagnostics, `review_gate.json` now
-builds a `diagnostic_repair_queue`; `run_summary.json` and `final_report.md`
-expose its status and item count for the next CodeBrigade repair pass.
+builds a `diagnostic_repair_queue` with impacted surfaces, work-package ids,
+read targets, stop conditions, and required repair evidence; `run_summary.json`
+and `final_report.md` expose its status and item count for the next CodeBrigade
+repair pass.
 
 Current `EyeOfTerror/Mechanicum` planning quality gates:
 
