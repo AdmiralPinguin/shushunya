@@ -16,7 +16,16 @@ for path in [CERAXIA_PATH, PLANNING_PATH, CODE_BRIGADE_PATH]:
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from ceraxia import CeraxiaInput, build_implementation_brief, build_repo_survey, run_ceraxia  # noqa: E402
+from ceraxia import (  # noqa: E402
+    CeraxiaInput,
+    build_evidence_matrix,
+    build_execution_readiness,
+    build_implementation_brief,
+    build_repo_survey,
+    build_verification_report,
+    review_gate,
+    run_ceraxia,
+)
 from code_brigade_adapter import build_worker_report  # noqa: E402
 from planning_brigade import build_planning_packet  # noqa: E402
 
@@ -48,6 +57,12 @@ def main() -> int:
     assert_required(ROOT / "Ceraxia" / "contracts" / "implementation_brief.schema.json", brief, "implementation brief")
     worker_report = build_worker_report(brief, dry_run=True)
     assert_required(ROOT / "CodeBrigade" / "code_brigade_contract.schema.json", worker_report, "worker report")
+    verification = build_verification_report(brief, worker_report)
+    review = review_gate(packet, brief, worker_report, verification)
+    status = {"state": "finalized"}
+    readiness = build_execution_readiness(status, brief, verification, review, dry_run=True)
+    evidence_matrix = build_evidence_matrix(brief, worker_report, verification, readiness)
+    assert_required(ROOT / "Ceraxia" / "contracts" / "evidence_matrix.schema.json", evidence_matrix, "evidence matrix")
 
     with tempfile.TemporaryDirectory() as tmp:
         repo = Path(tmp) / "repo"

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ceraxia Evidence Matrix",
+  "type": "object",
+  "required": [
+    "kind",
+    "contract_version",
+    "decision",
+    "required_evidence_count",
+    "present_count",
+    "planned_count",
+    "blocked_count",
+    "rows",
+    "implementation_plan_sources"
+  ],
+  "properties": {
+    "kind": {
+      "const": "ceraxia_evidence_matrix"
+    },
+    "contract_version": {
+      "const": "eye-mechanicum.v1"
+    },
+    "decision": {
+      "type": "string"
+    },
+    "required_evidence_count": {
+      "type": "integer"
+    },
+    "present_count": {
+      "type": "integer"
+    },
+    "planned_count": {
+      "type": "integer"
+    },
+    "blocked_count": {
+      "type": "integer"
+    },
+    "rows": {
+      "type": "array"
+    },
+    "implementation_plan_sources": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

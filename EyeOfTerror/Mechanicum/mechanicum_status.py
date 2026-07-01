@@ -19,6 +19,7 @@ COMPONENTS = {
             "repo_survey.py",
             "self_test.py",
             "contracts/implementation_brief.schema.json",
+            "contracts/evidence_matrix.schema.json",
             "contracts/run_artifacts.schema.json",
         ],
         "maturity": "dry_run_controller_with_readonly_survey_and_verification",
