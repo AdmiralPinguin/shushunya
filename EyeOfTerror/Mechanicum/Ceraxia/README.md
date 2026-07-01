@@ -56,6 +56,9 @@ keeping source mutation in dry-run mode.
 `evidence_matrix.json` maps the PlanningBrigade quality bar to concrete or
 planned evidence sources, and `run_summary.json` carries the same coverage
 counters for fast orchestration checks.
+`repo_survey.json.truncated=true` means the survey hit its file limit; Ceraxia
+keeps the package usable, but `review_gate.json` records a partial-coverage
+warning.
 
 Smoke command:
 
