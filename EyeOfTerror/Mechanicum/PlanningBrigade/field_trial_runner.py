@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from planning_brigade import CONTRACT_VERSION, build_planning_packet
+from planning_packet_contract import validate_planning_packet
 
 
 ROOT = Path(__file__).resolve().parent
@@ -20,6 +22,10 @@ def require_subset(expected: list[str], actual: list[str], label: str, trial_id:
 def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     packet = build_planning_packet({"task": trial["task"], "repo_path": trial.get("repo_path", "")})
     trial_id = str(trial["id"])
+    validation_problems = validate_planning_packet(packet)
+    expected_decision = trial.get("expected_decision", "ready_for_ceraxia_review")
+    if expected_decision != "blocked" and validation_problems:
+        raise AssertionError(f"{trial_id}: generated packet failed contract validation: {validation_problems}; packet={packet}")
     require_subset(trial.get("expected_kinds", []), packet["task_triage"]["task_kinds"], "task kinds", trial_id)
     phases = [phase["id"] for phase in packet["work_breakdown"]["phases"]]
     require_subset(trial.get("expected_phases", []), phases, "work phases", trial_id)
@@ -42,7 +48,6 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         trial_id,
     )
     decision = packet["planning_review_gate"]["decision"]
-    expected_decision = trial.get("expected_decision", "ready_for_ceraxia_review")
     if decision != expected_decision:
         raise AssertionError(f"{trial_id}: expected decision {expected_decision}, got {decision}: {packet}")
     minimum_score = int(trial.get("minimum_score", 0))
@@ -55,7 +60,75 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "task_kinds": packet["task_triage"]["task_kinds"],
         "phases": phases,
         "surfaces": surfaces,
+        "highest_risk_surface": packet["impact_analysis"]["highest_risk_surface"],
+        "negative_tests": packet["verification_strategy"]["negative_tests"],
+        "validation_problem_count": len(validation_problems),
     }
+
+
+def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+    kinds: Counter[str] = Counter()
+    phases: Counter[str] = Counter()
+    surfaces: Counter[str] = Counter()
+    highest_risk_surfaces: Counter[str] = Counter()
+    decisions: Counter[str] = Counter()
+    negative_tests: Counter[str] = Counter()
+    scores: list[int] = []
+    for result in results:
+        kinds.update(str(item) for item in result.get("task_kinds", []))
+        phases.update(str(item) for item in result.get("phases", []))
+        surfaces.update(str(item) for item in result.get("surfaces", []))
+        if result.get("highest_risk_surface"):
+            highest_risk_surfaces.update([str(result["highest_risk_surface"])])
+        decisions.update([str(result.get("decision", ""))])
+        negative_tests.update(str(item) for item in result.get("negative_tests", []))
+        if isinstance(result.get("score"), int):
+            scores.append(result["score"])
+    return {
+        "trial_count": len(results),
+        "decision_counts": dict(sorted(decisions.items())),
+        "task_kind_counts": dict(sorted(kinds.items())),
+        "phase_counts": dict(sorted(phases.items())),
+        "surface_counts": dict(sorted(surfaces.items())),
+        "highest_risk_surface_counts": dict(sorted(highest_risk_surfaces.items())),
+        "negative_test_counts": dict(sorted(negative_tests.items())),
+        "minimum_score": min(scores) if scores else 0,
+        "average_score": round(sum(scores) / len(scores), 2) if scores else 0,
+    }
+
+
+def assert_coverage(summary: dict[str, Any]) -> None:
+    required_kinds = {
+        "api_compatibility",
+        "bugfix",
+        "concurrency",
+        "config_runtime",
+        "migration",
+        "refactor",
+        "security",
+        "test_repair",
+    }
+    required_surfaces = {
+        "concurrency_runtime",
+        "data_compatibility",
+        "internal_architecture",
+        "public_api_contract",
+        "runtime_configuration",
+        "security_boundary",
+        "source_behavior",
+        "test_surface",
+    }
+    kind_counts = summary.get("task_kind_counts") if isinstance(summary.get("task_kind_counts"), dict) else {}
+    surface_counts = summary.get("surface_counts") if isinstance(summary.get("surface_counts"), dict) else {}
+    missing_kinds = sorted(kind for kind in required_kinds if kind not in kind_counts)
+    missing_surfaces = sorted(surface for surface in required_surfaces if surface not in surface_counts)
+    if missing_kinds:
+        raise AssertionError(f"field trials are missing task kind coverage: {missing_kinds}")
+    if missing_surfaces:
+        raise AssertionError(f"field trials are missing surface coverage: {missing_surfaces}")
+    decision_counts = summary.get("decision_counts") if isinstance(summary.get("decision_counts"), dict) else {}
+    if "blocked" not in decision_counts or "ready_for_ceraxia_review" not in decision_counts:
+        raise AssertionError(f"field trials must cover blocked and ready decisions: {summary}")
 
 
 def main() -> int:
@@ -63,7 +136,9 @@ def main() -> int:
     if spec.get("contract_version") != CONTRACT_VERSION:
         raise AssertionError(f"field trial contract version drifted: {spec}")
     results = [run_trial(trial) for trial in spec["trials"]]
-    print(json.dumps({"ok": True, "trials": results}, ensure_ascii=False, indent=2))
+    summary = summarize_results(results)
+    assert_coverage(summary)
+    print(json.dumps({"ok": True, "summary": summary, "trials": results}, ensure_ascii=False, indent=2))
     return 0
 
 
