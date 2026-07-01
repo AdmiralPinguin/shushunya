@@ -303,6 +303,9 @@ def review_gate(
         warnings.append({"severity": "warning", "finding": "broad verification is planned but not executed"})
     if verification_report.get("commands_executable") and not verification_report.get("commands_executed"):
         warnings.append({"severity": "warning", "finding": "executable verification commands exist but were not run"})
+    repo_evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
+    if repo_evidence.get("survey_truncated"):
+        warnings.append({"severity": "warning", "finding": "repository survey reached file limit; coverage is partial"})
     if any("hardcode" in approach for approach in brief.get("forbidden_approaches", [])):
         hardcode_rejected = any(
             option.get("name") == "hardcode" and option.get("decision") == "reject"

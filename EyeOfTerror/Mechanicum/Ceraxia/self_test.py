@@ -215,6 +215,28 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertEqual(review["decision"], "blocked")
 
+    def test_review_gate_warns_on_truncated_survey(self) -> None:
+        packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
+        survey = build_repo_survey(packet)
+        brief = build_implementation_brief(packet, survey)
+        brief["repo_survey_evidence"]["survey_truncated"] = True
+        worker_report = {
+            "status": "dry_run_handoff_ready",
+            "dry_run": True,
+            "changed_files": [],
+            "implementation_brief_acknowledged": True,
+        }
+        verification_report = {
+            "status": "planned_only",
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "commands_planned": ["python -m pytest"],
+            "commands_executable": [],
+            "commands_executed": [],
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        self.assertTrue(any("coverage is partial" in item["finding"] for item in review["warnings"]))
+
     def test_planning_validation_blocks_weak_contract_fields(self) -> None:
         packet = build_planning_packet({"task": "repo-grade migration API compatibility", "repo_path": "."})
         packet["contract_version"] = "old"
