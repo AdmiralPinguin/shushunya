@@ -683,6 +683,51 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
             self.assertEqual(audit["decision"], "passed")
 
+    def test_review_only_mode_builds_review_package_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+            patch = {
+                "operations": [
+                    {
+                        "type": "replace_return_expression",
+                        "path": "app.py",
+                        "function_name": "app",
+                        "old_expression": "False",
+                        "new_expression": "True",
+                    }
+                ]
+            }
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="review only for `app.py`\nCERAXIA_PATCH:\n" + json.dumps(patch),
+                    repo_path=str(repo),
+                    execution_mode="review_only",
+                    runs_root=Path(tmp) / "runs",
+                    execute_verification=True,
+                    verification_commands=("python -m py_compile app.py",),
+                )
+            )
+            self.assertTrue(result["ok"], result)
+            self.assertFalse(result["ready_for_execution"], result)
+            self.assertIn("return False", (repo / "app.py").read_text(encoding="utf-8"))
+            run_dir = Path(result["run_dir"])
+            task_json = json.loads((run_dir / "task.json").read_text(encoding="utf-8"))
+            self.assertEqual(task_json["execution_mode"], "review_only")
+            worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(worker_report["status"], "review_only_ready")
+            self.assertEqual(worker_report["edit_plan"]["controller_execution_mode"], "review_only")
+            self.assertEqual(worker_report["execution_policy_status"], "review_only_no_source_execution")
+            self.assertNotIn("execution_result", worker_report)
+            review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
+            self.assertEqual(review["decision"], "dry_run_ready")
+            readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
+            self.assertIn("review_only requested", " ".join(readiness["blockers"]))
+            summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["maturity"], "review_only_controller_without_code_brigade_execution")
+            self.assertEqual(summary["code_brigade_execution_policy_status"], "review_only_no_source_execution")
+
     def test_review_gate_blocks_blocked_work_packages(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
         survey = {

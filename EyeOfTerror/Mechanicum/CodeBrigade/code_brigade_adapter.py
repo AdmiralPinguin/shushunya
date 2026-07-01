@@ -324,6 +324,8 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     validation_problems = validate_implementation_brief(brief)
     implementation_plan = build_implementation_plan(brief)
     execution_intent = dict(brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {})
+    controller_mode = str(brief.get("controller_execution_mode") or "dry_run")
+    review_only = controller_mode == "review_only"
     edit_plan = build_edit_plan(brief, implementation_plan, execution_intent)
     task = str(brief.get("task") or "")
     has_explicit_patch = "CERAXIA_PATCH:" in task
@@ -378,6 +380,9 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         status = "blocked"
         notes.extend(str(item) for item in brief.get("blockers", []))
         notes.append("implementation not started because the implementation brief is blocked")
+    elif review_only:
+        status = "review_only_ready"
+        notes.append("review_only mode requested; CodeBrigade produced review artifacts without source mutation")
     elif dry_run:
         status = "dry_run_handoff_ready"
         notes.append("CodeBrigade adapter accepted the implementation brief without source mutation")
@@ -393,7 +398,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     if status == "implemented":
         package_status = "implemented"
         package_evidence = "execution_result"
-    elif status == "dry_run_handoff_ready":
+    elif status in {"dry_run_handoff_ready", "review_only_ready"}:
         package_status = "planned"
         package_evidence = "implementation_plan"
     else:
@@ -414,6 +419,12 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         if isinstance(package, dict)
         for package_id in [str(package.get("id") or "")]
     ]
+    if review_only:
+        execution_policy_status = "review_only_no_source_execution"
+    elif dry_run or status == "blocked":
+        execution_policy_status = REAL_EXECUTION_STATUS
+    else:
+        execution_policy_status = "real_execution_adapter_active"
     report = {
         "kind": "ceraxia_code_brigade_worker_report",
         "contract_version": CONTRACT_VERSION,
@@ -427,7 +438,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "autonomous_execution_request": build_autonomous_execution_request(brief, implementation_plan, execution_intent),
         "implementation_plan": implementation_plan,
         "work_package_statuses": package_statuses,
-        "execution_policy_status": REAL_EXECUTION_STATUS if dry_run or status == "blocked" else "real_execution_adapter_active",
+        "execution_policy_status": execution_policy_status,
         "notes": notes,
         "implementation_brief_acknowledged": not validation_problems,
         "validation_problems": validation_problems,

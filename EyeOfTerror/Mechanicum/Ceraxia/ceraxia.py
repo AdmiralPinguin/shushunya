@@ -1749,7 +1749,9 @@ def build_execution_readiness(
     repair_queue = review.get("diagnostic_repair_queue") if isinstance(review.get("diagnostic_repair_queue"), dict) else {}
     if repair_queue.get("item_count", 0):
         blockers.append("diagnostic repair request must be handled before execution readiness")
-    if dry_run:
+    if worker_report.get("status") == "review_only_ready":
+        blockers.append("review_only requested; source execution was intentionally skipped")
+    elif dry_run:
         blockers.append("dry run requested; real CodeBrigade execution was intentionally skipped")
     intent = worker_report.get("execution_intent") if isinstance(worker_report.get("execution_intent"), dict) else {}
     if not dry_run and intent.get("real_execution_supported") is False:
@@ -1761,13 +1763,17 @@ def build_execution_readiness(
         "dry_run": dry_run,
         "ready_conditions": ready_conditions,
         "blockers": blockers,
-        "next_capability_to_wire": "CodeBrigade diagnostic repair adapter" if repair_queue.get("item_count", 0) else ("CodeBrigade real execution adapter" if dry_run else ""),
+        "next_capability_to_wire": "CodeBrigade diagnostic repair adapter"
+        if repair_queue.get("item_count", 0)
+        else ("CodeBrigade real execution adapter" if dry_run and worker_report.get("status") != "review_only_ready" else ""),
     }
 
 
 def build_final_next_action(status: dict[str, Any], worker_report: dict[str, Any], dry_run: bool) -> str:
     if status.get("state") != "finalized":
         return "inspect blockers"
+    if worker_report.get("status") == "review_only_ready":
+        return "inspect review package or rerun with guarded_patch/repo_engineer when mutation is intended"
     if dry_run:
         return "execute with CodeBrigade only when mutation is explicitly intended"
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
@@ -1784,6 +1790,8 @@ def build_maturity_label(worker_report: dict[str, Any], readiness: dict[str, Any
         return "explicit_patch_execution_controller"
     if worker_report.get("status") == "dry_run_handoff_ready":
         return "dry_run_controller_with_code_brigade_handoff_adapter"
+    if worker_report.get("status") == "review_only_ready":
+        return "review_only_controller_without_code_brigade_execution"
     return "blocked_controller_with_audited_handoff"
 
 
