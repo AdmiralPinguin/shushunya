@@ -72,6 +72,7 @@
         "expected_code_brigade_iterations",
         "recommended_timeout_minutes",
         "escalation_triggers",
+        "diagnostic_repair_plan",
         "mutation_preconditions",
         "implementation_work_packages",
         "work_package_review_order",
@@ -222,6 +223,46 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "diagnostic_repair_plan": {
+          "type": "object",
+          "required": ["target", "max_repair_attempts", "diagnostic_inputs_required", "read_before_repair", "stop_conditions", "repair_evidence_required"],
+          "properties": {
+            "target": {
+              "const": "CodeBrigade"
+            },
+            "max_repair_attempts": {
+              "const": 3
+            },
+            "diagnostic_inputs_required": {
+              "type": "array",
+              "minItems": 4,
+              "items": {
+                "type": "string"
+              }
+            },
+            "read_before_repair": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "type": "string"
+              }
+            },
+            "stop_conditions": {
+              "type": "array",
+              "minItems": 4,
+              "items": {
+                "type": "string"
+              }
+            },
+            "repair_evidence_required": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "type": "string"
+              }
+            }
           }
         },
         "implementation_work_packages": {

@@ -884,6 +884,57 @@ def verification_strategy(triage: dict[str, Any], payload: dict[str, Any] | None
     }
 
 
+def diagnostic_repair_plan(
+    triage: dict[str, Any],
+    verification: dict[str, Any],
+    impact: dict[str, Any],
+    forecast: dict[str, Any],
+) -> dict[str, Any]:
+    stop_conditions = [
+        "same verification failure repeats after a mutation",
+        "diagnostics identify no repo-local source or test surface",
+        "repair would exceed execution_forecast.scope_budget",
+        "zero-test diagnostics indicate wrong test runner or command mismatch",
+        "missing import cannot be mapped to an allowed existing or planned file",
+    ]
+    repair_evidence = [
+        "diagnostic_summary",
+        "changed files mapped to impact surfaces",
+        "verification commands rerun after final mutation",
+        "residual blockers when repair stops",
+    ]
+    if verification.get("broad_verification_required"):
+        stop_conditions.append("broad verification cannot be executed or explicitly blocked after repair")
+        repair_evidence.append("broad verification result or explicit blocker")
+    if triage.get("risk_level") == "high" or impact.get("requires_cross_surface_review"):
+        repair_evidence.append("Ceraxia review checkpoint after each repair attempt")
+    return {
+        "role": "VerificationArchitect",
+        "target": "CodeBrigade",
+        "max_repair_attempts": 3,
+        "diagnostic_inputs_required": [
+            "latest verification_execution.results[].diagnostics",
+            "verification_execution.results[].diagnostics.traceback_files",
+            "verification_execution.results[].diagnostics.missing_imports",
+            "verification_execution.results[].diagnostics.has_assertion_failure",
+            "verification_execution.results[].diagnostics.has_syntax_error",
+            "verification_execution.results[].diagnostics.has_no_tests_ran",
+        ],
+        "read_before_repair": [
+            "traceback_files",
+            "target_files_to_inspect",
+            "test_files_to_preserve",
+            "reverse_dependency_index",
+            "changed-file verification output",
+        ],
+        "stop_conditions": stop_conditions,
+        "repair_evidence_required": repair_evidence,
+        "scope_budget": forecast.get("scope_budget", {}) if isinstance(forecast.get("scope_budget"), dict) else {},
+        "requires_ceraxia_review_after_each_attempt": triage.get("risk_level") == "high" or bool(impact.get("requires_cross_surface_review")),
+        "handoff_to": "CodeBrigade",
+    }
+
+
 def surface_verification_matrix(impact: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
     checks = verification.get("checks", []) if isinstance(verification.get("checks"), list) else []
     negative_tests = verification.get("negative_tests", []) if isinstance(verification.get("negative_tests"), list) else []
@@ -1688,6 +1739,7 @@ def code_brigade_handoff(
     quality: dict[str, Any],
     work_packages: dict[str, Any],
     acceptance_trace: dict[str, Any],
+    repair_plan: dict[str, Any],
 ) -> dict[str, Any]:
     steps = [
         {
@@ -1745,6 +1797,7 @@ def code_brigade_handoff(
         "package_review_order": work_packages.get("review_order", []),
         "package_dependency_graph": work_packages.get("package_dependency_graph", {}),
         "global_handoff_criteria": work_packages.get("global_handoff_criteria", []),
+        "diagnostic_repair_plan": repair_plan,
         "acceptance_trace_required": acceptance_trace.get("complete") is True,
         "acceptance_trace_row_count": acceptance_trace.get("row_count", 0),
         "required_quality_evidence": quality["must_have_evidence"],
@@ -1766,6 +1819,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     design = design_options(payload, triage)
     verification = verification_strategy(triage, payload)
     change_control = change_control_plan(triage, impact, verification, expert_plan)
+    repair_plan = diagnostic_repair_plan(triage, verification, impact, forecast)
     surface_matrix = surface_verification_matrix(impact, verification)
     risks = risk_register(triage, survey, design, verification)
     quality = quality_bar(triage, verification)
@@ -1776,7 +1830,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     acceptance_trace = acceptance_trace_matrix(problem, quality, acceptance, verification, surface_matrix, work_packages)
     constraint_trace = constraint_trace_matrix(problem, work_packages, acceptance_trace)
     review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, change_control, work_packages, package_matrix, acceptance_trace, constraint_trace)
-    handoff = code_brigade_handoff(triage, verification, quality, work_packages, acceptance_trace)
+    handoff = code_brigade_handoff(triage, verification, quality, work_packages, acceptance_trace, repair_plan)
     return {
         "ok": bool(task),
         "contract_version": CONTRACT_VERSION,
@@ -1797,6 +1851,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "change_control_plan": change_control,
         "design_options": design,
         "verification_strategy": verification,
+        "diagnostic_repair_plan": repair_plan,
         "surface_verification_matrix": surface_matrix,
         "surface_package_matrix": package_matrix,
         "risk_register": risks,

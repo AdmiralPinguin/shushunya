@@ -28,6 +28,7 @@ REQUIRED_PACKET_OBJECTS = [
     "change_control_plan",
     "design_options",
     "verification_strategy",
+    "diagnostic_repair_plan",
     "surface_verification_matrix",
     "surface_package_matrix",
     "risk_register",
@@ -208,6 +209,22 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("verification strategy must include broad_verification_required boolean")
     if verification.get("handoff_to") != "RiskScribe":
         problems.append("verification strategy must hand off to RiskScribe")
+
+    repair_plan = object_field(packet, "diagnostic_repair_plan")
+    if repair_plan.get("target") != "CodeBrigade":
+        problems.append("diagnostic repair plan must target CodeBrigade")
+    if not isinstance(repair_plan.get("diagnostic_inputs_required"), list) or len(repair_plan.get("diagnostic_inputs_required", [])) < 4:
+        problems.append("diagnostic repair plan must require verification diagnostics")
+    if not isinstance(repair_plan.get("read_before_repair"), list) or "traceback_files" not in repair_plan.get("read_before_repair", []):
+        problems.append("diagnostic repair plan must require traceback reads before repair")
+    if not isinstance(repair_plan.get("stop_conditions"), list) or not any("same verification failure repeats" in str(item) for item in repair_plan.get("stop_conditions", [])):
+        problems.append("diagnostic repair plan must stop on repeated verification failure")
+    if not isinstance(repair_plan.get("repair_evidence_required"), list) or "diagnostic_summary" not in repair_plan.get("repair_evidence_required", []):
+        problems.append("diagnostic repair plan must require a diagnostic summary")
+    if repair_plan.get("max_repair_attempts") != 3:
+        problems.append("diagnostic repair plan must cap repair attempts at 3")
+    if repair_plan.get("handoff_to") != "CodeBrigade":
+        problems.append("diagnostic repair plan must hand off to CodeBrigade")
 
     surface_matrix = object_field(packet, "surface_verification_matrix")
     if not isinstance(surface_matrix.get("rows"), list) or not surface_matrix.get("rows"):
@@ -420,6 +437,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("code brigade handoff package_dependency_graph must match implementation work packages")
     if list_field(handoff.get("global_handoff_criteria")) != list_field(work_packages.get("global_handoff_criteria")):
         problems.append("code brigade handoff global_handoff_criteria must match implementation work packages")
+    if object_field(handoff, "diagnostic_repair_plan") != repair_plan:
+        problems.append("code brigade handoff diagnostic_repair_plan must match planning packet")
     if handoff.get("acceptance_trace_required") is not True:
         problems.append("code brigade handoff must require acceptance trace")
     if handoff.get("acceptance_trace_row_count") != trace_matrix.get("row_count"):

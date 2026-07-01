@@ -42,6 +42,9 @@ Current capabilities:
   inconsistent passed reports that contain failure or traceback evidence
 - verification diagnostics now preserve traceback, assertion, syntax, and
   missing-import signals for future repair loops and orchestration summaries
+- PlanningBrigade now emits an explicit `diagnostic_repair_plan` that caps
+  repair attempts, names required diagnostic inputs, read-before-edit evidence,
+  stop conditions, and repair evidence for CodeBrigade
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
 - planned read-only service interface contracts for future role split on
@@ -77,6 +80,6 @@ Next useful upgrades:
   import resolution
 - teach review gates to compare command stdout/stderr semantics with each
   impacted surface more deeply than current output-signal and diagnostic counts
-- expand CodeBrigade from explicit and guarded natural-language patch
-  operations toward diagnostic autonomous source edits behind the existing
-  preflight, verification, rollback, and audit contracts
+- implement CodeBrigade's broader autonomous source-edit adapter against the
+  PlanningBrigade diagnostic repair plan, existing preflight, verification,
+  rollback, and audit contracts

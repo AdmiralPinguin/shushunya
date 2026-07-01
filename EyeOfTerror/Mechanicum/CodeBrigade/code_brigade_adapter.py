@@ -15,6 +15,7 @@ REAL_EXECUTION_STATUS = "blocked_until_adapter_is_wired"
 def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     verification = brief.get("required_verification") if isinstance(brief.get("required_verification"), dict) else {}
+    repair_plan = brief.get("diagnostic_repair_plan") if isinstance(brief.get("diagnostic_repair_plan"), dict) else {}
     surface_matrix = brief.get("surface_verification_matrix") if isinstance(brief.get("surface_verification_matrix"), dict) else {}
     package_matrix = brief.get("surface_package_matrix") if isinstance(brief.get("surface_package_matrix"), dict) else {}
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
@@ -87,6 +88,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "scope_budget": forecast.get("scope_budget", {}) if isinstance(forecast.get("scope_budget"), dict) else {},
         "escalation_triggers": forecast.get("escalation_triggers", []) if isinstance(forecast.get("escalation_triggers"), list) else [],
         "execution_intent": execution_intent,
+        "diagnostic_repair_plan": repair_plan,
         "mutation_preconditions": blueprint.get("mutation_preconditions", []) if isinstance(blueprint.get("mutation_preconditions"), list) else [],
         "implementation_work_packages": packages,
         "work_package_review_order": work_packages.get("review_order", []) if isinstance(work_packages.get("review_order"), list) else [],
@@ -140,6 +142,31 @@ def build_autonomous_execution_request(brief: dict[str, Any], implementation_pla
     if execution_intent is None:
         execution_intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
     request_required = execution_intent.get("real_execution_supported") is False
+    repair_plan = implementation_plan.get("diagnostic_repair_plan") if isinstance(implementation_plan.get("diagnostic_repair_plan"), dict) else {}
+    diagnostic_inputs_required = repair_plan.get("diagnostic_inputs_required") if isinstance(repair_plan.get("diagnostic_inputs_required"), list) else [
+        "latest verification_execution.results[].diagnostics",
+        "traceback_files mapped to repo-relative paths",
+        "missing_imports from failed verification output",
+        "assertion, syntax, and zero-test signals",
+        "changed-file verification commands after every mutation",
+    ]
+    read_before_repair = repair_plan.get("read_before_repair") if isinstance(repair_plan.get("read_before_repair"), list) else [
+        "target_files_to_inspect",
+        "traceback_files",
+        "test_files_to_preserve",
+    ]
+    stop_conditions = repair_plan.get("stop_conditions") if isinstance(repair_plan.get("stop_conditions"), list) else [
+        "diagnostics do not identify a repo-local source or test surface",
+        "next patch would exceed scope_budget",
+        "verification has zero-test or missing-import diagnostics without a safe source edit",
+        "the same verification failure repeats after a mutation",
+    ]
+    required_outputs = repair_plan.get("repair_evidence_required") if isinstance(repair_plan.get("repair_evidence_required"), list) else [
+        "diagnostic_summary",
+        "attempted_patch_summary",
+        "verification_commands_executed",
+        "residual_blockers",
+    ]
     return {
         "kind": "code_brigade_autonomous_execution_request",
         "contract_version": CONTRACT_VERSION,
@@ -157,28 +184,12 @@ def build_autonomous_execution_request(brief: dict[str, Any], implementation_pla
         "verification_commands": implementation_plan.get("verification_commands", []),
         "acceptance_evidence_required": implementation_plan.get("acceptance_evidence_required", []),
         "refusal_conditions": implementation_plan.get("refusal_conditions", []),
-        "diagnostic_inputs_required": [
-            "latest verification_execution.results[].diagnostics",
-            "traceback_files mapped to repo-relative paths",
-            "missing_imports from failed verification output",
-            "assertion, syntax, and zero-test signals",
-            "changed-file verification commands after every mutation",
-        ],
+        "diagnostic_inputs_required": diagnostic_inputs_required,
         "repair_loop_contract": {
-            "max_attempts": 3,
-            "must_read_before_edit": ["target_files_to_inspect", "traceback_files", "test_files_to_preserve"],
-            "must_stop_when": [
-                "diagnostics do not identify a repo-local source or test surface",
-                "next patch would exceed scope_budget",
-                "verification has zero-test or missing-import diagnostics without a safe source edit",
-                "the same verification failure repeats after a mutation",
-            ],
-            "required_outputs": [
-                "diagnostic_summary",
-                "attempted_patch_summary",
-                "verification_commands_executed",
-                "residual_blockers",
-            ],
+            "max_attempts": repair_plan.get("max_repair_attempts", 3),
+            "must_read_before_edit": read_before_repair,
+            "must_stop_when": stop_conditions,
+            "required_outputs": required_outputs,
         },
         "return_contract": [
             "patch_manifest.json with changed files and rationale",

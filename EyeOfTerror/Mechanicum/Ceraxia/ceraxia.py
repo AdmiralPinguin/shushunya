@@ -255,6 +255,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "final_report.md",
         ],
         "required_verification": verification,
+        "diagnostic_repair_plan": packet.get("diagnostic_repair_plan", {}),
         "surface_verification_matrix": packet.get("surface_verification_matrix", {}),
         "surface_package_matrix": packet.get("surface_package_matrix", {}),
         "survey_quality_gate": survey_quality,

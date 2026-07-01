@@ -75,7 +75,7 @@ ROADMAP = [
     {
         "priority": 1,
         "item": "expand CodeBrigade from guarded inference to diagnostic autonomous source edits",
-        "reason": "CodeBrigade can now apply explicit patch operations, guarded natural-language single-file operations, and narrow test-inferred safe-literal patches after preflight, but broader mutation still needs diagnostics, source evidence, verification feedback, and refusal controls before execution.",
+        "reason": "PlanningBrigade now emits a diagnostic repair plan and CodeBrigade preserves it in implementation plans and autonomous execution requests, but the broader source-edit adapter still needs to execute diagnostic repair loops against repo evidence, verification feedback, scope budgets, and refusal controls.",
         "owner": "CodeBrigade",
     },
     {
@@ -93,7 +93,7 @@ ROADMAP = [
     {
         "priority": 4,
         "item": "split PlanningBrigade roles into callable services after more field trials",
-        "reason": "PlanningBrigade now emits problem framing, path hints, assumption registers, investigation playbooks, change-control plans, acceptance trace matrices, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, CodeBrigade brief blueprints, and implementation work packages; role services should wait until these contracts survive more real tasks.",
+        "reason": "PlanningBrigade now emits problem framing, path hints, assumption registers, investigation playbooks, change-control plans, diagnostic repair plans, acceptance trace matrices, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, CodeBrigade brief blueprints, and implementation work packages; role services should wait until these contracts survive more real tasks.",
         "owner": "PlanningBrigade",
     },
 ]

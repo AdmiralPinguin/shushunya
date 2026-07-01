@@ -17,6 +17,7 @@
     "forbidden_approaches",
     "expected_artifacts",
     "required_verification",
+    "diagnostic_repair_plan",
     "surface_verification_matrix",
     "surface_package_matrix",
     "survey_quality_gate",
@@ -119,6 +120,49 @@
     },
     "required_verification": {
       "type": "object"
+    },
+    "diagnostic_repair_plan": {
+      "type": "object",
+      "required": ["target", "max_repair_attempts", "diagnostic_inputs_required", "read_before_repair", "stop_conditions", "repair_evidence_required", "handoff_to"],
+      "properties": {
+        "target": {
+          "const": "CodeBrigade"
+        },
+        "max_repair_attempts": {
+          "const": 3
+        },
+        "diagnostic_inputs_required": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "read_before_repair": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "stop_conditions": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "repair_evidence_required": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "handoff_to": {
+          "const": "CodeBrigade"
+        }
+      }
     },
     "surface_verification_matrix": {
       "type": "object"

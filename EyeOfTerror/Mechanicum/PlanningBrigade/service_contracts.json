@@ -46,8 +46,8 @@
       "name": "VerificationArchitect",
       "port": 7114,
       "authority": "map impacted surfaces to verification evidence",
-      "input_artifacts": ["impact_analysis", "design_options", "change_control_plan"],
-      "output_artifacts": ["verification_strategy", "surface_verification_matrix"],
+      "input_artifacts": ["impact_analysis", "design_options", "execution_forecast", "change_control_plan"],
+      "output_artifacts": ["verification_strategy", "diagnostic_repair_plan", "surface_verification_matrix"],
       "may_mutate_source": false,
       "handoff_to": "RiskScribe"
     },

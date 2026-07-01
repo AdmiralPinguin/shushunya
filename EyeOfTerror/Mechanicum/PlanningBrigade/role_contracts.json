@@ -46,10 +46,11 @@
     {
       "name": "VerificationArchitect",
       "authority": "map impacted surfaces to verification evidence",
-      "inputs": ["impact_analysis", "design_options"],
-      "outputs": ["verification_strategy", "surface_verification_matrix"],
+      "inputs": ["impact_analysis", "design_options", "execution_forecast"],
+      "outputs": ["verification_strategy", "diagnostic_repair_plan", "surface_verification_matrix"],
       "quality_gates": [
         "targeted commands are planned",
+        "diagnostic repair inputs and stop conditions are explicit",
         "negative tests are named for boundary risks",
         "every impacted surface has planned evidence or a blocker"
       ],

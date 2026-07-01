@@ -47,6 +47,9 @@ Current contract:
   post-change proofs before source mutation reaches CodeBrigade.
 - `execution_forecast` estimates task complexity, expected CodeBrigade
   iterations, timeout budget, orchestration notes, and escalation triggers.
+- `diagnostic_repair_plan` defines the bounded repair loop for failed
+  verification: required diagnostic inputs, read-before-edit evidence, stop
+  conditions, max attempts, and required repair evidence.
 - `surface_verification_matrix` maps each impacted surface to planned evidence
   and blocks handoff when coverage is missing.
 - `acceptance_contract` records what the final package must prove and what
@@ -66,7 +69,8 @@ Current contract:
   structurally unsafe plans before they reach CodeBrigade.
 - `code_brigade_handoff` lists the ordered execution/review steps, package
   review order, package dependency graph, global handoff criteria, and
-  acceptance trace requirement.
+  acceptance trace requirement, including the diagnostic repair plan that
+  CodeBrigade must preserve.
 
 ```bash
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "почини failing unittest без изменения тестов" --repo-path /repo

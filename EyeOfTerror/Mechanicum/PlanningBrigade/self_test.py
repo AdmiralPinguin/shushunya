@@ -149,6 +149,12 @@ def main() -> int:
         or "negative boundary evidence proves the bypass is closed" not in security_packet["expert_quality_plan"]["review_checklist"]
         or security_packet["design_options"]["selected_strategy"] != "boundary_first_patch"
         or "untrusted input is rejected" not in security_packet["verification_strategy"]["negative_tests"]
+        or security_packet["diagnostic_repair_plan"]["target"] != "CodeBrigade"
+        or security_packet["diagnostic_repair_plan"]["max_repair_attempts"] != 3
+        or "verification_execution.results[].diagnostics.traceback_files" not in security_packet["diagnostic_repair_plan"]["diagnostic_inputs_required"]
+        or "traceback_files" not in security_packet["diagnostic_repair_plan"]["read_before_repair"]
+        or not any("zero-test diagnostics" in item for item in security_packet["diagnostic_repair_plan"]["stop_conditions"])
+        or not security_packet["diagnostic_repair_plan"]["requires_ceraxia_review_after_each_attempt"]
         or not security_packet["verification_strategy"]["broad_verification_required"]
         or "negative boundary test or explicit blocker is present" not in security_packet["quality_bar"]["must_have_evidence"]
         or "required negative tests are present, executed, or explicitly blocked" not in security_packet["acceptance_contract"]["must_prove"]
@@ -160,6 +166,7 @@ def main() -> int:
         or security_packet["planning_review_gate"]["decision"] != "ready_for_ceraxia_review"
         or security_packet["planning_review_gate"]["score"] < 80
         or "prove_negative_boundary" not in [step["step"] for step in security_packet["code_brigade_handoff"]["steps"]]
+        or security_packet["code_brigade_handoff"]["diagnostic_repair_plan"] != security_packet["diagnostic_repair_plan"]
     ):
         raise AssertionError(f"security planning packet is too weak: {security_packet}")
     selected_security_option = next(option for option in security_packet["design_options"]["options"] if option["name"] == security_packet["design_options"]["selected_strategy"])

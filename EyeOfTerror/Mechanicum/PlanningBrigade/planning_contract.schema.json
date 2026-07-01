@@ -22,6 +22,7 @@
     "change_control_plan",
     "design_options",
     "verification_strategy",
+    "diagnostic_repair_plan",
     "surface_verification_matrix",
     "surface_package_matrix",
     "risk_register",
@@ -201,6 +202,37 @@
         "handoff_to": {"const": "RiskScribe"}
       }
     },
+    "diagnostic_repair_plan": {
+      "type": "object",
+      "required": ["target", "max_repair_attempts", "diagnostic_inputs_required", "read_before_repair", "stop_conditions", "repair_evidence_required", "scope_budget", "requires_ceraxia_review_after_each_attempt", "handoff_to"],
+      "properties": {
+        "target": {"const": "CodeBrigade"},
+        "max_repair_attempts": {"const": 3},
+        "diagnostic_inputs_required": {
+          "type": "array",
+          "minItems": 4,
+          "items": {"type": "string"}
+        },
+        "read_before_repair": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"type": "string"}
+        },
+        "stop_conditions": {
+          "type": "array",
+          "minItems": 4,
+          "items": {"type": "string"}
+        },
+        "repair_evidence_required": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"type": "string"}
+        },
+        "scope_budget": {"type": "object"},
+        "requires_ceraxia_review_after_each_attempt": {"type": "boolean"},
+        "handoff_to": {"const": "CodeBrigade"}
+      }
+    },
     "surface_verification_matrix": {
       "type": "object",
       "required": ["rows", "complete", "blockers"]
@@ -353,7 +385,7 @@
     },
     "code_brigade_handoff": {
       "type": "object",
-      "required": ["target", "steps", "package_review_order", "package_dependency_graph", "global_handoff_criteria", "acceptance_trace_required", "acceptance_trace_row_count", "required_quality_evidence"],
+      "required": ["target", "steps", "package_review_order", "package_dependency_graph", "global_handoff_criteria", "diagnostic_repair_plan", "acceptance_trace_required", "acceptance_trace_row_count", "required_quality_evidence"],
       "properties": {
         "target": {"const": "CodeBrigade"},
         "steps": {
@@ -374,6 +406,7 @@
           "minItems": 3,
           "items": {"type": "string"}
         },
+        "diagnostic_repair_plan": {"type": "object"},
         "acceptance_trace_required": {"const": true},
         "acceptance_trace_row_count": {
           "type": "integer",

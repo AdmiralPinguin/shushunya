@@ -442,6 +442,50 @@ def valid_brief() -> dict:
             "blockers": ["unshaped source mutation requires a future CodeBrigade autonomous execution adapter"],
             "required_next_adapter": "autonomous CodeBrigade source-edit adapter",
         },
+        "diagnostic_repair_plan": {
+            "role": "VerificationArchitect",
+            "target": "CodeBrigade",
+            "max_repair_attempts": 3,
+            "diagnostic_inputs_required": [
+                "latest verification_execution.results[].diagnostics",
+                "verification_execution.results[].diagnostics.traceback_files",
+                "verification_execution.results[].diagnostics.missing_imports",
+                "verification_execution.results[].diagnostics.has_assertion_failure",
+                "verification_execution.results[].diagnostics.has_syntax_error",
+                "verification_execution.results[].diagnostics.has_no_tests_ran",
+            ],
+            "read_before_repair": [
+                "traceback_files",
+                "target_files_to_inspect",
+                "test_files_to_preserve",
+                "reverse_dependency_index",
+                "changed-file verification output",
+            ],
+            "stop_conditions": [
+                "same verification failure repeats after a mutation",
+                "diagnostics identify no repo-local source or test surface",
+                "repair would exceed execution_forecast.scope_budget",
+                "zero-test diagnostics indicate wrong test runner or command mismatch",
+                "missing import cannot be mapped to an allowed existing or planned file",
+            ],
+            "repair_evidence_required": [
+                "diagnostic_summary",
+                "changed files mapped to impact surfaces",
+                "verification commands rerun after final mutation",
+                "residual blockers when repair stops",
+            ],
+            "scope_budget": {
+                "max_source_files_to_edit": 4,
+                "max_test_files_to_edit_without_explicit_user_request": 0,
+                "max_docs_files_to_edit": 2,
+                "requires_ceraxia_replan_when": [
+                    "needed source edits exceed max_source_files_to_edit",
+                    "test edits are needed but were not explicitly requested by the user",
+                ],
+            },
+            "requires_ceraxia_review_after_each_attempt": False,
+            "handoff_to": "CodeBrigade",
+        },
         "repo_survey_evidence": {
             "candidate_files": ["app.py"],
             "test_files": ["test_app.py"],
@@ -467,6 +511,41 @@ def valid_brief() -> dict:
         "suggested_verification_commands": ["python -m pytest test_app.py"],
         "code_brigade_handoff": {
             "target": "CodeBrigade",
+            "diagnostic_repair_plan": {
+                "target": "CodeBrigade",
+                "max_repair_attempts": 3,
+                "diagnostic_inputs_required": [
+                    "latest verification_execution.results[].diagnostics",
+                    "verification_execution.results[].diagnostics.traceback_files",
+                    "verification_execution.results[].diagnostics.missing_imports",
+                    "verification_execution.results[].diagnostics.has_assertion_failure",
+                    "verification_execution.results[].diagnostics.has_syntax_error",
+                    "verification_execution.results[].diagnostics.has_no_tests_ran",
+                ],
+                "read_before_repair": [
+                    "traceback_files",
+                    "target_files_to_inspect",
+                    "test_files_to_preserve",
+                    "reverse_dependency_index",
+                    "changed-file verification output",
+                ],
+                "stop_conditions": [
+                    "same verification failure repeats after a mutation",
+                    "diagnostics identify no repo-local source or test surface",
+                    "repair would exceed execution_forecast.scope_budget",
+                    "zero-test diagnostics indicate wrong test runner or command mismatch",
+                    "missing import cannot be mapped to an allowed existing or planned file",
+                ],
+                "repair_evidence_required": [
+                    "diagnostic_summary",
+                    "changed files mapped to impact surfaces",
+                    "verification commands rerun after final mutation",
+                    "residual blockers when repair stops",
+                ],
+                "scope_budget": {},
+                "requires_ceraxia_review_after_each_attempt": False,
+                "handoff_to": "CodeBrigade",
+            },
             "steps": [
                 {"step": "inspect_repo_evidence", "owner": "CodeBrigade"},
                 {"step": "return_for_ceraxia_review", "owner": "Ceraxia"},
@@ -591,6 +670,14 @@ def main() -> int:
         raise AssertionError(f"implementation plan should forbid unrequested test edits: {plan}")
     if plan["execution_intent"]["required_next_adapter"] != "autonomous CodeBrigade source-edit adapter":
         raise AssertionError(f"implementation plan should preserve execution intent: {plan}")
+    if plan["diagnostic_repair_plan"]["target"] != "CodeBrigade":
+        raise AssertionError(f"implementation plan should preserve diagnostic repair target: {plan}")
+    if autonomous_request["repair_loop_contract"]["max_attempts"] != plan["diagnostic_repair_plan"]["max_repair_attempts"]:
+        raise AssertionError(f"autonomous request should derive repair attempts from planning: {dry_report}")
+    if autonomous_request["repair_loop_contract"]["must_read_before_edit"] != plan["diagnostic_repair_plan"]["read_before_repair"]:
+        raise AssertionError(f"autonomous request should derive repair reads from planning: {dry_report}")
+    if autonomous_request["repair_loop_contract"]["must_stop_when"] != plan["diagnostic_repair_plan"]["stop_conditions"]:
+        raise AssertionError(f"autonomous request should derive stop conditions from planning: {dry_report}")
     if "execution preflight passes" not in plan["mutation_preconditions"]:
         raise AssertionError(f"implementation plan should preserve mutation preconditions: {plan}")
     if [package["id"] for package in plan["implementation_work_packages"]] != [
