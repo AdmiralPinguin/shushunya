@@ -1,0 +1,50 @@
+{
+  "kind": "planning_brigade_field_trials",
+  "contract_version": "eye-mechanicum.v1",
+  "trials": [
+    {
+      "id": "failing-test-repair",
+      "task": "почини failing unittest без изменения тестов: regression in public parser",
+      "repo_path": "/repo",
+      "expected_kinds": ["test_repair"],
+      "expected_phases": ["capture_failing_test"],
+      "expected_negative_tests": [],
+      "minimum_score": 80
+    },
+    {
+      "id": "security-boundary",
+      "task": "почини security bug: API token можно обойти через path traversal, добавь pytest negative tests",
+      "repo_path": "/repo",
+      "expected_kinds": ["security", "api_compatibility", "test_repair"],
+      "expected_phases": ["prove_boundary"],
+      "expected_negative_tests": ["untrusted input is rejected", "path/auth/token boundary cannot be bypassed"],
+      "minimum_score": 80
+    },
+    {
+      "id": "migration-compatibility",
+      "task": "repo-grade migration: сохрани legacy compatibility, API response schema и runtime config",
+      "repo_path": "/repo",
+      "expected_kinds": ["migration", "api_compatibility", "config_runtime"],
+      "expected_phases": ["prove_compatibility"],
+      "expected_negative_tests": ["old and new API shape compatibility", "missing/invalid config fails safely", "old, new, and mixed records round-trip correctly"],
+      "minimum_score": 80
+    },
+    {
+      "id": "architecture-refactor",
+      "task": "refactor architecture: split planner and executor without changing public endpoint response contracts",
+      "repo_path": "/repo",
+      "expected_kinds": ["refactor", "api_compatibility"],
+      "expected_phases": ["prove_compatibility"],
+      "expected_negative_tests": ["old and new API shape compatibility"],
+      "minimum_score": 80
+    },
+    {
+      "id": "unclear-task",
+      "task": "почини",
+      "repo_path": "/repo",
+      "expected_kinds": ["bugfix"],
+      "expected_decision": "blocked",
+      "minimum_score": 0
+    }
+  ]
+}

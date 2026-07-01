@@ -37,3 +37,12 @@ python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "по�
 The brigade writes one `ceraxia_planning_packet` containing all five planning
 roles plus the handoff contracts above. Split these roles into separate services
 only after the packet format is stable.
+
+Field trials:
+
+```bash
+PYTHONPATH=EyeOfTerror/Mechanicum/PlanningBrigade python3 EyeOfTerror/Mechanicum/PlanningBrigade/field_trial_runner.py
+```
+
+The trials cover failing-test repair, security boundaries, migration/API
+compatibility, architecture refactors, and unclear tasks that must be blocked.

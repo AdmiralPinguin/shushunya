@@ -7,4 +7,5 @@ PYTHONPATH=EyeOfTerror/Mechanicum/CodeBrigade python3 EyeOfTerror/Mechanicum/Cod
 PYTHONPATH=EyeOfTerror/Mechanicum/CodeBrigade python3 EyeOfTerror/Mechanicum/CodeBrigade/verification_self_test.py
 PYTHONPATH=EyeOfTerror/Mechanicum python3 EyeOfTerror/Mechanicum/contracts_self_test.py
 PYTHONPATH=EyeOfTerror/Mechanicum/PlanningBrigade python3 EyeOfTerror/Mechanicum/PlanningBrigade/self_test.py
+PYTHONPATH=EyeOfTerror/Mechanicum/PlanningBrigade python3 EyeOfTerror/Mechanicum/PlanningBrigade/field_trial_runner.py >/dev/null
 PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade:EyeOfTerror/Mechanicum/CodeBrigade python3 EyeOfTerror/Mechanicum/Ceraxia/self_test.py
