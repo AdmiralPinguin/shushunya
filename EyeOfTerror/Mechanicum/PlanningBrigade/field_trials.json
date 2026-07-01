@@ -8,6 +8,7 @@
       "repo_path": "/repo",
       "expected_kinds": ["test_repair"],
       "expected_phases": ["capture_failing_test"],
+      "expected_surfaces": ["source_behavior", "test_surface"],
       "expected_negative_tests": [],
       "minimum_score": 80
     },
@@ -17,6 +18,8 @@
       "repo_path": "/repo",
       "expected_kinds": ["security", "api_compatibility", "test_repair"],
       "expected_phases": ["prove_boundary"],
+      "expected_surfaces": ["source_behavior", "test_surface", "public_api_contract", "security_boundary"],
+      "expected_highest_risk_surface": "security_boundary",
       "expected_negative_tests": ["untrusted input is rejected", "path/auth/token boundary cannot be bypassed"],
       "minimum_score": 80
     },
@@ -26,6 +29,8 @@
       "repo_path": "/repo",
       "expected_kinds": ["migration", "api_compatibility", "config_runtime"],
       "expected_phases": ["prove_compatibility"],
+      "expected_surfaces": ["source_behavior", "test_surface", "public_api_contract", "runtime_configuration", "data_compatibility"],
+      "expected_highest_risk_surface": "data_compatibility",
       "expected_negative_tests": ["old and new API shape compatibility", "missing/invalid config fails safely", "old, new, and mixed records round-trip correctly"],
       "minimum_score": 80
     },
@@ -35,6 +40,7 @@
       "repo_path": "/repo",
       "expected_kinds": ["refactor", "api_compatibility"],
       "expected_phases": ["prove_compatibility"],
+      "expected_surfaces": ["source_behavior", "test_surface", "public_api_contract", "internal_architecture"],
       "expected_negative_tests": ["old and new API shape compatibility"],
       "minimum_score": 80
     },
@@ -43,6 +49,7 @@
       "task": "почини",
       "repo_path": "/repo",
       "expected_kinds": ["bugfix"],
+      "expected_surfaces": ["source_behavior", "test_surface"],
       "expected_decision": "blocked",
       "minimum_score": 0
     }

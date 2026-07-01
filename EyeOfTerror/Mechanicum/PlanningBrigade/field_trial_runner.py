@@ -23,6 +23,18 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     require_subset(trial.get("expected_kinds", []), packet["task_triage"]["task_kinds"], "task kinds", trial_id)
     phases = [phase["id"] for phase in packet["work_breakdown"]["phases"]]
     require_subset(trial.get("expected_phases", []), phases, "work phases", trial_id)
+    surfaces = [surface["surface"] for surface in packet["impact_analysis"]["surfaces"]]
+    require_subset(trial.get("expected_surfaces", []), surfaces, "impact surfaces", trial_id)
+    expected_highest_risk_surface = trial.get("expected_highest_risk_surface")
+    if expected_highest_risk_surface and packet["impact_analysis"]["highest_risk_surface"] != expected_highest_risk_surface:
+        raise AssertionError(
+            f"{trial_id}: expected highest risk surface {expected_highest_risk_surface}, "
+            f"got {packet['impact_analysis']['highest_risk_surface']}: {packet}"
+        )
+    if not packet["surface_verification_matrix"]["complete"]:
+        raise AssertionError(f"{trial_id}: surface verification matrix should be complete: {packet}")
+    matrix_surfaces = [row["surface"] for row in packet["surface_verification_matrix"]["rows"]]
+    require_subset(trial.get("expected_surfaces", []), matrix_surfaces, "surface verification rows", trial_id)
     require_subset(
         trial.get("expected_negative_tests", []),
         packet["verification_strategy"]["negative_tests"],
@@ -42,6 +54,7 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "score": packet["planning_review_gate"]["score"],
         "task_kinds": packet["task_triage"]["task_kinds"],
         "phases": phases,
+        "surfaces": surfaces,
     }
 
 
