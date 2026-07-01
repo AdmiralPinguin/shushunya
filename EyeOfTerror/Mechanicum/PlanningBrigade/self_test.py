@@ -39,6 +39,16 @@ def assert_role_contracts() -> None:
             raise AssertionError(f"PlanningBrigade roles must be read-only: {role}")
         if not role.get("authority") or not role.get("outputs"):
             raise AssertionError(f"role contract must expose authority and outputs: {role}")
+    sample_packet = planning_brigade.build_planning_packet(
+        {
+            "task": "почини security API migration pytest",
+            "repo_path": "/repo",
+        }
+    )
+    for role in roles:
+        for output in role["outputs"]:
+            if output not in sample_packet:
+                raise AssertionError(f"role contract output is absent from planning packet: role={role['name']} output={output}")
 
 
 def main() -> int:
