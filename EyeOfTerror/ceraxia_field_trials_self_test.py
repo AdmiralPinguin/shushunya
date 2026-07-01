@@ -100,6 +100,9 @@ def main() -> int:
         "honest_expert_overall_score",
         "honest_expert_dimension_averages",
         "honest_expert_dimension_sample_counts",
+        "rolling_honest_expert_overall_score",
+        "rolling_honest_expert_dimension_averages",
+        "rolling_honest_expert_dimension_sample_counts",
     }:
         if key not in report_payload:
             raise AssertionError(f"Ceraxia report must expose honest-only metric {key}: {report_payload}")
@@ -121,10 +124,10 @@ def main() -> int:
     if report_payload.get("expert_target_met") is True:
         expert_gaps = report_payload.get("expert_gaps", {})
         if (
-            expert_gaps.get("honest_expert_trial_count", 0) < expert_target.get("minimum_expert_trials", 0)
-            or expert_gaps.get("expert_class_count", 0) < expert_target.get("minimum_expert_classes", 0)
-            or expert_gaps.get("honest_unshaped_expert_trial_count", 0) < expert_target.get("minimum_unshaped_expert_trials", 0)
-            or report_payload.get("honest_expert_overall_score", 0) < expert_target.get("rolling_average_min", 0)
+            expert_gaps.get("rolling_honest_expert_trial_count", 0) < expert_target.get("minimum_representative_trials", 0)
+            or expert_gaps.get("rolling_honest_expert_class_count", 0) < expert_target.get("minimum_expert_classes", 0)
+            or expert_gaps.get("rolling_honest_unshaped_expert_trial_count", 0) < expert_target.get("minimum_unshaped_expert_trials", 0)
+            or report_payload.get("rolling_honest_expert_overall_score", 0) < expert_target.get("rolling_average_min", 0)
         ):
             raise AssertionError(f"Ceraxia expert target cannot pass without required evidence: {report_payload}")
     if report_payload.get("accepted_trial_count", 0) and report_payload.get("target_met") is not True:
@@ -145,6 +148,9 @@ def main() -> int:
     honest_expert_sample_counts = report_payload.get("honest_expert_dimension_sample_counts", {})
     if set(honest_expert_sample_counts) != set(dimensions):
         raise AssertionError(f"Ceraxia report must expose honest expert sample counts for every dimension: {report_payload}")
+    rolling_honest_expert_sample_counts = report_payload.get("rolling_honest_expert_dimension_sample_counts", {})
+    if set(rolling_honest_expert_sample_counts) != set(dimensions):
+        raise AssertionError(f"Ceraxia report must expose rolling honest expert sample counts for every dimension: {report_payload}")
     expert_dimension_averages = report_payload.get("expert_dimension_averages", {})
     if set(expert_dimension_averages) != set(dimensions):
         raise AssertionError(f"Ceraxia report must expose expert averages for every dimension: {report_payload}")
@@ -154,12 +160,22 @@ def main() -> int:
     honest_expert_dimension_averages = report_payload.get("honest_expert_dimension_averages", {})
     if set(honest_expert_dimension_averages) != set(dimensions):
         raise AssertionError(f"Ceraxia report must expose honest expert averages for every dimension: {report_payload}")
+    rolling_honest_expert_dimension_averages = report_payload.get("rolling_honest_expert_dimension_averages", {})
+    if set(rolling_honest_expert_dimension_averages) != set(dimensions):
+        raise AssertionError(f"Ceraxia report must expose rolling honest expert averages for every dimension: {report_payload}")
     expert_gaps = report_payload.get("expert_gaps", {})
     for key in {
         "honest_expert_trial_count",
         "honest_unshaped_expert_trial_count",
         "needs_more_honest_expert_evidence",
         "needs_more_honest_unshaped_expert_evidence",
+        "rolling_honest_expert_trial_count",
+        "rolling_honest_expert_window_size",
+        "rolling_honest_expert_class_count",
+        "rolling_honest_unshaped_expert_trial_count",
+        "needs_more_rolling_honest_expert_evidence",
+        "needs_more_rolling_honest_expert_classes",
+        "needs_more_rolling_honest_unshaped_expert_evidence",
         "expert_entries_without_honest_evidence",
     }:
         if key not in expert_gaps:

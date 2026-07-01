@@ -117,6 +117,55 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     }
     entries = [item for item in ledger.get("entries", []) if isinstance(item, dict)]
     accepted = [item for item in entries if item.get("accepted_for_rolling_score") is True]
+
+    def applicable_scores_for(entries_to_score: list[dict[str, Any]]) -> dict[str, list[float]]:
+        collected: dict[str, list[float]] = {dimension: [] for dimension in dimensions}
+        for score_entry in entries_to_score:
+            trial = trial_by_id.get(str(score_entry.get("trial_id") or ""), {})
+            applicable = trial.get("applicable_dimensions")
+            applicable_dimensions = (
+                {str(item) for item in applicable}
+                if isinstance(applicable, list) and applicable
+                else set(dimensions)
+            )
+            scores = score_entry.get("scores") if isinstance(score_entry.get("scores"), dict) else {}
+            for dimension in dimensions:
+                if dimension not in applicable_dimensions:
+                    continue
+                value = scores.get(dimension)
+                if isinstance(value, (int, float)):
+                    collected[dimension].append(float(value))
+        return collected
+
+    def low_scores_for(entries_to_score: list[dict[str, Any]], floor: float) -> dict[str, list[dict[str, Any]]]:
+        lows: dict[str, list[dict[str, Any]]] = {dimension: [] for dimension in dimensions}
+        if not floor:
+            return lows
+        for score_entry in entries_to_score:
+            trial = trial_by_id.get(str(score_entry.get("trial_id") or ""), {})
+            applicable = trial.get("applicable_dimensions")
+            applicable_dimensions = (
+                {str(item) for item in applicable}
+                if isinstance(applicable, list) and applicable
+                else set(dimensions)
+            )
+            scores = score_entry.get("scores") if isinstance(score_entry.get("scores"), dict) else {}
+            for dimension in dimensions:
+                if dimension not in applicable_dimensions:
+                    continue
+                value = scores.get(dimension)
+                if isinstance(value, (int, float)) and float(value) < floor:
+                    lows[dimension].append(
+                        {
+                            "trial_id": score_entry.get("trial_id", ""),
+                            "run_id": score_entry.get("run_id", ""),
+                            "class": trial.get("class", ""),
+                            "difficulty": trial.get("difficulty", ""),
+                            "score": float(value),
+                        }
+                    )
+        return lows
+
     scores_by_dimension: dict[str, list[float]] = {dimension: [] for dimension in dimensions}
     honest_scores_by_dimension: dict[str, list[float]] = {dimension: [] for dimension in dimensions}
     expert_scores_by_dimension: dict[str, list[float]] = {dimension: [] for dimension in dimensions}
@@ -307,15 +356,45 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     enough_honest_expert_overall = honest_expert_overall >= float(expert_target.get("rolling_average_min") or 0)
     enough_expert_entry_scores = not any(expert_low_entry_scores.values())
     enough_honest_expert_entry_scores = not any(honest_expert_low_entry_scores.values())
+    expert_window_size = int(expert_target.get("minimum_representative_trials") or expert_target.get("minimum_expert_trials") or 0)
+    rolling_honest_expert_entries = honest_expert_entries[-expert_window_size:] if expert_window_size else list(honest_expert_entries)
+    rolling_honest_expert_scores_by_dimension = applicable_scores_for(rolling_honest_expert_entries)
+    rolling_honest_expert_dimension_averages = {
+        dimension: average(values)
+        for dimension, values in rolling_honest_expert_scores_by_dimension.items()
+    }
+    rolling_honest_expert_dimension_sample_counts = {
+        dimension: len(values)
+        for dimension, values in rolling_honest_expert_scores_by_dimension.items()
+    }
+    rolling_honest_expert_overall = average(list(rolling_honest_expert_dimension_averages.values())) if rolling_honest_expert_dimension_averages else 0.0
+    rolling_honest_expert_classes = {
+        str(trial_by_id.get(str(entry.get("trial_id") or ""), {}).get("class") or "")
+        for entry in rolling_honest_expert_entries
+        if trial_by_id.get(str(entry.get("trial_id") or ""), {}).get("class")
+    }
+    rolling_honest_unshaped_expert_entries = [
+        entry
+        for entry in rolling_honest_expert_entries
+        if str(entry.get("trial_id") or "").startswith("ceraxia-expert-unshaped-")
+    ]
+    rolling_honest_expert_low_entry_scores = low_scores_for(rolling_honest_expert_entries, expert_entry_min)
+    enough_rolling_honest_expert_trials = len(rolling_honest_expert_entries) >= int(expert_target.get("minimum_representative_trials") or 0)
+    enough_rolling_honest_expert_classes = len(rolling_honest_expert_classes) >= int(expert_target.get("minimum_expert_classes") or 0)
+    enough_rolling_honest_unshaped_expert_trials = len(rolling_honest_unshaped_expert_entries) >= int(expert_target.get("minimum_unshaped_expert_trials") or 0)
+    enough_rolling_honest_expert_dimensions = all(value >= expert_dimension_min for value in rolling_honest_expert_dimension_averages.values())
+    enough_rolling_honest_expert_samples = all(count >= expert_sample_min for count in rolling_honest_expert_dimension_sample_counts.values())
+    enough_rolling_honest_expert_overall = rolling_honest_expert_overall >= float(expert_target.get("rolling_average_min") or 0)
+    enough_rolling_honest_expert_entry_scores = not any(rolling_honest_expert_low_entry_scores.values())
     expert_target_met = bool(
         expert_target
-        and enough_honest_expert_trials
-        and enough_expert_classes
-        and enough_honest_unshaped_expert_trials
-        and enough_honest_expert_dimensions
-        and enough_honest_expert_samples
-        and enough_honest_expert_overall
-        and enough_honest_expert_entry_scores
+        and enough_rolling_honest_expert_trials
+        and enough_rolling_honest_expert_classes
+        and enough_rolling_honest_unshaped_expert_trials
+        and enough_rolling_honest_expert_dimensions
+        and enough_rolling_honest_expert_samples
+        and enough_rolling_honest_expert_overall
+        and enough_rolling_honest_expert_entry_scores
     )
     return {
         "target_met": target_met,
@@ -325,14 +404,17 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
         "expert_overall_score": expert_overall,
         "honest_overall_score": honest_overall,
         "honest_expert_overall_score": honest_expert_overall,
+        "rolling_honest_expert_overall_score": rolling_honest_expert_overall,
         "dimension_averages": dimension_averages,
         "expert_dimension_averages": expert_dimension_averages,
         "honest_dimension_averages": honest_dimension_averages,
         "honest_expert_dimension_averages": honest_expert_dimension_averages,
+        "rolling_honest_expert_dimension_averages": rolling_honest_expert_dimension_averages,
         "dimension_sample_counts": dimension_sample_counts,
         "expert_dimension_sample_counts": expert_dimension_sample_counts,
         "honest_dimension_sample_counts": honest_dimension_sample_counts,
         "honest_expert_dimension_sample_counts": honest_expert_dimension_sample_counts,
+        "rolling_honest_expert_dimension_sample_counts": rolling_honest_expert_dimension_sample_counts,
         "accepted_trial_count": len(accepted),
         "accepted_honest_evidence_count": sum(
             1 for status in honest_evidence_by_run.values() if status.get("passed")
@@ -380,14 +462,15 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
             "needs_more_expert_classes": not enough_expert_classes,
             "needs_higher_overall": not enough_honest_expert_overall,
             "legacy_needs_higher_overall": not enough_expert_overall,
+            "rolling_needs_higher_overall": not enough_rolling_honest_expert_overall,
             "needs_more_dimension_evidence": [
                 dimension
-                for dimension, count in honest_expert_dimension_sample_counts.items()
+                for dimension, count in rolling_honest_expert_dimension_sample_counts.items()
                 if count < expert_sample_min
             ],
             "needs_higher_dimension_scores": [
                 dimension
-                for dimension, value in honest_expert_dimension_averages.items()
+                for dimension, value in rolling_honest_expert_dimension_averages.items()
                 if value < expert_dimension_min
             ],
             "legacy_needs_more_dimension_evidence": [
@@ -402,6 +485,11 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
             ],
             "needs_higher_entry_scores": {
                 dimension: items
+                for dimension, items in rolling_honest_expert_low_entry_scores.items()
+                if items
+            },
+            "all_time_needs_higher_entry_scores": {
+                dimension: items
                 for dimension, items in honest_expert_low_entry_scores.items()
                 if items
             },
@@ -412,12 +500,19 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
             },
             "expert_trial_count": len(expert_entries),
             "honest_expert_trial_count": len(honest_expert_entries),
+            "rolling_honest_expert_trial_count": len(rolling_honest_expert_entries),
+            "rolling_honest_expert_window_size": expert_window_size,
             "expert_class_count": len(expert_classes),
+            "rolling_honest_expert_class_count": len(rolling_honest_expert_classes),
             "unshaped_expert_trial_count": len(unshaped_expert_entries),
             "honest_unshaped_expert_trial_count": len(honest_unshaped_expert_entries),
+            "rolling_honest_unshaped_expert_trial_count": len(rolling_honest_unshaped_expert_entries),
             "needs_more_unshaped_expert_trials": not enough_unshaped_expert_trials,
             "needs_more_honest_expert_evidence": not enough_honest_expert_trials,
             "needs_more_honest_unshaped_expert_evidence": not enough_honest_unshaped_expert_trials,
+            "needs_more_rolling_honest_expert_evidence": not enough_rolling_honest_expert_trials,
+            "needs_more_rolling_honest_expert_classes": not enough_rolling_honest_expert_classes,
+            "needs_more_rolling_honest_unshaped_expert_evidence": not enough_rolling_honest_unshaped_expert_trials,
             "expert_entries_without_honest_evidence": [
                 item
                 for item in accepted_legacy_without_honest_evidence
