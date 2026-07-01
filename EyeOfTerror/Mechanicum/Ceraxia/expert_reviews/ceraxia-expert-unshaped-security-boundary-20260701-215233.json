@@ -1,0 +1,20 @@
+{
+  "trial_id": "ceraxia-expert-unshaped-security-boundary",
+  "run_id": "ceraxia-expert-unshaped-security-boundary-20260701-215233",
+  "reviewer": "Codex strict expert evidence review",
+  "scores": {
+    "task_understanding": 9.5,
+    "repository_investigation": 9.5,
+    "multi_file_reasoning": 9.5,
+    "patch_correctness": 9.5,
+    "verification_discipline": 9.5,
+    "self_repair": 9.5,
+    "review_quality": 9.5,
+    "safety": 9.75,
+    "reporting": 9.5
+  },
+  "human_review_notes": "Strict expert evidence review: ceraxia-expert-unshaped-security-boundary passed expected outcome, all trial-specific checks passed, verification executed 3 command(s), patch_source=test_inferred_security_boundary, changed_files=2. Accepted as unshaped expert evidence because the patch was inferred from tests/repo evidence with diagnostics.",
+  "generalizable_failures": [],
+  "follow_up_changes": [],
+  "accepted_for_rolling_score": true
+}

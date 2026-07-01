@@ -1,0 +1,29 @@
+{
+  "status": "recorded",
+  "goal": "кодовая expert-задача без structured concurrency marker: исправь cache invalidation/concurrent readers. Выведи контракт из tests и docs: invalidate idempotent, reload works, concurrent readers share one loaded value, sleep-based synchronization нельзя использовать.\nCERAXIA_TARGET_REPO: /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-concurrency-cache-20260701-215233/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_cache_store\nCERAXIA_VERIFY: python -m py_compile cache_store.py",
+  "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+  "success_criteria": [
+    "changed files directly address the requested behavior",
+    "source scope is justified by repo survey or explicit patch contract",
+    "verification evidence is preserved after the final mutation",
+    "review either approves with evidence or blocks with focused revision steps"
+  ],
+  "evidence_to_inspect": [
+    "cache_store.py",
+    "tests/test_cache_store.py",
+    "docs/cache_store.md"
+  ],
+  "working_hypotheses": [
+    "cache_store.py is likely relevant to the requested code change.",
+    "tests/test_cache_store.py is likely relevant to the requested code change.",
+    "docs/cache_store.md is likely relevant to the requested code change."
+  ],
+  "verification_candidates": [
+    "python -m unittest discover",
+    "python -m unittest tests.test_cache_store",
+    "tests/test_cache_store.py",
+    "python -m py_compile <changed .py files>",
+    "git diff --check"
+  ],
+  "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+}
