@@ -10,6 +10,40 @@ from typing import Any
 CONTRACT_VERSION = "eye-mechanicum.v1"
 
 
+def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
+    evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
+    verification = brief.get("required_verification") if isinstance(brief.get("required_verification"), dict) else {}
+    handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
+    suggested_commands = brief.get("suggested_verification_commands")
+    if not isinstance(suggested_commands, list):
+        suggested_commands = []
+    targeted_commands = verification.get("targeted_commands")
+    if not isinstance(targeted_commands, list):
+        targeted_commands = []
+    commands: list[str] = []
+    for command in [*targeted_commands, *suggested_commands]:
+        if isinstance(command, str) and command and command not in commands:
+            commands.append(command)
+    return {
+        "kind": "code_brigade_implementation_plan",
+        "contract_version": CONTRACT_VERSION,
+        "strategy": brief.get("selected_strategy", ""),
+        "risk_level": brief.get("risk_level", "high"),
+        "target_files_to_inspect": evidence.get("candidate_files", []) if isinstance(evidence.get("candidate_files"), list) else [],
+        "test_files_to_preserve": evidence.get("test_files", []) if isinstance(evidence.get("test_files"), list) else [],
+        "entrypoints_to_check": evidence.get("entrypoint_candidates", []) if isinstance(evidence.get("entrypoint_candidates"), list) else [],
+        "handoff_steps": handoff.get("steps", []) if isinstance(handoff.get("steps"), list) else [],
+        "verification_commands": commands,
+        "acceptance_gates": brief.get("acceptance_gates", []) if isinstance(brief.get("acceptance_gates"), list) else [],
+        "refusal_conditions": [
+            "brief validation fails",
+            "requested source tree is unavailable",
+            "required behavior cannot be proven by existing or newly planned verification",
+            "requested patch would require a broad rewrite outside allowed_scope",
+        ],
+    }
+
+
 def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if brief.get("kind") != "ceraxia_code_brigade_implementation_brief":
@@ -41,6 +75,7 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
 
 def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     validation_problems = validate_implementation_brief(brief)
+    implementation_plan = build_implementation_plan(brief)
     changed_files: list[str] = []
     notes: list[str] = []
     if validation_problems:
@@ -63,6 +98,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "status": status,
         "dry_run": dry_run,
         "changed_files": changed_files,
+        "implementation_plan": implementation_plan,
         "notes": notes,
         "implementation_brief_acknowledged": not validation_problems,
         "validation_problems": validation_problems,

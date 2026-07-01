@@ -77,6 +77,11 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertIn("untrusted input is rejected", verification["negative_tests_required"])
             self.assertTrue(any(command.startswith("python -m pytest test_app.py") for command in verification["commands_planned"]))
+            worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
+            implementation_plan = worker_report["implementation_plan"]
+            self.assertIn("app.py", implementation_plan["target_files_to_inspect"])
+            self.assertIn("test_app.py", implementation_plan["test_files_to_preserve"])
+            self.assertTrue(any(command.startswith("python -m pytest test_app.py") for command in implementation_plan["verification_commands"]))
             survey = json.loads((run_dir / "repo_survey.json").read_text(encoding="utf-8"))
             self.assertEqual(survey["status"], "surveyed")
             self.assertIn("app.py", survey["candidate_files"])
