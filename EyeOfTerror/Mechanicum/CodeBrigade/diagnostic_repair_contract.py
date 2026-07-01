@@ -390,11 +390,16 @@ def execute_diagnostic_repair_request(request: dict[str, Any]) -> dict[str, Any]
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate a Ceraxia diagnostic repair request for CodeBrigade.")
     parser.add_argument("request", help="Path to diagnostic_repair_request.json")
+    parser.add_argument("--execute", action="store_true", help="Execute the narrow guarded diagnostic repair adapter.")
     args = parser.parse_args()
     payload = json.loads(Path(args.request).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         print(json.dumps({"status": "blocked", "blockers": ["request payload must be an object"]}, ensure_ascii=False, indent=2))
         return 2
+    if args.execute:
+        result = execute_diagnostic_repair_request(payload)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result.get("status") == "implemented" else 2
     intake = build_diagnostic_repair_intake(payload)
     print(json.dumps(intake, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if intake["status"] in {"ready", "not_required"} else 2

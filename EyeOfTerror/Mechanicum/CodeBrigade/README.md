@@ -74,6 +74,7 @@ Use it directly when inspecting a run package:
 
 ```bash
 python3 EyeOfTerror/Mechanicum/CodeBrigade/diagnostic_repair_contract.py path/to/diagnostic_repair_request.json
+python3 EyeOfTerror/Mechanicum/CodeBrigade/diagnostic_repair_contract.py --execute path/to/diagnostic_repair_request.json
 ```
 
 It also includes `execution_policy_status`; this remains

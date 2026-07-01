@@ -778,6 +778,19 @@ def main() -> int:
             raise AssertionError("diagnostic repair executor should update source return literal")
         if (repo / "test_app.py").read_text(encoding="utf-8") != test_text:
             raise AssertionError("diagnostic repair executor must preserve test file content")
+        (repo / "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+        request_path = repo / "diagnostic_repair_request.json"
+        request_path.write_text(json.dumps(executable_request), encoding="utf-8")
+        cli = subprocess.run(
+            ["python3", str(Path(__file__).resolve().parent / "diagnostic_repair_contract.py"), "--execute", str(request_path)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if cli.returncode != 0 or '"status": "implemented"' not in cli.stdout:
+            raise AssertionError(f"diagnostic repair CLI --execute should implement guarded repair: rc={cli.returncode} out={cli.stdout} err={cli.stderr}")
+        if "return 2" not in (repo / "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("diagnostic repair CLI --execute should update source return literal")
     with tempfile.TemporaryDirectory() as tmp:
         request_path = Path(tmp) / "diagnostic_repair_request.json"
         request_path.write_text(json.dumps(repair_request), encoding="utf-8")
