@@ -11,8 +11,9 @@ def main() -> int:
     if status["architecture_contract"]["governance_root"] != "EyeOfTerror/Mechanicum":
         raise AssertionError(f"status should expose the architecture contract: {status}")
     by_name = {item["name"]: item for item in status["components"]}
-    if by_name["CodeBrigade"]["maturity"] != "dry_run_handoff_with_blocked_execution_adapter_and_allowlisted_verification":
-        raise AssertionError(f"CodeBrigade should honestly report verification-adapter maturity: {by_name['CodeBrigade']}")
+    code_maturity = by_name["CodeBrigade"]["maturity"]
+    if "blocked_execution_adapter" not in code_maturity or "preflight" not in code_maturity or "allowlisted_verification" not in code_maturity:
+        raise AssertionError(f"CodeBrigade should honestly report preflight and verification-adapter maturity: {by_name['CodeBrigade']}")
     if by_name["Ceraxia"]["maturity"] != "dry_run_controller_with_import_edges_evidence_matrix_and_verification":
         raise AssertionError(f"Ceraxia should honestly report dry-run survey and verification maturity: {by_name['Ceraxia']}")
     if "replace blocked CodeBrigade execution adapter" not in status["next_architecture_step"]:

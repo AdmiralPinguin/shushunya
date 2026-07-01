@@ -55,7 +55,7 @@ COMPONENTS = {
             "verification_adapter.py",
             "self_test.py",
         ],
-        "maturity": "dry_run_handoff_with_blocked_execution_adapter_and_allowlisted_verification",
+        "maturity": "dry_run_handoff_with_blocked_execution_adapter_preflight_and_allowlisted_verification",
     },
 }
 
@@ -64,7 +64,7 @@ ROADMAP = [
     {
         "priority": 1,
         "item": "replace blocked CodeBrigade execution adapter with safe source mutation",
-        "reason": "Ceraxia can produce a validated handoff and CodeBrigade has an execution boundary, but source mutation is still intentionally blocked.",
+        "reason": "Ceraxia can produce a validated handoff and CodeBrigade now has a read-only execution preflight, but source mutation is still intentionally blocked.",
         "owner": "CodeBrigade",
     },
     {
