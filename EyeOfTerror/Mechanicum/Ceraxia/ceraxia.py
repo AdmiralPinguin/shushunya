@@ -97,6 +97,50 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("planning packet is not ok")
     if packet.get("design_options", {}).get("requires_ceraxia_approval") is not True:
         problems.append("planning packet must require Ceraxia strategy approval")
+    triage = packet.get("task_triage") if isinstance(packet.get("task_triage"), dict) else {}
+    if not isinstance(triage.get("task_kinds"), list) or not triage.get("task_kinds"):
+        problems.append("task triage must include task_kinds")
+    if triage.get("risk_level") not in {"low", "medium", "high"}:
+        problems.append("task triage must include a valid risk_level")
+    if triage.get("handoff_to") != "RepoSurveyor":
+        problems.append("task triage must hand off to RepoSurveyor")
+    survey = packet.get("repo_survey_request") if isinstance(packet.get("repo_survey_request"), dict) else {}
+    if survey.get("read_only") is not True:
+        problems.append("repo survey request must be read-only")
+    if not isinstance(survey.get("focus"), list) or not survey.get("focus"):
+        problems.append("repo survey request must include focus areas")
+    if survey.get("handoff_to") != "DesignStrategos":
+        problems.append("repo survey request must hand off to DesignStrategos")
+    design = packet.get("design_options") if isinstance(packet.get("design_options"), dict) else {}
+    if not isinstance(design.get("selected_strategy"), str) or not design.get("selected_strategy"):
+        problems.append("design options must include selected_strategy")
+    options = design.get("options") if isinstance(design.get("options"), list) else []
+    if not any(item.get("name") == "hardcode" and item.get("decision") == "reject" for item in options if isinstance(item, dict)):
+        problems.append("design options must reject hardcode")
+    if not any(item.get("name") == "broad_rewrite" and item.get("decision") == "reject" for item in options if isinstance(item, dict)):
+        problems.append("design options must reject broad_rewrite")
+    if design.get("handoff_to") != "VerificationArchitect":
+        problems.append("design options must hand off to VerificationArchitect")
+    verification = packet.get("verification_strategy") if isinstance(packet.get("verification_strategy"), dict) else {}
+    if not isinstance(verification.get("targeted_commands"), list) or not verification.get("targeted_commands"):
+        problems.append("verification strategy must include targeted_commands")
+    if not isinstance(verification.get("checks"), list) or not verification.get("checks"):
+        problems.append("verification strategy must include checks")
+    if not isinstance(verification.get("negative_tests"), list):
+        problems.append("verification strategy must include negative_tests list")
+    if not isinstance(verification.get("broad_verification_required"), bool):
+        problems.append("verification strategy must include broad_verification_required boolean")
+    if verification.get("handoff_to") != "RiskScribe":
+        problems.append("verification strategy must hand off to RiskScribe")
+    risks = packet.get("risk_register") if isinstance(packet.get("risk_register"), dict) else {}
+    if not isinstance(risks.get("risks"), list) or not risks.get("risks"):
+        problems.append("risk register must include risks")
+    if not isinstance(risks.get("acceptance_gates"), list) or not risks.get("acceptance_gates"):
+        problems.append("risk register must include acceptance_gates")
+    if risks.get("handoff_to") != "Ceraxia":
+        problems.append("risk register must hand authority back to Ceraxia")
+    if packet.get("next_action", {}).get("owner") != "Ceraxia":
+        problems.append("next action must be owned by Ceraxia")
     return problems
 
 
@@ -117,19 +161,23 @@ def build_repo_survey_stub(packet: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
-    triage = packet["task_triage"]
-    verification = packet["verification_strategy"]
-    risks = packet["risk_register"]
-    blocked = bool(validate_planning_packet(packet)) or not survey["repo_exists"]
+    triage = packet.get("task_triage") if isinstance(packet.get("task_triage"), dict) else {}
+    verification = packet.get("verification_strategy") if isinstance(packet.get("verification_strategy"), dict) else {}
+    risks = packet.get("risk_register") if isinstance(packet.get("risk_register"), dict) else {}
+    planning_problems = validate_planning_packet(packet)
+    blocked = bool(planning_problems) or not survey["repo_exists"]
+    blockers = [f"planning validation failed: {problem}" for problem in planning_problems]
+    if not survey["repo_exists"]:
+        blockers.append("repo survey or planning validation is incomplete")
     return {
         "kind": "ceraxia_code_brigade_implementation_brief",
         "owner": "Ceraxia",
         "target": "CodeBrigade",
-        "task": packet["task"],
+        "task": str(packet.get("task") or ""),
         "repo_path": survey["repo_path"],
-        "task_kinds": triage["task_kinds"],
-        "risk_level": triage["risk_level"],
-        "selected_strategy": packet["design_options"]["selected_strategy"],
+        "task_kinds": triage.get("task_kinds") if isinstance(triage.get("task_kinds"), list) else [],
+        "risk_level": triage.get("risk_level") if triage.get("risk_level") in {"low", "medium", "high"} else "high",
+        "selected_strategy": packet.get("design_options", {}).get("selected_strategy", ""),
         "allowed_scope": [
             "candidate files identified by repository survey",
             "tests directly covering the requested behavior",
@@ -147,9 +195,9 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "final_report.md",
         ],
         "required_verification": verification,
-        "acceptance_gates": risks["acceptance_gates"],
+        "acceptance_gates": risks.get("acceptance_gates") if isinstance(risks.get("acceptance_gates"), list) else [],
         "blocked": blocked,
-        "blockers": [] if not blocked else ["repo survey or planning validation is incomplete"],
+        "blockers": blockers,
     }
 
 

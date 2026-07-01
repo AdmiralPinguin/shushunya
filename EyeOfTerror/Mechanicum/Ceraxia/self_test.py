@@ -109,6 +109,22 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertEqual(review["decision"], "blocked")
 
+    def test_planning_validation_blocks_weak_contract_fields(self) -> None:
+        packet = build_planning_packet({"task": "repo-grade migration API compatibility", "repo_path": "."})
+        packet["repo_survey_request"]["read_only"] = False
+        packet["design_options"]["options"] = []
+        packet["verification_strategy"]["targeted_commands"] = []
+        packet["risk_register"]["acceptance_gates"] = []
+        problems = validate_planning_packet(packet)
+        self.assertTrue(any("read-only" in problem for problem in problems), problems)
+        self.assertTrue(any("reject hardcode" in problem for problem in problems), problems)
+        self.assertTrue(any("targeted_commands" in problem for problem in problems), problems)
+        self.assertTrue(any("acceptance_gates" in problem for problem in problems), problems)
+        survey = build_repo_survey_stub(packet)
+        brief = build_implementation_brief(packet, survey)
+        self.assertTrue(brief["blocked"])
+        self.assertTrue(any("planning validation failed" in item for item in brief["blockers"]))
+
     def test_run_audit_blocks_missing_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
