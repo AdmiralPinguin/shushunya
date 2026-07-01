@@ -73,6 +73,7 @@ def classify_task(task: str) -> dict[str, Any]:
         "config_runtime": ["config", "env", "runtime", "timeout", "порт", "настрой"],
         "api_compatibility": ["api", "schema", "endpoint", "response", "request", "contract"],
         "test_repair": ["pytest", "unittest", "test_", "тест"],
+        "concurrency": ["concurrency", "parallel", "async", "race", "deadlock", "lock", "cache", "retry", "конкур", "паралл", "гонк", "кэш", "ретра"],
     }
     kinds = [name for name, needles in patterns.items() if any(needle in lowered for needle in needles)]
     if not kinds:
@@ -81,7 +82,7 @@ def classify_task(task: str) -> dict[str, Any]:
     for kind in kinds:
         if kind == "security":
             risk_score += 3
-        elif kind in {"migration", "api_compatibility", "refactor"}:
+        elif kind in {"migration", "api_compatibility", "refactor", "concurrency"}:
             risk_score += 2
         elif kind in {"config_runtime", "test_repair"}:
             risk_score += 1
@@ -159,6 +160,8 @@ def repo_survey_request(payload: dict[str, Any], triage: dict[str, Any]) -> dict
         focus.append("security boundary and untrusted input flows")
     if "migration" in triage["task_kinds"]:
         focus.append("old/new data shape readers and writers")
+    if "concurrency" in triage["task_kinds"]:
+        focus.append("concurrency, cache, retry, and shared-state boundaries")
     return {
         "role": "RepoSurveyor",
         "repo_path": repo_path,
@@ -408,6 +411,14 @@ def impact_analysis(triage: dict[str, Any], problem: dict[str, Any], survey: dic
                 "evidence_needed": ["old/new/mixed data shape round trip", "rollback or compatibility note"],
             }
         )
+    if "concurrency" in kinds:
+        surfaces.append(
+            {
+                "surface": "concurrency_runtime",
+                "risk": "high",
+                "evidence_needed": ["parallel/retry behavior", "shared-state or cache invalidation evidence"],
+            }
+        )
     if "refactor" in kinds:
         surfaces.append(
             {
@@ -421,7 +432,15 @@ def impact_analysis(triage: dict[str, Any], problem: dict[str, Any], survey: dic
         "path_hints": problem.get("explicit_path_hints", []),
         "repo_focus": survey.get("focus", []),
         "surfaces": surfaces,
-        "highest_risk_surface": "security_boundary" if "security" in kinds else "data_compatibility" if "migration" in kinds else surfaces[0]["surface"],
+        "highest_risk_surface": (
+            "security_boundary"
+            if "security" in kinds
+            else "data_compatibility"
+            if "migration" in kinds
+            else "concurrency_runtime"
+            if "concurrency" in kinds
+            else surfaces[0]["surface"]
+        ),
         "requires_cross_surface_review": len(surfaces) >= 4 or triage["risk_level"] == "high",
     }
 
@@ -524,6 +543,8 @@ def verification_strategy(triage: dict[str, Any], payload: dict[str, Any] | None
         negative_tests.append("missing/invalid config fails safely")
     if "migration" in triage["task_kinds"]:
         negative_tests.append("old, new, and mixed records round-trip correctly")
+    if "concurrency" in triage["task_kinds"]:
+        negative_tests.append("parallel/retry behavior preserves state")
     for command in string_list(payload.get("verification_commands")) + string_list(payload.get("required_verification_commands")):
         if command not in commands:
             commands.append(command)
@@ -561,6 +582,8 @@ def surface_verification_matrix(impact: dict[str, Any], verification: dict[str, 
             covered_by.extend(item for item in negative_tests if "config" in item)
         elif name == "data_compatibility":
             covered_by.extend(item for item in negative_tests if "round-trip" in item or "round trip" in item or "mixed records" in item)
+        elif name == "concurrency_runtime":
+            covered_by.extend(item for item in negative_tests if "parallel" in item or "retry" in item or "state" in item)
         elif name == "internal_architecture":
             covered_by.extend(item for item in checks if "dependency" in item or "behavior" in item)
         if not covered_by:

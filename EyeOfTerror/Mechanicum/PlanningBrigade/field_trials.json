@@ -45,6 +45,17 @@
       "minimum_score": 80
     },
     {
+      "id": "concurrency-cache",
+      "task": "fix async retry race: parallel requests corrupt cache state under timeout",
+      "repo_path": "/repo",
+      "expected_kinds": ["bugfix", "config_runtime", "concurrency"],
+      "expected_phases": [],
+      "expected_surfaces": ["source_behavior", "test_surface", "runtime_configuration", "concurrency_runtime"],
+      "expected_highest_risk_surface": "concurrency_runtime",
+      "expected_negative_tests": ["missing/invalid config fails safely", "parallel/retry behavior preserves state"],
+      "minimum_score": 80
+    },
+    {
       "id": "unclear-task",
       "task": "почини",
       "repo_path": "/repo",
