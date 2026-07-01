@@ -90,12 +90,19 @@ def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
     problems = validate_diagnostic_repair_request(request)
     queue = request.get("diagnostic_repair_queue") if isinstance(request.get("diagnostic_repair_queue"), dict) else {}
     items = queue.get("items") if isinstance(queue.get("items"), list) else []
+    executor_supported_signals = {"assertion_failure", "failed_command", "traceback", "missing_import"}
     attempt_plan = [
         {
             "attempt_id": f"repair-{index + 1}",
             "command": str(item.get("command") or ""),
             "priority": str(item.get("priority") or "normal"),
             "diagnostic_signals": item.get("diagnostic_signals", []) if isinstance(item.get("diagnostic_signals"), list) else [],
+            "executor_supported": bool(
+                executor_supported_signals.intersection(item.get("diagnostic_signals") if isinstance(item.get("diagnostic_signals"), list) else [])
+            ),
+            "unsupported_reason": ""
+            if executor_supported_signals.intersection(item.get("diagnostic_signals") if isinstance(item.get("diagnostic_signals"), list) else [])
+            else "current guarded executor supports assertion_failure, failed_command, traceback, or missing_import only",
             "read_order": item.get("concrete_read_targets", []) if isinstance(item.get("concrete_read_targets"), list) else [],
             "package_ids": item.get("package_ids", []) if isinstance(item.get("package_ids"), list) else [],
             "stop_conditions": item.get("stop_conditions", []) if isinstance(item.get("stop_conditions"), list) else [],
@@ -441,15 +448,19 @@ def execute_diagnostic_repair_request(request: dict[str, Any]) -> dict[str, Any]
         return build_blocked_execution_result([f"invalid diagnostic repair request: {problem}" for problem in intake["blockers"]])
     if intake["status"] == "not_required":
         return build_blocked_execution_result(["diagnostic repair request is not required"])
-    supported_signals = {"assertion_failure", "failed_command", "traceback", "missing_import"}
     supported = any(
-        isinstance(item, dict)
-        and bool(supported_signals.intersection(item.get("diagnostic_signals") if isinstance(item.get("diagnostic_signals"), list) else []))
-        for item in request.get("diagnostic_repair_queue", {}).get("items", [])
-        if isinstance(request.get("diagnostic_repair_queue"), dict)
+        isinstance(item, dict) and item.get("executor_supported") is True
+        for item in intake.get("attempt_plan", [])
     )
     if not supported:
-        return build_blocked_execution_result(["diagnostic repair executor currently supports assertion_failure, failed_command, traceback, or missing_import guarded inference only"])
+        unsupported_reasons = sorted(
+            {
+                str(item.get("unsupported_reason") or "")
+                for item in intake.get("attempt_plan", [])
+                if isinstance(item, dict) and item.get("unsupported_reason")
+            }
+        )
+        return build_blocked_execution_result(unsupported_reasons or ["diagnostic repair executor has no supported repair attempt"])
     from execution_adapter import execute_implementation_brief
 
     return execute_implementation_brief(build_repair_execution_brief(request, intake))

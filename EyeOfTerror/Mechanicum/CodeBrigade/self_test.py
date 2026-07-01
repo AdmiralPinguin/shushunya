@@ -915,8 +915,18 @@ def main() -> int:
         raise AssertionError(f"diagnostic repair intake should preserve package ids: {repair_intake}")
     if repair_intake["attempt_plan"][0]["read_order"] != ["app.py"]:
         raise AssertionError(f"diagnostic repair intake should build attempt read order: {repair_intake}")
+    if repair_intake["attempt_plan"][0]["executor_supported"] is not True or repair_intake["attempt_plan"][0]["unsupported_reason"]:
+        raise AssertionError(f"diagnostic repair intake should mark assertion repair as executor-supported: {repair_intake}")
     if "repair item has no safe concrete read target" not in repair_intake["refusal_conditions"]:
         raise AssertionError(f"diagnostic repair intake should expose refusal conditions: {repair_intake}")
+    syntax_error_request = json.loads(json.dumps(repair_request))
+    syntax_error_request["diagnostic_repair_queue"]["items"][0]["diagnostic_signals"] = ["syntax_error"]
+    syntax_error_intake = build_diagnostic_repair_intake(syntax_error_request)
+    if syntax_error_intake["status"] != "ready" or syntax_error_intake["attempt_plan"][0]["executor_supported"] is not False:
+        raise AssertionError(f"syntax-error diagnostic intake should be valid but unsupported by current executor: {syntax_error_intake}")
+    syntax_error_execution = execute_diagnostic_repair_request(syntax_error_request)
+    if syntax_error_execution["status"] != "blocked" or not any("supports assertion_failure" in blocker for blocker in syntax_error_execution["blockers"]):
+        raise AssertionError(f"syntax-error diagnostic execution should block with supported-signal reason: {syntax_error_execution}")
     broken_repair_request = dict(repair_request)
     broken_repair_request["diagnostic_repair_queue"] = dict(repair_request["diagnostic_repair_queue"], item_count=2)
     broken_intake = build_diagnostic_repair_intake(broken_repair_request)

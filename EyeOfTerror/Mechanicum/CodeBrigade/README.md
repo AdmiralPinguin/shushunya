@@ -69,12 +69,15 @@ so the future adapter is expected to consume verification diagnostics rather
 than edit blindly.
 `diagnostic_repair_contract.py` validates Ceraxia
 `diagnostic_repair_request.json` artifacts and builds a CodeBrigade intake
-summary with impacted surfaces, package ids, target files, preserved tests, and
-blockers. Its first executor path is intentionally narrow: assertion-failure
-repair requests, failed-command requests, and traceback-backed repair requests
-may reuse the existing guarded test-inferred source patch adapter; missing-import
-repair requests can use the same guarded path when tests identify the missing
-source symbol. Unsupported diagnostics return blocked execution results. The
+summary with impacted surfaces, package ids, target files, preserved tests,
+per-attempt executor support, and blockers. Its first executor path is
+intentionally narrow: assertion-failure repair requests, failed-command
+requests, and traceback-backed repair requests may reuse the existing guarded
+test-inferred source patch adapter; missing-import repair requests can use the
+same guarded path when tests identify the missing source symbol. Unsupported
+diagnostics, such as raw syntax-error repair without a guarded oracle, return
+blocked execution results with the unsupported reason attached to the attempt.
+The
 repair execution brief includes the same worker-output contract shape as normal
 Ceraxia handoff, so diagnostic repair cannot bypass package-status auditing.
 Use it directly when inspecting a run package:
