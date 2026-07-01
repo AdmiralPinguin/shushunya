@@ -214,6 +214,8 @@ def infer_single_test_literal_candidate(repo: Path, brief: dict[str, Any]) -> tu
             literal = infer_simple_zero_arg_expected_literal(text, function_name)
             if literal:
                 candidates.append((function_name, literal))
+        for alias in module_import_aliases(text, module_name):
+            candidates.extend(infer_simple_module_zero_arg_expected_literals(text, alias))
     unique_candidates = sorted(set(candidates))
     if len(unique_candidates) != 1:
         return None
@@ -246,6 +248,8 @@ def infer_single_test_constant_literal_candidate(repo: Path, brief: dict[str, An
             literal = infer_simple_imported_symbol_expected_literal(text, symbol_name)
             if literal:
                 candidates.append((symbol_name, literal))
+        for alias in module_import_aliases(text, module_name):
+            candidates.extend(infer_simple_module_symbol_expected_literals(text, alias))
     unique_candidates = sorted(set(candidates))
     if len(unique_candidates) != 1:
         return None
@@ -291,6 +295,46 @@ def infer_simple_zero_arg_expected_literal(test_text: str, function_name: str) -
             if literal not in literals:
                 literals.append(literal)
     return literals[0] if len(literals) == 1 else ""
+
+
+def module_import_aliases(test_text: str, module_name: str) -> list[str]:
+    aliases: list[str] = []
+    pattern = re.compile(rf"(?m)^import\s+{re.escape(module_name)}(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\b")
+    for match in pattern.finditer(test_text):
+        alias = match.group(1) or module_name
+        if alias not in aliases:
+            aliases.append(alias)
+    return aliases
+
+
+def infer_simple_module_zero_arg_expected_literals(test_text: str, module_alias: str) -> list[tuple[str, str]]:
+    escaped = re.escape(module_alias)
+    pattern = re.compile(rf"\b{escaped}\.([A-Za-z_][A-Za-z0-9_]*)\(\)\s*==\s*(?P<literal>[^\n#]+)")
+    candidates: list[tuple[str, str]] = []
+    for match in pattern.finditer(test_text):
+        function_name = match.group(1)
+        literal = match.group("literal").strip()
+        try:
+            validate_safe_return_literal(literal)
+        except ValueError:
+            continue
+        candidates.append((function_name, literal))
+    return candidates
+
+
+def infer_simple_module_symbol_expected_literals(test_text: str, module_alias: str) -> list[tuple[str, str]]:
+    escaped = re.escape(module_alias)
+    pattern = re.compile(rf"\b{escaped}\.([A-Z][A-Z0-9_]*)\s*==\s*(?P<literal>[^\n#]+)")
+    candidates: list[tuple[str, str]] = []
+    for match in pattern.finditer(test_text):
+        symbol_name = match.group(1)
+        literal = match.group("literal").strip()
+        try:
+            validate_safe_return_literal(literal)
+        except ValueError:
+            continue
+        candidates.append((symbol_name, literal))
+    return candidates
 
 
 def infer_simple_imported_symbol_expected_literal(test_text: str, symbol_name: str) -> str:
