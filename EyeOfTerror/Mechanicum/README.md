@@ -34,11 +34,13 @@ execution policy, execution result, evidence matrix, and run summary contracts.
 It is intentionally small and stdlib-only; detailed schema validation can come
 later.
 
-Current source mutation status: narrow explicit-patch only. `CodeBrigade` can
-apply `CERAXIA_PATCH` operations against surveyed repo-relative files after
-brief validation and preflight. The next hard architecture step is expanding
-that adapter beyond explicit patches while preserving validation, preflight,
-execution result, verification, rollback, and audit contracts.
+Current source mutation status: narrow explicit-patch and guarded inference
+only. `CodeBrigade` can apply `CERAXIA_PATCH` operations against surveyed
+repo-relative files after brief validation and preflight, and it can infer a
+small set of backtick-delimited single-file operations from task text. The next
+hard architecture step is expanding that adapter beyond guarded operations
+while preserving validation, preflight, execution result, verification,
+rollback, and audit contracts.
 
 For fast local iteration inside this folder, run:
 

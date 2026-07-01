@@ -38,6 +38,8 @@ Current capabilities:
   covered by at least one implementation work package
 - Ceraxia review evidence maps impacted surfaces to matched executed
   verification commands when execution is enabled
+- Ceraxia summarizes verification stdout/stderr into output signals and blocks
+  inconsistent passed reports that contain failure or traceback evidence
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
 - planned read-only service interface contracts for future role split on
@@ -56,9 +58,11 @@ Current boundaries:
 - repository evidence is read-only and summarized by Ceraxia
 - non-Python source summaries are still shallow symbol/import-like extraction;
   JS/TS relative imports, barrel exports, and side-effect imports are resolved,
-  but this is not a full language-aware dependency graph
+  Python package-relative imports are resolved, but this is not a full
+  language-aware dependency graph
 - CodeBrigade source mutation is limited to the explicit patch adapter and
-  remains blocked for broad natural-language mutation
+  narrow guarded natural-language operations; broad natural-language mutation
+  remains blocked
 - planning quality is regression-tested, but real-world quality still depends
   on reviewed field-trial runs against varied repositories
 
@@ -68,7 +72,7 @@ Next useful upgrades:
 - add richer multi-language dependency graphs beyond current JS/TS relative
   import resolution
 - teach review gates to compare command stdout/stderr semantics with each
-  impacted surface, beyond current matched-command tracing
+  impacted surface more deeply than current output-signal consistency checks
 - expand CodeBrigade from explicit and guarded natural-language patch
   operations toward diagnostic autonomous source edits behind the existing
   preflight, verification, rollback, and audit contracts

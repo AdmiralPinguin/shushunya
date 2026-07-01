@@ -40,10 +40,11 @@ when that same evidence proves a mismatch.
 adapter and execution adapter.
 `execution_adapter.py` is that boundary today. It applies explicit
 `CERAXIA_PATCH` `replace`, `replace_return_expression`, `write_file`, and
-`create_file` operations, plus guarded natural-language simple replace and
-Python add-function operations, and a test-inferred missing-function operation,
-literal return-mismatch operation, missing-constant operation, or constant
-mismatch operation, only after brief validation and read-only preflight.
+`create_file` operations, plus guarded natural-language simple replace,
+Python add-function, and explicit missing-file creation operations, and a
+test-inferred missing-function operation, literal return-mismatch operation,
+missing-constant operation, or constant mismatch operation, only after brief
+validation and read-only preflight.
 Ambiguous tasks still return a formal
 `code_brigade_execution_result` blocker.
 `execution_contract.py` owns the formal execution result builders so the
