@@ -309,31 +309,39 @@ def module_import_aliases(test_text: str, module_name: str) -> list[str]:
 
 def infer_simple_module_zero_arg_expected_literals(test_text: str, module_alias: str) -> list[tuple[str, str]]:
     escaped = re.escape(module_alias)
-    pattern = re.compile(rf"\b{escaped}\.([A-Za-z_][A-Za-z0-9_]*)\(\)\s*==\s*(?P<literal>[^\n#]+)")
     candidates: list[tuple[str, str]] = []
-    for match in pattern.finditer(test_text):
-        function_name = match.group(1)
-        literal = match.group("literal").strip()
-        try:
-            validate_safe_return_literal(literal)
-        except ValueError:
-            continue
-        candidates.append((function_name, literal))
+    patterns = [
+        re.compile(rf"\b{escaped}\.([A-Za-z_][A-Za-z0-9_]*)\(\)\s*==\s*(?P<literal>[^\n#]+)"),
+        re.compile(rf"\bself\.assertEqual\(\s*{escaped}\.([A-Za-z_][A-Za-z0-9_]*)\(\)\s*,\s*(?P<literal>[^,\n\)]+)\s*\)"),
+    ]
+    for pattern in patterns:
+        for match in pattern.finditer(test_text):
+            function_name = match.group(1)
+            literal = match.group("literal").strip()
+            try:
+                validate_safe_return_literal(literal)
+            except ValueError:
+                continue
+            candidates.append((function_name, literal))
     return candidates
 
 
 def infer_simple_module_symbol_expected_literals(test_text: str, module_alias: str) -> list[tuple[str, str]]:
     escaped = re.escape(module_alias)
-    pattern = re.compile(rf"\b{escaped}\.([A-Z][A-Z0-9_]*)\s*==\s*(?P<literal>[^\n#]+)")
     candidates: list[tuple[str, str]] = []
-    for match in pattern.finditer(test_text):
-        symbol_name = match.group(1)
-        literal = match.group("literal").strip()
-        try:
-            validate_safe_return_literal(literal)
-        except ValueError:
-            continue
-        candidates.append((symbol_name, literal))
+    patterns = [
+        re.compile(rf"\b{escaped}\.([A-Z][A-Z0-9_]*)\s*==\s*(?P<literal>[^\n#]+)"),
+        re.compile(rf"\bself\.assertEqual\(\s*{escaped}\.([A-Z][A-Z0-9_]*)\s*,\s*(?P<literal>[^,\n\)]+)\s*\)"),
+    ]
+    for pattern in patterns:
+        for match in pattern.finditer(test_text):
+            symbol_name = match.group(1)
+            literal = match.group("literal").strip()
+            try:
+                validate_safe_return_literal(literal)
+            except ValueError:
+                continue
+            candidates.append((symbol_name, literal))
     return candidates
 
 

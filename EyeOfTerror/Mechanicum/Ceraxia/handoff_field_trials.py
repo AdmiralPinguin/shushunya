@@ -169,10 +169,10 @@ def run_test_inferred_missing_function_trial(root: Path) -> dict[str, Any]:
         {
             "app.py": "",
             "test_app.py": (
-                "import unittest\nfrom app import value\n\n"
+                "import unittest\nimport app\n\n"
                 "class ValueTest(unittest.TestCase):\n"
                 "    def test_value(self):\n"
-                "        self.assertEqual(value(), 42)\n\n"
+                "        self.assertEqual(app.value(), 42)\n\n"
                 "if __name__ == '__main__':\n"
                 "    unittest.main()\n"
             ),

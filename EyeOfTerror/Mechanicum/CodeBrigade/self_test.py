@@ -747,7 +747,13 @@ def main() -> int:
             raise AssertionError("test-inferred list literal did not update app.py")
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("", encoding="utf-8")
-        Path(tmp, "test_app.py").write_text("import app\n\ndef test_value():\n    assert app.value() == 42\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text(
+            "import unittest\nimport app\n\n"
+            "class ValueTest(unittest.TestCase):\n"
+            "    def test_value(self):\n"
+            "        self.assertEqual(app.value(), 42)\n",
+            encoding="utf-8",
+        )
         module_function_brief = valid_brief()
         module_function_brief["repo_path"] = tmp
         module_function_brief["task"] = "почини app.py чтобы тест проходил"
@@ -821,7 +827,13 @@ def main() -> int:
             raise AssertionError("test-inferred missing constant did not update app.py")
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("", encoding="utf-8")
-        Path(tmp, "test_app.py").write_text("import app\n\ndef test_answer():\n    assert app.ANSWER == 42\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text(
+            "import unittest\nimport app\n\n"
+            "class AnswerTest(unittest.TestCase):\n"
+            "    def test_answer(self):\n"
+            "        self.assertEqual(app.ANSWER, 42)\n",
+            encoding="utf-8",
+        )
         module_constant_brief = valid_brief()
         module_constant_brief["repo_path"] = tmp
         module_constant_brief["task"] = "почини app.py чтобы тест проходил"
