@@ -21,7 +21,7 @@ COMPONENTS = {
             "contracts/implementation_brief.schema.json",
             "contracts/run_artifacts.schema.json",
         ],
-        "maturity": "dry_run_controller_with_readonly_survey",
+        "maturity": "dry_run_controller_with_readonly_survey_and_verification",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -67,9 +67,9 @@ ROADMAP = [
     },
     {
         "priority": 3,
-        "item": "wire allowlisted verification adapter into Ceraxia runs",
-        "reason": "CodeBrigade can execute allowlisted verification commands; Ceraxia still records them as planned.",
-        "owner": "CodeBrigade",
+        "item": "promote verification execution evidence into review-specific gates",
+        "reason": "Ceraxia can execute allowlisted verification; review should next reason about which commands are sufficient for each risk.",
+        "owner": "Ceraxia",
     },
     {
         "priority": 4,
