@@ -63,6 +63,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(brief["target"], "CodeBrigade")
             self.assertEqual(brief["risk_level"], "high")
             self.assertIn("hardcoded one-off behavior", brief["forbidden_approaches"])
+            self.assertIn("negative boundary test or explicit blocker is present", brief["quality_bar"]["must_have_evidence"])
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertIn("untrusted input is rejected", verification["negative_tests_required"])
             audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
@@ -121,11 +122,13 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         packet["design_options"]["options"] = []
         packet["verification_strategy"]["targeted_commands"] = []
         packet["risk_register"]["acceptance_gates"] = []
+        packet["quality_bar"]["must_have_evidence"] = []
         problems = validate_planning_packet(packet)
         self.assertTrue(any("read-only" in problem for problem in problems), problems)
         self.assertTrue(any("reject hardcode" in problem for problem in problems), problems)
         self.assertTrue(any("targeted_commands" in problem for problem in problems), problems)
         self.assertTrue(any("acceptance_gates" in problem for problem in problems), problems)
+        self.assertTrue(any("quality bar" in problem for problem in problems), problems)
         survey = build_repo_survey_stub(packet)
         brief = build_implementation_brief(packet, survey)
         self.assertTrue(brief["blocked"])

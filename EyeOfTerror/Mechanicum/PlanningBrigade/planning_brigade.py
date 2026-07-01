@@ -234,6 +234,35 @@ def risk_register(triage: dict[str, Any], survey: dict[str, Any], design: dict[s
     }
 
 
+def quality_bar(triage: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
+    kinds = set(triage["task_kinds"])
+    must_have = [
+        "task intent is restated in implementable terms",
+        "candidate files are chosen from repository evidence",
+        "final report names changed files, verification, blockers, and next action",
+    ]
+    if "test_repair" in kinds:
+        must_have.append("failing test diagnostic is preserved before source mutation")
+    if "api_compatibility" in kinds or "migration" in kinds:
+        must_have.append("backward compatibility evidence is present")
+    if "security" in kinds:
+        must_have.append("negative boundary test or explicit blocker is present")
+    if verification["broad_verification_required"]:
+        must_have.append("broad verification is executed or blocked with a concrete reason")
+    return {
+        "role": "PlanningBrigade",
+        "risk_level": triage["risk_level"],
+        "must_have_evidence": must_have,
+        "forbidden_shortcuts": [
+            "claiming success without verification evidence",
+            "changing tests before source evidence supports the fix",
+            "broad rewrite without explicit repo evidence",
+            "hiding blocked or skipped checks",
+        ],
+        "success_definition": "Ceraxia can hand the task to CodeBrigade with scoped files, verification expectations, risk gates, and an auditable final package.",
+    }
+
+
 def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
     triage = task_triage(payload)
@@ -241,6 +270,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     design = design_options(payload, triage)
     verification = verification_strategy(triage)
     risks = risk_register(triage, survey, design, verification)
+    quality = quality_bar(triage, verification)
     return {
         "ok": bool(task),
         "worker": "PlanningBrigade",
@@ -252,6 +282,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "design_options": design,
         "verification_strategy": verification,
         "risk_register": risks,
+        "quality_bar": quality,
         "next_action": {
             "owner": "Ceraxia",
             "action": "approve_or_revise_plan",

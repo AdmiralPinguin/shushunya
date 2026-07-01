@@ -88,6 +88,7 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         "design_options",
         "verification_strategy",
         "risk_register",
+        "quality_bar",
     ]
     if packet.get("roles_completed") != ROLE_ORDER:
         problems.append("planning packet must include all five planning roles in order")
@@ -140,6 +141,13 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("risk register must include acceptance_gates")
     if risks.get("handoff_to") != "Ceraxia":
         problems.append("risk register must hand authority back to Ceraxia")
+    quality = packet.get("quality_bar") if isinstance(packet.get("quality_bar"), dict) else {}
+    if not isinstance(quality.get("must_have_evidence"), list) or not quality.get("must_have_evidence"):
+        problems.append("quality bar must include must_have_evidence")
+    if not isinstance(quality.get("forbidden_shortcuts"), list) or not quality.get("forbidden_shortcuts"):
+        problems.append("quality bar must include forbidden_shortcuts")
+    if not isinstance(quality.get("success_definition"), str) or not quality.get("success_definition"):
+        problems.append("quality bar must include success_definition")
     if packet.get("next_action", {}).get("owner") != "Ceraxia":
         problems.append("next action must be owned by Ceraxia")
     return problems
@@ -165,6 +173,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
     triage = packet.get("task_triage") if isinstance(packet.get("task_triage"), dict) else {}
     verification = packet.get("verification_strategy") if isinstance(packet.get("verification_strategy"), dict) else {}
     risks = packet.get("risk_register") if isinstance(packet.get("risk_register"), dict) else {}
+    quality = packet.get("quality_bar") if isinstance(packet.get("quality_bar"), dict) else {}
     planning_problems = validate_planning_packet(packet)
     blocked = bool(planning_problems) or not survey["repo_exists"]
     blockers = [f"planning validation failed: {problem}" for problem in planning_problems]
@@ -197,6 +206,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         ],
         "required_verification": verification,
         "acceptance_gates": risks.get("acceptance_gates") if isinstance(risks.get("acceptance_gates"), list) else [],
+        "quality_bar": quality,
         "blocked": blocked,
         "blockers": blockers,
     }

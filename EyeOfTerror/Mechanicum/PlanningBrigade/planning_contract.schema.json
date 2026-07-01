@@ -13,6 +13,7 @@
     "design_options",
     "verification_strategy",
     "risk_register",
+    "quality_bar",
     "next_action"
   ],
   "properties": {
@@ -30,6 +31,7 @@
     "design_options": {"type": "object"},
     "verification_strategy": {"type": "object"},
     "risk_register": {"type": "object"},
+    "quality_bar": {"type": "object"},
     "next_action": {"type": "object"}
   }
 }
