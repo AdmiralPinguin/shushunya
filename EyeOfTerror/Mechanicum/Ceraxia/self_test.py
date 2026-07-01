@@ -86,6 +86,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                 "worker_report.json",
                 "verification_report.json",
                 "review_gate.json",
+                "diagnostic_repair_request.json",
                 "status.json",
                 "final_report.md",
                 "execution_readiness.json",
@@ -251,6 +252,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertFalse(review["surface_package_sufficiency"]["missing_status_package_ids"])
             self.assertGreaterEqual(review["surface_verification_sufficiency"]["surface_count"], 1)
             self.assertGreaterEqual(review["verification_sufficiency"]["commands_planned_count"], 1)
+            repair_request = json.loads((run_dir / "diagnostic_repair_request.json").read_text(encoding="utf-8"))
+            self.assertEqual(repair_request["target"], "CodeBrigade")
+            self.assertEqual(repair_request["status"], "not_required")
+            self.assertEqual(repair_request["diagnostic_repair_queue"], review["diagnostic_repair_queue"])
             readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
             self.assertEqual(readiness["decision"], "blocked")
             self.assertIn("dry run requested; real CodeBrigade execution was intentionally skipped", readiness["blockers"])

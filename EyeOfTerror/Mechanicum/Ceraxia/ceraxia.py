@@ -56,6 +56,7 @@ REQUIRED_RUN_ARTIFACTS = [
     "worker_report.json",
     "verification_report.json",
     "review_gate.json",
+    "diagnostic_repair_request.json",
     "status.json",
     "final_report.md",
     "execution_readiness.json",
@@ -503,6 +504,39 @@ def build_diagnostic_repair_queue(
         "items": items,
         "source": "verification_output_diagnostics",
         "plan_present": bool(repair_plan),
+    }
+
+
+def build_diagnostic_repair_request(
+    run_id: str,
+    brief: dict[str, Any],
+    worker_report: dict[str, Any],
+    verification_report: dict[str, Any],
+    review: dict[str, Any],
+) -> dict[str, Any]:
+    queue = review.get("diagnostic_repair_queue") if isinstance(review.get("diagnostic_repair_queue"), dict) else {}
+    implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
+    return {
+        "kind": "ceraxia_code_brigade_diagnostic_repair_request",
+        "contract_version": CONTRACT_VERSION,
+        "run_id": run_id,
+        "status": "required" if queue.get("item_count", 0) else "not_required",
+        "target": "CodeBrigade",
+        "repo_path": brief.get("repo_path", ""),
+        "task": brief.get("task", ""),
+        "verification_status": verification_report.get("status", ""),
+        "review_decision": review.get("decision", ""),
+        "diagnostic_repair_plan": brief.get("diagnostic_repair_plan", {}) if isinstance(brief.get("diagnostic_repair_plan"), dict) else {},
+        "diagnostic_repair_queue": queue,
+        "target_files_to_inspect": implementation_plan.get("target_files_to_inspect", []) if isinstance(implementation_plan.get("target_files_to_inspect"), list) else [],
+        "test_files_to_preserve": implementation_plan.get("test_files_to_preserve", []) if isinstance(implementation_plan.get("test_files_to_preserve"), list) else [],
+        "reverse_dependency_index": implementation_plan.get("reverse_dependency_index", {}) if isinstance(implementation_plan.get("reverse_dependency_index"), dict) else {},
+        "scope_budget": implementation_plan.get("scope_budget", {}) if isinstance(implementation_plan.get("scope_budget"), dict) else {},
+        "return_contract": [
+            "worker_report.json with changed files, package statuses, and residual blockers",
+            "verification_report.json after rerunning relevant failed commands",
+            "diagnostic_summary mapped to repaired queue items",
+        ],
     }
 
 
@@ -1767,6 +1801,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     status["lifecycle"].append(status["state"])
     status["next_action"] = "finalize run package" if status["state"] == "reviewed" else "repair review findings"
     write_json(run_dir / "review_gate.json", review)
+    repair_request = build_diagnostic_repair_request(run_id, brief, worker_report, verification_report, review)
+    write_json(run_dir / "diagnostic_repair_request.json", repair_request)
 
     status["state"] = "finalized" if status["state"] == "reviewed" else "failed"
     status["lifecycle"].append(status["state"])
@@ -1778,6 +1814,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "worker_report": worker_report,
         "verification_report": verification_report,
         "review_gate": review,
+        "diagnostic_repair_request": repair_request,
     }
     write_json(run_dir / "status.json", status)
     readiness = build_execution_readiness(status, brief, worker_report, verification_report, review, task_input.dry_run)

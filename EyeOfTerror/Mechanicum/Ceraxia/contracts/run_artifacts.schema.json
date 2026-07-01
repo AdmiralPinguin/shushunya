@@ -10,6 +10,7 @@
     "worker_report.json",
     "verification_report.json",
     "review_gate.json",
+    "diagnostic_repair_request.json",
     "status.json",
     "final_report.md",
     "execution_readiness.json",
@@ -38,6 +39,9 @@
       "type": "string"
     },
     "review_gate.json": {
+      "type": "string"
+    },
+    "diagnostic_repair_request.json": {
       "type": "string"
     },
     "status.json": {
