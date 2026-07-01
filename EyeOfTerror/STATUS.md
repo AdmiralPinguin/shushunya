@@ -15,6 +15,8 @@
   design-decision seed, review decision records, and focused revision context.
 - Ceraxia can infer a narrow arithmetic return-expression patch from a
   two-argument unittest assertion when the candidate is unique and verified.
+- Ceraxia/CodeBrigade handoffs expose implementation work packages, package
+  surface coverage, package statuses, and review blocking for blocked packages.
 
 ## Working
 
@@ -79,6 +81,8 @@
   marking a run completed.
 - Local and HTTP executors record malformed dispatch packets as structured
   failed/preflight-failed runs instead of crashing.
+- Local executor retries one flaky worker timeout once by default while keeping
+  zero-second timeout tests as hard failures.
 - Warmaster Gateway can prepare Iskandar run packages, expose run status, execute local dev pipelines, and execute HTTP worker-service pipelines.
 - Warmaster Gateway can preflight existing run packages before local or HTTP
   execution without starting workers.

@@ -23,7 +23,7 @@ COMPONENTS = {
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
         ],
-        "maturity": "dry_run_controller_with_planning_quality_survey_gate_read_order_generic_edges_and_per_surface_verification",
+        "maturity": "controller_with_planning_quality_survey_gate_read_order_generic_edges_per_surface_verification_and_work_package_review",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -65,7 +65,7 @@ COMPONENTS = {
             "verification_execution.schema.json",
             "self_test.py",
         ],
-        "maturity": "dry_run_handoff_with_read_order_preflight_explicit_text_and_ast_patch_adapter_and_allowlisted_verification",
+        "maturity": "handoff_with_read_order_preflight_explicit_text_and_ast_patch_adapter_package_statuses_and_allowlisted_verification",
     },
 }
 
@@ -86,7 +86,7 @@ ROADMAP = [
     {
         "priority": 3,
         "item": "match per-surface verification to command output and artifact evidence",
-        "reason": "Review now reports per-surface executed, partial, planned, failed, or blocked evidence and blocks high-risk partial execution; it still does not deeply inspect command stdout/stderr or generated artifacts for surface-specific assertions.",
+        "reason": "Review now reports per-surface executed, partial, planned, failed, or blocked evidence, tracks work-package statuses, and blocks high-risk partial execution; it still does not deeply inspect command stdout/stderr or generated artifacts for surface-specific assertions.",
         "owner": "Ceraxia",
     },
     {
