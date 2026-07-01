@@ -848,6 +848,19 @@ def implementation_work_packages(
                 "handoff_criteria": ["negative_test_evidence.json or explicit blocker is returned"],
             }
         )
+    if "config_runtime" in task_kinds:
+        packages.append(
+            {
+                "id": "runtime_configuration_package",
+                "owner": "CodeBrigade",
+                "purpose": "Keep config keys, environment overrides, startup behavior, and runtime defaults aligned.",
+                "read_scope": ["runtime_configuration", "config files", "environment loader", "startup entrypoints"],
+                "edit_scope": ["configuration loader, defaults, docs, or entrypoints required by the task"],
+                "verification_scope": [item for item in [*targeted_commands, *negative_tests] if any(word in item.lower() for word in ("config", "runtime", "startup", "env"))],
+                "risk_controls": ["block if missing/invalid config behavior is not proven or explicitly accepted"],
+                "handoff_criteria": ["runtime configuration evidence is present or blocked with a concrete reason"],
+            }
+        )
     if "concurrency" in task_kinds:
         packages.append(
             {
@@ -859,6 +872,19 @@ def implementation_work_packages(
                 "verification_scope": [item for item in [*targeted_commands, *negative_tests] if any(word in item.lower() for word in ("parallel", "retry", "state", "cache"))],
                 "risk_controls": ["block if the race condition cannot be reproduced or bounded"],
                 "handoff_criteria": ["remaining race risk is named in the review evidence"],
+            }
+        )
+    if "refactor" in task_kinds:
+        packages.append(
+            {
+                "id": "architecture_refactor_package",
+                "owner": "CodeBrigade",
+                "purpose": "Preserve behavior while moving internal boundaries, ownership, or module structure.",
+                "read_scope": ["internal_architecture", "dependency edge review", "public callers"],
+                "edit_scope": ["source files justified by the selected refactor strategy"],
+                "verification_scope": [item for item in targeted_commands if any(word in item.lower() for word in ("test", "compile", "lint", "type", "dependency", "behavior"))],
+                "risk_controls": ["block broad rewrites unless dependency evidence proves the scope"],
+                "handoff_criteria": ["refactor evidence shows behavior preservation and dependency impact"],
             }
         )
     return {

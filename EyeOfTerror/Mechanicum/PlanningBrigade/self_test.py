@@ -116,6 +116,7 @@ def main() -> int:
         or "data_compatibility" not in [row["surface"] for row in migration_packet["surface_verification_matrix"]["rows"]]
         or migration_packet["execution_forecast"]["complexity"] != "high"
         or "compatibility_package" not in migration_packet["implementation_work_packages"]["review_order"]
+        or "runtime_configuration_package" not in migration_packet["implementation_work_packages"]["review_order"]
         or not any(package["id"] == "compatibility_package" and "Protect old/new public or data shapes across callers, readers, and writers." == package["purpose"] for package in migration_packet["implementation_work_packages"]["packages"])
         or "dependency_critical_path" not in migration_packet["implementation_brief_blueprint"]
         or "work_phases" not in migration_packet["implementation_brief_blueprint"]
@@ -138,6 +139,15 @@ def main() -> int:
     if sorted(review_depends_on) != ["prove_boundary", "prove_compatibility"]:
         raise AssertionError(f"combined high-risk plan must wait for both proof phases: {combined_packet}")
 
+    refactor_packet = planning_brigade.build_planning_packet(
+        {
+            "task": "refactor architecture: split planner and executor without changing public endpoint response contracts",
+            "repo_path": "/repo",
+        }
+    )
+    if "architecture_refactor_package" not in refactor_packet["implementation_work_packages"]["review_order"]:
+        raise AssertionError(f"refactor planning must create architecture work package: {refactor_packet}")
+
     concurrency_packet = planning_brigade.build_planning_packet(
         {
             "task": "fix async retry race: parallel requests corrupt cache state under timeout",
@@ -148,6 +158,8 @@ def main() -> int:
         raise AssertionError(f"concurrency planning must expose nondeterministic state risk: {concurrency_packet}")
     if "concurrency_runtime_package" not in concurrency_packet["implementation_work_packages"]["review_order"]:
         raise AssertionError(f"concurrency planning must create runtime work package: {concurrency_packet}")
+    if "runtime_configuration_package" not in concurrency_packet["implementation_work_packages"]["review_order"]:
+        raise AssertionError(f"concurrency config/runtime planning must create config work package: {concurrency_packet}")
 
     unclear_packet = planning_brigade.build_planning_packet({"task": "почини", "repo_path": "/repo"})
     if unclear_packet["planning_review_gate"]["decision"] != "blocked" or not unclear_packet["planning_review_gate"]["blockers"]:

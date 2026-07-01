@@ -19,6 +19,8 @@ Current capabilities:
 - risk register, quality bar, acceptance contract, and CodeBrigade handoff
 - implementation work packages with read scope, edit scope, verification
   scope, risk controls, handoff criteria, and review order
+- specialized work packages for compatibility, security boundaries, runtime
+  configuration, concurrency runtime, and architecture refactors
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
 - field trials for multiple task shapes with coverage gates for task kinds,

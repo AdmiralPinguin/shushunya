@@ -129,9 +129,11 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     }
     required_work_packages = {
         "compatibility_package",
+        "architecture_refactor_package",
         "concurrency_runtime_package",
         "evidence_survey_package",
         "minimal_patch_package",
+        "runtime_configuration_package",
         "security_boundary_package",
         "verification_evidence_package",
     }
