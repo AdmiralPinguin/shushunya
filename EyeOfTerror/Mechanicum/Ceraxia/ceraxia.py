@@ -26,7 +26,8 @@ CODE_BRIGADE_PATH = str(MECHANICUM_ROOT / "CodeBrigade")
 if CODE_BRIGADE_PATH not in sys.path:
     sys.path.insert(0, CODE_BRIGADE_PATH)
 
-from planning_brigade import build_planning_packet, validate_planning_packet as validate_planning_packet_contract  # noqa: E402
+from planning_brigade import build_planning_packet  # noqa: E402
+from planning_packet_contract import validate_planning_packet as validate_planning_packet_contract  # noqa: E402
 from code_brigade_adapter import build_worker_report  # noqa: E402
 from verification_adapter import run_verification_commands  # noqa: E402
 from repo_survey import survey_repository  # noqa: E402

@@ -31,6 +31,7 @@ COMPONENTS = {
             "README.md",
             "STATUS.md",
             "planning_brigade.py",
+            "planning_packet_contract.py",
             "planning_contract.schema.json",
             "role_contracts.json",
             "field_trials.json",
