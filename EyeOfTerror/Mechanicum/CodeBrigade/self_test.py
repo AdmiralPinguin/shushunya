@@ -29,6 +29,7 @@ def valid_brief() -> dict:
             "entrypoint_candidates": ["main.py"],
             "local_import_edges": [{"source": "app.py", "import": "util.enabled", "target": "util.py"}],
             "survey_truncated": False,
+            "python_symbols_truncated": False,
         },
         "suggested_verification_commands": ["python -m pytest test_app.py"],
         "code_brigade_handoff": {
@@ -67,6 +68,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve local dependency edges: {plan}")
     if plan["survey_truncated"]:
         raise AssertionError(f"small survey fixture should not be marked truncated: {plan}")
+    if plan["python_symbols_truncated"]:
+        raise AssertionError(f"small survey fixture should not have truncated python symbols: {plan}")
     if not plan["refusal_conditions"]:
         raise AssertionError(f"implementation plan should include refusal conditions: {plan}")
     execute_report = code_brigade_adapter.build_worker_report(valid_brief(), dry_run=False)

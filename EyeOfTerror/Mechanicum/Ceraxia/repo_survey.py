@@ -25,6 +25,7 @@ SOURCE_SUFFIXES = {".py", ".js", ".ts", ".tsx", ".jsx", ".kt", ".java", ".go", "
 CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml", ".ini", ".env"}
 DOC_SUFFIXES = {".md", ".rst", ".txt"}
 MAX_SURVEY_FILES = 2000
+MAX_PYTHON_SYMBOL_FILES = 40
 
 
 def excluded(path: Path, root: Path, exclude_patterns: list[str]) -> bool:
@@ -133,6 +134,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "suggested_verification_commands": [],
             "max_files_scanned": MAX_SURVEY_FILES,
             "truncated": False,
+            "max_python_symbol_files": MAX_PYTHON_SYMBOL_FILES,
+            "python_symbols_truncated": False,
         }
     files: list[Path] = []
     truncated = False
@@ -161,7 +164,9 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         for path in files
         if path.name.lower() in {"main.py", "app.py", "server.py", "cli.py"}
     ][:20]
-    python_files = [path for path in files if path.suffix.lower() == ".py"][:40]
+    all_python_files = [path for path in files if path.suffix.lower() == ".py"]
+    python_symbols_truncated = len(all_python_files) > MAX_PYTHON_SYMBOL_FILES
+    python_files = all_python_files[:MAX_PYTHON_SYMBOL_FILES]
     python_symbols = [python_summary(path, root) for path in python_files]
     suggested_commands: list[str] = []
     if tests:
@@ -187,4 +192,6 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "suggested_verification_commands": suggested_commands,
         "max_files_scanned": MAX_SURVEY_FILES,
         "truncated": truncated,
+        "max_python_symbol_files": MAX_PYTHON_SYMBOL_FILES,
+        "python_symbols_truncated": python_symbols_truncated,
     }

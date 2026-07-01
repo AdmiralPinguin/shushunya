@@ -35,6 +35,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "entrypoints_to_check": evidence.get("entrypoint_candidates", []) if isinstance(evidence.get("entrypoint_candidates"), list) else [],
         "dependency_edges_to_check": evidence.get("local_import_edges", []) if isinstance(evidence.get("local_import_edges"), list) else [],
         "survey_truncated": bool(evidence.get("survey_truncated")),
+        "python_symbols_truncated": bool(evidence.get("python_symbols_truncated")),
         "handoff_steps": handoff.get("steps", []) if isinstance(handoff.get("steps"), list) else [],
         "verification_commands": commands,
         "acceptance_gates": brief.get("acceptance_gates", []) if isinstance(brief.get("acceptance_gates"), list) else [],

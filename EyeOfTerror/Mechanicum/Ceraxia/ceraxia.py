@@ -231,6 +231,8 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "local_import_edges": survey.get("local_import_edges", []),
             "survey_truncated": bool(survey.get("truncated")),
             "max_files_scanned": survey.get("max_files_scanned", 0),
+            "python_symbols_truncated": bool(survey.get("python_symbols_truncated")),
+            "max_python_symbol_files": survey.get("max_python_symbol_files", 0),
         },
         "suggested_verification_commands": survey.get("suggested_verification_commands", []),
         "blocked": blocked,
@@ -318,6 +320,8 @@ def review_gate(
     repo_evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     if repo_evidence.get("survey_truncated"):
         warnings.append({"severity": "warning", "finding": "repository survey reached file limit; coverage is partial"})
+    if repo_evidence.get("python_symbols_truncated"):
+        warnings.append({"severity": "warning", "finding": "python symbol survey reached file limit; dependency evidence is partial"})
     if any("hardcode" in approach for approach in brief.get("forbidden_approaches", [])):
         hardcode_rejected = any(
             option.get("name") == "hardcode" and option.get("decision") == "reject"

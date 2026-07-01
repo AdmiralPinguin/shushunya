@@ -49,6 +49,7 @@
         "test_files_to_preserve",
         "dependency_edges_to_check",
         "survey_truncated",
+        "python_symbols_truncated",
         "handoff_steps",
         "verification_commands",
         "acceptance_gates",
@@ -56,6 +57,9 @@
       ],
       "properties": {
         "survey_truncated": {
+          "type": "boolean"
+        },
+        "python_symbols_truncated": {
           "type": "boolean"
         }
       }

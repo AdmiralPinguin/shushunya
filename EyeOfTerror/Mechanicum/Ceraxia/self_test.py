@@ -76,6 +76,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("prove_negative_boundary", [step["step"] for step in brief["code_brigade_handoff"]["steps"]])
             self.assertIn("app.py", brief["repo_survey_evidence"]["candidate_files"])
             self.assertFalse(brief["repo_survey_evidence"]["survey_truncated"])
+            self.assertFalse(brief["repo_survey_evidence"]["python_symbols_truncated"])
             self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in brief["repo_survey_evidence"]["local_import_edges"]))
             self.assertTrue(any(command.startswith("python -m pytest test_app.py") for command in brief["suggested_verification_commands"]))
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
@@ -88,12 +89,14 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("test_app.py", implementation_plan["test_files_to_preserve"])
             self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in implementation_plan["dependency_edges_to_check"]))
             self.assertFalse(implementation_plan["survey_truncated"])
+            self.assertFalse(implementation_plan["python_symbols_truncated"])
             self.assertTrue(any(command.startswith("python -m pytest test_app.py") for command in implementation_plan["verification_commands"]))
             survey = json.loads((run_dir / "repo_survey.json").read_text(encoding="utf-8"))
             self.assertEqual(survey["status"], "surveyed")
             self.assertIn("app.py", survey["candidate_files"])
             self.assertIn("test_app.py", survey["test_files"])
             self.assertFalse(survey["truncated"])
+            self.assertFalse(survey["python_symbols_truncated"])
             self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in survey["local_import_edges"]))
             app_symbols = next(item for item in survey["python_symbols"] if item["path"] == "app.py")
             self.assertIn("app", app_symbols["functions"])
@@ -239,6 +242,28 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         }
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertTrue(any("coverage is partial" in item["finding"] for item in review["warnings"]))
+
+    def test_review_gate_warns_on_truncated_python_symbols(self) -> None:
+        packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
+        survey = build_repo_survey(packet)
+        brief = build_implementation_brief(packet, survey)
+        brief["repo_survey_evidence"]["python_symbols_truncated"] = True
+        worker_report = {
+            "status": "dry_run_handoff_ready",
+            "dry_run": True,
+            "changed_files": [],
+            "implementation_brief_acknowledged": True,
+        }
+        verification_report = {
+            "status": "planned_only",
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "commands_planned": ["python -m pytest"],
+            "commands_executable": [],
+            "commands_executed": [],
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        self.assertTrue(any("dependency evidence is partial" in item["finding"] for item in review["warnings"]))
 
     def test_planning_validation_blocks_weak_contract_fields(self) -> None:
         packet = build_planning_packet({"task": "repo-grade migration API compatibility", "repo_path": "."})
