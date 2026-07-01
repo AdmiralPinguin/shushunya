@@ -84,13 +84,15 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
   review and orchestration.
 - `planning_review_gate` scores the packet and blocks unclear or structurally
   unsafe plans.
-- `run_summary.json` and `final_report.md` expose planning review and survey
-  quality decisions for orchestration history.
+- `run_summary.json` and `final_report.md` expose planning review, survey
+  quality, implementation package dependency, and execution evidence decisions
+  for orchestration history.
 - `repo_survey.json.source_summaries` gives shallow multi-language symbol and
   import-like evidence for common source files; Python still has the deeper
   AST symbol/import path used for local dependency edges.
 - `repo_survey.json.generic_import_edges` resolves local relative JS/TS/TSX/JSX
-  imports to repository files and passes them through the CodeBrigade handoff.
+  imports, barrel exports, and side-effect imports to repository files and
+  passes them through the CodeBrigade handoff.
 - `repo_survey.json.caller_candidates` groups reverse dependency callers for
   candidate files, and `contract_surface_candidates` flags likely API, schema,
   route, endpoint, or contract files for compatibility review.

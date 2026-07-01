@@ -36,6 +36,8 @@ Current capabilities:
   configuration, concurrency runtime, and architecture refactors
 - package-to-surface traceability: every planned verification surface must be
   covered by at least one implementation work package
+- Ceraxia review evidence maps impacted surfaces to matched executed
+  verification commands when execution is enabled
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
 - planned read-only service interface contracts for future role split on
@@ -52,8 +54,9 @@ Current boundaries:
 
 - roles are still in-process, not independent services
 - repository evidence is read-only and summarized by Ceraxia
-- non-Python source summaries are shallow symbol/import-like extraction, not a
-  full dependency graph
+- non-Python source summaries are still shallow symbol/import-like extraction;
+  JS/TS relative imports, barrel exports, and side-effect imports are resolved,
+  but this is not a full language-aware dependency graph
 - CodeBrigade source mutation is limited to the explicit patch adapter and
   remains blocked for broad natural-language mutation
 - planning quality is regression-tested, but real-world quality still depends
@@ -62,9 +65,10 @@ Current boundaries:
 Next useful upgrades:
 
 - split role contracts into callable services after more field trials
-- add richer multi-language dependency graphs
-- teach review gates to compare executed command output with each impacted
-  surface
+- add richer multi-language dependency graphs beyond current JS/TS relative
+  import resolution
+- teach review gates to compare command stdout/stderr semantics with each
+  impacted surface, beyond current matched-command tracing
 - expand CodeBrigade from explicit and guarded natural-language patch
   operations toward diagnostic autonomous source edits behind the existing
   preflight, verification, rollback, and audit contracts
