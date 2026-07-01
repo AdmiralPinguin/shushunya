@@ -81,5 +81,5 @@ Next useful upgrades:
 - teach review gates to compare command stdout/stderr semantics with each
   impacted surface more deeply than current output-signal and diagnostic counts
 - implement CodeBrigade's broader autonomous source-edit adapter against the
-  PlanningBrigade diagnostic repair plan, existing preflight, verification,
+  generated diagnostic repair request, existing preflight, verification,
   rollback, and audit contracts

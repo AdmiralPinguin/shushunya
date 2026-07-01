@@ -24,7 +24,7 @@ COMPONENTS = {
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
         ],
-        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_caller_contract_evidence_generic_edges_per_surface_verification_and_work_package_review",
+        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_caller_contract_evidence_generic_edges_per_surface_verification_work_package_review_and_diagnostic_repair_requests",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -68,7 +68,7 @@ COMPONENTS = {
             "verification_execution.schema.json",
             "self_test.py",
         ],
-        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_preflight_explicit_text_ast_guarded_natural_language_and_test_inferred_literal_patch_adapter_package_statuses_and_allowlisted_verification",
+        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_preflight_explicit_text_ast_guarded_natural_language_test_inferred_literal_patch_adapter_package_statuses_allowlisted_verification_and_diagnostic_repair_intake",
     },
 }
 
@@ -77,7 +77,7 @@ ROADMAP = [
     {
         "priority": 1,
         "item": "expand CodeBrigade from guarded inference to diagnostic autonomous source edits",
-        "reason": "PlanningBrigade now emits a diagnostic repair plan and CodeBrigade preserves it in implementation plans and autonomous execution requests, but the broader source-edit adapter still needs to execute diagnostic repair loops against repo evidence, verification feedback, scope budgets, and refusal controls.",
+        "reason": "PlanningBrigade now emits a diagnostic repair plan, Ceraxia writes diagnostic repair request artifacts, and CodeBrigade validates repair intake, but the broader source-edit adapter still needs to execute diagnostic repair loops against repo evidence, verification feedback, scope budgets, and refusal controls.",
         "owner": "CodeBrigade",
     },
     {
