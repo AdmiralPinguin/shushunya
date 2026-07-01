@@ -294,9 +294,13 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(verification["status"], "passed")
             self.assertTrue(verification["commands_executed"])
             review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
-            self.assertEqual(review["surface_verification_sufficiency"]["status"], "executed")
+            self.assertEqual(review["surface_verification_sufficiency"]["status"], "partial")
+            self.assertGreaterEqual(review["verification_sufficiency"]["meaningful_commands_executed_count"], 1)
+            surface_evidence = review["surface_verification_sufficiency"]["surface_evidence"]
+            self.assertTrue(any(row["surface"] == "source_behavior" and row["status"] == "executed" for row in surface_evidence))
+            self.assertTrue(any(row["status"] == "partial" for row in surface_evidence))
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
-            self.assertEqual(summary["surface_verification_status"], "executed")
+            self.assertEqual(summary["surface_verification_status"], "partial")
 
     def test_review_gate_marks_failed_surface_verification(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})

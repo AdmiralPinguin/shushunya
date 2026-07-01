@@ -271,6 +271,94 @@ def build_verification_report(brief: dict[str, Any], worker_report: dict[str, An
     }
 
 
+def meaningful_executed_commands(verification_report: dict[str, Any]) -> list[dict[str, Any]]:
+    commands = verification_report.get("commands_executed") if isinstance(verification_report.get("commands_executed"), list) else []
+    return [item for item in commands if isinstance(item, dict) and item.get("status") in {"passed", "failed", "blocked"}]
+
+
+def command_texts(commands: list[dict[str, Any]]) -> list[str]:
+    return [str(item.get("command", "")) for item in commands if isinstance(item, dict)]
+
+
+def has_test_command(commands: list[dict[str, Any]]) -> bool:
+    return any("pytest" in command or "test" in command or "unittest" in command for command in command_texts(commands))
+
+
+def has_source_command(commands: list[dict[str, Any]]) -> bool:
+    return any("py_compile" in command or "pytest" in command or "test" in command or "unittest" in command for command in command_texts(commands))
+
+
+def surface_evidence_rows(surface_rows: list[Any], verification_report: dict[str, Any]) -> list[dict[str, Any]]:
+    planned_commands = verification_report.get("commands_planned") if isinstance(verification_report.get("commands_planned"), list) else []
+    executed_commands = meaningful_executed_commands(verification_report)
+    negative_tests = verification_report.get("negative_tests_required") if isinstance(verification_report.get("negative_tests_required"), list) else []
+    verification_status = str(verification_report.get("status", ""))
+    rows: list[dict[str, Any]] = []
+    for surface_row in surface_rows:
+        if not isinstance(surface_row, dict):
+            continue
+        surface = str(surface_row.get("surface", ""))
+        blockers = surface_row.get("blockers") if isinstance(surface_row.get("blockers"), list) else []
+        if blockers:
+            status = "blocked"
+            reason = "surface planning row has blockers"
+        elif verification_status in {"failed", "blocked"}:
+            status = verification_status
+            reason = f"verification report status is {verification_status}"
+        elif not planned_commands:
+            status = "missing"
+            reason = "no verification command is planned"
+        elif not executed_commands:
+            status = "planned_only"
+            reason = "verification is planned but not executed"
+        elif surface == "source_behavior" and has_source_command(executed_commands):
+            status = "executed"
+            reason = "source command executed"
+        elif surface == "test_surface" and has_test_command(executed_commands):
+            status = "executed"
+            reason = "test command executed"
+        elif surface in {"public_api_contract", "security_boundary", "data_compatibility", "concurrency_runtime", "runtime_configuration"}:
+            if negative_tests and has_test_command(executed_commands):
+                status = "executed"
+                reason = "negative or compatibility test command executed"
+            else:
+                status = "partial"
+                reason = "executed commands do not directly prove this high-risk surface"
+        elif executed_commands:
+            status = "partial"
+            reason = "some verification executed, but this surface has no direct evidence"
+        else:
+            status = "planned_only"
+            reason = "verification is planned but not executed"
+        rows.append(
+            {
+                "surface": surface,
+                "status": status,
+                "reason": reason,
+                "covered_by": surface_row.get("covered_by", []) if isinstance(surface_row.get("covered_by"), list) else [],
+                "evidence_needed": surface_row.get("evidence_needed", []) if isinstance(surface_row.get("evidence_needed"), list) else [],
+            }
+        )
+    return rows
+
+
+def surface_status_from_rows(rows: list[dict[str, Any]]) -> str:
+    statuses = {row.get("status") for row in rows}
+    if not rows:
+        return "missing"
+    if "blocked" in statuses:
+        return "blocked"
+    if "failed" in statuses:
+        return "failed"
+    if statuses == {"executed"}:
+        return "executed"
+    if "executed" in statuses or "partial" in statuses:
+        return "partial"
+    if "missing" in statuses:
+        return "missing"
+    return "planned_only"
+
+
 def review_gate(
     packet: dict[str, Any],
     brief: dict[str, Any],
@@ -281,33 +369,29 @@ def review_gate(
     warnings: list[dict[str, str]] = []
     commands_planned = verification_report.get("commands_planned") if isinstance(verification_report.get("commands_planned"), list) else []
     commands_executed = verification_report.get("commands_executed") if isinstance(verification_report.get("commands_executed"), list) else []
+    meaningful_commands_executed = meaningful_executed_commands(verification_report)
     negative_tests = verification_report.get("negative_tests_required", [])
     verification_sufficiency = {
         "risk_level": brief.get("risk_level", "high"),
-        "status": "executed" if commands_executed else ("planned_only" if commands_planned else "missing"),
+        "status": "executed" if meaningful_commands_executed else ("planned_only" if commands_planned else "missing"),
         "commands_planned_count": len(commands_planned),
         "commands_executed_count": len(commands_executed),
+        "meaningful_commands_executed_count": len(meaningful_commands_executed),
         "negative_tests_required_count": len(negative_tests) if isinstance(negative_tests, list) else 0,
         "broad_verification_required": bool(verification_report.get("broad_verification_required")),
     }
     surface_matrix = brief.get("surface_verification_matrix") if isinstance(brief.get("surface_verification_matrix"), dict) else {}
     surface_rows = surface_matrix.get("rows") if isinstance(surface_matrix.get("rows"), list) else []
     surface_blockers = surface_matrix.get("blockers") if isinstance(surface_matrix.get("blockers"), list) else []
-    verification_status = str(verification_report.get("status", ""))
-    if surface_blockers:
-        surface_status = "blocked"
-    elif verification_status in {"failed", "blocked"}:
-        surface_status = verification_status
-    elif commands_executed:
-        surface_status = "executed"
-    else:
-        surface_status = "planned_only"
+    surface_evidence = surface_evidence_rows(surface_rows, verification_report)
+    surface_status = "blocked" if surface_blockers else surface_status_from_rows(surface_evidence)
     surface_verification_sufficiency = {
         "planned_complete": surface_matrix.get("complete") is True,
         "status": surface_status,
         "surface_count": len(surface_rows),
         "blocker_count": len(surface_blockers),
-        "executed_evidence": bool(commands_executed),
+        "executed_evidence": bool(meaningful_commands_executed),
+        "surface_evidence": surface_evidence,
     }
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
@@ -323,8 +407,10 @@ def review_gate(
         warnings.append({"severity": "warning", "finding": "broad verification is planned but not executed"})
     if surface_blockers:
         findings.append({"severity": "blocker", "finding": "surface verification matrix has blockers"})
-    if surface_rows and not commands_executed:
+    if surface_rows and not meaningful_commands_executed:
         warnings.append({"severity": "warning", "finding": "surface verification coverage is planned but not executed"})
+    if surface_status == "partial":
+        warnings.append({"severity": "warning", "finding": "surface verification has only partial executed evidence"})
     if verification_report.get("commands_executable") and not verification_report.get("commands_executed"):
         warnings.append({"severity": "warning", "finding": "executable verification commands exist but were not run"})
     if brief.get("risk_level") == "high" and not commands_executed:
