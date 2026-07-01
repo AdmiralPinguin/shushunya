@@ -151,6 +151,7 @@ def assert_contract_version_consts() -> None:
     schema_paths = [
         ROOT / "PlanningBrigade" / "planning_contract.schema.json",
         ROOT / "Ceraxia" / "contracts" / "implementation_brief.schema.json",
+        ROOT / "Ceraxia" / "contracts" / "diagnostic_repair_request.schema.json",
         ROOT / "Ceraxia" / "contracts" / "evidence_matrix.schema.json",
         ROOT / "Ceraxia" / "contracts" / "run_summary.schema.json",
         ROOT / "CodeBrigade" / "code_brigade_contract.schema.json",
@@ -247,6 +248,12 @@ def main() -> int:
             raise AssertionError(f"run artifact schema drifted from generated files: {missing_artifacts}")
         summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
         assert_schema_subset(load_schema(ROOT / "Ceraxia" / "contracts" / "run_summary.schema.json"), summary, "run summary")
+        repair_request = json.loads((run_dir / "diagnostic_repair_request.json").read_text(encoding="utf-8"))
+        assert_schema_subset(
+            load_schema(ROOT / "Ceraxia" / "contracts" / "diagnostic_repair_request.schema.json"),
+            repair_request,
+            "diagnostic repair request",
+        )
     print("[ok] EyeOfTerror Mechanicum contracts")
     return 0
 

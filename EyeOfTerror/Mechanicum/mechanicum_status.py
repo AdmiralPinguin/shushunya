@@ -19,6 +19,7 @@ COMPONENTS = {
             "repo_survey.py",
             "self_test.py",
             "contracts/implementation_brief.schema.json",
+            "contracts/diagnostic_repair_request.schema.json",
             "contracts/evidence_matrix.schema.json",
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
