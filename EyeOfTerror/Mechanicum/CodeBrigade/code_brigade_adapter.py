@@ -20,6 +20,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
     acceptance = brief.get("acceptance_contract") if isinstance(brief.get("acceptance_contract"), dict) else {}
+    expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     blueprint = brief.get("implementation_brief_blueprint") if isinstance(brief.get("implementation_brief_blueprint"), dict) else {}
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
@@ -80,6 +81,13 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "work_package_blocking_policies": package_blocking_policies,
         "work_package_handoff_criteria": work_packages.get("global_handoff_criteria", []) if isinstance(work_packages.get("global_handoff_criteria"), list) else [],
         "acceptance_evidence_required": acceptance.get("must_prove", []) if isinstance(acceptance.get("must_prove"), list) else [],
+        "expert_quality_level": expert_plan.get("level", ""),
+        "expert_quality_required": bool(expert_plan.get("required_for_expert_gate")),
+        "expert_tradeoff_register": expert_plan.get("tradeoff_register", []) if isinstance(expert_plan.get("tradeoff_register"), list) else [],
+        "expert_rollback_strategy": expert_plan.get("rollback_strategy", []) if isinstance(expert_plan.get("rollback_strategy"), list) else [],
+        "expert_observability_plan": expert_plan.get("observability_plan", []) if isinstance(expert_plan.get("observability_plan"), list) else [],
+        "expert_review_checklist": expert_plan.get("review_checklist", []) if isinstance(expert_plan.get("review_checklist"), list) else [],
+        "expert_escalation_policy": expert_plan.get("escalation_policy", []) if isinstance(expert_plan.get("escalation_policy"), list) else [],
         "verification_commands": commands,
         "surface_verification_complete": bool(surface_matrix.get("complete")),
         "surface_verification_rows": surface_matrix.get("rows", []) if isinstance(surface_matrix.get("rows"), list) else [],
@@ -93,6 +101,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
             "requested source tree is unavailable",
             "required behavior cannot be proven by existing or newly planned verification",
             "requested patch would require a broad rewrite outside allowed_scope",
+            "expert quality plan cannot be satisfied for high-risk work",
         ],
     }
 

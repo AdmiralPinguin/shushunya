@@ -76,6 +76,13 @@
         "work_package_blocking_policies",
         "work_package_handoff_criteria",
         "acceptance_evidence_required",
+        "expert_quality_level",
+        "expert_quality_required",
+        "expert_tradeoff_register",
+        "expert_rollback_strategy",
+        "expert_observability_plan",
+        "expert_review_checklist",
+        "expert_escalation_policy",
         "verification_commands",
         "surface_verification_complete",
         "surface_verification_rows",
@@ -215,6 +222,42 @@
           }
         },
         "acceptance_evidence_required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expert_quality_level": {
+          "enum": ["standard", "expert"]
+        },
+        "expert_quality_required": {
+          "type": "boolean"
+        },
+        "expert_tradeoff_register": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "expert_rollback_strategy": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expert_observability_plan": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expert_review_checklist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expert_escalation_policy": {
           "type": "array",
           "items": {
             "type": "string"

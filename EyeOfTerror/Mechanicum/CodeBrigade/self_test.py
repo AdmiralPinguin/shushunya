@@ -83,8 +83,48 @@ def valid_brief() -> dict:
                 "the changed behavior is covered by targeted verification",
             ],
         },
+        "expert_quality_plan": {
+            "level": "standard",
+            "required_for_expert_gate": False,
+            "impact_surfaces": ["source_behavior", "test_surface"],
+            "tradeoff_register": [
+                {
+                    "decision": "minimal_patch_vs_broad_rewrite",
+                    "prefer": "minimal_patch",
+                    "reason": "Preserve public behavior until repo evidence proves a wider rewrite.",
+                },
+                {
+                    "decision": "fast_green_checks_vs_behavior_proof",
+                    "prefer": "behavior_proof",
+                    "reason": "Syntax checks are not enough for user-visible behavior.",
+                },
+            ],
+            "rollback_strategy": [
+                "keep changed-file set small enough to revert as one package",
+                "name previous behavior that must still work after the patch",
+            ],
+            "observability_plan": [
+                "record executed, skipped, failed, and blocked verification commands",
+                "preserve changed files and package blockers in the worker report",
+            ],
+            "review_checklist": [
+                "does the final package satisfy the original task",
+                "are changed files justified by repository evidence",
+                "does every risk surface have evidence or a blocker",
+                "are residual risks named when present",
+            ],
+            "escalation_policy": [
+                "return to Ceraxia when implementation scope exceeds the selected strategy",
+                "return to PlanningBrigade when verification cannot prove the acceptance contract",
+            ],
+        },
         "implementation_brief_blueprint": {
             "target": "CodeBrigade",
+            "required_sections": [
+                "task",
+                "repo_path",
+                "expert_quality_plan",
+            ],
             "mutation_preconditions": [
                 "implementation brief validates",
                 "execution preflight passes",
@@ -288,6 +328,14 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve global handoff criteria: {plan}")
     if "the original user-visible request is satisfied" not in plan["acceptance_evidence_required"]:
         raise AssertionError(f"implementation plan should preserve acceptance evidence: {plan}")
+    if plan["expert_quality_level"] != "standard" or plan["expert_quality_required"]:
+        raise AssertionError(f"implementation plan should preserve expert quality level: {plan}")
+    if plan["expert_tradeoff_register"][0]["decision"] != "minimal_patch_vs_broad_rewrite":
+        raise AssertionError(f"implementation plan should preserve expert quality tradeoffs: {plan}")
+    if "preserve changed files and package blockers in the worker report" not in plan["expert_observability_plan"]:
+        raise AssertionError(f"implementation plan should preserve expert observability requirements: {plan}")
+    if "return to PlanningBrigade when verification cannot prove the acceptance contract" not in plan["expert_escalation_policy"]:
+        raise AssertionError(f"implementation plan should preserve expert escalation policy: {plan}")
     if not plan["surface_verification_complete"] or plan["surface_verification_rows"][0]["surface"] != "source_behavior":
         raise AssertionError(f"implementation plan should preserve surface verification matrix: {plan}")
     if not plan["surface_package_matrix_complete"] or plan["surface_package_matrix_rows"][0]["package_ids"][0] != "evidence_survey_package":

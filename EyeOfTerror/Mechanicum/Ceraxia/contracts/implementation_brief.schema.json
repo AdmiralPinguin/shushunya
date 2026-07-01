@@ -22,6 +22,7 @@
     "acceptance_gates",
     "quality_bar",
     "acceptance_contract",
+    "expert_quality_plan",
     "implementation_brief_blueprint",
     "implementation_work_packages",
     "planning_review_gate",
@@ -113,6 +114,38 @@
     },
     "acceptance_contract": {
       "type": "object"
+    },
+    "expert_quality_plan": {
+      "type": "object",
+      "required": ["level", "required_for_expert_gate", "tradeoff_register", "rollback_strategy", "observability_plan", "review_checklist", "escalation_policy"],
+      "properties": {
+        "level": {
+          "enum": ["standard", "expert"]
+        },
+        "required_for_expert_gate": {
+          "type": "boolean"
+        },
+        "tradeoff_register": {
+          "type": "array",
+          "minItems": 2
+        },
+        "rollback_strategy": {
+          "type": "array",
+          "minItems": 2
+        },
+        "observability_plan": {
+          "type": "array",
+          "minItems": 2
+        },
+        "review_checklist": {
+          "type": "array",
+          "minItems": 4
+        },
+        "escalation_policy": {
+          "type": "array",
+          "minItems": 2
+        }
+      }
     },
     "implementation_brief_blueprint": {
       "type": "object"

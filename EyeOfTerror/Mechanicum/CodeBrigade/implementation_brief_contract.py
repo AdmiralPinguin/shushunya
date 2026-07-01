@@ -51,11 +51,23 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
     acceptance = brief.get("acceptance_contract") if isinstance(brief.get("acceptance_contract"), dict) else {}
     if not isinstance(acceptance.get("must_prove"), list) or not acceptance.get("must_prove"):
         problems.append("brief acceptance_contract.must_prove is required")
+    expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
+    if expert_plan.get("level") not in {"standard", "expert"}:
+        problems.append("brief expert_quality_plan.level is required")
+    for key in ("tradeoff_register", "rollback_strategy", "observability_plan", "review_checklist", "escalation_policy"):
+        if not isinstance(expert_plan.get(key), list) or len(expert_plan.get(key, [])) < 2:
+            problems.append(f"brief expert_quality_plan.{key} is required")
+    if brief.get("risk_level") == "high" and (
+        expert_plan.get("level") != "expert" or expert_plan.get("required_for_expert_gate") is not True
+    ):
+        problems.append("brief high-risk work must include an expert quality plan")
     blueprint = brief.get("implementation_brief_blueprint") if isinstance(brief.get("implementation_brief_blueprint"), dict) else {}
     if blueprint.get("target") != "CodeBrigade":
         problems.append("brief implementation_brief_blueprint must target CodeBrigade")
     if not isinstance(blueprint.get("mutation_preconditions"), list) or not blueprint.get("mutation_preconditions"):
         problems.append("brief implementation_brief_blueprint mutation_preconditions are required")
+    if "expert_quality_plan" not in blueprint.get("required_sections", []):
+        problems.append("brief implementation_brief_blueprint must require expert_quality_plan")
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
     if len(packages) < 3:
