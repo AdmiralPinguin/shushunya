@@ -85,8 +85,8 @@ ROADMAP = [
     },
     {
         "priority": 3,
-        "item": "make per-surface verification strict enough to block high-risk partial evidence",
-        "reason": "Review now reports per-surface executed, partial, planned, failed, or blocked evidence; high-risk surfaces still warn on partial evidence instead of always blocking.",
+        "item": "match per-surface verification to command output and artifact evidence",
+        "reason": "Review now reports per-surface executed, partial, planned, failed, or blocked evidence and blocks high-risk partial execution; it still does not deeply inspect command stdout/stderr or generated artifacts for surface-specific assertions.",
         "owner": "Ceraxia",
     },
     {
