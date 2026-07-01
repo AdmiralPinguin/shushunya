@@ -13,6 +13,9 @@ Current capabilities:
 - read-only repository survey request shaping
 - investigation playbook with ordered read stages, evidence questions,
   mutation blockers, and replan triggers for CodeBrigade
+- change-control planning with allowed change intents, protected invariants,
+  mutation requirements, diff-review questions, rollback triggers, and
+  post-change proofs
 - dependency map and work breakdown generation
 - impact analysis across source, tests, public API, security, runtime config,
   data compatibility, internal architecture, and concurrency runtime surfaces
@@ -28,7 +31,8 @@ Current capabilities:
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
 - field trials for multiple task shapes with coverage gates for task kinds,
-  impacted surfaces, and implementation work packages
+  impacted surfaces, implementation work packages, and change-control
+  invariant/proof coverage
 - CLI validation mode
 
 Current boundaries:

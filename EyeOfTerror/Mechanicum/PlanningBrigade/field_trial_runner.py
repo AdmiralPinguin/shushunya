@@ -40,6 +40,19 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError(f"{trial_id}: investigation playbook must include evidence questions: {packet}")
     if not isinstance(playbook.get("mutation_blockers"), list) or len(playbook.get("mutation_blockers", [])) < 3:
         raise AssertionError(f"{trial_id}: investigation playbook must include mutation blockers: {packet}")
+    change_control = packet.get("change_control_plan") if isinstance(packet.get("change_control_plan"), dict) else {}
+    if change_control.get("target") != "CodeBrigade":
+        raise AssertionError(f"{trial_id}: change control plan must target CodeBrigade: {packet}")
+    for key, minimum in [
+        ("allowed_change_intents", 3),
+        ("protected_invariants", 3),
+        ("mutation_requires", 4),
+        ("diff_review_questions", 3),
+        ("rollback_triggers", 3),
+        ("post_change_proofs", 3),
+    ]:
+        if not isinstance(change_control.get(key), list) or len(change_control.get(key, [])) < minimum:
+            raise AssertionError(f"{trial_id}: change control plan missing {key}: {packet}")
     missing_blocking_policy = [package.get("id", "<unknown>") for package in work_packages if not package.get("blocking_policy")]
     if missing_blocking_policy:
         raise AssertionError(f"{trial_id}: work packages missing blocking_policy: {missing_blocking_policy}; packet={packet}")
@@ -94,6 +107,17 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "surfaces": surfaces,
         "highest_risk_surface": packet["impact_analysis"]["highest_risk_surface"],
         "negative_tests": packet["verification_strategy"]["negative_tests"],
+        "change_protected_invariants": change_control["protected_invariants"],
+        "change_post_change_proofs": change_control["post_change_proofs"],
+        "change_rollback_triggers": change_control["rollback_triggers"],
+        "change_control_counts": {
+            "allowed_change_intents": len(change_control["allowed_change_intents"]),
+            "protected_invariants": len(change_control["protected_invariants"]),
+            "mutation_requires": len(change_control["mutation_requires"]),
+            "diff_review_questions": len(change_control["diff_review_questions"]),
+            "rollback_triggers": len(change_control["rollback_triggers"]),
+            "post_change_proofs": len(change_control["post_change_proofs"]),
+        },
         "validation_problem_count": len(validation_problems),
     }
 
@@ -106,6 +130,10 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     highest_risk_surfaces: Counter[str] = Counter()
     decisions: Counter[str] = Counter()
     negative_tests: Counter[str] = Counter()
+    change_invariants: Counter[str] = Counter()
+    change_post_proofs: Counter[str] = Counter()
+    change_rollback_triggers: Counter[str] = Counter()
+    minimum_change_control_counts: dict[str, int] = {}
     scores: list[int] = []
     for result in results:
         kinds.update(str(item) for item in result.get("task_kinds", []))
@@ -116,6 +144,13 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
             highest_risk_surfaces.update([str(result["highest_risk_surface"])])
         decisions.update([str(result.get("decision", ""))])
         negative_tests.update(str(item) for item in result.get("negative_tests", []))
+        change_invariants.update(str(item) for item in result.get("change_protected_invariants", []))
+        change_post_proofs.update(str(item) for item in result.get("change_post_change_proofs", []))
+        change_rollback_triggers.update(str(item) for item in result.get("change_rollback_triggers", []))
+        counts = result.get("change_control_counts") if isinstance(result.get("change_control_counts"), dict) else {}
+        for key, value in counts.items():
+            if isinstance(value, int):
+                minimum_change_control_counts[key] = min(minimum_change_control_counts.get(key, value), value)
         if isinstance(result.get("score"), int):
             scores.append(result["score"])
     return {
@@ -127,6 +162,10 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "surface_counts": dict(sorted(surfaces.items())),
         "highest_risk_surface_counts": dict(sorted(highest_risk_surfaces.items())),
         "negative_test_counts": dict(sorted(negative_tests.items())),
+        "change_invariant_counts": dict(sorted(change_invariants.items())),
+        "change_post_proof_counts": dict(sorted(change_post_proofs.items())),
+        "change_rollback_trigger_counts": dict(sorted(change_rollback_triggers.items())),
+        "minimum_change_control_counts": dict(sorted(minimum_change_control_counts.items())),
         "minimum_score": min(scores) if scores else 0,
         "average_score": round(sum(scores) / len(scores), 2) if scores else 0,
     }
@@ -166,6 +205,10 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     kind_counts = summary.get("task_kind_counts") if isinstance(summary.get("task_kind_counts"), dict) else {}
     surface_counts = summary.get("surface_counts") if isinstance(summary.get("surface_counts"), dict) else {}
     work_package_counts = summary.get("work_package_counts") if isinstance(summary.get("work_package_counts"), dict) else {}
+    invariant_counts = summary.get("change_invariant_counts") if isinstance(summary.get("change_invariant_counts"), dict) else {}
+    post_proof_counts = summary.get("change_post_proof_counts") if isinstance(summary.get("change_post_proof_counts"), dict) else {}
+    rollback_counts = summary.get("change_rollback_trigger_counts") if isinstance(summary.get("change_rollback_trigger_counts"), dict) else {}
+    minimum_change_counts = summary.get("minimum_change_control_counts") if isinstance(summary.get("minimum_change_control_counts"), dict) else {}
     missing_kinds = sorted(kind for kind in required_kinds if kind not in kind_counts)
     missing_surfaces = sorted(surface for surface in required_surfaces if surface not in surface_counts)
     missing_work_packages = sorted(package for package in required_work_packages if package not in work_package_counts)
@@ -178,6 +221,44 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     decision_counts = summary.get("decision_counts") if isinstance(summary.get("decision_counts"), dict) else {}
     if "blocked" not in decision_counts or "ready_for_ceraxia_review" not in decision_counts:
         raise AssertionError(f"field trials must cover blocked and ready decisions: {summary}")
+    required_invariant_fragments = [
+        "negative security boundary",
+        "old callers, old data",
+        "parallel, retry, cache",
+        "public entrypoints and dependency edges",
+    ]
+    missing_invariant_fragments = [
+        fragment
+        for fragment in required_invariant_fragments
+        if not any(fragment in invariant for invariant in invariant_counts)
+    ]
+    if missing_invariant_fragments:
+        raise AssertionError(f"field trials are missing change-control invariant coverage: {missing_invariant_fragments}")
+    required_post_proof_fragments = [
+        "negative boundary evidence",
+        "compatibility evidence",
+        "remaining race risk",
+        "dependency-edge review",
+    ]
+    missing_post_proof_fragments = [
+        fragment
+        for fragment in required_post_proof_fragments
+        if not any(fragment in proof for proof in post_proof_counts)
+    ]
+    if missing_post_proof_fragments:
+        raise AssertionError(f"field trials are missing change-control proof coverage: {missing_post_proof_fragments}")
+    for key, minimum in {
+        "allowed_change_intents": 3,
+        "protected_invariants": 3,
+        "mutation_requires": 4,
+        "diff_review_questions": 3,
+        "rollback_triggers": 3,
+        "post_change_proofs": 3,
+    }.items():
+        if minimum_change_counts.get(key, 0) < minimum:
+            raise AssertionError(f"field trials have weak minimum change-control count for {key}: {summary}")
+    if "verification cannot prove the changed behavior" not in rollback_counts:
+        raise AssertionError(f"field trials must preserve verification rollback trigger coverage: {summary}")
 
 
 def main() -> int:

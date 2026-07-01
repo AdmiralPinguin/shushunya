@@ -3880,22 +3880,28 @@ def orchestrate_start_run(
 
     workspace_root = resolve_run_child_path(run_dir, "", "work")
     if run_mode == "local":
-        executor = lambda: execute_local_run(
-            REPO_ROOT,
+        executor = lambda: execute_with_ledger_failure_guard(
             run_dir,
-            workspace_root,
-            timeout_sec=timeout_sec,
-            step_ids=step_ids,
-            execution_mode=execution_mode,
+            lambda: execute_local_run(
+                REPO_ROOT,
+                run_dir,
+                workspace_root,
+                timeout_sec=timeout_sec,
+                step_ids=step_ids,
+                execution_mode=execution_mode,
+            ),
         )
     else:
-        executor = lambda: execute_http_run(
+        executor = lambda: execute_with_ledger_failure_guard(
             run_dir,
-            host=host,
-            timeout_sec=timeout_sec,
-            workspace_root=None,
-            step_ids=step_ids,
-            execution_mode=execution_mode,
+            lambda: execute_http_run(
+                run_dir,
+                host=host,
+                timeout_sec=timeout_sec,
+                workspace_root=None,
+                step_ids=step_ids,
+                execution_mode=execution_mode,
+            ),
         )
     ledger_path = run_dir / "task_ledger.json"
     if ledger_path.exists():
@@ -4705,11 +4711,31 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         response(self, 200 if preflight.get("ok") else 409, preflight)
                         return
                     if parts[2] in {"execute_local", "start_local", "execute_revision_local", "start_revision_local", "resume_local", "start_resume_local"}:
-                        executor = lambda: execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec, step_ids=restricted_step_ids, execution_mode=execution_mode)
+                        executor = lambda: execute_with_ledger_failure_guard(
+                            run_dir,
+                            lambda: execute_local_run(
+                                REPO_ROOT,
+                                run_dir,
+                                workspace_root,
+                                timeout_sec=timeout_sec,
+                                step_ids=restricted_step_ids,
+                                execution_mode=execution_mode,
+                            ),
+                        )
                     else:
                         host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
                         http_workspace_root = workspace_root if "workspace_root" in payload else None
-                        executor = lambda: execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root, step_ids=restricted_step_ids, execution_mode=execution_mode)
+                        executor = lambda: execute_with_ledger_failure_guard(
+                            run_dir,
+                            lambda: execute_http_run(
+                                run_dir,
+                                host=host,
+                                timeout_sec=timeout_sec,
+                                workspace_root=http_workspace_root,
+                                step_ids=restricted_step_ids,
+                                execution_mode=execution_mode,
+                            ),
+                        )
                     if parts[2].startswith("start_"):
                         if ledger_path.exists():
                             try:
