@@ -13,7 +13,8 @@
     "rows",
     "implementation_plan_sources",
     "implementation_work_package_summary",
-    "surface_package_summary"
+    "surface_package_summary",
+    "expert_quality_summary"
   ],
   "properties": {
     "kind": {
@@ -101,6 +102,48 @@
           "items": {
             "type": "object"
           }
+        }
+      }
+    },
+    "expert_quality_summary": {
+      "type": "object",
+      "required": [
+        "level",
+        "required_for_expert_gate",
+        "impact_surfaces",
+        "tradeoff_count",
+        "rollback_requirement_count",
+        "observability_requirement_count",
+        "review_checklist_count",
+        "escalation_policy_count"
+      ],
+      "properties": {
+        "level": {
+          "enum": ["standard", "expert"]
+        },
+        "required_for_expert_gate": {
+          "type": "boolean"
+        },
+        "impact_surfaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tradeoff_count": {
+          "type": "integer"
+        },
+        "rollback_requirement_count": {
+          "type": "integer"
+        },
+        "observability_requirement_count": {
+          "type": "integer"
+        },
+        "review_checklist_count": {
+          "type": "integer"
+        },
+        "escalation_policy_count": {
+          "type": "integer"
         }
       }
     }

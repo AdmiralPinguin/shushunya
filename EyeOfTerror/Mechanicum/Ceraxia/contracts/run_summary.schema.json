@@ -33,6 +33,10 @@
     "risk_level",
     "task_kinds",
     "selected_strategy",
+    "expert_quality_level",
+    "expert_quality_required",
+    "expert_tradeoff_count",
+    "expert_review_checklist_count",
     "evidence",
     "blockers",
     "next_action",
@@ -139,6 +143,18 @@
     },
     "selected_strategy": {
       "type": "string"
+    },
+    "expert_quality_level": {
+      "enum": ["standard", "expert"]
+    },
+    "expert_quality_required": {
+      "type": "boolean"
+    },
+    "expert_tradeoff_count": {
+      "type": "integer"
+    },
+    "expert_review_checklist_count": {
+      "type": "integer"
     },
     "evidence": {
       "type": "object",

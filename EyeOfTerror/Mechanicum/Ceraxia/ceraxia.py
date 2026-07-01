@@ -531,6 +531,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
+    expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     blockers = readiness.get("blockers", [])
     warnings = review.get("warnings", [])
@@ -557,6 +558,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Execution readiness: {readiness['decision']}",
         f"Risk: {brief['risk_level']}",
         f"Strategy: {brief['selected_strategy']}",
+        f"Expert quality level: {expert_plan.get('level', '')}",
+        f"Expert quality required: {str(bool(expert_plan.get('required_for_expert_gate'))).lower()}",
         f"Review decision: {review['decision']}",
         f"Planning review decision: {planning_review.get('decision', '')}",
         f"Planning review score: {planning_review.get('score', '')}",
@@ -600,6 +603,9 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
             f"- max python symbol files: {repo_evidence.get('max_python_symbol_files', 0)}",
             f"- max source summary files: {repo_evidence.get('max_source_summary_files', 0)}",
             f"- code brigade handoff steps: {len(brief.get('code_brigade_handoff', {}).get('steps', []))}",
+            f"- expert tradeoffs: {len(expert_plan.get('tradeoff_register', [])) if isinstance(expert_plan.get('tradeoff_register'), list) else 0}",
+            f"- expert rollback requirements: {len(expert_plan.get('rollback_strategy', [])) if isinstance(expert_plan.get('rollback_strategy'), list) else 0}",
+            f"- expert review checklist items: {len(expert_plan.get('review_checklist', [])) if isinstance(expert_plan.get('review_checklist'), list) else 0}",
             "",
         ]
     )
@@ -728,6 +734,7 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     if summary.get("planning_work_phase_count", 0) != len(phases):
         findings.append({"severity": "blocker", "finding": "run_summary planning_work_phase_count disagrees with implementation_brief.json"})
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
+    expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
     package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
     package_status_counts = {
@@ -788,6 +795,16 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
             findings.append({"severity": "blocker", "finding": "evidence_matrix review_order disagrees with run_summary"})
         if package_summary.get("status_counts") != summary.get("work_package_status_counts"):
             findings.append({"severity": "blocker", "finding": "evidence_matrix work package status_counts disagrees with run_summary"})
+    expert_summary = evidence_matrix.get("expert_quality_summary") if isinstance(evidence_matrix.get("expert_quality_summary"), dict) else {}
+    if expert_summary:
+        if expert_summary.get("level") != summary.get("expert_quality_level"):
+            findings.append({"severity": "blocker", "finding": "evidence_matrix expert quality level disagrees with run_summary"})
+        if expert_summary.get("required_for_expert_gate") != summary.get("expert_quality_required"):
+            findings.append({"severity": "blocker", "finding": "evidence_matrix expert quality requirement disagrees with run_summary"})
+        if expert_summary.get("tradeoff_count") != summary.get("expert_tradeoff_count"):
+            findings.append({"severity": "blocker", "finding": "evidence_matrix expert tradeoff_count disagrees with run_summary"})
+        if expert_summary.get("review_checklist_count") != summary.get("expert_review_checklist_count"):
+            findings.append({"severity": "blocker", "finding": "evidence_matrix expert review_checklist_count disagrees with run_summary"})
     decision = "passed" if not findings else "blocked"
     return {
         "kind": "ceraxia_run_package_audit",
@@ -851,6 +868,7 @@ def build_run_summary(
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     surface_sufficiency = review.get("surface_verification_sufficiency") if isinstance(review.get("surface_verification_sufficiency"), dict) else {}
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
+    expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
     package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
     package_status_counts = {
@@ -897,6 +915,10 @@ def build_run_summary(
         "risk_level": brief.get("risk_level"),
         "task_kinds": brief.get("task_kinds", []),
         "selected_strategy": brief.get("selected_strategy"),
+        "expert_quality_level": expert_plan.get("level", ""),
+        "expert_quality_required": bool(expert_plan.get("required_for_expert_gate")),
+        "expert_tradeoff_count": len(expert_plan.get("tradeoff_register", [])) if isinstance(expert_plan.get("tradeoff_register"), list) else 0,
+        "expert_review_checklist_count": len(expert_plan.get("review_checklist", [])) if isinstance(expert_plan.get("review_checklist"), list) else 0,
         "evidence": {
             "required_count": evidence_matrix.get("required_evidence_count", 0),
             "present_count": evidence_matrix.get("present_count", 0),
@@ -916,6 +938,7 @@ def build_evidence_matrix(
     readiness: dict[str, Any],
 ) -> dict[str, Any]:
     quality = brief.get("quality_bar") if isinstance(brief.get("quality_bar"), dict) else {}
+    expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     required_evidence = quality.get("must_have_evidence") if isinstance(quality.get("must_have_evidence"), list) else []
     repo_evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
@@ -995,6 +1018,16 @@ def build_evidence_matrix(
         "surface_package_summary": {
             "surface_count": len(surface_package_rows),
             "rows": surface_package_rows,
+        },
+        "expert_quality_summary": {
+            "level": expert_plan.get("level", ""),
+            "required_for_expert_gate": bool(expert_plan.get("required_for_expert_gate")),
+            "impact_surfaces": expert_plan.get("impact_surfaces", []) if isinstance(expert_plan.get("impact_surfaces"), list) else [],
+            "tradeoff_count": len(expert_plan.get("tradeoff_register", [])) if isinstance(expert_plan.get("tradeoff_register"), list) else 0,
+            "rollback_requirement_count": len(expert_plan.get("rollback_strategy", [])) if isinstance(expert_plan.get("rollback_strategy"), list) else 0,
+            "observability_requirement_count": len(expert_plan.get("observability_plan", [])) if isinstance(expert_plan.get("observability_plan"), list) else 0,
+            "review_checklist_count": len(expert_plan.get("review_checklist", [])) if isinstance(expert_plan.get("review_checklist"), list) else 0,
+            "escalation_policy_count": len(expert_plan.get("escalation_policy", [])) if isinstance(expert_plan.get("escalation_policy"), list) else 0,
         },
     }
 
