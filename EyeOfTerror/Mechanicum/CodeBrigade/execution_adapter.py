@@ -57,6 +57,14 @@ def surveyed_paths(brief: dict[str, Any]) -> set[str]:
     return values
 
 
+def explicitly_missing_paths(brief: dict[str, Any]) -> set[str]:
+    evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
+    items = evidence.get("missing_path_hints")
+    if not isinstance(items, list):
+        return set()
+    return {str(item) for item in items if is_repo_relative_path(item)}
+
+
 def simple_function_return_segment(source_path: Path, function_name: str) -> dict[str, Any]:
     text = source_path.read_text(encoding="utf-8")
     tree = ast.parse(text)
@@ -100,6 +108,7 @@ def replace_return_expression_in_file(source_path: Path, function_name: str, old
 
 def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, Any]) -> tuple[list[str], str, list[dict[str, Any]], str]:
     allowed_paths = surveyed_paths(brief)
+    allowed_new_paths = explicitly_missing_paths(brief)
     originals: dict[Path, str | None] = {}
     changed: list[str] = []
     operation_results: list[dict[str, Any]] = []
@@ -110,14 +119,29 @@ def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, A
                 raise ValueError(f"patch operation {index} must be an object")
             op_type = str(operation.get("type") or "")
             rel_path = str(operation.get("path") or "")
-            if rel_path not in allowed_paths:
+            if op_type == "create_file":
+                if rel_path not in allowed_new_paths:
+                    raise ValueError(f"create_file path must be an explicit missing path hint: {rel_path}")
+            elif rel_path not in allowed_paths:
                 raise ValueError(f"patch path is outside surveyed candidate/test files: {rel_path}")
             path = safe_operation_path(repo, rel_path)
-            if not path.exists() or not path.is_file():
+            if op_type == "create_file":
+                if path.exists():
+                    raise ValueError(f"create_file target already exists: {rel_path}")
+                if not path.parent.exists() or not path.parent.is_dir() or path.parent.is_symlink():
+                    raise ValueError(f"create_file parent must be an existing non-symlink directory: {rel_path}")
+                content = operation.get("content")
+                if not isinstance(content, str):
+                    raise ValueError(f"create_file operation requires string content: {rel_path}")
+                originals[path] = None
+                path.write_text(content, encoding="utf-8")
+            elif not path.exists() or not path.is_file():
                 raise ValueError(f"patch target does not exist: {rel_path}")
-            if path not in originals:
+            elif path not in originals:
                 originals[path] = path.read_text(encoding="utf-8")
-            if op_type == "replace":
+            if op_type == "create_file":
+                pass
+            elif op_type == "replace":
                 old = operation.get("old")
                 new = operation.get("new")
                 if not isinstance(old, str) or not old:

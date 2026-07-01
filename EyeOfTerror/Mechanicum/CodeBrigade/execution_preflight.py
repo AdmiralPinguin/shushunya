@@ -18,6 +18,7 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
     verification = brief.get("required_verification") if isinstance(brief.get("required_verification"), dict) else {}
     candidate_files = evidence.get("candidate_files") if isinstance(evidence.get("candidate_files"), list) else []
     test_files = evidence.get("test_files") if isinstance(evidence.get("test_files"), list) else []
+    missing_path_hints = evidence.get("missing_path_hints") if isinstance(evidence.get("missing_path_hints"), list) else []
     targeted_commands = verification.get("targeted_commands") if isinstance(verification.get("targeted_commands"), list) else []
     suggested_commands = brief.get("suggested_verification_commands")
     if not isinstance(suggested_commands, list):
@@ -26,6 +27,8 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
     unsafe_candidate_files = [str(path) for path in candidate_files if not is_repo_relative_path(path)]
     safe_test_files = [path for path in test_files if is_repo_relative_path(path)]
     unsafe_test_files = [str(path) for path in test_files if not is_repo_relative_path(path)]
+    safe_missing_path_hints = [path for path in missing_path_hints if is_repo_relative_path(path)]
+    unsafe_missing_path_hints = [str(path) for path in missing_path_hints if not is_repo_relative_path(path)]
     symlink_candidate_files = [
         path for path in safe_candidate_files if (repo_path / path).is_symlink()
     ]
@@ -63,6 +66,8 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
         blockers.append("repository survey candidate files are missing")
     if unsafe_test_files:
         blockers.append("repository survey test files must be repo-relative")
+    if unsafe_missing_path_hints:
+        blockers.append("repository survey missing path hints must be repo-relative")
     if symlink_test_files:
         blockers.append("repository survey test files must not be symlinks")
     if missing_test_files:
@@ -85,6 +90,8 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
         "missing_test_files": missing_test_files[:20],
         "unsafe_test_files": unsafe_test_files[:20],
         "symlink_test_files": symlink_test_files[:20],
+        "allowed_new_files": safe_missing_path_hints[:20],
+        "unsafe_missing_path_hints": unsafe_missing_path_hints[:20],
         "targeted_command_count": len(targeted_commands),
         "suggested_command_count": len(suggested_commands),
         "blockers": blockers,

@@ -70,6 +70,8 @@
         "missing_test_files",
         "unsafe_test_files",
         "symlink_test_files",
+        "allowed_new_files",
+        "unsafe_missing_path_hints",
         "targeted_command_count",
         "suggested_command_count",
         "blockers",
@@ -131,6 +133,18 @@
           }
         },
         "symlink_test_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowed_new_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unsafe_missing_path_hints": {
           "type": "array",
           "items": {
             "type": "string"

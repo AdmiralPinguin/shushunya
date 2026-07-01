@@ -362,6 +362,51 @@ def main() -> int:
         if "return left + right" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("AST return patch did not update app.py")
     with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
+        create_brief = valid_brief()
+        create_brief["repo_path"] = tmp
+        create_brief["repo_survey_evidence"]["missing_path_hints"] = ["helpers.py"]
+        create_brief["task"] += "\nCERAXIA_PATCH:\n" + json.dumps(
+            {
+                "operations": [
+                    {
+                        "type": "create_file",
+                        "path": "helpers.py",
+                        "content": "def helper():\n    return True\n",
+                    }
+                ]
+            }
+        )
+        create_report = code_brigade_adapter.build_worker_report(create_brief, dry_run=False)
+        if create_report["status"] != "implemented" or create_report["changed_files"] != ["helpers.py"]:
+            raise AssertionError(f"explicit create_file should report implemented changed file: {create_report}")
+        if "helpers.py" not in create_report["execution_result"]["preflight"]["allowed_new_files"]:
+            raise AssertionError(f"create_file preflight should expose allowed new files: {create_report}")
+        if "def helper" not in Path(tmp, "helpers.py").read_text(encoding="utf-8"):
+            raise AssertionError("explicit create_file did not create helpers.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
+        forbidden_create_brief = valid_brief()
+        forbidden_create_brief["repo_path"] = tmp
+        forbidden_create_brief["task"] += "\nCERAXIA_PATCH:\n" + json.dumps(
+            {
+                "operations": [
+                    {
+                        "type": "create_file",
+                        "path": "helpers.py",
+                        "content": "def helper():\n    return True\n",
+                    }
+                ]
+            }
+        )
+        forbidden_create_report = code_brigade_adapter.build_worker_report(forbidden_create_brief, dry_run=False)
+        if forbidden_create_report["status"] != "blocked" or "explicit missing path hint" not in " ".join(forbidden_create_report["execution_result"]["blockers"]):
+            raise AssertionError(f"create_file without missing path hint should block: {forbidden_create_report}")
+        if Path(tmp, "helpers.py").exists():
+            raise AssertionError("blocked create_file should not leave helpers.py behind")
+    with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
         rollback_brief = valid_brief()
