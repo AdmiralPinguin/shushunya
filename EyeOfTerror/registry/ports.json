@@ -9,7 +9,7 @@
     "7101": {
       "name": "IskandarKhayon",
       "role": "lore research and reconstruction governor",
-      "path": "EyeOfTerror/_temporary/IskandarKhayon/governor"
+      "path": "EyeOfTerror/Scriptorium/IskandarKhayon"
     },
     "7102": {
       "name": "CogitatorCodewrightGovernor",
@@ -36,37 +36,37 @@
     "7002": {
       "name": "Lexmechanic",
       "role": "source researcher",
-      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/Lexmechanic"
+      "path": "EyeOfTerror/Scriptorium/Brigade/Lexmechanic"
     },
     "7003": {
       "name": "NoosphericExtractor",
       "role": "fact extractor",
-      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/NoosphericExtractor"
+      "path": "EyeOfTerror/Scriptorium/Brigade/NoosphericExtractor"
     },
     "7004": {
       "name": "Chronologis",
       "role": "timeline builder",
-      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/Chronologis"
+      "path": "EyeOfTerror/Scriptorium/Brigade/Chronologis"
     },
     "7005": {
       "name": "ScriptoriumDaemon",
       "role": "writer",
-      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/ScriptoriumDaemon"
+      "path": "EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon"
     },
     "7006": {
       "name": "ReductorVerifier",
       "role": "critic and verifier",
-      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/ReductorVerifier"
+      "path": "EyeOfTerror/Scriptorium/Brigade/ReductorVerifier"
     },
     "7007": {
       "name": "FabricatorFinalis",
       "role": "finalizer, packager, telegram sender",
-      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/FabricatorFinalis"
+      "path": "EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis"
     },
     "7009": {
       "name": "AuspexBrowser",
       "role": "browser worker",
-      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/AuspexBrowser"
+      "path": "EyeOfTerror/Scriptorium/Brigade/AuspexBrowser"
     },
     "7010": {
       "name": "ForgeRelay",
@@ -88,7 +88,7 @@
     "7013": {
       "name": "CorpusIngestor",
       "role": "local corpus indexer",
-      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/CorpusIngestor"
+      "path": "EyeOfTerror/Scriptorium/Brigade/CorpusIngestor"
     },
     "7014": {
       "name": "CogitatorCodewright",

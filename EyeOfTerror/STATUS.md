@@ -455,7 +455,7 @@ local executor tests, service tests, and the end-to-end HTTP worker pipeline.
 Optional live discovery smoke:
 
 ```bash
-PYTHONPATH=EyeOfTerror/_temporary/IskandarKhayon/brigade/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 EyeOfTerror/_temporary/IskandarKhayon/brigade/Lexmechanic/live_discovery_smoke.py
+PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/Lexmechanic LEXMECHANIC_LIVE_DISCOVERY=1 python3 EyeOfTerror/Scriptorium/Brigade/Lexmechanic/live_discovery_smoke.py
 ```
 
 ## Current Limits

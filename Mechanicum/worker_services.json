@@ -1,17 +1,17 @@
 {
   "Lexmechanic": {
     "port": 7002,
-    "module_path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/Lexmechanic",
+    "module_path": "EyeOfTerror/Scriptorium/Brigade/Lexmechanic",
     "module": "lexmechanic"
   },
   "AuspexBrowser": {
     "port": 7009,
-    "module_path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/AuspexBrowser",
+    "module_path": "EyeOfTerror/Scriptorium/Brigade/AuspexBrowser",
     "module": "auspex_browser"
   },
   "CorpusIngestor": {
     "port": 7013,
-    "module_path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/CorpusIngestor",
+    "module_path": "EyeOfTerror/Scriptorium/Brigade/CorpusIngestor",
     "module": "corpus_ingestor"
   },
   "CogitatorCodewright": {
@@ -56,27 +56,27 @@
   },
   "NoosphericExtractor": {
     "port": 7003,
-    "module_path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/NoosphericExtractor",
+    "module_path": "EyeOfTerror/Scriptorium/Brigade/NoosphericExtractor",
     "module": "noospheric_extractor"
   },
   "Chronologis": {
     "port": 7004,
-    "module_path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/Chronologis",
+    "module_path": "EyeOfTerror/Scriptorium/Brigade/Chronologis",
     "module": "chronologis"
   },
   "ScriptoriumDaemon": {
     "port": 7005,
-    "module_path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/ScriptoriumDaemon",
+    "module_path": "EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon",
     "module": "scriptorium_daemon"
   },
   "ReductorVerifier": {
     "port": 7006,
-    "module_path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/ReductorVerifier",
+    "module_path": "EyeOfTerror/Scriptorium/Brigade/ReductorVerifier",
     "module": "reductor_verifier"
   },
   "FabricatorFinalis": {
     "port": 7007,
-    "module_path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/FabricatorFinalis",
+    "module_path": "EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis",
     "module": "fabricator_finalis"
   }
 }

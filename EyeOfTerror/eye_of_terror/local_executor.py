@@ -14,15 +14,15 @@ from .pipeline import write_json_atomic
 
 
 WORKER_COMMANDS = {
-    "CorpusIngestor": ("EyeOfTerror/_temporary/IskandarKhayon/brigade/CorpusIngestor", "EyeOfTerror/_temporary/IskandarKhayon/brigade/CorpusIngestor/corpus_ingestor.py"),
-    "Lexmechanic": ("EyeOfTerror/_temporary/IskandarKhayon/brigade/Lexmechanic", "EyeOfTerror/_temporary/IskandarKhayon/brigade/Lexmechanic/lexmechanic.py"),
-    "AuspexBrowser": ("EyeOfTerror/_temporary/IskandarKhayon/brigade/AuspexBrowser", "EyeOfTerror/_temporary/IskandarKhayon/brigade/AuspexBrowser/auspex_browser.py"),
+    "CorpusIngestor": ("EyeOfTerror/Scriptorium/Brigade/CorpusIngestor", "EyeOfTerror/Scriptorium/Brigade/CorpusIngestor/corpus_ingestor.py"),
+    "Lexmechanic": ("EyeOfTerror/Scriptorium/Brigade/Lexmechanic", "EyeOfTerror/Scriptorium/Brigade/Lexmechanic/lexmechanic.py"),
+    "AuspexBrowser": ("EyeOfTerror/Scriptorium/Brigade/AuspexBrowser", "EyeOfTerror/Scriptorium/Brigade/AuspexBrowser/auspex_browser.py"),
     "OcularisRenderium": ("Mechanicum/OcularisRenderium", "Mechanicum/OcularisRenderium/ocularis_renderium.py"),
-    "NoosphericExtractor": ("EyeOfTerror/_temporary/IskandarKhayon/brigade/NoosphericExtractor", "EyeOfTerror/_temporary/IskandarKhayon/brigade/NoosphericExtractor/noospheric_extractor.py"),
-    "Chronologis": ("EyeOfTerror/_temporary/IskandarKhayon/brigade/Chronologis", "EyeOfTerror/_temporary/IskandarKhayon/brigade/Chronologis/chronologis.py"),
-    "ScriptoriumDaemon": ("EyeOfTerror/_temporary/IskandarKhayon/brigade/ScriptoriumDaemon", "EyeOfTerror/_temporary/IskandarKhayon/brigade/ScriptoriumDaemon/scriptorium_daemon.py"),
-    "ReductorVerifier": ("EyeOfTerror/_temporary/IskandarKhayon/brigade/ReductorVerifier", "EyeOfTerror/_temporary/IskandarKhayon/brigade/ReductorVerifier/reductor_verifier.py"),
-    "FabricatorFinalis": ("EyeOfTerror/_temporary/IskandarKhayon/brigade/FabricatorFinalis", "EyeOfTerror/_temporary/IskandarKhayon/brigade/FabricatorFinalis/fabricator_finalis.py"),
+    "NoosphericExtractor": ("EyeOfTerror/Scriptorium/Brigade/NoosphericExtractor", "EyeOfTerror/Scriptorium/Brigade/NoosphericExtractor/noospheric_extractor.py"),
+    "Chronologis": ("EyeOfTerror/Scriptorium/Brigade/Chronologis", "EyeOfTerror/Scriptorium/Brigade/Chronologis/chronologis.py"),
+    "ScriptoriumDaemon": ("EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon", "EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon/scriptorium_daemon.py"),
+    "ReductorVerifier": ("EyeOfTerror/Scriptorium/Brigade/ReductorVerifier", "EyeOfTerror/Scriptorium/Brigade/ReductorVerifier/reductor_verifier.py"),
+    "FabricatorFinalis": ("EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis", "EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis/fabricator_finalis.py"),
     "CogitatorCodewright": ("Mechanicum/CogitatorCodewright", "Mechanicum/CogitatorCodewright/cogitator_codewright.py"),
     "LogisRepository": ("Mechanicum/LogisRepository", "Mechanicum/LogisRepository/logis_repository.py"),
     "MagosStrategos": ("Mechanicum/MagosStrategos", "Mechanicum/MagosStrategos/magos_strategos.py"),

@@ -27,7 +27,7 @@ def main() -> int:
         source = root / "test" / "source_map.json"
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(json.dumps({"topic": "other", "sources": []}), encoding="utf-8")
-        run_worker = load_worker(repo_root / "EyeOfTerror" / "_temporary" / "IskandarKhayon" / "brigade" / "NoosphericExtractor", "noospheric_extractor")
+        run_worker = load_worker(repo_root / "EyeOfTerror" / "Scriptorium" / "Brigade" / "NoosphericExtractor", "noospheric_extractor")
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler("NoosphericExtractor", root, run_worker))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()

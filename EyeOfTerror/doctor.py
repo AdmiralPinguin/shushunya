@@ -170,7 +170,7 @@ def require_string_list(value: Any, message: str, errors: list[str], *, allow_em
 
 
 def check_source_playbooks(errors: list[str]) -> int:
-    playbook_dir = REPO_ROOT / "EyeOfTerror" / "_temporary" / "IskandarKhayon" / "brigade" / "Lexmechanic" / "playbooks"
+    playbook_dir = REPO_ROOT / "EyeOfTerror" / "Scriptorium" / "Brigade" / "Lexmechanic" / "playbooks"
     count = 0
     seen_names: set[str] = set()
     for path in sorted(playbook_dir.glob("*.json")):
@@ -207,7 +207,7 @@ def check_source_playbooks(errors: list[str]) -> int:
 
 
 def check_event_playbooks(errors: list[str]) -> int:
-    playbook_dir = REPO_ROOT / "EyeOfTerror" / "_temporary" / "IskandarKhayon" / "brigade" / "NoosphericExtractor" / "playbooks"
+    playbook_dir = REPO_ROOT / "EyeOfTerror" / "Scriptorium" / "Brigade" / "NoosphericExtractor" / "playbooks"
     count = 0
     for path in sorted(playbook_dir.glob("*.json")):
         count += 1

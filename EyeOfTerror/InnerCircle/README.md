@@ -8,7 +8,7 @@ Governor services should expose the standard contract in
 Active governors are currently being re-homed into explicit task-domain
 structures. See:
 
-- `EyeOfTerror/_temporary/IskandarKhayon/` for the parked lore governor.
+- `EyeOfTerror/Scriptorium/` for Iskandar Khayon and his lore brigade.
 - `EyeOfTerror/Mechanicum/Ceraxia/` for the active code-brigade governor
   materials.
 
