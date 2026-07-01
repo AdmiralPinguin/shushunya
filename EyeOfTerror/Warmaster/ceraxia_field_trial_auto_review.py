@@ -145,6 +145,40 @@ def senior_evidence_signals(manifest: dict[str, Any]) -> dict[str, Any]:
     return signals
 
 
+def principal_evidence_signals(manifest: dict[str, Any]) -> dict[str, Any]:
+    summary = manifest.get("principal_evidence_summary") if isinstance(manifest.get("principal_evidence_summary"), dict) else {}
+    checks = summary.get("checks") if isinstance(summary.get("checks"), dict) else {}
+    missing = summary.get("missing_checks") if isinstance(summary.get("missing_checks"), list) else []
+    expected_checks = {
+        "ready_and_approved",
+        "problem_and_options_recorded",
+        "investigation_depth",
+        "acceptance_and_impact_model",
+        "scope_and_rollback_control",
+        "verification_after_mutation",
+        "broad_or_repo_grade_coverage",
+        "review_gate_rich",
+        "architecture_and_package_recorded",
+        "diagnostic_or_repair_trace",
+        "repair_loop_accounted",
+    }
+    present = expected_checks.issubset(checks)
+    complete = (
+        summary.get("status") == "complete"
+        and present
+        and not missing
+        and all(checks.get(name) is True for name in expected_checks)
+    )
+    return {
+        "present": bool(summary),
+        "expected_checks_present": present,
+        "complete": complete,
+        "strength_count": int(summary.get("strength_count") or 0),
+        "check_count": int(summary.get("check_count") or 0),
+        "missing_checks": missing,
+    }
+
+
 def repair_evidence_signals(manifest: dict[str, Any]) -> dict[str, Any]:
     verification = manifest.get("verification_summary") if isinstance(manifest.get("verification_summary"), dict) else {}
     executed = manifest.get("verification_executed") if isinstance(manifest.get("verification_executed"), list) else []
@@ -196,6 +230,7 @@ def scores_for_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[st
     diagnostics = observed.get("diagnostics") if isinstance(observed.get("diagnostics"), dict) else {}
     manifest = manifest_for_packet(packet)
     senior_signals = senior_evidence_signals(manifest)
+    principal_signals = principal_evidence_signals(manifest)
     repair_signals = repair_evidence_signals(manifest)
     patch_source = str(observed.get("patch_source") or "")
     trial_class = str(packet.get("class") or "")
@@ -218,10 +253,24 @@ def scores_for_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[st
             "safety": 9.15,
             "reporting": 9.2,
         }
+    if difficulty == "expert" and principal_signals.get("complete") is True:
+        scores = {
+            "task_understanding": 9.6,
+            "repository_investigation": 9.7,
+            "multi_file_reasoning": 9.6,
+            "patch_correctness": 9.6,
+            "verification_discipline": 9.65,
+            "self_repair": 9.55,
+            "review_quality": 9.7,
+            "safety": 9.6,
+            "reporting": 9.6,
+        }
     if patch_source.startswith("test_inferred_") or patch_source.startswith("runtime_diagnostic_"):
         scores["repository_investigation"] += 1.0
         scores["review_quality"] += 0.5
     elif patch_source:
+        if difficulty == "expert":
+            raise ValueError("expert rolling evidence must be unshaped/test-inferred/runtime-diagnostic, not marker-shaped")
         scores["repository_investigation"] = min(scores["repository_investigation"], 7.5)
         failures.append("Evidence is executable but partly marker-shaped; autonomy is not fully proven.")
         followups.append("Prefer unshaped trials when raising the long-term engineering score.")
@@ -241,7 +290,7 @@ def scores_for_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[st
         scores["safety"] += 0.75
     if "api" in trial_class or "migration" in trial_class or "integration" in trial_class:
         scores["multi_file_reasoning"] += 0.5
-    cap = 9.4 if senior_signals.get("complete") is True else 9.0
+    cap = 9.75 if principal_signals.get("complete") is True else (9.4 if senior_signals.get("complete") is True else 9.0)
     scores = {dimension: min(round(value, 2), cap) for dimension, value in scores.items()}
     if repair_signals.get("complete") is True:
         scores["self_repair"] = min(round(max(scores["self_repair"], 9.75), 2), 9.75)
@@ -251,6 +300,7 @@ def scores_for_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[st
         f"honest_evidence passed, manifest is ready, verification executed "
         f"{verification.get('executed_count')} command(s), patch_source={patch_source}, "
         f"changed_files={len(changed_files)}, senior_evidence_complete={senior_signals.get('complete')}, "
+        f"principal_evidence_complete={principal_signals.get('complete')}, "
         f"repair_evidence_complete={repair_signals.get('complete')}. "
         f"Scores are capped at {cap} because this is evidence-based triage, not an external senior-code-review claim."
     )

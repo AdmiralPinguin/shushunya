@@ -2283,6 +2283,1541 @@
       "generalizable_failures": [],
       "follow_up_changes": [],
       "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-api-evolution",
+      "run_id": "ceraxia-expert-unshaped-api-evolution-20260702-084526",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260702-084526/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260702-084526/warmaster_runs/ceraxia-expert-unshaped-api-evolution-20260702-084526/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-api-evolution-20260702-084526 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_api_deprecation, changed_files=3, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-legacy-migration",
+      "run_id": "ceraxia-expert-legacy-migration-20260702-084548",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 8.0,
+        "repository_investigation": 7.75,
+        "multi_file_reasoning": 9.0,
+        "patch_correctness": 8.0,
+        "verification_discipline": 8.0,
+        "self_repair": 8.0,
+        "review_quality": 8.25,
+        "safety": 8.0,
+        "reporting": 8.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-legacy-migration-20260702-084548/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-legacy-migration-20260702-084548/warmaster_runs/ceraxia-expert-legacy-migration-20260702-084548/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-legacy-migration-20260702-084548 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=data_migration_marker_synthesis, changed_files=2, senior_evidence_complete=False, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.0 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [
+        "Evidence is executable but partly marker-shaped; autonomy is not fully proven."
+      ],
+      "follow_up_changes": [
+        "Prefer unshaped trials when raising the long-term engineering score.",
+        "Removed from rolling score because expert marker-shaped evidence is regression evidence, not autonomous expert evidence."
+      ],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-concurrency-cache",
+      "run_id": "ceraxia-expert-concurrency-cache-20260702-084549",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-concurrency-cache-20260702-084549/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-concurrency-cache-20260702-084549/warmaster_runs/ceraxia-expert-concurrency-cache-20260702-084549/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-public-api-deprecation",
+      "run_id": "ceraxia-expert-public-api-deprecation-20260702-084549",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-public-api-deprecation-20260702-084549/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-public-api-deprecation-20260702-084549/warmaster_runs/ceraxia-expert-public-api-deprecation-20260702-084549/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-security-boundary",
+      "run_id": "ceraxia-expert-security-boundary-20260702-084550",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 8.0,
+        "repository_investigation": 7.75,
+        "multi_file_reasoning": 8.75,
+        "patch_correctness": 8.0,
+        "verification_discipline": 8.0,
+        "self_repair": 8.0,
+        "review_quality": 8.25,
+        "safety": 8.75,
+        "reporting": 8.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-security-boundary-20260702-084550/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-security-boundary-20260702-084550/warmaster_runs/ceraxia-expert-security-boundary-20260702-084550/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-security-boundary-20260702-084550 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=edge_fix_marker_synthesis, changed_files=2, senior_evidence_complete=False, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.0 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [
+        "Evidence is executable but partly marker-shaped; autonomy is not fully proven."
+      ],
+      "follow_up_changes": [
+        "Prefer unshaped trials when raising the long-term engineering score.",
+        "Removed from rolling score because expert marker-shaped evidence is regression evidence, not autonomous expert evidence."
+      ],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-flaky-test-root-cause",
+      "run_id": "ceraxia-expert-flaky-test-root-cause-20260702-084550",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-flaky-test-root-cause-20260702-084550/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-flaky-test-root-cause-20260702-084550/warmaster_runs/ceraxia-expert-flaky-test-root-cause-20260702-084550/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-failed-review-revision",
+      "run_id": "ceraxia-expert-failed-review-revision-20260702-084551",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-failed-review-revision-20260702-084551/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-failed-review-revision-20260702-084551/warmaster_runs/ceraxia-expert-failed-review-revision-20260702-084551/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-api-evolution",
+      "run_id": "ceraxia-expert-unshaped-api-evolution-20260702-084551",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260702-084551/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260702-084551/warmaster_runs/ceraxia-expert-unshaped-api-evolution-20260702-084551/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-api-evolution-20260702-084551 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_api_deprecation, changed_files=3, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-data-migration",
+      "run_id": "ceraxia-expert-unshaped-data-migration-20260702-084552",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.4,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.15,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-data-migration-20260702-084552/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-data-migration-20260702-084552/warmaster_runs/ceraxia-expert-unshaped-data-migration-20260702-084552/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-data-migration-20260702-084552 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_data_migration, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-config-runtime",
+      "run_id": "ceraxia-expert-unshaped-config-runtime-20260702-084552",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.4,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.15,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-config-runtime-20260702-084552/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-config-runtime-20260702-084552/warmaster_runs/ceraxia-expert-unshaped-config-runtime-20260702-084552/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-config-runtime-20260702-084552 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_config_runtime, changed_files=3, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-design-choice",
+      "run_id": "ceraxia-expert-unshaped-design-choice-20260702-084553",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.4,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.15,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260702-084553/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260702-084553/warmaster_runs/ceraxia-expert-unshaped-design-choice-20260702-084553/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-design-choice-20260702-084553 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_design_choice_tax, changed_files=3, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-security-boundary",
+      "run_id": "ceraxia-expert-unshaped-security-boundary-20260702-084553",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.4,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.4,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-security-boundary-20260702-084553/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-security-boundary-20260702-084553/warmaster_runs/ceraxia-expert-unshaped-security-boundary-20260702-084553/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-security-boundary-20260702-084553 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_security_boundary, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-concurrency-cache",
+      "run_id": "ceraxia-expert-unshaped-concurrency-cache-20260702-084553",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.4,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.15,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-concurrency-cache-20260702-084553/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-concurrency-cache-20260702-084553/warmaster_runs/ceraxia-expert-unshaped-concurrency-cache-20260702-084553/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-concurrency-cache-20260702-084553 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_cache_concurrency, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-flaky-root-cause",
+      "run_id": "ceraxia-expert-unshaped-flaky-root-cause-20260702-084554",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.4,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.15,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260702-084554/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260702-084554/warmaster_runs/ceraxia-expert-unshaped-flaky-root-cause-20260702-084554/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-flaky-root-cause-20260702-084554 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_flaky_ordering, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-retry-policy",
+      "run_id": "ceraxia-expert-unshaped-retry-policy-20260702-084554",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.4,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.15,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260702-084554/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260702-084554/warmaster_runs/ceraxia-expert-unshaped-retry-policy-20260702-084554/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-retry-policy-20260702-084554 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_retry_policy, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-self-repair",
+      "run_id": "ceraxia-expert-unshaped-self-repair-20260702-084555",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.6,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.75,
+        "self_repair": 9.75,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260702-084555/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260702-084555/warmaster_runs/ceraxia-expert-unshaped-self-repair-20260702-084555/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-self-repair-20260702-084555 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_self_repair_seed, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=True. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-self-repair-batch-limit",
+      "run_id": "ceraxia-expert-unshaped-self-repair-batch-limit-20260702-084555",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.6,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.75,
+        "self_repair": 9.75,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-batch-limit-20260702-084555/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-batch-limit-20260702-084555/warmaster_runs/ceraxia-expert-unshaped-self-repair-batch-limit-20260702-084555/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-self-repair-batch-limit-20260702-084555 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_self_repair_seed, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=True. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-self-repair-retention-days",
+      "run_id": "ceraxia-expert-unshaped-self-repair-retention-days-20260702-084556",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.6,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.75,
+        "self_repair": 9.75,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-retention-days-20260702-084556/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-retention-days-20260702-084556/warmaster_runs/ceraxia-expert-unshaped-self-repair-retention-days-20260702-084556/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-self-repair-retention-days-20260702-084556 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_self_repair_seed, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=True. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-runtime-alias",
+      "run_id": "ceraxia-expert-unshaped-runtime-alias-20260702-084556",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.2,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.15,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-runtime-alias-20260702-084556/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-runtime-alias-20260702-084556/warmaster_runs/ceraxia-expert-unshaped-runtime-alias-20260702-084556/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-runtime-alias-20260702-084556 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=runtime_diagnostic_return_mismatch, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-pytest-runtime",
+      "run_id": "ceraxia-expert-unshaped-pytest-runtime-20260702-084557",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 8.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 8.0,
+        "patch_correctness": 8.0,
+        "verification_discipline": 8.0,
+        "self_repair": 8.0,
+        "review_quality": 8.75,
+        "safety": 8.0,
+        "reporting": 8.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-pytest-runtime-20260702-084557/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-pytest-runtime-20260702-084557/warmaster_runs/ceraxia-expert-unshaped-pytest-runtime-20260702-084557/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-pytest-runtime-20260702-084557 conservatively: honest_evidence passed, manifest is ready, verification executed 2 command(s), patch_source=runtime_diagnostic_return_mismatch, changed_files=1, senior_evidence_complete=False, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.0 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-repo-grade-workflow",
+      "run_id": "ceraxia-expert-repo-grade-workflow-20260702-084557",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-repo-grade-workflow-20260702-084557/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-repo-grade-workflow-20260702-084557/warmaster_runs/ceraxia-expert-repo-grade-workflow-20260702-084557/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-legacy-migration",
+      "run_id": "ceraxia-expert-legacy-migration-20260702-084915",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-legacy-migration-20260702-084915/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-legacy-migration-20260702-084915/warmaster_runs/ceraxia-expert-legacy-migration-20260702-084915/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-concurrency-cache",
+      "run_id": "ceraxia-expert-concurrency-cache-20260702-084915",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-concurrency-cache-20260702-084915/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-concurrency-cache-20260702-084915/warmaster_runs/ceraxia-expert-concurrency-cache-20260702-084915/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-public-api-deprecation",
+      "run_id": "ceraxia-expert-public-api-deprecation-20260702-084916",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-public-api-deprecation-20260702-084916/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-public-api-deprecation-20260702-084916/warmaster_runs/ceraxia-expert-public-api-deprecation-20260702-084916/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-security-boundary",
+      "run_id": "ceraxia-expert-security-boundary-20260702-084916",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-security-boundary-20260702-084916/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-security-boundary-20260702-084916/warmaster_runs/ceraxia-expert-security-boundary-20260702-084916/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-flaky-test-root-cause",
+      "run_id": "ceraxia-expert-flaky-test-root-cause-20260702-084917",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-flaky-test-root-cause-20260702-084917/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-flaky-test-root-cause-20260702-084917/warmaster_runs/ceraxia-expert-flaky-test-root-cause-20260702-084917/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-failed-review-revision",
+      "run_id": "ceraxia-expert-failed-review-revision-20260702-084917",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-failed-review-revision-20260702-084917/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-failed-review-revision-20260702-084917/warmaster_runs/ceraxia-expert-failed-review-revision-20260702-084917/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-api-evolution",
+      "run_id": "ceraxia-expert-unshaped-api-evolution-20260702-084918",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260702-084918/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260702-084918/warmaster_runs/ceraxia-expert-unshaped-api-evolution-20260702-084918/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-api-evolution-20260702-084918 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_api_deprecation, changed_files=3, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-data-migration",
+      "run_id": "ceraxia-expert-unshaped-data-migration-20260702-084918",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-data-migration-20260702-084918/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-data-migration-20260702-084918/warmaster_runs/ceraxia-expert-unshaped-data-migration-20260702-084918/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-data-migration-20260702-084918 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_data_migration, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-config-runtime",
+      "run_id": "ceraxia-expert-unshaped-config-runtime-20260702-084918",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.4,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.15,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-config-runtime-20260702-084918/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-config-runtime-20260702-084918/warmaster_runs/ceraxia-expert-unshaped-config-runtime-20260702-084918/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-config-runtime-20260702-084918 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_config_runtime, changed_files=3, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-design-choice",
+      "run_id": "ceraxia-expert-unshaped-design-choice-20260702-084919",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.4,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.15,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260702-084919/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260702-084919/warmaster_runs/ceraxia-expert-unshaped-design-choice-20260702-084919/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-design-choice-20260702-084919 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_design_choice_tax, changed_files=3, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-security-boundary",
+      "run_id": "ceraxia-expert-unshaped-security-boundary-20260702-084919",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.75,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-security-boundary-20260702-084919/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-security-boundary-20260702-084919/warmaster_runs/ceraxia-expert-unshaped-security-boundary-20260702-084919/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-security-boundary-20260702-084919 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_security_boundary, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-concurrency-cache",
+      "run_id": "ceraxia-expert-unshaped-concurrency-cache-20260702-084920",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-concurrency-cache-20260702-084920/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-concurrency-cache-20260702-084920/warmaster_runs/ceraxia-expert-unshaped-concurrency-cache-20260702-084920/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-concurrency-cache-20260702-084920 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_cache_concurrency, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-flaky-root-cause",
+      "run_id": "ceraxia-expert-unshaped-flaky-root-cause-20260702-084920",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.4,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.15,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260702-084920/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260702-084920/warmaster_runs/ceraxia-expert-unshaped-flaky-root-cause-20260702-084920/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-flaky-root-cause-20260702-084920 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_flaky_ordering, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-retry-policy",
+      "run_id": "ceraxia-expert-unshaped-retry-policy-20260702-084921",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.2,
+        "repository_investigation": 9.4,
+        "multi_file_reasoning": 9.4,
+        "patch_correctness": 9.2,
+        "verification_discipline": 9.3,
+        "self_repair": 9.0,
+        "review_quality": 9.4,
+        "safety": 9.15,
+        "reporting": 9.2
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260702-084921/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260702-084921/warmaster_runs/ceraxia-expert-unshaped-retry-policy-20260702-084921/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-retry-policy-20260702-084921 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_retry_policy, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.4 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-self-repair",
+      "run_id": "ceraxia-expert-unshaped-self-repair-20260702-084921",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.6,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.75,
+        "self_repair": 9.75,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260702-084921/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260702-084921/warmaster_runs/ceraxia-expert-unshaped-self-repair-20260702-084921/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-self-repair-20260702-084921 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_self_repair_seed, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=True. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-self-repair-batch-limit",
+      "run_id": "ceraxia-expert-unshaped-self-repair-batch-limit-20260702-084922",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.6,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.75,
+        "self_repair": 9.75,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-batch-limit-20260702-084922/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-batch-limit-20260702-084922/warmaster_runs/ceraxia-expert-unshaped-self-repair-batch-limit-20260702-084922/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-self-repair-batch-limit-20260702-084922 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_self_repair_seed, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=True. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-self-repair-retention-days",
+      "run_id": "ceraxia-expert-unshaped-self-repair-retention-days-20260702-084922",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.6,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.75,
+        "self_repair": 9.75,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-retention-days-20260702-084922/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-retention-days-20260702-084922/warmaster_runs/ceraxia-expert-unshaped-self-repair-retention-days-20260702-084922/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-self-repair-retention-days-20260702-084922 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_self_repair_seed, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=True. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-runtime-alias",
+      "run_id": "ceraxia-expert-unshaped-runtime-alias-20260702-084923",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.6,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-runtime-alias-20260702-084923/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-runtime-alias-20260702-084923/warmaster_runs/ceraxia-expert-unshaped-runtime-alias-20260702-084923/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-runtime-alias-20260702-084923 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=runtime_diagnostic_return_mismatch, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-pytest-runtime",
+      "run_id": "ceraxia-expert-unshaped-pytest-runtime-20260702-084923",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 8.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 8.0,
+        "patch_correctness": 8.0,
+        "verification_discipline": 8.0,
+        "self_repair": 8.0,
+        "review_quality": 8.75,
+        "safety": 8.0,
+        "reporting": 8.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-pytest-runtime-20260702-084923/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-pytest-runtime-20260702-084923/warmaster_runs/ceraxia-expert-unshaped-pytest-runtime-20260702-084923/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-pytest-runtime-20260702-084923 conservatively: honest_evidence passed, manifest is ready, verification executed 2 command(s), patch_source=runtime_diagnostic_return_mismatch, changed_files=1, senior_evidence_complete=False, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.0 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-repo-grade-workflow",
+      "run_id": "ceraxia-expert-repo-grade-workflow-20260702-084924",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-repo-grade-workflow-20260702-084924/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-repo-grade-workflow-20260702-084924/warmaster_runs/ceraxia-expert-repo-grade-workflow-20260702-084924/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-legacy-migration",
+      "run_id": "ceraxia-expert-legacy-migration-20260702-085122",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-legacy-migration-20260702-085122/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-legacy-migration-20260702-085122/warmaster_runs/ceraxia-expert-legacy-migration-20260702-085122/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-concurrency-cache",
+      "run_id": "ceraxia-expert-concurrency-cache-20260702-085122",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-concurrency-cache-20260702-085122/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-concurrency-cache-20260702-085122/warmaster_runs/ceraxia-expert-concurrency-cache-20260702-085122/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-public-api-deprecation",
+      "run_id": "ceraxia-expert-public-api-deprecation-20260702-085123",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-public-api-deprecation-20260702-085123/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-public-api-deprecation-20260702-085123/warmaster_runs/ceraxia-expert-public-api-deprecation-20260702-085123/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-security-boundary",
+      "run_id": "ceraxia-expert-security-boundary-20260702-085123",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-security-boundary-20260702-085123/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-security-boundary-20260702-085123/warmaster_runs/ceraxia-expert-security-boundary-20260702-085123/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-flaky-test-root-cause",
+      "run_id": "ceraxia-expert-flaky-test-root-cause-20260702-085124",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-flaky-test-root-cause-20260702-085124/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-flaky-test-root-cause-20260702-085124/warmaster_runs/ceraxia-expert-flaky-test-root-cause-20260702-085124/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-failed-review-revision",
+      "run_id": "ceraxia-expert-failed-review-revision-20260702-085124",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-failed-review-revision-20260702-085124/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-failed-review-revision-20260702-085124/warmaster_runs/ceraxia-expert-failed-review-revision-20260702-085124/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-api-evolution",
+      "run_id": "ceraxia-expert-unshaped-api-evolution-20260702-085125",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260702-085125/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260702-085125/warmaster_runs/ceraxia-expert-unshaped-api-evolution-20260702-085125/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-api-evolution-20260702-085125 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_api_deprecation, changed_files=3, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-data-migration",
+      "run_id": "ceraxia-expert-unshaped-data-migration-20260702-085125",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-data-migration-20260702-085125/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-data-migration-20260702-085125/warmaster_runs/ceraxia-expert-unshaped-data-migration-20260702-085125/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-data-migration-20260702-085125 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_data_migration, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-config-runtime",
+      "run_id": "ceraxia-expert-unshaped-config-runtime-20260702-085126",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-config-runtime-20260702-085126/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-config-runtime-20260702-085126/warmaster_runs/ceraxia-expert-unshaped-config-runtime-20260702-085126/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-config-runtime-20260702-085126 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_config_runtime, changed_files=3, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-design-choice",
+      "run_id": "ceraxia-expert-unshaped-design-choice-20260702-085126",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260702-085126/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260702-085126/warmaster_runs/ceraxia-expert-unshaped-design-choice-20260702-085126/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-design-choice-20260702-085126 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_design_choice_tax, changed_files=3, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-security-boundary",
+      "run_id": "ceraxia-expert-unshaped-security-boundary-20260702-085126",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.75,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-security-boundary-20260702-085126/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-security-boundary-20260702-085126/warmaster_runs/ceraxia-expert-unshaped-security-boundary-20260702-085126/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-security-boundary-20260702-085126 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_security_boundary, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-concurrency-cache",
+      "run_id": "ceraxia-expert-unshaped-concurrency-cache-20260702-085127",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-concurrency-cache-20260702-085127/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-concurrency-cache-20260702-085127/warmaster_runs/ceraxia-expert-unshaped-concurrency-cache-20260702-085127/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-concurrency-cache-20260702-085127 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_cache_concurrency, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-flaky-root-cause",
+      "run_id": "ceraxia-expert-unshaped-flaky-root-cause-20260702-085127",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260702-085127/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260702-085127/warmaster_runs/ceraxia-expert-unshaped-flaky-root-cause-20260702-085127/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-flaky-root-cause-20260702-085127 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_flaky_ordering, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-retry-policy",
+      "run_id": "ceraxia-expert-unshaped-retry-policy-20260702-085128",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.75,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260702-085128/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260702-085128/warmaster_runs/ceraxia-expert-unshaped-retry-policy-20260702-085128/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-retry-policy-20260702-085128 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=test_inferred_retry_policy, changed_files=2, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-self-repair",
+      "run_id": "ceraxia-expert-unshaped-self-repair-20260702-085128",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.6,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.75,
+        "self_repair": 9.75,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260702-085128/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260702-085128/warmaster_runs/ceraxia-expert-unshaped-self-repair-20260702-085128/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-self-repair-20260702-085128 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_self_repair_seed, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=True. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-self-repair-batch-limit",
+      "run_id": "ceraxia-expert-unshaped-self-repair-batch-limit-20260702-085129",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.6,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.75,
+        "self_repair": 9.75,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-batch-limit-20260702-085129/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-batch-limit-20260702-085129/warmaster_runs/ceraxia-expert-unshaped-self-repair-batch-limit-20260702-085129/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-self-repair-batch-limit-20260702-085129 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_self_repair_seed, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=True. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-self-repair-retention-days",
+      "run_id": "ceraxia-expert-unshaped-self-repair-retention-days-20260702-085129",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.6,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.75,
+        "self_repair": 9.75,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-retention-days-20260702-085129/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-self-repair-retention-days-20260702-085129/warmaster_runs/ceraxia-expert-unshaped-self-repair-retention-days-20260702-085129/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-self-repair-retention-days-20260702-085129 conservatively: honest_evidence passed, manifest is ready, verification executed 4 command(s), patch_source=test_inferred_self_repair_seed, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=True. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-runtime-alias",
+      "run_id": "ceraxia-expert-unshaped-runtime-alias-20260702-085130",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 9.6,
+        "repository_investigation": 9.75,
+        "multi_file_reasoning": 9.6,
+        "patch_correctness": 9.6,
+        "verification_discipline": 9.65,
+        "self_repair": 9.55,
+        "review_quality": 9.75,
+        "safety": 9.6,
+        "reporting": 9.6
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-runtime-alias-20260702-085130/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-runtime-alias-20260702-085130/warmaster_runs/ceraxia-expert-unshaped-runtime-alias-20260702-085130/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-runtime-alias-20260702-085130 conservatively: honest_evidence passed, manifest is ready, verification executed 3 command(s), patch_source=runtime_diagnostic_return_mismatch, changed_files=1, senior_evidence_complete=True, principal_evidence_complete=True, repair_evidence_complete=False. Scores are capped at 9.75 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-pytest-runtime",
+      "run_id": "ceraxia-expert-unshaped-pytest-runtime-20260702-085130",
+      "date": "2026-07-02",
+      "reviewer": "Codex conservative evidence review",
+      "scores": {
+        "task_understanding": 8.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 8.0,
+        "patch_correctness": 8.0,
+        "verification_discipline": 8.0,
+        "self_repair": 8.0,
+        "review_quality": 8.75,
+        "safety": 8.0,
+        "reporting": 8.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-pytest-runtime-20260702-085130/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-unshaped-pytest-runtime-20260702-085130/warmaster_runs/ceraxia-expert-unshaped-pytest-runtime-20260702-085130/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Automated evidence review accepted ceraxia-expert-unshaped-pytest-runtime-20260702-085130 conservatively: honest_evidence passed, manifest is ready, verification executed 2 command(s), patch_source=runtime_diagnostic_return_mismatch, changed_files=1, senior_evidence_complete=False, principal_evidence_complete=False, repair_evidence_complete=False. Scores are capped at 9.0 because this is evidence-based triage, not an external senior-code-review claim.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-repo-grade-workflow",
+      "run_id": "ceraxia-expert-repo-grade-workflow-20260702-085131",
+      "date": "2026-07-02",
+      "reviewer": "",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-repo-grade-workflow-20260702-085131/trial_result.json",
+        "EyeOfTerror/Warmaster/runs/field_trial_runs/ceraxia-expert-repo-grade-workflow-20260702-085131/warmaster_runs/ceraxia-expert-repo-grade-workflow-20260702-085131/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false
     }
   ]
 }

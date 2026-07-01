@@ -15,7 +15,7 @@ from ceraxia_field_trial_runner import (
     honest_evidence_summary,
     resolve_run_storage,
 )
-from ceraxia_field_trial_auto_review import repair_evidence_signals, senior_evidence_signals
+from ceraxia_field_trial_auto_review import principal_evidence_signals, repair_evidence_signals, senior_evidence_signals
 
 
 WARMASTER_ROOT = Path(__file__).resolve().parent
@@ -329,6 +329,48 @@ def main() -> int:
     }
     if senior_evidence_signals(senior_manifest).get("complete") is not True:
         raise AssertionError(f"Ceraxia senior evidence signals rejected explained rich manifest: {senior_evidence_signals(senior_manifest)}")
+    principal_manifest = json.loads(json.dumps(senior_manifest))
+    principal_manifest.update(
+        {
+            "status": "ready",
+            "approved": True,
+            "problem_statement": {"status": "recorded"},
+            "architecture_options": {"status": "recorded"},
+            "verification_strategy": {
+                "focused_commands": ["python -m unittest tests.test_config"],
+                "broad_commands": ["python -m unittest discover -s tests"],
+            },
+            "verification_summary": {"executed_count": 4, "blocker_count": 0},
+            "patch_scope_evidence": {"changed_files_outside_repo_map": [], "evidence": [{"path": "app/config.py"}]},
+            "patch_package": {
+                "kind": "ceraxia_patch_package",
+                "workflow_mode": "repo_grade",
+                "review_decision_record": [{"status": "pass"}],
+            },
+            "pr_summary": {"rollback": "revert changed files"},
+            "principal_evidence_summary": {
+                "status": "complete",
+                "checks": {
+                    "ready_and_approved": True,
+                    "problem_and_options_recorded": True,
+                    "investigation_depth": True,
+                    "acceptance_and_impact_model": True,
+                    "scope_and_rollback_control": True,
+                    "verification_after_mutation": True,
+                    "broad_or_repo_grade_coverage": True,
+                    "review_gate_rich": True,
+                    "architecture_and_package_recorded": True,
+                    "diagnostic_or_repair_trace": True,
+                    "repair_loop_accounted": True,
+                },
+                "missing_checks": [],
+                "strength_count": 11,
+                "check_count": 11,
+            },
+        }
+    )
+    if principal_evidence_signals(principal_manifest).get("complete") is not True:
+        raise AssertionError(f"Ceraxia principal evidence signals rejected complete manifest: {principal_evidence_signals(principal_manifest)}")
     unexplained_scope = json.loads(json.dumps(senior_manifest))
     unexplained_scope["diagnostics"] = {"source_path": "app/config.py"}
     if senior_evidence_signals(unexplained_scope).get("patch_scope_mapped") is True:

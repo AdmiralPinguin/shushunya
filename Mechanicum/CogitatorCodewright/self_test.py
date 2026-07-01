@@ -730,6 +730,13 @@ def main() -> int:
             or final.get("execution_report", {}).get("source_excerpt_count", 0) < 1
         ):
             raise AssertionError(f"final manifest should preserve implementation decision evidence: {final}")
+        principal = final.get("principal_evidence_summary", {})
+        if (
+            principal.get("status") != "partial"
+            or "verification_after_mutation" not in principal.get("missing_checks", [])
+            or principal.get("score_ceiling_hint") != 9.4
+        ):
+            raise AssertionError(f"focused explicit patch should expose partial principal evidence honestly: {final}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         target_repo = root / "repo"
@@ -2213,6 +2220,14 @@ def main() -> int:
             or review_checks.get("broad_verification_present") != "pass"
         ):
             raise AssertionError(f"repo-grade review should gate architecture and broad verification: {final}")
+        principal = final.get("principal_evidence_summary", {})
+        if (
+            principal.get("status") != "partial"
+            or "investigation_depth" not in principal.get("missing_checks", [])
+            or "scope_and_rollback_control" not in principal.get("missing_checks", [])
+            or principal.get("score_ceiling_hint") != 9.4
+        ):
+            raise AssertionError(f"marker-based repo-grade package should expose partial principal evidence honestly: {final}")
         plan_text = (root / "work" / "code" / "change_plan.md").read_text(encoding="utf-8")
         if "## Architecture Decision Record" not in plan_text or "## Repo-Grade Workflow" not in plan_text:
             raise AssertionError(f"repo-grade change plan should expose ADR and workflow sections: {plan_text}")
