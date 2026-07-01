@@ -14,6 +14,7 @@
     "final_report.md",
     "execution_readiness.json",
     "run_summary.json",
+    "evidence_matrix.json",
     "artifact_manifest.json",
     "run_audit.json"
   ],
@@ -49,6 +50,9 @@
       "type": "string"
     },
     "run_summary.json": {
+      "type": "string"
+    },
+    "evidence_matrix.json": {
       "type": "string"
     },
     "artifact_manifest.json": {

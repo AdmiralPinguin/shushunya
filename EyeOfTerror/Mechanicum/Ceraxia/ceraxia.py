@@ -58,6 +58,7 @@ REQUIRED_RUN_ARTIFACTS = [
     "final_report.md",
     "execution_readiness.json",
     "run_summary.json",
+    "evidence_matrix.json",
 ]
 
 
@@ -371,20 +372,27 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     )
     lines.extend(
         [
-        "## Artifacts",
-        "",
-        "- task.json",
-        "- planning_packet.json",
-        "- repo_survey.json",
-        "- implementation_brief.json",
-        "- worker_report.json",
-        "- verification_report.json",
-        "- review_gate.json",
-        "",
-        "## Next Action",
-        "",
-        artifacts["status"]["next_action"],
-        "",
+            "## Artifacts",
+            "",
+            "- task.json",
+            "- planning_packet.json",
+            "- repo_survey.json",
+            "- implementation_brief.json",
+            "- worker_report.json",
+            "- verification_report.json",
+            "- review_gate.json",
+            "- status.json",
+            "- final_report.md",
+            "- execution_readiness.json",
+            "- run_summary.json",
+            "- evidence_matrix.json",
+            "- artifact_manifest.json",
+            "- run_audit.json",
+            "",
+            "## Next Action",
+            "",
+            artifacts["status"]["next_action"],
+            "",
         ]
     )
     return "\n".join(lines)
@@ -508,6 +516,66 @@ def build_run_summary(
     }
 
 
+def build_evidence_matrix(
+    brief: dict[str, Any],
+    worker_report: dict[str, Any],
+    verification_report: dict[str, Any],
+    readiness: dict[str, Any],
+) -> dict[str, Any]:
+    quality = brief.get("quality_bar") if isinstance(brief.get("quality_bar"), dict) else {}
+    required_evidence = quality.get("must_have_evidence") if isinstance(quality.get("must_have_evidence"), list) else []
+    repo_evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
+    implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
+    rows: list[dict[str, Any]] = []
+    candidate_files = repo_evidence.get("candidate_files") if isinstance(repo_evidence.get("candidate_files"), list) else []
+    test_files = repo_evidence.get("test_files") if isinstance(repo_evidence.get("test_files"), list) else []
+    verification_commands = verification_report.get("commands_planned") if isinstance(verification_report.get("commands_planned"), list) else []
+    commands_executed = verification_report.get("commands_executed") if isinstance(verification_report.get("commands_executed"), list) else []
+    for requirement in required_evidence:
+        status = "planned"
+        sources: list[str] = []
+        requirement_text = str(requirement)
+        if "candidate files" in requirement_text and candidate_files:
+            status = "present"
+            sources.append("repo_survey.json:candidate_files")
+        if "verification command" in requirement_text and verification_commands:
+            status = "planned" if not commands_executed else "present"
+            sources.append("verification_report.json:commands_planned")
+        if "negative boundary" in requirement_text:
+            negative_tests = verification_report.get("negative_tests_required")
+            if isinstance(negative_tests, list) and negative_tests:
+                status = "planned" if not commands_executed else "present"
+                sources.append("verification_report.json:negative_tests_required")
+        if "backward compatibility" in requirement_text and test_files:
+            status = "planned" if not commands_executed else "present"
+            sources.append("repo_survey.json:test_files")
+        if readiness.get("decision") == "blocked" and not sources:
+            status = "blocked"
+        rows.append(
+            {
+                "requirement": requirement_text,
+                "status": status,
+                "sources": sources,
+                "blocking_reason": "no concrete evidence source mapped yet" if not sources else "",
+            }
+        )
+    return {
+        "kind": "ceraxia_evidence_matrix",
+        "contract_version": CONTRACT_VERSION,
+        "decision": readiness.get("decision"),
+        "required_evidence_count": len(required_evidence),
+        "present_count": sum(1 for row in rows if row["status"] == "present"),
+        "planned_count": sum(1 for row in rows if row["status"] == "planned"),
+        "blocked_count": sum(1 for row in rows if row["status"] == "blocked"),
+        "rows": rows,
+        "implementation_plan_sources": {
+            "target_files_to_inspect": implementation_plan.get("target_files_to_inspect", []),
+            "test_files_to_preserve": implementation_plan.get("test_files_to_preserve", []),
+            "verification_commands": implementation_plan.get("verification_commands", []),
+        },
+    }
+
+
 def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     run_id = f"ceraxia-{utc_stamp()}-{task_slug(task_input.task)}"
     run_dir = task_input.runs_root / run_id
@@ -580,6 +648,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_json(run_dir / "execution_readiness.json", readiness)
     summary = build_run_summary(run_id, run_dir, status, brief, review, readiness)
     write_json(run_dir / "run_summary.json", summary)
+    evidence_matrix = build_evidence_matrix(brief, worker_report, verification_report, readiness)
+    write_json(run_dir / "evidence_matrix.json", evidence_matrix)
     manifest = build_artifact_manifest(run_dir)
     write_json(run_dir / "artifact_manifest.json", manifest)
     audit = audit_run_package(run_dir)

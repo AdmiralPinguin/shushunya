@@ -59,6 +59,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                 "final_report.md",
                 "execution_readiness.json",
                 "run_summary.json",
+                "evidence_matrix.json",
                 "artifact_manifest.json",
                 "run_audit.json",
             ]
@@ -103,8 +104,14 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertFalse(summary["ready_for_execution"])
             self.assertEqual(summary["review_decision"], "dry_run_ready")
             self.assertIn("security", summary["task_kinds"])
+            evidence_matrix = json.loads((run_dir / "evidence_matrix.json").read_text(encoding="utf-8"))
+            self.assertEqual(evidence_matrix["kind"], "ceraxia_evidence_matrix")
+            self.assertGreaterEqual(evidence_matrix["required_evidence_count"], 1)
+            self.assertTrue(any(row["requirement"] == "candidate files are chosen from repository evidence" for row in evidence_matrix["rows"]))
+            self.assertIn("app.py", evidence_matrix["implementation_plan_sources"]["target_files_to_inspect"])
             final_report = (run_dir / "final_report.md").read_text(encoding="utf-8")
             self.assertIn("Execution readiness: blocked", final_report)
+            self.assertIn("- evidence_matrix.json", final_report)
             self.assertIn("BLOCKER: real CodeBrigade execution is not wired in this controller yet", final_report)
             self.assertIn("Verification commands planned:", final_report)
             self.assertIn("Verification commands executed: 0", final_report)
