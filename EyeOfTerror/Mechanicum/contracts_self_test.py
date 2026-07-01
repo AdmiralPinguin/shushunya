@@ -136,7 +136,25 @@ def assert_execution_policy_matches_result_schema() -> None:
         )
 
 
+def assert_contract_version_consts() -> None:
+    schema_paths = [
+        ROOT / "PlanningBrigade" / "planning_contract.schema.json",
+        ROOT / "Ceraxia" / "contracts" / "implementation_brief.schema.json",
+        ROOT / "Ceraxia" / "contracts" / "evidence_matrix.schema.json",
+        ROOT / "Ceraxia" / "contracts" / "run_summary.schema.json",
+        ROOT / "CodeBrigade" / "code_brigade_contract.schema.json",
+        ROOT / "CodeBrigade" / "execution_policy.schema.json",
+        ROOT / "CodeBrigade" / "execution_result.schema.json",
+    ]
+    for schema_path in schema_paths:
+        schema = load_schema(schema_path)
+        version_schema = schema.get("properties", {}).get("contract_version")
+        if not isinstance(version_schema, dict) or version_schema.get("const") != "eye-mechanicum.v1":
+            raise AssertionError(f"schema contract_version drifted in {schema_path.relative_to(ROOT)}")
+
+
 def main() -> int:
+    assert_contract_version_consts()
     packet = build_planning_packet(
         {
             "task": "почини security API migration compatibility pytest",
