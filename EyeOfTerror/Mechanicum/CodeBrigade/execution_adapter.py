@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from code_brigade_adapter import build_blocked_execution_result, validate_implementation_brief
+from execution_contract import build_blocked_execution_result
+from implementation_brief_contract import validate_implementation_brief
 
 
 def execute_implementation_brief(brief: dict[str, Any]) -> dict[str, Any]:
