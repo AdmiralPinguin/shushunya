@@ -797,6 +797,10 @@ def implementation_work_packages(
             "edit_scope": [],
             "verification_scope": ["no mutation; evidence only"],
             "risk_controls": ["block if candidate files or required path hints are missing"],
+            "blocking_policy": [
+                "block when repo survey has no candidate files",
+                "block when explicit path hints are missing or unsafe",
+            ],
             "handoff_criteria": ["candidate file decision is grounded in repo_survey.json"],
         },
         {
@@ -812,6 +816,11 @@ def implementation_work_packages(
                 "do not edit tests to mask broken source behavior",
                 "rollback or block when patch preflight fails",
             ],
+            "blocking_policy": [
+                "block when requested edit is outside allowed scope",
+                "block when patch preflight fails",
+                "block when the smallest coherent patch cannot satisfy the task contract",
+            ],
             "handoff_criteria": ["worker_report.json lists changed files, blockers, and execution result"],
         },
         {
@@ -823,6 +832,10 @@ def implementation_work_packages(
             "edit_scope": [],
             "verification_scope": targeted_commands + negative_tests,
             "risk_controls": ["do not treat syntax-only checks as behavior proof"],
+            "blocking_policy": [
+                "block when planned verification cannot run and no explicit blocker is recorded",
+                "block when high-risk surfaces have only partial executed evidence",
+            ],
             "handoff_criteria": ["verification_report.json names executed, skipped, failed, or blocked checks"],
         },
     ]
@@ -837,6 +850,10 @@ def implementation_work_packages(
                 "edit_scope": ["source files required by compatibility evidence"],
                 "verification_scope": [item for item in [*targeted_commands, *negative_tests] if "compat" in item.lower() or "api" in item.lower() or "schema" in item.lower() or "round" in item.lower()],
                 "risk_controls": ["block if compatibility breakage is not explicitly accepted"],
+                "blocking_policy": [
+                    "block when old/new compatibility evidence is missing",
+                    "block when public contract breakage is not explicitly accepted",
+                ],
                 "handoff_criteria": ["compatibility evidence is present or the migration break is explicit"],
             }
         )
@@ -851,6 +868,10 @@ def implementation_work_packages(
                 "edit_scope": ["boundary validation source files only"],
                 "verification_scope": [item for item in negative_tests if any(word in item for word in ("input", "path", "auth", "token"))],
                 "risk_controls": ["final review blocks without negative boundary evidence"],
+                "blocking_policy": [
+                    "block when negative boundary evidence is missing",
+                    "block when untrusted input flow is not identified",
+                ],
                 "handoff_criteria": ["negative_test_evidence.json or explicit blocker is returned"],
             }
         )
@@ -865,6 +886,10 @@ def implementation_work_packages(
                 "edit_scope": ["configuration loader, defaults, docs, or entrypoints required by the task"],
                 "verification_scope": [item for item in [*targeted_commands, *negative_tests] if any(word in item.lower() for word in ("config", "runtime", "startup", "env"))],
                 "risk_controls": ["block if missing/invalid config behavior is not proven or explicitly accepted"],
+                "blocking_policy": [
+                    "block when runtime default or environment override behavior is unknown",
+                    "block when missing/invalid config behavior is not proven or explicitly accepted",
+                ],
                 "handoff_criteria": ["runtime configuration evidence is present or blocked with a concrete reason"],
             }
         )
@@ -879,6 +904,10 @@ def implementation_work_packages(
                 "edit_scope": ["state coordination source files only"],
                 "verification_scope": [item for item in [*targeted_commands, *negative_tests] if any(word in item.lower() for word in ("parallel", "retry", "state", "cache"))],
                 "risk_controls": ["block if the race condition cannot be reproduced or bounded"],
+                "blocking_policy": [
+                    "block when shared-state boundary is unknown",
+                    "block when remaining race risk is not named",
+                ],
                 "handoff_criteria": ["remaining race risk is named in the review evidence"],
             }
         )
@@ -893,6 +922,10 @@ def implementation_work_packages(
                 "edit_scope": ["source files justified by the selected refactor strategy"],
                 "verification_scope": [item for item in targeted_commands if any(word in item.lower() for word in ("test", "compile", "lint", "type", "dependency", "behavior"))],
                 "risk_controls": ["block broad rewrites unless dependency evidence proves the scope"],
+                "blocking_policy": [
+                    "block when dependency impact is not mapped",
+                    "block when behavior preservation cannot be verified",
+                ],
                 "handoff_criteria": ["refactor evidence shows behavior preservation and dependency impact"],
             }
         )

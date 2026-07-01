@@ -18,7 +18,7 @@ Current capabilities:
 - execution forecast for CodeBrigade iterations, timeout, and escalation
 - risk register, quality bar, acceptance contract, and CodeBrigade handoff
 - implementation work packages with read scope, edit scope, verification
-  scope, risk controls, handoff criteria, and review order
+  scope, risk controls, blocking policy, handoff criteria, and review order
 - specialized work packages for compatibility, security boundaries, runtime
   configuration, concurrency runtime, and architecture refactors
 - package-to-surface traceability: every planned verification surface must be

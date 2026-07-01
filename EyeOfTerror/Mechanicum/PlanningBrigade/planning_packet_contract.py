@@ -191,12 +191,14 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
             continue
         if package.get("owner") != "CodeBrigade":
             problems.append(f"implementation work package must target CodeBrigade: {package.get('id', '<unknown>')}")
-        for key in ("id", "purpose", "impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+        for key in ("id", "purpose", "impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "blocking_policy", "handoff_criteria"):
             if key not in package:
                 problems.append(f"implementation work package missing {key}: {package.get('id', '<unknown>')}")
-        for key in ("impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+        for key in ("impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "blocking_policy", "handoff_criteria"):
             if not isinstance(package.get(key), list):
                 problems.append(f"implementation work package {key} must be a list: {package.get('id', '<unknown>')}")
+        if not package.get("blocking_policy"):
+            problems.append(f"implementation work package blocking_policy must be non-empty: {package.get('id', '<unknown>')}")
     if not isinstance(work_packages.get("review_order"), list) or len(work_packages.get("review_order", [])) != len(packages):
         problems.append("implementation work packages must include review_order for every package")
     planned_surfaces = {

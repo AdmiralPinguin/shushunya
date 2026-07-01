@@ -82,6 +82,7 @@ def valid_brief() -> dict:
                     "edit_scope": [],
                     "verification_scope": ["no mutation; evidence only"],
                     "risk_controls": ["block if candidate files are missing"],
+                    "blocking_policy": ["block when repo survey has no candidate files"],
                     "handoff_criteria": ["candidate file decision is grounded in repo_survey.json"],
                 },
                 {
@@ -93,6 +94,7 @@ def valid_brief() -> dict:
                     "edit_scope": ["candidate files identified by repository survey"],
                     "verification_scope": ["rerun failing test command"],
                     "risk_controls": ["do not edit tests to mask broken source behavior"],
+                    "blocking_policy": ["block when patch preflight fails"],
                     "handoff_criteria": ["worker_report.json lists changed files"],
                 },
                 {
@@ -104,6 +106,7 @@ def valid_brief() -> dict:
                     "edit_scope": [],
                     "verification_scope": ["rerun failing test command"],
                     "risk_controls": ["do not treat syntax-only checks as behavior proof"],
+                    "blocking_policy": ["block when planned verification cannot run"],
                     "handoff_criteria": ["verification_report.json names executed checks"],
                 },
             ],
@@ -443,6 +446,11 @@ def main() -> int:
     missing_work_packages_report = code_brigade_adapter.build_worker_report(missing_work_packages, dry_run=True)
     if missing_work_packages_report["status"] != "blocked" or not any("implementation_work_packages" in item for item in missing_work_packages_report["validation_problems"]):
         raise AssertionError(f"missing implementation work packages should be blocked: {missing_work_packages_report}")
+    missing_blocking_policy = valid_brief()
+    missing_blocking_policy["implementation_work_packages"]["packages"][0]["blocking_policy"] = []
+    missing_blocking_policy_report = code_brigade_adapter.build_worker_report(missing_blocking_policy, dry_run=True)
+    if missing_blocking_policy_report["status"] != "blocked" or not any("blocking_policy" in item for item in missing_blocking_policy_report["validation_problems"]):
+        raise AssertionError(f"missing package blocking policy should be blocked: {missing_blocking_policy_report}")
     uncovered_surface = valid_brief()
     uncovered_surface["implementation_work_packages"]["packages"][0]["impact_surfaces"] = ["source_behavior"]
     uncovered_surface["implementation_work_packages"]["packages"][2]["impact_surfaces"] = ["source_behavior"]

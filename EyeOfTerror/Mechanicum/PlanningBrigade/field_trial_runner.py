@@ -32,6 +32,9 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     work_packages = packet["implementation_work_packages"]["packages"]
     work_package_ids = [package["id"] for package in work_packages]
     require_subset(trial.get("expected_work_packages", []), work_package_ids, "implementation work packages", trial_id)
+    missing_blocking_policy = [package.get("id", "<unknown>") for package in work_packages if not package.get("blocking_policy")]
+    if missing_blocking_policy:
+        raise AssertionError(f"{trial_id}: work packages missing blocking_policy: {missing_blocking_policy}; packet={packet}")
     if packet["implementation_work_packages"]["review_order"] != work_package_ids:
         raise AssertionError(f"{trial_id}: work package review_order must match package order: {packet}")
     surfaces = [surface["surface"] for surface in packet["impact_analysis"]["surfaces"]]

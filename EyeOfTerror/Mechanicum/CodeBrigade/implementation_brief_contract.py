@@ -61,12 +61,14 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
                 continue
             if package.get("owner") != "CodeBrigade":
                 problems.append(f"brief implementation work package must target CodeBrigade: {package.get('id', '<unknown>')}")
-            for key in ("id", "purpose", "impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+            for key in ("id", "purpose", "impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "blocking_policy", "handoff_criteria"):
                 if key not in package:
                     problems.append(f"brief implementation work package missing {key}: {package.get('id', '<unknown>')}")
-            for key in ("impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+            for key in ("impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "blocking_policy", "handoff_criteria"):
                 if not isinstance(package.get(key), list):
                     problems.append(f"brief implementation work package {key} must be a list: {package.get('id', '<unknown>')}")
+            if not package.get("blocking_policy"):
+                problems.append(f"brief implementation work package blocking_policy must be non-empty: {package.get('id', '<unknown>')}")
     review_order = work_packages.get("review_order") if isinstance(work_packages.get("review_order"), list) else []
     if len(review_order) != len(packages):
         problems.append("brief implementation_work_packages review_order must cover every package")
