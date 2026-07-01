@@ -68,6 +68,9 @@ builds a `diagnostic_repair_queue` with impacted surfaces, work-package ids,
 read targets, stop conditions, and required repair evidence; `run_summary.json`
 and `final_report.md` expose its status and item count for the next CodeBrigade
 repair pass.
+With `--execute-diagnostic-repair`, Ceraxia also writes
+`diagnostic_repair_execution_result.json` from CodeBrigade's narrow guarded
+repair adapter.
 
 Current `EyeOfTerror/Mechanicum` planning quality gates:
 

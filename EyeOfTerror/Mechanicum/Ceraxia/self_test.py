@@ -528,6 +528,31 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["verification_output_signal_counts"], review["verification_sufficiency"]["output_signal_counts"])
             self.assertEqual(summary["verification_output_diagnostic_counts"], review["verification_sufficiency"]["output_diagnostic_counts"])
 
+    def test_execute_diagnostic_repair_writes_execution_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+            (repo / "test_app.py").write_text(
+                "import unittest\nimport app\n\n\nclass AppTest(unittest.TestCase):\n    def test_value(self):\n        self.assertEqual(app.value(), 2)\n\n\nif __name__ == '__main__':\n    unittest.main()\n",
+                encoding="utf-8",
+            )
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="почини failing unittest в `app.py`",
+                    repo_path=str(repo),
+                    execute_verification=True,
+                    execute_diagnostic_repair=True,
+                    verification_commands=("python -m unittest test_app.py",),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            run_dir = Path(result["run_dir"])
+            repair_execution = json.loads((run_dir / "diagnostic_repair_execution_result.json").read_text(encoding="utf-8"))
+            self.assertEqual(repair_execution["status"], "implemented")
+            self.assertEqual(repair_execution["changed_files"], ["app.py"])
+            self.assertIn("return 2", (repo / "app.py").read_text(encoding="utf-8"))
+
     def test_real_explicit_patch_pipeline_reaches_execution_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"

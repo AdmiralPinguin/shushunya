@@ -29,6 +29,7 @@ if CODE_BRIGADE_PATH not in sys.path:
 from planning_brigade import build_planning_packet  # noqa: E402
 from planning_packet_contract import validate_planning_packet as validate_planning_packet_contract  # noqa: E402
 from code_brigade_adapter import build_worker_report  # noqa: E402
+from diagnostic_repair_contract import execute_diagnostic_repair_request  # noqa: E402
 from execution_adapter import can_infer_guarded_natural_language_patch  # noqa: E402
 from verification_adapter import run_verification_commands  # noqa: E402
 from repo_survey import survey_repository  # noqa: E402
@@ -71,6 +72,7 @@ class CeraxiaInput:
     repo_path: str
     dry_run: bool = True
     execute_verification: bool = False
+    execute_diagnostic_repair: bool = False
     constraints: tuple[str, ...] = ()
     verification_commands: tuple[str, ...] = ()
     runs_root: Path = RUNS_ROOT
@@ -1769,6 +1771,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "task": task_input.task,
         "repo_path": task_input.repo_path,
         "dry_run": task_input.dry_run,
+        "execute_diagnostic_repair": task_input.execute_diagnostic_repair,
         "constraints": list(task_input.constraints),
         "verification_commands": list(task_input.verification_commands),
     }
@@ -1812,6 +1815,20 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_json(run_dir / "review_gate.json", review)
     repair_request = build_diagnostic_repair_request(run_id, brief, worker_report, verification_report, review)
     write_json(run_dir / "diagnostic_repair_request.json", repair_request)
+    repair_execution_result: dict[str, Any] = {
+        "kind": "code_brigade_execution_result",
+        "contract_version": CONTRACT_VERSION,
+        "status": "not_requested",
+        "changed_files": [],
+        "patch_summary": "",
+        "verification_commands_executed": [],
+        "blockers": [],
+        "rollback_notes": "",
+        "operation_results": [],
+    }
+    if task_input.execute_diagnostic_repair:
+        repair_execution_result = execute_diagnostic_repair_request(repair_request)
+        write_json(run_dir / "diagnostic_repair_execution_result.json", repair_execution_result)
 
     status["state"] = "finalized" if status["state"] == "reviewed" else "failed"
     status["lifecycle"].append(status["state"])
@@ -1824,6 +1841,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "verification_report": verification_report,
         "review_gate": review,
         "diagnostic_repair_request": repair_request,
+        "diagnostic_repair_execution_result": repair_execution_result,
     }
     write_json(run_dir / "status.json", status)
     readiness = build_execution_readiness(status, brief, worker_report, verification_report, review, task_input.dry_run)
@@ -1875,6 +1893,7 @@ def main() -> int:
     parser.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     parser.add_argument("--execute", action="store_true", help="Reserved for future real CodeBrigade execution.")
     parser.add_argument("--execute-verification", action="store_true", help="Run allowlisted verification commands while keeping source mutation dry-run.")
+    parser.add_argument("--execute-diagnostic-repair", action="store_true", help="Run the narrow CodeBrigade diagnostic repair adapter when review creates a repair request.")
     parser.add_argument("--constraint", action="append", default=[], help="Structured planning constraint. Can be repeated.")
     parser.add_argument("--verification-command", action="append", default=[], help="Structured verification command. Can be repeated.")
     args = parser.parse_args()
@@ -1884,6 +1903,7 @@ def main() -> int:
             repo_path=args.repo_path,
             dry_run=not args.execute,
             execute_verification=args.execute_verification,
+            execute_diagnostic_repair=args.execute_diagnostic_repair,
             constraints=tuple(args.constraint),
             verification_commands=tuple(args.verification_command),
             runs_root=args.runs_root,
