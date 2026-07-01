@@ -1,0 +1,19 @@
+{
+  "kind": "code_brigade_verification_policy",
+  "contract_version": "eye-mechanicum.v1",
+  "execution_mode": "allowlisted_no_shell",
+  "allowed_prefixes": [
+    ["python", "-m", "py_compile"],
+    ["python3", "-m", "py_compile"],
+    ["python", "-m", "pytest"],
+    ["python3", "-m", "pytest"],
+    ["pytest"],
+    ["git", "diff", "--check"]
+  ],
+  "path_token_guards": [
+    "block absolute path tokens",
+    "block parent traversal tokens",
+    "block option values that point outside the repository"
+  ],
+  "output_contract": "verification_execution.schema.json"
+}

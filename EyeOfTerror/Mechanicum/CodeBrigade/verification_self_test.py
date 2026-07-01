@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -8,6 +9,11 @@ import verification_adapter
 
 
 def main() -> int:
+    policy = json.loads((Path(__file__).resolve().parent / "verification_policy.json").read_text(encoding="utf-8"))
+    if policy["allowed_prefixes"] != verification_adapter.ALLOWED_PREFIXES:
+        raise AssertionError(f"verification policy allowlist drifted from runtime: {policy}")
+    if "block absolute path tokens" not in policy["path_token_guards"]:
+        raise AssertionError(f"verification policy should document path token guards: {policy}")
     with tempfile.TemporaryDirectory() as tmp:
         repo = Path(tmp)
         (repo / "ok.py").write_text("VALUE = 1\n", encoding="utf-8")
