@@ -943,25 +943,34 @@ def surface_verification_matrix(impact: dict[str, Any], verification: dict[str, 
     for surface in impact.get("surfaces", []):
         name = surface["surface"]
         covered_by: list[str] = []
+        output_evidence_required = ["command status is recorded", "output signal is classified"]
         blockers: list[str] = []
         if name == "source_behavior":
             covered_by.extend(check for check in checks if "behavior" in check)
+            output_evidence_required.append("source behavior command output is linked to this surface")
         elif name == "test_surface":
             covered_by.extend(check for check in checks if "test" in check)
             if not covered_by:
                 covered_by.append("changed-file syntax verification")
+            output_evidence_required.append("test command output is linked to this surface")
         elif name == "public_api_contract":
             covered_by.extend(item for item in [*checks, *negative_tests] if "API" in item or "api" in item or "schema" in item or "compatibility" in item)
+            output_evidence_required.append("API or schema command output is linked to this surface")
         elif name == "security_boundary":
             covered_by.extend(item for item in negative_tests if "input" in item or "path" in item or "auth" in item or "token" in item)
+            output_evidence_required.append("negative boundary output or explicit blocker is linked to this surface")
         elif name == "runtime_configuration":
             covered_by.extend(item for item in negative_tests if "config" in item)
+            output_evidence_required.append("runtime configuration output or explicit blocker is linked to this surface")
         elif name == "data_compatibility":
             covered_by.extend(item for item in negative_tests if "round-trip" in item or "round trip" in item or "mixed records" in item)
+            output_evidence_required.append("compatibility output or explicit blocker is linked to this surface")
         elif name == "concurrency_runtime":
             covered_by.extend(item for item in negative_tests if "parallel" in item or "retry" in item or "state" in item)
+            output_evidence_required.append("parallel or retry output or explicit blocker is linked to this surface")
         elif name == "internal_architecture":
             covered_by.extend(item for item in checks if "dependency" in item or "behavior" in item)
+            output_evidence_required.append("dependency or behavior output is linked to this surface")
         if not covered_by:
             blockers.append(f"no planned verification covers {name}")
         rows.append(
@@ -970,6 +979,7 @@ def surface_verification_matrix(impact: dict[str, Any], verification: dict[str, 
                 "risk": surface["risk"],
                 "evidence_needed": surface["evidence_needed"],
                 "covered_by": covered_by,
+                "output_evidence_required": output_evidence_required,
                 "blockers": blockers,
             }
         )

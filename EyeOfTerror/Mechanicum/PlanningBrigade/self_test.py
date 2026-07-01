@@ -291,6 +291,9 @@ def main() -> int:
         or security_packet["code_brigade_handoff"]["worker_output_contract"] != security_packet["worker_output_contract"]
     ):
         raise AssertionError(f"security planning packet is too weak: {security_packet}")
+    security_surface_row = next(row for row in security_packet["surface_verification_matrix"]["rows"] if row["surface"] == "security_boundary")
+    if "negative boundary output or explicit blocker is linked to this surface" not in security_surface_row["output_evidence_required"]:
+        raise AssertionError(f"security surface must require surface-specific output evidence: {security_surface_row}")
     selected_security_option = next(option for option in security_packet["design_options"]["options"] if option["name"] == security_packet["design_options"]["selected_strategy"])
     if selected_security_option["decision"] != "prefer":
         raise AssertionError(f"selected security strategy must be preferred: {security_packet}")
@@ -349,6 +352,9 @@ def main() -> int:
         or migration_packet["repo_survey_request"]["read_only"] is not True
     ):
         raise AssertionError(f"migration planning packet is incomplete: {migration_packet}")
+    data_surface_row = next(row for row in migration_packet["surface_verification_matrix"]["rows"] if row["surface"] == "data_compatibility")
+    if "compatibility output or explicit blocker is linked to this surface" not in data_surface_row["output_evidence_required"]:
+        raise AssertionError(f"migration surface must require surface-specific output evidence: {data_surface_row}")
     if "acceptance_trace_matrix" not in migration_packet["implementation_brief_blueprint"]["required_sections"]:
         raise AssertionError(f"migration brief blueprint must require acceptance trace matrix: {migration_packet}")
     if not migration_packet["acceptance_trace_matrix"]["complete"] or not any(
@@ -360,6 +366,11 @@ def main() -> int:
     for section in ["surface_verification_matrix", "survey_quality_gate", "execution_forecast", "expert_quality_plan", "implementation_work_packages", "planning_review_gate"]:
         if section not in required_brief_sections:
             raise AssertionError(f"implementation brief blueprint missing required section {section}: {migration_packet}")
+    weak_surface_packet = planning_brigade.build_planning_packet({"task": "почини public API pytest", "repo_path": "/repo"})
+    weak_surface_packet["surface_verification_matrix"]["rows"][0].pop("output_evidence_required", None)
+    weak_surface_problems = planning_brigade.validate_planning_packet(weak_surface_packet)
+    if not any("output evidence" in problem for problem in weak_surface_problems):
+        raise AssertionError(f"planning validator must block surface rows without output evidence: {weak_surface_problems}")
 
     combined_packet = planning_brigade.build_planning_packet(
         {

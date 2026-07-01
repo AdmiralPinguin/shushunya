@@ -69,6 +69,7 @@ def valid_brief() -> dict:
                     "risk": "medium",
                     "evidence_needed": ["candidate source files"],
                     "covered_by": ["targeted behavior verification"],
+                    "output_evidence_required": ["command status is recorded", "output signal is classified"],
                     "blockers": [],
                 },
                 {
@@ -76,6 +77,7 @@ def valid_brief() -> dict:
                     "risk": "medium",
                     "evidence_needed": ["existing tests"],
                     "covered_by": ["rerun failing test command"],
+                    "output_evidence_required": ["command status is recorded", "output signal is classified"],
                     "blockers": [],
                 }
             ],

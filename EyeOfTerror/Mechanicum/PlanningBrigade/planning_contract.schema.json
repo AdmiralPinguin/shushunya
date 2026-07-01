@@ -236,7 +236,23 @@
     },
     "surface_verification_matrix": {
       "type": "object",
-      "required": ["rows", "complete", "blockers"]
+      "required": ["rows", "complete", "blockers"],
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["surface", "risk", "evidence_needed", "covered_by", "output_evidence_required", "blockers"],
+            "properties": {
+              "output_evidence_required": {
+                "type": "array",
+                "minItems": 2,
+                "items": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
     },
     "risk_register": {
       "type": "object",

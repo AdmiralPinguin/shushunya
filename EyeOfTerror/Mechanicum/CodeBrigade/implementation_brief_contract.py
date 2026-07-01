@@ -36,8 +36,15 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
     if not isinstance(assumptions.get("replan_when_false"), list) or len(assumptions.get("replan_when_false", [])) < 3:
         problems.append("brief assumption_register.replan_when_false is required")
     surface_matrix = brief.get("surface_verification_matrix") if isinstance(brief.get("surface_verification_matrix"), dict) else {}
-    if not isinstance(surface_matrix.get("rows"), list) or not surface_matrix.get("rows"):
+    surface_rows = surface_matrix.get("rows") if isinstance(surface_matrix.get("rows"), list) else []
+    if not surface_rows:
         problems.append("brief surface_verification_matrix.rows is required")
+    for index, row in enumerate(surface_rows):
+        if not isinstance(row, dict):
+            problems.append(f"brief surface_verification_matrix row {index} is not an object")
+            continue
+        if not isinstance(row.get("output_evidence_required"), list) or len(row.get("output_evidence_required", [])) < 2:
+            problems.append(f"brief surface_verification_matrix row {index} must require output evidence")
     if surface_matrix.get("complete") is False:
         problems.append("brief surface_verification_matrix is incomplete")
     package_matrix = brief.get("surface_package_matrix") if isinstance(brief.get("surface_package_matrix"), dict) else {}

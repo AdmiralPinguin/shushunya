@@ -246,7 +246,17 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
         "surface_verification_matrix": {
             "complete": True,
             "blockers": [],
-            "rows": [{"surface": surface, "risk": "medium", "evidence_needed": ["failed command rerun"], "covered_by": ["rerun failed command"], "blockers": []} for surface in surfaces],
+            "rows": [
+                {
+                    "surface": surface,
+                    "risk": "medium",
+                    "evidence_needed": ["failed command rerun"],
+                    "covered_by": ["rerun failed command"],
+                    "output_evidence_required": ["command status is recorded", "output signal is classified", "repair command output is linked to this surface"],
+                    "blockers": [],
+                }
+                for surface in surfaces
+            ],
         },
         "surface_package_matrix": {
             "complete": True,

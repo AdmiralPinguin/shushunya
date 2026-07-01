@@ -230,6 +230,12 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
     surface_matrix = object_field(packet, "surface_verification_matrix")
     if not isinstance(surface_matrix.get("rows"), list) or not surface_matrix.get("rows"):
         problems.append("surface verification matrix must include rows")
+    for row in list_field(surface_matrix.get("rows")):
+        if not isinstance(row, dict):
+            problems.append("surface verification matrix row must be an object")
+            continue
+        if not list_field(row.get("output_evidence_required")):
+            problems.append(f"surface verification matrix row must require output evidence: {row.get('surface', '<unknown>')}")
     if not isinstance(surface_matrix.get("complete"), bool):
         problems.append("surface verification matrix must include complete boolean")
     if surface_matrix.get("complete") is False:
