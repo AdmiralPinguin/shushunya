@@ -1,0 +1,26 @@
+{
+  "kind": "code_brigade_execution_policy",
+  "contract_version": "eye-mechanicum.v1",
+  "default_mode": "dry_run_handoff",
+  "real_execution_status": "blocked_until_adapter_is_wired",
+  "mutation_preconditions": [
+    "implementation_brief validates against the CodeBrigade contract",
+    "implementation_plan lists target files, test files, dependency edges, and refusal conditions",
+    "repository survey evidence exists for candidate files before source mutation",
+    "verification strategy names focused checks before source mutation",
+    "dirty worktree or unknown ownership requires explicit blocker instead of overwrite"
+  ],
+  "forbidden_execution_shortcuts": [
+    "mutating source without repository survey evidence",
+    "editing tests to match a broken implementation",
+    "claiming readiness when verification is only planned",
+    "broad rewrite outside allowed_scope"
+  ],
+  "future_adapter_outputs": [
+    "changed_files",
+    "patch_summary",
+    "verification_commands_executed",
+    "blockers",
+    "rollback_notes"
+  ]
+}

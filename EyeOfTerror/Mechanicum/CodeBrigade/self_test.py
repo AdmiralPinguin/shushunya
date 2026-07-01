@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import code_brigade_adapter
 
 
@@ -40,6 +43,11 @@ def valid_brief() -> dict:
 
 
 def main() -> int:
+    policy = json.loads((Path(__file__).resolve().parent / "execution_policy.json").read_text(encoding="utf-8"))
+    if policy["real_execution_status"] != "blocked_until_adapter_is_wired":
+        raise AssertionError(f"execution policy must stay honest until real adapter exists: {policy}")
+    if "implementation_brief validates against the CodeBrigade contract" not in policy["mutation_preconditions"]:
+        raise AssertionError(f"execution policy must require brief validation before mutation: {policy}")
     dry_report = code_brigade_adapter.build_worker_report(valid_brief(), dry_run=True)
     if dry_report["status"] != "dry_run_handoff_ready" or not dry_report["implementation_brief_acknowledged"]:
         raise AssertionError(f"valid dry-run brief should be accepted: {dry_report}")
