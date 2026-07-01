@@ -19,9 +19,10 @@
       "name": "RepoSurveyor",
       "authority": "request and consume read-only repository evidence",
       "inputs": ["problem_statement", "task_triage"],
-      "outputs": ["repo_survey_request", "dependency_map"],
+      "outputs": ["repo_survey_request", "assumption_register", "dependency_map"],
       "quality_gates": [
         "repository survey request is read-only",
+        "task, repo, and verification assumptions are explicit",
         "explicit path hints are preserved",
         "critical path includes repo evidence before design"
       ],

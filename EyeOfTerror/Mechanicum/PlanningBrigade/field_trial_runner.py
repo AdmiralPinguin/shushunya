@@ -95,6 +95,10 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     trace_rows = acceptance_trace.get("rows") if isinstance(acceptance_trace.get("rows"), list) else []
     if acceptance_trace.get("complete") is not True or not trace_rows:
         raise AssertionError(f"{trial_id}: acceptance trace matrix must be complete: {packet}")
+    assumptions = packet.get("assumption_register") if isinstance(packet.get("assumption_register"), dict) else {}
+    assumption_rows = assumptions.get("assumptions") if isinstance(assumptions.get("assumptions"), list) else []
+    if len(assumption_rows) < 3:
+        raise AssertionError(f"{trial_id}: assumption register must include task, repo, and verification assumptions: {packet}")
     decision = packet["planning_review_gate"]["decision"]
     if decision != expected_decision:
         raise AssertionError(f"{trial_id}: expected decision {expected_decision}, got {decision}: {packet}")
@@ -123,6 +127,9 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
             if isinstance(package_id, str)
         ],
         "acceptance_trace_row_count": len(trace_rows),
+        "assumption_ids": [row["id"] for row in assumption_rows if isinstance(row, dict) and row.get("id")],
+        "assumption_replan_triggers": assumptions.get("replan_when_false", []) if isinstance(assumptions.get("replan_when_false"), list) else [],
+        "assumption_count": len(assumption_rows),
         "change_control_counts": {
             "allowed_change_intents": len(change_control["allowed_change_intents"]),
             "protected_invariants": len(change_control["protected_invariants"]),
@@ -149,6 +156,9 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     acceptance_trace_packages: Counter[str] = Counter()
     acceptance_trace_requirements: Counter[str] = Counter()
     acceptance_trace_row_counts: list[int] = []
+    assumption_ids: Counter[str] = Counter()
+    assumption_replan_triggers: Counter[str] = Counter()
+    assumption_counts: list[int] = []
     minimum_change_control_counts: dict[str, int] = {}
     scores: list[int] = []
     for result in results:
@@ -167,6 +177,10 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         acceptance_trace_requirements.update(str(item) for item in result.get("acceptance_trace_requirements", []))
         if isinstance(result.get("acceptance_trace_row_count"), int):
             acceptance_trace_row_counts.append(result["acceptance_trace_row_count"])
+        assumption_ids.update(str(item) for item in result.get("assumption_ids", []))
+        assumption_replan_triggers.update(str(item) for item in result.get("assumption_replan_triggers", []))
+        if isinstance(result.get("assumption_count"), int):
+            assumption_counts.append(result["assumption_count"])
         counts = result.get("change_control_counts") if isinstance(result.get("change_control_counts"), dict) else {}
         for key, value in counts.items():
             if isinstance(value, int):
@@ -188,6 +202,9 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "acceptance_trace_package_counts": dict(sorted(acceptance_trace_packages.items())),
         "acceptance_trace_requirement_counts": dict(sorted(acceptance_trace_requirements.items())),
         "minimum_acceptance_trace_row_count": min(acceptance_trace_row_counts) if acceptance_trace_row_counts else 0,
+        "assumption_id_counts": dict(sorted(assumption_ids.items())),
+        "assumption_replan_trigger_counts": dict(sorted(assumption_replan_triggers.items())),
+        "minimum_assumption_count": min(assumption_counts) if assumption_counts else 0,
         "minimum_change_control_counts": dict(sorted(minimum_change_control_counts.items())),
         "minimum_score": min(scores) if scores else 0,
         "average_score": round(sum(scores) / len(scores), 2) if scores else 0,
@@ -232,6 +249,7 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     post_proof_counts = summary.get("change_post_proof_counts") if isinstance(summary.get("change_post_proof_counts"), dict) else {}
     rollback_counts = summary.get("change_rollback_trigger_counts") if isinstance(summary.get("change_rollback_trigger_counts"), dict) else {}
     acceptance_trace_package_counts = summary.get("acceptance_trace_package_counts") if isinstance(summary.get("acceptance_trace_package_counts"), dict) else {}
+    assumption_id_counts = summary.get("assumption_id_counts") if isinstance(summary.get("assumption_id_counts"), dict) else {}
     minimum_change_counts = summary.get("minimum_change_control_counts") if isinstance(summary.get("minimum_change_control_counts"), dict) else {}
     missing_kinds = sorted(kind for kind in required_kinds if kind not in kind_counts)
     missing_surfaces = sorted(surface for surface in required_surfaces if surface not in surface_counts)
@@ -288,6 +306,19 @@ def assert_coverage(summary: dict[str, Any]) -> None:
             raise AssertionError(f"field trials are missing acceptance trace package coverage for {package}: {summary}")
     if int(summary.get("minimum_acceptance_trace_row_count") or 0) < 3:
         raise AssertionError(f"field trials have too few acceptance trace rows: {summary}")
+    required_assumptions = {
+        "task_contract_is_sufficient",
+        "repo_survey_can_find_relevant_surface",
+        "verification_can_prove_user_visible_behavior",
+        "security_boundary_is_traceable",
+        "compatibility_expectation_is_known",
+        "state_transition_risk_is_bounded",
+    }
+    missing_assumptions = sorted(assumption for assumption in required_assumptions if assumption not in assumption_id_counts)
+    if missing_assumptions:
+        raise AssertionError(f"field trials are missing assumption coverage: {missing_assumptions}")
+    if int(summary.get("minimum_assumption_count") or 0) < 3:
+        raise AssertionError(f"field trials have too few assumptions: {summary}")
 
 
 def main() -> int:

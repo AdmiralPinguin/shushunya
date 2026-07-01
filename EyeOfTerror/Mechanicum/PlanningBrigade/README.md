@@ -26,6 +26,8 @@ Current contract:
   unknowns, and definition of done.
 - `dependency_map` preserves the planning critical path from task contract to
   implementation brief.
+- `assumption_register` records task, repository, verification, and specialized
+  risk assumptions with validation sources and replan/blocker triggers.
 - `work_breakdown` orders the work phases, owners, dependencies, outputs, exit
   gates, parallel work opportunities, and stop conditions.
 - `impact_analysis` records affected engineering surfaces such as source
@@ -77,5 +79,5 @@ compatibility, architecture refactors, concurrency/cache failures, and unclear
 tasks that must be blocked. The runner also emits a coverage summary for task
 kinds, work phases, impacted surfaces, highest-risk surfaces, gate decisions,
 negative tests, implementation work packages, acceptance trace packages,
-change-control invariants, change-control post-change proofs, rollback
-triggers, and planning scores.
+assumption coverage, change-control invariants, change-control post-change
+proofs, rollback triggers, and planning scores.

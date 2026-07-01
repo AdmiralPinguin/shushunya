@@ -84,6 +84,8 @@
         "change_post_change_proofs",
         "acceptance_trace_rows",
         "acceptance_trace_complete",
+        "assumption_rows",
+        "assumption_replan_triggers",
         "caller_candidates",
         "contract_surface_candidates",
         "verification_commands"

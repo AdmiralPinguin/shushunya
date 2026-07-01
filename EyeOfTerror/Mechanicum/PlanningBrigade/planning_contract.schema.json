@@ -12,6 +12,7 @@
     "problem_statement",
     "task_triage",
     "repo_survey_request",
+    "assumption_register",
     "investigation_playbook",
     "dependency_map",
     "work_breakdown",
@@ -70,6 +71,26 @@
         "read_only": {"const": true},
         "expected_output": {"const": "repo_survey.json"},
         "handoff_to": {"const": "DesignStrategos"}
+      }
+    },
+    "assumption_register": {
+      "type": "object",
+      "required": ["assumptions", "replan_when_false", "handoff_to"],
+      "properties": {
+        "assumptions": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "object",
+            "required": ["id", "assumption", "risk_if_false", "validation_source", "blocks_when_false", "owner"]
+          }
+        },
+        "replan_when_false": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"type": "string"}
+        },
+        "handoff_to": {"const": "CodeBrigade"}
       }
     },
     "investigation_playbook": {

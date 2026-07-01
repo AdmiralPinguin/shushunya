@@ -104,6 +104,8 @@
         "surface_package_matrix_rows",
         "survey_quality_decision",
         "survey_quality_warnings",
+        "assumption_rows",
+        "assumption_replan_triggers",
         "acceptance_gates",
         "refusal_conditions"
       ],
@@ -392,6 +394,20 @@
         },
         "survey_quality_warnings": {
           "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "assumption_rows": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "object"
+          }
+        },
+        "assumption_replan_triggers": {
+          "type": "array",
+          "minItems": 3,
           "items": {
             "type": "string"
           }

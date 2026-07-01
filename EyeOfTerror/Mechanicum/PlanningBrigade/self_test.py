@@ -80,6 +80,7 @@ def main() -> int:
         or "prove_boundary" not in [phase["id"] for phase in security_packet["work_breakdown"]["phases"]]
         or "prove_boundary" not in next(phase for phase in security_packet["work_breakdown"]["phases"] if phase["id"] == "review_result")["depends_on"]
         or security_packet["impact_analysis"]["highest_risk_surface"] != "security_boundary"
+        or "security_boundary_is_traceable" not in [item["id"] for item in security_packet["assumption_register"]["assumptions"]]
         or security_packet["investigation_playbook"]["target"] != "CodeBrigade"
         or security_packet["investigation_playbook"]["read_stages"][0]["stage"] != "entrypoints_first"
         or "security_boundary_trace" not in [stage["stage"] for stage in security_packet["investigation_playbook"]["read_stages"]]
@@ -140,6 +141,7 @@ def main() -> int:
         or "prove_compatibility" not in [phase["id"] for phase in migration_packet["work_breakdown"]["phases"]]
         or migration_packet["impact_analysis"]["highest_risk_surface"] != "data_compatibility"
         or "runtime_configuration" not in [surface["surface"] for surface in migration_packet["impact_analysis"]["surfaces"]]
+        or "compatibility_expectation_is_known" not in [item["id"] for item in migration_packet["assumption_register"]["assumptions"]]
         or not migration_packet["surface_verification_matrix"]["complete"]
         or "data_compatibility" not in [row["surface"] for row in migration_packet["surface_verification_matrix"]["rows"]]
         or not any(row["surface"] == "runtime_configuration" and "runtime_configuration_package" in row["package_ids"] for row in migration_packet["surface_package_matrix"]["rows"])

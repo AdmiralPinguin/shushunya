@@ -21,6 +21,39 @@ def valid_brief() -> dict:
         "task_kinds": ["test_repair"],
         "risk_level": "medium",
         "selected_strategy": "minimal_design",
+        "assumption_register": {
+            "assumptions": [
+                {
+                    "id": "task_contract_is_sufficient",
+                    "assumption": "task text is sufficient",
+                    "risk_if_false": "wrong subset",
+                    "validation_source": "problem_statement.definition_of_done",
+                    "blocks_when_false": "task requires clarification before source mutation",
+                    "owner": "PlanningBrigade",
+                },
+                {
+                    "id": "repo_survey_can_find_relevant_surface",
+                    "assumption": "repo survey can find files",
+                    "risk_if_false": "scope guessed",
+                    "validation_source": "repo_survey.json",
+                    "blocks_when_false": "survey_quality_gate blocks implementation brief",
+                    "owner": "Ceraxia",
+                },
+                {
+                    "id": "verification_can_prove_user_visible_behavior",
+                    "assumption": "verification can prove behavior",
+                    "risk_if_false": "syntax-only proof",
+                    "validation_source": "verification_report.json",
+                    "blocks_when_false": "review_gate blocks finalization or requests replan",
+                    "owner": "CodeBrigade",
+                },
+            ],
+            "replan_when_false": [
+                "task requires clarification before source mutation",
+                "survey_quality_gate blocks implementation brief",
+                "review_gate blocks finalization or requests replan",
+            ],
+        },
         "allowed_scope": ["candidate files identified by repository survey"],
         "forbidden_approaches": ["hardcoded one-off behavior"],
         "expected_artifacts": ["worker_report.json", "verification_report.json", "final_report.md"],
@@ -231,6 +264,7 @@ def valid_brief() -> dict:
                 "investigation_playbook",
                 "change_control_plan",
                 "acceptance_trace_matrix",
+                "assumption_register",
             ],
             "mutation_preconditions": [
                 "implementation brief validates",
@@ -515,6 +549,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve surface package matrix: {plan}")
     if plan["survey_quality_decision"] != "passed":
         raise AssertionError(f"implementation plan should preserve survey quality gate: {plan}")
+    if len(plan["assumption_rows"]) < 3 or "review_gate blocks finalization or requests replan" not in plan["assumption_replan_triggers"]:
+        raise AssertionError(f"implementation plan should preserve assumption register: {plan}")
     if plan["survey_truncated"]:
         raise AssertionError(f"small survey fixture should not be marked truncated: {plan}")
     if plan["python_symbols_truncated"]:

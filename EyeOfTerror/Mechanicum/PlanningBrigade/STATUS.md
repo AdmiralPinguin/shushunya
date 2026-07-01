@@ -11,6 +11,8 @@ Current capabilities:
 - explicit path hint extraction
 - structured constraint and verification-command intake
 - read-only repository survey request shaping
+- assumption register for task, repository, verification, and specialized risk
+  assumptions, with validation sources and replan/blocker triggers
 - investigation playbook with ordered read stages, evidence questions,
   mutation blockers, and replan triggers for CodeBrigade
 - change-control planning with allowed change intents, protected invariants,
@@ -34,7 +36,7 @@ Current capabilities:
 - role contracts for the five planning roles
 - field trials for multiple task shapes with coverage gates for task kinds,
   impacted surfaces, implementation work packages, and change-control
-  invariant/proof plus acceptance-trace package coverage
+  invariant/proof, acceptance-trace package coverage, and assumption coverage
 - CLI validation mode
 
 Current boundaries:

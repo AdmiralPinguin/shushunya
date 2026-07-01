@@ -19,6 +19,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     package_matrix = brief.get("surface_package_matrix") if isinstance(brief.get("surface_package_matrix"), dict) else {}
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
+    assumptions = brief.get("assumption_register") if isinstance(brief.get("assumption_register"), dict) else {}
     acceptance = brief.get("acceptance_contract") if isinstance(brief.get("acceptance_contract"), dict) else {}
     acceptance_trace = brief.get("acceptance_trace_matrix") if isinstance(brief.get("acceptance_trace_matrix"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
@@ -118,6 +119,8 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "surface_package_matrix_rows": package_matrix.get("rows", []) if isinstance(package_matrix.get("rows"), list) else [],
         "survey_quality_decision": survey_quality.get("decision", ""),
         "survey_quality_warnings": survey_quality.get("warnings", []) if isinstance(survey_quality.get("warnings"), list) else [],
+        "assumption_rows": assumptions.get("assumptions", []) if isinstance(assumptions.get("assumptions"), list) else [],
+        "assumption_replan_triggers": assumptions.get("replan_when_false", []) if isinstance(assumptions.get("replan_when_false"), list) else [],
         "acceptance_gates": brief.get("acceptance_gates", []) if isinstance(brief.get("acceptance_gates"), list) else [],
         "refusal_conditions": [
             "brief validation fails",

@@ -22,6 +22,19 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief forbidden_approaches is required")
     if not isinstance(brief.get("required_verification"), dict):
         problems.append("brief required_verification is required")
+    assumptions = brief.get("assumption_register") if isinstance(brief.get("assumption_register"), dict) else {}
+    assumption_rows = assumptions.get("assumptions") if isinstance(assumptions.get("assumptions"), list) else []
+    if len(assumption_rows) < 3:
+        problems.append("brief assumption_register.assumptions are required")
+    for row in assumption_rows:
+        if not isinstance(row, dict):
+            problems.append("brief assumption_register row must be an object")
+            continue
+        for key in ("id", "assumption", "risk_if_false", "validation_source", "blocks_when_false", "owner"):
+            if key not in row:
+                problems.append(f"brief assumption_register row missing {key}")
+    if not isinstance(assumptions.get("replan_when_false"), list) or len(assumptions.get("replan_when_false", [])) < 3:
+        problems.append("brief assumption_register.replan_when_false is required")
     surface_matrix = brief.get("surface_verification_matrix") if isinstance(brief.get("surface_verification_matrix"), dict) else {}
     if not isinstance(surface_matrix.get("rows"), list) or not surface_matrix.get("rows"):
         problems.append("brief surface_verification_matrix.rows is required")
@@ -115,6 +128,8 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief implementation_brief_blueprint must require change_control_plan")
     if "acceptance_trace_matrix" not in blueprint.get("required_sections", []):
         problems.append("brief implementation_brief_blueprint must require acceptance_trace_matrix")
+    if "assumption_register" not in blueprint.get("required_sections", []):
+        problems.append("brief implementation_brief_blueprint must require assumption_register")
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
     if len(packages) < 3:

@@ -208,6 +208,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "task_kinds": triage.get("task_kinds") if isinstance(triage.get("task_kinds"), list) else [],
         "risk_level": triage.get("risk_level") if triage.get("risk_level") in {"low", "medium", "high"} else "high",
         "selected_strategy": packet.get("design_options", {}).get("selected_strategy", ""),
+        "assumption_register": packet.get("assumption_register", {}),
         "allowed_scope": [
             "candidate files identified by repository survey",
             "tests directly covering the requested behavior",
@@ -504,6 +505,30 @@ def acceptance_trace_sufficiency_from_worker(worker_report: dict[str, Any]) -> d
     }
 
 
+def assumption_sufficiency_from_worker(worker_report: dict[str, Any]) -> dict[str, Any]:
+    implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
+    rows = implementation_plan.get("assumption_rows") if isinstance(implementation_plan.get("assumption_rows"), list) else []
+    replan_triggers = implementation_plan.get("assumption_replan_triggers") if isinstance(implementation_plan.get("assumption_replan_triggers"), list) else []
+    blockers: list[str] = []
+    if len(rows) < 3:
+        blockers.append("assumption register has fewer than three assumptions")
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            blockers.append(f"assumption row {index} is not an object")
+            continue
+        for key in ("id", "assumption", "risk_if_false", "validation_source", "blocks_when_false", "owner"):
+            if key not in row:
+                blockers.append(f"assumption row {index} missing {key}")
+    if len(replan_triggers) < 3:
+        blockers.append("assumption register has too few replan triggers")
+    return {
+        "status": "complete" if not blockers else "blocked",
+        "assumption_count": len(rows),
+        "replan_trigger_count": len(replan_triggers),
+        "blockers": blockers,
+    }
+
+
 def review_gate(
     packet: dict[str, Any],
     brief: dict[str, Any],
@@ -584,6 +609,7 @@ def review_gate(
     investigation_sufficiency = investigation_sufficiency_from_worker(worker_report)
     change_control_sufficiency = change_control_sufficiency_from_worker(worker_report)
     acceptance_trace_sufficiency = acceptance_trace_sufficiency_from_worker(worker_report)
+    assumption_sufficiency = assumption_sufficiency_from_worker(worker_report)
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
     if not worker_report.get("implementation_brief_acknowledged", False):
@@ -602,6 +628,8 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "change control plan is incomplete: " + "; ".join(change_control_sufficiency["blockers"])})
     if acceptance_trace_sufficiency["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "acceptance trace matrix is incomplete: " + "; ".join(acceptance_trace_sufficiency["blockers"])})
+    if assumption_sufficiency["status"] == "blocked":
+        findings.append({"severity": "blocker", "finding": "assumption register is incomplete: " + "; ".join(assumption_sufficiency["blockers"])})
     if worker_report["dry_run"] and package_status_counts["planned"]:
         warnings.append({"severity": "warning", "finding": "work packages are planned but not implemented"})
     if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution", "passed"}:
@@ -653,6 +681,7 @@ def review_gate(
         "investigation_sufficiency": investigation_sufficiency,
         "change_control_sufficiency": change_control_sufficiency,
         "acceptance_trace_sufficiency": acceptance_trace_sufficiency,
+        "assumption_sufficiency": assumption_sufficiency,
         "checked_against": [
             "planning packet completeness",
             "strategy approval",
@@ -664,6 +693,7 @@ def review_gate(
             "investigation playbook coverage",
             "change control plan coverage",
             "acceptance traceability coverage",
+            "assumption register coverage",
             "worker report honesty",
         ],
     }
@@ -694,6 +724,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     investigation_sufficiency = review.get("investigation_sufficiency") if isinstance(review.get("investigation_sufficiency"), dict) else {}
     change_control_sufficiency = review.get("change_control_sufficiency") if isinstance(review.get("change_control_sufficiency"), dict) else {}
     acceptance_trace_sufficiency = review.get("acceptance_trace_sufficiency") if isinstance(review.get("acceptance_trace_sufficiency"), dict) else {}
+    assumption_sufficiency = review.get("assumption_sufficiency") if isinstance(review.get("assumption_sufficiency"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     blockers = readiness.get("blockers", [])
     warnings = review.get("warnings", [])
@@ -735,6 +766,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Protected invariants: {change_control_sufficiency.get('protected_invariant_count', 0)}",
         f"Acceptance trace status: {acceptance_trace_sufficiency.get('status', '')}",
         f"Acceptance trace rows: {acceptance_trace_sufficiency.get('row_count', 0)}",
+        f"Assumption register status: {assumption_sufficiency.get('status', '')}",
+        f"Assumptions tracked: {assumption_sufficiency.get('assumption_count', 0)}",
         f"Survey quality decision: {survey_quality.get('decision', '')}",
         f"Verification status: {verification['status']}",
         f"Surface verification status: {review.get('surface_verification_sufficiency', {}).get('status', '')}",
@@ -907,6 +940,11 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": "run_summary acceptance_trace_status disagrees with review_gate.json"})
     if summary.get("acceptance_trace_row_count", 0) != acceptance_trace_sufficiency.get("row_count", 0):
         findings.append({"severity": "blocker", "finding": "run_summary acceptance_trace_row_count disagrees with review_gate.json"})
+    assumption_sufficiency = review.get("assumption_sufficiency") if isinstance(review.get("assumption_sufficiency"), dict) else {}
+    if summary.get("assumption_register_status", "") != assumption_sufficiency.get("status", ""):
+        findings.append({"severity": "blocker", "finding": "run_summary assumption_register_status disagrees with review_gate.json"})
+    if summary.get("assumption_count", 0) != assumption_sufficiency.get("assumption_count", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary assumption_count disagrees with review_gate.json"})
     if summary.get("ready_for_execution") != (readiness.get("decision") == "ready_for_real_execution"):
         findings.append({"severity": "blocker", "finding": "run_summary ready_for_execution disagrees with execution_readiness.json"})
     if summary.get("worker_status") != worker_report.get("status"):
@@ -1004,6 +1042,9 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     acceptance_trace_rows = plan_sources.get("acceptance_trace_rows") if isinstance(plan_sources.get("acceptance_trace_rows"), list) else []
     if summary.get("acceptance_trace_row_count", 0) != len(acceptance_trace_rows):
         findings.append({"severity": "blocker", "finding": "run_summary acceptance_trace_row_count disagrees with evidence_matrix.json"})
+    assumption_rows = plan_sources.get("assumption_rows") if isinstance(plan_sources.get("assumption_rows"), list) else []
+    if summary.get("assumption_count", 0) != len(assumption_rows):
+        findings.append({"severity": "blocker", "finding": "run_summary assumption_count disagrees with evidence_matrix.json"})
     package_summary = evidence_matrix.get("implementation_work_package_summary") if isinstance(evidence_matrix.get("implementation_work_package_summary"), dict) else {}
     if package_summary:
         if package_summary.get("package_count") != summary.get("implementation_work_package_count"):
@@ -1120,6 +1161,7 @@ def build_run_summary(
     investigation_sufficiency = review.get("investigation_sufficiency") if isinstance(review.get("investigation_sufficiency"), dict) else {}
     change_control_sufficiency = review.get("change_control_sufficiency") if isinstance(review.get("change_control_sufficiency"), dict) else {}
     acceptance_trace_sufficiency = review.get("acceptance_trace_sufficiency") if isinstance(review.get("acceptance_trace_sufficiency"), dict) else {}
+    assumption_sufficiency = review.get("assumption_sufficiency") if isinstance(review.get("assumption_sufficiency"), dict) else {}
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
@@ -1174,6 +1216,9 @@ def build_run_summary(
         "acceptance_trace_status": acceptance_trace_sufficiency.get("status", ""),
         "acceptance_trace_row_count": acceptance_trace_sufficiency.get("row_count", 0),
         "acceptance_trace_blocked_row_count": acceptance_trace_sufficiency.get("blocked_row_count", 0),
+        "assumption_register_status": assumption_sufficiency.get("status", ""),
+        "assumption_count": assumption_sufficiency.get("assumption_count", 0),
+        "assumption_replan_trigger_count": assumption_sufficiency.get("replan_trigger_count", 0),
         "execution_readiness": readiness.get("decision"),
         "worker_status": worker_report.get("status"),
         "code_brigade_execution_policy_status": worker_report.get("execution_policy_status"),
@@ -1292,6 +1337,8 @@ def build_evidence_matrix(
             "change_post_change_proofs": implementation_plan.get("change_post_change_proofs", []),
             "acceptance_trace_rows": implementation_plan.get("acceptance_trace_rows", []),
             "acceptance_trace_complete": implementation_plan.get("acceptance_trace_complete", False),
+            "assumption_rows": implementation_plan.get("assumption_rows", []),
+            "assumption_replan_triggers": implementation_plan.get("assumption_replan_triggers", []),
             "verification_commands": implementation_plan.get("verification_commands", []),
             "scope_budget": implementation_plan.get("scope_budget", {}),
             "reverse_dependency_index": implementation_plan.get("reverse_dependency_index", {}),

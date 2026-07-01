@@ -184,6 +184,78 @@ def repo_survey_request(payload: dict[str, Any], triage: dict[str, Any]) -> dict
     }
 
 
+def assumption_register(triage: dict[str, Any], problem: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
+    kinds = set(triage.get("task_kinds", []))
+    assumptions: list[dict[str, Any]] = [
+        {
+            "id": "task_contract_is_sufficient",
+            "assumption": "the task text and structured constraints are sufficient to choose a narrow implementation strategy",
+            "risk_if_false": "CodeBrigade may solve a convenient subset instead of the user request",
+            "validation_source": "problem_statement.definition_of_done",
+            "blocks_when_false": "task requires clarification before source mutation",
+            "owner": "PlanningBrigade",
+        },
+        {
+            "id": "repo_survey_can_find_relevant_surface",
+            "assumption": "read-only repository survey can identify candidate files, entrypoints, tests, or concrete blockers",
+            "risk_if_false": "implementation scope would be guessed from task wording",
+            "validation_source": "repo_survey.json",
+            "blocks_when_false": "survey_quality_gate blocks implementation brief",
+            "owner": "Ceraxia",
+        },
+        {
+            "id": "verification_can_prove_user_visible_behavior",
+            "assumption": "planned verification can prove the changed user-visible behavior or name a concrete blocker",
+            "risk_if_false": "syntax-only checks could be mistaken for behavior proof",
+            "validation_source": "verification_report.json",
+            "blocks_when_false": "review_gate blocks finalization or requests replan",
+            "owner": "CodeBrigade",
+        },
+    ]
+    if "security" in kinds:
+        assumptions.append(
+            {
+                "id": "security_boundary_is_traceable",
+                "assumption": "untrusted input, boundary enforcement, and negative bypass case can be traced before mutation",
+                "risk_if_false": "security patch may close the wrong path",
+                "validation_source": "investigation_playbook.security_boundary_trace",
+                "blocks_when_false": "negative boundary work package blocks handoff",
+                "owner": "CodeBrigade",
+            }
+        )
+    if kinds & {"api_compatibility", "migration"}:
+        assumptions.append(
+            {
+                "id": "compatibility_expectation_is_known",
+                "assumption": "old, new, mixed, and caller-facing shapes can be identified before deciding compatibility behavior",
+                "risk_if_false": "migration may silently break existing callers or data",
+                "validation_source": "investigation_playbook.compatibility_shape_trace",
+                "blocks_when_false": "compatibility package blocks or returns to PlanningBrigade",
+                "owner": "CodeBrigade",
+            }
+        )
+    if "concurrency" in kinds:
+        assumptions.append(
+            {
+                "id": "state_transition_risk_is_bounded",
+                "assumption": "shared state, retry/cache boundary, and nondeterministic failure mode can be named",
+                "risk_if_false": "race-condition fix may be unverifiable or introduce a hidden state regression",
+                "validation_source": "investigation_playbook.state_transition_trace",
+                "blocks_when_false": "concurrency runtime package blocks final review",
+                "owner": "CodeBrigade",
+            }
+        )
+    return {
+        "role": "PlanningBrigade",
+        "risk_level": triage["risk_level"],
+        "path_hints": problem.get("explicit_path_hints", []),
+        "repo_focus": survey.get("focus", []),
+        "assumptions": assumptions,
+        "replan_when_false": [item["blocks_when_false"] for item in assumptions],
+        "handoff_to": "CodeBrigade",
+    }
+
+
 def investigation_playbook(triage: dict[str, Any], problem: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
     kinds = set(triage.get("task_kinds", []))
     stages: list[dict[str, Any]] = [
@@ -1014,6 +1086,7 @@ def implementation_brief_blueprint(
             "quality_bar",
             "acceptance_contract",
             "acceptance_trace_matrix",
+            "assumption_register",
             "repo_survey_evidence",
             "work_breakdown",
             "impact_analysis",
@@ -1566,6 +1639,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     triage = task_triage(payload)
     problem = problem_statement(payload, triage)
     survey = repo_survey_request(payload, triage)
+    assumptions = assumption_register(triage, problem, survey)
     playbook = investigation_playbook(triage, problem, survey)
     dependency = dependency_map(triage, survey)
     breakdown = work_breakdown(triage, dependency)
@@ -1595,6 +1669,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "problem_statement": problem,
         "task_triage": triage,
         "repo_survey_request": survey,
+        "assumption_register": assumptions,
         "investigation_playbook": playbook,
         "dependency_map": dependency,
         "work_breakdown": breakdown,

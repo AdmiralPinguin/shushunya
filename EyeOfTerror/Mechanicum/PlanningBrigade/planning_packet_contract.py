@@ -18,6 +18,7 @@ REQUIRED_PACKET_OBJECTS = [
     "problem_statement",
     "task_triage",
     "repo_survey_request",
+    "assumption_register",
     "investigation_playbook",
     "dependency_map",
     "work_breakdown",
@@ -78,6 +79,20 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("repo survey request must include focus areas")
     if survey.get("handoff_to") != "DesignStrategos":
         problems.append("repo survey request must hand off to DesignStrategos")
+
+    assumptions = object_field(packet, "assumption_register")
+    assumption_rows = list_field(assumptions.get("assumptions"))
+    if len(assumption_rows) < 3:
+        problems.append("assumption register must include assumptions")
+    for row in assumption_rows:
+        if not isinstance(row, dict):
+            problems.append("assumption register row must be an object")
+            continue
+        for key in ("id", "assumption", "risk_if_false", "validation_source", "blocks_when_false", "owner"):
+            if key not in row:
+                problems.append(f"assumption register row missing {key}")
+    if not isinstance(assumptions.get("replan_when_false"), list) or not assumptions.get("replan_when_false"):
+        problems.append("assumption register must include replan_when_false")
 
     playbook = object_field(packet, "investigation_playbook")
     stages = list_field(playbook.get("read_stages"))
@@ -254,6 +269,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("implementation brief blueprint must require change_control_plan")
     if "acceptance_trace_matrix" not in list_field(blueprint.get("required_sections")):
         problems.append("implementation brief blueprint must require acceptance_trace_matrix")
+    if "assumption_register" not in list_field(blueprint.get("required_sections")):
+        problems.append("implementation brief blueprint must require assumption_register")
 
     work_packages = object_field(packet, "implementation_work_packages")
     packages = list_field(work_packages.get("packages"))

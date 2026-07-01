@@ -12,6 +12,7 @@
     "task_kinds",
     "risk_level",
     "selected_strategy",
+    "assumption_register",
     "allowed_scope",
     "forbidden_approaches",
     "expected_artifacts",
@@ -72,6 +73,27 @@
     "selected_strategy": {
       "type": "string",
       "minLength": 1
+    },
+    "assumption_register": {
+      "type": "object",
+      "required": ["assumptions", "replan_when_false"],
+      "properties": {
+        "assumptions": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "object",
+            "required": ["id", "assumption", "risk_if_false", "validation_source", "blocks_when_false", "owner"]
+          }
+        },
+        "replan_when_false": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     },
     "allowed_scope": {
       "type": "array",
