@@ -80,11 +80,39 @@ def validate_planning_feedback_request(request: dict[str, Any]) -> list[str]:
     return problems
 
 
+def build_replan_payload(request: dict[str, Any]) -> dict[str, Any]:
+    findings = request.get("feedback_findings") if isinstance(request.get("feedback_findings"), list) else []
+    finding_text = [
+        str(item.get("finding") or "").strip()
+        for item in findings
+        if isinstance(item, dict) and str(item.get("finding") or "").strip()
+    ]
+    replan_focus = string_list(request.get("replan_focus"))
+    required_artifacts = string_list(request.get("required_return_artifacts"))
+    constraints = [
+        "treat Ceraxia planning feedback as authoritative replan input",
+        "preserve the original user task intent while repairing planning and handoff defects",
+        "return authority to Ceraxia after rebuilding the planning packet and implementation brief",
+    ]
+    constraints.extend(f"feedback finding: {item}" for item in finding_text)
+    constraints.extend(f"replan focus: {item}" for item in replan_focus)
+    constraints.extend(f"required return artifact: {item}" for item in required_artifacts)
+    return {
+        "task": str(request.get("task") or ""),
+        "repo_path": str(request.get("repo_path") or ""),
+        "constraints": constraints,
+        "requirements": replan_focus,
+        "source_run_id": str(request.get("run_id") or ""),
+        "source_feedback_status": str(request.get("status") or ""),
+    }
+
+
 def build_planning_feedback_intake(request: dict[str, Any]) -> dict[str, Any]:
     problems = validate_planning_feedback_request(request)
     findings = request.get("feedback_findings") if isinstance(request.get("feedback_findings"), list) else []
     replan_focus = string_list(request.get("replan_focus"))
     required_artifacts = string_list(request.get("required_return_artifacts"))
+    replan_payload = build_replan_payload(request)
     return {
         "kind": "planning_brigade_feedback_intake",
         "contract_version": CONTRACT_VERSION,
@@ -98,6 +126,7 @@ def build_planning_feedback_intake(request: dict[str, Any]) -> dict[str, Any]:
         "feedback_finding_count": len(findings),
         "replan_focus": replan_focus,
         "required_return_artifacts": required_artifacts,
+        "replan_payload": replan_payload,
         "recommended_planning_actions": [
             {
                 "action": "rebuild_planning_packet",

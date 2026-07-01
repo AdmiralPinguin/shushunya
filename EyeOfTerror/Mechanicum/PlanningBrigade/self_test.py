@@ -169,6 +169,17 @@ def assert_planning_feedback_intake() -> None:
         raise AssertionError(f"feedback intake must count findings: {intake}")
     if "planning_packet.json" not in intake["required_return_artifacts"]:
         raise AssertionError(f"feedback intake must preserve required return artifacts: {intake}")
+    replan_payload = intake["replan_payload"]
+    if replan_payload["task"] != feedback_request["task"] or replan_payload["repo_path"] != feedback_request["repo_path"]:
+        raise AssertionError(f"feedback intake must preserve original task and repo path: {intake}")
+    if not any("feedback finding:" in item for item in replan_payload["constraints"]):
+        raise AssertionError(f"feedback intake must turn findings into replan constraints: {intake}")
+    replan_packet = planning_brigade.build_planning_packet(replan_payload)
+    replan_problems = planning_brigade.validate_planning_packet(replan_packet)
+    if replan_problems:
+        raise AssertionError(f"replan payload should build a valid planning packet: {replan_problems}")
+    if not any("feedback finding:" in item for item in replan_packet["problem_statement"]["known_constraints"]):
+        raise AssertionError(f"replan packet must preserve feedback constraints: {replan_packet}")
 
     invalid_request = dict(feedback_request)
     invalid_request["status"] = "not_required"
@@ -194,6 +205,8 @@ def assert_planning_feedback_intake() -> None:
         cli_intake = json.loads(cli_feedback.stdout)
         if cli_intake["status"] != "replan_required":
             raise AssertionError(f"CLI feedback intake must require replan: {cli_intake}")
+        if not cli_intake.get("replan_payload", {}).get("constraints"):
+            raise AssertionError(f"CLI feedback intake must include replan payload: {cli_intake}")
 
 
 def main() -> int:

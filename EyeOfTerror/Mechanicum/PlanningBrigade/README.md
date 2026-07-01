@@ -26,7 +26,8 @@ future split cannot silently collide with active workers.
 import the contract gate without coupling review logic to packet generation.
 `planning_feedback_contract.py` owns the reverse intake from Ceraxia: it
 validates `planning_feedback_request.json` and turns review findings into a
-PlanningBrigade replan checklist that must hand authority back to Ceraxia.
+PlanningBrigade replan checklist plus a `replan_payload` suitable for rebuilding
+the packet, then hands authority back to Ceraxia.
 
 Current contract:
 

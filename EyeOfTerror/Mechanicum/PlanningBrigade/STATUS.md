@@ -47,7 +47,7 @@ Current capabilities:
   stop conditions, and repair evidence for CodeBrigade
 - PlanningBrigade now validates Ceraxia `planning_feedback_request.json`
   artifacts and turns planning/handoff review findings into a replan intake
-  checklist
+  checklist with a packet-ready `replan_payload`
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
 - planned read-only service interface contracts for future role split on
