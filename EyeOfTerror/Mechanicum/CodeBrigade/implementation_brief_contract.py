@@ -277,9 +277,11 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         if not isinstance(row, dict):
             problems.append("brief worker_output_contract package_result_contract row must be an object")
             continue
-        for key in ("package_id", "required_status_field", "allowed_statuses", "required_evidence_source", "acceptance_evidence", "blocker_contract"):
+        for key in ("package_id", "required_status_field", "allowed_statuses", "required_evidence_source", "acceptance_requirements", "acceptance_evidence", "blocker_contract"):
             if key not in row:
                 problems.append(f"brief worker_output_contract row missing {key}: {row.get('package_id', '<unknown>')}")
+        if not isinstance(row.get("acceptance_requirements"), list) or not row.get("acceptance_requirements"):
+            problems.append(f"brief worker_output_contract row acceptance_requirements are required: {row.get('package_id', '<unknown>')}")
         if not isinstance(row.get("acceptance_evidence"), list) or not row.get("acceptance_evidence"):
             problems.append(f"brief worker_output_contract row acceptance_evidence is required: {row.get('package_id', '<unknown>')}")
     if len(output_contract.get("final_review_inputs", []) if isinstance(output_contract.get("final_review_inputs"), list) else []) < 4:

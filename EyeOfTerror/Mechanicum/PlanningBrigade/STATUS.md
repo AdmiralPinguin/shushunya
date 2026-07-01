@@ -34,6 +34,8 @@ Current capabilities:
   ids and planned evidence
 - implementation work packages with read scope, edit scope, verification
   scope, risk controls, blocking policy, handoff criteria, and review order
+- worker-output package result rows carry acceptance requirements so each work
+  package remains tied to the task and quality contract it is meant to satisfy
 - implementation brief blueprint coverage for required CodeBrigade sections
   and mutation preconditions
 - package dependency graphs that force evidence and specialized boundary
@@ -64,8 +66,8 @@ Current capabilities:
   impacted surfaces, implementation work packages, and change-control
   invariant/proof, acceptance-trace package coverage, constraint-trace package
   coverage, definition-of-done trace completeness, assumption coverage,
-  surface-output evidence coverage, and implementation-brief blueprint
-  coverage
+  surface-output evidence coverage, worker-output acceptance requirement
+  coverage, and implementation-brief blueprint coverage
 - CLI validation mode
 
 Current boundaries:

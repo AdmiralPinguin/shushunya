@@ -25,7 +25,7 @@ COMPONENTS = {
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
         ],
-        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_definition_of_done_trace_audit_caller_contract_evidence_generic_edges_per_surface_verification_counts_work_package_review_worker_output_contract_audit_diagnostic_repair_requests_planning_feedback_requests_and_optional_guarded_repair_execution",
+        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_definition_of_done_trace_audit_caller_contract_evidence_generic_edges_per_surface_verification_counts_work_package_review_worker_output_acceptance_requirement_contract_audit_diagnostic_repair_requests_planning_feedback_requests_and_optional_guarded_repair_execution",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -48,7 +48,7 @@ COMPONENTS = {
             "VerificationArchitect/README.md",
             "RiskScribe/README.md",
         ],
-        "maturity": "contracted_planning_department_with_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_definition_of_done_trace_surface_output_evidence_implementation_brief_blueprint_field_trial_coverage_code_work_packages_worker_output_contracts_and_ceraxia_feedback_intake",
+        "maturity": "contracted_planning_department_with_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_definition_of_done_trace_surface_output_evidence_implementation_brief_blueprint_field_trial_coverage_code_work_packages_worker_output_acceptance_requirement_contracts_and_ceraxia_feedback_intake",
     },
     "CodeBrigade": {
         "kind": "implementation_brigade_contract",

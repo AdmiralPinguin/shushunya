@@ -399,7 +399,19 @@
           "minItems": 3,
           "items": {
             "type": "object",
-            "required": ["package_id", "required_status_field", "allowed_statuses", "required_evidence_source", "acceptance_evidence", "blocker_contract"]
+            "required": ["package_id", "required_status_field", "allowed_statuses", "required_evidence_source", "acceptance_requirements", "acceptance_evidence", "blocker_contract"],
+            "properties": {
+              "acceptance_requirements": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string"}
+              },
+              "acceptance_evidence": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string"}
+              }
+            }
           }
         },
         "final_review_inputs": {

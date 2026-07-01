@@ -223,6 +223,8 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
             raise AssertionError(f"{trial_id}: worker output contract row must be an object: {packet}")
         if not row.get("required_status_field") or not row.get("required_evidence_source"):
             raise AssertionError(f"{trial_id}: worker output contract row must require status and evidence source: {packet}")
+        if not isinstance(row.get("acceptance_requirements"), list) or not row.get("acceptance_requirements"):
+            raise AssertionError(f"{trial_id}: worker output contract row must include acceptance requirements: {packet}")
         if not isinstance(row.get("acceptance_evidence"), list) or not row.get("acceptance_evidence"):
             raise AssertionError(f"{trial_id}: worker output contract row must include acceptance evidence: {packet}")
         if len(row.get("blocker_contract", []) if isinstance(row.get("blocker_contract"), list) else []) < 3:
@@ -299,6 +301,11 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "brief_mutation_precondition_count": len(brief_mutation_preconditions),
         "worker_output_required_package_statuses": output_contract.get("required_package_statuses", []) if isinstance(output_contract.get("required_package_statuses"), list) else [],
         "worker_output_package_result_ids": output_row_package_ids,
+        "worker_output_acceptance_requirement_package_ids": [
+            row.get("package_id")
+            for row in output_rows
+            if isinstance(row, dict) and row.get("package_id") and isinstance(row.get("acceptance_requirements"), list) and row.get("acceptance_requirements")
+        ],
         "worker_output_required_report_count": len(output_contract.get("required_reports", [])) if isinstance(output_contract.get("required_reports"), list) else 0,
         "worker_output_final_review_input_count": len(output_contract.get("final_review_inputs", [])) if isinstance(output_contract.get("final_review_inputs"), list) else 0,
         "worker_output_failure_contract_count": len(output_contract.get("failure_contract", [])) if isinstance(output_contract.get("failure_contract"), list) else 0,
@@ -368,6 +375,7 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     brief_mutation_precondition_counts: list[int] = []
     worker_output_required_packages: Counter[str] = Counter()
     worker_output_result_packages: Counter[str] = Counter()
+    worker_output_acceptance_requirement_packages: Counter[str] = Counter()
     worker_output_required_report_counts: list[int] = []
     worker_output_final_review_input_counts: list[int] = []
     worker_output_failure_contract_counts: list[int] = []
@@ -432,6 +440,7 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
             brief_mutation_precondition_counts.append(result["brief_mutation_precondition_count"])
         worker_output_required_packages.update(str(item) for item in result.get("worker_output_required_package_statuses", []))
         worker_output_result_packages.update(str(item) for item in result.get("worker_output_package_result_ids", []))
+        worker_output_acceptance_requirement_packages.update(str(item) for item in result.get("worker_output_acceptance_requirement_package_ids", []))
         if isinstance(result.get("worker_output_required_report_count"), int):
             worker_output_required_report_counts.append(result["worker_output_required_report_count"])
         if isinstance(result.get("worker_output_final_review_input_count"), int):
@@ -499,6 +508,7 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "minimum_brief_mutation_precondition_count": min(brief_mutation_precondition_counts) if brief_mutation_precondition_counts else 0,
         "worker_output_required_package_counts": dict(sorted(worker_output_required_packages.items())),
         "worker_output_result_package_counts": dict(sorted(worker_output_result_packages.items())),
+        "worker_output_acceptance_requirement_package_counts": dict(sorted(worker_output_acceptance_requirement_packages.items())),
         "minimum_worker_output_required_report_count": min(worker_output_required_report_counts) if worker_output_required_report_counts else 0,
         "minimum_worker_output_final_review_input_count": min(worker_output_final_review_input_counts) if worker_output_final_review_input_counts else 0,
         "minimum_worker_output_failure_contract_count": min(worker_output_failure_contract_counts) if worker_output_failure_contract_counts else 0,
@@ -567,6 +577,7 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     brief_mutation_precondition_counts = summary.get("brief_mutation_precondition_counts") if isinstance(summary.get("brief_mutation_precondition_counts"), dict) else {}
     worker_output_required_package_counts = summary.get("worker_output_required_package_counts") if isinstance(summary.get("worker_output_required_package_counts"), dict) else {}
     worker_output_result_package_counts = summary.get("worker_output_result_package_counts") if isinstance(summary.get("worker_output_result_package_counts"), dict) else {}
+    worker_output_acceptance_requirement_counts = summary.get("worker_output_acceptance_requirement_package_counts") if isinstance(summary.get("worker_output_acceptance_requirement_package_counts"), dict) else {}
     surface_output_evidence_counts = summary.get("surface_output_evidence_required_counts") if isinstance(summary.get("surface_output_evidence_required_counts"), dict) else {}
     constraint_trace_package_counts = summary.get("constraint_trace_package_counts") if isinstance(summary.get("constraint_trace_package_counts"), dict) else {}
     assumption_id_counts = summary.get("assumption_id_counts") if isinstance(summary.get("assumption_id_counts"), dict) else {}
@@ -694,10 +705,13 @@ def assert_coverage(summary: dict[str, Any]) -> None:
         raise AssertionError(f"field trials have too few implementation brief mutation preconditions: {summary}")
     missing_worker_output_required_packages = sorted(package for package in required_work_packages if package not in worker_output_required_package_counts)
     missing_worker_output_result_packages = sorted(package for package in required_work_packages if package not in worker_output_result_package_counts)
+    missing_worker_output_acceptance_requirement_packages = sorted(package for package in required_work_packages if package not in worker_output_acceptance_requirement_counts)
     if missing_worker_output_required_packages:
         raise AssertionError(f"field trials are missing worker-output required package coverage: {missing_worker_output_required_packages}")
     if missing_worker_output_result_packages:
         raise AssertionError(f"field trials are missing worker-output result package coverage: {missing_worker_output_result_packages}")
+    if missing_worker_output_acceptance_requirement_packages:
+        raise AssertionError(f"field trials are missing worker-output acceptance requirement coverage: {missing_worker_output_acceptance_requirement_packages}")
     if int(summary.get("minimum_worker_output_required_report_count") or 0) < 3:
         raise AssertionError(f"field trials have too few worker-output required reports: {summary}")
     if int(summary.get("minimum_worker_output_final_review_input_count") or 0) < 4:

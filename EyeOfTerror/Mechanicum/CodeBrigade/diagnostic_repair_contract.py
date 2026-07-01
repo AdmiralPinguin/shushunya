@@ -205,6 +205,7 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
                 "required_status_field": "work_package_statuses[].status",
                 "allowed_statuses": ["planned", "implemented", "blocked"],
                 "required_evidence_source": "work_package_statuses[].evidence_source",
+                "acceptance_requirements": ["failed behavior is repaired or explicitly blocked"],
                 "acceptance_evidence": ["execution_result.json", "rerun failed command"],
                 "constraint_evidence": ["changed files exclude tests"],
                 "blocker_contract": [

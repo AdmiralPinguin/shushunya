@@ -467,9 +467,11 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         if not isinstance(row, dict):
             problems.append("worker output contract row must be an object")
             continue
-        for key in ("package_id", "required_status_field", "required_evidence_source", "acceptance_evidence", "blocker_contract"):
+        for key in ("package_id", "required_status_field", "required_evidence_source", "acceptance_requirements", "acceptance_evidence", "blocker_contract"):
             if key not in row:
                 problems.append(f"worker output contract row missing {key}: {row.get('package_id', '<unknown>')}")
+        if not list_field(row.get("acceptance_requirements")):
+            problems.append(f"worker output contract row needs acceptance requirements: {row.get('package_id', '<unknown>')}")
         if not list_field(row.get("acceptance_evidence")):
             problems.append(f"worker output contract row needs acceptance evidence: {row.get('package_id', '<unknown>')}")
     if not isinstance(output_contract.get("final_review_inputs"), list) or len(output_contract.get("final_review_inputs", [])) < 4:

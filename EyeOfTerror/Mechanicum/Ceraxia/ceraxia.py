@@ -977,6 +977,19 @@ def worker_output_contract_sufficiency_from_worker(worker_report: dict[str, Any]
         for row in contract_rows
         if isinstance(row, dict) and row.get("package_id")
     ]
+    rows_with_acceptance_requirements = 0
+    for row in contract_rows:
+        if not isinstance(row, dict):
+            blockers.append("worker output contract package row is not an object")
+            continue
+        package_id = str(row.get("package_id") or "<unknown>")
+        requirements = row.get("acceptance_requirements")
+        if isinstance(requirements, list) and requirements:
+            rows_with_acceptance_requirements += 1
+        else:
+            blockers.append(f"worker output contract package has no acceptance requirements: {package_id}")
+        if not isinstance(row.get("acceptance_evidence"), list) or not row.get("acceptance_evidence"):
+            blockers.append(f"worker output contract package has no acceptance evidence: {package_id}")
     if sorted(contract_package_ids) != sorted(str(item) for item in required_packages if str(item)):
         blockers.append("worker output contract package rows do not match required package statuses")
     return {
@@ -984,6 +997,7 @@ def worker_output_contract_sufficiency_from_worker(worker_report: dict[str, Any]
         "required_package_count": len(required_packages),
         "reported_package_count": len(package_statuses),
         "contract_row_count": len(contract_rows),
+        "rows_with_acceptance_requirements": rows_with_acceptance_requirements,
         "blockers": blockers,
     }
 
@@ -1498,6 +1512,8 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": "run_summary worker_output_reported_package_count disagrees with review_gate.json"})
     if summary.get("worker_output_contract_row_count", 0) != worker_output_contract_sufficiency.get("contract_row_count", 0):
         findings.append({"severity": "blocker", "finding": "run_summary worker_output_contract_row_count disagrees with review_gate.json"})
+    if summary.get("worker_output_acceptance_requirement_row_count", 0) != worker_output_contract_sufficiency.get("rows_with_acceptance_requirements", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary worker_output_acceptance_requirement_row_count disagrees with review_gate.json"})
     if planning_feedback_request.get("kind") != "ceraxia_planning_feedback_request":
         findings.append({"severity": "blocker", "finding": "planning_feedback_request.json has invalid kind"})
     if planning_feedback_request.get("target") != "PlanningBrigade":
@@ -1840,6 +1856,7 @@ def build_run_summary(
         "worker_output_required_package_count": worker_output_contract_sufficiency.get("required_package_count", 0),
         "worker_output_reported_package_count": worker_output_contract_sufficiency.get("reported_package_count", 0),
         "worker_output_contract_row_count": worker_output_contract_sufficiency.get("contract_row_count", 0),
+        "worker_output_acceptance_requirement_row_count": worker_output_contract_sufficiency.get("rows_with_acceptance_requirements", 0),
         "planning_feedback_request_status": planning_feedback.get("status", ""),
         "planning_feedback_finding_count": len(planning_feedback_findings),
         "execution_readiness": readiness.get("decision"),

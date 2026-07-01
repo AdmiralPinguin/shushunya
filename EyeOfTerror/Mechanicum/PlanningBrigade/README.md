@@ -73,8 +73,8 @@ Current contract:
   work packages with read scope, edit scope, verification scope, risk controls,
   blocking policy, handoff criteria, and a package dependency graph.
 - `worker_output_contract` tells CodeBrigade which reports, package statuses,
-  evidence sources, and blocker fields must return for Ceraxia to accept the
-  work.
+  package-level acceptance requirements, evidence sources, and blocker fields
+  must return for Ceraxia to accept the work.
 - `planning_feedback_contract.py` validates Ceraxia feedback when review
   findings point back at the planning packet or handoff contracts, then creates
   a replan intake with required return artifacts.

@@ -65,6 +65,7 @@
     "worker_output_required_package_count",
     "worker_output_reported_package_count",
     "worker_output_contract_row_count",
+    "worker_output_acceptance_requirement_row_count",
     "planning_feedback_request_status",
     "planning_feedback_finding_count",
     "execution_readiness",
@@ -294,6 +295,9 @@
       "type": "integer"
     },
     "worker_output_contract_row_count": {
+      "type": "integer"
+    },
+    "worker_output_acceptance_requirement_row_count": {
       "type": "integer"
     },
     "planning_feedback_request_status": {

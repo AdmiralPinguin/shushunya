@@ -1874,6 +1874,15 @@ def worker_output_contract(
                 if str(item)
             }
         )
+        acceptance_requirements = sorted(
+            {
+                str(row.get("requirement") or "")
+                for row in trace_rows
+                if isinstance(row, dict)
+                and package_id in (row.get("package_ids") if isinstance(row.get("package_ids"), list) else [])
+                and row.get("requirement")
+            }
+        )
         constraint_evidence = sorted(
             {
                 str(item)
@@ -1885,12 +1894,15 @@ def worker_output_contract(
         )
         if not acceptance_evidence:
             acceptance_evidence = ["worker_report.json", "verification_report.json"]
+        if not acceptance_requirements:
+            acceptance_requirements = ["package must explain why no acceptance requirement maps directly to it"]
         package_rows.append(
             {
                 "package_id": package_id,
                 "required_status_field": "work_package_statuses[].status",
                 "allowed_statuses": ["planned", "implemented", "blocked"],
                 "required_evidence_source": "work_package_statuses[].evidence_source",
+                "acceptance_requirements": acceptance_requirements,
                 "acceptance_evidence": acceptance_evidence,
                 "constraint_evidence": constraint_evidence,
                 "blocker_contract": [

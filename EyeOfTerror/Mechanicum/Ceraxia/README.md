@@ -108,8 +108,9 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
   repository, verification, and specialized risk assumptions remain visible to
   review and orchestration.
 - `worker_output_contract` is preserved through the CodeBrigade implementation
-  plan. The review gate blocks missing package statuses, missing evidence
-  sources, or contract rows that no longer match the planned work packages.
+  plan. The review gate blocks missing package statuses, missing package-level
+  acceptance requirements, missing evidence sources, or contract rows that no
+  longer match the planned work packages.
 - `planning_feedback_request.json` is a contracted return channel from Ceraxia
   back to PlanningBrigade when plan structure or handoff contracts need a replan.
 - `planning_review_gate` scores the packet and blocks unclear or structurally

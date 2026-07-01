@@ -338,6 +338,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["worker_output_required_package_count"], summary["implementation_work_package_count"])
             self.assertEqual(summary["worker_output_reported_package_count"], summary["implementation_work_package_count"])
             self.assertEqual(summary["worker_output_contract_row_count"], summary["implementation_work_package_count"])
+            self.assertEqual(summary["worker_output_acceptance_requirement_row_count"], summary["implementation_work_package_count"])
             self.assertEqual(summary["planning_feedback_request_status"], "not_required")
             self.assertEqual(summary["planning_feedback_finding_count"], 0)
             self.assertEqual(summary["worker_status"], "dry_run_handoff_ready")

@@ -399,6 +399,7 @@ def valid_brief() -> dict:
                     "required_status_field": "work_package_statuses[].status",
                     "allowed_statuses": ["planned", "implemented", "blocked"],
                     "required_evidence_source": "work_package_statuses[].evidence_source",
+                    "acceptance_requirements": ["the original user-visible request is satisfied"],
                     "acceptance_evidence": ["worker_report.json", "verification_report.json"],
                     "constraint_evidence": [],
                     "blocker_contract": [
@@ -412,6 +413,7 @@ def valid_brief() -> dict:
                     "required_status_field": "work_package_statuses[].status",
                     "allowed_statuses": ["planned", "implemented", "blocked"],
                     "required_evidence_source": "work_package_statuses[].evidence_source",
+                    "acceptance_requirements": ["the original user-visible request is satisfied"],
                     "acceptance_evidence": ["targeted behavior verification"],
                     "constraint_evidence": [],
                     "blocker_contract": [
@@ -425,6 +427,7 @@ def valid_brief() -> dict:
                     "required_status_field": "work_package_statuses[].status",
                     "allowed_statuses": ["planned", "implemented", "blocked"],
                     "required_evidence_source": "work_package_statuses[].evidence_source",
+                    "acceptance_requirements": ["the changed behavior is covered by targeted verification"],
                     "acceptance_evidence": ["targeted behavior verification"],
                     "constraint_evidence": ["targeted behavior verification"],
                     "blocker_contract": [
@@ -611,6 +614,7 @@ def valid_brief() -> dict:
                         "required_status_field": "work_package_statuses[].status",
                         "allowed_statuses": ["planned", "implemented", "blocked"],
                         "required_evidence_source": "work_package_statuses[].evidence_source",
+                        "acceptance_requirements": ["the original user-visible request is satisfied"],
                         "acceptance_evidence": ["worker_report.json", "verification_report.json"],
                         "constraint_evidence": [],
                         "blocker_contract": [
@@ -624,6 +628,7 @@ def valid_brief() -> dict:
                         "required_status_field": "work_package_statuses[].status",
                         "allowed_statuses": ["planned", "implemented", "blocked"],
                         "required_evidence_source": "work_package_statuses[].evidence_source",
+                        "acceptance_requirements": ["the original user-visible request is satisfied"],
                         "acceptance_evidence": ["targeted behavior verification"],
                         "constraint_evidence": [],
                         "blocker_contract": [
@@ -637,6 +642,7 @@ def valid_brief() -> dict:
                         "required_status_field": "work_package_statuses[].status",
                         "allowed_statuses": ["planned", "implemented", "blocked"],
                         "required_evidence_source": "work_package_statuses[].evidence_source",
+                        "acceptance_requirements": ["the changed behavior is covered by targeted verification"],
                         "acceptance_evidence": ["targeted behavior verification"],
                         "constraint_evidence": ["targeted behavior verification"],
                         "blocker_contract": [
@@ -829,6 +835,8 @@ def main() -> int:
         raise AssertionError(f"worker output contract should track package review order: {plan}")
     if not any(row["package_id"] == "minimal_patch_package" for row in plan["worker_output_contract"]["package_result_contract"]):
         raise AssertionError(f"worker output contract should require package result rows: {plan}")
+    if not all(row.get("acceptance_requirements") for row in plan["worker_output_contract"]["package_result_contract"]):
+        raise AssertionError(f"worker output contract should preserve package acceptance requirements: {plan}")
     if autonomous_request["repair_loop_contract"]["max_attempts"] != plan["diagnostic_repair_plan"]["max_repair_attempts"]:
         raise AssertionError(f"autonomous request should derive repair attempts from planning: {dry_report}")
     if autonomous_request["repair_loop_contract"]["must_read_before_edit"] != plan["diagnostic_repair_plan"]["read_before_repair"]:
