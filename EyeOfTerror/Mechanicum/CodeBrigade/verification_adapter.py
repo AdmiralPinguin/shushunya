@@ -35,6 +35,19 @@ def command_allowed(tokens: list[str]) -> bool:
     return any(tokens[: len(prefix)] == prefix for prefix in ALLOWED_PREFIXES)
 
 
+def command_has_unsafe_path_tokens(tokens: list[str]) -> bool:
+    for token in tokens:
+        if token.startswith("-"):
+            continue
+        if token.startswith("/") or token == ".." or token.startswith("../") or "/../" in token:
+            return True
+        if "=" in token:
+            _, value = token.split("=", 1)
+            if value.startswith("/") or value == ".." or value.startswith("../") or "/../" in value:
+                return True
+    return False
+
+
 def normalize_tokens(tokens: list[str]) -> list[str]:
     if tokens and tokens[0] in {"python", "python3"}:
         return [sys.executable, *tokens[1:]]
@@ -60,6 +73,10 @@ def run_verification_commands(commands: list[str], repo_path: str, execute: bool
         if not command_allowed(tokens):
             blockers.append(f"command is not allowlisted: {command}")
             results.append({"command": command, "status": "blocked", "returncode": None, "stdout": "", "stderr": "not allowlisted"})
+            continue
+        if command_has_unsafe_path_tokens(tokens):
+            blockers.append(f"command contains unsafe path token: {command}")
+            results.append({"command": command, "status": "blocked", "returncode": None, "stdout": "", "stderr": "unsafe path token"})
             continue
         if not execute:
             results.append({"command": command, "status": "planned", "returncode": None, "stdout": "", "stderr": ""})

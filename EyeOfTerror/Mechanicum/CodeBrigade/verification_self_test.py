@@ -23,6 +23,12 @@ def main() -> int:
         blocked = verification_adapter.run_verification_commands(["rm -rf ."], str(repo), execute=True)
         if blocked["status"] != "blocked" or not blocked["blockers"]:
             raise AssertionError(f"unsafe command should be blocked: {blocked}")
+        outside_path = verification_adapter.run_verification_commands(["python -m py_compile ../outside.py"], str(repo), execute=True)
+        if outside_path["status"] != "blocked" or "unsafe path token" not in outside_path["results"][0]["stderr"]:
+            raise AssertionError(f"allowlisted command with traversal path should be blocked: {outside_path}")
+        absolute_path = verification_adapter.run_verification_commands(["pytest /tmp/test_api.py"], str(repo), execute=False)
+        if absolute_path["status"] != "blocked" or "unsafe path token" not in absolute_path["results"][0]["stderr"]:
+            raise AssertionError(f"allowlisted command with absolute path should be blocked: {absolute_path}")
     print("[ok] Ceraxia CodeBrigade verification adapter")
     return 0
 
