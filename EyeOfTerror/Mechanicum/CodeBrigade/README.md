@@ -50,7 +50,10 @@ refusal conditions for the future real executor.
 It also includes `execution_policy_status`; this remains
 `blocked_until_adapter_is_wired` for dry-run handoffs and blocked execution
 requests, and switches to `real_execution_adapter_active` only when the explicit
-patch adapter reports implemented changes. Adapter results must satisfy
+or guarded inferred patch adapter reports implemented changes. Guarded inference
+is intentionally narrow: it only accepts explicit backtick-delimited file paths
+and edit literals for simple replacement or Python add-function operations.
+Adapter results must satisfy
 `execution_result.schema.json`: status, changed files, patch summary, executed
 verification commands, blockers, rollback notes, and per-operation patch
 results. Failed patch batches are rolled back and must preserve rollback

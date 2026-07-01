@@ -11,13 +11,23 @@ from typing import Any
 from planning_packet_contract import CONTRACT_VERSION, ROLE_ORDER, validate_planning_packet
 
 
+PATH_HINT_PATTERN = re.compile(r"(?<![\w/.-])([\w./-]+\.(?:py|js|ts|tsx|jsx|kt|java|go|rs|sh|json|toml|ya?ml|md|txt))(?![\w/.-])")
+
+
+def looks_like_path_hint(value: str) -> bool:
+    cleaned = value.strip()
+    if not cleaned or any(character.isspace() for character in cleaned):
+        return False
+    return bool(PATH_HINT_PATTERN.fullmatch(cleaned) or "/" in cleaned)
+
+
 def extract_path_hints(task: str) -> list[str]:
     hints: list[str] = []
     for value in re.findall(r"`([^`]+)`", task):
         cleaned = value.strip()
-        if cleaned and cleaned not in hints:
+        if looks_like_path_hint(cleaned) and cleaned not in hints:
             hints.append(cleaned)
-    for value in re.findall(r"(?<![\w/.-])([\w./-]+\.(?:py|js|ts|tsx|jsx|kt|java|go|rs|sh|json|toml|ya?ml|md|txt))(?![\w/.-])", task):
+    for value in PATH_HINT_PATTERN.findall(task):
         cleaned = value.strip()
         if cleaned and cleaned not in hints:
             hints.append(cleaned)

@@ -288,8 +288,8 @@ def valid_brief() -> dict:
 
 def main() -> int:
     policy = json.loads((Path(__file__).resolve().parent / "execution_policy.json").read_text(encoding="utf-8"))
-    if policy["real_execution_status"] != "explicit_patch_adapter_only":
-        raise AssertionError(f"execution policy must stay honest about narrow explicit patch execution: {policy}")
+    if policy["real_execution_status"] != "explicit_or_guarded_inference_adapter":
+        raise AssertionError(f"execution policy must stay honest about narrow guarded execution: {policy}")
     if "implementation_brief validates against the CodeBrigade contract" not in policy["mutation_preconditions"]:
         raise AssertionError(f"execution policy must require brief validation before mutation: {policy}")
     if "execution preflight passes before source mutation" not in policy["mutation_preconditions"]:
@@ -437,6 +437,56 @@ def main() -> int:
             raise AssertionError(f"explicit patch execution result should be implemented: {patch_report}")
         if "return True" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("explicit patch execution did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app() is True\n", encoding="utf-8")
+        inferred_replace_brief = valid_brief()
+        inferred_replace_brief["repo_path"] = tmp
+        inferred_replace_brief["task"] = "В файле `app.py` замени `return False` на `return True`."
+        inferred_replace_report = code_brigade_adapter.build_worker_report(inferred_replace_brief, dry_run=False)
+        if inferred_replace_report["status"] != "implemented" or inferred_replace_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"guarded inferred replace should report implemented changed files: {inferred_replace_report}")
+        if inferred_replace_report["execution_intent"]["mode"] != "guarded_inferred_patch_execution":
+            raise AssertionError(f"guarded inferred replace should expose inferred intent: {inferred_replace_report}")
+        if inferred_replace_report["autonomous_execution_request"]["status"] != "not_required":
+            raise AssertionError(f"guarded inferred replace should not request autonomous adapter: {inferred_replace_report}")
+        if "natural_language_simple_replace" not in inferred_replace_report["execution_result"]["patch_summary"]:
+            raise AssertionError(f"guarded inferred replace should expose patch source: {inferred_replace_report}")
+        if "return True" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("guarded inferred replace did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import value\n\ndef test_value():\n    assert value() == 42\n", encoding="utf-8")
+        inferred_add_brief = valid_brief()
+        inferred_add_brief["repo_path"] = tmp
+        inferred_add_brief["task"] = "В файле `app.py` добавь функцию `value`, возвращающую `42`."
+        inferred_add_report = code_brigade_adapter.build_worker_report(inferred_add_brief, dry_run=False)
+        if inferred_add_report["status"] != "implemented" or inferred_add_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"guarded inferred add-function should report implemented changed files: {inferred_add_report}")
+        if "def value():\n    return 42\n" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("guarded inferred add-function did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import value\n\ndef test_value():\n    assert value() == 42\n", encoding="utf-8")
+        duplicate_add_brief = valid_brief()
+        duplicate_add_brief["repo_path"] = tmp
+        duplicate_add_brief["task"] = "В файле `app.py` добавь функцию `value`, возвращающую `42`."
+        duplicate_add_report = code_brigade_adapter.build_worker_report(duplicate_add_brief, dry_run=False)
+        if duplicate_add_report["status"] != "blocked" or "function already exists" not in " ".join(duplicate_add_report["execution_result"]["blockers"]):
+            raise AssertionError(f"guarded inferred duplicate function should block: {duplicate_add_report}")
+        if Path(tmp, "app.py").read_text(encoding="utf-8").count("def value") != 1:
+            raise AssertionError("blocked duplicate add-function should not mutate app.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app() is True\n", encoding="utf-8")
+        ambiguous_brief = valid_brief()
+        ambiguous_brief["repo_path"] = tmp
+        ambiguous_brief["task"] = "почини app.py чтобы тест проходил"
+        ambiguous_report = code_brigade_adapter.build_worker_report(ambiguous_brief, dry_run=False)
+        if ambiguous_report["status"] != "blocked" or ambiguous_report["autonomous_execution_request"]["status"] != "required":
+            raise AssertionError(f"ambiguous unshaped task should still request autonomous adapter: {ambiguous_report}")
+        if "return False" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("ambiguous unshaped task should not mutate app.py")
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def total(left, right):\n    return left - right\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import total\n\ndef test_total():\n    assert total(2, 3) == 5\n", encoding="utf-8")

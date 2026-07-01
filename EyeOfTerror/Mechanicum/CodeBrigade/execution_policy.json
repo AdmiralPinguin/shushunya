@@ -2,12 +2,13 @@
   "kind": "code_brigade_execution_policy",
   "contract_version": "eye-mechanicum.v1",
   "default_mode": "dry_run_handoff",
-  "real_execution_status": "explicit_patch_adapter_only",
+  "real_execution_status": "explicit_or_guarded_inference_adapter",
   "mutation_preconditions": [
     "implementation_brief validates against the CodeBrigade contract",
     "implementation_plan lists target files, test files, dependency edges, and refusal conditions",
     "execution preflight passes before source mutation",
     "repository survey evidence exists for candidate files before source mutation",
+    "guarded natural-language inference requires explicit backtick-delimited path and edit literals",
     "verification strategy names focused checks before source mutation",
     "dirty worktree or unknown ownership requires explicit blocker instead of overwrite"
   ],

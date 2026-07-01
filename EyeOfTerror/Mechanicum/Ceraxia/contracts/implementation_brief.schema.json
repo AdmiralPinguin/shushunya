@@ -190,10 +190,10 @@
           "const": "eye-mechanicum.v1"
         },
         "mode": {
-          "enum": ["planning_handoff_only", "explicit_patch_execution"]
+          "enum": ["planning_handoff_only", "explicit_patch_execution", "guarded_inferred_patch_execution"]
         },
         "adapter_capability": {
-          "const": "explicit_patch_adapter_only"
+          "enum": ["explicit_patch_adapter_only", "explicit_or_guarded_inference_adapter"]
         },
         "explicit_patch_present": {
           "type": "boolean"

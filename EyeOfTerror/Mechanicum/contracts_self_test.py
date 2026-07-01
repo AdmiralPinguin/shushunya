@@ -219,7 +219,7 @@ def main() -> int:
     )
     review = review_gate(packet, brief, worker_report, verification)
     status = {"state": "finalized"}
-    readiness = build_execution_readiness(status, brief, verification, review, dry_run=True)
+    readiness = build_execution_readiness(status, brief, worker_report, verification, review, dry_run=True)
     evidence_matrix = build_evidence_matrix(brief, worker_report, verification, readiness)
     evidence_schema = ROOT / "Ceraxia" / "contracts" / "evidence_matrix.schema.json"
     assert_schema_subset(load_schema(evidence_schema), evidence_matrix, "evidence matrix")

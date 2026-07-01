@@ -858,6 +858,7 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
 def build_execution_readiness(
     status: dict[str, Any],
     brief: dict[str, Any],
+    worker_report: dict[str, Any],
     verification_report: dict[str, Any],
     review: dict[str, Any],
     dry_run: bool,
@@ -880,7 +881,7 @@ def build_execution_readiness(
         blockers.append("review gate did not approve the handoff")
     if dry_run:
         blockers.append("dry run requested; real CodeBrigade execution was intentionally skipped")
-    intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
+    intent = worker_report.get("execution_intent") if isinstance(worker_report.get("execution_intent"), dict) else {}
     if not dry_run and intent.get("real_execution_supported") is False:
         blockers.append("real CodeBrigade execution requires autonomous unshaped source-edit adapter")
     return {
@@ -906,7 +907,10 @@ def build_final_next_action(status: dict[str, Any], worker_report: dict[str, Any
 
 
 def build_maturity_label(worker_report: dict[str, Any], readiness: dict[str, Any]) -> str:
+    intent = worker_report.get("execution_intent") if isinstance(worker_report.get("execution_intent"), dict) else {}
     if readiness.get("decision") == "ready_for_real_execution" and worker_report.get("status") == "implemented":
+        if intent.get("mode") == "guarded_inferred_patch_execution":
+            return "guarded_inferred_patch_execution_controller"
         return "explicit_patch_execution_controller"
     if worker_report.get("status") == "dry_run_handoff_ready":
         return "dry_run_controller_with_code_brigade_handoff_adapter"
@@ -1180,7 +1184,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "review_gate": review,
     }
     write_json(run_dir / "status.json", status)
-    readiness = build_execution_readiness(status, brief, verification_report, review, task_input.dry_run)
+    readiness = build_execution_readiness(status, brief, worker_report, verification_report, review, task_input.dry_run)
     artifacts["execution_readiness"] = readiness
     write_text(run_dir / "final_report.md", final_report_markdown(run_id, artifacts))
     write_json(run_dir / "execution_readiness.json", readiness)

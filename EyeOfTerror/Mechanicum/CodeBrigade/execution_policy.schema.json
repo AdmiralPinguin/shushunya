@@ -22,7 +22,7 @@
       "const": "dry_run_handoff"
     },
     "real_execution_status": {
-      "enum": ["blocked_until_adapter_is_wired", "explicit_patch_adapter_only", "real_execution_adapter_active"]
+      "enum": ["blocked_until_adapter_is_wired", "explicit_patch_adapter_only", "explicit_or_guarded_inference_adapter", "real_execution_adapter_active"]
     },
     "mutation_preconditions": {
       "type": "array",

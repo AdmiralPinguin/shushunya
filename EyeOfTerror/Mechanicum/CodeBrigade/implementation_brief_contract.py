@@ -161,9 +161,9 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief execution_intent kind is required")
     if execution_intent.get("contract_version") != CONTRACT_VERSION:
         problems.append("brief execution_intent contract_version is unsupported")
-    if execution_intent.get("mode") not in {"planning_handoff_only", "explicit_patch_execution"}:
+    if execution_intent.get("mode") not in {"planning_handoff_only", "explicit_patch_execution", "guarded_inferred_patch_execution"}:
         problems.append("brief execution_intent.mode is required")
-    if execution_intent.get("adapter_capability") != "explicit_patch_adapter_only":
+    if execution_intent.get("adapter_capability") not in {"explicit_patch_adapter_only", "explicit_or_guarded_inference_adapter"}:
         problems.append("brief execution_intent.adapter_capability is required")
     if not isinstance(execution_intent.get("explicit_patch_present"), bool):
         problems.append("brief execution_intent.explicit_patch_present is required")

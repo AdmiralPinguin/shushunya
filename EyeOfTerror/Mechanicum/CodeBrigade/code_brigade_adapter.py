@@ -111,8 +111,9 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_autonomous_execution_request(brief: dict[str, Any], implementation_plan: dict[str, Any]) -> dict[str, Any]:
-    execution_intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
+def build_autonomous_execution_request(brief: dict[str, Any], implementation_plan: dict[str, Any], execution_intent: dict[str, Any] | None = None) -> dict[str, Any]:
+    if execution_intent is None:
+        execution_intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
     return {
         "kind": "code_brigade_autonomous_execution_request",
         "contract_version": CONTRACT_VERSION,
@@ -142,12 +143,20 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     validation_problems = validate_implementation_brief(brief)
     implementation_plan = build_implementation_plan(brief)
     execution_intent = dict(brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {})
-    if "CERAXIA_PATCH:" in str(brief.get("task") or ""):
+    task = str(brief.get("task") or "")
+    has_explicit_patch = "CERAXIA_PATCH:" in task
+    has_guarded_inferred_patch = False
+    if not has_explicit_patch:
+        from execution_adapter import can_infer_guarded_natural_language_patch
+
+        has_guarded_inferred_patch = can_infer_guarded_natural_language_patch(task)
+    if has_explicit_patch or has_guarded_inferred_patch:
         intent_blockers = execution_intent.get("blockers") if isinstance(execution_intent.get("blockers"), list) else []
         execution_intent.update(
             {
-                "mode": "explicit_patch_execution",
-                "explicit_patch_present": True,
+                "mode": "explicit_patch_execution" if has_explicit_patch else "guarded_inferred_patch_execution",
+                "adapter_capability": "explicit_or_guarded_inference_adapter",
+                "explicit_patch_present": has_explicit_patch,
                 "real_execution_supported": True,
                 "required_next_adapter": "",
                 "blockers": [
@@ -182,7 +191,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         notes.extend(str(item) for item in execution_result.get("blockers", []))
         if status == "implemented":
             changed_files = execution_result.get("changed_files", []) if isinstance(execution_result.get("changed_files"), list) else []
-            notes.append("CodeBrigade explicit patch adapter applied the requested changes")
+            notes.append("CodeBrigade guarded execution adapter applied the requested changes")
     if status == "implemented":
         package_status = "implemented"
         package_evidence = "execution_result"
@@ -211,7 +220,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "dry_run": dry_run,
         "changed_files": changed_files,
         "execution_intent": execution_intent,
-        "autonomous_execution_request": build_autonomous_execution_request(brief, implementation_plan),
+        "autonomous_execution_request": build_autonomous_execution_request(brief, implementation_plan, execution_intent),
         "implementation_plan": implementation_plan,
         "work_package_statuses": package_statuses,
         "execution_policy_status": REAL_EXECUTION_STATUS if dry_run or status == "blocked" else "real_execution_adapter_active",

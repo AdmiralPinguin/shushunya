@@ -98,6 +98,30 @@ def run_explicit_patch_trial(root: Path) -> dict[str, Any]:
     return {"id": "explicit-patch-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
 
 
+def run_guarded_inferred_patch_trial(root: Path) -> dict[str, Any]:
+    repo = root / "guarded-inferred-patch-repo"
+    write_repo(repo, {"app.py": "def enabled():\n    return False\n"})
+    result = run_ceraxia(
+        CeraxiaInput(
+            task="В файле `app.py` замени `return False` на `return True`.",
+            repo_path=str(repo),
+            runs_root=root / "runs",
+            dry_run=False,
+            execute_verification=True,
+            verification_commands=("python -m py_compile app.py",),
+        )
+    )
+    artifacts = load_run_artifacts(Path(result["run_dir"]))
+    require(result["ok"], "guarded inferred patch handoff should complete", result)
+    require(result["ready_for_execution"], "guarded inferred patch handoff should be ready after real adapter execution", result)
+    require("return True" in (repo / "app.py").read_text(encoding="utf-8"), "guarded inferred patch should mutate app.py")
+    require(artifacts["worker"]["execution_intent"]["mode"] == "guarded_inferred_patch_execution", "worker must expose guarded inferred intent", artifacts["worker"])
+    require(artifacts["worker"]["autonomous_execution_request"]["status"] == "not_required", "guarded inferred execution should not request autonomous adapter", artifacts["worker"])
+    require(artifacts["summary"]["maturity"] == "guarded_inferred_patch_execution_controller", "guarded inferred maturity should show real adapter execution", artifacts["summary"])
+    require("natural_language_simple_replace" in artifacts["worker"]["execution_result"]["patch_summary"], "worker result should expose inferred patch source", artifacts["worker"])
+    return {"id": "guarded-inferred-patch-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
+
+
 def run_missing_path_trial(root: Path) -> dict[str, Any]:
     repo = root / "missing-path-repo"
     write_repo(repo, {"app.py": "def app():\n    return True\n"})
@@ -142,6 +166,7 @@ def main() -> int:
         trials = [
             run_dry_security_trial(root),
             run_explicit_patch_trial(root),
+            run_guarded_inferred_patch_trial(root),
             run_missing_path_trial(root),
             run_unshaped_real_execution_trial(root),
         ]

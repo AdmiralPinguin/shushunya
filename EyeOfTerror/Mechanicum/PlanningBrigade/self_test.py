@@ -276,6 +276,14 @@ def main() -> int:
         raise AssertionError(f"planning packet should extract explicit path hints: {path_hint_packet}")
     if path_hint_packet["repo_survey_request"]["path_hints"] != ["src/app.py", "tests/test_app.py"]:
         raise AssertionError(f"survey request should preserve path hints: {path_hint_packet}")
+    code_literal_packet = planning_brigade.build_planning_packet(
+        {
+            "task": "В файле `app.py` замени `return False` на `return True`.",
+            "repo_path": "/repo",
+        }
+    )
+    if code_literal_packet["problem_statement"]["explicit_path_hints"] != ["app.py"]:
+        raise AssertionError(f"planning packet should not treat backtick code literals as paths: {code_literal_packet}")
 
     structured_packet = planning_brigade.build_planning_packet(
         {

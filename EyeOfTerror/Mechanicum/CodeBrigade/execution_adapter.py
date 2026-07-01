@@ -22,7 +22,10 @@ class PatchApplicationError(ValueError):
 def extract_explicit_patch(task: str) -> dict[str, Any]:
     marker = "CERAXIA_PATCH:"
     if marker not in task:
-        raise ValueError("unshaped source mutation requires a future CodeBrigade autonomous execution adapter; current adapter only executes explicit CERAXIA_PATCH")
+        inferred = infer_guarded_natural_language_patch(task)
+        if inferred:
+            return inferred
+        raise ValueError("unshaped source mutation requires a future CodeBrigade autonomous execution adapter; current adapter only executes explicit CERAXIA_PATCH or guarded inferred single-file operations")
     raw = task.split(marker, 1)[1].strip()
     decoder = json.JSONDecoder()
     payload, _ = decoder.raw_decode(raw)
@@ -31,7 +34,65 @@ def extract_explicit_patch(task: str) -> dict[str, Any]:
     operations = payload.get("operations")
     if not isinstance(operations, list) or not operations:
         raise ValueError("CERAXIA_PATCH.operations must be a non-empty list")
+    payload["source"] = "explicit_json_patch"
     return payload
+
+
+def infer_guarded_natural_language_patch(task: str) -> dict[str, Any]:
+    replace_match = re.search(
+        r"В\s+файле\s+`(?P<path>[^`]+)`.*?замени\s+`(?P<old>[^`]+)`\s+на\s+`(?P<new>[^`]+)`",
+        task,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if replace_match:
+        return {
+            "source": "natural_language_simple_replace",
+            "operations": [
+                {
+                    "type": "replace",
+                    "path": replace_match.group("path").strip(),
+                    "old": replace_match.group("old"),
+                    "new": replace_match.group("new"),
+                }
+            ],
+        }
+    add_function_match = re.search(
+        r"В\s+файле\s+`(?P<path>[^`]+)`.*?добавь\s+функцию\s+`(?P<name>[A-Za-z_][A-Za-z0-9_]*)`[,]?\s+возвращающую\s+`(?P<literal>[^`]+)`",
+        task,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if add_function_match:
+        literal = add_function_match.group("literal").strip()
+        validate_safe_return_literal(literal)
+        function_name = add_function_match.group("name").strip()
+        return {
+            "source": "natural_language_add_function",
+            "operations": [
+                {
+                    "type": "append_python_function",
+                    "path": add_function_match.group("path").strip(),
+                    "function_name": function_name,
+                    "return_literal": literal,
+                }
+            ],
+        }
+    return {}
+
+
+def can_infer_guarded_natural_language_patch(task: str) -> bool:
+    try:
+        return bool(infer_guarded_natural_language_patch(task))
+    except ValueError:
+        return False
+
+
+def validate_safe_return_literal(literal: str) -> None:
+    try:
+        parsed = ast.parse(literal, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"natural language add-function return value is not a valid Python literal: {exc.msg}") from exc
+    if not isinstance(parsed.body, ast.Constant):
+        raise ValueError("natural language add-function return value must be a simple Python literal")
 
 
 def safe_operation_path(repo: Path, rel_path: str) -> Path:
@@ -152,6 +213,22 @@ def replace_return_expression_in_file(source_path: Path, function_name: str, old
     source_path.write_text("".join(lines), encoding="utf-8")
 
 
+def append_python_function_to_file(source_path: Path, function_name: str, return_literal: str) -> None:
+    if source_path.suffix != ".py":
+        raise ValueError("append_python_function only supports Python files")
+    validate_safe_return_literal(return_literal)
+    text = source_path.read_text(encoding="utf-8")
+    if text.strip():
+        tree = ast.parse(text)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+                raise ValueError(f"function already exists: {function_name}")
+    separator = "" if not text or text.endswith("\n") else "\n"
+    if text.strip():
+        separator += "\n"
+    source_path.write_text(f"{text}{separator}def {function_name}():\n    return {return_literal}\n", encoding="utf-8")
+
+
 def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, Any]) -> tuple[list[str], str, list[dict[str, Any]], str]:
     allowed_paths = surveyed_paths(brief)
     allowed_new_paths = explicitly_missing_paths(brief)
@@ -218,6 +295,14 @@ def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, A
                 if path.suffix != ".py":
                     raise ValueError(f"replace_return_expression only supports Python files: {rel_path}")
                 replace_return_expression_in_file(path, function_name, old_expression, new_expression)
+            elif op_type == "append_python_function":
+                function_name = operation.get("function_name")
+                return_literal = operation.get("return_literal")
+                if not isinstance(function_name, str) or not function_name:
+                    raise ValueError(f"append_python_function requires function_name: {rel_path}")
+                if not isinstance(return_literal, str):
+                    raise ValueError(f"append_python_function requires return_literal: {rel_path}")
+                append_python_function_to_file(path, function_name, return_literal)
             else:
                 raise ValueError(f"unsupported patch operation type: {op_type}")
             if rel_path not in changed:
@@ -239,7 +324,8 @@ def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, A
         )
         rollback_notes = f"rolled back {len(originals)} touched files after patch failure"
         raise PatchApplicationError(str(exc), operation_results, rollback_notes) from exc
-    return changed, f"applied {len(operations)} explicit CERAXIA_PATCH operations", operation_results, ""
+    source = str(patch.get("source") or "explicit_json_patch")
+    return changed, f"applied {len(operations)} {source} operations", operation_results, ""
 
 
 def execute_implementation_brief(brief: dict[str, Any]) -> dict[str, Any]:
