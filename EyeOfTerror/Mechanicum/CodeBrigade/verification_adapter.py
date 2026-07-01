@@ -17,6 +17,8 @@ ALLOWED_PREFIXES = [
     ["python3", "-m", "py_compile"],
     ["python", "-m", "pytest"],
     ["python3", "-m", "pytest"],
+    ["python", "-m", "unittest"],
+    ["python3", "-m", "unittest"],
     ["pytest"],
     ["git", "diff", "--check"],
 ]

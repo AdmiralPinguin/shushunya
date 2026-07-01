@@ -23,6 +23,13 @@ def main() -> int:
         executed = verification_adapter.run_verification_commands(["python -m py_compile ok.py"], str(repo), execute=True)
         if executed["status"] != "passed" or executed["results"][0]["returncode"] != 0:
             raise AssertionError(f"py_compile should execute successfully: {executed}")
+        (repo / "test_ok.py").write_text(
+            "import unittest\n\nclass OkTest(unittest.TestCase):\n    def test_ok(self):\n        self.assertEqual(1, 1)\n",
+            encoding="utf-8",
+        )
+        unittest_executed = verification_adapter.run_verification_commands(["python -m unittest test_ok.py"], str(repo), execute=True)
+        if unittest_executed["status"] != "passed" or unittest_executed["results"][0]["returncode"] != 0:
+            raise AssertionError(f"unittest should execute successfully: {unittest_executed}")
         git_diff = verification_adapter.run_verification_commands(["git diff --check"], str(repo), execute=False)
         if git_diff["status"] != "planned" or git_diff["results"][0]["status"] != "planned":
             raise AssertionError(f"git diff --check should be allowlisted as planned: {git_diff}")

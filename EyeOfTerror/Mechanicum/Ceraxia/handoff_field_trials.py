@@ -163,7 +163,14 @@ def run_test_inferred_return_mismatch_trial(root: Path) -> dict[str, Any]:
         repo,
         {
             "app.py": "def value():\n    return 1\n",
-            "test_app.py": "from app import value\n\ndef test_value():\n    assert value() == 42\n",
+            "test_app.py": (
+                "import unittest\nfrom app import value\n\n"
+                "class ValueTest(unittest.TestCase):\n"
+                "    def test_value(self):\n"
+                "        self.assertEqual(value(), 42)\n\n"
+                "if __name__ == '__main__':\n"
+                "    unittest.main()\n"
+            ),
         },
     )
     result = run_ceraxia(
@@ -173,7 +180,7 @@ def run_test_inferred_return_mismatch_trial(root: Path) -> dict[str, Any]:
             runs_root=root / "runs",
             dry_run=False,
             execute_verification=True,
-            verification_commands=("python -m py_compile app.py",),
+            verification_commands=("python -m unittest test_app.py", "python -m py_compile app.py"),
         )
     )
     artifacts = load_run_artifacts(Path(result["run_dir"]))

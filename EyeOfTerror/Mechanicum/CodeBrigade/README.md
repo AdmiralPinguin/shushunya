@@ -67,7 +67,8 @@ evidence in the execution result.
 
 `verification_policy.json` records the runtime allowlist and path-token guards
 for verification. `verification_adapter.py` can run that narrow allowlist
-without a shell. It blocks non-allowlisted commands, absolute/traversal path
+without a shell, including `py_compile`, `pytest`, `unittest`, and
+`git diff --check`. It blocks non-allowlisted commands, absolute/traversal path
 tokens, and option values that point outside the repository. Its output is
 versioned by `verification_execution.schema.json`; planned verification reports
 `status: planned`, while executed checks report `passed`, `failed`, or
