@@ -235,6 +235,25 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(brief["survey_quality_gate"]["decision"], "blocked")
             self.assertIn("missing.py", brief["survey_quality_gate"]["missing_path_hints"])
 
+    def test_unsafe_explicit_path_hint_blocks_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="почини `/tmp/outside.py` без изменения API",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            self.assertFalse(result["ok"], result)
+            run_dir = Path(result["run_dir"])
+            brief = json.loads((run_dir / "implementation_brief.json").read_text(encoding="utf-8"))
+            self.assertTrue(brief["blocked"])
+            self.assertEqual(brief["survey_quality_gate"]["decision"], "blocked")
+            self.assertIn("/tmp/outside.py", brief["survey_quality_gate"]["unsafe_path_hints"])
+
     def test_execute_verification_runs_allowlisted_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
