@@ -1022,6 +1022,37 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["maturity"], "guarded_inferred_patch_execution_controller")
             self.assertEqual(summary["code_brigade_execution_intent_mode"], "guarded_inferred_patch_execution")
 
+    def test_non_dry_guarded_inferred_create_file_allows_missing_path_hint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="Создай файл `helpers.py` с содержимым `def helper():\n    return True\n`.",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                    dry_run=False,
+                    execute_verification=True,
+                    verification_commands=("python -m py_compile helpers.py",),
+                )
+            )
+            self.assertTrue(result["ok"], result)
+            self.assertTrue(result["ready_for_execution"], result)
+            self.assertIn("def helper", (repo / "helpers.py").read_text(encoding="utf-8"))
+            run_dir = Path(result["run_dir"])
+            brief = json.loads((run_dir / "implementation_brief.json").read_text(encoding="utf-8"))
+            self.assertEqual(brief["survey_quality_gate"]["decision"], "passed")
+            self.assertEqual(brief["survey_quality_gate"]["missing_path_hints"], ["helpers.py"])
+            self.assertEqual(brief["survey_quality_gate"]["allowed_missing_create_path_hints"], ["helpers.py"])
+            worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(worker_report["status"], "implemented")
+            self.assertIn("natural_language_create_file", worker_report["execution_result"]["patch_summary"])
+            self.assertEqual(worker_report["changed_files"], ["helpers.py"])
+            summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["maturity"], "guarded_inferred_patch_execution_controller")
+            self.assertEqual(summary["code_brigade_execution_result_status"], "implemented")
+
     def test_review_gate_rejects_incomplete_planning_packet(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
         packet.pop("verification_strategy")

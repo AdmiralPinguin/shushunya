@@ -121,6 +121,29 @@ def build_repo_survey(packet: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def planned_create_paths_from_task(task: str) -> list[str]:
+    paths: list[str] = []
+    for match in re.finditer(
+        r"создай\s+файл\s+`(?P<path>[^`]+)`\s+с\s+содержимым\s+`(?P<content>[^`]+)`",
+        task,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        paths.append(match.group("path").strip())
+    marker = "CERAXIA_PATCH:"
+    if marker in task:
+        raw = task.split(marker, 1)[1].strip()
+        try:
+            payload, _ = json.JSONDecoder().raw_decode(raw)
+        except json.JSONDecodeError:
+            payload = {}
+        operations = payload.get("operations") if isinstance(payload, dict) else []
+        if isinstance(operations, list):
+            for operation in operations:
+                if isinstance(operation, dict) and operation.get("type") == "create_file":
+                    paths.append(str(operation.get("path") or "").strip())
+    return [path for path in paths if path]
+
+
 def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
     triage = packet.get("task_triage") if isinstance(packet.get("task_triage"), dict) else {}
     task_kinds = set(triage.get("task_kinds", []) if isinstance(triage.get("task_kinds"), list) else [])
@@ -129,14 +152,17 @@ def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) ->
     test_files = survey.get("test_files") if isinstance(survey.get("test_files"), list) else []
     missing_path_hints = survey.get("missing_path_hints") if isinstance(survey.get("missing_path_hints"), list) else []
     unsafe_path_hints = survey.get("unsafe_path_hints") if isinstance(survey.get("unsafe_path_hints"), list) else []
+    planned_create_paths = planned_create_paths_from_task(str(packet.get("task") or ""))
+    missing_blockers = [str(item) for item in missing_path_hints if str(item) not in planned_create_paths]
+    allowed_missing_create_path_hints = [str(item) for item in missing_path_hints if str(item) in planned_create_paths]
     blockers: list[str] = []
     warnings: list[str] = []
     if not survey.get("repo_exists"):
         blockers.append("repository does not exist")
     if unsafe_path_hints:
         blockers.append("unsafe explicit path hints: " + ", ".join(str(item) for item in unsafe_path_hints))
-    if missing_path_hints:
-        blockers.append("explicit path hints were not found: " + ", ".join(str(item) for item in missing_path_hints))
+    if missing_blockers:
+        blockers.append("explicit path hints were not found: " + ", ".join(missing_blockers))
     if not candidate_files:
         blockers.append("repository survey found no candidate source/config/documentation files")
     if risk_level == "high" and not test_files:
@@ -157,6 +183,7 @@ def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) ->
         "candidate_file_count": len(candidate_files),
         "test_file_count": len(test_files),
         "missing_path_hints": missing_path_hints,
+        "allowed_missing_create_path_hints": allowed_missing_create_path_hints,
         "unsafe_path_hints": unsafe_path_hints,
         "blockers": blockers,
         "warnings": warnings,

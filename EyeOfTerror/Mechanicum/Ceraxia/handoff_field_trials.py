@@ -127,6 +127,30 @@ def run_guarded_inferred_patch_trial(root: Path) -> dict[str, Any]:
     return {"id": "guarded-inferred-patch-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
 
 
+def run_guarded_inferred_create_file_trial(root: Path) -> dict[str, Any]:
+    repo = root / "guarded-inferred-create-file-repo"
+    write_repo(repo, {"app.py": "def app():\n    return True\n"})
+    result = run_ceraxia(
+        CeraxiaInput(
+            task="Создай файл `helpers.py` с содержимым `def helper():\n    return True\n`.",
+            repo_path=str(repo),
+            runs_root=root / "runs",
+            dry_run=False,
+            execute_verification=True,
+            verification_commands=("python -m py_compile helpers.py",),
+        )
+    )
+    artifacts = load_run_artifacts(Path(result["run_dir"]))
+    require(result["ok"], "guarded inferred create-file handoff should complete", result)
+    require(result["ready_for_execution"], "guarded inferred create-file handoff should be ready after real adapter execution", result)
+    require("def helper" in (repo / "helpers.py").read_text(encoding="utf-8"), "guarded inferred create-file should create helpers.py")
+    require(artifacts["brief"]["survey_quality_gate"]["allowed_missing_create_path_hints"] == ["helpers.py"], "create-file path should be an allowed missing hint", artifacts["brief"])
+    require(artifacts["worker"]["execution_intent"]["mode"] == "guarded_inferred_patch_execution", "worker must expose guarded inferred intent", artifacts["worker"])
+    require("natural_language_create_file" in artifacts["worker"]["execution_result"]["patch_summary"], "worker result should expose inferred create-file source", artifacts["worker"])
+    require(artifacts["summary"]["maturity"] == "guarded_inferred_patch_execution_controller", "guarded inferred create-file maturity should show real adapter execution", artifacts["summary"])
+    return {"id": "guarded-inferred-create-file-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
+
+
 def run_test_inferred_missing_function_trial(root: Path) -> dict[str, Any]:
     repo = root / "test-inferred-missing-function-repo"
     write_repo(
@@ -279,6 +303,7 @@ def main() -> int:
             run_dry_security_trial(root),
             run_explicit_patch_trial(root),
             run_guarded_inferred_patch_trial(root),
+            run_guarded_inferred_create_file_trial(root),
             run_test_inferred_missing_function_trial(root),
             run_test_inferred_return_mismatch_trial(root),
             run_test_inferred_constant_trial(root),
