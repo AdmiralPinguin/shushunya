@@ -36,6 +36,7 @@ from repo_survey import survey_repository  # noqa: E402
 
 
 CONTRACT_VERSION = "eye-mechanicum.v1"
+EXECUTION_MODES = {"dry_run", "guarded_patch", "repo_engineer", "review_only"}
 
 
 LIFECYCLE = [
@@ -71,6 +72,7 @@ REQUIRED_RUN_ARTIFACTS = [
 class CeraxiaInput:
     task: str
     repo_path: str
+    execution_mode: str = ""
     dry_run: bool = True
     execute_verification: bool = False
     execute_diagnostic_repair: bool = False
@@ -217,6 +219,16 @@ def build_execution_intent(packet: dict[str, Any], dry_run: bool | None = None) 
     }
 
 
+def normalize_execution_mode(task_input: CeraxiaInput) -> str:
+    if task_input.execution_mode in EXECUTION_MODES:
+        return task_input.execution_mode
+    return "dry_run" if task_input.dry_run else "guarded_patch"
+
+
+def execution_mode_dry_run(mode: str) -> bool:
+    return mode in {"dry_run", "review_only"}
+
+
 def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
     triage = packet.get("task_triage") if isinstance(packet.get("task_triage"), dict) else {}
     verification = packet.get("verification_strategy") if isinstance(packet.get("verification_strategy"), dict) else {}
@@ -280,6 +292,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "impact_analysis": packet.get("impact_analysis", {}),
         "execution_forecast": packet.get("execution_forecast", {}),
         "execution_intent": build_execution_intent(packet),
+        "controller_execution_mode": packet.get("execution_mode", "dry_run"),
         "code_brigade_handoff": handoff,
         "repo_survey_evidence": {
             "candidate_files": survey.get("candidate_files", []),
@@ -2024,6 +2037,8 @@ def build_evidence_matrix(
 
 
 def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
+    execution_mode = normalize_execution_mode(task_input)
+    dry_run = execution_mode_dry_run(execution_mode)
     run_id, run_dir = allocate_run_dir(
         task_input.runs_root,
         f"ceraxia-{utc_stamp()}-{task_slug(task_input.task, task_input.repo_path)}",
@@ -2039,7 +2054,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "contract_version": CONTRACT_VERSION,
         "task": task_input.task,
         "repo_path": task_input.repo_path,
-        "dry_run": task_input.dry_run,
+        "execution_mode": execution_mode,
+        "dry_run": dry_run,
         "execute_diagnostic_repair": task_input.execute_diagnostic_repair,
         "constraints": list(task_input.constraints),
         "verification_commands": list(task_input.verification_commands),
@@ -2047,6 +2063,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_json(run_dir / "task.json", task_payload)
 
     packet = build_planning_packet(task_payload)
+    packet["execution_mode"] = execution_mode
     planning_problems = validate_planning_packet(packet)
     status["state"] = "planned" if not planning_problems else "failed"
     status["lifecycle"].append(status["state"])
@@ -2065,7 +2082,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     status["next_action"] = "handoff to CodeBrigade" if not brief["blocked"] else "fix blockers before implementation"
     write_json(run_dir / "implementation_brief.json", brief)
 
-    worker_report = build_worker_report(brief, task_input.dry_run)
+    worker_report = build_worker_report(brief, dry_run)
     status["state"] = "implemented" if worker_report["status"] != "blocked" else "failed"
     status["lifecycle"].append(status["state"])
     status["next_action"] = "verify worker output" if worker_report["status"] != "blocked" else "repair implementation blockers"
@@ -2103,7 +2120,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
 
     status["state"] = "finalized" if status["state"] == "reviewed" else "failed"
     status["lifecycle"].append(status["state"])
-    status["next_action"] = build_final_next_action(status, worker_report, task_input.dry_run)
+    status["next_action"] = build_final_next_action(status, worker_report, dry_run)
     artifacts = {
         "status": status,
         "planning_packet": packet,
@@ -2116,7 +2133,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "diagnostic_repair_execution_result": repair_execution_result,
     }
     write_json(run_dir / "status.json", status)
-    readiness = build_execution_readiness(status, brief, worker_report, verification_report, review, task_input.dry_run)
+    readiness = build_execution_readiness(status, brief, worker_report, verification_report, review, dry_run)
     artifacts["execution_readiness"] = readiness
     write_text(run_dir / "final_report.md", final_report_markdown(run_id, artifacts))
     write_json(run_dir / "execution_readiness.json", readiness)
@@ -2156,6 +2173,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "lifecycle": status["lifecycle"],
         "review_decision": review["decision"],
         "next_action": status["next_action"],
+        "execution_mode": execution_mode,
     }
 
 
@@ -2164,7 +2182,8 @@ def main() -> int:
     parser.add_argument("--task", required=True)
     parser.add_argument("--repo-path", default=str(PROJECT_ROOT))
     parser.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
-    parser.add_argument("--execute", action="store_true", help="Reserved for future real CodeBrigade execution.")
+    parser.add_argument("--mode", choices=sorted(EXECUTION_MODES), default="", help="Ceraxia execution mode.")
+    parser.add_argument("--execute", action="store_true", help="Compatibility alias for --mode guarded_patch.")
     parser.add_argument("--execute-verification", action="store_true", help="Run allowlisted verification commands while keeping source mutation dry-run.")
     parser.add_argument("--execute-diagnostic-repair", action="store_true", help="Run the narrow CodeBrigade diagnostic repair adapter when review creates a repair request.")
     parser.add_argument("--constraint", action="append", default=[], help="Structured planning constraint. Can be repeated.")
@@ -2174,7 +2193,8 @@ def main() -> int:
         CeraxiaInput(
             task=args.task,
             repo_path=args.repo_path,
-            dry_run=not args.execute,
+            execution_mode=args.mode or ("guarded_patch" if args.execute else "dry_run"),
+            dry_run=not args.execute if not args.mode else execution_mode_dry_run(args.mode),
             execute_verification=args.execute_verification,
             execute_diagnostic_repair=args.execute_diagnostic_repair,
             constraints=tuple(args.constraint),

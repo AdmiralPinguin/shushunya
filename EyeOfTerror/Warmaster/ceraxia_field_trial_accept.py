@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ceraxia_evidence_contract import REQUIRED_HONEST_CHECKS
 from ceraxia_field_trial_report import build_report, load_json, validate_ledger
 from ceraxia_field_trial_review import build_review_packet
 
@@ -66,13 +67,7 @@ def validate_honest_evidence(packet: dict[str, Any]) -> list[str]:
     if not isinstance(honest, dict) or honest.get("status") != "passed":
         return ["accepted review requires passed honest_evidence"]
     checks = honest.get("checks") if isinstance(honest.get("checks"), dict) else {}
-    required = {
-        "source_correct",
-        "tests_not_adjusted",
-        "patch_minimal",
-        "verification_meaningful",
-        "review_artifacts_present",
-    }
+    required = REQUIRED_HONEST_CHECKS
     missing = sorted(required - set(checks))
     errors = [f"accepted review missing honest_evidence checks: {', '.join(missing)}"] if missing else []
     failed = [

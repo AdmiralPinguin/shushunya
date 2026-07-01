@@ -4,8 +4,10 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
+from ceraxia_evidence_contract import REQUIRED_HONEST_CHECKS, evidence_package_status
 from ceraxia_field_trial_runner import (
     DEFAULT_FIELD_TRIAL_RUN_ROOT,
     apply_trial_checks_to_outcome,
@@ -256,17 +258,26 @@ def main() -> int:
     smoke_payload = json.loads(smoke_trial.stdout)
     honest = smoke_payload.get("honest_evidence") if isinstance(smoke_payload.get("honest_evidence"), dict) else {}
     honest_checks = honest.get("checks") if isinstance(honest.get("checks"), dict) else {}
-    required_honest_checks = {
-        "source_correct",
-        "tests_not_adjusted",
-        "patch_minimal",
-        "verification_meaningful",
-        "review_artifacts_present",
-    }
+    required_honest_checks = REQUIRED_HONEST_CHECKS
     if honest.get("status") != "passed" or not required_honest_checks.issubset(honest_checks):
         raise AssertionError(f"Ceraxia trial result must expose honest evidence checks: {smoke_payload}")
     if not all(isinstance(item, dict) and item.get("passed") is True for item in honest_checks.values()):
         raise AssertionError(f"Ceraxia honest evidence checks must all pass for accepted smoke trial: {honest}")
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_root = Path(tmp)
+        trial_result = tmp_root / "trial_result.json"
+        trial_result.write_text(
+            json.dumps({"honest_evidence": {"status": "passed", "checks": {key: {"passed": True} for key in REQUIRED_HONEST_CHECKS}}}),
+            encoding="utf-8",
+        )
+        incomplete_status = evidence_package_status(tmp_root, {"evidence_paths": [str(trial_result)]})
+        if incomplete_status.get("passed") is True or "final_manifest" not in str(incomplete_status.get("reason", "")):
+            raise AssertionError(f"Ceraxia evidence contract must reject incomplete packages: {incomplete_status}")
+        manifest = tmp_root / "final_manifest.json"
+        manifest.write_text(json.dumps({"status": "ready"}), encoding="utf-8")
+        complete_status = evidence_package_status(tmp_root, {"evidence_paths": [str(trial_result), str(manifest)]})
+        if complete_status.get("passed") is not True:
+            raise AssertionError(f"Ceraxia evidence contract rejected complete package: {complete_status}")
     expert_suite = subprocess.run(
         [sys.executable, str(EXPERT_SUITE), "--require-all"],
         cwd=str(EYE_ROOT.parent),

@@ -12,6 +12,43 @@ from implementation_brief_contract import validate_implementation_brief
 REAL_EXECUTION_STATUS = "blocked_until_adapter_is_wired"
 
 
+def build_edit_plan(brief: dict[str, Any], implementation_plan: dict[str, Any], execution_intent: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "kind": "code_brigade_edit_plan",
+        "contract_version": CONTRACT_VERSION,
+        "controller_execution_mode": brief.get("controller_execution_mode", "dry_run"),
+        "execution_intent_mode": execution_intent.get("mode", ""),
+        "read_before_edit": implementation_plan.get("recommended_read_order", [])[:12],
+        "target_files": implementation_plan.get("target_files_to_inspect", []),
+        "allowed_new_files": implementation_plan.get("missing_path_hints", []),
+        "test_files": implementation_plan.get("test_files_to_preserve", []),
+        "planned_diff_summary": {
+            "change_intents": implementation_plan.get("change_allowed_intents", []),
+            "protected_invariants": implementation_plan.get("change_protected_invariants", []),
+            "post_change_proofs": implementation_plan.get("change_post_change_proofs", []),
+        },
+        "acceptance_criteria": implementation_plan.get("acceptance_evidence_required", []),
+        "verification_commands": implementation_plan.get("verification_commands", []),
+    }
+
+
+def mutation_preflight_blockers(implementation_plan: dict[str, Any], edit_plan: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    allowed_new_files = edit_plan.get("allowed_new_files") if isinstance(edit_plan.get("allowed_new_files"), list) else []
+    if not implementation_plan.get("recommended_read_order") and not allowed_new_files:
+        blockers.append("mutation preflight requires recommended_read_order before editing")
+    if not implementation_plan.get("target_files_to_inspect") and not allowed_new_files:
+        blockers.append("mutation preflight requires target_files_to_inspect before editing")
+    if not implementation_plan.get("verification_commands"):
+        blockers.append("mutation preflight requires verification_commands before editing")
+    planned_diff = edit_plan.get("planned_diff_summary") if isinstance(edit_plan.get("planned_diff_summary"), dict) else {}
+    if not planned_diff.get("change_intents"):
+        blockers.append("mutation preflight requires planned diff change intents")
+    if not edit_plan.get("acceptance_criteria"):
+        blockers.append("mutation preflight requires acceptance criteria")
+    return blockers
+
+
 def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     verification = brief.get("required_verification") if isinstance(brief.get("required_verification"), dict) else {}
@@ -210,6 +247,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     validation_problems = validate_implementation_brief(brief)
     implementation_plan = build_implementation_plan(brief)
     execution_intent = dict(brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {})
+    edit_plan = build_edit_plan(brief, implementation_plan, execution_intent)
     task = str(brief.get("task") or "")
     has_explicit_patch = "CERAXIA_PATCH:" in task
     has_guarded_inferred_patch = False
@@ -249,9 +287,13 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     }
     changed_files: list[str] = []
     notes: list[str] = []
+    preflight_blockers = [] if dry_run else mutation_preflight_blockers(implementation_plan, edit_plan)
     if validation_problems:
         status = "blocked"
         notes.extend(f"invalid implementation brief: {problem}" for problem in validation_problems)
+    elif preflight_blockers:
+        status = "blocked"
+        notes.extend(preflight_blockers)
     elif brief.get("blocked"):
         status = "blocked"
         notes.extend(str(item) for item in brief.get("blockers", []))
@@ -300,6 +342,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "dry_run": dry_run,
         "changed_files": changed_files,
         "execution_intent": execution_intent,
+        "edit_plan": edit_plan,
         "autonomous_execution_request": build_autonomous_execution_request(brief, implementation_plan, execution_intent),
         "implementation_plan": implementation_plan,
         "work_package_statuses": package_statuses,

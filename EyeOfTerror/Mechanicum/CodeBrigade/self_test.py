@@ -765,6 +765,13 @@ def main() -> int:
         raise AssertionError(f"worker report contract version drifted: {dry_report}")
     if dry_report["execution_policy_status"] != "blocked_until_adapter_is_wired":
         raise AssertionError(f"dry-run worker report must expose blocked execution policy: {dry_report}")
+    edit_plan = dry_report.get("edit_plan", {})
+    if edit_plan.get("kind") != "code_brigade_edit_plan":
+        raise AssertionError(f"worker report must expose a formal edit plan: {dry_report}")
+    if not edit_plan.get("read_before_edit") or not edit_plan.get("target_files") or not edit_plan.get("acceptance_criteria"):
+        raise AssertionError(f"edit plan must preserve read, target, and acceptance gates: {dry_report}")
+    if not edit_plan.get("verification_commands"):
+        raise AssertionError(f"edit plan must preserve verification commands: {dry_report}")
     if dry_report["execution_intent"]["mode"] != "planning_handoff_only" or dry_report["execution_intent"]["real_execution_supported"]:
         raise AssertionError(f"dry-run unshaped worker report should expose planning-only execution intent: {dry_report}")
     if dry_report["autonomous_execution_request"]["status"] != "required":

@@ -12,6 +12,10 @@ real 7/10 engineering score is not considered proven by self-tests. The
 evaluation protocol lives in `EVALUATION.md`; representative field trials live
 in `field_trials.json`. Regression tests may prevent known breakage, but only
 reviewed field-trial ledger entries can support the real 7/10 claim.
+Honest score reporting requires a complete evidence package, not just a legacy
+ledger score. At minimum the accepted evidence must include a readable
+`trial_result.json`, a readable `final_manifest.json`, and passed
+`honest_evidence` checks from `ceraxia_evidence_contract.py`.
 
 She owns code-task decomposition, repository survey, scoped implementation
 planning, patch manifest handoff, verification planning, code review, and final
@@ -55,6 +59,21 @@ CLI `ok` and `package_ok` mean the dry-run package is internally consistent;
 `ready_for_execution` remains false until real CodeBrigade execution is wired.
 Use `--execute-verification` to run allowlisted verification commands while
 keeping source mutation in dry-run mode.
+Execution mode is explicit:
+
+- `dry_run`: build planning, survey, handoff, review, and run package without
+  source mutation.
+- `guarded_patch`: allow the current explicit or guarded-inferred CodeBrigade
+  patch adapter after mutation preflight.
+- `repo_engineer`: reserved for the broader autonomous CodeBrigade executor.
+- `review_only`: keep mutation disabled and use Ceraxia as an audit/review
+  surface.
+
+`--execute` remains a compatibility alias for `--mode guarded_patch`.
+CodeBrigade now writes an `edit_plan` before mutation. The plan records
+read-before-edit targets, allowed new files, planned diff intent, acceptance
+criteria, and verification commands; mutation is blocked when these gates are
+missing, except for explicitly planned new-file creation.
 `evidence_matrix.json` maps the PlanningBrigade quality bar to concrete or
 planned evidence sources, and `run_summary.json` carries the same coverage
 counters for fast orchestration checks.

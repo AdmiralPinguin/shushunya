@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ceraxia_evidence_contract import evidence_package_status
+
 
 WARMASTER_ROOT = Path(__file__).resolve().parent
 EYE_ROOT = WARMASTER_ROOT.parent
@@ -24,50 +26,8 @@ def load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
-def resolve_repo_path(path_text: str) -> Path:
-    path = Path(path_text)
-    if path.is_absolute():
-        return path
-    return EYE_ROOT.parent / path
-
-
 def honest_evidence_status(entry: dict[str, Any]) -> dict[str, Any]:
-    evidence_paths = entry.get("evidence_paths")
-    if not isinstance(evidence_paths, list):
-        return {"present": False, "passed": False, "reason": "missing evidence_paths"}
-    trial_result_path = None
-    for item in evidence_paths:
-        if not isinstance(item, str):
-            continue
-        path = resolve_repo_path(item)
-        if path.name == "trial_result.json" and path.exists():
-            trial_result_path = path
-            break
-    if trial_result_path is None:
-        return {"present": False, "passed": False, "reason": "missing readable trial_result.json"}
-    try:
-        trial_result = load_json(trial_result_path)
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
-        return {"present": False, "passed": False, "reason": f"unreadable trial_result.json: {exc}"}
-    honest = trial_result.get("honest_evidence") if isinstance(trial_result.get("honest_evidence"), dict) else {}
-    checks = honest.get("checks") if isinstance(honest.get("checks"), dict) else {}
-    required = {
-        "source_correct",
-        "tests_not_adjusted",
-        "patch_minimal",
-        "verification_meaningful",
-        "review_artifacts_present",
-    }
-    passed = honest.get("status") == "passed" and required.issubset(checks) and all(
-        isinstance(item, dict) and item.get("passed") is True
-        for item in checks.values()
-    )
-    return {
-        "present": bool(honest),
-        "passed": passed,
-        "trial_result": str(trial_result_path),
-        "missing_checks": sorted(required - set(checks)),
-    }
+    return evidence_package_status(EYE_ROOT.parent, entry)
 
 
 def validate_ledger(spec: dict[str, Any], ledger: dict[str, Any]) -> list[str]:
