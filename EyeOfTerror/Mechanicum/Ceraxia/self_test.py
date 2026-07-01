@@ -500,6 +500,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["surface_verification_status"], "partial")
             self.assertGreaterEqual(summary["verification_output_summary_count"], 1)
             self.assertEqual(summary["verification_output_signal_counts"], review["verification_sufficiency"]["output_signal_counts"])
+            self.assertEqual(summary["verification_output_diagnostic_counts"], review["verification_sufficiency"]["output_diagnostic_counts"])
 
     def test_real_explicit_patch_pipeline_reaches_execution_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -842,12 +843,14 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     "stdout_nonempty": True,
                     "stderr_nonempty": False,
                     "output_signal": "failure_text",
+                    "has_assertion_failure": True,
                 }
             ],
         }
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertEqual(review["surface_verification_sufficiency"]["status"], "failed")
         self.assertEqual(review["verification_sufficiency"]["output_signal_counts"]["failure_text"], 1)
+        self.assertEqual(review["verification_sufficiency"]["output_diagnostic_counts"]["assertion_failure"], 1)
 
     def test_review_gate_blocks_passed_report_with_failure_output(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})

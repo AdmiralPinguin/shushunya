@@ -372,6 +372,7 @@ def summarize_verification_output(commands: list[Any]) -> list[dict[str, Any]]:
             continue
         stdout = str(item.get("stdout") or "")
         stderr = str(item.get("stderr") or "")
+        diagnostics = item.get("diagnostics") if isinstance(item.get("diagnostics"), dict) else {}
         summary.append(
             {
                 "command": str(item.get("command") or ""),
@@ -380,6 +381,11 @@ def summarize_verification_output(commands: list[Any]) -> list[dict[str, Any]]:
                 "stdout_nonempty": bool(stdout),
                 "stderr_nonempty": bool(stderr),
                 "output_signal": output_signal_for_result(item),
+                "has_traceback": bool(diagnostics.get("has_traceback")),
+                "has_assertion_failure": bool(diagnostics.get("has_assertion_failure")),
+                "has_syntax_error": bool(diagnostics.get("has_syntax_error")),
+                "traceback_files": diagnostics.get("traceback_files", []) if isinstance(diagnostics.get("traceback_files"), list) else [],
+                "missing_imports": diagnostics.get("missing_imports", []) if isinstance(diagnostics.get("missing_imports"), list) else [],
             }
         )
     return summary
@@ -393,6 +399,14 @@ def output_signal_counts_from_summary(output_summary: list[Any]) -> dict[str, in
         signal = str(item.get("output_signal") or "unknown")
         counts[signal] = counts.get(signal, 0) + 1
     return counts
+
+
+def output_diagnostic_counts_from_summary(output_summary: list[Any]) -> dict[str, int]:
+    return {
+        "traceback": sum(1 for item in output_summary if isinstance(item, dict) and item.get("has_traceback")),
+        "assertion_failure": sum(1 for item in output_summary if isinstance(item, dict) and item.get("has_assertion_failure")),
+        "syntax_error": sum(1 for item in output_summary if isinstance(item, dict) and item.get("has_syntax_error")),
+    }
 
 
 def output_consistency_findings(verification_report: dict[str, Any], output_summary: list[Any]) -> list[str]:
@@ -685,6 +699,7 @@ def review_gate(
     meaningful_commands_executed = meaningful_executed_commands(verification_report)
     output_summary = verification_report.get("output_summary") if isinstance(verification_report.get("output_summary"), list) else []
     output_signal_counts = output_signal_counts_from_summary(output_summary)
+    output_diagnostic_counts = output_diagnostic_counts_from_summary(output_summary)
     negative_tests = verification_report.get("negative_tests_required", [])
     verification_sufficiency = {
         "risk_level": brief.get("risk_level", "high"),
@@ -694,6 +709,7 @@ def review_gate(
         "meaningful_commands_executed_count": len(meaningful_commands_executed),
         "output_summary_count": len(output_summary),
         "output_signal_counts": output_signal_counts,
+        "output_diagnostic_counts": output_diagnostic_counts,
         "negative_tests_required_count": len(negative_tests) if isinstance(negative_tests, list) else 0,
         "broad_verification_required": bool(verification_report.get("broad_verification_required")),
     }
@@ -887,6 +903,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     commands_planned = verification.get("commands_planned", [])
     output_summary = verification.get("output_summary", []) if isinstance(verification.get("output_summary"), list) else []
     output_signal_counts = output_signal_counts_from_summary(output_summary)
+    output_diagnostic_counts = output_diagnostic_counts_from_summary(output_summary)
     repo_evidence = brief.get("repo_survey_evidence", {}) if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     work_packages = brief.get("implementation_work_packages", {}) if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
@@ -940,6 +957,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Verification commands executed: {len(commands_executed)}",
         f"Verification output summary rows: {len(output_summary)}",
         f"Verification output signals: {json.dumps(output_signal_counts, ensure_ascii=False, sort_keys=True)}",
+        f"Verification output diagnostics: {json.dumps(output_diagnostic_counts, ensure_ascii=False, sort_keys=True)}",
         f"Worker status: {worker_report.get('status', '')}",
         f"Execution policy status: {worker_report.get('execution_policy_status', '')}",
         f"Execution result status: {execution_result.get('status', '')}",
@@ -1097,6 +1115,8 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": "run_summary verification_output_summary_count disagrees with review_gate.json"})
     if summary.get("verification_output_signal_counts", {}) != verification_sufficiency.get("output_signal_counts", {}):
         findings.append({"severity": "blocker", "finding": "run_summary verification_output_signal_counts disagrees with review_gate.json"})
+    if summary.get("verification_output_diagnostic_counts", {}) != verification_sufficiency.get("output_diagnostic_counts", {}):
+        findings.append({"severity": "blocker", "finding": "run_summary verification_output_diagnostic_counts disagrees with review_gate.json"})
     investigation_sufficiency = review.get("investigation_sufficiency") if isinstance(review.get("investigation_sufficiency"), dict) else {}
     if summary.get("investigation_playbook_status", "") != investigation_sufficiency.get("status", ""):
         findings.append({"severity": "blocker", "finding": "run_summary investigation_playbook_status disagrees with review_gate.json"})
@@ -1401,6 +1421,7 @@ def build_run_summary(
         "surface_verification_surface_count": surface_sufficiency.get("surface_count", 0),
         "verification_output_summary_count": verification_sufficiency.get("output_summary_count", 0),
         "verification_output_signal_counts": verification_sufficiency.get("output_signal_counts", {}),
+        "verification_output_diagnostic_counts": verification_sufficiency.get("output_diagnostic_counts", {}),
         "investigation_playbook_status": investigation_sufficiency.get("status", ""),
         "investigation_read_stage_count": investigation_sufficiency.get("read_stage_count", 0),
         "investigation_evidence_question_count": investigation_sufficiency.get("evidence_question_count", 0),

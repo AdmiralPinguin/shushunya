@@ -30,6 +30,7 @@
     "surface_verification_surface_count",
     "verification_output_summary_count",
     "verification_output_signal_counts",
+    "verification_output_diagnostic_counts",
     "investigation_playbook_status",
     "investigation_read_stage_count",
     "investigation_evidence_question_count",
@@ -163,6 +164,12 @@
       "type": "integer"
     },
     "verification_output_signal_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "verification_output_diagnostic_counts": {
       "type": "object",
       "additionalProperties": {
         "type": "integer"
