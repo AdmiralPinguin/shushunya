@@ -191,6 +191,30 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError(f"{trial_id}: CodeBrigade handoff must require acceptance trace: {packet}")
     if handoff.get("acceptance_trace_row_count") != acceptance_trace.get("row_count"):
         raise AssertionError(f"{trial_id}: CodeBrigade handoff acceptance row count drifted: {packet}")
+    output_contract = packet.get("worker_output_contract") if isinstance(packet.get("worker_output_contract"), dict) else {}
+    if output_contract.get("target") != "CodeBrigade":
+        raise AssertionError(f"{trial_id}: worker output contract must target CodeBrigade: {packet}")
+    if output_contract.get("required_package_statuses") != work_package_ids:
+        raise AssertionError(f"{trial_id}: worker output contract must track work package order: {packet}")
+    output_rows = output_contract.get("package_result_contract") if isinstance(output_contract.get("package_result_contract"), list) else []
+    output_row_package_ids = [
+        row.get("package_id")
+        for row in output_rows
+        if isinstance(row, dict) and isinstance(row.get("package_id"), str) and row.get("package_id")
+    ]
+    if sorted(output_row_package_ids) != sorted(work_package_ids):
+        raise AssertionError(f"{trial_id}: worker output contract rows must cover every work package: {packet}")
+    for row in output_rows:
+        if not isinstance(row, dict):
+            raise AssertionError(f"{trial_id}: worker output contract row must be an object: {packet}")
+        if not row.get("required_status_field") or not row.get("required_evidence_source"):
+            raise AssertionError(f"{trial_id}: worker output contract row must require status and evidence source: {packet}")
+        if not isinstance(row.get("acceptance_evidence"), list) or not row.get("acceptance_evidence"):
+            raise AssertionError(f"{trial_id}: worker output contract row must include acceptance evidence: {packet}")
+        if len(row.get("blocker_contract", []) if isinstance(row.get("blocker_contract"), list) else []) < 3:
+            raise AssertionError(f"{trial_id}: worker output contract row must include blocker contract: {packet}")
+    if handoff.get("worker_output_contract") != output_contract:
+        raise AssertionError(f"{trial_id}: CodeBrigade handoff must carry worker output contract: {packet}")
     assumptions = packet.get("assumption_register") if isinstance(packet.get("assumption_register"), dict) else {}
     assumption_rows = assumptions.get("assumptions") if isinstance(assumptions.get("assumptions"), list) else []
     if len(assumption_rows) < 3:
@@ -231,6 +255,11 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "handoff_package_review_order": handoff.get("package_review_order", []) if isinstance(handoff.get("package_review_order"), list) else [],
         "handoff_acceptance_trace_required": handoff.get("acceptance_trace_required"),
         "handoff_acceptance_trace_row_count": handoff.get("acceptance_trace_row_count"),
+        "worker_output_required_package_statuses": output_contract.get("required_package_statuses", []) if isinstance(output_contract.get("required_package_statuses"), list) else [],
+        "worker_output_package_result_ids": output_row_package_ids,
+        "worker_output_required_report_count": len(output_contract.get("required_reports", [])) if isinstance(output_contract.get("required_reports"), list) else 0,
+        "worker_output_final_review_input_count": len(output_contract.get("final_review_inputs", [])) if isinstance(output_contract.get("final_review_inputs"), list) else 0,
+        "worker_output_failure_contract_count": len(output_contract.get("failure_contract", [])) if isinstance(output_contract.get("failure_contract"), list) else 0,
         "constraint_trace_constraints": [row["constraint"] for row in constraint_rows if isinstance(row, dict) and row.get("constraint")],
         "constraint_trace_package_ids": [
             package_id
@@ -283,6 +312,11 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     handoff_package_review_orders: list[list[str]] = []
     handoff_acceptance_trace_required: Counter[str] = Counter()
     handoff_acceptance_trace_row_counts: list[int] = []
+    worker_output_required_packages: Counter[str] = Counter()
+    worker_output_result_packages: Counter[str] = Counter()
+    worker_output_required_report_counts: list[int] = []
+    worker_output_final_review_input_counts: list[int] = []
+    worker_output_failure_contract_counts: list[int] = []
     constraint_trace_constraints: Counter[str] = Counter()
     constraint_trace_packages: Counter[str] = Counter()
     constraint_trace_row_counts: list[int] = []
@@ -324,6 +358,14 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         handoff_acceptance_trace_required.update([str(result.get("handoff_acceptance_trace_required"))])
         if isinstance(result.get("handoff_acceptance_trace_row_count"), int):
             handoff_acceptance_trace_row_counts.append(result["handoff_acceptance_trace_row_count"])
+        worker_output_required_packages.update(str(item) for item in result.get("worker_output_required_package_statuses", []))
+        worker_output_result_packages.update(str(item) for item in result.get("worker_output_package_result_ids", []))
+        if isinstance(result.get("worker_output_required_report_count"), int):
+            worker_output_required_report_counts.append(result["worker_output_required_report_count"])
+        if isinstance(result.get("worker_output_final_review_input_count"), int):
+            worker_output_final_review_input_counts.append(result["worker_output_final_review_input_count"])
+        if isinstance(result.get("worker_output_failure_contract_count"), int):
+            worker_output_failure_contract_counts.append(result["worker_output_failure_contract_count"])
         constraint_trace_constraints.update(str(item) for item in result.get("constraint_trace_constraints", []))
         constraint_trace_packages.update(str(item) for item in result.get("constraint_trace_package_ids", []))
         if isinstance(result.get("constraint_trace_row_count"), int):
@@ -370,6 +412,11 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "handoff_package_review_orders": handoff_package_review_orders,
         "handoff_acceptance_trace_required_counts": dict(sorted(handoff_acceptance_trace_required.items())),
         "minimum_handoff_acceptance_trace_row_count": min(handoff_acceptance_trace_row_counts) if handoff_acceptance_trace_row_counts else 0,
+        "worker_output_required_package_counts": dict(sorted(worker_output_required_packages.items())),
+        "worker_output_result_package_counts": dict(sorted(worker_output_result_packages.items())),
+        "minimum_worker_output_required_report_count": min(worker_output_required_report_counts) if worker_output_required_report_counts else 0,
+        "minimum_worker_output_final_review_input_count": min(worker_output_final_review_input_counts) if worker_output_final_review_input_counts else 0,
+        "minimum_worker_output_failure_contract_count": min(worker_output_failure_contract_counts) if worker_output_failure_contract_counts else 0,
         "constraint_trace_constraint_counts": dict(sorted(constraint_trace_constraints.items())),
         "constraint_trace_package_counts": dict(sorted(constraint_trace_packages.items())),
         "minimum_constraint_trace_row_count": min(constraint_trace_row_counts) if constraint_trace_row_counts else 0,
@@ -427,6 +474,8 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     rollback_counts = summary.get("change_rollback_trigger_counts") if isinstance(summary.get("change_rollback_trigger_counts"), dict) else {}
     acceptance_trace_package_counts = summary.get("acceptance_trace_package_counts") if isinstance(summary.get("acceptance_trace_package_counts"), dict) else {}
     handoff_acceptance_required_counts = summary.get("handoff_acceptance_trace_required_counts") if isinstance(summary.get("handoff_acceptance_trace_required_counts"), dict) else {}
+    worker_output_required_package_counts = summary.get("worker_output_required_package_counts") if isinstance(summary.get("worker_output_required_package_counts"), dict) else {}
+    worker_output_result_package_counts = summary.get("worker_output_result_package_counts") if isinstance(summary.get("worker_output_result_package_counts"), dict) else {}
     constraint_trace_package_counts = summary.get("constraint_trace_package_counts") if isinstance(summary.get("constraint_trace_package_counts"), dict) else {}
     assumption_id_counts = summary.get("assumption_id_counts") if isinstance(summary.get("assumption_id_counts"), dict) else {}
     planning_service_name_counts = summary.get("planning_service_name_counts") if isinstance(summary.get("planning_service_name_counts"), dict) else {}
@@ -505,6 +554,18 @@ def assert_coverage(summary: dict[str, Any]) -> None:
         raise AssertionError(f"field trials must prove handoff requires acceptance trace: {summary}")
     if int(summary.get("minimum_handoff_acceptance_trace_row_count") or 0) < int(summary.get("minimum_acceptance_trace_row_count") or 0):
         raise AssertionError(f"field trials show handoff acceptance trace row count drift: {summary}")
+    missing_worker_output_required_packages = sorted(package for package in required_work_packages if package not in worker_output_required_package_counts)
+    missing_worker_output_result_packages = sorted(package for package in required_work_packages if package not in worker_output_result_package_counts)
+    if missing_worker_output_required_packages:
+        raise AssertionError(f"field trials are missing worker-output required package coverage: {missing_worker_output_required_packages}")
+    if missing_worker_output_result_packages:
+        raise AssertionError(f"field trials are missing worker-output result package coverage: {missing_worker_output_result_packages}")
+    if int(summary.get("minimum_worker_output_required_report_count") or 0) < 3:
+        raise AssertionError(f"field trials have too few worker-output required reports: {summary}")
+    if int(summary.get("minimum_worker_output_final_review_input_count") or 0) < 4:
+        raise AssertionError(f"field trials have too few worker-output final review inputs: {summary}")
+    if int(summary.get("minimum_worker_output_failure_contract_count") or 0) < 3:
+        raise AssertionError(f"field trials have too few worker-output failure contract rows: {summary}")
     if int(summary.get("minimum_constraint_trace_row_count") or 0) < 3:
         raise AssertionError(f"field trials have too few constraint trace rows: {summary}")
     for package in {"evidence_survey_package", "minimal_patch_package", "verification_evidence_package"}:
