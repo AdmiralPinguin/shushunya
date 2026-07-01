@@ -76,6 +76,8 @@
         "investigation_read_stages",
         "investigation_evidence_questions",
         "investigation_mutation_blockers",
+        "caller_candidates",
+        "contract_surface_candidates",
         "verification_commands"
       ]
     },

@@ -318,6 +318,8 @@ def valid_brief() -> dict:
             "generic_import_edges": [{"source": "client.ts", "import": "./api", "target": "api.ts", "language": "typescript"}],
             "reverse_dependency_index": {"app.py": ["test_app.py"], "util.py": ["app.py"]},
             "test_coverage_links": [{"test": "test_app.py", "target": "app.py"}],
+            "caller_candidates": [{"target": "app.py", "callers": ["test_app.py"], "caller_count": 1}],
+            "contract_surface_candidates": [{"path": "api/schema.json", "score": 6, "reason": "api/schema/contract naming or file type"}],
             "survey_truncated": False,
             "python_symbols_truncated": False,
         },
@@ -340,6 +342,8 @@ def main() -> int:
         raise AssertionError(f"execution policy must stay honest about narrow guarded execution: {policy}")
     if "implementation_brief validates against the CodeBrigade contract" not in policy["mutation_preconditions"]:
         raise AssertionError(f"execution policy must require brief validation before mutation: {policy}")
+    if "implementation_plan lists target files, test files, caller candidates, contract surfaces, dependency edges, and refusal conditions" not in policy["mutation_preconditions"]:
+        raise AssertionError(f"execution policy must require caller and contract evidence before mutation: {policy}")
     if "execution preflight passes before source mutation" not in policy["mutation_preconditions"]:
         raise AssertionError(f"execution policy must require preflight before mutation: {policy}")
     if "investigation playbook read stages are acknowledged before source mutation" not in policy["mutation_preconditions"]:
@@ -380,6 +384,10 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve reverse dependency index: {plan}")
     if plan["test_coverage_links"] != [{"test": "test_app.py", "target": "app.py"}]:
         raise AssertionError(f"implementation plan should preserve test coverage links: {plan}")
+    if plan["caller_candidates"] != [{"target": "app.py", "callers": ["test_app.py"], "caller_count": 1}]:
+        raise AssertionError(f"implementation plan should preserve caller candidates: {plan}")
+    if plan["contract_surface_candidates"][0]["path"] != "api/schema.json":
+        raise AssertionError(f"implementation plan should preserve contract surface candidates: {plan}")
     if plan["planning_critical_path"][-1] != "implementation_brief":
         raise AssertionError(f"implementation plan should preserve planning critical path: {plan}")
     if plan["planning_review_decision"] != "ready_for_ceraxia_review" or plan["planning_review_score"] < 80:

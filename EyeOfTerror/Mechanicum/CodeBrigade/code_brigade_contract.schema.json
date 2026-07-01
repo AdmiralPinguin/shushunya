@@ -55,6 +55,8 @@
         "recommended_read_order",
         "source_summaries_to_consider",
         "dependency_edges_to_check",
+        "caller_candidates",
+        "contract_surface_candidates",
         "survey_truncated",
         "python_symbols_truncated",
         "handoff_steps",
@@ -135,6 +137,18 @@
           }
         },
         "source_summaries_to_consider": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "caller_candidates": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "contract_surface_candidates": {
           "type": "array",
           "items": {
             "type": "object"

@@ -5,7 +5,7 @@
   "real_execution_status": "explicit_or_guarded_inference_adapter",
   "mutation_preconditions": [
     "implementation_brief validates against the CodeBrigade contract",
-    "implementation_plan lists target files, test files, dependency edges, and refusal conditions",
+    "implementation_plan lists target files, test files, caller candidates, contract surfaces, dependency edges, and refusal conditions",
     "investigation playbook read stages are acknowledged before source mutation",
     "execution preflight passes before source mutation",
     "repository survey evidence exists for candidate files before source mutation",

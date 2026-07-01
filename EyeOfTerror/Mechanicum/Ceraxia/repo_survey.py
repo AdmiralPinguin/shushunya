@@ -340,6 +340,56 @@ def build_test_coverage_links(edges: list[dict[str, str]]) -> list[dict[str, str
     return links[:80]
 
 
+def build_caller_candidates(candidates: list[str], reverse_dependency_index: dict[str, list[str]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for candidate in candidates:
+        callers = reverse_dependency_index.get(candidate, [])
+        if not callers:
+            continue
+        rows.append(
+            {
+                "target": candidate,
+                "callers": callers[:20],
+                "caller_count": len(callers),
+            }
+        )
+    return rows[:80]
+
+
+def contract_surface_score(path: Path) -> int:
+    rel = "/".join(part.lower() for part in path.parts)
+    name = path.name.lower()
+    suffix = path.suffix.lower()
+    score = 0
+    if any(token in rel for token in ("api", "schema", "contract", "openapi", "swagger", "proto", "graphql", "route", "endpoint")):
+        score += 4
+    if suffix in {".json", ".yaml", ".yml", ".toml"}:
+        score += 2
+    if suffix in SOURCE_SUFFIXES and any(token in name for token in ("api", "schema", "client", "route", "endpoint", "handler")):
+        score += 2
+    if is_test_file(path):
+        score -= 1
+    return score
+
+
+def build_contract_surface_candidates(files: list[Path], root: Path) -> list[dict[str, Any]]:
+    scored = sorted(
+        (
+            (contract_surface_score(path), str(path.relative_to(root)))
+            for path in files
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    rows: list[dict[str, Any]] = []
+    for score, rel in scored:
+        if score <= 0:
+            continue
+        rows.append({"path": rel, "score": score, "reason": "api/schema/contract naming or file type"})
+        if len(rows) >= 30:
+            break
+    return rows
+
+
 def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[str], path_hints: list[str] | None = None) -> dict[str, Any]:
     root = Path(repo_path)
     path_hints = path_hints or []
@@ -369,6 +419,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "generic_import_edges": [],
             "reverse_dependency_index": {},
             "test_coverage_links": [],
+            "caller_candidates": [],
+            "contract_surface_candidates": [],
             "recommended_read_order": [],
             "suggested_verification_commands": [],
             "max_files_scanned": MAX_SURVEY_FILES,
@@ -430,6 +482,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     dependency_edges = unique_edges([*python_edges, *generic_edges])[:120]
     reverse_dependency_index = build_reverse_dependency_index(dependency_edges)
     test_coverage_links = build_test_coverage_links(dependency_edges)
+    caller_candidates = build_caller_candidates(candidates, reverse_dependency_index)
+    contract_surface_candidates = build_contract_surface_candidates(files, root)
     recommended_read_order = build_recommended_read_order(existing_path_hints, entrypoints, candidates, tests, dependency_edges)
     suggested_commands: list[str] = []
     if tests:
@@ -460,6 +514,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "generic_import_edges": generic_edges,
         "reverse_dependency_index": reverse_dependency_index,
         "test_coverage_links": test_coverage_links,
+        "caller_candidates": caller_candidates,
+        "contract_surface_candidates": contract_surface_candidates,
         "recommended_read_order": recommended_read_order,
         "suggested_verification_commands": suggested_commands,
         "max_files_scanned": MAX_SURVEY_FILES,
