@@ -163,7 +163,7 @@ def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) ->
         blockers.append("unsafe explicit path hints: " + ", ".join(str(item) for item in unsafe_path_hints))
     if missing_blockers:
         blockers.append("explicit path hints were not found: " + ", ".join(missing_blockers))
-    if not candidate_files:
+    if not candidate_files and not allowed_missing_create_path_hints:
         blockers.append("repository survey found no candidate source/config/documentation files")
     if risk_level == "high" and not test_files:
         blockers.append("high-risk task has no discovered test surface")

@@ -56,7 +56,7 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
         blockers.append("repo_path is not a directory")
     if not brief.get("allowed_scope"):
         blockers.append("allowed_scope is missing")
-    if not candidate_files:
+    if not candidate_files and not safe_missing_path_hints:
         blockers.append("repository survey has no candidate files")
     elif unsafe_candidate_files:
         blockers.append("repository survey candidate files must be repo-relative")

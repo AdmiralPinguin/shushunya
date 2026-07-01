@@ -55,7 +55,13 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             (repo / "barrel.ts").write_text("export { api } from './api';\n", encoding="utf-8")
             (repo / "client.ts").write_text("import { api } from './api';\nexport function client() { return api(); }\n", encoding="utf-8")
             (repo / "client.spec.ts").write_text("import './setup';\nimport { client } from './client';\ntest('client', () => client());\n", encoding="utf-8")
-            (repo / "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
+            (repo / "test_app.py").write_text(
+                "import unittest\nfrom app import app\n\n"
+                "class AppTest(unittest.TestCase):\n"
+                "    def test_app(self):\n"
+                "        self.assertTrue(app())\n",
+                encoding="utf-8",
+            )
             runs = Path(tmp) / "runs"
             result = run_ceraxia(
                 CeraxiaInput(
@@ -1055,6 +1061,38 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["maturity"], "guarded_inferred_patch_execution_controller")
             self.assertEqual(summary["code_brigade_execution_result_status"], "implemented")
+
+    def test_non_dry_guarded_inferred_create_file_can_be_only_source_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "test_app.py").write_text(
+                "import unittest\nfrom app import app\n\n"
+                "class AppTest(unittest.TestCase):\n"
+                "    def test_app(self):\n"
+                "        self.assertTrue(app())\n",
+                encoding="utf-8",
+            )
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="Создай файл `app.py` с содержимым `def app():\n    return True\n`.",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                    dry_run=False,
+                    execute_verification=True,
+                    verification_commands=("python -m py_compile app.py", "python -m unittest test_app.py"),
+                )
+            )
+            self.assertTrue(result["ok"], result)
+            self.assertTrue(result["ready_for_execution"], result)
+            self.assertIn("def app", (repo / "app.py").read_text(encoding="utf-8"))
+            run_dir = Path(result["run_dir"])
+            brief = json.loads((run_dir / "implementation_brief.json").read_text(encoding="utf-8"))
+            self.assertEqual(brief["survey_quality_gate"]["decision"], "passed")
+            self.assertEqual(brief["repo_survey_evidence"]["candidate_files"], [])
+            self.assertEqual(brief["survey_quality_gate"]["allowed_missing_create_path_hints"], ["app.py"])
+            summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["surface_verification_status"], "executed")
 
     def test_review_gate_rejects_incomplete_planning_packet(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
