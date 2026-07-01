@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 
@@ -19,6 +20,7 @@ def require_dir(path: Path) -> None:
 
 
 def assert_brigade_structure() -> None:
+    require_file(ROOT / "architecture_contract.json")
     for dirname in ["Ceraxia", "CodeBrigade", "PlanningBrigade"]:
         require_dir(ROOT / dirname)
         require_file(ROOT / dirname / "README.md")
@@ -28,6 +30,21 @@ def assert_brigade_structure() -> None:
     require_file(ROOT / "PlanningBrigade" / "planning_brigade.py")
     for role in ["TaskTriage", "RepoSurveyor", "DesignStrategos", "VerificationArchitect", "RiskScribe"]:
         require_file(ROOT / "PlanningBrigade" / role / "README.md")
+
+
+def assert_architecture_contract() -> None:
+    payload = json.loads((ROOT / "architecture_contract.json").read_text(encoding="utf-8"))
+    if payload.get("kind") != "eye_mechanicum_architecture_contract":
+        raise AssertionError("architecture_contract.json kind drifted")
+    if payload.get("contract_version") != "eye-mechanicum.v1":
+        raise AssertionError("architecture_contract.json contract_version drifted")
+    if payload.get("governance_root") != "EyeOfTerror/Mechanicum":
+        raise AssertionError("EyeOfTerror/Mechanicum must remain the governance root")
+    if payload.get("legacy_runtime_root") != "Mechanicum":
+        raise AssertionError("top-level Mechanicum must remain marked as legacy/shared runtime")
+    rules = payload.get("rules")
+    if not isinstance(rules, list) or not any("must not import top-level Mechanicum" in str(rule) for rule in rules):
+        raise AssertionError("architecture_contract.json must document the root Mechanicum import boundary")
 
 
 def assert_no_reverse_runtime_dependency() -> None:
@@ -57,6 +74,7 @@ def assert_runtime_artifacts_ignored() -> None:
 
 def main() -> int:
     assert_brigade_structure()
+    assert_architecture_contract()
     assert_no_reverse_runtime_dependency()
     assert_runtime_artifacts_ignored()
     print("[ok] EyeOfTerror Mechanicum boundary")
