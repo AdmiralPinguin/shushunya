@@ -735,6 +735,17 @@ def main() -> int:
         if "def value():\n    return 42\n" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("guarded inferred add-function did not update app.py")
     with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import values\n\ndef test_values():\n    assert values() == [1, 2, 3]\n", encoding="utf-8")
+        list_literal_brief = valid_brief()
+        list_literal_brief["repo_path"] = tmp
+        list_literal_brief["task"] = "почини app.py чтобы тест проходил"
+        list_literal_report = code_brigade_adapter.build_worker_report(list_literal_brief, dry_run=False)
+        if list_literal_report["status"] != "implemented" or list_literal_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"test-inferred list literal should report implemented changed files: {list_literal_report}")
+        if "def values():\n    return [1, 2, 3]\n" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("test-inferred list literal did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import value\n\ndef test_value():\n    assert value() == 42\n", encoding="utf-8")
         duplicate_add_brief = valid_brief()

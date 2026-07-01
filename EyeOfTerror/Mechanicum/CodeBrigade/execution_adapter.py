@@ -326,11 +326,11 @@ def python_module_constant_exists(source_path: Path, symbol_name: str) -> bool:
 
 def validate_safe_return_literal(literal: str) -> None:
     try:
-        parsed = ast.parse(literal, mode="eval")
-    except SyntaxError as exc:
-        raise ValueError(f"natural language add-function return value is not a valid Python literal: {exc.msg}") from exc
-    if not isinstance(parsed.body, ast.Constant):
-        raise ValueError("natural language add-function return value must be a simple Python literal")
+        ast.parse(literal, mode="eval")
+        ast.literal_eval(literal)
+    except (SyntaxError, ValueError) as exc:
+        detail = exc.msg if isinstance(exc, SyntaxError) else str(exc)
+        raise ValueError(f"natural language add-function return value is not a safe Python literal: {detail}") from exc
 
 
 def safe_operation_path(repo: Path, rel_path: str) -> Path:
