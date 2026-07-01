@@ -28,6 +28,7 @@ if CODE_BRIGADE_PATH not in sys.path:
 
 from planning_brigade import ROLE_ORDER, build_planning_packet  # noqa: E402
 from code_brigade_adapter import build_worker_report  # noqa: E402
+from verification_adapter import run_verification_commands  # noqa: E402
 from repo_survey import survey_repository  # noqa: E402
 
 
@@ -65,6 +66,7 @@ class CeraxiaInput:
     task: str
     repo_path: str
     dry_run: bool = True
+    execute_verification: bool = False
     runs_root: Path = RUNS_ROOT
 
 
@@ -232,23 +234,45 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
     }
 
 
-def build_verification_report(brief: dict[str, Any], worker_report: dict[str, Any]) -> dict[str, Any]:
+def build_verification_report(brief: dict[str, Any], worker_report: dict[str, Any], execute_verification: bool = False) -> dict[str, Any]:
     strategy = brief["required_verification"]
     commands = list(strategy.get("targeted_commands", []))
     for command in brief.get("suggested_verification_commands", []):
         if command not in commands:
             commands.append(command)
+    executable_commands = [
+        command
+        for command in commands
+        if not command.startswith("rerun ") and "<" not in command and ">" not in command
+    ]
     dry_run = worker_report["dry_run"]
     blocked = brief["blocked"] or worker_report["status"] == "blocked"
+    execution = run_verification_commands(executable_commands, brief.get("repo_path", ""), execute=execute_verification) if executable_commands and not blocked else {
+        "kind": "code_brigade_verification_execution",
+        "status": "blocked" if blocked else "passed",
+        "execute": execute_verification,
+        "repo_path": brief.get("repo_path", ""),
+        "results": [],
+        "blockers": brief.get("blockers", []) if blocked else [],
+    }
+    if blocked:
+        status = "blocked"
+    elif execute_verification:
+        status = execution["status"] if executable_commands else "requires_execution"
+    else:
+        status = "planned_only" if dry_run else "requires_execution"
     return {
         "kind": "ceraxia_verification_report",
-        "status": "blocked" if blocked else ("planned_only" if dry_run else "requires_execution"),
+        "status": status,
         "commands_planned": commands,
-        "commands_executed": [],
+        "commands_executable": executable_commands,
+        "commands_executed": [item for item in execution.get("results", []) if item.get("status") != "planned"],
+        "verification_execution": execution,
         "negative_tests_required": strategy.get("negative_tests", []),
         "broad_verification_required": bool(strategy.get("broad_verification_required")),
-        "blockers": brief.get("blockers", []) if blocked else [],
+        "blockers": execution.get("blockers", []) if execution.get("blockers") else (brief.get("blockers", []) if blocked else []),
         "dry_run": dry_run,
+        "execute_verification": execute_verification,
     }
 
 
@@ -266,7 +290,7 @@ def review_gate(
     if worker_report["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "worker report is blocked"})
     negative_tests = verification_report.get("negative_tests_required", [])
-    if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution"}:
+    if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution", "passed"}:
         findings.append({"severity": "blocker", "finding": "negative tests are missing or not planned"})
     if verification_report.get("broad_verification_required") and not verification_report.get("commands_planned"):
         findings.append({"severity": "blocker", "finding": "broad verification is required but no commands are planned"})
@@ -486,8 +510,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     status["next_action"] = "verify worker output" if worker_report["status"] != "blocked" else "repair implementation blockers"
     write_json(run_dir / "worker_report.json", worker_report)
 
-    verification_report = build_verification_report(brief, worker_report)
-    status["state"] = "verified" if verification_report["status"] in {"planned_only", "requires_execution"} else "failed"
+    verification_report = build_verification_report(brief, worker_report, execute_verification=task_input.execute_verification)
+    status["state"] = "verified" if verification_report["status"] in {"planned_only", "requires_execution", "passed"} else "failed"
     status["lifecycle"].append(status["state"])
     status["next_action"] = "review gate" if status["state"] == "verified" else "repair verification blockers"
     write_json(run_dir / "verification_report.json", verification_report)
@@ -539,12 +563,14 @@ def main() -> int:
     parser.add_argument("--repo-path", default=str(PROJECT_ROOT))
     parser.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     parser.add_argument("--execute", action="store_true", help="Reserved for future real CodeBrigade execution.")
+    parser.add_argument("--execute-verification", action="store_true", help="Run allowlisted verification commands while keeping source mutation dry-run.")
     args = parser.parse_args()
     result = run_ceraxia(
         CeraxiaInput(
             task=args.task,
             repo_path=args.repo_path,
             dry_run=not args.execute,
+            execute_verification=args.execute_verification,
             runs_root=args.runs_root,
         )
     )

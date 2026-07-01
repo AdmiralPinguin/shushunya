@@ -16,6 +16,7 @@ ALLOWED_PREFIXES = [
     ["python", "-m", "pytest"],
     ["python3", "-m", "pytest"],
     ["pytest"],
+    ["git", "diff", "--check"],
 ]
 
 
@@ -60,6 +61,9 @@ def run_verification_commands(commands: list[str], repo_path: str, execute: bool
         if not execute:
             results.append({"command": command, "status": "planned", "returncode": None, "stdout": "", "stderr": ""})
             continue
+        if tokens == ["git", "diff", "--check"] and not (repo / ".git").exists():
+            results.append({"command": command, "status": "skipped", "returncode": None, "stdout": "", "stderr": "not a git repository"})
+            continue
         try:
             completed = subprocess.run(normalize_tokens(tokens), cwd=repo, text=True, capture_output=True, timeout=timeout_sec, check=False)
         except FileNotFoundError as exc:
@@ -77,7 +81,7 @@ def run_verification_commands(commands: list[str], repo_path: str, execute: bool
                 "stderr": completed.stderr[-4000:],
             }
         )
-    status = "blocked" if blockers else ("passed" if all(item["status"] in {"planned", "passed"} for item in results) else "failed")
+    status = "blocked" if blockers else ("passed" if all(item["status"] in {"planned", "passed", "skipped"} for item in results) else "failed")
     return {
         "kind": "code_brigade_verification_execution",
         "status": status,

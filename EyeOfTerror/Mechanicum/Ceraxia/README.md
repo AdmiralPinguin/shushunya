@@ -50,6 +50,8 @@ artifacts. Real CodeBrigade execution can replace the dry-run worker report
 without changing the surrounding artifact contract.
 CLI `ok` and `package_ok` mean the dry-run package is internally consistent;
 `ready_for_execution` remains false until real CodeBrigade execution is wired.
+Use `--execute-verification` to run allowlisted verification commands while
+keeping source mutation in dry-run mode.
 
 Smoke command:
 

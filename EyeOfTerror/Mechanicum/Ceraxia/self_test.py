@@ -118,6 +118,25 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
             self.assertIn("failed", status["lifecycle"])
 
+    def test_execute_verification_runs_allowlisted_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="добавь API helper",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                    execute_verification=True,
+                )
+            )
+            self.assertTrue(result["package_ok"], result)
+            run_dir = Path(result["run_dir"])
+            verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(verification["status"], "passed")
+            self.assertTrue(verification["commands_executed"])
+
     def test_review_gate_rejects_incomplete_planning_packet(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
         packet.pop("verification_strategy")
