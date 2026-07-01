@@ -11,7 +11,9 @@
     "verification_report.json",
     "review_gate.json",
     "status.json",
-    "final_report.md"
+    "final_report.md",
+    "artifact_manifest.json",
+    "run_audit.json"
   ],
   "properties": {
     "task.json": {
@@ -39,6 +41,12 @@
       "type": "string"
     },
     "final_report.md": {
+      "type": "string"
+    },
+    "artifact_manifest.json": {
+      "type": "string"
+    },
+    "run_audit.json": {
       "type": "string"
     }
   },

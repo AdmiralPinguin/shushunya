@@ -37,6 +37,18 @@ LIFECYCLE = [
     "finalized",
 ]
 
+REQUIRED_RUN_ARTIFACTS = [
+    "task.json",
+    "planning_packet.json",
+    "repo_survey.json",
+    "implementation_brief.json",
+    "worker_report.json",
+    "verification_report.json",
+    "review_gate.json",
+    "status.json",
+    "final_report.md",
+]
+
 
 @dataclass(frozen=True)
 class CeraxiaInput:
@@ -255,6 +267,61 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     return "\n".join(lines)
 
 
+def build_artifact_manifest(run_dir: Path) -> dict[str, Any]:
+    entries: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for name in REQUIRED_RUN_ARTIFACTS:
+        path = run_dir / name
+        if not path.exists():
+            missing.append(name)
+            entries.append({"path": name, "exists": False, "size_bytes": 0, "sha256": ""})
+            continue
+        data = path.read_bytes()
+        entries.append(
+            {
+                "path": name,
+                "exists": True,
+                "size_bytes": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+            }
+        )
+    return {
+        "kind": "ceraxia_run_artifact_manifest",
+        "required_artifacts": REQUIRED_RUN_ARTIFACTS,
+        "entries": entries,
+        "missing": missing,
+        "complete": not missing,
+    }
+
+
+def audit_run_package(run_dir: Path) -> dict[str, Any]:
+    manifest = build_artifact_manifest(run_dir)
+    findings: list[dict[str, str]] = []
+    if manifest["missing"]:
+        findings.append({"severity": "blocker", "finding": f"missing artifacts: {', '.join(manifest['missing'])}"})
+    try:
+        status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        findings.append({"severity": "blocker", "finding": f"status.json is unreadable: {exc}"})
+        status = {}
+    if status.get("state") == "finalized" and status.get("lifecycle") != LIFECYCLE:
+        findings.append({"severity": "blocker", "finding": "finalized run has incomplete lifecycle"})
+    try:
+        review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        findings.append({"severity": "blocker", "finding": f"review_gate.json is unreadable: {exc}"})
+        review = {}
+    if status.get("state") == "finalized" and review.get("decision") not in {"ready", "dry_run_ready"}:
+        findings.append({"severity": "blocker", "finding": "finalized run lacks passing review gate"})
+    decision = "passed" if not findings else "blocked"
+    return {
+        "kind": "ceraxia_run_package_audit",
+        "decision": decision,
+        "manifest_complete": manifest["complete"],
+        "findings": findings,
+    }
+
+
 def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     run_id = f"ceraxia-{utc_stamp()}-{task_slug(task_input.task)}"
     run_dir = task_input.runs_root / run_id
@@ -320,11 +387,16 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     }
     write_json(run_dir / "status.json", status)
     write_text(run_dir / "final_report.md", final_report_markdown(run_id, artifacts))
+    manifest = build_artifact_manifest(run_dir)
+    write_json(run_dir / "artifact_manifest.json", manifest)
+    audit = audit_run_package(run_dir)
+    write_json(run_dir / "run_audit.json", audit)
     return {
-        "ok": status["state"] == "finalized",
+        "ok": status["state"] == "finalized" and audit["decision"] == "passed",
         "run_id": run_id,
         "run_dir": str(run_dir),
         "state": status["state"],
+        "audit_decision": audit["decision"],
         "lifecycle": status["lifecycle"],
         "review_decision": review["decision"],
         "next_action": status["next_action"],

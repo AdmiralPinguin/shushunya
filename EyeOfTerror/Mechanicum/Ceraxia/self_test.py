@@ -11,6 +11,7 @@ from ceraxia import (
     LIFECYCLE,
     build_implementation_brief,
     build_repo_survey_stub,
+    audit_run_package,
     review_gate,
     run_ceraxia,
     validate_planning_packet,
@@ -52,6 +53,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                 "review_gate.json",
                 "status.json",
                 "final_report.md",
+                "artifact_manifest.json",
+                "run_audit.json",
             ]
             for name in expected:
                 self.assertTrue((run_dir / name).exists(), name)
@@ -61,6 +64,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("hardcoded one-off behavior", brief["forbidden_approaches"])
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertIn("untrusted input is rejected", verification["negative_tests_required"])
+            audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
+            self.assertEqual(audit["decision"], "passed")
+            self.assertTrue(audit["manifest_complete"])
 
     def test_missing_repo_blocks_before_claiming_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -102,6 +108,23 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         packet.pop("risk_register")
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertEqual(review["decision"], "blocked")
+
+    def test_run_audit_blocks_missing_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="почини pytest для public API schema",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            run_dir = Path(result["run_dir"])
+            (run_dir / "worker_report.json").unlink()
+            audit = audit_run_package(run_dir)
+            self.assertEqual(audit["decision"], "blocked")
+            self.assertFalse(audit["manifest_complete"])
 
 
 if __name__ == "__main__":
