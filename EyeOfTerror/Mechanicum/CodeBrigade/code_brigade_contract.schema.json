@@ -70,6 +70,9 @@
         "recommended_timeout_minutes",
         "escalation_triggers",
         "mutation_preconditions",
+        "implementation_work_packages",
+        "work_package_review_order",
+        "work_package_handoff_criteria",
         "acceptance_evidence_required",
         "verification_commands",
         "surface_verification_complete",
@@ -174,6 +177,24 @@
           }
         },
         "mutation_preconditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "implementation_work_packages": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "work_package_review_order": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "work_package_handoff_criteria": {
           "type": "array",
           "items": {
             "type": "string"

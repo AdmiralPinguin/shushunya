@@ -766,6 +766,122 @@ def implementation_brief_blueprint(
     }
 
 
+def implementation_work_packages(
+    triage: dict[str, Any],
+    problem: dict[str, Any],
+    dependency: dict[str, Any],
+    impact: dict[str, Any],
+    verification: dict[str, Any],
+    risks: dict[str, Any],
+    forecast: dict[str, Any],
+) -> dict[str, Any]:
+    task_kinds = set(triage.get("task_kinds", []))
+    surfaces = impact.get("surfaces", []) if isinstance(impact.get("surfaces"), list) else []
+    targeted_commands = verification.get("targeted_commands", []) if isinstance(verification.get("targeted_commands"), list) else []
+    negative_tests = verification.get("negative_tests", []) if isinstance(verification.get("negative_tests"), list) else []
+    risk_items = risks.get("risks", []) if isinstance(risks.get("risks"), list) else []
+    packages: list[dict[str, Any]] = [
+        {
+            "id": "evidence_survey_package",
+            "owner": "CodeBrigade",
+            "purpose": "Confirm candidate files, dependent callers, and tests before choosing an edit.",
+            "read_scope": [
+                "repo_survey_evidence.recommended_read_order",
+                "repo_survey_evidence.candidate_files",
+                "repo_survey_evidence.test_files",
+                "repo_survey_evidence.local_import_edges",
+                "repo_survey_evidence.generic_import_edges",
+            ],
+            "edit_scope": [],
+            "verification_scope": ["no mutation; evidence only"],
+            "risk_controls": ["block if candidate files or required path hints are missing"],
+            "handoff_criteria": ["candidate file decision is grounded in repo_survey.json"],
+        },
+        {
+            "id": "minimal_patch_package",
+            "owner": "CodeBrigade",
+            "purpose": "Apply the smallest source change that satisfies the selected strategy.",
+            "read_scope": ["implementation_brief_blueprint", "planning_dependency_map", "impact_analysis"],
+            "edit_scope": ["candidate files identified by repository survey"],
+            "verification_scope": targeted_commands,
+            "risk_controls": [
+                "preserve public behavior unless the task explicitly changes it",
+                "do not edit tests to mask broken source behavior",
+                "rollback or block when patch preflight fails",
+            ],
+            "handoff_criteria": ["worker_report.json lists changed files, blockers, and execution result"],
+        },
+        {
+            "id": "verification_evidence_package",
+            "owner": "CodeBrigade",
+            "purpose": "Prove each planned impact surface or return concrete blockers.",
+            "read_scope": ["surface_verification_matrix", "required_verification", "acceptance_contract"],
+            "edit_scope": [],
+            "verification_scope": targeted_commands + negative_tests,
+            "risk_controls": ["do not treat syntax-only checks as behavior proof"],
+            "handoff_criteria": ["verification_report.json names executed, skipped, failed, or blocked checks"],
+        },
+    ]
+    if task_kinds & {"api_compatibility", "migration"}:
+        packages.append(
+            {
+                "id": "compatibility_package",
+                "owner": "CodeBrigade",
+                "purpose": "Protect old/new public or data shapes across callers, readers, and writers.",
+                "read_scope": ["compatibility_boundary", "entrypoints_to_check", "dependency_edges_to_check"],
+                "edit_scope": ["source files required by compatibility evidence"],
+                "verification_scope": [item for item in [*targeted_commands, *negative_tests] if "compat" in item.lower() or "api" in item.lower() or "schema" in item.lower() or "round" in item.lower()],
+                "risk_controls": ["block if compatibility breakage is not explicitly accepted"],
+                "handoff_criteria": ["compatibility evidence is present or the migration break is explicit"],
+            }
+        )
+    if "security" in task_kinds:
+        packages.append(
+            {
+                "id": "security_boundary_package",
+                "owner": "CodeBrigade",
+                "purpose": "Prove the untrusted input, path, auth, or token boundary cannot be bypassed.",
+                "read_scope": ["security_boundary", "negative_tests", "untrusted input flows"],
+                "edit_scope": ["boundary validation source files only"],
+                "verification_scope": [item for item in negative_tests if any(word in item for word in ("input", "path", "auth", "token"))],
+                "risk_controls": ["final review blocks without negative boundary evidence"],
+                "handoff_criteria": ["negative_test_evidence.json or explicit blocker is returned"],
+            }
+        )
+    if "concurrency" in task_kinds:
+        packages.append(
+            {
+                "id": "concurrency_runtime_package",
+                "owner": "CodeBrigade",
+                "purpose": "Protect parallel, retry, cache, and shared-state behavior from nondeterministic regressions.",
+                "read_scope": ["concurrency_runtime", "shared-state callers", "retry/cache boundaries"],
+                "edit_scope": ["state coordination source files only"],
+                "verification_scope": [item for item in [*targeted_commands, *negative_tests] if any(word in item.lower() for word in ("parallel", "retry", "state", "cache"))],
+                "risk_controls": ["block if the race condition cannot be reproduced or bounded"],
+                "handoff_criteria": ["remaining race risk is named in the review evidence"],
+            }
+        )
+    return {
+        "role": "PlanningBrigade",
+        "risk_level": triage["risk_level"],
+        "task_kinds": triage["task_kinds"],
+        "critical_path": dependency["critical_path"],
+        "highest_risk_surface": impact.get("highest_risk_surface", ""),
+        "surface_count": len(surfaces),
+        "expected_iterations": forecast.get("expected_code_brigade_iterations", 1),
+        "packages": packages,
+        "package_count": len(packages),
+        "review_order": [package["id"] for package in packages],
+        "global_handoff_criteria": [
+            "each package is passed, blocked, or explicitly deferred",
+            "package blockers are reflected in review_gate.json",
+            "final report answers the original task rather than only package-local success",
+        ],
+        "risk_focus": [item.get("risk", "") for item in risk_items if isinstance(item, dict) and item.get("risk")],
+        "definition_of_done": problem.get("definition_of_done", []),
+    }
+
+
 def planning_review_gate(
     triage: dict[str, Any],
     problem: dict[str, Any],
@@ -775,6 +891,7 @@ def planning_review_gate(
     verification: dict[str, Any],
     surface_matrix: dict[str, Any],
     acceptance: dict[str, Any],
+    work_packages: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -794,6 +911,19 @@ def planning_review_gate(
         blockers.append("high-risk task lacks broad verification requirement")
     if surface_matrix.get("complete") is False:
         blockers.extend(str(item) for item in surface_matrix.get("blockers", []))
+    if work_packages is not None:
+        packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
+        if len(packages) < 3:
+            blockers.append("implementation work packages are incomplete")
+        for package in packages:
+            if not isinstance(package, dict):
+                blockers.append("implementation work package is not an object")
+                continue
+            for key in ("id", "owner", "purpose", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+                if key not in package:
+                    blockers.append(f"implementation work package missing {key}: {package.get('id', '<unknown>')}")
+            if package.get("owner") != "CodeBrigade":
+                blockers.append(f"implementation work package owner must be CodeBrigade: {package.get('id', '<unknown>')}")
     if verification.get("negative_tests") and not any("negative" in item for item in acceptance.get("must_prove", [])):
         blockers.append("negative test requirement is not reflected in acceptance contract")
     score = 100
@@ -821,6 +951,7 @@ def planning_review_gate(
             "dependency critical path",
             "work phase completeness",
             "verification coverage",
+            "implementation work package completeness",
             "acceptance evidence alignment",
         ],
     }
@@ -900,7 +1031,8 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     quality = quality_bar(triage, verification)
     acceptance = acceptance_contract(problem, triage, verification, quality, surface_matrix)
     blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix, forecast)
-    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance)
+    work_packages = implementation_work_packages(triage, problem, dependency, impact, verification, risks, forecast)
+    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, work_packages)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
         "ok": bool(task),
@@ -923,6 +1055,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "quality_bar": quality,
         "acceptance_contract": acceptance,
         "implementation_brief_blueprint": blueprint,
+        "implementation_work_packages": work_packages,
         "planning_review_gate": review,
         "code_brigade_handoff": handoff,
         "next_action": {

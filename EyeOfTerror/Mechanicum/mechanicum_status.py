@@ -43,7 +43,7 @@ COMPONENTS = {
             "VerificationArchitect/README.md",
             "RiskScribe/README.md",
         ],
-        "maturity": "contracted_planning_department_with_role_quality_gates_and_field_trial_coverage",
+        "maturity": "contracted_planning_department_with_role_quality_gates_field_trial_coverage_and_code_work_packages",
     },
     "CodeBrigade": {
         "kind": "implementation_brigade_contract",
@@ -92,7 +92,7 @@ ROADMAP = [
     {
         "priority": 4,
         "item": "split PlanningBrigade roles into callable services after more field trials",
-        "reason": "PlanningBrigade now emits problem framing, path hints, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, and CodeBrigade brief blueprints; role services should wait until these contracts survive more real tasks.",
+        "reason": "PlanningBrigade now emits problem framing, path hints, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, CodeBrigade brief blueprints, and implementation work packages; role services should wait until these contracts survive more real tasks.",
         "owner": "PlanningBrigade",
     },
 ]

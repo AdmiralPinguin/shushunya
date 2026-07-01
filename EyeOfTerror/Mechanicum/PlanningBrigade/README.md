@@ -39,6 +39,9 @@ Current contract:
   shortcuts are forbidden.
 - `implementation_brief_blueprint` defines the CodeBrigade handoff sections and
   mutation preconditions.
+- `implementation_work_packages` turns the plan into reviewable CodeBrigade
+  work packages with read scope, edit scope, verification scope, risk controls,
+  and handoff criteria.
 - `planning_review_gate` scores the planning packet and blocks unclear or
   structurally unsafe plans before they reach CodeBrigade.
 - `code_brigade_handoff` lists the ordered execution/review steps.

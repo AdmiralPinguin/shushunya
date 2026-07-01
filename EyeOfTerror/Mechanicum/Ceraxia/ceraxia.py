@@ -198,6 +198,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "quality_bar": quality,
         "acceptance_contract": packet.get("acceptance_contract", {}),
         "implementation_brief_blueprint": packet.get("implementation_brief_blueprint", {}),
+        "implementation_work_packages": packet.get("implementation_work_packages", {}),
         "planning_review_gate": planning_review,
         "planning_dependency_map": packet.get("dependency_map", {}),
         "work_breakdown": packet.get("work_breakdown", {}),

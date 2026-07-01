@@ -64,6 +64,50 @@ def valid_brief() -> dict:
                 "candidate files are repo-relative existing non-symlink paths",
             ],
         },
+        "implementation_work_packages": {
+            "packages": [
+                {
+                    "id": "evidence_survey_package",
+                    "owner": "CodeBrigade",
+                    "purpose": "Confirm candidate files before editing.",
+                    "read_scope": ["repo_survey_evidence.recommended_read_order"],
+                    "edit_scope": [],
+                    "verification_scope": ["no mutation; evidence only"],
+                    "risk_controls": ["block if candidate files are missing"],
+                    "handoff_criteria": ["candidate file decision is grounded in repo_survey.json"],
+                },
+                {
+                    "id": "minimal_patch_package",
+                    "owner": "CodeBrigade",
+                    "purpose": "Apply the smallest source change.",
+                    "read_scope": ["implementation_brief_blueprint"],
+                    "edit_scope": ["candidate files identified by repository survey"],
+                    "verification_scope": ["rerun failing test command"],
+                    "risk_controls": ["do not edit tests to mask broken source behavior"],
+                    "handoff_criteria": ["worker_report.json lists changed files"],
+                },
+                {
+                    "id": "verification_evidence_package",
+                    "owner": "CodeBrigade",
+                    "purpose": "Prove each planned impact surface.",
+                    "read_scope": ["surface_verification_matrix"],
+                    "edit_scope": [],
+                    "verification_scope": ["rerun failing test command"],
+                    "risk_controls": ["do not treat syntax-only checks as behavior proof"],
+                    "handoff_criteria": ["verification_report.json names executed checks"],
+                },
+            ],
+            "review_order": [
+                "evidence_survey_package",
+                "minimal_patch_package",
+                "verification_evidence_package",
+            ],
+            "global_handoff_criteria": [
+                "each package is passed, blocked, or explicitly deferred",
+                "package blockers are reflected in review_gate.json",
+                "final report answers the original task rather than only package-local success",
+            ],
+        },
         "planning_review_gate": {
             "decision": "ready_for_ceraxia_review",
             "score": 95,
@@ -195,6 +239,16 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve execution forecast: {plan}")
     if "execution preflight passes" not in plan["mutation_preconditions"]:
         raise AssertionError(f"implementation plan should preserve mutation preconditions: {plan}")
+    if [package["id"] for package in plan["implementation_work_packages"]] != [
+        "evidence_survey_package",
+        "minimal_patch_package",
+        "verification_evidence_package",
+    ]:
+        raise AssertionError(f"implementation plan should preserve work packages: {plan}")
+    if plan["work_package_review_order"][0] != "evidence_survey_package":
+        raise AssertionError(f"implementation plan should preserve work package review order: {plan}")
+    if "final report answers the original task rather than only package-local success" not in plan["work_package_handoff_criteria"]:
+        raise AssertionError(f"implementation plan should preserve global handoff criteria: {plan}")
     if "the original user-visible request is satisfied" not in plan["acceptance_evidence_required"]:
         raise AssertionError(f"implementation plan should preserve acceptance evidence: {plan}")
     if not plan["surface_verification_complete"] or plan["surface_verification_rows"][0]["surface"] != "source_behavior":
@@ -368,6 +422,11 @@ def main() -> int:
     missing_forecast_report = code_brigade_adapter.build_worker_report(missing_forecast, dry_run=True)
     if missing_forecast_report["status"] != "blocked" or not any("execution_forecast" in item for item in missing_forecast_report["validation_problems"]):
         raise AssertionError(f"missing execution forecast should be blocked: {missing_forecast_report}")
+    missing_work_packages = valid_brief()
+    missing_work_packages["implementation_work_packages"] = {"packages": []}
+    missing_work_packages_report = code_brigade_adapter.build_worker_report(missing_work_packages, dry_run=True)
+    if missing_work_packages_report["status"] != "blocked" or not any("implementation_work_packages" in item for item in missing_work_packages_report["validation_problems"]):
+        raise AssertionError(f"missing implementation work packages should be blocked: {missing_work_packages_report}")
     missing_evidence = valid_brief()
     missing_evidence.pop("repo_survey_evidence")
     missing_evidence_report = code_brigade_adapter.build_worker_report(missing_evidence, dry_run=True)

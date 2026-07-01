@@ -29,6 +29,7 @@ REQUIRED_PACKET_OBJECTS = [
     "quality_bar",
     "acceptance_contract",
     "implementation_brief_blueprint",
+    "implementation_work_packages",
     "planning_review_gate",
     "code_brigade_handoff",
 ]
@@ -179,6 +180,25 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("implementation brief blueprint must target CodeBrigade")
     if not isinstance(blueprint.get("mutation_preconditions"), list) or len(blueprint.get("mutation_preconditions", [])) < 3:
         problems.append("implementation brief blueprint must include mutation preconditions")
+
+    work_packages = object_field(packet, "implementation_work_packages")
+    packages = list_field(work_packages.get("packages"))
+    if len(packages) < 3:
+        problems.append("implementation work packages must include at least three packages")
+    for package in packages:
+        if not isinstance(package, dict):
+            problems.append("implementation work package must be an object")
+            continue
+        if package.get("owner") != "CodeBrigade":
+            problems.append(f"implementation work package must target CodeBrigade: {package.get('id', '<unknown>')}")
+        for key in ("id", "purpose", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+            if key not in package:
+                problems.append(f"implementation work package missing {key}: {package.get('id', '<unknown>')}")
+        for key in ("read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+            if not isinstance(package.get(key), list):
+                problems.append(f"implementation work package {key} must be a list: {package.get('id', '<unknown>')}")
+    if not isinstance(work_packages.get("review_order"), list) or len(work_packages.get("review_order", [])) != len(packages):
+        problems.append("implementation work packages must include review_order for every package")
 
     planning_review = object_field(packet, "planning_review_gate")
     if planning_review.get("decision") not in {"ready_for_ceraxia_review", "revise", "blocked"}:

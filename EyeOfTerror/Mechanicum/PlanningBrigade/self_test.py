@@ -82,6 +82,9 @@ def main() -> int:
         or "required negative tests are present, executed, or explicitly blocked" not in security_packet["acceptance_contract"]["must_prove"]
         or security_packet["implementation_brief_blueprint"]["target"] != "CodeBrigade"
         or "execution preflight passes" not in security_packet["implementation_brief_blueprint"]["mutation_preconditions"]
+        or security_packet["implementation_work_packages"]["package_count"] < 4
+        or "security_boundary_package" not in security_packet["implementation_work_packages"]["review_order"]
+        or not any(package["id"] == "security_boundary_package" and "negative_test_evidence.json or explicit blocker is returned" in package["handoff_criteria"] for package in security_packet["implementation_work_packages"]["packages"])
         or security_packet["planning_review_gate"]["decision"] != "ready_for_ceraxia_review"
         or security_packet["planning_review_gate"]["score"] < 80
         or "prove_negative_boundary" not in [step["step"] for step in security_packet["code_brigade_handoff"]["steps"]]
@@ -112,6 +115,8 @@ def main() -> int:
         or not migration_packet["surface_verification_matrix"]["complete"]
         or "data_compatibility" not in [row["surface"] for row in migration_packet["surface_verification_matrix"]["rows"]]
         or migration_packet["execution_forecast"]["complexity"] != "high"
+        or "compatibility_package" not in migration_packet["implementation_work_packages"]["review_order"]
+        or not any(package["id"] == "compatibility_package" and "Protect old/new public or data shapes across callers, readers, and writers." == package["purpose"] for package in migration_packet["implementation_work_packages"]["packages"])
         or "dependency_critical_path" not in migration_packet["implementation_brief_blueprint"]
         or "work_phases" not in migration_packet["implementation_brief_blueprint"]
         or migration_packet["code_brigade_handoff"]["target"] != "CodeBrigade"
@@ -141,6 +146,8 @@ def main() -> int:
     )
     if not any(item["risk"] == "nondeterministic_parallel_state_regression" for item in concurrency_packet["risk_register"]["risks"]):
         raise AssertionError(f"concurrency planning must expose nondeterministic state risk: {concurrency_packet}")
+    if "concurrency_runtime_package" not in concurrency_packet["implementation_work_packages"]["review_order"]:
+        raise AssertionError(f"concurrency planning must create runtime work package: {concurrency_packet}")
 
     unclear_packet = planning_brigade.build_planning_packet({"task": "почини", "repo_path": "/repo"})
     if unclear_packet["planning_review_gate"]["decision"] != "blocked" or not unclear_packet["planning_review_gate"]["blockers"]:

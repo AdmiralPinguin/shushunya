@@ -50,6 +50,26 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief implementation_brief_blueprint must target CodeBrigade")
     if not isinstance(blueprint.get("mutation_preconditions"), list) or not blueprint.get("mutation_preconditions"):
         problems.append("brief implementation_brief_blueprint mutation_preconditions are required")
+    work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
+    packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
+    if len(packages) < 3:
+        problems.append("brief implementation_work_packages packages are required")
+    else:
+        for package in packages:
+            if not isinstance(package, dict):
+                problems.append("brief implementation_work_packages package must be an object")
+                continue
+            if package.get("owner") != "CodeBrigade":
+                problems.append(f"brief implementation work package must target CodeBrigade: {package.get('id', '<unknown>')}")
+            for key in ("id", "purpose", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+                if key not in package:
+                    problems.append(f"brief implementation work package missing {key}: {package.get('id', '<unknown>')}")
+            for key in ("read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+                if not isinstance(package.get(key), list):
+                    problems.append(f"brief implementation work package {key} must be a list: {package.get('id', '<unknown>')}")
+    review_order = work_packages.get("review_order") if isinstance(work_packages.get("review_order"), list) else []
+    if len(review_order) != len(packages):
+        problems.append("brief implementation_work_packages review_order must cover every package")
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
     if planning_review.get("decision") == "blocked":
         problems.append("brief planning_review_gate is blocked")

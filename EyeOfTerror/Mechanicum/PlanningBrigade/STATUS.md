@@ -17,6 +17,8 @@ Current capabilities:
 - surface verification matrix generation
 - execution forecast for CodeBrigade iterations, timeout, and escalation
 - risk register, quality bar, acceptance contract, and CodeBrigade handoff
+- implementation work packages with read scope, edit scope, verification
+  scope, risk controls, handoff criteria, and review order
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
 - field trials for multiple task shapes
@@ -28,8 +30,8 @@ Current boundaries:
 - repository evidence is read-only and summarized by Ceraxia
 - non-Python source summaries are shallow symbol/import-like extraction, not a
   full dependency graph
-- CodeBrigade source mutation remains blocked until the safe execution adapter
-  exists
+- CodeBrigade source mutation is limited to the explicit patch adapter and
+  remains blocked for broad natural-language mutation
 - planning quality is regression-tested, but real-world quality still depends
   on reviewed field-trial runs against varied repositories
 
@@ -39,5 +41,6 @@ Next useful upgrades:
 - add richer multi-language dependency graphs
 - teach review gates to compare executed command output with each impacted
   surface
-- wire the safe CodeBrigade mutation adapter behind existing preflight,
-  verification, rollback, and audit contracts
+- expand CodeBrigade from explicit patch operations toward safe
+  natural-language patch planning behind the existing preflight, verification,
+  rollback, and audit contracts
