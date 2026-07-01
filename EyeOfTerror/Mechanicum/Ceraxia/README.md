@@ -47,6 +47,8 @@ The dry-run path deliberately does not edit source. It proves that Ceraxia can
 shape the task, enforce the planning contract, build the CodeBrigade handoff,
 review honesty, and persist artifacts. Real CodeBrigade execution can replace
 the dry-run worker report without changing the surrounding artifact contract.
+CLI `ok` and `package_ok` mean the dry-run package is internally consistent;
+`ready_for_execution` remains false until real CodeBrigade execution is wired.
 
 Smoke command:
 

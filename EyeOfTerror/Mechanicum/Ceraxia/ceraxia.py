@@ -418,6 +418,8 @@ def build_run_summary(
         "run_id": run_id,
         "run_dir": str(run_dir),
         "state": status.get("state"),
+        "package_ok": status.get("state") == "finalized",
+        "ready_for_execution": readiness.get("decision") == "ready_for_real_execution",
         "review_decision": review.get("decision"),
         "execution_readiness": readiness.get("decision"),
         "risk_level": brief.get("risk_level"),
@@ -504,6 +506,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_json(run_dir / "run_audit.json", audit)
     return {
         "ok": status["state"] == "finalized" and audit["decision"] == "passed",
+        "package_ok": status["state"] == "finalized" and audit["decision"] == "passed",
+        "ready_for_execution": readiness["decision"] == "ready_for_real_execution",
         "run_id": run_id,
         "run_dir": str(run_dir),
         "state": status["state"],
