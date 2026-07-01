@@ -128,6 +128,11 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
 - `repo_survey.json.caller_candidates` groups reverse dependency callers for
   candidate files, and `contract_surface_candidates` flags likely API, schema,
   route, endpoint, or contract files for compatibility review.
+- `repo_survey.json.package_manifest_candidates` captures common package and
+  dependency manifests such as `package.json`, `pyproject.toml`,
+  `requirements.txt`, `go.mod`, `Cargo.toml`, `pom.xml`, and Gradle files, then
+  passes package name, dependency counts, dev dependency counts, scripts, and
+  parse errors through the CodeBrigade handoff.
 - `repo_survey.json.recommended_read_order` ranks explicit path hints,
   entrypoints, source candidates, dependency neighbours, and tests for worker
   inspection before mutation.

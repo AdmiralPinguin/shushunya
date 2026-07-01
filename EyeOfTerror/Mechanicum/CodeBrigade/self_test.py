@@ -589,6 +589,7 @@ def valid_brief() -> dict:
             "test_coverage_links": [{"test": "test_app.py", "target": "app.py"}],
             "caller_candidates": [{"target": "app.py", "callers": ["test_app.py"], "caller_count": 1}],
             "contract_surface_candidates": [{"path": "api/schema.json", "score": 6, "reason": "api/schema/contract naming or file type"}],
+            "package_manifest_candidates": [{"path": "package.json", "ecosystem": "node", "package_name": "demo", "dependency_count": 1, "dev_dependency_count": 1, "script_count": 1, "parse_error": ""}],
             "survey_truncated": False,
             "python_symbols_truncated": False,
         },
@@ -815,6 +816,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve caller candidates: {plan}")
     if plan["contract_surface_candidates"][0]["path"] != "api/schema.json":
         raise AssertionError(f"implementation plan should preserve contract surface candidates: {plan}")
+    if plan["package_manifest_candidates"][0]["path"] != "package.json" or plan["package_manifest_candidates"][0]["dependency_count"] != 1:
+        raise AssertionError(f"implementation plan should preserve package manifest candidates: {plan}")
     if plan["planning_critical_path"][-1] != "implementation_brief":
         raise AssertionError(f"implementation plan should preserve planning critical path: {plan}")
     if plan["planning_review_decision"] != "ready_for_ceraxia_review" or plan["planning_review_score"] < 80:

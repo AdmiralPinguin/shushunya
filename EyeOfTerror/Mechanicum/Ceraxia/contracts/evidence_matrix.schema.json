@@ -94,6 +94,7 @@
         "assumption_replan_triggers",
         "caller_candidates",
         "contract_surface_candidates",
+        "package_manifest_candidates",
         "verification_commands"
       ]
     },

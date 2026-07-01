@@ -57,6 +57,7 @@
         "dependency_edges_to_check",
         "caller_candidates",
         "contract_surface_candidates",
+        "package_manifest_candidates",
         "survey_truncated",
         "python_symbols_truncated",
         "handoff_steps",
@@ -168,6 +169,12 @@
           }
         },
         "contract_surface_candidates": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "package_manifest_candidates": {
           "type": "array",
           "items": {
             "type": "object"

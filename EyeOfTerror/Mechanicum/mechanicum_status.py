@@ -25,7 +25,7 @@ COMPONENTS = {
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
         ],
-        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_definition_of_done_trace_audit_caller_contract_evidence_generic_edges_per_surface_verification_counts_work_package_review_worker_output_acceptance_requirement_contract_audit_diagnostic_repair_requests_planning_feedback_requests_and_optional_guarded_repair_execution",
+        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_definition_of_done_trace_audit_caller_contract_package_manifest_evidence_generic_edges_per_surface_verification_counts_work_package_review_worker_output_acceptance_requirement_contract_audit_diagnostic_repair_requests_planning_feedback_requests_and_optional_guarded_repair_execution",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -87,7 +87,7 @@ ROADMAP = [
     {
         "priority": 2,
         "item": "deepen repository survey beyond shallow generic import edges",
-        "reason": "Ceraxia now records path hints, read order, investigation playbook stages, caller candidates, contract surface candidates, Python import edges, source summaries, and local JS/TS relative import edges; cross-language call graphs and package-level dependency evidence are still shallow.",
+        "reason": "Ceraxia now records path hints, read order, investigation playbook stages, caller candidates, contract surface candidates, package manifest candidates, Python import edges, source summaries, and local JS/TS relative import edges; cross-language call graphs and manifest-to-source impact analysis are still shallow.",
         "owner": "Ceraxia",
     },
     {

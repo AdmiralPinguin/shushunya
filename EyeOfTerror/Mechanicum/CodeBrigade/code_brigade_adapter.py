@@ -72,6 +72,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "test_coverage_links": evidence.get("test_coverage_links", []) if isinstance(evidence.get("test_coverage_links"), list) else [],
         "caller_candidates": evidence.get("caller_candidates", []) if isinstance(evidence.get("caller_candidates"), list) else [],
         "contract_surface_candidates": evidence.get("contract_surface_candidates", []) if isinstance(evidence.get("contract_surface_candidates"), list) else [],
+        "package_manifest_candidates": evidence.get("package_manifest_candidates", []) if isinstance(evidence.get("package_manifest_candidates"), list) else [],
         "survey_truncated": bool(evidence.get("survey_truncated")),
         "python_symbols_truncated": bool(evidence.get("python_symbols_truncated")),
         "handoff_steps": handoff.get("steps", []) if isinstance(handoff.get("steps"), list) else [],

@@ -2,10 +2,16 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback
+    tomllib = None  # type: ignore[assignment]
 
 
 DEFAULT_EXCLUDE_DIRS = {
@@ -25,6 +31,16 @@ DEFAULT_EXCLUDE_DIRS = {
 SOURCE_SUFFIXES = {".py", ".js", ".ts", ".tsx", ".jsx", ".kt", ".java", ".go", ".rs", ".sh"}
 CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml", ".ini", ".env"}
 DOC_SUFFIXES = {".md", ".rst", ".txt"}
+PACKAGE_MANIFEST_NAMES = {
+    "package.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "go.mod",
+    "Cargo.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+}
 MAX_SURVEY_FILES = 2000
 MAX_PYTHON_SYMBOL_FILES = 40
 MAX_SOURCE_SUMMARY_FILES = 80
@@ -406,6 +422,92 @@ def build_contract_surface_candidates(files: list[Path], root: Path) -> list[dic
     return rows
 
 
+def package_manifest_row(path: Path, root: Path) -> dict[str, Any]:
+    rel = str(path.relative_to(root))
+    name = path.name
+    row: dict[str, Any] = {
+        "path": rel,
+        "ecosystem": "unknown",
+        "package_name": "",
+        "dependency_count": 0,
+        "dev_dependency_count": 0,
+        "script_count": 0,
+        "parse_error": "",
+    }
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        row["parse_error"] = str(exc)
+        return row
+    try:
+        if name == "package.json":
+            payload = json.loads(text)
+            if not isinstance(payload, dict):
+                raise ValueError("package.json root is not an object")
+            row.update(
+                {
+                    "ecosystem": "node",
+                    "package_name": str(payload.get("name") or ""),
+                    "dependency_count": len(payload.get("dependencies", {}) if isinstance(payload.get("dependencies"), dict) else {}),
+                    "dev_dependency_count": len(payload.get("devDependencies", {}) if isinstance(payload.get("devDependencies"), dict) else {}),
+                    "script_count": len(payload.get("scripts", {}) if isinstance(payload.get("scripts"), dict) else {}),
+                }
+            )
+        elif name == "pyproject.toml":
+            if tomllib is None:
+                raise ValueError("tomllib is unavailable")
+            payload = tomllib.loads(text)
+            project = payload.get("project", {}) if isinstance(payload, dict) and isinstance(payload.get("project"), dict) else {}
+            optional = project.get("optional-dependencies", {}) if isinstance(project.get("optional-dependencies"), dict) else {}
+            build_system = payload.get("build-system", {}) if isinstance(payload, dict) and isinstance(payload.get("build-system"), dict) else {}
+            row.update(
+                {
+                    "ecosystem": "python",
+                    "package_name": str(project.get("name") or ""),
+                    "dependency_count": len(project.get("dependencies", []) if isinstance(project.get("dependencies"), list) else []),
+                    "dev_dependency_count": sum(len(items) for items in optional.values() if isinstance(items, list)),
+                    "script_count": len(project.get("scripts", {}) if isinstance(project.get("scripts"), dict) else {}),
+                    "build_dependency_count": len(build_system.get("requires", []) if isinstance(build_system.get("requires"), list) else []),
+                }
+            )
+        elif name == "requirements.txt":
+            dependencies = [
+                line.strip()
+                for line in text.splitlines()
+                if line.strip() and not line.lstrip().startswith("#") and not line.lstrip().startswith("-")
+            ]
+            row.update({"ecosystem": "python", "dependency_count": len(dependencies)})
+        elif name == "go.mod":
+            requires = [
+                line.strip()
+                for line in text.splitlines()
+                if line.strip().startswith("require ") and not line.strip().startswith("require (")
+            ]
+            module_match = re.search(r"(?m)^module\s+(.+)$", text)
+            row.update({"ecosystem": "go", "package_name": module_match.group(1).strip() if module_match else "", "dependency_count": len(requires)})
+        elif name == "Cargo.toml":
+            if tomllib is None:
+                raise ValueError("tomllib is unavailable")
+            payload = tomllib.loads(text)
+            package = payload.get("package", {}) if isinstance(payload, dict) and isinstance(payload.get("package"), dict) else {}
+            deps = payload.get("dependencies", {}) if isinstance(payload, dict) and isinstance(payload.get("dependencies"), dict) else {}
+            dev_deps = payload.get("dev-dependencies", {}) if isinstance(payload, dict) and isinstance(payload.get("dev-dependencies"), dict) else {}
+            row.update({"ecosystem": "rust", "package_name": str(package.get("name") or ""), "dependency_count": len(deps), "dev_dependency_count": len(dev_deps)})
+        elif name in {"pom.xml", "build.gradle", "build.gradle.kts"}:
+            row.update({"ecosystem": "jvm", "dependency_count": text.count("<dependency>") + len(re.findall(r"\bimplementation\s*[\(\"']", text))})
+    except (json.JSONDecodeError, ValueError) as exc:
+        row["parse_error"] = str(exc)
+    return row
+
+
+def build_package_manifest_candidates(files: list[Path], root: Path) -> list[dict[str, Any]]:
+    manifests = sorted(
+        [path for path in files if path.name in PACKAGE_MANIFEST_NAMES],
+        key=lambda path: str(path.relative_to(root)),
+    )
+    return [package_manifest_row(path, root) for path in manifests[:40]]
+
+
 def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[str], path_hints: list[str] | None = None) -> dict[str, Any]:
     root = Path(repo_path)
     path_hints = path_hints or []
@@ -437,6 +539,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "test_coverage_links": [],
             "caller_candidates": [],
             "contract_surface_candidates": [],
+            "package_manifest_candidates": [],
             "recommended_read_order": [],
             "suggested_verification_commands": [],
             "max_files_scanned": MAX_SURVEY_FILES,
@@ -500,6 +603,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     test_coverage_links = build_test_coverage_links(dependency_edges)
     caller_candidates = build_caller_candidates(candidates, reverse_dependency_index)
     contract_surface_candidates = build_contract_surface_candidates(files, root)
+    package_manifest_candidates = build_package_manifest_candidates(files, root)
     recommended_read_order = build_recommended_read_order(existing_path_hints, entrypoints, candidates, tests, dependency_edges)
     suggested_commands: list[str] = []
     if tests:
@@ -532,6 +636,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "test_coverage_links": test_coverage_links,
         "caller_candidates": caller_candidates,
         "contract_surface_candidates": contract_surface_candidates,
+        "package_manifest_candidates": package_manifest_candidates,
         "recommended_read_order": recommended_read_order,
         "suggested_verification_commands": suggested_commands,
         "max_files_scanned": MAX_SURVEY_FILES,

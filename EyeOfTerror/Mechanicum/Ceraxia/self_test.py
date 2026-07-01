@@ -59,6 +59,14 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             (repo / "barrel.ts").write_text("export { api } from './api';\n", encoding="utf-8")
             (repo / "client.ts").write_text("import { api } from './api';\nexport function client() { return api(); }\n", encoding="utf-8")
             (repo / "client.spec.ts").write_text("import './setup';\nimport { client } from './client';\ntest('client', () => client());\n", encoding="utf-8")
+            (repo / "package.json").write_text(
+                json.dumps({"name": "demo", "dependencies": {"axios": "^1.0.0"}, "devDependencies": {"vitest": "^1.0.0"}, "scripts": {"test": "vitest"}}),
+                encoding="utf-8",
+            )
+            (repo / "pyproject.toml").write_text(
+                "[project]\nname = \"demo-py\"\ndependencies = [\"requests\"]\n[project.optional-dependencies]\ntest = [\"pytest\"]\n",
+                encoding="utf-8",
+            )
             (repo / "test_app.py").write_text(
                 "import unittest\nfrom app import app\n\n"
                 "class AppTest(unittest.TestCase):\n"
@@ -165,6 +173,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any(link["test"] == "test_app.py" and link["target"] == "app.py" for link in brief["repo_survey_evidence"]["test_coverage_links"]))
             self.assertTrue(any(row["target"] == "app.py" and "test_app.py" in row["callers"] for row in brief["repo_survey_evidence"]["caller_candidates"]))
             self.assertTrue(any(row["path"] == "api.ts" for row in brief["repo_survey_evidence"]["contract_surface_candidates"]))
+            self.assertTrue(any(row["path"] == "package.json" and row["ecosystem"] == "node" and row["dependency_count"] == 1 for row in brief["repo_survey_evidence"]["package_manifest_candidates"]))
+            self.assertTrue(any(row["path"] == "pyproject.toml" and row["ecosystem"] == "python" and row["dependency_count"] == 1 for row in brief["repo_survey_evidence"]["package_manifest_candidates"]))
             self.assertTrue(any(command.startswith("python -m pytest test_app.py") for command in brief["suggested_verification_commands"]))
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertIn("untrusted input is rejected", verification["negative_tests_required"])
@@ -223,6 +233,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any(link["test"] == "test_app.py" and link["target"] == "app.py" for link in implementation_plan["test_coverage_links"]))
             self.assertTrue(any(row["target"] == "app.py" and "test_app.py" in row["callers"] for row in implementation_plan["caller_candidates"]))
             self.assertTrue(any(row["path"] == "api.ts" for row in implementation_plan["contract_surface_candidates"]))
+            self.assertTrue(any(row["path"] == "package.json" for row in implementation_plan["package_manifest_candidates"]))
             self.assertFalse(implementation_plan["survey_truncated"])
             self.assertFalse(implementation_plan["python_symbols_truncated"])
             self.assertTrue(any(command.startswith("python -m pytest test_app.py") for command in implementation_plan["verification_commands"]))
@@ -250,6 +261,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any(link["test"] == "test_app.py" and link["target"] == "app.py" for link in survey["test_coverage_links"]))
             self.assertTrue(any(row["target"] == "app.py" and "test_app.py" in row["callers"] for row in survey["caller_candidates"]))
             self.assertTrue(any(row["path"] == "api.ts" for row in survey["contract_surface_candidates"]))
+            self.assertTrue(any(row["path"] == "package.json" and row["script_count"] == 1 for row in survey["package_manifest_candidates"]))
+            self.assertTrue(any(row["path"] == "pyproject.toml" and row["dev_dependency_count"] == 1 for row in survey["package_manifest_candidates"]))
             app_symbols = next(item for item in survey["python_symbols"] if item["path"] == "app.py")
             self.assertIn("app", app_symbols["functions"])
             client_summary = next(item for item in survey["source_summaries"] if item["path"] == "client.ts")
@@ -394,6 +407,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any(link["test"] == "test_app.py" and link["target"] == "app.py" for link in evidence_matrix["implementation_plan_sources"]["test_coverage_links"]))
             self.assertTrue(any(row["target"] == "app.py" and "test_app.py" in row["callers"] for row in evidence_matrix["implementation_plan_sources"]["caller_candidates"]))
             self.assertTrue(any(row["path"] == "api.ts" for row in evidence_matrix["implementation_plan_sources"]["contract_surface_candidates"]))
+            self.assertTrue(any(row["path"] == "package.json" for row in evidence_matrix["implementation_plan_sources"]["package_manifest_candidates"]))
             self.assertEqual(evidence_matrix["autonomous_execution_request"]["status"], "required")
             self.assertEqual(evidence_matrix["autonomous_execution_request"]["target_adapter"], "autonomous CodeBrigade source-edit adapter")
             self.assertIn("security_boundary_package", evidence_matrix["implementation_work_package_summary"]["review_order"])
@@ -460,6 +474,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("- test coverage links:", final_report)
             self.assertIn("- caller candidate rows:", final_report)
             self.assertIn("- contract surface candidates:", final_report)
+            self.assertIn("- package manifest candidates:", final_report)
             self.assertIn("- expert tradeoffs:", final_report)
             self.assertIn("- expert review checklist items:", final_report)
 

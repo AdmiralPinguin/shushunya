@@ -297,6 +297,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "test_coverage_links": survey.get("test_coverage_links", []),
             "caller_candidates": survey.get("caller_candidates", []),
             "contract_surface_candidates": survey.get("contract_surface_candidates", []),
+            "package_manifest_candidates": survey.get("package_manifest_candidates", []),
             "recommended_read_order": survey.get("recommended_read_order", []),
             "survey_truncated": bool(survey.get("truncated")),
             "max_files_scanned": survey.get("max_files_scanned", 0),
@@ -1328,6 +1329,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
             f"- test coverage links: {len(repo_evidence.get('test_coverage_links', [])) if isinstance(repo_evidence.get('test_coverage_links'), list) else 0}",
             f"- caller candidate rows: {len(repo_evidence.get('caller_candidates', [])) if isinstance(repo_evidence.get('caller_candidates'), list) else 0}",
             f"- contract surface candidates: {len(repo_evidence.get('contract_surface_candidates', [])) if isinstance(repo_evidence.get('contract_surface_candidates'), list) else 0}",
+            f"- package manifest candidates: {len(repo_evidence.get('package_manifest_candidates', [])) if isinstance(repo_evidence.get('package_manifest_candidates'), list) else 0}",
             f"- repository survey partial: {str(bool(repo_evidence.get('survey_truncated'))).lower()}",
             f"- python symbol survey partial: {str(bool(repo_evidence.get('python_symbols_truncated'))).lower()}",
             f"- source summary survey partial: {str(bool(repo_evidence.get('source_summaries_truncated'))).lower()}",
@@ -1992,6 +1994,7 @@ def build_evidence_matrix(
             "test_coverage_links": implementation_plan.get("test_coverage_links", []),
             "caller_candidates": implementation_plan.get("caller_candidates", []),
             "contract_surface_candidates": implementation_plan.get("contract_surface_candidates", []),
+            "package_manifest_candidates": implementation_plan.get("package_manifest_candidates", []),
         },
         "autonomous_execution_request": autonomous_request,
         "implementation_work_package_summary": {
