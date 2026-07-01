@@ -108,6 +108,11 @@ def assert_array_item_required(schema_path: Path, payload: dict, field: str, lab
 
 def assert_execution_policy_matches_result_schema() -> None:
     policy = json.loads((ROOT / "CodeBrigade" / "execution_policy.json").read_text(encoding="utf-8"))
+    assert_schema_subset(
+        load_schema(ROOT / "CodeBrigade" / "execution_policy.schema.json"),
+        policy,
+        "execution policy",
+    )
     schema = load_schema(ROOT / "CodeBrigade" / "execution_result.schema.json")
     if policy.get("contract_version") != schema.get("properties", {}).get("contract_version", {}).get("const"):
         raise AssertionError(f"execution policy version drifted from result schema: {policy}")
