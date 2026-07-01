@@ -165,6 +165,11 @@ def main() -> int:
     )
     if "preflight" not in preflight_execution_result:
         raise AssertionError(f"execution adapter should expose preflight evidence: {preflight_execution_result}")
+    assert_schema_subset(
+        load_schema(ROOT / "CodeBrigade" / "execution_preflight.schema.json"),
+        preflight_execution_result["preflight"],
+        "execution preflight",
+    )
     assert_execution_policy_matches_result_schema()
     verification = build_verification_report(brief, worker_report)
     review = review_gate(packet, brief, worker_report, verification)

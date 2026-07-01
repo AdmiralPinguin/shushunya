@@ -49,6 +49,7 @@ COMPONENTS = {
             "execution_adapter.py",
             "execution_contract.py",
             "execution_preflight.py",
+            "execution_preflight.schema.json",
             "implementation_brief_contract.py",
             "execution_policy.schema.json",
             "execution_result.schema.json",
