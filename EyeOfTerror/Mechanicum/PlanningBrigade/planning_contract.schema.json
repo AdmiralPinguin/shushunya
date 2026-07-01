@@ -329,7 +329,7 @@
         },
         "package_dependency_graph": {
           "type": "object",
-          "required": ["rows", "root_packages", "terminal_packages", "parallelizable_after_survey", "complete", "blockers"],
+          "required": ["rows", "root_packages", "terminal_packages", "parallelizable_after_survey", "execution_batches", "complete", "blockers"],
           "properties": {
             "rows": {
               "type": "array",
@@ -353,6 +353,15 @@
               "type": "array",
               "minItems": 1,
               "items": {"type": "string"}
+            },
+            "execution_batches": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string"}
+              }
             },
             "complete": {"const": true},
             "blockers": {

@@ -40,6 +40,9 @@ Current capabilities:
   and mutation preconditions
 - package dependency graphs that force evidence and specialized boundary
   packages before source mutation and final verification
+- package dependency graph execution batches that start with repository survey,
+  allow independent specialized packages after survey, and end with final
+  verification evidence
 - specialized work packages for compatibility, security boundaries, runtime
   configuration, concurrency runtime, and architecture refactors
 - package-to-surface traceability: every planned verification surface must be

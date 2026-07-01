@@ -71,7 +71,8 @@ Current contract:
   mutation preconditions.
 - `implementation_work_packages` turns the plan into reviewable CodeBrigade
   work packages with read scope, edit scope, verification scope, risk controls,
-  blocking policy, handoff criteria, and a package dependency graph.
+  blocking policy, handoff criteria, and a package dependency graph with
+  execution batches for safe future orchestration.
 - `worker_output_contract` tells CodeBrigade which reports, package statuses,
   package-level acceptance requirements, evidence sources, and blocker fields
   must return for Ceraxia to accept the work.

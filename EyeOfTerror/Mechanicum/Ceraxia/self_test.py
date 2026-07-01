@@ -399,6 +399,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("security_boundary_package", evidence_matrix["implementation_work_package_summary"]["review_order"])
             self.assertTrue(evidence_matrix["implementation_work_package_summary"]["dependency_graph"]["complete"])
             self.assertIn("verification_evidence_package", evidence_matrix["implementation_work_package_summary"]["dependency_graph"]["terminal_packages"])
+            self.assertEqual(evidence_matrix["implementation_work_package_summary"]["dependency_graph"]["execution_batches"][0], ["evidence_survey_package"])
+            self.assertEqual(evidence_matrix["implementation_work_package_summary"]["dependency_graph"]["execution_batches"][-1], ["verification_evidence_package"])
             self.assertIn("security_boundary", evidence_matrix["implementation_work_package_summary"]["covered_surfaces"])
             self.assertEqual(summary["implementation_work_package_count"], evidence_matrix["implementation_work_package_summary"]["package_count"])
             self.assertEqual(summary["implementation_work_package_surface_count"], evidence_matrix["implementation_work_package_summary"]["covered_surface_count"])

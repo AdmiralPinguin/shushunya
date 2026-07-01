@@ -375,6 +375,7 @@ def valid_brief() -> dict:
                 "root_packages": ["evidence_survey_package"],
                 "terminal_packages": ["verification_evidence_package"],
                 "parallelizable_after_survey": ["minimal_patch_package"],
+                "execution_batches": [["evidence_survey_package"], ["minimal_patch_package"], ["verification_evidence_package"]],
                 "complete": True,
                 "blockers": [],
             },
@@ -728,6 +729,7 @@ def valid_brief() -> dict:
                 "root_packages": ["evidence_survey_package"],
                 "terminal_packages": ["verification_evidence_package"],
                 "parallelizable_after_survey": ["minimal_patch_package"],
+                "execution_batches": [["evidence_survey_package"], ["minimal_patch_package"], ["verification_evidence_package"]],
                 "complete": True,
                 "blockers": [],
             },
@@ -858,6 +860,8 @@ def main() -> int:
         or plan["work_package_dependency_graph"]["terminal_packages"] != ["verification_evidence_package"]
         or plan["work_package_dependency_graph"]["rows"][-1]["package_id"] != "verification_evidence_package"
         or "minimal_patch_package" not in plan["work_package_dependency_graph"]["rows"][-1]["depends_on"]
+        or plan["work_package_dependency_graph"]["execution_batches"][0] != ["evidence_survey_package"]
+        or plan["work_package_dependency_graph"]["execution_batches"][-1] != ["verification_evidence_package"]
     ):
         raise AssertionError(f"implementation plan should preserve work package dependency graph: {plan}")
     repair_request = {

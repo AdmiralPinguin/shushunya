@@ -391,6 +391,22 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("implementation work package dependency graph must root at evidence_survey_package")
     if "verification_evidence_package" not in list_field(package_graph.get("terminal_packages")):
         problems.append("implementation work package dependency graph must terminate at verification_evidence_package")
+    execution_batches = list_field(package_graph.get("execution_batches"))
+    flattened_batches = [
+        package_id
+        for batch in execution_batches
+        if isinstance(batch, list)
+        for package_id in batch
+        if isinstance(package_id, str)
+    ]
+    if not execution_batches:
+        problems.append("implementation work package dependency graph must include execution_batches")
+    if sorted(flattened_batches) != sorted(package_ids):
+        problems.append("implementation work package execution_batches must cover every package exactly once")
+    if execution_batches and execution_batches[0] != ["evidence_survey_package"]:
+        problems.append("implementation work package execution_batches must start with evidence_survey_package")
+    if execution_batches and execution_batches[-1] != ["verification_evidence_package"]:
+        problems.append("implementation work package execution_batches must end with verification_evidence_package")
     package_id_set = set(package_ids)
     for row in graph_rows:
         if not isinstance(row, dict):

@@ -348,6 +348,11 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
                 "root_packages": [ordered_packages[0]],
                 "terminal_packages": ["verification_evidence_package"],
                 "parallelizable_after_survey": [package_id for package_id in ordered_packages if package_id not in {"evidence_survey_package", "verification_evidence_package"}],
+                "execution_batches": [
+                    ["evidence_survey_package"],
+                    [package_id for package_id in ordered_packages if package_id not in {"evidence_survey_package", "verification_evidence_package"}],
+                    ["verification_evidence_package"],
+                ],
                 "complete": True,
                 "blockers": [],
             },
@@ -389,6 +394,11 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
                 "root_packages": [ordered_packages[0]],
                 "terminal_packages": ["verification_evidence_package"],
                 "parallelizable_after_survey": [package_id for package_id in ordered_packages if package_id not in {"evidence_survey_package", "verification_evidence_package"}],
+                "execution_batches": [
+                    ["evidence_survey_package"],
+                    [package_id for package_id in ordered_packages if package_id not in {"evidence_survey_package", "verification_evidence_package"}],
+                    ["verification_evidence_package"],
+                ],
                 "complete": True,
                 "blockers": [],
             },

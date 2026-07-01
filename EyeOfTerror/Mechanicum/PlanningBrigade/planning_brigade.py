@@ -1380,6 +1380,11 @@ def implementation_work_packages(
                 "dependency_reason": reason,
             }
         )
+    execution_batches = (
+        [["evidence_survey_package"], special_package_ids, ["minimal_patch_package"], ["verification_evidence_package"]]
+        if special_package_ids
+        else [["evidence_survey_package"], ["minimal_patch_package"], ["verification_evidence_package"]]
+    )
     return {
         "role": "PlanningBrigade",
         "risk_level": triage["risk_level"],
@@ -1396,6 +1401,7 @@ def implementation_work_packages(
             "root_packages": ["evidence_survey_package"],
             "terminal_packages": ["verification_evidence_package"],
             "parallelizable_after_survey": special_package_ids or ["minimal_patch_package"],
+            "execution_batches": execution_batches,
             "complete": True,
             "blockers": [],
         },

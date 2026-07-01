@@ -134,6 +134,18 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError(f"{trial_id}: package dependency graph must root at evidence survey: {packet}")
     if "verification_evidence_package" not in package_graph.get("terminal_packages", []):
         raise AssertionError(f"{trial_id}: package dependency graph must terminate at verification evidence: {packet}")
+    execution_batches = package_graph.get("execution_batches") if isinstance(package_graph.get("execution_batches"), list) else []
+    flattened_execution_batches = [
+        package_id
+        for batch in execution_batches
+        if isinstance(batch, list)
+        for package_id in batch
+        if isinstance(package_id, str)
+    ]
+    if sorted(flattened_execution_batches) != sorted(work_package_ids):
+        raise AssertionError(f"{trial_id}: execution batches must cover every package: {packet}")
+    if not execution_batches or execution_batches[0] != ["evidence_survey_package"] or execution_batches[-1] != ["verification_evidence_package"]:
+        raise AssertionError(f"{trial_id}: execution batches must start at survey and end at verification: {packet}")
     verification_row = next((row for row in dependency_rows if isinstance(row, dict) and row.get("package_id") == "verification_evidence_package"), {})
     verification_dependencies = verification_row.get("depends_on") if isinstance(verification_row.get("depends_on"), list) else []
     missing_verification_dependencies = sorted(package_id for package_id in work_package_ids if package_id != "verification_evidence_package" and package_id not in verification_dependencies)
@@ -270,6 +282,8 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "package_dependency_graph_roots": package_graph.get("root_packages", []) if isinstance(package_graph.get("root_packages"), list) else [],
         "package_dependency_graph_terminals": package_graph.get("terminal_packages", []) if isinstance(package_graph.get("terminal_packages"), list) else [],
         "package_dependency_graph_parallelizable_after_survey": package_graph.get("parallelizable_after_survey", []) if isinstance(package_graph.get("parallelizable_after_survey"), list) else [],
+        "package_dependency_graph_execution_batches": execution_batches,
+        "package_dependency_graph_execution_batch_count": len(execution_batches),
         "package_dependency_graph_complete": package_graph.get("complete"),
         "surfaces": surfaces,
         "highest_risk_surface": packet["impact_analysis"]["highest_risk_surface"],
@@ -349,6 +363,9 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     graph_roots: Counter[str] = Counter()
     graph_terminals: Counter[str] = Counter()
     graph_parallelizable_after_survey: Counter[str] = Counter()
+    graph_execution_batch_counts: list[int] = []
+    graph_execution_batch_first_values: Counter[str] = Counter()
+    graph_execution_batch_last_values: Counter[str] = Counter()
     graph_complete_values: Counter[str] = Counter()
     surfaces: Counter[str] = Counter()
     highest_risk_surfaces: Counter[str] = Counter()
@@ -403,6 +420,12 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         graph_roots.update(str(item) for item in result.get("package_dependency_graph_roots", []))
         graph_terminals.update(str(item) for item in result.get("package_dependency_graph_terminals", []))
         graph_parallelizable_after_survey.update(str(item) for item in result.get("package_dependency_graph_parallelizable_after_survey", []))
+        if isinstance(result.get("package_dependency_graph_execution_batch_count"), int):
+            graph_execution_batch_counts.append(result["package_dependency_graph_execution_batch_count"])
+        execution_batches = result.get("package_dependency_graph_execution_batches")
+        if isinstance(execution_batches, list) and execution_batches:
+            graph_execution_batch_first_values.update([json.dumps(execution_batches[0], ensure_ascii=False, sort_keys=True)])
+            graph_execution_batch_last_values.update([json.dumps(execution_batches[-1], ensure_ascii=False, sort_keys=True)])
         graph_complete_values.update([str(result.get("package_dependency_graph_complete"))])
         surfaces.update(str(item) for item in result.get("surfaces", []))
         if result.get("highest_risk_surface"):
@@ -483,6 +506,9 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "package_dependency_graph_root_counts": dict(sorted(graph_roots.items())),
         "package_dependency_graph_terminal_counts": dict(sorted(graph_terminals.items())),
         "package_dependency_graph_parallelizable_after_survey_counts": dict(sorted(graph_parallelizable_after_survey.items())),
+        "minimum_package_dependency_graph_execution_batch_count": min(graph_execution_batch_counts) if graph_execution_batch_counts else 0,
+        "package_dependency_graph_execution_batch_first_counts": dict(sorted(graph_execution_batch_first_values.items())),
+        "package_dependency_graph_execution_batch_last_counts": dict(sorted(graph_execution_batch_last_values.items())),
         "package_dependency_graph_complete_value_counts": dict(sorted(graph_complete_values.items())),
         "surface_counts": dict(sorted(surfaces.items())),
         "highest_risk_surface_counts": dict(sorted(highest_risk_surfaces.items())),
@@ -591,6 +617,8 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     graph_package_counts = summary.get("package_dependency_graph_package_counts") if isinstance(summary.get("package_dependency_graph_package_counts"), dict) else {}
     graph_root_counts = summary.get("package_dependency_graph_root_counts") if isinstance(summary.get("package_dependency_graph_root_counts"), dict) else {}
     graph_terminal_counts = summary.get("package_dependency_graph_terminal_counts") if isinstance(summary.get("package_dependency_graph_terminal_counts"), dict) else {}
+    graph_batch_first_counts = summary.get("package_dependency_graph_execution_batch_first_counts") if isinstance(summary.get("package_dependency_graph_execution_batch_first_counts"), dict) else {}
+    graph_batch_last_counts = summary.get("package_dependency_graph_execution_batch_last_counts") if isinstance(summary.get("package_dependency_graph_execution_batch_last_counts"), dict) else {}
     graph_complete_counts = summary.get("package_dependency_graph_complete_value_counts") if isinstance(summary.get("package_dependency_graph_complete_value_counts"), dict) else {}
     missing_graph_packages = sorted(package for package in required_work_packages if package not in graph_package_counts)
     if missing_kinds:
@@ -607,6 +635,12 @@ def assert_coverage(summary: dict[str, Any]) -> None:
         raise AssertionError(f"field trials must terminate package dependency graphs at verification_evidence_package: {summary}")
     if graph_complete_counts != {"True": summary["trial_count"]}:
         raise AssertionError(f"field trials must prove package dependency graphs are complete: {summary}")
+    if int(summary.get("minimum_package_dependency_graph_execution_batch_count") or 0) < 3:
+        raise AssertionError(f"field trials must prove dependency graph execution batches: {summary}")
+    if graph_batch_first_counts != {'["evidence_survey_package"]': summary["trial_count"]}:
+        raise AssertionError(f"field trials must prove execution batches start with evidence survey: {summary}")
+    if graph_batch_last_counts != {'["verification_evidence_package"]': summary["trial_count"]}:
+        raise AssertionError(f"field trials must prove execution batches end with verification evidence: {summary}")
     decision_counts = summary.get("decision_counts") if isinstance(summary.get("decision_counts"), dict) else {}
     if "blocked" not in decision_counts or "ready_for_ceraxia_review" not in decision_counts:
         raise AssertionError(f"field trials must cover blocked and ready decisions: {summary}")
