@@ -39,6 +39,9 @@
     "acceptance_trace_status",
     "acceptance_trace_row_count",
     "acceptance_trace_blocked_row_count",
+    "constraint_trace_status",
+    "constraint_trace_row_count",
+    "constraint_trace_blocked_row_count",
     "assumption_register_status",
     "assumption_count",
     "assumption_replan_trigger_count",
@@ -181,6 +184,15 @@
       "type": "integer"
     },
     "acceptance_trace_blocked_row_count": {
+      "type": "integer"
+    },
+    "constraint_trace_status": {
+      "type": "string"
+    },
+    "constraint_trace_row_count": {
+      "type": "integer"
+    },
+    "constraint_trace_blocked_row_count": {
       "type": "integer"
     },
     "assumption_register_status": {

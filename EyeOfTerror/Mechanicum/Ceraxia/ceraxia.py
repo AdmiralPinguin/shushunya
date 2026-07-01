@@ -506,6 +506,34 @@ def acceptance_trace_sufficiency_from_worker(worker_report: dict[str, Any]) -> d
     }
 
 
+def constraint_trace_sufficiency_from_worker(worker_report: dict[str, Any]) -> dict[str, Any]:
+    implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
+    rows = implementation_plan.get("constraint_trace_rows") if isinstance(implementation_plan.get("constraint_trace_rows"), list) else []
+    complete = implementation_plan.get("constraint_trace_complete") is True
+    blockers: list[str] = []
+    if not rows:
+        blockers.append("constraint trace matrix has no rows")
+    if not complete:
+        blockers.append("constraint trace matrix is not complete")
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            blockers.append(f"constraint trace row {index} is not an object")
+            continue
+        if not row.get("constraint"):
+            blockers.append(f"constraint trace row {index} has no constraint")
+        if not isinstance(row.get("planned_evidence"), list) or not row.get("planned_evidence"):
+            blockers.append(f"constraint trace row {index} has no planned evidence")
+        if not isinstance(row.get("package_ids"), list) or not row.get("package_ids"):
+            blockers.append(f"constraint trace row {index} has no package ids")
+    return {
+        "status": "complete" if not blockers else "blocked",
+        "row_count": len(rows),
+        "blocked_row_count": sum(1 for row in rows if isinstance(row, dict) and row.get("status") == "blocked"),
+        "complete": complete,
+        "blockers": blockers,
+    }
+
+
 def assumption_sufficiency_from_worker(worker_report: dict[str, Any]) -> dict[str, Any]:
     implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
     rows = implementation_plan.get("assumption_rows") if isinstance(implementation_plan.get("assumption_rows"), list) else []
@@ -610,6 +638,7 @@ def review_gate(
     investigation_sufficiency = investigation_sufficiency_from_worker(worker_report)
     change_control_sufficiency = change_control_sufficiency_from_worker(worker_report)
     acceptance_trace_sufficiency = acceptance_trace_sufficiency_from_worker(worker_report)
+    constraint_trace_sufficiency = constraint_trace_sufficiency_from_worker(worker_report)
     assumption_sufficiency = assumption_sufficiency_from_worker(worker_report)
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
@@ -629,6 +658,8 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "change control plan is incomplete: " + "; ".join(change_control_sufficiency["blockers"])})
     if acceptance_trace_sufficiency["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "acceptance trace matrix is incomplete: " + "; ".join(acceptance_trace_sufficiency["blockers"])})
+    if constraint_trace_sufficiency["status"] == "blocked":
+        findings.append({"severity": "blocker", "finding": "constraint trace matrix is incomplete: " + "; ".join(constraint_trace_sufficiency["blockers"])})
     if assumption_sufficiency["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "assumption register is incomplete: " + "; ".join(assumption_sufficiency["blockers"])})
     if worker_report["dry_run"] and package_status_counts["planned"]:
@@ -682,6 +713,7 @@ def review_gate(
         "investigation_sufficiency": investigation_sufficiency,
         "change_control_sufficiency": change_control_sufficiency,
         "acceptance_trace_sufficiency": acceptance_trace_sufficiency,
+        "constraint_trace_sufficiency": constraint_trace_sufficiency,
         "assumption_sufficiency": assumption_sufficiency,
         "checked_against": [
             "planning packet completeness",
@@ -694,6 +726,7 @@ def review_gate(
             "investigation playbook coverage",
             "change control plan coverage",
             "acceptance traceability coverage",
+            "constraint traceability coverage",
             "assumption register coverage",
             "worker report honesty",
         ],
@@ -725,6 +758,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     investigation_sufficiency = review.get("investigation_sufficiency") if isinstance(review.get("investigation_sufficiency"), dict) else {}
     change_control_sufficiency = review.get("change_control_sufficiency") if isinstance(review.get("change_control_sufficiency"), dict) else {}
     acceptance_trace_sufficiency = review.get("acceptance_trace_sufficiency") if isinstance(review.get("acceptance_trace_sufficiency"), dict) else {}
+    constraint_trace_sufficiency = review.get("constraint_trace_sufficiency") if isinstance(review.get("constraint_trace_sufficiency"), dict) else {}
     assumption_sufficiency = review.get("assumption_sufficiency") if isinstance(review.get("assumption_sufficiency"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     blockers = readiness.get("blockers", [])
@@ -767,6 +801,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Protected invariants: {change_control_sufficiency.get('protected_invariant_count', 0)}",
         f"Acceptance trace status: {acceptance_trace_sufficiency.get('status', '')}",
         f"Acceptance trace rows: {acceptance_trace_sufficiency.get('row_count', 0)}",
+        f"Constraint trace status: {constraint_trace_sufficiency.get('status', '')}",
+        f"Constraint trace rows: {constraint_trace_sufficiency.get('row_count', 0)}",
         f"Assumption register status: {assumption_sufficiency.get('status', '')}",
         f"Assumptions tracked: {assumption_sufficiency.get('assumption_count', 0)}",
         f"Survey quality decision: {survey_quality.get('decision', '')}",
@@ -941,6 +977,11 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": "run_summary acceptance_trace_status disagrees with review_gate.json"})
     if summary.get("acceptance_trace_row_count", 0) != acceptance_trace_sufficiency.get("row_count", 0):
         findings.append({"severity": "blocker", "finding": "run_summary acceptance_trace_row_count disagrees with review_gate.json"})
+    constraint_trace_sufficiency = review.get("constraint_trace_sufficiency") if isinstance(review.get("constraint_trace_sufficiency"), dict) else {}
+    if summary.get("constraint_trace_status", "") != constraint_trace_sufficiency.get("status", ""):
+        findings.append({"severity": "blocker", "finding": "run_summary constraint_trace_status disagrees with review_gate.json"})
+    if summary.get("constraint_trace_row_count", 0) != constraint_trace_sufficiency.get("row_count", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary constraint_trace_row_count disagrees with review_gate.json"})
     assumption_sufficiency = review.get("assumption_sufficiency") if isinstance(review.get("assumption_sufficiency"), dict) else {}
     if summary.get("assumption_register_status", "") != assumption_sufficiency.get("status", ""):
         findings.append({"severity": "blocker", "finding": "run_summary assumption_register_status disagrees with review_gate.json"})
@@ -1043,6 +1084,9 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     acceptance_trace_rows = plan_sources.get("acceptance_trace_rows") if isinstance(plan_sources.get("acceptance_trace_rows"), list) else []
     if summary.get("acceptance_trace_row_count", 0) != len(acceptance_trace_rows):
         findings.append({"severity": "blocker", "finding": "run_summary acceptance_trace_row_count disagrees with evidence_matrix.json"})
+    constraint_trace_rows = plan_sources.get("constraint_trace_rows") if isinstance(plan_sources.get("constraint_trace_rows"), list) else []
+    if summary.get("constraint_trace_row_count", 0) != len(constraint_trace_rows):
+        findings.append({"severity": "blocker", "finding": "run_summary constraint_trace_row_count disagrees with evidence_matrix.json"})
     assumption_rows = plan_sources.get("assumption_rows") if isinstance(plan_sources.get("assumption_rows"), list) else []
     if summary.get("assumption_count", 0) != len(assumption_rows):
         findings.append({"severity": "blocker", "finding": "run_summary assumption_count disagrees with evidence_matrix.json"})
@@ -1162,6 +1206,7 @@ def build_run_summary(
     investigation_sufficiency = review.get("investigation_sufficiency") if isinstance(review.get("investigation_sufficiency"), dict) else {}
     change_control_sufficiency = review.get("change_control_sufficiency") if isinstance(review.get("change_control_sufficiency"), dict) else {}
     acceptance_trace_sufficiency = review.get("acceptance_trace_sufficiency") if isinstance(review.get("acceptance_trace_sufficiency"), dict) else {}
+    constraint_trace_sufficiency = review.get("constraint_trace_sufficiency") if isinstance(review.get("constraint_trace_sufficiency"), dict) else {}
     assumption_sufficiency = review.get("assumption_sufficiency") if isinstance(review.get("assumption_sufficiency"), dict) else {}
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
@@ -1217,6 +1262,9 @@ def build_run_summary(
         "acceptance_trace_status": acceptance_trace_sufficiency.get("status", ""),
         "acceptance_trace_row_count": acceptance_trace_sufficiency.get("row_count", 0),
         "acceptance_trace_blocked_row_count": acceptance_trace_sufficiency.get("blocked_row_count", 0),
+        "constraint_trace_status": constraint_trace_sufficiency.get("status", ""),
+        "constraint_trace_row_count": constraint_trace_sufficiency.get("row_count", 0),
+        "constraint_trace_blocked_row_count": constraint_trace_sufficiency.get("blocked_row_count", 0),
         "assumption_register_status": assumption_sufficiency.get("status", ""),
         "assumption_count": assumption_sufficiency.get("assumption_count", 0),
         "assumption_replan_trigger_count": assumption_sufficiency.get("replan_trigger_count", 0),
@@ -1338,6 +1386,8 @@ def build_evidence_matrix(
             "change_post_change_proofs": implementation_plan.get("change_post_change_proofs", []),
             "acceptance_trace_rows": implementation_plan.get("acceptance_trace_rows", []),
             "acceptance_trace_complete": implementation_plan.get("acceptance_trace_complete", False),
+            "constraint_trace_rows": implementation_plan.get("constraint_trace_rows", []),
+            "constraint_trace_complete": implementation_plan.get("constraint_trace_complete", False),
             "assumption_rows": implementation_plan.get("assumption_rows", []),
             "assumption_replan_triggers": implementation_plan.get("assumption_replan_triggers", []),
             "verification_commands": implementation_plan.get("verification_commands", []),
