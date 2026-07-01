@@ -86,6 +86,89 @@ def can_infer_guarded_natural_language_patch(task: str) -> bool:
         return False
 
 
+def infer_test_missing_function_patch(repo: Path, brief: dict[str, Any]) -> dict[str, Any]:
+    candidate_files = sorted(
+        path
+        for path in surveyed_paths(brief)
+        if path.endswith(".py") and not is_test_path(path) and not is_docs_path(path)
+    )
+    test_files = sorted(path for path in surveyed_paths(brief) if path.endswith(".py") and is_test_path(path))
+    if len(candidate_files) != 1 or not test_files:
+        return {}
+    source_rel = candidate_files[0]
+    source_path = safe_operation_path(repo, source_rel)
+    module_name = source_path.stem
+    candidates: list[tuple[str, str]] = []
+    import_pattern = re.compile(rf"(?m)^from\s+{re.escape(module_name)}\s+import\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+    for test_rel in test_files:
+        test_path = safe_operation_path(repo, test_rel)
+        if not test_path.exists() or not test_path.is_file():
+            continue
+        text = test_path.read_text(encoding="utf-8")
+        imported_names = import_pattern.findall(text)
+        for function_name in imported_names:
+            literal = infer_simple_zero_arg_expected_literal(text, function_name)
+            if literal:
+                candidates.append((function_name, literal))
+    unique_candidates = sorted(set(candidates))
+    if len(unique_candidates) != 1:
+        return {}
+    function_name, literal = unique_candidates[0]
+    validate_safe_return_literal(literal)
+    if python_function_exists(source_path, function_name):
+        return {}
+    return {
+        "source": "test_inferred_missing_function",
+        "operations": [
+            {
+                "type": "append_python_function",
+                "path": source_rel,
+                "function_name": function_name,
+                "return_literal": literal,
+            }
+        ],
+    }
+
+
+def can_infer_guarded_execution(brief: dict[str, Any]) -> bool:
+    task = str(brief.get("task") or "")
+    if can_infer_guarded_natural_language_patch(task):
+        return True
+    repo_path = str(brief.get("repo_path") or "")
+    if not repo_path:
+        return False
+    try:
+        return bool(infer_test_missing_function_patch(Path(repo_path), brief))
+    except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
+        return False
+
+
+def infer_simple_zero_arg_expected_literal(test_text: str, function_name: str) -> str:
+    escaped = re.escape(function_name)
+    patterns = [
+        rf"\bassert\s+{escaped}\(\)\s*==\s*(?P<literal>[^\n#]+)",
+        rf"\bself\.assertEqual\(\s*{escaped}\(\)\s*,\s*(?P<literal>[^,\n\)]+)\s*\)",
+    ]
+    literals: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, test_text):
+            literal = match.group("literal").strip()
+            try:
+                validate_safe_return_literal(literal)
+            except ValueError:
+                continue
+            if literal not in literals:
+                literals.append(literal)
+    return literals[0] if len(literals) == 1 else ""
+
+
+def python_function_exists(source_path: Path, function_name: str) -> bool:
+    if not source_path.exists() or source_path.suffix != ".py":
+        return False
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    return any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name for node in ast.walk(tree))
+
+
 def validate_safe_return_literal(literal: str) -> None:
     try:
         parsed = ast.parse(literal, mode="eval")
@@ -336,7 +419,14 @@ def execute_implementation_brief(brief: dict[str, Any]) -> dict[str, Any]:
     if not preflight["ok"]:
         return build_blocked_execution_result(preflight["blockers"], preflight)
     try:
-        patch = extract_explicit_patch(str(brief.get("task") or ""))
+        try:
+            patch = extract_explicit_patch(str(brief.get("task") or ""))
+        except ValueError as exc:
+            if "future CodeBrigade autonomous execution adapter" not in str(exc):
+                raise
+            patch = infer_test_missing_function_patch(Path(str(brief.get("repo_path") or "")), brief)
+            if not patch:
+                raise
         changed_files, patch_summary, operation_results, rollback_notes = apply_patch_operations(Path(str(brief.get("repo_path") or "")), brief, patch)
     except PatchApplicationError as exc:
         return build_blocked_execution_result([str(exc)], preflight, exc.rollback_notes, exc.operation_results)

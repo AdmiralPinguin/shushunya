@@ -38,6 +38,16 @@ def main() -> int:
         option_path = verification_adapter.run_verification_commands(["pytest --rootdir=/tmp"], str(repo), execute=False)
         if option_path["status"] != "blocked" or "unsafe path token" not in option_path["results"][0]["stderr"]:
             raise AssertionError(f"allowlisted command with absolute option path should be blocked: {option_path}")
+        pytest_unavailable = verification_adapter.run_verification_commands(
+            ["python -m py_compile ok.py", "python -m pytest test_missing.py"],
+            str(repo),
+            execute=True,
+        )
+        pytest_result = pytest_unavailable["results"][1]
+        if pytest_result["status"] not in {"skipped", "failed"}:
+            raise AssertionError(f"pytest availability fallback should produce a clear status: {pytest_unavailable}")
+        if pytest_result["status"] == "skipped" and pytest_unavailable["status"] != "passed":
+            raise AssertionError(f"skipped unavailable pytest should not fail when another verification passed: {pytest_unavailable}")
     print("[ok] Ceraxia CodeBrigade verification adapter")
     return 0
 

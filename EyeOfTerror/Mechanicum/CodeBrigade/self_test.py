@@ -477,6 +477,37 @@ def main() -> int:
         if Path(tmp, "app.py").read_text(encoding="utf-8").count("def value") != 1:
             raise AssertionError("blocked duplicate add-function should not mutate app.py")
     with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import value\n\ndef test_value():\n    assert value() == 42\n", encoding="utf-8")
+        test_inferred_brief = valid_brief()
+        test_inferred_brief["repo_path"] = tmp
+        test_inferred_brief["task"] = "почини app.py чтобы тест проходил"
+        test_inferred_report = code_brigade_adapter.build_worker_report(test_inferred_brief, dry_run=False)
+        if test_inferred_report["status"] != "implemented" or test_inferred_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"test-inferred missing function should report implemented changed files: {test_inferred_report}")
+        if test_inferred_report["execution_intent"]["mode"] != "guarded_inferred_patch_execution":
+            raise AssertionError(f"test-inferred missing function should expose guarded inferred intent: {test_inferred_report}")
+        if "test_inferred_missing_function" not in test_inferred_report["execution_result"]["patch_summary"]:
+            raise AssertionError(f"test-inferred missing function should expose patch source: {test_inferred_report}")
+        if "def value():\n    return 42\n" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("test-inferred missing function did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text(
+            "from app import value\nfrom app import other\n\n"
+            "def test_value():\n    assert value() == 42\n\n"
+            "def test_other():\n    assert other() == 7\n",
+            encoding="utf-8",
+        )
+        ambiguous_test_inferred_brief = valid_brief()
+        ambiguous_test_inferred_brief["repo_path"] = tmp
+        ambiguous_test_inferred_brief["task"] = "почини app.py чтобы тесты проходили"
+        ambiguous_test_inferred_report = code_brigade_adapter.build_worker_report(ambiguous_test_inferred_brief, dry_run=False)
+        if ambiguous_test_inferred_report["status"] != "blocked" or ambiguous_test_inferred_report["autonomous_execution_request"]["status"] != "required":
+            raise AssertionError(f"ambiguous test-inferred task should still request autonomous adapter: {ambiguous_test_inferred_report}")
+        if Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("ambiguous test-inferred task should not mutate app.py")
+    with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app() is True\n", encoding="utf-8")
         ambiguous_brief = valid_brief()

@@ -147,9 +147,9 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     has_explicit_patch = "CERAXIA_PATCH:" in task
     has_guarded_inferred_patch = False
     if not has_explicit_patch:
-        from execution_adapter import can_infer_guarded_natural_language_patch
+        from execution_adapter import can_infer_guarded_execution
 
-        has_guarded_inferred_patch = can_infer_guarded_natural_language_patch(task)
+        has_guarded_inferred_patch = can_infer_guarded_execution(brief)
     if has_explicit_patch or has_guarded_inferred_patch:
         intent_blockers = execution_intent.get("blockers") if isinstance(execution_intent.get("blockers"), list) else []
         execution_intent.update(

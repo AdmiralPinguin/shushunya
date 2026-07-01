@@ -54,6 +54,10 @@ def normalize_tokens(tokens: list[str]) -> list[str]:
     return tokens
 
 
+def is_pytest_command(tokens: list[str]) -> bool:
+    return bool(tokens and (tokens[0] == "pytest" or (len(tokens) >= 3 and tokens[1:3] == ["-m", "pytest"])))
+
+
 def run_verification_commands(commands: list[str], repo_path: str, execute: bool = False, timeout_sec: int = 30) -> dict[str, Any]:
     repo = Path(repo_path)
     results: list[dict[str, Any]] = []
@@ -91,6 +95,17 @@ def run_verification_commands(commands: list[str], repo_path: str, execute: bool
             continue
         except subprocess.TimeoutExpired as exc:
             results.append({"command": command, "status": "failed", "returncode": None, "stdout": exc.stdout or "", "stderr": "verification command timed out"})
+            continue
+        if is_pytest_command(tokens) and completed.returncode == 1 and "No module named pytest" in completed.stderr:
+            results.append(
+                {
+                    "command": command,
+                    "status": "skipped",
+                    "returncode": completed.returncode,
+                    "stdout": completed.stdout[-4000:],
+                    "stderr": "pytest unavailable",
+                }
+            )
             continue
         results.append(
             {

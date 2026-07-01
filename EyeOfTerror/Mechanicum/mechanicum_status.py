@@ -65,7 +65,7 @@ COMPONENTS = {
             "verification_execution.schema.json",
             "self_test.py",
         ],
-        "maturity": "handoff_with_read_order_preflight_explicit_text_ast_and_guarded_natural_language_patch_adapter_package_statuses_and_allowlisted_verification",
+        "maturity": "handoff_with_read_order_preflight_explicit_text_ast_guarded_natural_language_and_test_inferred_missing_function_adapter_package_statuses_and_allowlisted_verification",
     },
 }
 
