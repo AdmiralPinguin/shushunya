@@ -8,6 +8,8 @@ def main() -> int:
     status = mechanicum_status.build_status()
     if not status["ok"]:
         raise AssertionError(f"Mechanicum status should be ready: {status}")
+    if status["architecture_contract"]["governance_root"] != "EyeOfTerror/Mechanicum":
+        raise AssertionError(f"status should expose the architecture contract: {status}")
     by_name = {item["name"]: item for item in status["components"]}
     if by_name["CodeBrigade"]["maturity"] != "dry_run_handoff_with_implementation_plan_and_allowlisted_verification":
         raise AssertionError(f"CodeBrigade should honestly report verification-adapter maturity: {by_name['CodeBrigade']}")

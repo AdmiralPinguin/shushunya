@@ -104,10 +104,12 @@ def component_status(name: str, spec: dict[str, Any]) -> dict[str, Any]:
 def build_status() -> dict[str, Any]:
     components = [component_status(name, spec) for name, spec in COMPONENTS.items()]
     incomplete = [item["name"] for item in components if item["status"] != "ready"]
+    architecture_contract = json.loads((ROOT / "architecture_contract.json").read_text(encoding="utf-8"))
     return {
         "ok": not incomplete,
         "kind": "eye_mechanicum_status",
         "root": str(ROOT),
+        "architecture_contract": architecture_contract,
         "components": components,
         "incomplete_components": incomplete,
         "roadmap": ROADMAP,
