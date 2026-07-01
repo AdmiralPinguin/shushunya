@@ -298,6 +298,43 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["surface_verification_status"], "executed")
 
+    def test_review_gate_marks_failed_surface_verification(self) -> None:
+        packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
+        survey = {
+            "repo_exists": True,
+            "repo_path": ".",
+            "candidate_files": ["app.py"],
+            "test_files": ["test_app.py"],
+            "entrypoint_candidates": [],
+            "python_symbols": [],
+            "source_summaries": [],
+            "local_import_edges": [],
+            "suggested_verification_commands": [],
+            "truncated": False,
+            "python_symbols_truncated": False,
+            "source_summaries_truncated": False,
+            "max_files_scanned": 1,
+            "max_python_symbol_files": 1,
+            "max_source_summary_files": 1,
+        }
+        brief = build_implementation_brief(packet, survey)
+        worker_report = {
+            "status": "dry_run_handoff_ready",
+            "dry_run": True,
+            "changed_files": [],
+            "implementation_brief_acknowledged": True,
+        }
+        verification_report = {
+            "status": "failed",
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "commands_planned": ["python -m pytest"],
+            "commands_executable": ["python -m pytest"],
+            "commands_executed": [{"command": "python -m pytest", "status": "failed"}],
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        self.assertEqual(review["surface_verification_sufficiency"]["status"], "failed")
+
     def test_non_dry_run_blocks_until_real_code_brigade_execution_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"

@@ -292,9 +292,18 @@ def review_gate(
     surface_matrix = brief.get("surface_verification_matrix") if isinstance(brief.get("surface_verification_matrix"), dict) else {}
     surface_rows = surface_matrix.get("rows") if isinstance(surface_matrix.get("rows"), list) else []
     surface_blockers = surface_matrix.get("blockers") if isinstance(surface_matrix.get("blockers"), list) else []
+    verification_status = str(verification_report.get("status", ""))
+    if surface_blockers:
+        surface_status = "blocked"
+    elif verification_status in {"failed", "blocked"}:
+        surface_status = verification_status
+    elif commands_executed:
+        surface_status = "executed"
+    else:
+        surface_status = "planned_only"
     surface_verification_sufficiency = {
         "planned_complete": surface_matrix.get("complete") is True,
-        "status": "blocked" if surface_blockers else ("executed" if commands_executed else "planned_only"),
+        "status": surface_status,
         "surface_count": len(surface_rows),
         "blocker_count": len(surface_blockers),
         "executed_evidence": bool(commands_executed),
