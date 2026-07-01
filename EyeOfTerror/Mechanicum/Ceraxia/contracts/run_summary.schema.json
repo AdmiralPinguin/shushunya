@@ -73,6 +73,9 @@
     "code_brigade_execution_preflight_blocker_count": {
       "type": "integer"
     },
+    "code_brigade_execution_preflight_ok": {
+      "type": ["boolean", "null"]
+    },
     "risk_level": {
       "type": "string"
     },

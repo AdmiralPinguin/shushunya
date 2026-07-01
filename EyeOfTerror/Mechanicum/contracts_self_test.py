@@ -39,7 +39,11 @@ def load_schema(path: Path) -> dict:
     return payload
 
 
-def matches_type(value: object, schema_type: str) -> bool:
+def matches_type(value: object, schema_type: object) -> bool:
+    if isinstance(schema_type, list):
+        return any(matches_type(value, item) for item in schema_type)
+    if not isinstance(schema_type, str):
+        return True
     if schema_type == "object":
         return isinstance(value, dict)
     if schema_type == "array":
@@ -50,11 +54,13 @@ def matches_type(value: object, schema_type: str) -> bool:
         return isinstance(value, bool)
     if schema_type == "integer":
         return isinstance(value, int) and not isinstance(value, bool)
+    if schema_type == "null":
+        return value is None
     return True
 
 
 def assert_schema_subset(schema: dict, payload: object, label: str) -> None:
-    if "type" in schema and not matches_type(payload, str(schema["type"])):
+    if "type" in schema and not matches_type(payload, schema["type"]):
         raise AssertionError(f"{label} expected type {schema['type']}: {payload}")
     if "const" in schema and payload != schema["const"]:
         raise AssertionError(f"{label} expected const {schema['const']}: {payload}")
