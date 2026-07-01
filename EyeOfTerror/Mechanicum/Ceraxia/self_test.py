@@ -78,6 +78,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(survey["status"], "surveyed")
             self.assertIn("app.py", survey["candidate_files"])
             self.assertIn("test_app.py", survey["test_files"])
+            app_symbols = next(item for item in survey["python_symbols"] if item["path"] == "app.py")
+            self.assertIn("app", app_symbols["functions"])
             audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
             self.assertEqual(audit["decision"], "passed")
             self.assertTrue(audit["manifest_complete"])

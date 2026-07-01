@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import ast
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,34 @@ def score_candidate(path: Path) -> int:
     return score
 
 
+def python_summary(path: Path, root: Path) -> dict[str, Any]:
+    rel = str(path.relative_to(root))
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+        return {"path": rel, "parse_error": str(exc), "functions": [], "classes": [], "imports": []}
+    functions: list[str] = []
+    classes: list[str] = []
+    imports: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.append(node.name)
+        elif isinstance(node, ast.ClassDef):
+            classes.append(node.name)
+        elif isinstance(node, ast.Import):
+            imports.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            imports.extend(f"{module}.{alias.name}".strip(".") for alias in node.names)
+    return {
+        "path": rel,
+        "parse_error": "",
+        "functions": sorted(functions)[:30],
+        "classes": sorted(classes)[:30],
+        "imports": sorted(set(imports))[:30],
+    }
+
+
 def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[str]) -> dict[str, Any]:
     root = Path(repo_path)
     if not root.exists() or not root.is_dir():
@@ -92,6 +121,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         for path in files
         if path.name.lower() in {"main.py", "app.py", "server.py", "cli.py"}
     ][:20]
+    python_files = [path for path in files if path.suffix.lower() == ".py"][:40]
     return {
         "kind": "ceraxia_repo_survey",
         "repo_path": str(root),
@@ -105,4 +135,5 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "candidate_files": candidates,
         "test_files": tests,
         "entrypoint_candidates": entrypoints,
+        "python_symbols": [python_summary(path, root) for path in python_files],
     }
