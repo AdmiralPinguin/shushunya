@@ -127,6 +127,15 @@ def main() -> int:
     if sorted(review_depends_on) != ["prove_boundary", "prove_compatibility"]:
         raise AssertionError(f"combined high-risk plan must wait for both proof phases: {combined_packet}")
 
+    concurrency_packet = planning_brigade.build_planning_packet(
+        {
+            "task": "fix async retry race: parallel requests corrupt cache state under timeout",
+            "repo_path": "/repo",
+        }
+    )
+    if not any(item["risk"] == "nondeterministic_parallel_state_regression" for item in concurrency_packet["risk_register"]["risks"]):
+        raise AssertionError(f"concurrency planning must expose nondeterministic state risk: {concurrency_packet}")
+
     unclear_packet = planning_brigade.build_planning_packet({"task": "почини", "repo_path": "/repo"})
     if unclear_packet["planning_review_gate"]["decision"] != "blocked" or not unclear_packet["planning_review_gate"]["blockers"]:
         raise AssertionError(f"unclear task must be blocked by planning review: {unclear_packet}")

@@ -635,6 +635,14 @@ def risk_register(triage: dict[str, Any], survey: dict[str, Any], design: dict[s
                 "mitigation": "Document compatibility impact and add caller-facing verification.",
             }
         )
+    if "concurrency" in triage["task_kinds"]:
+        risks.append(
+            {
+                "risk": "nondeterministic_parallel_state_regression",
+                "severity": "high",
+                "mitigation": "Require parallel/retry verification or an explicit blocker before final acceptance.",
+            }
+        )
     return {
         "role": "RiskScribe",
         "risks": risks,
