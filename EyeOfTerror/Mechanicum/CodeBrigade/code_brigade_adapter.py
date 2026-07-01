@@ -28,6 +28,14 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief required_verification is required")
     if not isinstance(brief.get("acceptance_gates"), list) or not brief.get("acceptance_gates"):
         problems.append("brief acceptance_gates are required")
+    handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
+    if handoff.get("target") != "CodeBrigade":
+        problems.append("brief code_brigade_handoff must target CodeBrigade")
+    steps = handoff.get("steps") if isinstance(handoff.get("steps"), list) else []
+    if not steps:
+        problems.append("brief code_brigade_handoff steps are required")
+    elif not all(isinstance(step, dict) and step.get("step") and step.get("owner") for step in steps):
+        problems.append("brief code_brigade_handoff steps must include step and owner")
     return problems
 
 

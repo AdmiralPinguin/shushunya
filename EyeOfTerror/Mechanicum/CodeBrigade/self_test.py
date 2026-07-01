@@ -20,6 +20,13 @@ def valid_brief() -> dict:
         "expected_artifacts": ["worker_report.json", "verification_report.json", "final_report.md"],
         "required_verification": {"targeted_commands": ["rerun failing test command"]},
         "acceptance_gates": ["planning packet includes all five planning roles"],
+        "code_brigade_handoff": {
+            "target": "CodeBrigade",
+            "steps": [
+                {"step": "inspect_repo_evidence", "owner": "CodeBrigade"},
+                {"step": "return_for_ceraxia_review", "owner": "Ceraxia"},
+            ],
+        },
         "blocked": False,
         "blockers": [],
     }
@@ -39,6 +46,11 @@ def main() -> int:
     invalid_report = code_brigade_adapter.build_worker_report(invalid, dry_run=True)
     if invalid_report["status"] != "blocked" or invalid_report["implementation_brief_acknowledged"]:
         raise AssertionError(f"invalid brief should be blocked: {invalid_report}")
+    missing_handoff = valid_brief()
+    missing_handoff["code_brigade_handoff"] = {"target": "CodeBrigade", "steps": []}
+    missing_handoff_report = code_brigade_adapter.build_worker_report(missing_handoff, dry_run=True)
+    if missing_handoff_report["status"] != "blocked" or not any("handoff steps" in item for item in missing_handoff_report["validation_problems"]):
+        raise AssertionError(f"missing handoff steps should be blocked: {missing_handoff_report}")
     print("[ok] Ceraxia CodeBrigade adapter")
     return 0
 
