@@ -22,7 +22,7 @@ COMPONENTS = {
             "contracts/evidence_matrix.schema.json",
             "contracts/run_artifacts.schema.json",
         ],
-        "maturity": "dry_run_controller_with_readonly_survey_and_verification",
+        "maturity": "dry_run_controller_with_import_edges_evidence_matrix_and_verification",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -48,7 +48,7 @@ COMPONENTS = {
             "verification_adapter.py",
             "self_test.py",
         ],
-        "maturity": "dry_run_handoff_with_allowlisted_verification",
+        "maturity": "dry_run_handoff_with_implementation_plan_and_allowlisted_verification",
     },
 }
 
@@ -62,14 +62,14 @@ ROADMAP = [
     },
     {
         "priority": 2,
-        "item": "deepen read-only repository survey adapter",
-        "reason": "Ceraxia now has basic read-only file evidence; deeper symbol/import analysis still belongs in a stronger adapter.",
+        "item": "deepen repository survey beyond Python import edges",
+        "reason": "Ceraxia now maps Python symbols and local imports; multi-language call/dependency evidence is still shallow.",
         "owner": "Ceraxia",
     },
     {
         "priority": 3,
         "item": "promote verification execution evidence into review-specific gates",
-        "reason": "Ceraxia can execute allowlisted verification; review should next reason about which commands are sufficient for each risk.",
+        "reason": "Ceraxia can execute allowlisted verification and summarize evidence; review should next reason about which commands are sufficient for each risk.",
         "owner": "Ceraxia",
     },
     {

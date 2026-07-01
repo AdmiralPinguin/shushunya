@@ -9,9 +9,9 @@ def main() -> int:
     if not status["ok"]:
         raise AssertionError(f"Mechanicum status should be ready: {status}")
     by_name = {item["name"]: item for item in status["components"]}
-    if by_name["CodeBrigade"]["maturity"] != "dry_run_handoff_with_allowlisted_verification":
+    if by_name["CodeBrigade"]["maturity"] != "dry_run_handoff_with_implementation_plan_and_allowlisted_verification":
         raise AssertionError(f"CodeBrigade should honestly report verification-adapter maturity: {by_name['CodeBrigade']}")
-    if by_name["Ceraxia"]["maturity"] != "dry_run_controller_with_readonly_survey_and_verification":
+    if by_name["Ceraxia"]["maturity"] != "dry_run_controller_with_import_edges_evidence_matrix_and_verification":
         raise AssertionError(f"Ceraxia should honestly report dry-run survey and verification maturity: {by_name['Ceraxia']}")
     if "wire CodeBrigade real execution adapter" not in status["next_architecture_step"]:
         raise AssertionError(f"status should point to the next architecture gap: {status}")
