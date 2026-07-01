@@ -110,6 +110,17 @@ def main() -> int:
     assert_packet_shape(cli_packet)
     if "test_repair" not in cli_packet["task_triage"]["task_kinds"] or "rerun failing test command" not in cli_packet["verification_strategy"]["targeted_commands"]:
         raise AssertionError(f"CLI packet should plan failing-test repair: {cli_packet}")
+
+    path_hint_packet = planning_brigade.build_planning_packet(
+        {
+            "task": "почини `src/app.py` и tests/test_app.py без изменения public API",
+            "repo_path": "/repo",
+        }
+    )
+    if path_hint_packet["problem_statement"]["explicit_path_hints"] != ["src/app.py", "tests/test_app.py"]:
+        raise AssertionError(f"planning packet should extract explicit path hints: {path_hint_packet}")
+    if path_hint_packet["repo_survey_request"]["path_hints"] != ["src/app.py", "tests/test_app.py"]:
+        raise AssertionError(f"survey request should preserve path hints: {path_hint_packet}")
     print("[ok] Ceraxia PlanningBrigade")
     return 0
 

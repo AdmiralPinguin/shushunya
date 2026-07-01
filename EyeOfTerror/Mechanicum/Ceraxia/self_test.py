@@ -37,7 +37,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             runs = Path(tmp) / "runs"
             result = run_ceraxia(
                 CeraxiaInput(
-                    task="почини security bug: token auth можно обойти через path traversal, добавь pytest negative tests",
+                    task="почини security bug в `app.py`: token auth можно обойти через path traversal, добавь pytest negative tests для `test_app.py`",
                     repo_path=str(repo),
                     runs_root=runs,
                 )
@@ -78,6 +78,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(brief["planning_review_gate"]["score"], 80)
             self.assertGreaterEqual(len(brief["work_breakdown"]["phases"]), 6)
             self.assertIn("app.py", brief["repo_survey_evidence"]["candidate_files"])
+            self.assertEqual(brief["repo_survey_evidence"]["existing_path_hints"], ["app.py", "test_app.py"])
+            self.assertEqual(brief["repo_survey_evidence"]["missing_path_hints"], [])
+            self.assertEqual(brief["repo_survey_evidence"]["unsafe_path_hints"], [])
             self.assertFalse(brief["repo_survey_evidence"]["survey_truncated"])
             self.assertFalse(brief["repo_survey_evidence"]["python_symbols_truncated"])
             self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in brief["repo_survey_evidence"]["local_import_edges"]))
@@ -90,6 +93,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             implementation_plan = worker_report["implementation_plan"]
             self.assertIn("app.py", implementation_plan["target_files_to_inspect"])
             self.assertIn("test_app.py", implementation_plan["test_files_to_preserve"])
+            self.assertEqual(implementation_plan["existing_path_hints"], ["app.py", "test_app.py"])
             self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in implementation_plan["dependency_edges_to_check"]))
             self.assertFalse(implementation_plan["survey_truncated"])
             self.assertFalse(implementation_plan["python_symbols_truncated"])
@@ -98,6 +102,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(survey["status"], "surveyed")
             self.assertIn("app.py", survey["candidate_files"])
             self.assertIn("test_app.py", survey["test_files"])
+            self.assertEqual(survey["existing_path_hints"], ["app.py", "test_app.py"])
             self.assertFalse(survey["truncated"])
             self.assertFalse(survey["python_symbols_truncated"])
             self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in survey["local_import_edges"]))

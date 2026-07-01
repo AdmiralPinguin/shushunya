@@ -47,6 +47,10 @@
         "risk_level",
         "target_files_to_inspect",
         "test_files_to_preserve",
+        "path_hints",
+        "existing_path_hints",
+        "missing_path_hints",
+        "unsafe_path_hints",
         "dependency_edges_to_check",
         "survey_truncated",
         "python_symbols_truncated",
@@ -68,6 +72,30 @@
         },
         "python_symbols_truncated": {
           "type": "boolean"
+        },
+        "path_hints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "existing_path_hints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing_path_hints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unsafe_path_hints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "planning_critical_path": {
           "type": "array",

@@ -234,6 +234,7 @@ def build_repo_survey(packet: dict[str, Any]) -> dict[str, Any]:
         str(survey_request.get("repo_path") or PROJECT_ROOT),
         survey_request.get("focus", []) if isinstance(survey_request.get("focus"), list) else [],
         survey_request.get("exclude_patterns", []) if isinstance(survey_request.get("exclude_patterns"), list) else [],
+        survey_request.get("path_hints", []) if isinstance(survey_request.get("path_hints"), list) else [],
     )
 
 
@@ -287,6 +288,10 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "repo_survey_evidence": {
             "candidate_files": survey.get("candidate_files", []),
             "test_files": survey.get("test_files", []),
+            "path_hints": survey.get("path_hints", []),
+            "existing_path_hints": survey.get("existing_path_hints", []),
+            "missing_path_hints": survey.get("missing_path_hints", []),
+            "unsafe_path_hints": survey.get("unsafe_path_hints", []),
             "entrypoint_candidates": survey.get("entrypoint_candidates", []),
             "python_symbols": survey.get("python_symbols", []),
             "local_import_edges": survey.get("local_import_edges", []),

@@ -79,6 +79,10 @@ def valid_brief() -> dict:
         "repo_survey_evidence": {
             "candidate_files": ["app.py"],
             "test_files": ["test_app.py"],
+            "path_hints": ["app.py", "test_app.py"],
+            "existing_path_hints": ["app.py", "test_app.py"],
+            "missing_path_hints": [],
+            "unsafe_path_hints": [],
             "entrypoint_candidates": ["main.py"],
             "local_import_edges": [{"source": "app.py", "import": "util.enabled", "target": "util.py"}],
             "survey_truncated": False,
@@ -117,6 +121,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve survey candidates: {plan}")
     if plan["test_files_to_preserve"] != ["test_app.py"]:
         raise AssertionError(f"implementation plan should preserve test evidence: {plan}")
+    if plan["existing_path_hints"] != ["app.py", "test_app.py"]:
+        raise AssertionError(f"implementation plan should preserve explicit path hints: {plan}")
     if "python -m pytest test_app.py" not in plan["verification_commands"]:
         raise AssertionError(f"implementation plan should include suggested verification: {plan}")
     if plan["dependency_edges_to_check"] != [{"source": "app.py", "import": "util.enabled", "target": "util.py"}]:

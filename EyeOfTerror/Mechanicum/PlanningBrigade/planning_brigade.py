@@ -19,6 +19,19 @@ ROLE_ORDER = [
 CONTRACT_VERSION = "eye-mechanicum.v1"
 
 
+def extract_path_hints(task: str) -> list[str]:
+    hints: list[str] = []
+    for value in re.findall(r"`([^`]+)`", task):
+        cleaned = value.strip()
+        if cleaned and cleaned not in hints:
+            hints.append(cleaned)
+    for value in re.findall(r"(?<![\w/.-])([\w./-]+\.(?:py|js|ts|tsx|jsx|kt|java|go|rs|sh|json|toml|ya?ml|md|txt))(?![\w/.-])", task):
+        cleaned = value.strip()
+        if cleaned and cleaned not in hints:
+            hints.append(cleaned)
+    return hints
+
+
 def task_text(payload: dict[str, Any]) -> str:
     return str(payload.get("task") or payload.get("goal") or payload.get("message") or "").strip()
 
@@ -91,7 +104,7 @@ def task_triage(payload: dict[str, Any]) -> dict[str, Any]:
 
 def problem_statement(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
-    explicit_paths = re.findall(r"`([^`]+)`", task)
+    explicit_paths = extract_path_hints(task)
     return {
         "role": "TaskTriage",
         "intent": task[:500],
@@ -113,6 +126,7 @@ def problem_statement(payload: dict[str, Any], triage: dict[str, Any]) -> dict[s
 
 
 def repo_survey_request(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str, Any]:
+    task = task_text(payload)
     repo_path = normalize_repo_path(payload)
     focus = [
         "public entrypoints",
@@ -130,6 +144,7 @@ def repo_survey_request(payload: dict[str, Any], triage: dict[str, Any]) -> dict
         "role": "RepoSurveyor",
         "repo_path": repo_path,
         "read_only": True,
+        "path_hints": extract_path_hints(task),
         "focus": focus,
         "exclude_patterns": [
             ".git/",

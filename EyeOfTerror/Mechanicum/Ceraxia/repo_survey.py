@@ -53,6 +53,21 @@ def score_candidate(path: Path) -> int:
     return score
 
 
+def safe_relative_hint(value: str) -> bool:
+    path = Path(value)
+    if path.is_absolute():
+        return False
+    return ".." not in path.parts and value.strip() not in {"", "."}
+
+
+def unique(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value not in result:
+            result.append(value)
+    return result
+
+
 def python_summary(path: Path, root: Path) -> dict[str, Any]:
     rel = str(path.relative_to(root))
     try:
@@ -113,8 +128,11 @@ def build_local_import_edges(python_summaries: list[dict[str, Any]], python_file
     return edges[:80]
 
 
-def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[str]) -> dict[str, Any]:
+def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[str], path_hints: list[str] | None = None) -> dict[str, Any]:
     root = Path(repo_path)
+    path_hints = path_hints or []
+    safe_path_hints = [hint for hint in path_hints if safe_relative_hint(str(hint))]
+    unsafe_path_hints = [hint for hint in path_hints if not safe_relative_hint(str(hint))]
     if not root.exists() or not root.is_dir():
         return {
             "kind": "ceraxia_repo_survey",
@@ -123,6 +141,10 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "read_only": True,
             "status": "blocked_missing_repo",
             "focus": focus,
+            "path_hints": path_hints,
+            "existing_path_hints": [],
+            "missing_path_hints": safe_path_hints,
+            "unsafe_path_hints": unsafe_path_hints,
             "exclude_patterns": exclude_patterns,
             "file_count": 0,
             "suffix_counts": {},
@@ -149,16 +171,29 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             truncated = True
             break
     suffix_counts = Counter(path.suffix.lower() or "<none>" for path in files)
+    rel_to_path = {str(path.relative_to(root)): path for path in files}
+    existing_path_hints = [hint for hint in safe_path_hints if hint in rel_to_path]
+    missing_path_hints = [hint for hint in safe_path_hints if hint not in rel_to_path]
+    hinted_candidates = [
+        hint
+        for hint in existing_path_hints
+        if score_candidate(rel_to_path[hint]) > 0 and "test" not in rel_to_path[hint].name.lower()
+    ]
+    hinted_tests = [
+        hint
+        for hint in existing_path_hints
+        if "test" in rel_to_path[hint].name.lower() or rel_to_path[hint].parent.name.lower() in {"test", "tests"}
+    ]
     scored = sorted(
         ((score_candidate(path), str(path.relative_to(root))) for path in files),
         key=lambda item: (-item[0], item[1]),
     )
-    candidates = [path for score, path in scored if score > 0][:30]
-    tests = [
+    candidates = unique(hinted_candidates + [path for score, path in scored if score > 0])[:30]
+    tests = unique(hinted_tests + [
         str(path.relative_to(root))
         for path in files
         if "test" in path.name.lower() or path.parent.name.lower() in {"test", "tests"}
-    ][:30]
+    ])[:30]
     entrypoints = [
         str(path.relative_to(root))
         for path in files
@@ -181,6 +216,10 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "read_only": True,
         "status": "surveyed",
         "focus": focus,
+        "path_hints": path_hints,
+        "existing_path_hints": existing_path_hints,
+        "missing_path_hints": missing_path_hints,
+        "unsafe_path_hints": unsafe_path_hints,
         "exclude_patterns": exclude_patterns,
         "file_count": len(files),
         "suffix_counts": dict(sorted(suffix_counts.items())),
