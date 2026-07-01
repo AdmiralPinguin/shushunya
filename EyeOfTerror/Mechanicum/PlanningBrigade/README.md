@@ -110,4 +110,4 @@ kinds, work phases, impacted surfaces, highest-risk surfaces, gate decisions,
 negative tests, implementation work packages, acceptance trace packages,
 assumption coverage, change-control invariants, change-control post-change
 proofs, rollback triggers, surface-specific output evidence requirements, and
-planning scores.
+implementation-brief blueprint sections and mutation preconditions.

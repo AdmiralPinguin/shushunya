@@ -215,6 +215,13 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
             raise AssertionError(f"{trial_id}: worker output contract row must include blocker contract: {packet}")
     if handoff.get("worker_output_contract") != output_contract:
         raise AssertionError(f"{trial_id}: CodeBrigade handoff must carry worker output contract: {packet}")
+    blueprint = packet.get("implementation_brief_blueprint") if isinstance(packet.get("implementation_brief_blueprint"), dict) else {}
+    brief_required_sections = blueprint.get("required_sections") if isinstance(blueprint.get("required_sections"), list) else []
+    brief_mutation_preconditions = blueprint.get("mutation_preconditions") if isinstance(blueprint.get("mutation_preconditions"), list) else []
+    if len(brief_required_sections) < 20:
+        raise AssertionError(f"{trial_id}: implementation brief blueprint must require the full CodeBrigade handoff surface: {packet}")
+    if len(brief_mutation_preconditions) < 6:
+        raise AssertionError(f"{trial_id}: implementation brief blueprint must include mutation preconditions: {packet}")
     surface_matrix = packet.get("surface_verification_matrix") if isinstance(packet.get("surface_verification_matrix"), dict) else {}
     surface_rows = surface_matrix.get("rows") if isinstance(surface_matrix.get("rows"), list) else []
     surface_output_evidence_required = [
@@ -266,6 +273,10 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "handoff_package_review_order": handoff.get("package_review_order", []) if isinstance(handoff.get("package_review_order"), list) else [],
         "handoff_acceptance_trace_required": handoff.get("acceptance_trace_required"),
         "handoff_acceptance_trace_row_count": handoff.get("acceptance_trace_row_count"),
+        "brief_required_sections": [str(item) for item in brief_required_sections if isinstance(item, str)],
+        "brief_mutation_preconditions": [str(item) for item in brief_mutation_preconditions if isinstance(item, str)],
+        "brief_required_section_count": len(brief_required_sections),
+        "brief_mutation_precondition_count": len(brief_mutation_preconditions),
         "worker_output_required_package_statuses": output_contract.get("required_package_statuses", []) if isinstance(output_contract.get("required_package_statuses"), list) else [],
         "worker_output_package_result_ids": output_row_package_ids,
         "worker_output_required_report_count": len(output_contract.get("required_reports", [])) if isinstance(output_contract.get("required_reports"), list) else 0,
@@ -325,6 +336,10 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     handoff_package_review_orders: list[list[str]] = []
     handoff_acceptance_trace_required: Counter[str] = Counter()
     handoff_acceptance_trace_row_counts: list[int] = []
+    brief_required_sections: Counter[str] = Counter()
+    brief_mutation_preconditions: Counter[str] = Counter()
+    brief_required_section_counts: list[int] = []
+    brief_mutation_precondition_counts: list[int] = []
     worker_output_required_packages: Counter[str] = Counter()
     worker_output_result_packages: Counter[str] = Counter()
     worker_output_required_report_counts: list[int] = []
@@ -373,6 +388,12 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         handoff_acceptance_trace_required.update([str(result.get("handoff_acceptance_trace_required"))])
         if isinstance(result.get("handoff_acceptance_trace_row_count"), int):
             handoff_acceptance_trace_row_counts.append(result["handoff_acceptance_trace_row_count"])
+        brief_required_sections.update(str(item) for item in result.get("brief_required_sections", []))
+        brief_mutation_preconditions.update(str(item) for item in result.get("brief_mutation_preconditions", []))
+        if isinstance(result.get("brief_required_section_count"), int):
+            brief_required_section_counts.append(result["brief_required_section_count"])
+        if isinstance(result.get("brief_mutation_precondition_count"), int):
+            brief_mutation_precondition_counts.append(result["brief_mutation_precondition_count"])
         worker_output_required_packages.update(str(item) for item in result.get("worker_output_required_package_statuses", []))
         worker_output_result_packages.update(str(item) for item in result.get("worker_output_package_result_ids", []))
         if isinstance(result.get("worker_output_required_report_count"), int):
@@ -430,6 +451,10 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "handoff_package_review_orders": handoff_package_review_orders,
         "handoff_acceptance_trace_required_counts": dict(sorted(handoff_acceptance_trace_required.items())),
         "minimum_handoff_acceptance_trace_row_count": min(handoff_acceptance_trace_row_counts) if handoff_acceptance_trace_row_counts else 0,
+        "brief_required_section_counts": dict(sorted(brief_required_sections.items())),
+        "brief_mutation_precondition_counts": dict(sorted(brief_mutation_preconditions.items())),
+        "minimum_brief_required_section_count": min(brief_required_section_counts) if brief_required_section_counts else 0,
+        "minimum_brief_mutation_precondition_count": min(brief_mutation_precondition_counts) if brief_mutation_precondition_counts else 0,
         "worker_output_required_package_counts": dict(sorted(worker_output_required_packages.items())),
         "worker_output_result_package_counts": dict(sorted(worker_output_result_packages.items())),
         "minimum_worker_output_required_report_count": min(worker_output_required_report_counts) if worker_output_required_report_counts else 0,
@@ -494,6 +519,8 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     rollback_counts = summary.get("change_rollback_trigger_counts") if isinstance(summary.get("change_rollback_trigger_counts"), dict) else {}
     acceptance_trace_package_counts = summary.get("acceptance_trace_package_counts") if isinstance(summary.get("acceptance_trace_package_counts"), dict) else {}
     handoff_acceptance_required_counts = summary.get("handoff_acceptance_trace_required_counts") if isinstance(summary.get("handoff_acceptance_trace_required_counts"), dict) else {}
+    brief_required_section_counts = summary.get("brief_required_section_counts") if isinstance(summary.get("brief_required_section_counts"), dict) else {}
+    brief_mutation_precondition_counts = summary.get("brief_mutation_precondition_counts") if isinstance(summary.get("brief_mutation_precondition_counts"), dict) else {}
     worker_output_required_package_counts = summary.get("worker_output_required_package_counts") if isinstance(summary.get("worker_output_required_package_counts"), dict) else {}
     worker_output_result_package_counts = summary.get("worker_output_result_package_counts") if isinstance(summary.get("worker_output_result_package_counts"), dict) else {}
     surface_output_evidence_counts = summary.get("surface_output_evidence_required_counts") if isinstance(summary.get("surface_output_evidence_required_counts"), dict) else {}
@@ -575,6 +602,40 @@ def assert_coverage(summary: dict[str, Any]) -> None:
         raise AssertionError(f"field trials must prove handoff requires acceptance trace: {summary}")
     if int(summary.get("minimum_handoff_acceptance_trace_row_count") or 0) < int(summary.get("minimum_acceptance_trace_row_count") or 0):
         raise AssertionError(f"field trials show handoff acceptance trace row count drift: {summary}")
+    required_brief_sections = {
+        "surface_verification_matrix",
+        "surface_package_matrix",
+        "investigation_playbook",
+        "acceptance_trace_matrix",
+        "constraint_trace_matrix",
+        "assumption_register",
+        "implementation_work_packages",
+        "worker_output_contract",
+        "planning_review_gate",
+        "change_control_plan",
+    }
+    missing_brief_sections = sorted(section for section in required_brief_sections if section not in brief_required_section_counts)
+    if missing_brief_sections:
+        raise AssertionError(f"field trials are missing implementation brief section coverage: {missing_brief_sections}")
+    if int(summary.get("minimum_brief_required_section_count") or 0) < 20:
+        raise AssertionError(f"field trials have too few implementation brief required sections: {summary}")
+    required_precondition_fragments = [
+        "implementation brief validates",
+        "investigation playbook",
+        "change control plan",
+        "execution preflight passes",
+        "candidate files are repo-relative",
+        "verification plan is attached",
+    ]
+    missing_precondition_fragments = [
+        fragment
+        for fragment in required_precondition_fragments
+        if not any(fragment in precondition for precondition in brief_mutation_precondition_counts)
+    ]
+    if missing_precondition_fragments:
+        raise AssertionError(f"field trials are missing implementation brief mutation precondition coverage: {missing_precondition_fragments}")
+    if int(summary.get("minimum_brief_mutation_precondition_count") or 0) < 6:
+        raise AssertionError(f"field trials have too few implementation brief mutation preconditions: {summary}")
     missing_worker_output_required_packages = sorted(package for package in required_work_packages if package not in worker_output_required_package_counts)
     missing_worker_output_result_packages = sorted(package for package in required_work_packages if package not in worker_output_result_package_counts)
     if missing_worker_output_required_packages:
