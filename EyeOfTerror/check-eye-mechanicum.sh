@@ -15,6 +15,7 @@ PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_service_self_test.py
 PYTHONPATH=EyeOfTerror python3 EyeOfTerror/ceraxia_field_trials_self_test.py
 PYTHONPATH=EyeOfTerror:Mechanicum python3 EyeOfTerror/ceraxia_patch_pipeline_self_test.py
 PYTHONPATH=EyeOfTerror/Mechanicum/PlanningBrigade python3 EyeOfTerror/Mechanicum/PlanningBrigade/self_test.py
+PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade python3 EyeOfTerror/Mechanicum/Ceraxia/self_test.py
 PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/Lexmechanic python3 EyeOfTerror/Scriptorium/Brigade/Lexmechanic/self_test.py
 PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/AuspexBrowser python3 EyeOfTerror/Scriptorium/Brigade/AuspexBrowser/self_test.py
 PYTHONPATH=Mechanicum/OcularisRenderium python3 Mechanicum/OcularisRenderium/self_test.py

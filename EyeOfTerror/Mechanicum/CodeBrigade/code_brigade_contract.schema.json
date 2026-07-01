@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ceraxia CodeBrigade Worker Report Contract",
+  "type": "object",
+  "required": [
+    "kind",
+    "target",
+    "status",
+    "dry_run",
+    "changed_files",
+    "notes",
+    "implementation_brief_acknowledged"
+  ],
+  "properties": {
+    "kind": {
+      "const": "ceraxia_code_brigade_worker_report"
+    },
+    "target": {
+      "const": "CodeBrigade"
+    },
+    "status": {
+      "enum": ["dry_run_handoff_ready", "implemented", "blocked"]
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "implementation_brief_acknowledged": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": true
+}

@@ -17,6 +17,42 @@ She owns code-task decomposition, repository survey, scoped implementation
 planning, patch manifest handoff, verification planning, code review, and final
 handoff packaging.
 
+## Mechanicum Controller
+
+`ceraxia.py` is the local Mechanicum-facing controller for the new Ceraxia
+brigade structure. It currently runs a dry-run management pipeline:
+
+```text
+task
+  -> PlanningBrigade planning_packet.json
+  -> repo_survey.json
+  -> CodeBrigade implementation_brief.json
+  -> worker_report.json
+  -> verification_report.json
+  -> review_gate.json
+  -> final_report.md
+```
+
+Lifecycle states:
+
+```text
+received -> planned -> surveyed -> implementation_ready -> implemented -> verified -> reviewed -> finalized
+```
+
+The dry-run path deliberately does not edit source. It proves that Ceraxia can
+shape the task, enforce the planning contract, build the CodeBrigade handoff,
+review honesty, and persist artifacts. Real CodeBrigade execution can replace
+the dry-run worker report without changing the surrounding artifact contract.
+
+Smoke command:
+
+```bash
+python3 EyeOfTerror/Mechanicum/Ceraxia/ceraxia.py --task "почини security bug и добавь pytest negative tests" --repo-path /absolute/repo
+```
+
+Generated run artifacts live under `runs/` and are intentionally ignored by
+git.
+
 Repo-grade workflow requirements are documented in
 `repo_grade_workflow.md`. In short, high-risk architecture/refactor/migration
 tasks must be treated like a small PR pipeline: survey, architecture decision,

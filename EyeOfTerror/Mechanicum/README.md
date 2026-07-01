@@ -3,9 +3,9 @@
 This folder is the EyeOfTerror-side home for code-governance structure.
 
 - `Ceraxia/` contains the code-brigade governor evaluation protocol, field
-  trials, ledger, and review material.
-- `CodeBrigade/` is reserved for code-worker grouping and implementation
-  brigade contracts.
+  trials, ledger, dry-run lifecycle controller, and review material.
+- `CodeBrigade/` contains code-worker grouping and implementation brigade
+  contracts.
 - `PlanningBrigade/` contains Ceraxia's advisory planning department: task
   triage, repository survey request, design strategy, verification strategy,
   and risk register.

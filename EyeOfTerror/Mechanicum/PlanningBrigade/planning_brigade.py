@@ -46,7 +46,9 @@ def classify_task(task: str) -> dict[str, Any]:
         kinds = ["general_code_change"]
     risk_score = 1
     for kind in kinds:
-        if kind in {"migration", "security", "api_compatibility", "refactor"}:
+        if kind == "security":
+            risk_score += 3
+        elif kind in {"migration", "api_compatibility", "refactor"}:
             risk_score += 2
         elif kind in {"config_runtime", "test_repair"}:
             risk_score += 1

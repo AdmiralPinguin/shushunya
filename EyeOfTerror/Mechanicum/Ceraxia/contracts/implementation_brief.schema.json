@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ceraxia CodeBrigade Implementation Brief",
+  "type": "object",
+  "required": [
+    "kind",
+    "owner",
+    "target",
+    "task",
+    "repo_path",
+    "task_kinds",
+    "risk_level",
+    "selected_strategy",
+    "allowed_scope",
+    "forbidden_approaches",
+    "expected_artifacts",
+    "required_verification",
+    "acceptance_gates",
+    "blocked",
+    "blockers"
+  ],
+  "properties": {
+    "kind": {
+      "const": "ceraxia_code_brigade_implementation_brief"
+    },
+    "owner": {
+      "const": "Ceraxia"
+    },
+    "target": {
+      "const": "CodeBrigade"
+    },
+    "task": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_kinds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "risk_level": {
+      "enum": ["low", "medium", "high"]
+    },
+    "selected_strategy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allowed_scope": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "forbidden_approaches": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "expected_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 3
+    },
+    "required_verification": {
+      "type": "object"
+    },
+    "acceptance_gates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "blocked": {
+      "type": "boolean"
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

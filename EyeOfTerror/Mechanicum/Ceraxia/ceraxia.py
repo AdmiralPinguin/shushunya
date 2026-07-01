@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+CERAXIA_ROOT = Path(__file__).resolve().parent
+MECHANICUM_ROOT = CERAXIA_ROOT.parent
+EYE_ROOT = MECHANICUM_ROOT.parent
+PROJECT_ROOT = EYE_ROOT.parent
+RUNS_ROOT = CERAXIA_ROOT / "runs"
+
+import sys
+
+PLANNING_PATH = str(MECHANICUM_ROOT / "PlanningBrigade")
+if PLANNING_PATH not in sys.path:
+    sys.path.insert(0, PLANNING_PATH)
+
+from planning_brigade import ROLE_ORDER, build_planning_packet  # noqa: E402
+
+
+LIFECYCLE = [
+    "received",
+    "planned",
+    "surveyed",
+    "implementation_ready",
+    "implemented",
+    "verified",
+    "reviewed",
+    "finalized",
+]
+
+
+@dataclass(frozen=True)
+class CeraxiaInput:
+    task: str
+    repo_path: str
+    dry_run: bool = True
+    runs_root: Path = RUNS_ROOT
+
+
+def utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+
+def task_slug(task: str) -> str:
+    words = re.findall(r"[a-zA-Z0-9а-яА-ЯёЁ]+", task.lower())
+    slug = "-".join(words[:6]) or "task"
+    digest = hashlib.sha1(task.encode("utf-8")).hexdigest()[:8]
+    return f"{slug}-{digest}"
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
+    problems: list[str] = []
+    required = [
+        "task_triage",
+        "repo_survey_request",
+        "design_options",
+        "verification_strategy",
+        "risk_register",
+    ]
+    if packet.get("roles_completed") != ROLE_ORDER:
+        problems.append("planning packet must include all five planning roles in order")
+    for key in required:
+        if not isinstance(packet.get(key), dict):
+            problems.append(f"planning packet missing object: {key}")
+    if not packet.get("ok"):
+        problems.append("planning packet is not ok")
+    if packet.get("design_options", {}).get("requires_ceraxia_approval") is not True:
+        problems.append("planning packet must require Ceraxia strategy approval")
+    return problems
+
+
+def build_repo_survey_stub(packet: dict[str, Any]) -> dict[str, Any]:
+    survey_request = packet["repo_survey_request"]
+    repo_path = Path(survey_request.get("repo_path") or PROJECT_ROOT)
+    exists = repo_path.exists()
+    return {
+        "kind": "ceraxia_repo_survey_stub",
+        "repo_path": str(repo_path),
+        "repo_exists": exists,
+        "read_only": True,
+        "focus": survey_request.get("focus", []),
+        "exclude_patterns": survey_request.get("exclude_patterns", []),
+        "candidate_files_required": True,
+        "status": "ready_for_real_survey" if exists else "blocked_missing_repo",
+    }
+
+
+def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
+    triage = packet["task_triage"]
+    verification = packet["verification_strategy"]
+    risks = packet["risk_register"]
+    blocked = bool(validate_planning_packet(packet)) or not survey["repo_exists"]
+    return {
+        "kind": "ceraxia_code_brigade_implementation_brief",
+        "owner": "Ceraxia",
+        "target": "CodeBrigade",
+        "task": packet["task"],
+        "repo_path": survey["repo_path"],
+        "task_kinds": triage["task_kinds"],
+        "risk_level": triage["risk_level"],
+        "selected_strategy": packet["design_options"]["selected_strategy"],
+        "allowed_scope": [
+            "candidate files identified by repository survey",
+            "tests directly covering the requested behavior",
+            "documentation only when needed to preserve the contract",
+        ],
+        "forbidden_approaches": [
+            "hardcoded one-off behavior",
+            "broad rewrite without repo evidence",
+            "editing tests to fit a broken patch",
+            "claiming verification without command output or explicit blocker",
+        ],
+        "expected_artifacts": [
+            "worker_report.json",
+            "verification_report.json",
+            "final_report.md",
+        ],
+        "required_verification": verification,
+        "acceptance_gates": risks["acceptance_gates"],
+        "blocked": blocked,
+        "blockers": [] if not blocked else ["repo survey or planning validation is incomplete"],
+    }
+
+
+def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
+    if brief["blocked"]:
+        status = "blocked"
+        changed_files: list[str] = []
+        notes = ["implementation not started because the implementation brief is blocked"]
+    elif dry_run:
+        status = "dry_run_handoff_ready"
+        changed_files = []
+        notes = ["no source mutation was attempted in smoke mode"]
+    else:
+        status = "blocked"
+        changed_files = []
+        notes = ["real CodeBrigade execution is not wired in this local controller yet"]
+    return {
+        "kind": "ceraxia_code_brigade_worker_report",
+        "target": "CodeBrigade",
+        "status": status,
+        "dry_run": dry_run,
+        "changed_files": changed_files,
+        "notes": notes,
+        "implementation_brief_acknowledged": True,
+    }
+
+
+def build_verification_report(brief: dict[str, Any], worker_report: dict[str, Any]) -> dict[str, Any]:
+    strategy = brief["required_verification"]
+    commands = strategy.get("targeted_commands", [])
+    dry_run = worker_report["dry_run"]
+    blocked = brief["blocked"] or worker_report["status"] == "blocked"
+    return {
+        "kind": "ceraxia_verification_report",
+        "status": "blocked" if blocked else ("planned_only" if dry_run else "requires_execution"),
+        "commands_planned": commands,
+        "commands_executed": [],
+        "negative_tests_required": strategy.get("negative_tests", []),
+        "broad_verification_required": bool(strategy.get("broad_verification_required")),
+        "blockers": brief.get("blockers", []) if blocked else [],
+        "dry_run": dry_run,
+    }
+
+
+def review_gate(
+    packet: dict[str, Any],
+    brief: dict[str, Any],
+    worker_report: dict[str, Any],
+    verification_report: dict[str, Any],
+) -> dict[str, Any]:
+    findings: list[dict[str, str]] = []
+    for problem in validate_planning_packet(packet):
+        findings.append({"severity": "blocker", "finding": problem})
+    if not worker_report.get("implementation_brief_acknowledged", False):
+        findings.append({"severity": "blocker", "finding": "implementation brief was not acknowledged"})
+    if worker_report["status"] == "blocked":
+        findings.append({"severity": "blocker", "finding": "worker report is blocked"})
+    negative_tests = verification_report.get("negative_tests_required", [])
+    if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution"}:
+        findings.append({"severity": "blocker", "finding": "negative tests are missing or not planned"})
+    if verification_report.get("broad_verification_required") and not verification_report.get("commands_planned"):
+        findings.append({"severity": "blocker", "finding": "broad verification is required but no commands are planned"})
+    if any("hardcode" in approach for approach in brief.get("forbidden_approaches", [])):
+        hardcode_rejected = any(
+            option.get("name") == "hardcode" and option.get("decision") == "reject"
+            for option in packet.get("design_options", {}).get("options", [])
+        )
+        if not hardcode_rejected:
+            findings.append({"severity": "blocker", "finding": "hardcode rejection is missing"})
+    decision = "blocked" if any(item["severity"] == "blocker" for item in findings) else "ready"
+    if worker_report["dry_run"] and decision == "ready":
+        decision = "dry_run_ready"
+    return {
+        "kind": "ceraxia_review_gate",
+        "decision": decision,
+        "findings": findings,
+        "checked_against": [
+            "planning packet completeness",
+            "strategy approval",
+            "scope control",
+            "verification strategy",
+            "worker report honesty",
+        ],
+    }
+
+
+def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> str:
+    packet = artifacts["planning_packet"]
+    brief = artifacts["implementation_brief"]
+    review = artifacts["review_gate"]
+    lines = [
+        f"# Ceraxia Run {run_id}",
+        "",
+        f"Task: {packet['task']}",
+        f"Lifecycle status: {artifacts['status']['state']}",
+        f"Risk: {brief['risk_level']}",
+        f"Strategy: {brief['selected_strategy']}",
+        f"Review decision: {review['decision']}",
+        "",
+        "## Artifacts",
+        "",
+        "- task.json",
+        "- planning_packet.json",
+        "- repo_survey.json",
+        "- implementation_brief.json",
+        "- worker_report.json",
+        "- verification_report.json",
+        "- review_gate.json",
+        "",
+        "## Next Action",
+        "",
+        artifacts["status"]["next_action"],
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
+    run_id = f"ceraxia-{utc_stamp()}-{task_slug(task_input.task)}"
+    run_dir = task_input.runs_root / run_id
+    status = {
+        "run_id": run_id,
+        "state": "received",
+        "lifecycle": ["received"],
+        "next_action": "build planning packet",
+    }
+    task_payload = {
+        "kind": "ceraxia_task",
+        "task": task_input.task,
+        "repo_path": task_input.repo_path,
+        "dry_run": task_input.dry_run,
+    }
+    write_json(run_dir / "task.json", task_payload)
+
+    packet = build_planning_packet(task_payload)
+    planning_problems = validate_planning_packet(packet)
+    status["state"] = "planned" if not planning_problems else "failed"
+    status["lifecycle"].append(status["state"])
+    status["next_action"] = "survey repository" if not planning_problems else "repair planning packet"
+    write_json(run_dir / "planning_packet.json", packet)
+
+    survey = build_repo_survey_stub(packet)
+    status["state"] = "surveyed" if survey["repo_exists"] else "failed"
+    status["lifecycle"].append(status["state"])
+    status["next_action"] = "build implementation brief" if survey["repo_exists"] else "provide existing repo path"
+    write_json(run_dir / "repo_survey.json", survey)
+
+    brief = build_implementation_brief(packet, survey)
+    status["state"] = "implementation_ready" if not brief["blocked"] else "failed"
+    status["lifecycle"].append(status["state"])
+    status["next_action"] = "handoff to CodeBrigade" if not brief["blocked"] else "fix blockers before implementation"
+    write_json(run_dir / "implementation_brief.json", brief)
+
+    worker_report = build_worker_report(brief, task_input.dry_run)
+    status["state"] = "implemented" if worker_report["status"] != "blocked" else "failed"
+    status["lifecycle"].append(status["state"])
+    status["next_action"] = "verify worker output" if worker_report["status"] != "blocked" else "repair implementation blockers"
+    write_json(run_dir / "worker_report.json", worker_report)
+
+    verification_report = build_verification_report(brief, worker_report)
+    status["state"] = "verified" if verification_report["status"] in {"planned_only", "requires_execution"} else "failed"
+    status["lifecycle"].append(status["state"])
+    status["next_action"] = "review gate" if status["state"] == "verified" else "repair verification blockers"
+    write_json(run_dir / "verification_report.json", verification_report)
+
+    review = review_gate(packet, brief, worker_report, verification_report)
+    status["state"] = "reviewed" if review["decision"] in {"dry_run_ready", "ready"} else "failed"
+    status["lifecycle"].append(status["state"])
+    status["next_action"] = "finalize run package" if status["state"] == "reviewed" else "repair review findings"
+    write_json(run_dir / "review_gate.json", review)
+
+    status["state"] = "finalized" if status["state"] == "reviewed" else "failed"
+    status["lifecycle"].append(status["state"])
+    status["next_action"] = "real CodeBrigade execution can replace dry-run handoff" if status["state"] == "finalized" else "inspect blockers"
+    artifacts = {
+        "status": status,
+        "planning_packet": packet,
+        "implementation_brief": brief,
+        "review_gate": review,
+    }
+    write_json(run_dir / "status.json", status)
+    write_text(run_dir / "final_report.md", final_report_markdown(run_id, artifacts))
+    return {
+        "ok": status["state"] == "finalized",
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "state": status["state"],
+        "lifecycle": status["lifecycle"],
+        "review_decision": review["decision"],
+        "next_action": status["next_action"],
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run Ceraxia's planning-to-review smoke controller.")
+    parser.add_argument("--task", required=True)
+    parser.add_argument("--repo-path", default=str(PROJECT_ROOT))
+    parser.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
+    parser.add_argument("--execute", action="store_true", help="Reserved for future real CodeBrigade execution.")
+    args = parser.parse_args()
+    result = run_ceraxia(
+        CeraxiaInput(
+            task=args.task,
+            repo_path=args.repo_path,
+            dry_run=not args.execute,
+            runs_root=args.runs_root,
+        )
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["ok"] else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

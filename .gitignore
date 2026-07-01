@@ -130,6 +130,7 @@ PalatineConsole/runtime/
 # Generic local runtime/cache
 runtime/
 EyeOfTerror/live_runs/
+EyeOfTerror/Mechanicum/Ceraxia/runs/
 tmp/
 temp/
 cache/

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ceraxia Run Artifact Set",
+  "type": "object",
+  "required": [
+    "task.json",
+    "planning_packet.json",
+    "repo_survey.json",
+    "implementation_brief.json",
+    "worker_report.json",
+    "verification_report.json",
+    "review_gate.json",
+    "status.json",
+    "final_report.md"
+  ],
+  "properties": {
+    "task.json": {
+      "type": "string"
+    },
+    "planning_packet.json": {
+      "type": "string"
+    },
+    "repo_survey.json": {
+      "type": "string"
+    },
+    "implementation_brief.json": {
+      "type": "string"
+    },
+    "worker_report.json": {
+      "type": "string"
+    },
+    "verification_report.json": {
+      "type": "string"
+    },
+    "review_gate.json": {
+      "type": "string"
+    },
+    "status.json": {
+      "type": "string"
+    },
+    "final_report.md": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}
