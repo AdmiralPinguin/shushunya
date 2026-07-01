@@ -20,6 +20,7 @@ def require_dir(path: Path) -> None:
 
 
 def assert_brigade_structure() -> None:
+    require_file(ROOT / "README.md")
     require_file(ROOT / "architecture_contract.json")
     for dirname in ["Ceraxia", "CodeBrigade", "PlanningBrigade"]:
         require_dir(ROOT / dirname)

@@ -3,9 +3,12 @@
 This folder is the EyeOfTerror-side home for code-governance structure.
 
 - `Ceraxia/` contains the code-brigade governor evaluation protocol, field
-  trials, ledger, dry-run lifecycle controller, and review material.
+  trials, ledger, dry-run lifecycle controller, run package audit, summary
+  schema, and review material.
 - `CodeBrigade/` contains code-worker grouping and implementation brigade
-  contracts.
+  contracts. It can accept dry-run handoffs, run allowlisted verification, and
+  perform read-only execution preflight checks, but real source mutation is
+  still intentionally blocked.
 - `PlanningBrigade/` contains Ceraxia's advisory planning department: task
   triage, repository survey request, design strategy, verification strategy,
   and risk register.
@@ -22,9 +25,16 @@ stay honest: contract-only components must not be reported as executable
 workers until a real adapter exists. Its JSON output also carries the current
 architecture roadmap, ordered by priority.
 
-`contracts_self_test.py` checks that generated packets still satisfy the
-required fields declared by the local JSON schema files. It is intentionally
-small and stdlib-only; detailed schema validation can come later.
+`contracts_self_test.py` checks that generated packets and run artifacts still
+satisfy the required fields declared by the local JSON schema files, including
+execution policy, execution result, evidence matrix, and run summary contracts.
+It is intentionally small and stdlib-only; detailed schema validation can come
+later.
+
+Current source mutation status: blocked by policy. The next hard architecture
+step is replacing the blocked `CodeBrigade/execution_adapter.py` stub with a
+safe source mutation adapter that uses the existing brief validation, preflight,
+execution result, verification, rollback, and audit contracts.
 
 For fast local iteration inside this folder, run:
 
