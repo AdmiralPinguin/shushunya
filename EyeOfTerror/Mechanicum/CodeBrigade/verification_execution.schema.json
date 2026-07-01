@@ -77,6 +77,9 @@
               },
               "has_syntax_error": {
                 "type": "boolean"
+              },
+              "has_no_tests_ran": {
+                "type": "boolean"
               }
             },
             "additionalProperties": true

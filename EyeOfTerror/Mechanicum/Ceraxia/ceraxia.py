@@ -384,6 +384,7 @@ def summarize_verification_output(commands: list[Any]) -> list[dict[str, Any]]:
                 "has_traceback": bool(diagnostics.get("has_traceback")),
                 "has_assertion_failure": bool(diagnostics.get("has_assertion_failure")),
                 "has_syntax_error": bool(diagnostics.get("has_syntax_error")),
+                "has_no_tests_ran": bool(diagnostics.get("has_no_tests_ran")),
                 "traceback_files": diagnostics.get("traceback_files", []) if isinstance(diagnostics.get("traceback_files"), list) else [],
                 "missing_imports": diagnostics.get("missing_imports", []) if isinstance(diagnostics.get("missing_imports"), list) else [],
             }
@@ -406,6 +407,7 @@ def output_diagnostic_counts_from_summary(output_summary: list[Any]) -> dict[str
         "traceback": sum(1 for item in output_summary if isinstance(item, dict) and item.get("has_traceback")),
         "assertion_failure": sum(1 for item in output_summary if isinstance(item, dict) and item.get("has_assertion_failure")),
         "syntax_error": sum(1 for item in output_summary if isinstance(item, dict) and item.get("has_syntax_error")),
+        "no_tests_ran": sum(1 for item in output_summary if isinstance(item, dict) and item.get("has_no_tests_ran")),
     }
 
 

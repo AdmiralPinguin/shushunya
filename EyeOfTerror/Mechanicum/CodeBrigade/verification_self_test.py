@@ -40,6 +40,10 @@ def main() -> int:
             raise AssertionError(f"failing unittest should expose assertion diagnostics: {failing_unittest}")
         if not any(item.startswith("test_fail.py:") for item in diagnostics["traceback_files"]):
             raise AssertionError(f"failing unittest should expose repo-relative traceback files: {failing_unittest}")
+        (repo / "test_plain_function.py").write_text("def test_plain():\n    assert True\n", encoding="utf-8")
+        no_tests_ran = verification_adapter.run_verification_commands(["python -m unittest test_plain_function.py"], str(repo), execute=True)
+        if not no_tests_ran["results"][0]["diagnostics"]["has_no_tests_ran"]:
+            raise AssertionError(f"unittest zero-test diagnostic should be explicit: {no_tests_ran}")
         git_diff = verification_adapter.run_verification_commands(["git diff --check"], str(repo), execute=False)
         if git_diff["status"] != "planned" or git_diff["results"][0]["status"] != "planned":
             raise AssertionError(f"git diff --check should be allowlisted as planned: {git_diff}")

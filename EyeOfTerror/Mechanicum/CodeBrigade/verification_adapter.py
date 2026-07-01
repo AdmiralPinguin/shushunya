@@ -80,6 +80,7 @@ def verification_diagnostics(stdout: str, stderr: str, repo: Path) -> dict[str, 
         "missing_imports": missing_imports[:20],
         "has_assertion_failure": "AssertionError" in combined or "FAILED" in combined or "FAIL:" in combined,
         "has_syntax_error": "SyntaxError" in combined,
+        "has_no_tests_ran": "NO TESTS RAN" in combined or "collected 0 items" in combined,
     }
 
 
