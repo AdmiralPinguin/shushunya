@@ -48,7 +48,7 @@ COMPONENTS = {
             "VerificationArchitect/README.md",
             "RiskScribe/README.md",
         ],
-        "maturity": "contracted_planning_department_with_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_field_trial_coverage_code_work_packages_worker_output_contracts_and_ceraxia_feedback_intake",
+        "maturity": "contracted_planning_department_with_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_surface_output_evidence_field_trial_coverage_code_work_packages_worker_output_contracts_and_ceraxia_feedback_intake",
     },
     "CodeBrigade": {
         "kind": "implementation_brigade_contract",
