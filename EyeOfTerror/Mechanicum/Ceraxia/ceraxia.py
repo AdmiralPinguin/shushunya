@@ -556,6 +556,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     execution_intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
+    forecast = brief.get("execution_forecast") if isinstance(brief.get("execution_forecast"), dict) else {}
+    scope_budget = forecast.get("scope_budget") if isinstance(forecast.get("scope_budget"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     blockers = readiness.get("blockers", [])
     warnings = review.get("warnings", [])
@@ -602,6 +604,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Execution preflight ok: {preflight.get('ok') if preflight else 'n/a'}",
         f"Execution intent: {execution_intent.get('mode', '')}",
         f"Execution adapter capability: {execution_intent.get('adapter_capability', '')}",
+        f"Scope budget source files: {scope_budget.get('max_source_files_to_edit', 0)}",
+        f"Scope budget unrequested test edits: {scope_budget.get('max_test_files_to_edit_without_explicit_user_request', 0)}",
         "",
         "## Readiness",
         "",
@@ -914,6 +918,8 @@ def build_run_summary(
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
     execution_intent = worker_report.get("execution_intent") if isinstance(worker_report.get("execution_intent"), dict) else {}
+    forecast = brief.get("execution_forecast") if isinstance(brief.get("execution_forecast"), dict) else {}
+    scope_budget = forecast.get("scope_budget") if isinstance(forecast.get("scope_budget"), dict) else {}
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
@@ -973,6 +979,9 @@ def build_run_summary(
         "expert_quality_required": bool(expert_plan.get("required_for_expert_gate")),
         "expert_tradeoff_count": len(expert_plan.get("tradeoff_register", [])) if isinstance(expert_plan.get("tradeoff_register"), list) else 0,
         "expert_review_checklist_count": len(expert_plan.get("review_checklist", [])) if isinstance(expert_plan.get("review_checklist"), list) else 0,
+        "scope_budget_max_source_files_to_edit": scope_budget.get("max_source_files_to_edit", 0),
+        "scope_budget_max_unrequested_test_files_to_edit": scope_budget.get("max_test_files_to_edit_without_explicit_user_request", 0),
+        "scope_budget_replan_trigger_count": len(scope_budget.get("requires_ceraxia_replan_when", [])) if isinstance(scope_budget.get("requires_ceraxia_replan_when"), list) else 0,
         "evidence": {
             "required_count": evidence_matrix.get("required_evidence_count", 0),
             "present_count": evidence_matrix.get("present_count", 0),
@@ -1060,6 +1069,7 @@ def build_evidence_matrix(
             "test_files_to_preserve": implementation_plan.get("test_files_to_preserve", []),
             "recommended_read_order": implementation_plan.get("recommended_read_order", []),
             "verification_commands": implementation_plan.get("verification_commands", []),
+            "scope_budget": implementation_plan.get("scope_budget", {}),
         },
         "implementation_work_package_summary": {
             "package_count": len(work_packages),
