@@ -257,6 +257,15 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(repair_request["target"], "CodeBrigade")
             self.assertEqual(repair_request["status"], "not_required")
             self.assertEqual(repair_request["diagnostic_repair_queue"], review["diagnostic_repair_queue"])
+            self.assertEqual(
+                repair_request["suggested_code_brigade_command"],
+                [
+                    "python3",
+                    "EyeOfTerror/Mechanicum/CodeBrigade/diagnostic_repair_contract.py",
+                    "--execute",
+                    "diagnostic_repair_request.json",
+                ],
+            )
             readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
             self.assertEqual(readiness["decision"], "blocked")
             self.assertIn("dry run requested; real CodeBrigade execution was intentionally skipped", readiness["blockers"])

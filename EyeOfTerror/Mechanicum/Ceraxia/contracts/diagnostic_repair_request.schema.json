@@ -14,6 +14,7 @@
     "review_decision",
     "diagnostic_repair_plan",
     "diagnostic_repair_queue",
+    "suggested_code_brigade_command",
     "target_files_to_inspect",
     "test_files_to_preserve",
     "reverse_dependency_index",
@@ -89,6 +90,19 @@
           "type": "boolean"
         }
       }
+    },
+    "suggested_code_brigade_command": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "python3"},
+        {"const": "EyeOfTerror/Mechanicum/CodeBrigade/diagnostic_repair_contract.py"},
+        {"const": "--execute"},
+        {"const": "diagnostic_repair_request.json"}
+      ],
+      "items": {
+        "type": "string"
+      },
+      "minItems": 4
     },
     "target_files_to_inspect": {
       "type": "array",

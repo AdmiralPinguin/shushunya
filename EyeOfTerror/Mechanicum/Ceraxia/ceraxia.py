@@ -528,6 +528,12 @@ def build_diagnostic_repair_request(
         "review_decision": review.get("decision", ""),
         "diagnostic_repair_plan": brief.get("diagnostic_repair_plan", {}) if isinstance(brief.get("diagnostic_repair_plan"), dict) else {},
         "diagnostic_repair_queue": queue,
+        "suggested_code_brigade_command": [
+            "python3",
+            "EyeOfTerror/Mechanicum/CodeBrigade/diagnostic_repair_contract.py",
+            "--execute",
+            "diagnostic_repair_request.json",
+        ],
         "target_files_to_inspect": implementation_plan.get("target_files_to_inspect", []) if isinstance(implementation_plan.get("target_files_to_inspect"), list) else [],
         "test_files_to_preserve": implementation_plan.get("test_files_to_preserve", []) if isinstance(implementation_plan.get("test_files_to_preserve"), list) else [],
         "reverse_dependency_index": implementation_plan.get("reverse_dependency_index", {}) if isinstance(implementation_plan.get("reverse_dependency_index"), dict) else {},
