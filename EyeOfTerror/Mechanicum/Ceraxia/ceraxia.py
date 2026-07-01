@@ -1352,6 +1352,11 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": f"run_summary.json is unreadable: {exc}"})
         summary = {}
     try:
+        planning_feedback_request = json.loads((run_dir / "planning_feedback_request.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        findings.append({"severity": "blocker", "finding": f"planning_feedback_request.json is unreadable: {exc}"})
+        planning_feedback_request = {}
+    try:
         worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         findings.append({"severity": "blocker", "finding": f"worker_report.json is unreadable: {exc}"})
@@ -1419,6 +1424,20 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": "run_summary worker_output_reported_package_count disagrees with review_gate.json"})
     if summary.get("worker_output_contract_row_count", 0) != worker_output_contract_sufficiency.get("contract_row_count", 0):
         findings.append({"severity": "blocker", "finding": "run_summary worker_output_contract_row_count disagrees with review_gate.json"})
+    if planning_feedback_request.get("kind") != "ceraxia_planning_feedback_request":
+        findings.append({"severity": "blocker", "finding": "planning_feedback_request.json has invalid kind"})
+    if planning_feedback_request.get("target") != "PlanningBrigade":
+        findings.append({"severity": "blocker", "finding": "planning_feedback_request.json has invalid target"})
+    if planning_feedback_request.get("status") not in {"required", "not_required"}:
+        findings.append({"severity": "blocker", "finding": "planning_feedback_request.json has invalid status"})
+    planning_feedback_findings = planning_feedback_request.get("feedback_findings") if isinstance(planning_feedback_request.get("feedback_findings"), list) else []
+    expected_feedback_status = "required" if planning_feedback_findings else "not_required"
+    if planning_feedback_request.get("status") != expected_feedback_status:
+        findings.append({"severity": "blocker", "finding": "planning_feedback_request status disagrees with feedback_findings"})
+    if summary.get("planning_feedback_request_status", "") != planning_feedback_request.get("status", ""):
+        findings.append({"severity": "blocker", "finding": "run_summary planning_feedback_request_status disagrees with planning_feedback_request.json"})
+    if summary.get("planning_feedback_finding_count", 0) != len(planning_feedback_findings):
+        findings.append({"severity": "blocker", "finding": "run_summary planning_feedback_finding_count disagrees with planning_feedback_request.json"})
     if summary.get("ready_for_execution") != (readiness.get("decision") == "ready_for_real_execution"):
         findings.append({"severity": "blocker", "finding": "run_summary ready_for_execution disagrees with execution_readiness.json"})
     if summary.get("worker_status") != worker_report.get("status"):
@@ -1635,6 +1654,7 @@ def build_run_summary(
     review: dict[str, Any],
     readiness: dict[str, Any],
     evidence_matrix: dict[str, Any],
+    planning_feedback_request: dict[str, Any] | None = None,
     package_audit_decision: str = "pending_until_run_audit",
 ) -> dict[str, Any]:
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
@@ -1656,6 +1676,8 @@ def build_run_summary(
     constraint_trace_sufficiency = review.get("constraint_trace_sufficiency") if isinstance(review.get("constraint_trace_sufficiency"), dict) else {}
     assumption_sufficiency = review.get("assumption_sufficiency") if isinstance(review.get("assumption_sufficiency"), dict) else {}
     worker_output_contract_sufficiency = review.get("worker_output_contract_sufficiency") if isinstance(review.get("worker_output_contract_sufficiency"), dict) else {}
+    planning_feedback = planning_feedback_request if isinstance(planning_feedback_request, dict) else {}
+    planning_feedback_findings = planning_feedback.get("feedback_findings") if isinstance(planning_feedback.get("feedback_findings"), list) else []
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
@@ -1731,6 +1753,8 @@ def build_run_summary(
         "worker_output_required_package_count": worker_output_contract_sufficiency.get("required_package_count", 0),
         "worker_output_reported_package_count": worker_output_contract_sufficiency.get("reported_package_count", 0),
         "worker_output_contract_row_count": worker_output_contract_sufficiency.get("contract_row_count", 0),
+        "planning_feedback_request_status": planning_feedback.get("status", ""),
+        "planning_feedback_finding_count": len(planning_feedback_findings),
         "execution_readiness": readiness.get("decision"),
         "worker_status": worker_report.get("status"),
         "code_brigade_execution_policy_status": worker_report.get("execution_policy_status"),
@@ -1987,7 +2011,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_json(run_dir / "execution_readiness.json", readiness)
     evidence_matrix = build_evidence_matrix(brief, worker_report, verification_report, readiness)
     write_json(run_dir / "evidence_matrix.json", evidence_matrix)
-    summary = build_run_summary(run_id, run_dir, status, brief, worker_report, review, readiness, evidence_matrix)
+    summary = build_run_summary(run_id, run_dir, status, brief, worker_report, review, readiness, evidence_matrix, planning_feedback_request)
     write_json(run_dir / "run_summary.json", summary)
     manifest = build_artifact_manifest(run_dir)
     write_json(run_dir / "artifact_manifest.json", manifest)
@@ -2002,6 +2026,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         review,
         readiness,
         evidence_matrix,
+        planning_feedback_request,
         package_audit_decision=str(audit.get("decision") or "blocked"),
     )
     write_json(run_dir / "run_summary.json", summary)

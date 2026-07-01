@@ -277,6 +277,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(planning_feedback["kind"], "ceraxia_planning_feedback_request")
             self.assertEqual(planning_feedback["target"], "PlanningBrigade")
             self.assertEqual(planning_feedback["status"], "not_required")
+            self.assertEqual(planning_feedback["source"], "Ceraxia.review_gate")
+            self.assertEqual(planning_feedback["feedback_findings"], [])
+            self.assertIn("implementation_brief.json", planning_feedback["required_return_artifacts"])
             readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
             self.assertEqual(readiness["decision"], "blocked")
             self.assertIn("dry run requested; real CodeBrigade execution was intentionally skipped", readiness["blockers"])
@@ -319,6 +322,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["worker_output_required_package_count"], summary["implementation_work_package_count"])
             self.assertEqual(summary["worker_output_reported_package_count"], summary["implementation_work_package_count"])
             self.assertEqual(summary["worker_output_contract_row_count"], summary["implementation_work_package_count"])
+            self.assertEqual(summary["planning_feedback_request_status"], "not_required")
+            self.assertEqual(summary["planning_feedback_finding_count"], 0)
             self.assertEqual(summary["worker_status"], "dry_run_handoff_ready")
             self.assertEqual(summary["code_brigade_execution_policy_status"], "blocked_until_adapter_is_wired")
             self.assertEqual(summary["code_brigade_autonomous_execution_request_status"], "required")
@@ -678,8 +683,11 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         feedback = build_planning_feedback_request("run-1", packet, brief, worker_report, verification_report, review)
         self.assertEqual(feedback["status"], "required")
         self.assertEqual(feedback["target"], "PlanningBrigade")
+        self.assertEqual(feedback["source"], "Ceraxia.review_gate")
+        self.assertEqual(feedback["worker_output_contract_sufficiency"], review["worker_output_contract_sufficiency"])
         self.assertTrue(any("worker output contract" in item["finding"] for item in feedback["feedback_findings"]))
         self.assertIn("worker-output contract", " ".join(feedback["replan_focus"]))
+        self.assertIn("planning_packet.json", feedback["required_return_artifacts"])
 
     def test_review_gate_blocks_missing_investigation_playbook(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
@@ -1443,6 +1451,27 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             audit = audit_run_package(run_dir)
             self.assertEqual(audit["decision"], "blocked")
             self.assertTrue(any("worker_output_contract_status disagrees" in item["finding"] for item in audit["findings"]))
+
+    def test_run_audit_blocks_planning_feedback_summary_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="добавь helper в `app.py`",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            run_dir = Path(result["run_dir"])
+            summary_path = run_dir / "run_summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["planning_feedback_request_status"] = "required"
+            summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            audit = audit_run_package(run_dir)
+            self.assertEqual(audit["decision"], "blocked")
+            self.assertTrue(any("planning_feedback_request_status disagrees" in item["finding"] for item in audit["findings"]))
 
 
 if __name__ == "__main__":

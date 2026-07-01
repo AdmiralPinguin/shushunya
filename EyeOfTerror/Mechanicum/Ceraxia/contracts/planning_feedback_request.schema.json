@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ceraxia Planning Feedback Request",
+  "type": "object",
+  "required": [
+    "kind",
+    "contract_version",
+    "run_id",
+    "status",
+    "target",
+    "source",
+    "repo_path",
+    "task",
+    "review_decision",
+    "worker_status",
+    "verification_status",
+    "planning_review_decision",
+    "feedback_findings",
+    "worker_output_contract_sufficiency",
+    "replan_focus",
+    "required_return_artifacts",
+    "suggested_planning_command"
+  ],
+  "properties": {
+    "kind": {
+      "const": "ceraxia_planning_feedback_request"
+    },
+    "contract_version": {
+      "const": "eye-mechanicum.v1"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "status": {
+      "enum": ["required", "not_required"]
+    },
+    "target": {
+      "const": "PlanningBrigade"
+    },
+    "source": {
+      "const": "Ceraxia.review_gate"
+    },
+    "repo_path": {
+      "type": "string"
+    },
+    "task": {
+      "type": "string"
+    },
+    "review_decision": {
+      "type": "string"
+    },
+    "worker_status": {
+      "type": "string"
+    },
+    "verification_status": {
+      "type": "string"
+    },
+    "planning_review_decision": {
+      "type": "string"
+    },
+    "feedback_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "finding"],
+        "properties": {
+          "severity": {
+            "type": "string"
+          },
+          "finding": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "worker_output_contract_sufficiency": {
+      "type": "object",
+      "required": ["status"]
+    },
+    "replan_focus": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "required_return_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "suggested_planning_command": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "const": "python3"
+        },
+        {
+          "const": "EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py"
+        }
+      ],
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -21,6 +21,7 @@ from ceraxia import (  # noqa: E402
     build_evidence_matrix,
     build_execution_readiness,
     build_implementation_brief,
+    build_planning_feedback_request,
     build_repo_survey,
     build_verification_report,
     review_gate,
@@ -152,6 +153,7 @@ def assert_contract_version_consts() -> None:
         ROOT / "PlanningBrigade" / "planning_contract.schema.json",
         ROOT / "Ceraxia" / "contracts" / "implementation_brief.schema.json",
         ROOT / "Ceraxia" / "contracts" / "diagnostic_repair_request.schema.json",
+        ROOT / "Ceraxia" / "contracts" / "planning_feedback_request.schema.json",
         ROOT / "Ceraxia" / "contracts" / "evidence_matrix.schema.json",
         ROOT / "Ceraxia" / "contracts" / "run_summary.schema.json",
         ROOT / "CodeBrigade" / "code_brigade_contract.schema.json",
@@ -219,6 +221,12 @@ def main() -> int:
         "verification execution",
     )
     review = review_gate(packet, brief, worker_report, verification)
+    planning_feedback_request = build_planning_feedback_request("contracts-smoke", packet, brief, worker_report, verification, review)
+    assert_schema_subset(
+        load_schema(ROOT / "Ceraxia" / "contracts" / "planning_feedback_request.schema.json"),
+        planning_feedback_request,
+        "planning feedback request",
+    )
     status = {"state": "finalized"}
     readiness = build_execution_readiness(status, brief, worker_report, verification, review, dry_run=True)
     evidence_matrix = build_evidence_matrix(brief, worker_report, verification, readiness)
@@ -253,6 +261,12 @@ def main() -> int:
             load_schema(ROOT / "Ceraxia" / "contracts" / "diagnostic_repair_request.schema.json"),
             repair_request,
             "diagnostic repair request",
+        )
+        planning_feedback_request = json.loads((run_dir / "planning_feedback_request.json").read_text(encoding="utf-8"))
+        assert_schema_subset(
+            load_schema(ROOT / "Ceraxia" / "contracts" / "planning_feedback_request.schema.json"),
+            planning_feedback_request,
+            "planning feedback request",
         )
     print("[ok] EyeOfTerror Mechanicum contracts")
     return 0

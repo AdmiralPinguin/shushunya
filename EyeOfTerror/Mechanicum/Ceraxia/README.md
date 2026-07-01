@@ -72,6 +72,11 @@ repair pass.
 With `--execute-diagnostic-repair`, Ceraxia also writes
 `diagnostic_repair_execution_result.json` from CodeBrigade's narrow guarded
 repair adapter.
+When review findings point back at the planning packet, matrices, investigation
+playbook, change-control plan, trace matrices, assumption register, or
+worker-output contract, Ceraxia writes `planning_feedback_request.json` as a
+formal PlanningBrigade return package. `run_summary.json` mirrors its status and
+finding count, and `run_audit.json` blocks drift between the two artifacts.
 
 Current `EyeOfTerror/Mechanicum` planning quality gates:
 
@@ -96,6 +101,8 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
 - `worker_output_contract` is preserved through the CodeBrigade implementation
   plan. The review gate blocks missing package statuses, missing evidence
   sources, or contract rows that no longer match the planned work packages.
+- `planning_feedback_request.json` is a contracted return channel from Ceraxia
+  back to PlanningBrigade when plan structure or handoff contracts need a replan.
 - `planning_review_gate` scores the packet and blocks unclear or structurally
   unsafe plans.
 - `run_summary.json` and `final_report.md` expose planning review, survey
