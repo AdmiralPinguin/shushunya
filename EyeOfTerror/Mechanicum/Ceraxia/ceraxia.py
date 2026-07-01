@@ -890,6 +890,7 @@ def build_run_summary(
     review: dict[str, Any],
     readiness: dict[str, Any],
     evidence_matrix: dict[str, Any],
+    package_audit_decision: str = "pending_until_run_audit",
 ) -> dict[str, Any]:
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
@@ -924,7 +925,7 @@ def build_run_summary(
         "state": status.get("state"),
         "package_ok": status.get("state") == "finalized",
         "package_lifecycle_finalized": status.get("state") == "finalized",
-        "package_audit_decision": "pending_until_run_audit",
+        "package_audit_decision": package_audit_decision,
         "ready_for_execution": readiness.get("decision") == "ready_for_real_execution",
         "review_decision": review.get("decision"),
         "planning_review_decision": planning_review.get("decision", ""),
@@ -1147,6 +1148,20 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_json(run_dir / "artifact_manifest.json", manifest)
     audit = audit_run_package(run_dir)
     write_json(run_dir / "run_audit.json", audit)
+    summary = build_run_summary(
+        run_id,
+        run_dir,
+        status,
+        brief,
+        worker_report,
+        review,
+        readiness,
+        evidence_matrix,
+        package_audit_decision=str(audit.get("decision") or "blocked"),
+    )
+    write_json(run_dir / "run_summary.json", summary)
+    manifest = build_artifact_manifest(run_dir)
+    write_json(run_dir / "artifact_manifest.json", manifest)
     return {
         "ok": status["state"] == "finalized" and audit["decision"] == "passed",
         "package_ok": status["state"] == "finalized" and audit["decision"] == "passed",
