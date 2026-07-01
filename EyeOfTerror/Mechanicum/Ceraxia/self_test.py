@@ -433,6 +433,27 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(audit["decision"], "blocked")
             self.assertFalse(audit["manifest_complete"])
 
+    def test_run_audit_blocks_corrupt_planning_packet(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="добавь helper в `app.py`",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            run_dir = Path(result["run_dir"])
+            packet_path = run_dir / "planning_packet.json"
+            packet = json.loads(packet_path.read_text(encoding="utf-8"))
+            packet.pop("surface_verification_matrix")
+            packet_path.write_text(json.dumps(packet, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            audit = audit_run_package(run_dir)
+            self.assertEqual(audit["decision"], "blocked")
+            self.assertTrue(any("planning packet audit failed" in item["finding"] for item in audit["findings"]))
+
     def test_run_audit_blocks_summary_readiness_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"

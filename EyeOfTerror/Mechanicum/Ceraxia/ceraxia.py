@@ -511,6 +511,13 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": f"worker_report.json is unreadable: {exc}"})
         worker_report = {}
     try:
+        planning_packet = json.loads((run_dir / "planning_packet.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        findings.append({"severity": "blocker", "finding": f"planning_packet.json is unreadable: {exc}"})
+        planning_packet = {}
+    for problem in validate_planning_packet(planning_packet):
+        findings.append({"severity": "blocker", "finding": f"planning packet audit failed: {problem}"})
+    try:
         brief = json.loads((run_dir / "implementation_brief.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         findings.append({"severity": "blocker", "finding": f"implementation_brief.json is unreadable: {exc}"})
