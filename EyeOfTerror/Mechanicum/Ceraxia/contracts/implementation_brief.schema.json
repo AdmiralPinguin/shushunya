@@ -23,6 +23,7 @@
     "quality_bar",
     "acceptance_contract",
     "expert_quality_plan",
+    "change_control_plan",
     "investigation_playbook",
     "implementation_brief_blueprint",
     "implementation_work_packages",
@@ -146,6 +147,57 @@
         "escalation_policy": {
           "type": "array",
           "minItems": 2
+        }
+      }
+    },
+    "change_control_plan": {
+      "type": "object",
+      "required": ["target", "allowed_change_intents", "protected_invariants", "mutation_requires", "diff_review_questions", "rollback_triggers", "post_change_proofs"],
+      "properties": {
+        "target": {
+          "const": "CodeBrigade"
+        },
+        "allowed_change_intents": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "protected_invariants": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "mutation_requires": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "diff_review_questions": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "rollback_triggers": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "post_change_proofs": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

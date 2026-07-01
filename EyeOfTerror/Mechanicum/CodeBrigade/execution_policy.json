@@ -7,6 +7,7 @@
     "implementation_brief validates against the CodeBrigade contract",
     "implementation_plan lists target files, test files, caller candidates, contract surfaces, dependency edges, and refusal conditions",
     "investigation playbook read stages are acknowledged before source mutation",
+    "change control protected invariants are acknowledged before source mutation",
     "execution preflight passes before source mutation",
     "repository survey evidence exists for candidate files before source mutation",
     "guarded natural-language inference requires explicit backtick-delimited path and edit literals",

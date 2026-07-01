@@ -32,10 +32,11 @@
       "name": "DesignStrategos",
       "authority": "select the smallest coherent design and impacted surfaces",
       "inputs": ["problem_statement", "repo_survey_request", "dependency_map"],
-      "outputs": ["work_breakdown", "impact_analysis", "investigation_playbook", "design_options", "execution_forecast", "expert_quality_plan"],
+      "outputs": ["work_breakdown", "impact_analysis", "investigation_playbook", "design_options", "execution_forecast", "expert_quality_plan", "change_control_plan"],
       "quality_gates": [
         "hardcode and broad rewrite shortcuts are rejected",
         "highest-risk surface is named",
+        "protected invariants and rollback triggers are named",
         "work breakdown reaches review before finalization"
       ],
       "may_mutate_source": false,

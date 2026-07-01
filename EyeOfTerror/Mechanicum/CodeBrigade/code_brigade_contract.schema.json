@@ -85,6 +85,12 @@
         "expert_observability_plan",
         "expert_review_checklist",
         "expert_escalation_policy",
+        "change_allowed_intents",
+        "change_protected_invariants",
+        "change_mutation_requires",
+        "change_diff_review_questions",
+        "change_rollback_triggers",
+        "change_post_change_proofs",
         "investigation_read_stages",
         "investigation_evidence_questions",
         "investigation_mutation_blockers",
@@ -277,6 +283,48 @@
         },
         "expert_escalation_policy": {
           "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "change_allowed_intents": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "change_protected_invariants": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "change_mutation_requires": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "change_diff_review_questions": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "change_rollback_triggers": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "change_post_change_proofs": {
+          "type": "array",
+          "minItems": 3,
           "items": {
             "type": "string"
           }

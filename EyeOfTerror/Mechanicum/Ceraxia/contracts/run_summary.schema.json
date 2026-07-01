@@ -29,6 +29,13 @@
     "investigation_evidence_question_count",
     "investigation_mutation_blocker_count",
     "investigation_replan_trigger_count",
+    "change_control_status",
+    "change_control_allowed_intent_count",
+    "change_control_protected_invariant_count",
+    "change_control_mutation_requirement_count",
+    "change_control_diff_review_question_count",
+    "change_control_rollback_trigger_count",
+    "change_control_post_change_proof_count",
     "execution_readiness",
     "worker_status",
     "code_brigade_execution_policy_status",
@@ -138,6 +145,27 @@
       "type": "integer"
     },
     "investigation_replan_trigger_count": {
+      "type": "integer"
+    },
+    "change_control_status": {
+      "type": "string"
+    },
+    "change_control_allowed_intent_count": {
+      "type": "integer"
+    },
+    "change_control_protected_invariant_count": {
+      "type": "integer"
+    },
+    "change_control_mutation_requirement_count": {
+      "type": "integer"
+    },
+    "change_control_diff_review_question_count": {
+      "type": "integer"
+    },
+    "change_control_rollback_trigger_count": {
+      "type": "integer"
+    },
+    "change_control_post_change_proof_count": {
       "type": "integer"
     },
     "execution_readiness": {

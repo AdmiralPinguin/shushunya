@@ -21,6 +21,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
     acceptance = brief.get("acceptance_contract") if isinstance(brief.get("acceptance_contract"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
+    change_control = brief.get("change_control_plan") if isinstance(brief.get("change_control_plan"), dict) else {}
     playbook = brief.get("investigation_playbook") if isinstance(brief.get("investigation_playbook"), dict) else {}
     blueprint = brief.get("implementation_brief_blueprint") if isinstance(brief.get("implementation_brief_blueprint"), dict) else {}
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
@@ -96,6 +97,13 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "expert_observability_plan": expert_plan.get("observability_plan", []) if isinstance(expert_plan.get("observability_plan"), list) else [],
         "expert_review_checklist": expert_plan.get("review_checklist", []) if isinstance(expert_plan.get("review_checklist"), list) else [],
         "expert_escalation_policy": expert_plan.get("escalation_policy", []) if isinstance(expert_plan.get("escalation_policy"), list) else [],
+        "change_allowed_intents": change_control.get("allowed_change_intents", []) if isinstance(change_control.get("allowed_change_intents"), list) else [],
+        "change_protected_invariants": change_control.get("protected_invariants", []) if isinstance(change_control.get("protected_invariants"), list) else [],
+        "change_mutation_requires": change_control.get("mutation_requires", []) if isinstance(change_control.get("mutation_requires"), list) else [],
+        "change_diff_review_questions": change_control.get("diff_review_questions", []) if isinstance(change_control.get("diff_review_questions"), list) else [],
+        "change_rollback_triggers": change_control.get("rollback_triggers", []) if isinstance(change_control.get("rollback_triggers"), list) else [],
+        "change_post_change_proofs": change_control.get("post_change_proofs", []) if isinstance(change_control.get("post_change_proofs"), list) else [],
+        "change_expert_review_required": bool(change_control.get("expert_review_required")),
         "investigation_read_stages": playbook.get("read_stages", []) if isinstance(playbook.get("read_stages"), list) else [],
         "investigation_evidence_questions": playbook.get("evidence_questions", []) if isinstance(playbook.get("evidence_questions"), list) else [],
         "investigation_mutation_blockers": playbook.get("mutation_blockers", []) if isinstance(playbook.get("mutation_blockers"), list) else [],

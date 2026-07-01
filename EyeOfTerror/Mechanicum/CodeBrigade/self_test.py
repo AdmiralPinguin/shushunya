@@ -118,6 +118,41 @@ def valid_brief() -> dict:
                 "return to PlanningBrigade when verification cannot prove the acceptance contract",
             ],
         },
+        "change_control_plan": {
+            "target": "CodeBrigade",
+            "allowed_change_intents": [
+                "change only behavior required by the original task contract",
+                "touch source files only when repo evidence links them to the impacted surface",
+                "adjust docs only when required to preserve the implemented contract",
+            ],
+            "protected_invariants": [
+                "public behavior not named by the task remains compatible",
+                "tests are not changed to make a broken source patch pass",
+                "verification evidence must stay tied to every risk surface",
+            ],
+            "mutation_requires": [
+                "implementation brief validates",
+                "investigation playbook evidence has been acknowledged",
+                "candidate file and caller impact are named",
+                "rollback trigger is known before source mutation",
+            ],
+            "diff_review_questions": [
+                "Does each changed file map to a planned impact surface?",
+                "Does the diff preserve protected invariants outside the requested change?",
+                "Does the diff avoid broad rewrite, hardcode, and test-masking shortcuts?",
+            ],
+            "rollback_triggers": [
+                "changed-file set exceeds the forecast scope budget",
+                "verification cannot prove the changed behavior",
+                "new public contract breakage appears outside the planned impact surfaces",
+            ],
+            "post_change_proofs": [
+                "changed files are listed with repo evidence rationale",
+                "targeted verification command is executed or concretely blocked",
+                "final report answers every definition_of_done item",
+            ],
+            "expert_review_required": False,
+        },
         "investigation_playbook": {
             "target": "CodeBrigade",
             "read_stages": [
@@ -171,10 +206,12 @@ def valid_brief() -> dict:
                 "repo_path",
                 "expert_quality_plan",
                 "investigation_playbook",
+                "change_control_plan",
             ],
             "mutation_preconditions": [
                 "implementation brief validates",
                 "investigation playbook read stages are acknowledged",
+                "change control plan protected invariants are acknowledged",
                 "execution preflight passes",
                 "candidate files are repo-relative existing non-symlink paths",
             ],
@@ -348,6 +385,8 @@ def main() -> int:
         raise AssertionError(f"execution policy must require preflight before mutation: {policy}")
     if "investigation playbook read stages are acknowledged before source mutation" not in policy["mutation_preconditions"]:
         raise AssertionError(f"execution policy must require investigation playbook before mutation: {policy}")
+    if "change control protected invariants are acknowledged before source mutation" not in policy["mutation_preconditions"]:
+        raise AssertionError(f"execution policy must require change control before mutation: {policy}")
     dry_report = code_brigade_adapter.build_worker_report(valid_brief(), dry_run=True)
     if dry_report["status"] != "dry_run_handoff_ready" or not dry_report["implementation_brief_acknowledged"]:
         raise AssertionError(f"valid dry-run brief should be accepted: {dry_report}")
@@ -430,6 +469,14 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve expert observability requirements: {plan}")
     if "return to PlanningBrigade when verification cannot prove the acceptance contract" not in plan["expert_escalation_policy"]:
         raise AssertionError(f"implementation plan should preserve expert escalation policy: {plan}")
+    if "tests are not changed to make a broken source patch pass" not in plan["change_protected_invariants"]:
+        raise AssertionError(f"implementation plan should preserve change protected invariants: {plan}")
+    if "rollback trigger is known before source mutation" not in plan["change_mutation_requires"]:
+        raise AssertionError(f"implementation plan should preserve change mutation requirements: {plan}")
+    if "verification cannot prove the changed behavior" not in plan["change_rollback_triggers"]:
+        raise AssertionError(f"implementation plan should preserve change rollback triggers: {plan}")
+    if "final report answers every definition_of_done item" not in plan["change_post_change_proofs"]:
+        raise AssertionError(f"implementation plan should preserve change post-change proofs: {plan}")
     if plan["investigation_read_stages"][0]["stage"] != "entrypoints_first":
         raise AssertionError(f"implementation plan should preserve investigation read stages: {plan}")
     if "Which callers could break?" not in plan["investigation_evidence_questions"]:

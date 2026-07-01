@@ -73,6 +73,9 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
   blocks incomplete coverage before CodeBrigade handoff.
 - `surface_package_matrix` preserves which CodeBrigade work packages own each
   impacted surface.
+- `change_control_plan` is carried through the CodeBrigade implementation plan
+  and review gate, so protected invariants, rollback triggers, and post-change
+  proofs cannot disappear during handoff.
 - `planning_review_gate` scores the packet and blocks unclear or structurally
   unsafe plans.
 - `run_summary.json` and `final_report.md` expose planning review and survey

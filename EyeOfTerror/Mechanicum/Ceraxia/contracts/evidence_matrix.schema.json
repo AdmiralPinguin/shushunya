@@ -76,6 +76,12 @@
         "investigation_read_stages",
         "investigation_evidence_questions",
         "investigation_mutation_blockers",
+        "change_allowed_intents",
+        "change_protected_invariants",
+        "change_mutation_requires",
+        "change_diff_review_questions",
+        "change_rollback_triggers",
+        "change_post_change_proofs",
         "caller_candidates",
         "contract_surface_candidates",
         "verification_commands"

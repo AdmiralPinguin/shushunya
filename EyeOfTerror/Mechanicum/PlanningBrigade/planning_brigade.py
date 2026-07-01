@@ -666,6 +666,75 @@ def expert_quality_plan(
     }
 
 
+def change_control_plan(
+    triage: dict[str, Any],
+    impact: dict[str, Any],
+    verification: dict[str, Any],
+    expert_plan: dict[str, Any],
+) -> dict[str, Any]:
+    kinds = set(triage.get("task_kinds", []))
+    surfaces = [
+        str(surface.get("surface") or "")
+        for surface in impact.get("surfaces", [])
+        if isinstance(surface, dict) and surface.get("surface")
+    ]
+    allowed_intents = [
+        "change only behavior required by the original task contract",
+        "touch source files only when repo evidence links them to the impacted surface",
+        "adjust configuration or docs only when required to preserve the implemented contract",
+    ]
+    protected_invariants = [
+        "public behavior not named by the task remains compatible",
+        "tests are not changed to make a broken source patch pass",
+        "verification evidence must stay tied to every high-risk surface",
+    ]
+    post_change_proofs = [
+        "changed files are listed with repo evidence rationale",
+        "targeted verification command is executed or concretely blocked",
+        "final report answers every definition_of_done item",
+    ]
+    if "security" in kinds:
+        protected_invariants.append("negative security boundary remains closed for bypass inputs")
+        post_change_proofs.append("negative boundary evidence is executed or blocked with a concrete reason")
+    if kinds & {"api_compatibility", "migration"}:
+        protected_invariants.append("old callers, old data, and mixed shapes remain intentionally handled")
+        post_change_proofs.append("compatibility evidence covers old, new, and mixed caller/data shapes")
+    if "concurrency" in kinds:
+        protected_invariants.append("parallel, retry, cache, and shared-state behavior remains deterministic or explicitly bounded")
+        post_change_proofs.append("remaining race risk is reproduced, bounded, or explicitly blocked")
+    if "refactor" in kinds:
+        protected_invariants.append("public entrypoints and dependency edges remain behavior-preserving")
+        post_change_proofs.append("dependency-edge review proves the refactor did not silently move public contracts")
+    return {
+        "role": "PlanningBrigade",
+        "target": "CodeBrigade",
+        "risk_level": triage["risk_level"],
+        "impacted_surfaces": surfaces,
+        "allowed_change_intents": allowed_intents,
+        "protected_invariants": protected_invariants,
+        "mutation_requires": [
+            "implementation brief validates",
+            "investigation playbook evidence has been acknowledged",
+            "candidate file and caller impact are named",
+            "rollback trigger is known before source mutation",
+        ],
+        "diff_review_questions": [
+            "Does each changed file map to a planned impact surface?",
+            "Does the diff preserve protected invariants outside the requested change?",
+            "Does the diff avoid broad rewrite, hardcode, and test-masking shortcuts?",
+            "Would a maintainer understand the patch from the evidence and verification trail?",
+        ],
+        "rollback_triggers": [
+            "changed-file set exceeds the forecast scope budget",
+            "verification cannot prove the changed behavior",
+            "new public contract breakage appears outside the planned impact surfaces",
+        ],
+        "post_change_proofs": post_change_proofs,
+        "expert_review_required": bool(expert_plan.get("required_for_expert_gate")),
+        "handoff_to": "CodeBrigade",
+    }
+
+
 def design_options(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
     selected = "minimal_design"
@@ -916,6 +985,7 @@ def implementation_brief_blueprint(
     forecast: dict[str, Any],
     expert_plan: dict[str, Any],
     playbook: dict[str, Any],
+    change_control: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "role": "PlanningBrigade",
@@ -948,6 +1018,7 @@ def implementation_brief_blueprint(
             "expert_quality_plan",
             "implementation_work_packages",
             "planning_review_gate",
+            "change_control_plan",
         ],
         "strategy": design["selected_strategy"],
         "risk_level": triage["risk_level"],
@@ -961,6 +1032,8 @@ def implementation_brief_blueprint(
         "expected_code_brigade_iterations": forecast["expected_code_brigade_iterations"],
         "expert_quality_level": expert_plan.get("level", "standard"),
         "expert_review_checklist": expert_plan.get("review_checklist", []),
+        "change_control_invariants": change_control.get("protected_invariants", []),
+        "change_control_post_change_proofs": change_control.get("post_change_proofs", []),
         "investigation_stages": [
             str(stage.get("stage") or "")
             for stage in playbook.get("read_stages", [])
@@ -969,6 +1042,7 @@ def implementation_brief_blueprint(
         "mutation_preconditions": [
             "implementation brief validates",
             "investigation playbook read stages are acknowledged",
+            "change control plan protected invariants are acknowledged",
             "execution preflight passes",
             "candidate files are repo-relative existing non-symlink paths",
             "verification plan is attached to the worker report",
@@ -1205,6 +1279,7 @@ def planning_review_gate(
     surface_matrix: dict[str, Any],
     acceptance: dict[str, Any],
     expert_plan: dict[str, Any] | None = None,
+    change_control: dict[str, Any] | None = None,
     work_packages: dict[str, Any] | None = None,
     package_matrix: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1231,6 +1306,14 @@ def planning_review_gate(
             for key in ("tradeoff_register", "rollback_strategy", "observability_plan", "review_checklist", "escalation_policy"):
                 if not expert_plan.get(key):
                     blockers.append(f"expert quality plan missing {key}")
+    if change_control is None:
+        blockers.append("change control plan is missing")
+    else:
+        for key in ("allowed_change_intents", "protected_invariants", "diff_review_questions", "rollback_triggers", "post_change_proofs"):
+            if len(change_control.get(key, []) if isinstance(change_control.get(key), list) else []) < 3:
+                blockers.append(f"change control plan missing {key}")
+        if len(change_control.get("mutation_requires", []) if isinstance(change_control.get("mutation_requires"), list) else []) < 4:
+            blockers.append("change control plan missing mutation_requires")
     if surface_matrix.get("complete") is False:
         blockers.extend(str(item) for item in surface_matrix.get("blockers", []))
     if package_matrix is not None and package_matrix.get("complete") is False:
@@ -1291,6 +1374,7 @@ def planning_review_gate(
             "work phase completeness",
             "verification coverage",
             "expert quality planning",
+            "change control planning",
             "implementation work package completeness",
             "acceptance evidence alignment",
         ],
@@ -1368,14 +1452,15 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     expert_plan = expert_quality_plan(triage, impact, forecast)
     design = design_options(payload, triage)
     verification = verification_strategy(triage, payload)
+    change_control = change_control_plan(triage, impact, verification, expert_plan)
     surface_matrix = surface_verification_matrix(impact, verification)
     risks = risk_register(triage, survey, design, verification)
     quality = quality_bar(triage, verification)
     acceptance = acceptance_contract(problem, triage, verification, quality, surface_matrix, expert_plan)
-    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix, forecast, expert_plan, playbook)
+    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix, forecast, expert_plan, playbook, change_control)
     work_packages = implementation_work_packages(triage, problem, dependency, impact, verification, risks, forecast)
     package_matrix = surface_package_matrix(surface_matrix, work_packages)
-    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, work_packages, package_matrix)
+    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, change_control, work_packages, package_matrix)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
         "ok": bool(task),
@@ -1393,6 +1478,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "impact_analysis": impact,
         "execution_forecast": forecast,
         "expert_quality_plan": expert_plan,
+        "change_control_plan": change_control,
         "design_options": design,
         "verification_strategy": verification,
         "surface_verification_matrix": surface_matrix,

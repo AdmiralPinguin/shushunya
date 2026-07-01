@@ -66,6 +66,14 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         expert_plan.get("level") != "expert" or expert_plan.get("required_for_expert_gate") is not True
     ):
         problems.append("brief high-risk work must include an expert quality plan")
+    change_control = brief.get("change_control_plan") if isinstance(brief.get("change_control_plan"), dict) else {}
+    if change_control.get("target") != "CodeBrigade":
+        problems.append("brief change_control_plan must target CodeBrigade")
+    for key in ("allowed_change_intents", "protected_invariants", "diff_review_questions", "rollback_triggers", "post_change_proofs"):
+        if not isinstance(change_control.get(key), list) or len(change_control.get(key, [])) < 3:
+            problems.append(f"brief change_control_plan.{key} is required")
+    if not isinstance(change_control.get("mutation_requires"), list) or len(change_control.get("mutation_requires", [])) < 4:
+        problems.append("brief change_control_plan.mutation_requires is required")
     playbook = brief.get("investigation_playbook") if isinstance(brief.get("investigation_playbook"), dict) else {}
     if playbook.get("target") != "CodeBrigade":
         problems.append("brief investigation_playbook must target CodeBrigade")
@@ -87,6 +95,8 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief implementation_brief_blueprint must require expert_quality_plan")
     if "investigation_playbook" not in blueprint.get("required_sections", []):
         problems.append("brief implementation_brief_blueprint must require investigation_playbook")
+    if "change_control_plan" not in blueprint.get("required_sections", []):
+        problems.append("brief implementation_brief_blueprint must require change_control_plan")
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
     if len(packages) < 3:

@@ -18,6 +18,7 @@
     "impact_analysis",
     "execution_forecast",
     "expert_quality_plan",
+    "change_control_plan",
     "design_options",
     "verification_strategy",
     "surface_verification_matrix",
@@ -148,6 +149,20 @@
         }
       }
     },
+    "change_control_plan": {
+      "type": "object",
+      "required": ["target", "allowed_change_intents", "protected_invariants", "mutation_requires", "diff_review_questions", "rollback_triggers", "post_change_proofs", "handoff_to"],
+      "properties": {
+        "target": {"const": "CodeBrigade"},
+        "allowed_change_intents": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "protected_invariants": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "mutation_requires": {"type": "array", "minItems": 4, "items": {"type": "string"}},
+        "diff_review_questions": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "rollback_triggers": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "post_change_proofs": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "handoff_to": {"const": "CodeBrigade"}
+      }
+    },
     "design_options": {
       "type": "object",
       "required": ["options", "selected_strategy", "requires_ceraxia_approval", "handoff_to"],
@@ -184,7 +199,7 @@
     },
     "implementation_brief_blueprint": {
       "type": "object",
-      "required": ["target", "required_sections", "mutation_preconditions", "dependency_critical_path", "work_phases"],
+      "required": ["target", "required_sections", "mutation_preconditions", "dependency_critical_path", "work_phases", "change_control_invariants", "change_control_post_change_proofs"],
       "properties": {
         "target": {"const": "CodeBrigade"}
       }

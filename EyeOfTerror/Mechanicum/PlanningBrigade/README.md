@@ -35,6 +35,9 @@ Current contract:
   entrypoints, candidate source, callers/dependencies, tests/oracles, contract
   risk review, and specialized traces for security, compatibility, or
   concurrency work.
+- `change_control_plan` defines allowed change intents, protected invariants,
+  mutation requirements, diff-review questions, rollback triggers, and
+  post-change proofs before source mutation reaches CodeBrigade.
 - `execution_forecast` estimates task complexity, expected CodeBrigade
   iterations, timeout budget, orchestration notes, and escalation triggers.
 - `surface_verification_matrix` maps each impacted surface to planned evidence

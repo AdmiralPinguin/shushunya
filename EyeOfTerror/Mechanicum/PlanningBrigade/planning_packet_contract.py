@@ -24,6 +24,7 @@ REQUIRED_PACKET_OBJECTS = [
     "impact_analysis",
     "execution_forecast",
     "expert_quality_plan",
+    "change_control_plan",
     "design_options",
     "verification_strategy",
     "surface_verification_matrix",
@@ -155,6 +156,17 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         if len(expert_plan.get("review_checklist", [])) < 4:
             problems.append("high-risk expert quality plan must include a review checklist")
 
+    change_control = object_field(packet, "change_control_plan")
+    if change_control.get("target") != "CodeBrigade":
+        problems.append("change control plan must target CodeBrigade")
+    for key in ("allowed_change_intents", "protected_invariants", "diff_review_questions", "rollback_triggers", "post_change_proofs"):
+        if not isinstance(change_control.get(key), list) or len(change_control.get(key, [])) < 3:
+            problems.append(f"change control plan must include {key}")
+    if not isinstance(change_control.get("mutation_requires"), list) or len(change_control.get("mutation_requires", [])) < 4:
+        problems.append("change control plan must include mutation_requires")
+    if change_control.get("handoff_to") != "CodeBrigade":
+        problems.append("change control plan must hand off to CodeBrigade")
+
     design = object_field(packet, "design_options")
     if not isinstance(design.get("selected_strategy"), str) or not design.get("selected_strategy"):
         problems.append("design options must include selected_strategy")
@@ -219,6 +231,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("implementation brief blueprint must require expert_quality_plan")
     if "investigation_playbook" not in list_field(blueprint.get("required_sections")):
         problems.append("implementation brief blueprint must require investigation_playbook")
+    if "change_control_plan" not in list_field(blueprint.get("required_sections")):
+        problems.append("implementation brief blueprint must require change_control_plan")
 
     work_packages = object_field(packet, "implementation_work_packages")
     packages = list_field(work_packages.get("packages"))

@@ -111,6 +111,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(brief["investigation_playbook"]["target"], "CodeBrigade")
             self.assertEqual(brief["investigation_playbook"]["read_stages"][0]["stage"], "entrypoints_first")
             self.assertIn("security_boundary_trace", [stage["stage"] for stage in brief["investigation_playbook"]["read_stages"]])
+            self.assertEqual(brief["change_control_plan"]["target"], "CodeBrigade")
+            self.assertIn("negative security boundary remains closed for bypass inputs", brief["change_control_plan"]["protected_invariants"])
+            self.assertIn("negative boundary evidence is executed or blocked with a concrete reason", brief["change_control_plan"]["post_change_proofs"])
             self.assertTrue(any(item["path"] == "client.ts" and item["language"] == "typescript" for item in brief["repo_survey_evidence"]["source_summaries"]))
             self.assertTrue(brief["surface_verification_matrix"]["complete"])
             self.assertTrue(any(row["surface"] == "security_boundary" for row in brief["surface_verification_matrix"]["rows"]))
@@ -151,6 +154,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(implementation_plan["investigation_read_stages"][0]["stage"], "entrypoints_first")
             self.assertIn("Which callers, entrypoints, or schemas could break if the patch is too narrow?", implementation_plan["investigation_evidence_questions"])
             self.assertIn("public caller or test surface is unknown for medium/high risk work", implementation_plan["investigation_mutation_blockers"])
+            self.assertIn("negative security boundary remains closed for bypass inputs", implementation_plan["change_protected_invariants"])
+            self.assertIn("rollback trigger is known before source mutation", implementation_plan["change_mutation_requires"])
+            self.assertIn("negative boundary evidence is executed or blocked with a concrete reason", implementation_plan["change_post_change_proofs"])
             self.assertIn("security_boundary_package", implementation_plan["work_package_review_order"])
             self.assertTrue(any(package["id"] == "security_boundary_package" for package in implementation_plan["implementation_work_packages"]))
             self.assertIn("final report answers the original task rather than only package-local success", implementation_plan["work_package_handoff_criteria"])
@@ -229,6 +235,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(summary["investigation_evidence_question_count"], 4)
             self.assertGreaterEqual(summary["investigation_mutation_blocker_count"], 3)
             self.assertGreaterEqual(summary["investigation_replan_trigger_count"], 3)
+            self.assertEqual(summary["change_control_status"], "complete")
+            self.assertGreaterEqual(summary["change_control_protected_invariant_count"], 4)
+            self.assertGreaterEqual(summary["change_control_post_change_proof_count"], 4)
             self.assertEqual(summary["worker_status"], "dry_run_handoff_ready")
             self.assertEqual(summary["code_brigade_execution_policy_status"], "blocked_until_adapter_is_wired")
             self.assertEqual(summary["code_brigade_autonomous_execution_request_status"], "required")
@@ -257,6 +266,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(evidence_matrix["implementation_plan_sources"]["recommended_read_order"][0]["path"], "app.py")
             self.assertEqual(evidence_matrix["implementation_plan_sources"]["investigation_read_stages"][0]["stage"], "entrypoints_first")
             self.assertIn("public caller or test surface is unknown for medium/high risk work", evidence_matrix["implementation_plan_sources"]["investigation_mutation_blockers"])
+            self.assertIn("negative security boundary remains closed for bypass inputs", evidence_matrix["implementation_plan_sources"]["change_protected_invariants"])
+            self.assertIn("negative boundary evidence is executed or blocked with a concrete reason", evidence_matrix["implementation_plan_sources"]["change_post_change_proofs"])
             self.assertEqual(evidence_matrix["implementation_plan_sources"]["scope_budget"]["max_test_files_to_edit_without_explicit_user_request"], 0)
             self.assertIn("test_app.py", evidence_matrix["implementation_plan_sources"]["reverse_dependency_index"]["app.py"])
             self.assertTrue(any(link["test"] == "test_app.py" and link["target"] == "app.py" for link in evidence_matrix["implementation_plan_sources"]["test_coverage_links"]))
@@ -279,6 +290,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("Execution readiness: blocked", final_report)
             self.assertIn("Investigation playbook status: complete", final_report)
             self.assertIn("Investigation read stages:", final_report)
+            self.assertIn("Change control status: complete", final_report)
+            self.assertIn("Protected invariants:", final_report)
             self.assertIn("- evidence_matrix.json", final_report)
             self.assertIn("BLOCKER: dry run requested; real CodeBrigade execution was intentionally skipped", final_report)
             self.assertIn("Verification commands planned:", final_report)
@@ -579,6 +592,70 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertEqual(review["decision"], "blocked")
         self.assertEqual(review["investigation_sufficiency"]["status"], "blocked")
         self.assertTrue(any("investigation playbook is incomplete" in item["finding"] for item in review["findings"]))
+
+    def test_review_gate_blocks_missing_change_control_plan(self) -> None:
+        packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
+        survey = {
+            "repo_exists": True,
+            "repo_path": ".",
+            "candidate_files": ["app.py"],
+            "test_files": ["test_app.py"],
+            "entrypoint_candidates": [],
+            "python_symbols": [],
+            "source_summaries": [],
+            "local_import_edges": [],
+            "generic_import_edges": [],
+            "recommended_read_order": [{"path": "app.py", "reason": "ranked source/config candidate"}],
+            "suggested_verification_commands": [],
+            "truncated": False,
+            "python_symbols_truncated": False,
+            "source_summaries_truncated": False,
+            "max_files_scanned": 1,
+            "max_python_symbol_files": 1,
+            "max_source_summary_files": 1,
+        }
+        brief = build_implementation_brief(packet, survey)
+        packages = brief["implementation_work_packages"]["packages"]
+        playbook = brief["investigation_playbook"]
+        worker_report = {
+            "status": "dry_run_handoff_ready",
+            "dry_run": True,
+            "changed_files": [],
+            "implementation_brief_acknowledged": True,
+            "implementation_plan": {
+                "investigation_read_stages": playbook["read_stages"],
+                "investigation_evidence_questions": playbook["evidence_questions"],
+                "investigation_mutation_blockers": playbook["mutation_blockers"],
+                "investigation_replan_triggers": playbook["replan_triggers"],
+                "change_allowed_intents": [],
+                "change_protected_invariants": [],
+                "change_mutation_requires": [],
+                "change_diff_review_questions": [],
+                "change_rollback_triggers": [],
+                "change_post_change_proofs": [],
+            },
+            "work_package_statuses": [
+                {
+                    "package_id": package["id"],
+                    "owner": "CodeBrigade",
+                    "impact_surfaces": package["impact_surfaces"],
+                    "status": "planned",
+                    "evidence_source": "implementation_plan",
+                }
+                for package in packages
+            ],
+        }
+        verification_report = {
+            "status": "planned_only",
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "commands_planned": ["python -m py_compile app.py"],
+            "commands_executed": [],
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        self.assertEqual(review["decision"], "blocked")
+        self.assertEqual(review["change_control_sufficiency"]["status"], "blocked")
+        self.assertTrue(any("change control plan is incomplete" in item["finding"] for item in review["findings"]))
 
     def test_review_gate_marks_failed_surface_verification(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
