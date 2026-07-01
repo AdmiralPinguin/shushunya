@@ -134,6 +134,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("Verification commands planned:", final_report)
             self.assertIn("Verification commands executed: 0", final_report)
             self.assertIn("WARNING: broad verification is planned but not executed", final_report)
+            self.assertIn("- repository survey partial: false", final_report)
+            self.assertIn("- python symbol survey partial: false", final_report)
+            self.assertIn("- max files scanned:", final_report)
+            self.assertIn("- max python symbol files:", final_report)
 
     def test_missing_repo_blocks_before_claiming_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

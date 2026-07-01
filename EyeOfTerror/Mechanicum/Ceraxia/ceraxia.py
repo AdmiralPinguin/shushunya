@@ -358,6 +358,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     warnings = review.get("warnings", [])
     commands_executed = verification.get("commands_executed", [])
     commands_planned = verification.get("commands_planned", [])
+    repo_evidence = brief.get("repo_survey_evidence", {}) if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     lines = [
         f"# Ceraxia Run {run_id}",
         "",
@@ -386,9 +387,13 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
             "",
             "## Evidence",
             "",
-            f"- candidate files: {len(brief.get('repo_survey_evidence', {}).get('candidate_files', []))}",
-            f"- test files: {len(brief.get('repo_survey_evidence', {}).get('test_files', []))}",
-            f"- python symbol reports: {len(brief.get('repo_survey_evidence', {}).get('python_symbols', []))}",
+            f"- candidate files: {len(repo_evidence.get('candidate_files', []))}",
+            f"- test files: {len(repo_evidence.get('test_files', []))}",
+            f"- python symbol reports: {len(repo_evidence.get('python_symbols', []))}",
+            f"- repository survey partial: {str(bool(repo_evidence.get('survey_truncated'))).lower()}",
+            f"- python symbol survey partial: {str(bool(repo_evidence.get('python_symbols_truncated'))).lower()}",
+            f"- max files scanned: {repo_evidence.get('max_files_scanned', 0)}",
+            f"- max python symbol files: {repo_evidence.get('max_python_symbol_files', 0)}",
             f"- code brigade handoff steps: {len(brief.get('code_brigade_handoff', {}).get('steps', []))}",
             "",
         ]
