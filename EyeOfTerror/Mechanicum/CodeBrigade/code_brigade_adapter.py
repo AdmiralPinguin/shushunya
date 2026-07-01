@@ -48,6 +48,19 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_blocked_execution_result(blockers: list[str]) -> dict[str, Any]:
+    return {
+        "kind": "code_brigade_execution_result",
+        "contract_version": CONTRACT_VERSION,
+        "status": "blocked",
+        "changed_files": [],
+        "patch_summary": "",
+        "verification_commands_executed": [],
+        "blockers": blockers,
+        "rollback_notes": "",
+    }
+
+
 def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if brief.get("kind") != "ceraxia_code_brigade_implementation_brief":
@@ -95,7 +108,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     else:
         status = "blocked"
         notes.append("real CodeBrigade execution adapter is not configured")
-    return {
+    report = {
         "kind": "ceraxia_code_brigade_worker_report",
         "contract_version": CONTRACT_VERSION,
         "target": "CodeBrigade",
@@ -109,6 +122,9 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "validation_problems": validation_problems,
         "adapter": "EyeOfTerror/Mechanicum/CodeBrigade/code_brigade_adapter.py",
     }
+    if status == "blocked":
+        report["execution_result"] = build_blocked_execution_result(notes)
+    return report
 
 
 def main() -> int:

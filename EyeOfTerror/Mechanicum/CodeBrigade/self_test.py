@@ -75,6 +75,10 @@ def main() -> int:
     execute_report = code_brigade_adapter.build_worker_report(valid_brief(), dry_run=False)
     if execute_report["status"] != "blocked" or "not configured" not in " ".join(execute_report["notes"]):
         raise AssertionError(f"real execution should be honestly blocked until adapter is wired: {execute_report}")
+    if execute_report["execution_result"]["status"] != "blocked":
+        raise AssertionError(f"blocked execution should expose a formal execution_result: {execute_report}")
+    if not execute_report["execution_result"]["blockers"]:
+        raise AssertionError(f"blocked execution_result should explain blockers: {execute_report}")
     invalid = valid_brief()
     invalid.pop("allowed_scope")
     invalid_report = code_brigade_adapter.build_worker_report(invalid, dry_run=True)
