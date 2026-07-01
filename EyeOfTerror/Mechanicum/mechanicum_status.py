@@ -56,6 +56,7 @@ COMPONENTS = {
             "execution_policy.json",
             "verification_adapter.py",
             "verification_policy.json",
+            "verification_policy.schema.json",
             "verification_execution.schema.json",
             "self_test.py",
         ],
