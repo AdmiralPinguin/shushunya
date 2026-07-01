@@ -475,6 +475,17 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     commands_executed = verification.get("commands_executed", [])
     commands_planned = verification.get("commands_planned", [])
     repo_evidence = brief.get("repo_survey_evidence", {}) if isinstance(brief.get("repo_survey_evidence"), dict) else {}
+    work_packages = brief.get("implementation_work_packages", {}) if isinstance(brief.get("implementation_work_packages"), dict) else {}
+    packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
+    covered_package_surfaces = sorted(
+        {
+            surface
+            for package in packages
+            if isinstance(package, dict)
+            for surface in package.get("impact_surfaces", [])
+            if isinstance(surface, str) and surface
+        }
+    )
     lines = [
         f"# Ceraxia Run {run_id}",
         "",
@@ -488,6 +499,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Planning review decision: {planning_review.get('decision', '')}",
         f"Planning review score: {planning_review.get('score', '')}",
         f"Planning work phases: {len(work_phases)}",
+        f"Implementation work packages: {len(packages)}",
+        f"Work package covered surfaces: {len(covered_package_surfaces)}",
         f"Survey quality decision: {survey_quality.get('decision', '')}",
         f"Verification status: {verification['status']}",
         f"Surface verification status: {review.get('surface_verification_sufficiency', {}).get('status', '')}",
@@ -651,6 +664,24 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     if summary.get("planning_work_phase_count", 0) != len(phases):
         findings.append({"severity": "blocker", "finding": "run_summary planning_work_phase_count disagrees with implementation_brief.json"})
+    work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
+    packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
+    package_review_order = work_packages.get("review_order") if isinstance(work_packages.get("review_order"), list) else []
+    package_surfaces = sorted(
+        {
+            surface
+            for package in packages
+            if isinstance(package, dict)
+            for surface in package.get("impact_surfaces", [])
+            if isinstance(surface, str) and surface
+        }
+    )
+    if summary.get("implementation_work_package_count", 0) != len(packages):
+        findings.append({"severity": "blocker", "finding": "run_summary implementation_work_package_count disagrees with implementation_brief.json"})
+    if summary.get("implementation_work_package_surface_count", 0) != len(package_surfaces):
+        findings.append({"severity": "blocker", "finding": "run_summary implementation_work_package_surface_count disagrees with implementation_brief.json"})
+    if summary.get("implementation_work_package_review_order", []) != package_review_order:
+        findings.append({"severity": "blocker", "finding": "run_summary implementation_work_package_review_order disagrees with implementation_brief.json"})
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     if summary.get("survey_quality_decision", "") != survey_quality.get("decision", ""):
         findings.append({"severity": "blocker", "finding": "run_summary survey_quality_decision disagrees with implementation_brief.json"})
@@ -672,6 +703,14 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         ]:
             if evidence_summary.get(summary_key) != evidence_matrix.get(matrix_key):
                 findings.append({"severity": "blocker", "finding": f"run_summary evidence.{summary_key} disagrees with evidence_matrix.json"})
+    package_summary = evidence_matrix.get("implementation_work_package_summary") if isinstance(evidence_matrix.get("implementation_work_package_summary"), dict) else {}
+    if package_summary:
+        if package_summary.get("package_count") != summary.get("implementation_work_package_count"):
+            findings.append({"severity": "blocker", "finding": "evidence_matrix package_count disagrees with run_summary"})
+        if package_summary.get("covered_surface_count") != summary.get("implementation_work_package_surface_count"):
+            findings.append({"severity": "blocker", "finding": "evidence_matrix covered_surface_count disagrees with run_summary"})
+        if package_summary.get("review_order") != summary.get("implementation_work_package_review_order"):
+            findings.append({"severity": "blocker", "finding": "evidence_matrix review_order disagrees with run_summary"})
     decision = "passed" if not findings else "blocked"
     return {
         "kind": "ceraxia_run_package_audit",
@@ -734,6 +773,17 @@ def build_run_summary(
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     surface_sufficiency = review.get("surface_verification_sufficiency") if isinstance(review.get("surface_verification_sufficiency"), dict) else {}
+    work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
+    packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
+    package_surfaces = sorted(
+        {
+            surface
+            for package in packages
+            if isinstance(package, dict)
+            for surface in package.get("impact_surfaces", [])
+            if isinstance(surface, str) and surface
+        }
+    )
     return {
         "kind": "ceraxia_run_summary",
         "contract_version": CONTRACT_VERSION,
@@ -748,6 +798,9 @@ def build_run_summary(
         "planning_review_decision": planning_review.get("decision", ""),
         "planning_review_score": planning_review.get("score", 0),
         "planning_work_phase_count": len(work_phases),
+        "implementation_work_package_count": len(packages),
+        "implementation_work_package_surface_count": len(package_surfaces),
+        "implementation_work_package_review_order": work_packages.get("review_order", []) if isinstance(work_packages.get("review_order"), list) else [],
         "survey_quality_decision": survey_quality.get("decision", ""),
         "survey_quality_warning_count": len(survey_quality.get("warnings", [])) if isinstance(survey_quality.get("warnings"), list) else 0,
         "surface_verification_status": surface_sufficiency.get("status", ""),
@@ -783,6 +836,17 @@ def build_evidence_matrix(
     required_evidence = quality.get("must_have_evidence") if isinstance(quality.get("must_have_evidence"), list) else []
     repo_evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
+    work_packages = implementation_plan.get("implementation_work_packages") if isinstance(implementation_plan.get("implementation_work_packages"), list) else []
+    work_package_review_order = implementation_plan.get("work_package_review_order") if isinstance(implementation_plan.get("work_package_review_order"), list) else []
+    package_surfaces = sorted(
+        {
+            surface
+            for package in work_packages
+            if isinstance(package, dict)
+            for surface in package.get("impact_surfaces", [])
+            if isinstance(surface, str) and surface
+        }
+    )
     rows: list[dict[str, Any]] = []
     candidate_files = repo_evidence.get("candidate_files") if isinstance(repo_evidence.get("candidate_files"), list) else []
     test_files = repo_evidence.get("test_files") if isinstance(repo_evidence.get("test_files"), list) else []
@@ -830,6 +894,12 @@ def build_evidence_matrix(
             "test_files_to_preserve": implementation_plan.get("test_files_to_preserve", []),
             "recommended_read_order": implementation_plan.get("recommended_read_order", []),
             "verification_commands": implementation_plan.get("verification_commands", []),
+        },
+        "implementation_work_package_summary": {
+            "package_count": len(work_packages),
+            "review_order": work_package_review_order,
+            "covered_surfaces": package_surfaces,
+            "covered_surface_count": len(package_surfaces),
         },
     }
 

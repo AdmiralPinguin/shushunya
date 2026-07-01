@@ -16,6 +16,9 @@
     "planning_review_decision",
     "planning_review_score",
     "planning_work_phase_count",
+    "implementation_work_package_count",
+    "implementation_work_package_surface_count",
+    "implementation_work_package_review_order",
     "survey_quality_decision",
     "survey_quality_warning_count",
     "surface_verification_status",
@@ -73,6 +76,18 @@
     },
     "planning_work_phase_count": {
       "type": "integer"
+    },
+    "implementation_work_package_count": {
+      "type": "integer"
+    },
+    "implementation_work_package_surface_count": {
+      "type": "integer"
+    },
+    "implementation_work_package_review_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "survey_quality_decision": {
       "type": "string"

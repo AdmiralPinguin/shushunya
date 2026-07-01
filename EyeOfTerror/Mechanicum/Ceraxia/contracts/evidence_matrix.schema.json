@@ -11,7 +11,8 @@
     "planned_count",
     "blocked_count",
     "rows",
-    "implementation_plan_sources"
+    "implementation_plan_sources",
+    "implementation_work_package_summary"
   ],
   "properties": {
     "kind": {
@@ -71,6 +72,15 @@
         "target_files_to_inspect",
         "test_files_to_preserve",
         "verification_commands"
+      ]
+    },
+    "implementation_work_package_summary": {
+      "type": "object",
+      "required": [
+        "package_count",
+        "review_order",
+        "covered_surfaces",
+        "covered_surface_count"
       ]
     }
   },
