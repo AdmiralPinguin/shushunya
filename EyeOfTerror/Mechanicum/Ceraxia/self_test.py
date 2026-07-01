@@ -104,6 +104,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertFalse(summary["ready_for_execution"])
             self.assertEqual(summary["review_decision"], "dry_run_ready")
             self.assertIn("security", summary["task_kinds"])
+            self.assertGreaterEqual(summary["evidence"]["required_count"], 1)
+            self.assertGreaterEqual(summary["evidence"]["planned_count"], 1)
             evidence_matrix = json.loads((run_dir / "evidence_matrix.json").read_text(encoding="utf-8"))
             self.assertEqual(evidence_matrix["kind"], "ceraxia_evidence_matrix")
             self.assertGreaterEqual(evidence_matrix["required_evidence_count"], 1)

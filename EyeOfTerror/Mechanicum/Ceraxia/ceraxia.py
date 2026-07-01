@@ -496,6 +496,7 @@ def build_run_summary(
     brief: dict[str, Any],
     review: dict[str, Any],
     readiness: dict[str, Any],
+    evidence_matrix: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "kind": "ceraxia_run_summary",
@@ -510,6 +511,12 @@ def build_run_summary(
         "risk_level": brief.get("risk_level"),
         "task_kinds": brief.get("task_kinds", []),
         "selected_strategy": brief.get("selected_strategy"),
+        "evidence": {
+            "required_count": evidence_matrix.get("required_evidence_count", 0),
+            "present_count": evidence_matrix.get("present_count", 0),
+            "planned_count": evidence_matrix.get("planned_count", 0),
+            "blocked_count": evidence_matrix.get("blocked_count", 0),
+        },
         "blockers": readiness.get("blockers", []),
         "next_action": status.get("next_action"),
         "maturity": "dry_run_controller_with_code_brigade_handoff_adapter",
@@ -646,10 +653,10 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     artifacts["execution_readiness"] = readiness
     write_text(run_dir / "final_report.md", final_report_markdown(run_id, artifacts))
     write_json(run_dir / "execution_readiness.json", readiness)
-    summary = build_run_summary(run_id, run_dir, status, brief, review, readiness)
-    write_json(run_dir / "run_summary.json", summary)
     evidence_matrix = build_evidence_matrix(brief, worker_report, verification_report, readiness)
     write_json(run_dir / "evidence_matrix.json", evidence_matrix)
+    summary = build_run_summary(run_id, run_dir, status, brief, review, readiness, evidence_matrix)
+    write_json(run_dir / "run_summary.json", summary)
     manifest = build_artifact_manifest(run_dir)
     write_json(run_dir / "artifact_manifest.json", manifest)
     audit = audit_run_package(run_dir)
