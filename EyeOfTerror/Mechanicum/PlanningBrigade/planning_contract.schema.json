@@ -14,6 +14,7 @@
     "verification_strategy",
     "risk_register",
     "quality_bar",
+    "code_brigade_handoff",
     "next_action"
   ],
   "properties": {
@@ -32,6 +33,7 @@
     "verification_strategy": {"type": "object"},
     "risk_register": {"type": "object"},
     "quality_bar": {"type": "object"},
+    "code_brigade_handoff": {"type": "object"},
     "next_action": {"type": "object"}
   }
 }

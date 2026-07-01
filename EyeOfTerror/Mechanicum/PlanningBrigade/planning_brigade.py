@@ -263,6 +263,64 @@ def quality_bar(triage: dict[str, Any], verification: dict[str, Any]) -> dict[st
     }
 
 
+def code_brigade_handoff(triage: dict[str, Any], verification: dict[str, Any], quality: dict[str, Any]) -> dict[str, Any]:
+    steps = [
+        {
+            "step": "inspect_repo_evidence",
+            "owner": "CodeBrigade",
+            "input": "repo_survey.json",
+            "output": "candidate_file_decision.json",
+            "may_mutate_source": False,
+        },
+        {
+            "step": "prepare_patch_plan",
+            "owner": "CodeBrigade",
+            "input": "implementation_brief.json",
+            "output": "patch_plan.json",
+            "may_mutate_source": False,
+        },
+        {
+            "step": "apply_or_block_patch",
+            "owner": "CodeBrigade",
+            "input": "patch_plan.json",
+            "output": "worker_report.json",
+            "may_mutate_source": True,
+        },
+        {
+            "step": "verify_patch",
+            "owner": "CodeBrigade",
+            "input": "worker_report.json",
+            "output": "verification_report.json",
+            "may_mutate_source": False,
+        },
+        {
+            "step": "return_for_ceraxia_review",
+            "owner": "Ceraxia",
+            "input": "verification_report.json",
+            "output": "review_gate.json",
+            "may_mutate_source": False,
+        },
+    ]
+    if "security" in triage["task_kinds"] or verification["negative_tests"]:
+        steps.insert(
+            3,
+            {
+                "step": "prove_negative_boundary",
+                "owner": "CodeBrigade",
+                "input": "patch_plan.json",
+                "output": "negative_test_evidence.json",
+                "may_mutate_source": False,
+            },
+        )
+    return {
+        "role": "PlanningBrigade",
+        "target": "CodeBrigade",
+        "task_kinds": triage["task_kinds"],
+        "steps": steps,
+        "required_quality_evidence": quality["must_have_evidence"],
+    }
+
+
 def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
     triage = task_triage(payload)
@@ -271,6 +329,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     verification = verification_strategy(triage)
     risks = risk_register(triage, survey, design, verification)
     quality = quality_bar(triage, verification)
+    handoff = code_brigade_handoff(triage, verification, quality)
     return {
         "ok": bool(task),
         "worker": "PlanningBrigade",
@@ -283,6 +342,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "verification_strategy": verification,
         "risk_register": risks,
         "quality_bar": quality,
+        "code_brigade_handoff": handoff,
         "next_action": {
             "owner": "Ceraxia",
             "action": "approve_or_revise_plan",

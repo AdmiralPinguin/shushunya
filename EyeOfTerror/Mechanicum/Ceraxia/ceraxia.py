@@ -93,6 +93,7 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         "verification_strategy",
         "risk_register",
         "quality_bar",
+        "code_brigade_handoff",
     ]
     if packet.get("roles_completed") != ROLE_ORDER:
         problems.append("planning packet must include all five planning roles in order")
@@ -152,6 +153,11 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("quality bar must include forbidden_shortcuts")
     if not isinstance(quality.get("success_definition"), str) or not quality.get("success_definition"):
         problems.append("quality bar must include success_definition")
+    handoff = packet.get("code_brigade_handoff") if isinstance(packet.get("code_brigade_handoff"), dict) else {}
+    if handoff.get("target") != "CodeBrigade":
+        problems.append("code brigade handoff must target CodeBrigade")
+    if not isinstance(handoff.get("steps"), list) or not handoff.get("steps"):
+        problems.append("code brigade handoff must include steps")
     if packet.get("next_action", {}).get("owner") != "Ceraxia":
         problems.append("next action must be owned by Ceraxia")
     return problems
@@ -178,6 +184,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
     verification = packet.get("verification_strategy") if isinstance(packet.get("verification_strategy"), dict) else {}
     risks = packet.get("risk_register") if isinstance(packet.get("risk_register"), dict) else {}
     quality = packet.get("quality_bar") if isinstance(packet.get("quality_bar"), dict) else {}
+    handoff = packet.get("code_brigade_handoff") if isinstance(packet.get("code_brigade_handoff"), dict) else {}
     planning_problems = validate_planning_packet(packet)
     blocked = bool(planning_problems) or not survey["repo_exists"]
     blockers = [f"planning validation failed: {problem}" for problem in planning_problems]
@@ -211,6 +218,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "required_verification": verification,
         "acceptance_gates": risks.get("acceptance_gates") if isinstance(risks.get("acceptance_gates"), list) else [],
         "quality_bar": quality,
+        "code_brigade_handoff": handoff,
         "blocked": blocked,
         "blockers": blockers,
     }

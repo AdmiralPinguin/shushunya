@@ -39,6 +39,7 @@ def main() -> int:
         or "untrusted input is rejected" not in security_packet["verification_strategy"]["negative_tests"]
         or not security_packet["verification_strategy"]["broad_verification_required"]
         or "negative boundary test or explicit blocker is present" not in security_packet["quality_bar"]["must_have_evidence"]
+        or "prove_negative_boundary" not in [step["step"] for step in security_packet["code_brigade_handoff"]["steps"]]
     ):
         raise AssertionError(f"security planning packet is too weak: {security_packet}")
     if not any(item["risk"] == "missing_negative_boundary_test" for item in security_packet["risk_register"]["risks"]):
@@ -56,6 +57,7 @@ def main() -> int:
         or "api_compatibility" not in migration_packet["task_triage"]["task_kinds"]
         or "old, new, and mixed records round-trip correctly" not in migration_packet["verification_strategy"]["negative_tests"]
         or "backward compatibility evidence is present" not in migration_packet["quality_bar"]["must_have_evidence"]
+        or migration_packet["code_brigade_handoff"]["target"] != "CodeBrigade"
         or migration_packet["repo_survey_request"]["read_only"] is not True
     ):
         raise AssertionError(f"migration planning packet is incomplete: {migration_packet}")
