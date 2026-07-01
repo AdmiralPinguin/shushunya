@@ -27,5 +27,7 @@ source. The brief must state:
 - acceptance gates.
 
 Workers return `worker_report.json` using
-`code_brigade_contract.schema.json`. A dry-run report may only prove that the
-handoff is shaped correctly; it cannot claim source changes.
+`code_brigade_contract.schema.json`. `code_brigade_adapter.py` is the current
+local adapter: it validates the implementation brief and can acknowledge a
+dry-run handoff, but real source execution remains blocked until an execution
+adapter is intentionally wired.

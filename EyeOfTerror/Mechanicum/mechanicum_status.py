@@ -42,8 +42,10 @@ COMPONENTS = {
         "required_files": [
             "README.md",
             "code_brigade_contract.schema.json",
+            "code_brigade_adapter.py",
+            "self_test.py",
         ],
-        "maturity": "contract_only",
+        "maturity": "dry_run_handoff_adapter",
     },
 }
 

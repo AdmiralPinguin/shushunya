@@ -9,8 +9,8 @@ def main() -> int:
     if not status["ok"]:
         raise AssertionError(f"Mechanicum status should be ready: {status}")
     by_name = {item["name"]: item for item in status["components"]}
-    if by_name["CodeBrigade"]["maturity"] != "contract_only":
-        raise AssertionError(f"CodeBrigade should honestly report contract-only maturity: {by_name['CodeBrigade']}")
+    if by_name["CodeBrigade"]["maturity"] != "dry_run_handoff_adapter":
+        raise AssertionError(f"CodeBrigade should honestly report dry-run adapter maturity: {by_name['CodeBrigade']}")
     if by_name["Ceraxia"]["maturity"] != "dry_run_controller":
         raise AssertionError(f"Ceraxia should honestly report dry-run maturity: {by_name['Ceraxia']}")
     if "wire CodeBrigade real execution adapter" not in status["next_architecture_step"]:

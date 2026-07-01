@@ -22,8 +22,12 @@ import sys
 PLANNING_PATH = str(MECHANICUM_ROOT / "PlanningBrigade")
 if PLANNING_PATH not in sys.path:
     sys.path.insert(0, PLANNING_PATH)
+CODE_BRIGADE_PATH = str(MECHANICUM_ROOT / "CodeBrigade")
+if CODE_BRIGADE_PATH not in sys.path:
+    sys.path.insert(0, CODE_BRIGADE_PATH)
 
 from planning_brigade import ROLE_ORDER, build_planning_packet  # noqa: E402
+from code_brigade_adapter import build_worker_report  # noqa: E402
 
 
 LIFECYCLE = [
@@ -209,30 +213,6 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "quality_bar": quality,
         "blocked": blocked,
         "blockers": blockers,
-    }
-
-
-def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
-    if brief["blocked"]:
-        status = "blocked"
-        changed_files: list[str] = []
-        notes = ["implementation not started because the implementation brief is blocked"]
-    elif dry_run:
-        status = "dry_run_handoff_ready"
-        changed_files = []
-        notes = ["no source mutation was attempted in smoke mode"]
-    else:
-        status = "blocked"
-        changed_files = []
-        notes = ["real CodeBrigade execution is not wired in this local controller yet"]
-    return {
-        "kind": "ceraxia_code_brigade_worker_report",
-        "target": "CodeBrigade",
-        "status": status,
-        "dry_run": dry_run,
-        "changed_files": changed_files,
-        "notes": notes,
-        "implementation_brief_acknowledged": True,
     }
 
 
