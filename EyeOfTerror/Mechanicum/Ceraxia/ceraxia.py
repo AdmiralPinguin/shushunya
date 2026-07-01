@@ -288,13 +288,23 @@ def review_gate(
 ) -> dict[str, Any]:
     findings: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
+    commands_planned = verification_report.get("commands_planned") if isinstance(verification_report.get("commands_planned"), list) else []
+    commands_executed = verification_report.get("commands_executed") if isinstance(verification_report.get("commands_executed"), list) else []
+    negative_tests = verification_report.get("negative_tests_required", [])
+    verification_sufficiency = {
+        "risk_level": brief.get("risk_level", "high"),
+        "status": "executed" if commands_executed else ("planned_only" if commands_planned else "missing"),
+        "commands_planned_count": len(commands_planned),
+        "commands_executed_count": len(commands_executed),
+        "negative_tests_required_count": len(negative_tests) if isinstance(negative_tests, list) else 0,
+        "broad_verification_required": bool(verification_report.get("broad_verification_required")),
+    }
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
     if not worker_report.get("implementation_brief_acknowledged", False):
         findings.append({"severity": "blocker", "finding": "implementation brief was not acknowledged"})
     if worker_report["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "worker report is blocked"})
-    negative_tests = verification_report.get("negative_tests_required", [])
     if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution", "passed"}:
         findings.append({"severity": "blocker", "finding": "negative tests are missing or not planned"})
     if verification_report.get("broad_verification_required") and not verification_report.get("commands_planned"):
@@ -303,6 +313,8 @@ def review_gate(
         warnings.append({"severity": "warning", "finding": "broad verification is planned but not executed"})
     if verification_report.get("commands_executable") and not verification_report.get("commands_executed"):
         warnings.append({"severity": "warning", "finding": "executable verification commands exist but were not run"})
+    if brief.get("risk_level") == "high" and not commands_executed:
+        warnings.append({"severity": "warning", "finding": "high-risk task has no executed verification evidence yet"})
     repo_evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     if repo_evidence.get("survey_truncated"):
         warnings.append({"severity": "warning", "finding": "repository survey reached file limit; coverage is partial"})
@@ -321,6 +333,7 @@ def review_gate(
         "decision": decision,
         "findings": findings,
         "warnings": warnings,
+        "verification_sufficiency": verification_sufficiency,
         "checked_against": [
             "planning packet completeness",
             "strategy approval",
