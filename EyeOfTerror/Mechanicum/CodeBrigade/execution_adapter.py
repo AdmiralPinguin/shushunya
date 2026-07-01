@@ -65,6 +65,52 @@ def explicitly_missing_paths(brief: dict[str, Any]) -> set[str]:
     return {str(item) for item in items if is_repo_relative_path(item)}
 
 
+def scope_budget(brief: dict[str, Any]) -> dict[str, Any]:
+    forecast = brief.get("execution_forecast") if isinstance(brief.get("execution_forecast"), dict) else {}
+    budget = forecast.get("scope_budget") if isinstance(forecast.get("scope_budget"), dict) else {}
+    return budget
+
+
+def is_test_path(rel_path: str) -> bool:
+    parts = Path(rel_path).parts
+    name = Path(rel_path).name.lower()
+    return "tests" in parts or name.startswith("test_") or name.endswith("_test.py") or ".spec." in name or ".test." in name
+
+
+def is_docs_path(rel_path: str) -> bool:
+    parts = Path(rel_path).parts
+    suffix = Path(rel_path).suffix.lower()
+    return "docs" in parts or suffix in {".md", ".rst", ".txt"}
+
+
+def validate_patch_scope_budget(brief: dict[str, Any], operations: list[Any]) -> None:
+    budget = scope_budget(brief)
+    max_source_files = int(budget.get("max_source_files_to_edit") or 0)
+    max_test_files = int(budget.get("max_test_files_to_edit_without_explicit_user_request") or 0)
+    max_docs_files = int(budget.get("max_docs_files_to_edit") or 0)
+    source_files: set[str] = set()
+    test_files: set[str] = set()
+    docs_files: set[str] = set()
+    for operation in operations:
+        if not isinstance(operation, dict):
+            continue
+        rel_path = str(operation.get("path") or "")
+        if not rel_path:
+            continue
+        if is_test_path(rel_path):
+            test_files.add(rel_path)
+        elif is_docs_path(rel_path):
+            docs_files.add(rel_path)
+        else:
+            source_files.add(rel_path)
+    if max_source_files and len(source_files) > max_source_files:
+        raise ValueError(f"patch source file count exceeds scope budget: {len(source_files)} > {max_source_files}")
+    if len(test_files) > max_test_files:
+        raise ValueError(f"patch edits test files without explicit budget: {', '.join(sorted(test_files))}")
+    if max_docs_files and len(docs_files) > max_docs_files:
+        raise ValueError(f"patch docs file count exceeds scope budget: {len(docs_files)} > {max_docs_files}")
+
+
 def simple_function_return_segment(source_path: Path, function_name: str) -> dict[str, Any]:
     text = source_path.read_text(encoding="utf-8")
     tree = ast.parse(text)
@@ -113,6 +159,7 @@ def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, A
     changed: list[str] = []
     operation_results: list[dict[str, Any]] = []
     operations = patch["operations"]
+    validate_patch_scope_budget(brief, operations)
     try:
         for index, operation in enumerate(operations):
             if not isinstance(operation, dict):

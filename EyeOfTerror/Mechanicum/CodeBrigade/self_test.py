@@ -495,6 +495,50 @@ def main() -> int:
             raise AssertionError("blocked create_file should not leave helpers.py behind")
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app() is False\n", encoding="utf-8")
+        test_edit_brief = valid_brief()
+        test_edit_brief["repo_path"] = tmp
+        test_edit_brief["task"] += "\nCERAXIA_PATCH:\n" + json.dumps(
+            {
+                "operations": [
+                    {
+                        "type": "replace",
+                        "path": "test_app.py",
+                        "old": "assert app() is False",
+                        "new": "assert app() is True",
+                    }
+                ]
+            }
+        )
+        test_edit_report = code_brigade_adapter.build_worker_report(test_edit_brief, dry_run=False)
+        if test_edit_report["status"] != "blocked" or "test files" not in " ".join(test_edit_report["execution_result"]["blockers"]):
+            raise AssertionError(f"explicit patch should reject unbudgeted test edits: {test_edit_report}")
+        if "assert app() is False" not in Path(tmp, "test_app.py").read_text(encoding="utf-8"):
+            raise AssertionError("blocked test edit should leave test_app.py unchanged")
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in ["a.py", "b.py", "c.py"]:
+            Path(tmp, name).write_text("def value():\n    return 0\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("def test_placeholder():\n    assert True\n", encoding="utf-8")
+        over_budget_brief = valid_brief()
+        over_budget_brief["repo_path"] = tmp
+        over_budget_brief["repo_survey_evidence"]["candidate_files"] = ["a.py", "b.py", "c.py"]
+        over_budget_brief["execution_forecast"]["scope_budget"]["max_source_files_to_edit"] = 2
+        over_budget_brief["task"] += "\nCERAXIA_PATCH:\n" + json.dumps(
+            {
+                "operations": [
+                    {"type": "replace", "path": "a.py", "old": "return 0", "new": "return 1"},
+                    {"type": "replace", "path": "b.py", "old": "return 0", "new": "return 1"},
+                    {"type": "replace", "path": "c.py", "old": "return 0", "new": "return 1"},
+                ]
+            }
+        )
+        over_budget_report = code_brigade_adapter.build_worker_report(over_budget_brief, dry_run=False)
+        if over_budget_report["status"] != "blocked" or "scope budget" not in " ".join(over_budget_report["execution_result"]["blockers"]):
+            raise AssertionError(f"explicit patch should reject source edits beyond scope budget: {over_budget_report}")
+        if any("return 1" in Path(tmp, name).read_text(encoding="utf-8") for name in ["a.py", "b.py", "c.py"]):
+            raise AssertionError("over-budget patch should not mutate source files")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
         rollback_brief = valid_brief()
         rollback_brief["repo_path"] = tmp
