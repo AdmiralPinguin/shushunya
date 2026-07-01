@@ -416,7 +416,7 @@ def execute_diagnostic_repair_request(request: dict[str, Any]) -> dict[str, Any]
         return build_blocked_execution_result([f"invalid diagnostic repair request: {problem}" for problem in intake["blockers"]])
     if intake["status"] == "not_required":
         return build_blocked_execution_result(["diagnostic repair request is not required"])
-    supported_signals = {"assertion_failure", "failed_command"}
+    supported_signals = {"assertion_failure", "failed_command", "traceback"}
     supported = any(
         isinstance(item, dict)
         and bool(supported_signals.intersection(item.get("diagnostic_signals") if isinstance(item.get("diagnostic_signals"), list) else []))
@@ -424,7 +424,7 @@ def execute_diagnostic_repair_request(request: dict[str, Any]) -> dict[str, Any]
         if isinstance(request.get("diagnostic_repair_queue"), dict)
     )
     if not supported:
-        return build_blocked_execution_result(["diagnostic repair executor currently supports assertion_failure or failed_command guarded inference only"])
+        return build_blocked_execution_result(["diagnostic repair executor currently supports assertion_failure, failed_command, or traceback guarded inference only"])
     from execution_adapter import execute_implementation_brief
 
     return execute_implementation_brief(build_repair_execution_brief(request, intake))

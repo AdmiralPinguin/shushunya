@@ -928,6 +928,14 @@ def main() -> int:
         if (repo / "test_app.py").read_text(encoding="utf-8") != test_text:
             raise AssertionError("diagnostic repair executor must preserve test file content")
         (repo / "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+        traceback_request = json.loads(json.dumps(executable_request))
+        traceback_request["diagnostic_repair_queue"]["items"][0]["diagnostic_signals"] = ["traceback"]
+        traceback_execution = execute_diagnostic_repair_request(traceback_request)
+        if traceback_execution["status"] != "implemented" or traceback_execution["changed_files"] != ["app.py"]:
+            raise AssertionError(f"traceback diagnostic repair should use guarded source repair: {traceback_execution}")
+        if "return 2" not in (repo / "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("traceback diagnostic repair should update source return literal")
+        (repo / "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
         request_path = repo / "diagnostic_repair_request.json"
         request_path.write_text(json.dumps(executable_request), encoding="utf-8")
         cli = subprocess.run(
