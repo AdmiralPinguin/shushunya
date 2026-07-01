@@ -89,6 +89,7 @@ Current contract:
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "почини failing unittest без изменения тестов" --repo-path /repo
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "почини failing unittest без изменения тестов" --repo-path /repo --validate
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_feedback_contract.py path/to/planning_feedback_request.json
+python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --feedback-request path/to/planning_feedback_request.json --feedback-replan-packet --validate
 ```
 
 The brigade writes one `ceraxia_planning_packet` containing all five planning

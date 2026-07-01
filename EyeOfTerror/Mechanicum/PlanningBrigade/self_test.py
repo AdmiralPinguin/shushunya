@@ -207,6 +207,26 @@ def assert_planning_feedback_intake() -> None:
             raise AssertionError(f"CLI feedback intake must require replan: {cli_intake}")
         if not cli_intake.get("replan_payload", {}).get("constraints"):
             raise AssertionError(f"CLI feedback intake must include replan payload: {cli_intake}")
+        cli_replan_packet = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "planning_brigade.py"),
+                "--feedback-request",
+                str(feedback_path),
+                "--feedback-replan-packet",
+                "--validate",
+            ],
+            cwd=str(REPO_ROOT),
+            text=True,
+            capture_output=True,
+        )
+        if cli_replan_packet.returncode != 0:
+            raise AssertionError(f"valid feedback request should build a CLI replan packet: {cli_replan_packet.stdout} {cli_replan_packet.stderr}")
+        packet = json.loads(cli_replan_packet.stdout)
+        if packet["kind"] != "ceraxia_planning_packet":
+            raise AssertionError(f"CLI feedback replan must emit planning packet: {packet}")
+        if not any("feedback finding:" in item for item in packet["problem_statement"]["known_constraints"]):
+            raise AssertionError(f"CLI feedback replan packet must preserve feedback constraints: {packet}")
 
 
 def main() -> int:

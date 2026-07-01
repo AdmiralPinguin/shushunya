@@ -1962,11 +1962,23 @@ def main() -> int:
     parser.add_argument("--repo-path", default="")
     parser.add_argument("--input-json", type=Path)
     parser.add_argument("--feedback-request", type=Path, help="Build a PlanningBrigade replan intake from Ceraxia planning_feedback_request.json.")
+    parser.add_argument("--feedback-replan-packet", action="store_true", help="With --feedback-request, emit a new planning packet from the feedback replan payload.")
     parser.add_argument("--validate", action="store_true", help="Exit non-zero when the generated planning packet has contract problems.")
     args = parser.parse_args()
     if args.feedback_request:
         loaded = json.loads(args.feedback_request.read_text(encoding="utf-8"))
         intake = build_planning_feedback_intake(loaded if isinstance(loaded, dict) else {})
+        if args.feedback_replan_packet:
+            if intake["status"] == "blocked_invalid_request":
+                print(json.dumps(intake, ensure_ascii=False, indent=2), file=sys.stderr)
+                return 2
+            packet = build_planning_packet(intake["replan_payload"])
+            problems = validate_planning_packet(packet) if args.validate else []
+            print(json.dumps(packet, ensure_ascii=False, indent=2))
+            if problems:
+                print(json.dumps({"ok": False, "validation_problems": problems}, ensure_ascii=False, indent=2), file=sys.stderr)
+                return 2
+            return 0
         print(json.dumps(intake, ensure_ascii=False, indent=2))
         return 2 if intake["status"] == "blocked_invalid_request" else 0
     payload: dict[str, Any] = {}
