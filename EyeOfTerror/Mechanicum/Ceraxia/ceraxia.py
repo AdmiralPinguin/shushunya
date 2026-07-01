@@ -220,6 +220,13 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "acceptance_gates": risks.get("acceptance_gates") if isinstance(risks.get("acceptance_gates"), list) else [],
         "quality_bar": quality,
         "code_brigade_handoff": handoff,
+        "repo_survey_evidence": {
+            "candidate_files": survey.get("candidate_files", []),
+            "test_files": survey.get("test_files", []),
+            "entrypoint_candidates": survey.get("entrypoint_candidates", []),
+            "python_symbols": survey.get("python_symbols", []),
+        },
+        "suggested_verification_commands": survey.get("suggested_verification_commands", []),
         "blocked": blocked,
         "blockers": blockers,
     }
@@ -227,7 +234,10 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
 
 def build_verification_report(brief: dict[str, Any], worker_report: dict[str, Any]) -> dict[str, Any]:
     strategy = brief["required_verification"]
-    commands = strategy.get("targeted_commands", [])
+    commands = list(strategy.get("targeted_commands", []))
+    for command in brief.get("suggested_verification_commands", []):
+        if command not in commands:
+            commands.append(command)
     dry_run = worker_report["dry_run"]
     blocked = brief["blocked"] or worker_report["status"] == "blocked"
     return {

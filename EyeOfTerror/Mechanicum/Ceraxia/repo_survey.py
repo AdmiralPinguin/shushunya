@@ -95,6 +95,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "candidate_files": [],
             "test_files": [],
             "entrypoint_candidates": [],
+            "suggested_verification_commands": [],
         }
     files: list[Path] = []
     for path in root.rglob("*"):
@@ -122,6 +123,12 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         if path.name.lower() in {"main.py", "app.py", "server.py", "cli.py"}
     ][:20]
     python_files = [path for path in files if path.suffix.lower() == ".py"][:40]
+    suggested_commands: list[str] = []
+    if tests:
+        suggested_commands.append("python -m pytest " + " ".join(tests[:3]))
+    py_compile_targets = [path for path in candidates if path.endswith(".py") and path not in tests][:5]
+    if py_compile_targets:
+        suggested_commands.append("python -m py_compile " + " ".join(py_compile_targets))
     return {
         "kind": "ceraxia_repo_survey",
         "repo_path": str(root),
@@ -136,4 +143,5 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "test_files": tests,
         "entrypoint_candidates": entrypoints,
         "python_symbols": [python_summary(path, root) for path in python_files],
+        "suggested_verification_commands": suggested_commands,
     }
