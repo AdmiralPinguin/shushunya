@@ -106,8 +106,11 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         status = "dry_run_handoff_ready"
         notes.append("CodeBrigade adapter accepted the implementation brief without source mutation")
     else:
+        from execution_adapter import execute_implementation_brief
+
+        execution_result = execute_implementation_brief(brief)
         status = "blocked"
-        notes.append("real CodeBrigade execution adapter is not configured")
+        notes.extend(str(item) for item in execution_result.get("blockers", []))
     report = {
         "kind": "ceraxia_code_brigade_worker_report",
         "contract_version": CONTRACT_VERSION,
@@ -123,7 +126,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "adapter": "EyeOfTerror/Mechanicum/CodeBrigade/code_brigade_adapter.py",
     }
     if status == "blocked":
-        report["execution_result"] = build_blocked_execution_result(notes)
+        report["execution_result"] = execution_result if "execution_result" in locals() else build_blocked_execution_result(notes)
     return report
 
 

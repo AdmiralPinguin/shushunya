@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import code_brigade_adapter
+import execution_adapter
 
 
 def valid_brief() -> dict:
@@ -79,6 +80,9 @@ def main() -> int:
         raise AssertionError(f"blocked execution should expose a formal execution_result: {execute_report}")
     if not execute_report["execution_result"]["blockers"]:
         raise AssertionError(f"blocked execution_result should explain blockers: {execute_report}")
+    direct_execution = execution_adapter.execute_implementation_brief(valid_brief())
+    if direct_execution["status"] != "blocked" or not direct_execution["blockers"]:
+        raise AssertionError(f"execution adapter stub should return a formal blocker: {direct_execution}")
     invalid = valid_brief()
     invalid.pop("allowed_scope")
     invalid_report = code_brigade_adapter.build_worker_report(invalid, dry_run=True)
