@@ -11,6 +11,7 @@
     "verification_report.json",
     "review_gate.json",
     "diagnostic_repair_request.json",
+    "planning_feedback_request.json",
     "status.json",
     "final_report.md",
     "execution_readiness.json",
@@ -42,6 +43,9 @@
       "type": "string"
     },
     "diagnostic_repair_request.json": {
+      "type": "string"
+    },
+    "planning_feedback_request.json": {
       "type": "string"
     },
     "status.json": {

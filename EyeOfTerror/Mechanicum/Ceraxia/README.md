@@ -31,6 +31,7 @@ task
   -> verification_report.json
   -> review_gate.json
   -> diagnostic_repair_request.json
+  -> planning_feedback_request.json
   -> execution_readiness.json
   -> evidence_matrix.json
   -> run_summary.json

@@ -58,6 +58,7 @@ REQUIRED_RUN_ARTIFACTS = [
     "verification_report.json",
     "review_gate.json",
     "diagnostic_repair_request.json",
+    "planning_feedback_request.json",
     "status.json",
     "final_report.md",
     "execution_readiness.json",
@@ -545,6 +546,72 @@ def build_diagnostic_repair_request(
             "worker_report.json with changed files, package statuses, and residual blockers",
             "verification_report.json after rerunning relevant failed commands",
             "diagnostic_summary mapped to repaired queue items",
+        ],
+    }
+
+
+def build_planning_feedback_request(
+    run_id: str,
+    packet: dict[str, Any],
+    brief: dict[str, Any],
+    worker_report: dict[str, Any],
+    verification_report: dict[str, Any],
+    review: dict[str, Any],
+) -> dict[str, Any]:
+    findings = review.get("findings") if isinstance(review.get("findings"), list) else []
+    feedback_findings = [
+        item
+        for item in findings
+        if isinstance(item, dict)
+        and any(
+            needle in str(item.get("finding") or "")
+            for needle in [
+                "planning packet",
+                "surface verification matrix",
+                "surface package matrix",
+                "investigation playbook",
+                "change control plan",
+                "acceptance trace matrix",
+                "constraint trace matrix",
+                "assumption register",
+                "worker output contract",
+            ]
+        )
+    ]
+    worker_output_sufficiency = review.get("worker_output_contract_sufficiency") if isinstance(review.get("worker_output_contract_sufficiency"), dict) else {}
+    return {
+        "kind": "ceraxia_planning_feedback_request",
+        "contract_version": CONTRACT_VERSION,
+        "run_id": run_id,
+        "status": "required" if feedback_findings else "not_required",
+        "target": "PlanningBrigade",
+        "source": "Ceraxia.review_gate",
+        "repo_path": brief.get("repo_path", ""),
+        "task": brief.get("task", packet.get("task", "")),
+        "review_decision": review.get("decision", ""),
+        "worker_status": worker_report.get("status", ""),
+        "verification_status": verification_report.get("status", ""),
+        "planning_review_decision": brief.get("planning_review_gate", {}).get("decision", "") if isinstance(brief.get("planning_review_gate"), dict) else "",
+        "feedback_findings": feedback_findings,
+        "worker_output_contract_sufficiency": worker_output_sufficiency,
+        "replan_focus": [
+            "repair planning packet contract drift",
+            "refresh implementation brief sections before CodeBrigade mutation",
+            "tighten worker-output contract when package statuses or evidence sources are missing",
+            "return a new planning_packet.json and implementation_brief.json candidate",
+        ],
+        "required_return_artifacts": [
+            "planning_packet.json",
+            "implementation_brief.json",
+            "worker_output_contract",
+            "planning_review_gate",
+        ],
+        "suggested_planning_command": [
+            "python3",
+            "EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py",
+            "--validate",
+            "--input-json",
+            "task.json",
         ],
     }
 
@@ -1209,6 +1276,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
             "- worker_report.json",
             "- verification_report.json",
             "- review_gate.json",
+            "- diagnostic_repair_request.json",
+            "- planning_feedback_request.json",
             "- status.json",
             "- final_report.md",
             "- execution_readiness.json",
@@ -1880,6 +1949,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_json(run_dir / "review_gate.json", review)
     repair_request = build_diagnostic_repair_request(run_id, brief, worker_report, verification_report, review)
     write_json(run_dir / "diagnostic_repair_request.json", repair_request)
+    planning_feedback_request = build_planning_feedback_request(run_id, packet, brief, worker_report, verification_report, review)
+    write_json(run_dir / "planning_feedback_request.json", planning_feedback_request)
     repair_execution_result: dict[str, Any] = {
         "kind": "code_brigade_execution_result",
         "contract_version": CONTRACT_VERSION,
@@ -1906,6 +1977,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "verification_report": verification_report,
         "review_gate": review,
         "diagnostic_repair_request": repair_request,
+        "planning_feedback_request": planning_feedback_request,
         "diagnostic_repair_execution_result": repair_execution_result,
     }
     write_json(run_dir / "status.json", status)

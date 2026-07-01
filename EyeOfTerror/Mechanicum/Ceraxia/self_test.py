@@ -12,6 +12,7 @@ from ceraxia import (
     allocate_run_dir,
     build_execution_readiness,
     build_implementation_brief,
+    build_planning_feedback_request,
     build_repo_survey,
     build_survey_quality_gate,
     audit_run_package,
@@ -88,6 +89,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                 "verification_report.json",
                 "review_gate.json",
                 "diagnostic_repair_request.json",
+                "planning_feedback_request.json",
                 "status.json",
                 "final_report.md",
                 "execution_readiness.json",
@@ -271,6 +273,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     "diagnostic_repair_request.json",
                 ],
             )
+            planning_feedback = json.loads((run_dir / "planning_feedback_request.json").read_text(encoding="utf-8"))
+            self.assertEqual(planning_feedback["kind"], "ceraxia_planning_feedback_request")
+            self.assertEqual(planning_feedback["target"], "PlanningBrigade")
+            self.assertEqual(planning_feedback["status"], "not_required")
             readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
             self.assertEqual(readiness["decision"], "blocked")
             self.assertIn("dry run requested; real CodeBrigade execution was intentionally skipped", readiness["blockers"])
@@ -669,6 +675,11 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertTrue(any("work packages are blocked" in item["finding"] for item in review["findings"]))
         self.assertTrue(any("surface package matrix references packages without worker status" in item["finding"] for item in review["findings"]))
         self.assertTrue(any("worker output contract is incomplete" in item["finding"] for item in review["findings"]))
+        feedback = build_planning_feedback_request("run-1", packet, brief, worker_report, verification_report, review)
+        self.assertEqual(feedback["status"], "required")
+        self.assertEqual(feedback["target"], "PlanningBrigade")
+        self.assertTrue(any("worker output contract" in item["finding"] for item in feedback["feedback_findings"]))
+        self.assertIn("worker-output contract", " ".join(feedback["replan_focus"]))
 
     def test_review_gate_blocks_missing_investigation_playbook(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
