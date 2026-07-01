@@ -61,6 +61,18 @@
       "minimum_score": 80
     },
     {
+      "id": "multi-surface-release-hardening",
+      "task": "repo-grade refactor and migration: preserve legacy API response schema while changing async request retry/cache behavior, keep runtime env config compatible, close auth token path traversal security bug, and add pytest negative tests without changing existing tests",
+      "repo_path": "/repo",
+      "expected_kinds": ["migration", "security", "config_runtime", "api_compatibility", "test_repair", "concurrency", "refactor"],
+      "expected_phases": ["prove_boundary", "prove_compatibility"],
+      "expected_work_packages": ["evidence_survey_package", "minimal_patch_package", "verification_evidence_package", "compatibility_package", "security_boundary_package", "runtime_configuration_package", "concurrency_runtime_package", "architecture_refactor_package"],
+      "expected_surfaces": ["source_behavior", "test_surface", "public_api_contract", "security_boundary", "runtime_configuration", "data_compatibility", "internal_architecture", "concurrency_runtime"],
+      "expected_highest_risk_surface": "security_boundary",
+      "expected_negative_tests": ["untrusted input is rejected", "path/auth/token boundary cannot be bypassed", "old and new API shape compatibility", "missing/invalid config fails safely", "old, new, and mixed records round-trip correctly", "parallel/retry behavior preserves state"],
+      "minimum_score": 80
+    },
+    {
       "id": "unclear-task",
       "task": "почини",
       "repo_path": "/repo",

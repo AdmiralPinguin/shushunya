@@ -62,8 +62,9 @@ Current capabilities:
   reserved ports 7111-7115
 - service-port reservation checks against the active EyeOfTerror and
   Mechanicum registries
-- field trials for multiple task shapes with coverage gates for task kinds,
-  impacted surfaces, implementation work packages, and change-control
+- field trials for multiple task shapes, including a high-risk multi-surface
+  release-hardening scenario, with coverage gates for task kinds, impacted
+  surfaces, implementation work packages, and change-control
   invariant/proof, acceptance-trace package coverage, constraint-trace package
   coverage, definition-of-done trace completeness, assumption coverage,
   surface-output evidence coverage, worker-output acceptance requirement
