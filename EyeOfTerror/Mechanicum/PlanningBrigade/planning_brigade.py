@@ -681,6 +681,7 @@ def planning_review_gate(
     dependency: dict[str, Any],
     breakdown: dict[str, Any],
     verification: dict[str, Any],
+    surface_matrix: dict[str, Any],
     acceptance: dict[str, Any],
 ) -> dict[str, Any]:
     blockers: list[str] = []
@@ -699,6 +700,8 @@ def planning_review_gate(
         blockers.append("verification strategy has no targeted commands")
     if triage["risk_level"] == "high" and not verification.get("broad_verification_required"):
         blockers.append("high-risk task lacks broad verification requirement")
+    if surface_matrix.get("complete") is False:
+        blockers.extend(str(item) for item in surface_matrix.get("blockers", []))
     if verification.get("negative_tests") and not any("negative" in item for item in acceptance.get("must_prove", [])):
         blockers.append("negative test requirement is not reflected in acceptance contract")
     score = 100
@@ -804,7 +807,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     quality = quality_bar(triage, verification)
     acceptance = acceptance_contract(problem, triage, verification, quality, surface_matrix)
     blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix)
-    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, acceptance)
+    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
         "ok": bool(task),

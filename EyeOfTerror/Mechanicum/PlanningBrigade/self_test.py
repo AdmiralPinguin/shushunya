@@ -99,6 +99,27 @@ def main() -> int:
     if unclear_packet["planning_review_gate"]["decision"] != "blocked" or not unclear_packet["planning_review_gate"]["blockers"]:
         raise AssertionError(f"unclear task must be blocked by planning review: {unclear_packet}")
 
+    blocked_review = planning_brigade.planning_review_gate(
+        triage={"needs_clarification": False, "risk_level": "medium"},
+        problem={"definition_of_done": ["a", "b", "c"]},
+        survey={"repo_path": "/repo"},
+        dependency={
+            "critical_path": [
+                "task_contract",
+                "repo_evidence",
+                "design_decision",
+                "verification_contract",
+                "implementation_brief",
+            ]
+        },
+        breakdown={"phases": [{"id": str(index)} for index in range(6)]},
+        verification={"targeted_commands": ["python -m py_compile app.py"], "negative_tests": []},
+        surface_matrix={"complete": False, "blockers": ["no planned verification covers public_api_contract"]},
+        acceptance={"must_prove": ["a"]},
+    )
+    if blocked_review["decision"] != "blocked" or "public_api_contract" not in " ".join(blocked_review["blockers"]):
+        raise AssertionError(f"surface matrix blockers must block planning review: {blocked_review}")
+
     cli = subprocess.run(
         [
             sys.executable,
