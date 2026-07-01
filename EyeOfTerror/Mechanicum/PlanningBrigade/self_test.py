@@ -75,6 +75,9 @@ def main() -> int:
         or "prove_negative_boundary" not in [step["step"] for step in security_packet["code_brigade_handoff"]["steps"]]
     ):
         raise AssertionError(f"security planning packet is too weak: {security_packet}")
+    selected_security_option = next(option for option in security_packet["design_options"]["options"] if option["name"] == security_packet["design_options"]["selected_strategy"])
+    if selected_security_option["decision"] != "prefer":
+        raise AssertionError(f"selected security strategy must be preferred: {security_packet}")
     if not any(item["risk"] == "missing_negative_boundary_test" for item in security_packet["risk_register"]["risks"]):
         raise AssertionError(f"risk register must reject missing negative tests: {security_packet}")
 

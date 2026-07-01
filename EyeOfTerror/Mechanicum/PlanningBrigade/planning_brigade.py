@@ -487,10 +487,11 @@ def design_options(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str,
     if "refactor" in triage["task_kinds"]:
         options[2]["reason"] = "Narrow refactor with behavior-preservation checks before any broad architectural rewrite."
     if "security" in triage["task_kinds"]:
+        options[2]["decision"] = "consider"
         options.append(
             {
                 "name": "boundary_first_patch",
-                "decision": "consider",
+                "decision": "prefer",
                 "reason": "Security work may need validation before feature behavior changes.",
             }
         )
@@ -998,6 +999,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("design options must reject hardcode")
     if not any(item.get("name") == "broad_rewrite" and item.get("decision") == "reject" for item in options if isinstance(item, dict)):
         problems.append("design options must reject broad_rewrite")
+    if not any(item.get("name") == design.get("selected_strategy") and item.get("decision") == "prefer" for item in options if isinstance(item, dict)):
+        problems.append("selected strategy must be marked prefer")
     if design.get("handoff_to") != "VerificationArchitect":
         problems.append("design options must hand off to VerificationArchitect")
     verification = packet.get("verification_strategy") if isinstance(packet.get("verification_strategy"), dict) else {}
