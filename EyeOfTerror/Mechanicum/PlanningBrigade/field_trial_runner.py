@@ -35,6 +35,15 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     if packet["implementation_work_packages"]["review_order"] != work_package_ids:
         raise AssertionError(f"{trial_id}: work package review_order must match package order: {packet}")
     surfaces = [surface["surface"] for surface in packet["impact_analysis"]["surfaces"]]
+    covered_surfaces = {
+        surface
+        for package in work_packages
+        for surface in package.get("impact_surfaces", [])
+        if isinstance(surface, str)
+    }
+    missing_surface_packages = sorted(surface for surface in surfaces if surface not in covered_surfaces)
+    if missing_surface_packages:
+        raise AssertionError(f"{trial_id}: impact surfaces lack implementation work packages: {missing_surface_packages}; packet={packet}")
     require_subset(trial.get("expected_surfaces", []), surfaces, "impact surfaces", trial_id)
     expected_highest_risk_surface = trial.get("expected_highest_risk_surface")
     if expected_highest_risk_surface and packet["impact_analysis"]["highest_risk_surface"] != expected_highest_risk_surface:

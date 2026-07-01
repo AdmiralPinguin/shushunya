@@ -35,6 +35,13 @@ def valid_brief() -> dict:
                     "evidence_needed": ["candidate source files"],
                     "covered_by": ["targeted behavior verification"],
                     "blockers": [],
+                },
+                {
+                    "surface": "test_surface",
+                    "risk": "medium",
+                    "evidence_needed": ["existing tests"],
+                    "covered_by": ["rerun failing test command"],
+                    "blockers": [],
                 }
             ],
         },
@@ -70,6 +77,7 @@ def valid_brief() -> dict:
                     "id": "evidence_survey_package",
                     "owner": "CodeBrigade",
                     "purpose": "Confirm candidate files before editing.",
+                    "impact_surfaces": ["source_behavior", "test_surface"],
                     "read_scope": ["repo_survey_evidence.recommended_read_order"],
                     "edit_scope": [],
                     "verification_scope": ["no mutation; evidence only"],
@@ -80,6 +88,7 @@ def valid_brief() -> dict:
                     "id": "minimal_patch_package",
                     "owner": "CodeBrigade",
                     "purpose": "Apply the smallest source change.",
+                    "impact_surfaces": ["source_behavior"],
                     "read_scope": ["implementation_brief_blueprint"],
                     "edit_scope": ["candidate files identified by repository survey"],
                     "verification_scope": ["rerun failing test command"],
@@ -90,6 +99,7 @@ def valid_brief() -> dict:
                     "id": "verification_evidence_package",
                     "owner": "CodeBrigade",
                     "purpose": "Prove each planned impact surface.",
+                    "impact_surfaces": ["source_behavior", "test_surface"],
                     "read_scope": ["surface_verification_matrix"],
                     "edit_scope": [],
                     "verification_scope": ["rerun failing test command"],
@@ -427,6 +437,12 @@ def main() -> int:
     missing_work_packages_report = code_brigade_adapter.build_worker_report(missing_work_packages, dry_run=True)
     if missing_work_packages_report["status"] != "blocked" or not any("implementation_work_packages" in item for item in missing_work_packages_report["validation_problems"]):
         raise AssertionError(f"missing implementation work packages should be blocked: {missing_work_packages_report}")
+    uncovered_surface = valid_brief()
+    uncovered_surface["implementation_work_packages"]["packages"][0]["impact_surfaces"] = ["source_behavior"]
+    uncovered_surface["implementation_work_packages"]["packages"][2]["impact_surfaces"] = ["source_behavior"]
+    uncovered_surface_report = code_brigade_adapter.build_worker_report(uncovered_surface, dry_run=True)
+    if uncovered_surface_report["status"] != "blocked" or not any("cover every planned surface" in item for item in uncovered_surface_report["validation_problems"]):
+        raise AssertionError(f"uncovered surface should be blocked: {uncovered_surface_report}")
     missing_evidence = valid_brief()
     missing_evidence.pop("repo_survey_evidence")
     missing_evidence_report = code_brigade_adapter.build_worker_report(missing_evidence, dry_run=True)

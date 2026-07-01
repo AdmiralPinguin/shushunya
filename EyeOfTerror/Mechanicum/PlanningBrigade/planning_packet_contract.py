@@ -191,14 +191,29 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
             continue
         if package.get("owner") != "CodeBrigade":
             problems.append(f"implementation work package must target CodeBrigade: {package.get('id', '<unknown>')}")
-        for key in ("id", "purpose", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+        for key in ("id", "purpose", "impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
             if key not in package:
                 problems.append(f"implementation work package missing {key}: {package.get('id', '<unknown>')}")
-        for key in ("read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+        for key in ("impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
             if not isinstance(package.get(key), list):
                 problems.append(f"implementation work package {key} must be a list: {package.get('id', '<unknown>')}")
     if not isinstance(work_packages.get("review_order"), list) or len(work_packages.get("review_order", [])) != len(packages):
         problems.append("implementation work packages must include review_order for every package")
+    planned_surfaces = {
+        row.get("surface")
+        for row in list_field(surface_matrix.get("rows"))
+        if isinstance(row, dict) and row.get("surface")
+    }
+    covered_surfaces = {
+        surface
+        for package in packages
+        if isinstance(package, dict)
+        for surface in list_field(package.get("impact_surfaces"))
+        if isinstance(surface, str) and surface
+    }
+    missing_package_surfaces = sorted(surface for surface in planned_surfaces if surface not in covered_surfaces)
+    if missing_package_surfaces:
+        problems.append("implementation work packages must cover every planned surface: " + ", ".join(missing_package_surfaces))
 
     planning_review = object_field(packet, "planning_review_gate")
     if planning_review.get("decision") not in {"ready_for_ceraxia_review", "revise", "blocked"}:

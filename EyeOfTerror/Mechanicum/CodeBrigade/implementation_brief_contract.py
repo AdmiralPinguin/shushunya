@@ -61,15 +61,30 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
                 continue
             if package.get("owner") != "CodeBrigade":
                 problems.append(f"brief implementation work package must target CodeBrigade: {package.get('id', '<unknown>')}")
-            for key in ("id", "purpose", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+            for key in ("id", "purpose", "impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
                 if key not in package:
                     problems.append(f"brief implementation work package missing {key}: {package.get('id', '<unknown>')}")
-            for key in ("read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+            for key in ("impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
                 if not isinstance(package.get(key), list):
                     problems.append(f"brief implementation work package {key} must be a list: {package.get('id', '<unknown>')}")
     review_order = work_packages.get("review_order") if isinstance(work_packages.get("review_order"), list) else []
     if len(review_order) != len(packages):
         problems.append("brief implementation_work_packages review_order must cover every package")
+    planned_surfaces = {
+        row.get("surface")
+        for row in surface_matrix.get("rows", [])
+        if isinstance(row, dict) and row.get("surface")
+    }
+    covered_surfaces = {
+        surface
+        for package in packages
+        if isinstance(package, dict)
+        for surface in package.get("impact_surfaces", [])
+        if isinstance(surface, str) and surface
+    }
+    missing_package_surfaces = sorted(surface for surface in planned_surfaces if surface not in covered_surfaces)
+    if missing_package_surfaces:
+        problems.append("brief implementation_work_packages must cover every planned surface: " + ", ".join(missing_package_surfaces))
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
     if planning_review.get("decision") == "blocked":
         problems.append("brief planning_review_gate is blocked")

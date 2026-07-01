@@ -21,6 +21,8 @@ Current capabilities:
   scope, risk controls, handoff criteria, and review order
 - specialized work packages for compatibility, security boundaries, runtime
   configuration, concurrency runtime, and architecture refactors
+- package-to-surface traceability: every planned verification surface must be
+  covered by at least one implementation work package
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
 - field trials for multiple task shapes with coverage gates for task kinds,

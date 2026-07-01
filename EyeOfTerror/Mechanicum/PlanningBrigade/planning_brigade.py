@@ -785,6 +785,7 @@ def implementation_work_packages(
             "id": "evidence_survey_package",
             "owner": "CodeBrigade",
             "purpose": "Confirm candidate files, dependent callers, and tests before choosing an edit.",
+            "impact_surfaces": [surface.get("surface", "") for surface in surfaces if isinstance(surface, dict) and surface.get("surface")],
             "read_scope": [
                 "repo_survey_evidence.recommended_read_order",
                 "repo_survey_evidence.candidate_files",
@@ -801,6 +802,7 @@ def implementation_work_packages(
             "id": "minimal_patch_package",
             "owner": "CodeBrigade",
             "purpose": "Apply the smallest source change that satisfies the selected strategy.",
+            "impact_surfaces": ["source_behavior"],
             "read_scope": ["implementation_brief_blueprint", "planning_dependency_map", "impact_analysis"],
             "edit_scope": ["candidate files identified by repository survey"],
             "verification_scope": targeted_commands,
@@ -815,6 +817,7 @@ def implementation_work_packages(
             "id": "verification_evidence_package",
             "owner": "CodeBrigade",
             "purpose": "Prove each planned impact surface or return concrete blockers.",
+            "impact_surfaces": [surface.get("surface", "") for surface in surfaces if isinstance(surface, dict) and surface.get("surface")],
             "read_scope": ["surface_verification_matrix", "required_verification", "acceptance_contract"],
             "edit_scope": [],
             "verification_scope": targeted_commands + negative_tests,
@@ -828,6 +831,7 @@ def implementation_work_packages(
                 "id": "compatibility_package",
                 "owner": "CodeBrigade",
                 "purpose": "Protect old/new public or data shapes across callers, readers, and writers.",
+                "impact_surfaces": ["public_api_contract", "data_compatibility"],
                 "read_scope": ["compatibility_boundary", "entrypoints_to_check", "dependency_edges_to_check"],
                 "edit_scope": ["source files required by compatibility evidence"],
                 "verification_scope": [item for item in [*targeted_commands, *negative_tests] if "compat" in item.lower() or "api" in item.lower() or "schema" in item.lower() or "round" in item.lower()],
@@ -841,6 +845,7 @@ def implementation_work_packages(
                 "id": "security_boundary_package",
                 "owner": "CodeBrigade",
                 "purpose": "Prove the untrusted input, path, auth, or token boundary cannot be bypassed.",
+                "impact_surfaces": ["security_boundary"],
                 "read_scope": ["security_boundary", "negative_tests", "untrusted input flows"],
                 "edit_scope": ["boundary validation source files only"],
                 "verification_scope": [item for item in negative_tests if any(word in item for word in ("input", "path", "auth", "token"))],
@@ -854,6 +859,7 @@ def implementation_work_packages(
                 "id": "runtime_configuration_package",
                 "owner": "CodeBrigade",
                 "purpose": "Keep config keys, environment overrides, startup behavior, and runtime defaults aligned.",
+                "impact_surfaces": ["runtime_configuration"],
                 "read_scope": ["runtime_configuration", "config files", "environment loader", "startup entrypoints"],
                 "edit_scope": ["configuration loader, defaults, docs, or entrypoints required by the task"],
                 "verification_scope": [item for item in [*targeted_commands, *negative_tests] if any(word in item.lower() for word in ("config", "runtime", "startup", "env"))],
@@ -867,6 +873,7 @@ def implementation_work_packages(
                 "id": "concurrency_runtime_package",
                 "owner": "CodeBrigade",
                 "purpose": "Protect parallel, retry, cache, and shared-state behavior from nondeterministic regressions.",
+                "impact_surfaces": ["concurrency_runtime"],
                 "read_scope": ["concurrency_runtime", "shared-state callers", "retry/cache boundaries"],
                 "edit_scope": ["state coordination source files only"],
                 "verification_scope": [item for item in [*targeted_commands, *negative_tests] if any(word in item.lower() for word in ("parallel", "retry", "state", "cache"))],
@@ -880,6 +887,7 @@ def implementation_work_packages(
                 "id": "architecture_refactor_package",
                 "owner": "CodeBrigade",
                 "purpose": "Preserve behavior while moving internal boundaries, ownership, or module structure.",
+                "impact_surfaces": ["internal_architecture", "source_behavior"],
                 "read_scope": ["internal_architecture", "dependency edge review", "public callers"],
                 "edit_scope": ["source files justified by the selected refactor strategy"],
                 "verification_scope": [item for item in targeted_commands if any(word in item.lower() for word in ("test", "compile", "lint", "type", "dependency", "behavior"))],
@@ -945,11 +953,22 @@ def planning_review_gate(
             if not isinstance(package, dict):
                 blockers.append("implementation work package is not an object")
                 continue
-            for key in ("id", "owner", "purpose", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
+            for key in ("id", "owner", "purpose", "impact_surfaces", "read_scope", "edit_scope", "verification_scope", "risk_controls", "handoff_criteria"):
                 if key not in package:
                     blockers.append(f"implementation work package missing {key}: {package.get('id', '<unknown>')}")
             if package.get("owner") != "CodeBrigade":
                 blockers.append(f"implementation work package owner must be CodeBrigade: {package.get('id', '<unknown>')}")
+        planned_surfaces = {surface.get("surface") for surface in surface_matrix.get("rows", []) if isinstance(surface, dict)}
+        covered_surfaces = {
+            surface
+            for package in packages
+            if isinstance(package, dict)
+            for surface in package.get("impact_surfaces", [])
+            if isinstance(surface, str)
+        }
+        missing_package_surfaces = sorted(surface for surface in planned_surfaces if surface and surface not in covered_surfaces)
+        if missing_package_surfaces:
+            blockers.append("implementation work packages do not cover surfaces: " + ", ".join(missing_package_surfaces))
     if verification.get("negative_tests") and not any("negative" in item for item in acceptance.get("must_prove", [])):
         blockers.append("negative test requirement is not reflected in acceptance contract")
     score = 100
