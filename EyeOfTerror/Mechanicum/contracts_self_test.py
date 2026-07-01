@@ -44,6 +44,17 @@ def assert_required(schema_path: Path, payload: dict, label: str) -> None:
         raise AssertionError(f"{label} missing schema required fields {missing}: {payload}")
 
 
+def assert_nested_required(schema_path: Path, payload: dict, field: str, label: str) -> None:
+    schema = load_schema(schema_path)
+    field_schema = schema.get("properties", {}).get(field, {})
+    nested_payload = payload.get(field)
+    if not isinstance(nested_payload, dict):
+        raise AssertionError(f"{label} missing nested object {field}: {payload}")
+    missing = [nested for nested in field_schema.get("required", []) if nested not in nested_payload]
+    if missing:
+        raise AssertionError(f"{label}.{field} missing schema required fields {missing}: {nested_payload}")
+
+
 def main() -> int:
     packet = build_planning_packet(
         {
@@ -56,7 +67,9 @@ def main() -> int:
     brief = build_implementation_brief(packet, survey)
     assert_required(ROOT / "Ceraxia" / "contracts" / "implementation_brief.schema.json", brief, "implementation brief")
     worker_report = build_worker_report(brief, dry_run=True)
-    assert_required(ROOT / "CodeBrigade" / "code_brigade_contract.schema.json", worker_report, "worker report")
+    code_schema = ROOT / "CodeBrigade" / "code_brigade_contract.schema.json"
+    assert_required(code_schema, worker_report, "worker report")
+    assert_nested_required(code_schema, worker_report, "implementation_plan", "worker report")
     verification = build_verification_report(brief, worker_report)
     review = review_gate(packet, brief, worker_report, verification)
     status = {"state": "finalized"}
