@@ -233,6 +233,17 @@ def valid_brief() -> dict:
             "recommended_timeout_minutes": 30,
             "escalation_triggers": ["verification fails twice on the same behavior"],
         },
+        "execution_intent": {
+            "kind": "ceraxia_code_brigade_execution_intent",
+            "contract_version": "eye-mechanicum.v1",
+            "mode": "planning_handoff_only",
+            "adapter_capability": "explicit_patch_adapter_only",
+            "explicit_patch_present": False,
+            "real_execution_supported": False,
+            "dry_run_requested": False,
+            "blockers": ["unshaped source mutation requires a future CodeBrigade autonomous execution adapter"],
+            "required_next_adapter": "autonomous CodeBrigade source-edit adapter",
+        },
         "repo_survey_evidence": {
             "candidate_files": ["app.py"],
             "test_files": ["test_app.py"],
@@ -279,6 +290,8 @@ def main() -> int:
         raise AssertionError(f"worker report contract version drifted: {dry_report}")
     if dry_report["execution_policy_status"] != "blocked_until_adapter_is_wired":
         raise AssertionError(f"dry-run worker report must expose blocked execution policy: {dry_report}")
+    if dry_report["execution_intent"]["mode"] != "planning_handoff_only" or dry_report["execution_intent"]["real_execution_supported"]:
+        raise AssertionError(f"dry-run unshaped worker report should expose planning-only execution intent: {dry_report}")
     if not dry_report["work_package_statuses"] or any(item["status"] != "planned" for item in dry_report["work_package_statuses"]):
         raise AssertionError(f"dry-run worker report should mark work packages planned: {dry_report}")
     plan = dry_report["implementation_plan"]
@@ -312,6 +325,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve impacted surfaces: {plan}")
     if plan["execution_complexity"] != "medium" or plan["expected_code_brigade_iterations"] != 2:
         raise AssertionError(f"implementation plan should preserve execution forecast: {plan}")
+    if plan["execution_intent"]["required_next_adapter"] != "autonomous CodeBrigade source-edit adapter":
+        raise AssertionError(f"implementation plan should preserve execution intent: {plan}")
     if "execution preflight passes" not in plan["mutation_preconditions"]:
         raise AssertionError(f"implementation plan should preserve mutation preconditions: {plan}")
     if [package["id"] for package in plan["implementation_work_packages"]] != [
@@ -377,9 +392,22 @@ def main() -> int:
                 ]
             }
         )
+        patch_brief["execution_intent"] = {
+            "kind": "ceraxia_code_brigade_execution_intent",
+            "contract_version": "eye-mechanicum.v1",
+            "mode": "explicit_patch_execution",
+            "adapter_capability": "explicit_patch_adapter_only",
+            "explicit_patch_present": True,
+            "real_execution_supported": True,
+            "dry_run_requested": False,
+            "blockers": [],
+            "required_next_adapter": "",
+        }
         patch_report = code_brigade_adapter.build_worker_report(patch_brief, dry_run=False)
         if patch_report["status"] != "implemented" or patch_report["changed_files"] != ["app.py"]:
             raise AssertionError(f"explicit patch execution should report implemented changed files: {patch_report}")
+        if patch_report["execution_intent"]["mode"] != "explicit_patch_execution" or not patch_report["execution_intent"]["real_execution_supported"]:
+            raise AssertionError(f"explicit patch execution should expose executable intent: {patch_report}")
         if not patch_report["work_package_statuses"] or any(item["status"] != "implemented" for item in patch_report["work_package_statuses"]):
             raise AssertionError(f"implemented patch should mark work packages implemented: {patch_report}")
         if patch_report["execution_result"]["status"] != "implemented":

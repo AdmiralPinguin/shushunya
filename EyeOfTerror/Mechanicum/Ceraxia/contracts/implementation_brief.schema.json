@@ -30,6 +30,7 @@
     "work_breakdown",
     "impact_analysis",
     "execution_forecast",
+    "execution_intent",
     "code_brigade_handoff",
     "blocked",
     "blockers"
@@ -167,6 +168,52 @@
     },
     "execution_forecast": {
       "type": "object"
+    },
+    "execution_intent": {
+      "type": "object",
+      "required": [
+        "kind",
+        "contract_version",
+        "mode",
+        "adapter_capability",
+        "explicit_patch_present",
+        "real_execution_supported",
+        "dry_run_requested",
+        "blockers",
+        "required_next_adapter"
+      ],
+      "properties": {
+        "kind": {
+          "const": "ceraxia_code_brigade_execution_intent"
+        },
+        "contract_version": {
+          "const": "eye-mechanicum.v1"
+        },
+        "mode": {
+          "enum": ["planning_handoff_only", "explicit_patch_execution"]
+        },
+        "adapter_capability": {
+          "const": "explicit_patch_adapter_only"
+        },
+        "explicit_patch_present": {
+          "type": "boolean"
+        },
+        "real_execution_supported": {
+          "type": "boolean"
+        },
+        "dry_run_requested": {
+          "type": "boolean"
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "required_next_adapter": {
+          "type": "string"
+        }
+      }
     },
     "code_brigade_handoff": {
       "type": "object"

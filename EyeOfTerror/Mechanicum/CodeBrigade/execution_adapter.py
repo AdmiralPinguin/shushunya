@@ -22,7 +22,7 @@ class PatchApplicationError(ValueError):
 def extract_explicit_patch(task: str) -> dict[str, Any]:
     marker = "CERAXIA_PATCH:"
     if marker not in task:
-        raise ValueError("real CodeBrigade execution adapter is not configured for tasks without explicit CERAXIA_PATCH")
+        raise ValueError("unshaped source mutation requires a future CodeBrigade autonomous execution adapter; current adapter only executes explicit CERAXIA_PATCH")
     raw = task.split(marker, 1)[1].strip()
     decoder = json.JSONDecoder()
     payload, _ = decoder.raw_decode(raw)

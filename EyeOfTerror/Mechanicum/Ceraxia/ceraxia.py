@@ -151,6 +151,28 @@ def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) ->
     }
 
 
+def build_execution_intent(packet: dict[str, Any], dry_run: bool | None = None) -> dict[str, Any]:
+    task = str(packet.get("task") or "")
+    has_explicit_patch = "CERAXIA_PATCH:" in task
+    mode = "explicit_patch_execution" if has_explicit_patch else "planning_handoff_only"
+    blockers: list[str] = []
+    if dry_run is True:
+        blockers.append("dry run requested; source mutation is intentionally skipped")
+    if not has_explicit_patch:
+        blockers.append("unshaped source mutation requires a future CodeBrigade autonomous execution adapter")
+    return {
+        "kind": "ceraxia_code_brigade_execution_intent",
+        "contract_version": CONTRACT_VERSION,
+        "mode": mode,
+        "adapter_capability": "explicit_patch_adapter_only",
+        "explicit_patch_present": has_explicit_patch,
+        "real_execution_supported": has_explicit_patch,
+        "dry_run_requested": bool(dry_run) if dry_run is not None else False,
+        "blockers": blockers,
+        "required_next_adapter": "" if has_explicit_patch else "autonomous CodeBrigade source-edit adapter",
+    }
+
+
 def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
     triage = packet.get("task_triage") if isinstance(packet.get("task_triage"), dict) else {}
     verification = packet.get("verification_strategy") if isinstance(packet.get("verification_strategy"), dict) else {}
@@ -206,6 +228,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "work_breakdown": packet.get("work_breakdown", {}),
         "impact_analysis": packet.get("impact_analysis", {}),
         "execution_forecast": packet.get("execution_forecast", {}),
+        "execution_intent": build_execution_intent(packet),
         "code_brigade_handoff": handoff,
         "repo_survey_evidence": {
             "candidate_files": survey.get("candidate_files", []),
@@ -532,6 +555,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
+    execution_intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     blockers = readiness.get("blockers", [])
     warnings = review.get("warnings", [])
@@ -576,6 +600,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Execution policy status: {worker_report.get('execution_policy_status', '')}",
         f"Execution result status: {execution_result.get('status', '')}",
         f"Execution preflight ok: {preflight.get('ok') if preflight else 'n/a'}",
+        f"Execution intent: {execution_intent.get('mode', '')}",
+        f"Execution adapter capability: {execution_intent.get('adapter_capability', '')}",
         "",
         "## Readiness",
         "",
@@ -724,6 +750,8 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     if summary.get("code_brigade_execution_result_status", "") != execution_result.get("status", ""):
         findings.append({"severity": "blocker", "finding": "run_summary code_brigade_execution_result_status disagrees with worker_report.json"})
+    if summary.get("code_brigade_execution_intent_mode", "") != worker_report.get("execution_intent", {}).get("mode", ""):
+        findings.append({"severity": "blocker", "finding": "run_summary code_brigade_execution_intent_mode disagrees with worker_report.json"})
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
     if summary.get("planning_review_decision", "") != planning_review.get("decision", ""):
         findings.append({"severity": "blocker", "finding": "run_summary planning_review_decision disagrees with implementation_brief.json"})
@@ -838,7 +866,10 @@ def build_execution_readiness(
     if review.get("decision") not in {"ready", "dry_run_ready"}:
         blockers.append("review gate did not approve the handoff")
     if dry_run:
-        blockers.append("real CodeBrigade execution is not wired in this controller yet")
+        blockers.append("dry run requested; real CodeBrigade execution was intentionally skipped")
+    intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
+    if not dry_run and intent.get("real_execution_supported") is False:
+        blockers.append("real CodeBrigade execution requires autonomous unshaped source-edit adapter")
     return {
         "kind": "ceraxia_execution_readiness",
         "contract_version": CONTRACT_VERSION,
@@ -862,6 +893,7 @@ def build_run_summary(
 ) -> dict[str, Any]:
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
+    execution_intent = worker_report.get("execution_intent") if isinstance(worker_report.get("execution_intent"), dict) else {}
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
@@ -909,6 +941,8 @@ def build_run_summary(
         "execution_readiness": readiness.get("decision"),
         "worker_status": worker_report.get("status"),
         "code_brigade_execution_policy_status": worker_report.get("execution_policy_status"),
+        "code_brigade_execution_intent_mode": execution_intent.get("mode", ""),
+        "code_brigade_execution_real_supported": bool(execution_intent.get("real_execution_supported")),
         "code_brigade_execution_result_status": execution_result.get("status", ""),
         "code_brigade_execution_preflight_ok": preflight.get("ok") if preflight else None,
         "code_brigade_execution_preflight_blocker_count": len(preflight.get("blockers", [])) if preflight else 0,

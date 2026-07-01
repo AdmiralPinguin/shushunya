@@ -149,6 +149,19 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief execution_forecast.complexity is required")
     if not isinstance(forecast.get("expected_code_brigade_iterations"), int) or forecast.get("expected_code_brigade_iterations", 0) < 1:
         problems.append("brief execution_forecast.expected_code_brigade_iterations is required")
+    execution_intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
+    if execution_intent.get("kind") != "ceraxia_code_brigade_execution_intent":
+        problems.append("brief execution_intent kind is required")
+    if execution_intent.get("contract_version") != CONTRACT_VERSION:
+        problems.append("brief execution_intent contract_version is unsupported")
+    if execution_intent.get("mode") not in {"planning_handoff_only", "explicit_patch_execution"}:
+        problems.append("brief execution_intent.mode is required")
+    if execution_intent.get("adapter_capability") != "explicit_patch_adapter_only":
+        problems.append("brief execution_intent.adapter_capability is required")
+    if not isinstance(execution_intent.get("explicit_patch_present"), bool):
+        problems.append("brief execution_intent.explicit_patch_present is required")
+    if not isinstance(execution_intent.get("real_execution_supported"), bool):
+        problems.append("brief execution_intent.real_execution_supported is required")
     handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
     if handoff.get("target") != "CodeBrigade":
         problems.append("brief code_brigade_handoff must target CodeBrigade")

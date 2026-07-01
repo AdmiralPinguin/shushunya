@@ -34,6 +34,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     impact = brief.get("impact_analysis") if isinstance(brief.get("impact_analysis"), dict) else {}
     forecast = brief.get("execution_forecast") if isinstance(brief.get("execution_forecast"), dict) else {}
+    execution_intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
     suggested_commands = brief.get("suggested_verification_commands")
     if not isinstance(suggested_commands, list):
         suggested_commands = []
@@ -75,6 +76,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "expected_code_brigade_iterations": forecast.get("expected_code_brigade_iterations", 0),
         "recommended_timeout_minutes": forecast.get("recommended_timeout_minutes", 0),
         "escalation_triggers": forecast.get("escalation_triggers", []) if isinstance(forecast.get("escalation_triggers"), list) else [],
+        "execution_intent": execution_intent,
         "mutation_preconditions": blueprint.get("mutation_preconditions", []) if isinstance(blueprint.get("mutation_preconditions"), list) else [],
         "implementation_work_packages": packages,
         "work_package_review_order": work_packages.get("review_order", []) if isinstance(work_packages.get("review_order"), list) else [],
@@ -109,6 +111,11 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
 def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     validation_problems = validate_implementation_brief(brief)
     implementation_plan = build_implementation_plan(brief)
+    execution_intent = dict(brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {})
+    execution_intent["dry_run_requested"] = dry_run
+    if dry_run and "dry run requested; source mutation is intentionally skipped" not in execution_intent.get("blockers", []):
+        blockers = execution_intent.get("blockers") if isinstance(execution_intent.get("blockers"), list) else []
+        execution_intent["blockers"] = [*blockers, "dry run requested; source mutation is intentionally skipped"]
     work_packages = implementation_plan.get("implementation_work_packages") if isinstance(implementation_plan.get("implementation_work_packages"), list) else []
     changed_files: list[str] = []
     notes: list[str] = []
@@ -158,6 +165,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "status": status,
         "dry_run": dry_run,
         "changed_files": changed_files,
+        "execution_intent": execution_intent,
         "implementation_plan": implementation_plan,
         "work_package_statuses": package_statuses,
         "execution_policy_status": REAL_EXECUTION_STATUS if dry_run or status == "blocked" else "real_execution_adapter_active",
