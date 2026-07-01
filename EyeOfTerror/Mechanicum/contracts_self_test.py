@@ -66,6 +66,17 @@ def assert_schema_subset(schema: dict, payload: object, label: str) -> None:
         raise AssertionError(f"{label} expected const {schema['const']}: {payload}")
     if "enum" in schema and payload not in schema["enum"]:
         raise AssertionError(f"{label} expected one of {schema['enum']}: {payload}")
+    if isinstance(payload, list):
+        min_items = schema.get("minItems")
+        if isinstance(min_items, int) and len(payload) < min_items:
+            raise AssertionError(f"{label} expected at least {min_items} items: {payload}")
+        prefix_items = schema.get("prefixItems")
+        if isinstance(prefix_items, list):
+            for index, item_schema in enumerate(prefix_items):
+                if index >= len(payload):
+                    raise AssertionError(f"{label} missing prefix item {index}: {payload}")
+                if isinstance(item_schema, dict):
+                    assert_schema_subset(item_schema, payload[index], f"{label}[{index}]")
     if not isinstance(payload, dict):
         if isinstance(payload, list) and "items" in schema:
             for index, item in enumerate(payload):

@@ -35,25 +35,117 @@
     "task": {"type": "string"},
     "roles_completed": {
       "type": "array",
+      "prefixItems": [
+        {"const": "TaskTriage"},
+        {"const": "RepoSurveyor"},
+        {"const": "DesignStrategos"},
+        {"const": "VerificationArchitect"},
+        {"const": "RiskScribe"}
+      ],
       "items": {"type": "string"},
       "minItems": 5
     },
-    "problem_statement": {"type": "object"},
-    "task_triage": {"type": "object"},
-    "repo_survey_request": {"type": "object"},
-    "dependency_map": {"type": "object"},
-    "work_breakdown": {"type": "object"},
-    "impact_analysis": {"type": "object"},
-    "execution_forecast": {"type": "object"},
-    "design_options": {"type": "object"},
-    "verification_strategy": {"type": "object"},
-    "surface_verification_matrix": {"type": "object"},
-    "risk_register": {"type": "object"},
-    "quality_bar": {"type": "object"},
-    "acceptance_contract": {"type": "object"},
-    "implementation_brief_blueprint": {"type": "object"},
-    "planning_review_gate": {"type": "object"},
-    "code_brigade_handoff": {"type": "object"},
-    "next_action": {"type": "object"}
+    "problem_statement": {
+      "type": "object",
+      "required": ["intent", "task_kinds", "known_constraints", "explicit_path_hints", "definition_of_done"]
+    },
+    "task_triage": {
+      "type": "object",
+      "required": ["task_kinds", "risk_level", "risk_score", "needs_clarification", "required_artifacts", "handoff_to"],
+      "properties": {
+        "risk_level": {"enum": ["low", "medium", "high"]},
+        "handoff_to": {"const": "RepoSurveyor"}
+      }
+    },
+    "repo_survey_request": {
+      "type": "object",
+      "required": ["repo_path", "read_only", "path_hints", "focus", "exclude_patterns", "expected_output", "handoff_to"],
+      "properties": {
+        "read_only": {"const": true},
+        "expected_output": {"const": "repo_survey.json"},
+        "handoff_to": {"const": "DesignStrategos"}
+      }
+    },
+    "dependency_map": {
+      "type": "object",
+      "required": ["nodes", "critical_path", "blocked_without", "survey_reference"]
+    },
+    "work_breakdown": {
+      "type": "object",
+      "required": ["risk_level", "phases", "critical_path", "parallelizable_after_survey", "stop_conditions"]
+    },
+    "impact_analysis": {
+      "type": "object",
+      "required": ["surfaces", "highest_risk_surface", "requires_cross_surface_review"]
+    },
+    "execution_forecast": {
+      "type": "object",
+      "required": ["complexity", "complexity_score", "expected_code_brigade_iterations", "recommended_timeout_minutes", "escalation_triggers"],
+      "properties": {
+        "complexity": {"enum": ["low", "medium", "high"]}
+      }
+    },
+    "design_options": {
+      "type": "object",
+      "required": ["options", "selected_strategy", "requires_ceraxia_approval", "handoff_to"],
+      "properties": {
+        "requires_ceraxia_approval": {"const": true},
+        "handoff_to": {"const": "VerificationArchitect"}
+      }
+    },
+    "verification_strategy": {
+      "type": "object",
+      "required": ["targeted_commands", "checks", "negative_tests", "broad_verification_required", "broad_verification_or_blocker", "handoff_to"],
+      "properties": {
+        "handoff_to": {"const": "RiskScribe"}
+      }
+    },
+    "surface_verification_matrix": {
+      "type": "object",
+      "required": ["rows", "complete", "blockers"]
+    },
+    "risk_register": {
+      "type": "object",
+      "required": ["risks", "acceptance_gates", "handoff_to"],
+      "properties": {
+        "handoff_to": {"const": "Ceraxia"}
+      }
+    },
+    "quality_bar": {
+      "type": "object",
+      "required": ["must_have_evidence", "forbidden_shortcuts", "success_definition"]
+    },
+    "acceptance_contract": {
+      "type": "object",
+      "required": ["must_prove", "review_questions"]
+    },
+    "implementation_brief_blueprint": {
+      "type": "object",
+      "required": ["target", "required_sections", "mutation_preconditions", "dependency_critical_path", "work_phases"],
+      "properties": {
+        "target": {"const": "CodeBrigade"}
+      }
+    },
+    "planning_review_gate": {
+      "type": "object",
+      "required": ["decision", "score", "blockers", "warnings"],
+      "properties": {
+        "decision": {"enum": ["ready_for_ceraxia_review", "revise", "blocked"]}
+      }
+    },
+    "code_brigade_handoff": {
+      "type": "object",
+      "required": ["target", "steps"],
+      "properties": {
+        "target": {"const": "CodeBrigade"}
+      }
+    },
+    "next_action": {
+      "type": "object",
+      "required": ["owner", "action", "reason"],
+      "properties": {
+        "owner": {"const": "Ceraxia"}
+      }
+    }
   }
 }
