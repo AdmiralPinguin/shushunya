@@ -544,8 +544,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(review["verification_sufficiency"]["output_summary_count"], 1)
             self.assertTrue(review["verification_sufficiency"]["output_signal_counts"])
             surface_evidence = review["surface_verification_sufficiency"]["surface_evidence"]
-            self.assertTrue(any(row["surface"] == "source_behavior" and row["status"] == "executed" for row in surface_evidence))
-            self.assertTrue(any(row["surface"] == "source_behavior" and row["matched_commands"] for row in surface_evidence))
+            source_surface = next(row for row in surface_evidence if row["surface"] == "source_behavior")
+            self.assertEqual(source_surface["status"], "executed")
+            self.assertTrue(source_surface["matched_commands"])
+            self.assertTrue(source_surface["matched_output_signal_counts"])
             self.assertTrue(any(row["status"] == "partial" for row in surface_evidence))
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["surface_verification_status"], "partial")
@@ -945,6 +947,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertEqual(review["surface_verification_sufficiency"]["status"], "failed")
         self.assertEqual(review["verification_sufficiency"]["output_signal_counts"]["failure_text"], 1)
         self.assertEqual(review["verification_sufficiency"]["output_diagnostic_counts"]["assertion_failure"], 1)
+        failed_source_surface = next(row for row in review["surface_verification_sufficiency"]["surface_evidence"] if row["surface"] == "source_behavior")
+        self.assertEqual(failed_source_surface["matched_output_signal_counts"]["failure_text"], 1)
+        self.assertEqual(failed_source_surface["matched_output_diagnostic_counts"]["assertion_failure"], 1)
         self.assertEqual(review["diagnostic_repair_queue"]["status"], "queued")
         self.assertEqual(review["diagnostic_repair_queue"]["item_count"], 1)
         repair_item = review["diagnostic_repair_queue"]["items"][0]

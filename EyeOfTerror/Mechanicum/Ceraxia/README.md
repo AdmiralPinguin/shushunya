@@ -62,6 +62,9 @@ counters for fast orchestration checks.
 `review_gate.json`, so orchestration can distinguish executed, partial,
 planned-only, missing, failed, and blocked evidence instead of reading only one
 aggregate surface status.
+Each `review_gate.json.surface_verification_sufficiency.surface_evidence` row
+also carries output-signal and diagnostic counts for the commands matched to
+that surface.
 `repo_survey.json.truncated=true` means the survey hit its file limit; Ceraxia
 keeps the package usable, but `review_gate.json` records a partial-coverage
 warning.

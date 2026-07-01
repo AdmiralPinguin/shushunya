@@ -652,6 +652,33 @@ def commands_matching_surface(surface: str, commands: list[dict[str, Any]], nega
     return []
 
 
+def output_summary_for_commands(output_summary: list[Any], commands: list[str]) -> list[dict[str, Any]]:
+    command_set = set(commands)
+    return [
+        item
+        for item in output_summary
+        if isinstance(item, dict) and str(item.get("command") or "") in command_set
+    ]
+
+
+def output_signal_counts_for_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        signal = str(row.get("output_signal") or "unknown")
+        counts[signal] = counts.get(signal, 0) + 1
+    return counts
+
+
+def output_diagnostic_counts_for_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "traceback": sum(1 for row in rows if row.get("has_traceback")),
+        "assertion_failure": sum(1 for row in rows if row.get("has_assertion_failure")),
+        "syntax_error": sum(1 for row in rows if row.get("has_syntax_error")),
+        "no_tests_ran": sum(1 for row in rows if row.get("has_no_tests_ran")),
+        "missing_import": sum(1 for row in rows if row.get("missing_imports")),
+    }
+
+
 def has_test_command(commands: list[dict[str, Any]]) -> bool:
     return any("pytest" in command or "test" in command or "unittest" in command for command in command_texts(commands))
 
@@ -663,6 +690,7 @@ def has_source_command(commands: list[dict[str, Any]]) -> bool:
 def surface_evidence_rows(surface_rows: list[Any], verification_report: dict[str, Any]) -> list[dict[str, Any]]:
     planned_commands = verification_report.get("commands_planned") if isinstance(verification_report.get("commands_planned"), list) else []
     executed_commands = meaningful_executed_commands(verification_report)
+    output_summary = verification_report.get("output_summary") if isinstance(verification_report.get("output_summary"), list) else []
     negative_tests = verification_report.get("negative_tests_required") if isinstance(verification_report.get("negative_tests_required"), list) else []
     verification_status = str(verification_report.get("status", ""))
     rows: list[dict[str, Any]] = []
@@ -712,12 +740,15 @@ def surface_evidence_rows(surface_rows: list[Any], verification_report: dict[str
             status = "planned_only"
             reason = "verification is planned but not executed"
             matched_commands = []
+        matched_output_rows = output_summary_for_commands(output_summary, matched_commands)
         rows.append(
             {
                 "surface": surface,
                 "status": status,
                 "reason": reason,
                 "matched_commands": matched_commands,
+                "matched_output_signal_counts": output_signal_counts_for_rows(matched_output_rows),
+                "matched_output_diagnostic_counts": output_diagnostic_counts_for_rows(matched_output_rows),
                 "covered_by": surface_row.get("covered_by", []) if isinstance(surface_row.get("covered_by"), list) else [],
                 "evidence_needed": surface_row.get("evidence_needed", []) if isinstance(surface_row.get("evidence_needed"), list) else [],
             }
