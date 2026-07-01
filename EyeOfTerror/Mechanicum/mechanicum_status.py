@@ -53,6 +53,7 @@ COMPONENTS = {
             "README.md",
             "code_brigade_contract.schema.json",
             "code_brigade_adapter.py",
+            "diagnostic_repair_contract.py",
             "execution_adapter.py",
             "execution_contract.py",
             "execution_preflight.py",

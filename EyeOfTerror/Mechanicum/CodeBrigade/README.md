@@ -64,6 +64,10 @@ derives its diagnostic input contract, repair-loop read requirements, stop
 conditions, and max attempts from the PlanningBrigade `diagnostic_repair_plan`,
 so the future adapter is expected to consume verification diagnostics rather
 than edit blindly.
+`diagnostic_repair_contract.py` validates Ceraxia
+`diagnostic_repair_request.json` artifacts and builds a CodeBrigade intake
+summary with impacted surfaces, package ids, target files, preserved tests, and
+blockers. It does not execute source edits yet.
 It also includes `execution_policy_status`; this remains
 `blocked_until_adapter_is_wired` for dry-run handoffs and blocked execution
 requests, and switches to `real_execution_adapter_active` only when the explicit

@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import code_brigade_adapter
+from diagnostic_repair_contract import build_diagnostic_repair_intake
 import execution_adapter
 from execution_preflight import build_execution_preflight
 
@@ -695,6 +696,60 @@ def main() -> int:
         or "minimal_patch_package" not in plan["work_package_dependency_graph"]["rows"][-1]["depends_on"]
     ):
         raise AssertionError(f"implementation plan should preserve work package dependency graph: {plan}")
+    repair_request = {
+        "kind": "ceraxia_code_brigade_diagnostic_repair_request",
+        "contract_version": "eye-mechanicum.v1",
+        "run_id": "run-1",
+        "status": "required",
+        "target": "CodeBrigade",
+        "repo_path": "/repo",
+        "task": "почини pytest",
+        "verification_status": "failed",
+        "review_decision": "blocked",
+        "diagnostic_repair_plan": plan["diagnostic_repair_plan"],
+        "diagnostic_repair_queue": {
+            "status": "queued",
+            "item_count": 1,
+            "items": [
+                {
+                    "command": "python -m pytest",
+                    "status": "failed",
+                    "priority": "normal",
+                    "diagnostic_signals": ["assertion_failure"],
+                    "impacted_surfaces": ["source_behavior"],
+                    "package_ids": ["minimal_patch_package", "verification_evidence_package"],
+                    "traceback_files": [],
+                    "missing_imports": [],
+                    "read_before_repair": plan["diagnostic_repair_plan"]["read_before_repair"],
+                    "concrete_read_targets": ["app.py"],
+                    "stop_conditions": plan["diagnostic_repair_plan"]["stop_conditions"],
+                    "repair_evidence_required": plan["diagnostic_repair_plan"]["repair_evidence_required"],
+                    "max_repair_attempts": 3,
+                }
+            ],
+            "source": "verification_output_diagnostics",
+            "plan_present": True,
+        },
+        "target_files_to_inspect": ["app.py"],
+        "test_files_to_preserve": ["test_app.py"],
+        "reverse_dependency_index": {"app.py": ["test_app.py"]},
+        "scope_budget": plan["scope_budget"],
+        "return_contract": [
+            "worker_report.json with changed files, package statuses, and residual blockers",
+            "verification_report.json after rerunning relevant failed commands",
+            "diagnostic_summary mapped to repaired queue items",
+        ],
+    }
+    repair_intake = build_diagnostic_repair_intake(repair_request)
+    if repair_intake["status"] != "ready" or repair_intake["item_count"] != 1:
+        raise AssertionError(f"diagnostic repair intake should be ready for a valid request: {repair_intake}")
+    if repair_intake["package_ids"] != ["minimal_patch_package", "verification_evidence_package"]:
+        raise AssertionError(f"diagnostic repair intake should preserve package ids: {repair_intake}")
+    broken_repair_request = dict(repair_request)
+    broken_repair_request["diagnostic_repair_queue"] = dict(repair_request["diagnostic_repair_queue"], item_count=2)
+    broken_intake = build_diagnostic_repair_intake(broken_repair_request)
+    if broken_intake["status"] != "blocked" or not broken_intake["blockers"]:
+        raise AssertionError(f"diagnostic repair intake should block inconsistent queue counts: {broken_intake}")
     if plan["work_package_blocking_policies"].get("minimal_patch_package") != ["block when patch preflight fails"]:
         raise AssertionError(f"implementation plan should expose work package blocking policies: {plan}")
     if "final report answers the original task rather than only package-local success" not in plan["work_package_handoff_criteria"]:
