@@ -16,6 +16,7 @@
     "work_breakdown",
     "impact_analysis",
     "execution_forecast",
+    "expert_quality_plan",
     "design_options",
     "verification_strategy",
     "surface_verification_matrix",
@@ -85,6 +86,34 @@
       "required": ["complexity", "complexity_score", "expected_code_brigade_iterations", "recommended_timeout_minutes", "escalation_triggers"],
       "properties": {
         "complexity": {"enum": ["low", "medium", "high"]}
+      }
+    },
+    "expert_quality_plan": {
+      "type": "object",
+      "required": ["level", "required_for_expert_gate", "tradeoff_register", "rollback_strategy", "observability_plan", "review_checklist", "escalation_policy"],
+      "properties": {
+        "level": {"enum": ["standard", "expert"]},
+        "required_for_expert_gate": {"type": "boolean"},
+        "tradeoff_register": {
+          "type": "array",
+          "minItems": 2
+        },
+        "rollback_strategy": {
+          "type": "array",
+          "minItems": 2
+        },
+        "observability_plan": {
+          "type": "array",
+          "minItems": 2
+        },
+        "review_checklist": {
+          "type": "array",
+          "minItems": 4
+        },
+        "escalation_policy": {
+          "type": "array",
+          "minItems": 2
+        }
       }
     },
     "design_options": {

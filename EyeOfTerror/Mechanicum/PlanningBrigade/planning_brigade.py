@@ -474,6 +474,95 @@ def execution_forecast(triage: dict[str, Any], breakdown: dict[str, Any], impact
     }
 
 
+def expert_quality_plan(
+    triage: dict[str, Any],
+    impact: dict[str, Any],
+    forecast: dict[str, Any],
+) -> dict[str, Any]:
+    kinds = set(triage.get("task_kinds", []))
+    surfaces = [
+        str(surface.get("surface") or "")
+        for surface in impact.get("surfaces", [])
+        if isinstance(surface, dict) and surface.get("surface")
+    ]
+    expert_required = triage.get("risk_level") == "high" or forecast.get("complexity") == "high" or impact.get("requires_cross_surface_review") is True
+    tradeoffs = [
+        {
+            "decision": "minimal_patch_vs_broad_rewrite",
+            "prefer": "minimal_patch",
+            "reason": "Preserve public behavior until repository evidence proves a wider rewrite is necessary.",
+        },
+        {
+            "decision": "fast_green_checks_vs_behavior_proof",
+            "prefer": "behavior_proof",
+            "reason": "Syntax or smoke checks are not enough for user-visible, compatibility, security, or concurrency behavior.",
+        },
+    ]
+    rollback = [
+        "keep the changed-file set small enough to revert as one package",
+        "name the previous behavior or data shape that must still be readable after the patch",
+    ]
+    observability = [
+        "record executed, skipped, failed, and blocked verification commands",
+        "preserve changed files, candidate files, and package-level blockers in the worker report",
+    ]
+    review_checklist = [
+        "does the final package satisfy the original task rather than a convenient subset",
+        "are changed files justified by repository evidence and package ownership",
+        "does every high-risk surface have executed evidence or a concrete blocker",
+        "are compatibility, security, runtime, and concurrency risks named when present",
+    ]
+    escalation = [
+        "return to Ceraxia when implementation scope exceeds the selected strategy",
+        "return to PlanningBrigade when verification cannot prove the acceptance contract",
+    ]
+    if "migration" in kinds or "api_compatibility" in kinds:
+        tradeoffs.append(
+            {
+                "decision": "strict_new_shape_vs_backward_compatibility",
+                "prefer": "backward_compatibility",
+                "reason": "Public/data shape changes require explicit migration evidence before old callers are broken.",
+            }
+        )
+        rollback.append("document how old and mixed records can still be read or intentionally rejected")
+        review_checklist.append("old, new, and mixed data/API shapes are tested or explicitly blocked")
+    if "security" in kinds:
+        tradeoffs.append(
+            {
+                "decision": "boundary_patch_vs_feature_shortcut",
+                "prefer": "boundary_patch",
+                "reason": "Security work must close the untrusted-input path before expanding feature behavior.",
+            }
+        )
+        observability.append("capture negative boundary evidence for untrusted input, path, auth, or token flows")
+        review_checklist.append("negative boundary evidence proves the bypass is closed")
+    if "concurrency" in kinds:
+        tradeoffs.append(
+            {
+                "decision": "deterministic_state_vs_fast_shared_cache",
+                "prefer": "deterministic_state",
+                "reason": "Parallel/retry behavior must prefer correctness over a faster but race-prone shared state path.",
+            }
+        )
+        rollback.append("preserve a single-thread or stale-cache fallback when a race cannot be fully bounded")
+        observability.append("record remaining race risk and any non-deterministic verification limitations")
+        review_checklist.append("parallel or retry evidence covers shared-state and cache invalidation behavior")
+    if "refactor" in kinds:
+        rollback.append("keep old public entrypoints available until behavior-preservation evidence passes")
+        review_checklist.append("dependency edge review proves the refactor does not silently move public contracts")
+    return {
+        "role": "DesignStrategos",
+        "level": "expert" if expert_required else "standard",
+        "required_for_expert_gate": expert_required,
+        "impact_surfaces": surfaces,
+        "tradeoff_register": tradeoffs,
+        "rollback_strategy": rollback,
+        "observability_plan": observability,
+        "review_checklist": review_checklist,
+        "escalation_policy": escalation,
+    }
+
+
 def design_options(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
     selected = "minimal_design"
@@ -683,6 +772,7 @@ def acceptance_contract(
     verification: dict[str, Any],
     quality: dict[str, Any],
     surface_matrix: dict[str, Any],
+    expert_plan: dict[str, Any],
 ) -> dict[str, Any]:
     must_prove = list(problem["definition_of_done"])
     must_prove.extend(quality["must_have_evidence"])
@@ -690,6 +780,8 @@ def acceptance_contract(
         must_prove.append("required negative tests are present, executed, or explicitly blocked")
     if not surface_matrix["complete"]:
         must_prove.append("surface verification blockers are resolved or explicitly accepted")
+    if expert_plan.get("required_for_expert_gate") is True:
+        must_prove.append("expert quality plan tradeoffs, rollback, observability, and review checklist are satisfied or explicitly blocked")
     return {
         "role": "PlanningBrigade",
         "risk_level": triage["risk_level"],
@@ -703,6 +795,7 @@ def acceptance_contract(
             "Does the selected design satisfy the original request rather than a convenient subset?",
             "Are changed files justified by repository evidence?",
             "Would a reasonable maintainer accept the verification evidence?",
+            "Do rollback, observability, and review evidence match the task risk level?",
         ],
     }
 
@@ -718,6 +811,7 @@ def implementation_brief_blueprint(
     impact: dict[str, Any],
     surface_matrix: dict[str, Any],
     forecast: dict[str, Any],
+    expert_plan: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "role": "PlanningBrigade",
@@ -746,6 +840,7 @@ def implementation_brief_blueprint(
             "work_breakdown",
             "impact_analysis",
             "execution_forecast",
+            "expert_quality_plan",
             "implementation_work_packages",
             "planning_review_gate",
         ],
@@ -759,11 +854,14 @@ def implementation_brief_blueprint(
         "impact_surfaces": [surface["surface"] for surface in impact["surfaces"]],
         "surface_verification_complete": surface_matrix["complete"],
         "expected_code_brigade_iterations": forecast["expected_code_brigade_iterations"],
+        "expert_quality_level": expert_plan.get("level", "standard"),
+        "expert_review_checklist": expert_plan.get("review_checklist", []),
         "mutation_preconditions": [
             "implementation brief validates",
             "execution preflight passes",
             "candidate files are repo-relative existing non-symlink paths",
             "verification plan is attached to the worker report",
+            "expert quality plan is attached for high-risk or cross-surface work",
         ],
     }
 
@@ -995,6 +1093,7 @@ def planning_review_gate(
     verification: dict[str, Any],
     surface_matrix: dict[str, Any],
     acceptance: dict[str, Any],
+    expert_plan: dict[str, Any] | None = None,
     work_packages: dict[str, Any] | None = None,
     package_matrix: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1014,6 +1113,13 @@ def planning_review_gate(
         blockers.append("verification strategy has no targeted commands")
     if triage["risk_level"] == "high" and not verification.get("broad_verification_required"):
         blockers.append("high-risk task lacks broad verification requirement")
+    if triage["risk_level"] == "high":
+        if not expert_plan or expert_plan.get("level") != "expert":
+            blockers.append("high-risk task lacks expert quality plan")
+        else:
+            for key in ("tradeoff_register", "rollback_strategy", "observability_plan", "review_checklist", "escalation_policy"):
+                if not expert_plan.get(key):
+                    blockers.append(f"expert quality plan missing {key}")
     if surface_matrix.get("complete") is False:
         blockers.extend(str(item) for item in surface_matrix.get("blockers", []))
     if package_matrix is not None and package_matrix.get("complete") is False:
@@ -1073,6 +1179,7 @@ def planning_review_gate(
             "dependency critical path",
             "work phase completeness",
             "verification coverage",
+            "expert quality planning",
             "implementation work package completeness",
             "acceptance evidence alignment",
         ],
@@ -1146,16 +1253,17 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     breakdown = work_breakdown(triage, dependency)
     impact = impact_analysis(triage, problem, survey)
     forecast = execution_forecast(triage, breakdown, impact)
+    expert_plan = expert_quality_plan(triage, impact, forecast)
     design = design_options(payload, triage)
     verification = verification_strategy(triage, payload)
     surface_matrix = surface_verification_matrix(impact, verification)
     risks = risk_register(triage, survey, design, verification)
     quality = quality_bar(triage, verification)
-    acceptance = acceptance_contract(problem, triage, verification, quality, surface_matrix)
-    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix, forecast)
+    acceptance = acceptance_contract(problem, triage, verification, quality, surface_matrix, expert_plan)
+    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix, forecast, expert_plan)
     work_packages = implementation_work_packages(triage, problem, dependency, impact, verification, risks, forecast)
     package_matrix = surface_package_matrix(surface_matrix, work_packages)
-    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, work_packages, package_matrix)
+    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, work_packages, package_matrix)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
         "ok": bool(task),
@@ -1171,6 +1279,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "work_breakdown": breakdown,
         "impact_analysis": impact,
         "execution_forecast": forecast,
+        "expert_quality_plan": expert_plan,
         "design_options": design,
         "verification_strategy": verification,
         "surface_verification_matrix": surface_matrix,

@@ -22,6 +22,7 @@ REQUIRED_PACKET_OBJECTS = [
     "work_breakdown",
     "impact_analysis",
     "execution_forecast",
+    "expert_quality_plan",
     "design_options",
     "verification_strategy",
     "surface_verification_matrix",
@@ -121,6 +122,18 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
     if not isinstance(forecast.get("expected_code_brigade_iterations"), int) or forecast.get("expected_code_brigade_iterations", 0) < 1:
         problems.append("execution forecast must include expected_code_brigade_iterations")
 
+    expert_plan = object_field(packet, "expert_quality_plan")
+    if expert_plan.get("level") not in {"standard", "expert"}:
+        problems.append("expert quality plan must include level")
+    for key in ("tradeoff_register", "rollback_strategy", "observability_plan", "review_checklist", "escalation_policy"):
+        if not isinstance(expert_plan.get(key), list) or len(expert_plan.get(key, [])) < 2:
+            problems.append(f"expert quality plan must include {key}")
+    if triage.get("risk_level") == "high":
+        if expert_plan.get("level") != "expert" or expert_plan.get("required_for_expert_gate") is not True:
+            problems.append("high-risk planning packet must require an expert quality plan")
+        if len(expert_plan.get("review_checklist", [])) < 4:
+            problems.append("high-risk expert quality plan must include a review checklist")
+
     design = object_field(packet, "design_options")
     if not isinstance(design.get("selected_strategy"), str) or not design.get("selected_strategy"):
         problems.append("design options must include selected_strategy")
@@ -181,6 +194,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("implementation brief blueprint must target CodeBrigade")
     if not isinstance(blueprint.get("mutation_preconditions"), list) or len(blueprint.get("mutation_preconditions", [])) < 3:
         problems.append("implementation brief blueprint must include mutation preconditions")
+    if "expert_quality_plan" not in list_field(blueprint.get("required_sections")):
+        problems.append("implementation brief blueprint must require expert_quality_plan")
 
     work_packages = object_field(packet, "implementation_work_packages")
     packages = list_field(work_packages.get("packages"))

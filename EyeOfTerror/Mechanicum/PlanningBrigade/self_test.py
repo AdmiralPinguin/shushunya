@@ -87,6 +87,9 @@ def main() -> int:
         or not any(row["surface"] == "security_boundary" and "security_boundary_package" in row["package_ids"] for row in security_packet["surface_package_matrix"]["rows"])
         or security_packet["execution_forecast"]["complexity"] != "high"
         or security_packet["execution_forecast"]["expected_code_brigade_iterations"] < 4
+        or security_packet["expert_quality_plan"]["level"] != "expert"
+        or security_packet["expert_quality_plan"]["required_for_expert_gate"] is not True
+        or "negative boundary evidence proves the bypass is closed" not in security_packet["expert_quality_plan"]["review_checklist"]
         or security_packet["design_options"]["selected_strategy"] != "boundary_first_patch"
         or "untrusted input is rejected" not in security_packet["verification_strategy"]["negative_tests"]
         or not security_packet["verification_strategy"]["broad_verification_required"]
@@ -133,12 +136,14 @@ def main() -> int:
         or not any(package["id"] == "compatibility_package" and "Protect old/new public or data shapes across callers, readers, and writers." == package["purpose"] for package in migration_packet["implementation_work_packages"]["packages"])
         or "dependency_critical_path" not in migration_packet["implementation_brief_blueprint"]
         or "work_phases" not in migration_packet["implementation_brief_blueprint"]
+        or migration_packet["expert_quality_plan"]["level"] != "expert"
+        or "strict_new_shape_vs_backward_compatibility" not in [item["decision"] for item in migration_packet["expert_quality_plan"]["tradeoff_register"]]
         or migration_packet["code_brigade_handoff"]["target"] != "CodeBrigade"
         or migration_packet["repo_survey_request"]["read_only"] is not True
     ):
         raise AssertionError(f"migration planning packet is incomplete: {migration_packet}")
     required_brief_sections = migration_packet["implementation_brief_blueprint"]["required_sections"]
-    for section in ["surface_verification_matrix", "survey_quality_gate", "execution_forecast", "implementation_work_packages", "planning_review_gate"]:
+    for section in ["surface_verification_matrix", "survey_quality_gate", "execution_forecast", "expert_quality_plan", "implementation_work_packages", "planning_review_gate"]:
         if section not in required_brief_sections:
             raise AssertionError(f"implementation brief blueprint missing required section {section}: {migration_packet}")
 
@@ -173,6 +178,8 @@ def main() -> int:
         raise AssertionError(f"concurrency planning must create runtime work package: {concurrency_packet}")
     if "runtime_configuration_package" not in concurrency_packet["implementation_work_packages"]["review_order"]:
         raise AssertionError(f"concurrency config/runtime planning must create config work package: {concurrency_packet}")
+    if "deterministic_state_vs_fast_shared_cache" not in [item["decision"] for item in concurrency_packet["expert_quality_plan"]["tradeoff_register"]]:
+        raise AssertionError(f"concurrency planning must include expert state tradeoff: {concurrency_packet}")
 
     unclear_packet = planning_brigade.build_planning_packet({"task": "почини", "repo_path": "/repo"})
     if unclear_packet["planning_review_gate"]["decision"] != "blocked" or not unclear_packet["planning_review_gate"]["blockers"]:
