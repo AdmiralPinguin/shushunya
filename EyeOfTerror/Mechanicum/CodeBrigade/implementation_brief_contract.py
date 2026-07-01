@@ -38,6 +38,12 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
     dependency = brief.get("planning_dependency_map") if isinstance(brief.get("planning_dependency_map"), dict) else {}
     if not isinstance(dependency.get("critical_path"), list) or not dependency.get("critical_path"):
         problems.append("brief planning_dependency_map.critical_path is required")
+    breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
+    phases = breakdown.get("phases") if isinstance(breakdown.get("phases"), list) else []
+    if len(phases) < 6:
+        problems.append("brief work_breakdown phases are required")
+    elif not all(isinstance(phase, dict) and phase.get("id") and phase.get("owner") and phase.get("exit_gate") for phase in phases):
+        problems.append("brief work_breakdown phases must include id, owner, and exit_gate")
     handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
     if handoff.get("target") != "CodeBrigade":
         problems.append("brief code_brigade_handoff must target CodeBrigade")

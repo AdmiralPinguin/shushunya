@@ -215,6 +215,119 @@ def dependency_map(triage: dict[str, Any], survey: dict[str, Any]) -> dict[str, 
     }
 
 
+def work_breakdown(triage: dict[str, Any], dependency: dict[str, Any]) -> dict[str, Any]:
+    phases = [
+        {
+            "id": "frame_task",
+            "owner": "PlanningBrigade",
+            "depends_on": [],
+            "objective": "Restate the task as behavior, constraints, and definition of done.",
+            "outputs": ["problem_statement"],
+            "exit_gate": "task intent and unknowns are explicit",
+        },
+        {
+            "id": "survey_repo",
+            "owner": "Ceraxia",
+            "depends_on": ["frame_task"],
+            "objective": "Collect read-only repository evidence before selecting files.",
+            "outputs": ["repo_survey.json"],
+            "exit_gate": "candidate files, tests, entrypoints, or blockers are recorded",
+        },
+        {
+            "id": "choose_design",
+            "owner": "PlanningBrigade",
+            "depends_on": ["survey_repo"],
+            "objective": "Reject unsafe shortcuts and choose the smallest coherent design.",
+            "outputs": ["design_options"],
+            "exit_gate": "selected strategy is approved by Ceraxia",
+        },
+        {
+            "id": "prepare_verification",
+            "owner": "PlanningBrigade",
+            "depends_on": ["choose_design"],
+            "objective": "Define targeted commands, negative tests, and broad verification requirements.",
+            "outputs": ["verification_strategy"],
+            "exit_gate": "verification is executable, planned, or explicitly blocked",
+        },
+        {
+            "id": "handoff_to_code_brigade",
+            "owner": "Ceraxia",
+            "depends_on": ["prepare_verification"],
+            "objective": "Build the implementation brief and require CodeBrigade preflight before mutation.",
+            "outputs": ["implementation_brief.json"],
+            "exit_gate": "brief validates and mutation preconditions are attached",
+        },
+        {
+            "id": "review_result",
+            "owner": "Ceraxia",
+            "depends_on": ["handoff_to_code_brigade"],
+            "objective": "Check worker report, verification evidence, and acceptance contract before finalization.",
+            "outputs": ["review_gate.json", "final_report.md"],
+            "exit_gate": "final package proves the original request or names concrete blockers",
+        },
+    ]
+    if "test_repair" in triage["task_kinds"]:
+        phases.insert(
+            2,
+            {
+                "id": "capture_failing_test",
+                "owner": "CodeBrigade",
+                "depends_on": ["survey_repo"],
+                "objective": "Preserve the failing test diagnostic before source mutation.",
+                "outputs": ["failing_test_diagnostic.json"],
+                "exit_gate": "failure mode is known and not masked by test edits",
+            },
+        )
+        phases[3]["depends_on"] = ["capture_failing_test"]
+    if "security" in triage["task_kinds"]:
+        phases.insert(
+            -1,
+            {
+                "id": "prove_boundary",
+                "owner": "CodeBrigade",
+                "depends_on": ["handoff_to_code_brigade"],
+                "objective": "Prove the unsafe path/auth/input boundary cannot be bypassed.",
+                "outputs": ["negative_test_evidence.json"],
+                "exit_gate": "negative boundary evidence is present or blocked with a reason",
+            },
+        )
+    if any(kind in triage["task_kinds"] for kind in ("api_compatibility", "migration")):
+        phases.insert(
+            -1,
+            {
+                "id": "prove_compatibility",
+                "owner": "CodeBrigade",
+                "depends_on": ["handoff_to_code_brigade"],
+                "objective": "Prove old and new public/data shapes are intentionally handled.",
+                "outputs": ["compatibility_evidence.json"],
+                "exit_gate": "compatibility evidence is present or migration breakage is explicit",
+            },
+        )
+    final_review_dependencies = [
+        phase["id"]
+        for phase in phases
+        if phase["id"] in {"prove_boundary", "prove_compatibility"}
+    ] or ["handoff_to_code_brigade"]
+    for phase in phases:
+        if phase["id"] == "review_result":
+            phase["depends_on"] = final_review_dependencies
+    return {
+        "role": "PlanningBrigade",
+        "risk_level": triage["risk_level"],
+        "phases": phases,
+        "critical_path": dependency["critical_path"],
+        "parallelizable_after_survey": [
+            "verification planning can proceed beside detailed patch planning",
+            "risk register can be updated while CodeBrigade inspects candidate files",
+        ],
+        "stop_conditions": [
+            "repo survey cannot identify candidate files or tests",
+            "selected design needs broader rewrite than approved scope",
+            "verification cannot prove the requested behavior",
+        ],
+    }
+
+
 def design_options(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
     selected = "minimal_design"
@@ -391,6 +504,7 @@ def implementation_brief_blueprint(
     risks: dict[str, Any],
     quality: dict[str, Any],
     dependency: dict[str, Any],
+    breakdown: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "role": "PlanningBrigade",
@@ -419,6 +533,7 @@ def implementation_brief_blueprint(
         "required_verification": verification,
         "required_quality_evidence": quality["must_have_evidence"],
         "dependency_critical_path": dependency["critical_path"],
+        "work_phases": [phase["id"] for phase in breakdown["phases"]],
         "mutation_preconditions": [
             "implementation brief validates",
             "execution preflight passes",
@@ -492,12 +607,13 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     problem = problem_statement(payload, triage)
     survey = repo_survey_request(payload, triage)
     dependency = dependency_map(triage, survey)
+    breakdown = work_breakdown(triage, dependency)
     design = design_options(payload, triage)
     verification = verification_strategy(triage)
     risks = risk_register(triage, survey, design, verification)
     quality = quality_bar(triage, verification)
     acceptance = acceptance_contract(problem, triage, verification, quality)
-    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency)
+    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
         "ok": bool(task),
@@ -510,6 +626,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "task_triage": triage,
         "repo_survey_request": survey,
         "dependency_map": dependency,
+        "work_breakdown": breakdown,
         "design_options": design,
         "verification_strategy": verification,
         "risk_register": risks,

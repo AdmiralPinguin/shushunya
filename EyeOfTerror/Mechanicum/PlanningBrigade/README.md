@@ -20,6 +20,8 @@ Current contract:
   unknowns, and definition of done.
 - `dependency_map` preserves the planning critical path from task contract to
   implementation brief.
+- `work_breakdown` orders the work phases, owners, dependencies, outputs, exit
+  gates, parallel work opportunities, and stop conditions.
 - `acceptance_contract` records what the final package must prove and what
   shortcuts are forbidden.
 - `implementation_brief_blueprint` defines the CodeBrigade handoff sections and

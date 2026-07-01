@@ -19,6 +19,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     acceptance = brief.get("acceptance_contract") if isinstance(brief.get("acceptance_contract"), dict) else {}
     blueprint = brief.get("implementation_brief_blueprint") if isinstance(brief.get("implementation_brief_blueprint"), dict) else {}
     dependency = brief.get("planning_dependency_map") if isinstance(brief.get("planning_dependency_map"), dict) else {}
+    breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     suggested_commands = brief.get("suggested_verification_commands")
     if not isinstance(suggested_commands, list):
         suggested_commands = []
@@ -42,6 +43,8 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "python_symbols_truncated": bool(evidence.get("python_symbols_truncated")),
         "handoff_steps": handoff.get("steps", []) if isinstance(handoff.get("steps"), list) else [],
         "planning_critical_path": dependency.get("critical_path", []) if isinstance(dependency.get("critical_path"), list) else [],
+        "work_phases": breakdown.get("phases", []) if isinstance(breakdown.get("phases"), list) else [],
+        "stop_conditions": breakdown.get("stop_conditions", []) if isinstance(breakdown.get("stop_conditions"), list) else [],
         "mutation_preconditions": blueprint.get("mutation_preconditions", []) if isinstance(blueprint.get("mutation_preconditions"), list) else [],
         "acceptance_evidence_required": acceptance.get("must_prove", []) if isinstance(acceptance.get("must_prove"), list) else [],
         "verification_commands": commands,

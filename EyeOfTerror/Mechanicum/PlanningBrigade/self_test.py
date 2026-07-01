@@ -39,6 +39,8 @@ def main() -> int:
         or "security" not in security_packet["task_triage"]["task_kinds"]
         or "the original user-visible request is satisfied" not in security_packet["problem_statement"]["definition_of_done"]
         or security_packet["dependency_map"]["critical_path"][-1] != "implementation_brief"
+        or "prove_boundary" not in [phase["id"] for phase in security_packet["work_breakdown"]["phases"]]
+        or "prove_boundary" not in next(phase for phase in security_packet["work_breakdown"]["phases"] if phase["id"] == "review_result")["depends_on"]
         or security_packet["design_options"]["selected_strategy"] != "boundary_first_patch"
         or "untrusted input is rejected" not in security_packet["verification_strategy"]["negative_tests"]
         or not security_packet["verification_strategy"]["broad_verification_required"]
@@ -65,11 +67,23 @@ def main() -> int:
         or "old, new, and mixed records round-trip correctly" not in migration_packet["verification_strategy"]["negative_tests"]
         or "backward compatibility evidence is present" not in migration_packet["quality_bar"]["must_have_evidence"]
         or not any(node["id"] == "compatibility_boundary" for node in migration_packet["dependency_map"]["nodes"])
+        or "prove_compatibility" not in [phase["id"] for phase in migration_packet["work_breakdown"]["phases"]]
         or "dependency_critical_path" not in migration_packet["implementation_brief_blueprint"]
+        or "work_phases" not in migration_packet["implementation_brief_blueprint"]
         or migration_packet["code_brigade_handoff"]["target"] != "CodeBrigade"
         or migration_packet["repo_survey_request"]["read_only"] is not True
     ):
         raise AssertionError(f"migration planning packet is incomplete: {migration_packet}")
+
+    combined_packet = planning_brigade.build_planning_packet(
+        {
+            "task": "security API migration: path traversal ломает legacy schema compatibility",
+            "repo_path": "/repo",
+        }
+    )
+    review_depends_on = next(phase for phase in combined_packet["work_breakdown"]["phases"] if phase["id"] == "review_result")["depends_on"]
+    if sorted(review_depends_on) != ["prove_boundary", "prove_compatibility"]:
+        raise AssertionError(f"combined high-risk plan must wait for both proof phases: {combined_packet}")
 
     cli = subprocess.run(
         [

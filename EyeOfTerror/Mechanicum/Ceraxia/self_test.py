@@ -291,6 +291,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         packet["repo_survey_request"]["read_only"] = False
         packet["problem_statement"]["definition_of_done"] = []
         packet["dependency_map"]["critical_path"] = ["task_contract", "implementation_brief"]
+        packet["work_breakdown"]["phases"] = []
         packet["design_options"]["options"] = []
         packet["verification_strategy"]["targeted_commands"] = []
         packet["risk_register"]["acceptance_gates"] = []
@@ -303,6 +304,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertTrue(any("read-only" in problem for problem in problems), problems)
         self.assertTrue(any("definition_of_done" in problem for problem in problems), problems)
         self.assertTrue(any("critical path" in problem for problem in problems), problems)
+        self.assertTrue(any("work breakdown missing phase" in problem for problem in problems), problems)
         self.assertTrue(any("reject hardcode" in problem for problem in problems), problems)
         self.assertTrue(any("targeted_commands" in problem for problem in problems), problems)
         self.assertTrue(any("acceptance_gates" in problem for problem in problems), problems)

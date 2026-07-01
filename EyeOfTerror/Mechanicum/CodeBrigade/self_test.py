@@ -55,6 +55,21 @@ def valid_brief() -> dict:
                 "implementation_brief",
             ],
         },
+        "work_breakdown": {
+            "phases": [
+                {"id": "frame_task", "owner": "PlanningBrigade", "exit_gate": "task intent and unknowns are explicit"},
+                {"id": "survey_repo", "owner": "Ceraxia", "exit_gate": "candidate files are recorded"},
+                {"id": "capture_failing_test", "owner": "CodeBrigade", "exit_gate": "failure mode is known"},
+                {"id": "choose_design", "owner": "PlanningBrigade", "exit_gate": "selected strategy is approved"},
+                {"id": "prepare_verification", "owner": "PlanningBrigade", "exit_gate": "verification is planned"},
+                {"id": "handoff_to_code_brigade", "owner": "Ceraxia", "exit_gate": "brief validates"},
+                {"id": "review_result", "owner": "Ceraxia", "exit_gate": "final package proves the request"},
+            ],
+            "stop_conditions": [
+                "repo survey cannot identify candidate files or tests",
+                "verification cannot prove the requested behavior",
+            ],
+        },
         "repo_survey_evidence": {
             "candidate_files": ["app.py"],
             "test_files": ["test_app.py"],
@@ -102,6 +117,10 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve local dependency edges: {plan}")
     if plan["planning_critical_path"][-1] != "implementation_brief":
         raise AssertionError(f"implementation plan should preserve planning critical path: {plan}")
+    if not any(phase["id"] == "capture_failing_test" for phase in plan["work_phases"]):
+        raise AssertionError(f"implementation plan should preserve work phases: {plan}")
+    if "verification cannot prove the requested behavior" not in plan["stop_conditions"]:
+        raise AssertionError(f"implementation plan should preserve stop conditions: {plan}")
     if "execution preflight passes" not in plan["mutation_preconditions"]:
         raise AssertionError(f"implementation plan should preserve mutation preconditions: {plan}")
     if "the original user-visible request is satisfied" not in plan["acceptance_evidence_required"]:
@@ -190,6 +209,11 @@ def main() -> int:
     weak_planning_report = code_brigade_adapter.build_worker_report(weak_planning, dry_run=True)
     if weak_planning_report["status"] != "blocked" or not any("acceptance_contract" in item for item in weak_planning_report["validation_problems"]):
         raise AssertionError(f"weak planning evidence should be blocked: {weak_planning_report}")
+    missing_breakdown = valid_brief()
+    missing_breakdown["work_breakdown"] = {"phases": []}
+    missing_breakdown_report = code_brigade_adapter.build_worker_report(missing_breakdown, dry_run=True)
+    if missing_breakdown_report["status"] != "blocked" or not any("work_breakdown" in item for item in missing_breakdown_report["validation_problems"]):
+        raise AssertionError(f"missing work breakdown should be blocked: {missing_breakdown_report}")
     missing_handoff = valid_brief()
     missing_handoff["code_brigade_handoff"] = {"target": "CodeBrigade", "steps": []}
     missing_handoff_report = code_brigade_adapter.build_worker_report(missing_handoff, dry_run=True)

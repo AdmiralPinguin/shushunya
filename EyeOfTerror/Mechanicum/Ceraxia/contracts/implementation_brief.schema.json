@@ -21,6 +21,7 @@
     "acceptance_contract",
     "implementation_brief_blueprint",
     "planning_dependency_map",
+    "work_breakdown",
     "code_brigade_handoff",
     "blocked",
     "blockers"
@@ -101,6 +102,9 @@
       "type": "object"
     },
     "planning_dependency_map": {
+      "type": "object"
+    },
+    "work_breakdown": {
       "type": "object"
     },
     "code_brigade_handoff": {

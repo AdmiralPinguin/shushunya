@@ -99,6 +99,7 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         "task_triage",
         "repo_survey_request",
         "dependency_map",
+        "work_breakdown",
         "design_options",
         "verification_strategy",
         "risk_register",
@@ -147,6 +148,23 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("dependency map must preserve the planning critical path")
     if not isinstance(dependency.get("nodes"), list) or len(dependency.get("nodes", [])) < 5:
         problems.append("dependency map must include planning dependency nodes")
+    breakdown = packet.get("work_breakdown") if isinstance(packet.get("work_breakdown"), dict) else {}
+    phases = breakdown.get("phases") if isinstance(breakdown.get("phases"), list) else []
+    phase_ids = [phase.get("id") for phase in phases if isinstance(phase, dict)]
+    for required_phase in [
+        "frame_task",
+        "survey_repo",
+        "choose_design",
+        "prepare_verification",
+        "handoff_to_code_brigade",
+        "review_result",
+    ]:
+        if required_phase not in phase_ids:
+            problems.append(f"work breakdown missing phase: {required_phase}")
+    if "review_result" in phase_ids:
+        review_phase = next((phase for phase in phases if isinstance(phase, dict) and phase.get("id") == "review_result"), {})
+        if not isinstance(review_phase.get("depends_on"), list) or not review_phase.get("depends_on"):
+            problems.append("work breakdown review_result must depend on evidence phases")
     design = packet.get("design_options") if isinstance(packet.get("design_options"), dict) else {}
     if not isinstance(design.get("selected_strategy"), str) or not design.get("selected_strategy"):
         problems.append("design options must include selected_strategy")
@@ -254,6 +272,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "acceptance_contract": packet.get("acceptance_contract", {}),
         "implementation_brief_blueprint": packet.get("implementation_brief_blueprint", {}),
         "planning_dependency_map": packet.get("dependency_map", {}),
+        "work_breakdown": packet.get("work_breakdown", {}),
         "code_brigade_handoff": handoff,
         "repo_survey_evidence": {
             "candidate_files": survey.get("candidate_files", []),
