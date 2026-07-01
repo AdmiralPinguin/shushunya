@@ -83,6 +83,29 @@ def valid_brief() -> dict:
                 "the changed behavior is covered by targeted verification",
             ],
         },
+        "acceptance_trace_matrix": {
+            "rows": [
+                {
+                    "requirement": "the original user-visible request is satisfied",
+                    "source": ["problem_statement.definition_of_done", "acceptance_contract.must_prove"],
+                    "linked_surfaces": ["source_behavior"],
+                    "package_ids": ["minimal_patch_package", "verification_evidence_package"],
+                    "planned_evidence": ["targeted behavior verification"],
+                    "status": "planned",
+                },
+                {
+                    "requirement": "the changed behavior is covered by targeted verification",
+                    "source": ["problem_statement.definition_of_done", "acceptance_contract.must_prove"],
+                    "linked_surfaces": ["source_behavior", "test_surface"],
+                    "package_ids": ["minimal_patch_package", "verification_evidence_package"],
+                    "planned_evidence": ["rerun failing test command"],
+                    "status": "planned",
+                },
+            ],
+            "row_count": 2,
+            "complete": True,
+            "blockers": [],
+        },
         "expert_quality_plan": {
             "level": "standard",
             "required_for_expert_gate": False,
@@ -207,6 +230,7 @@ def valid_brief() -> dict:
                 "expert_quality_plan",
                 "investigation_playbook",
                 "change_control_plan",
+                "acceptance_trace_matrix",
             ],
             "mutation_preconditions": [
                 "implementation brief validates",
@@ -461,6 +485,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve global handoff criteria: {plan}")
     if "the original user-visible request is satisfied" not in plan["acceptance_evidence_required"]:
         raise AssertionError(f"implementation plan should preserve acceptance evidence: {plan}")
+    if not plan["acceptance_trace_complete"] or plan["acceptance_trace_rows"][0]["requirement"] != "the original user-visible request is satisfied":
+        raise AssertionError(f"implementation plan should preserve acceptance trace matrix: {plan}")
     if plan["expert_quality_level"] != "standard" or plan["expert_quality_required"]:
         raise AssertionError(f"implementation plan should preserve expert quality level: {plan}")
     if plan["expert_tradeoff_register"][0]["decision"] != "minimal_patch_vs_broad_rewrite":

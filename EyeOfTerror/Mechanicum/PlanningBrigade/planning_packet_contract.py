@@ -32,6 +32,7 @@ REQUIRED_PACKET_OBJECTS = [
     "risk_register",
     "quality_bar",
     "acceptance_contract",
+    "acceptance_trace_matrix",
     "implementation_brief_blueprint",
     "implementation_work_packages",
     "planning_review_gate",
@@ -222,6 +223,24 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
     if not isinstance(acceptance.get("review_questions"), list) or len(acceptance.get("review_questions", [])) < 3:
         problems.append("acceptance contract must include review questions")
 
+    trace_matrix = object_field(packet, "acceptance_trace_matrix")
+    trace_rows = list_field(trace_matrix.get("rows"))
+    if not trace_rows:
+        problems.append("acceptance trace matrix must include rows")
+    if trace_matrix.get("complete") is not True:
+        problems.extend(f"acceptance trace matrix blocked: {item}" for item in list_field(trace_matrix.get("blockers")))
+    for row in trace_rows:
+        if not isinstance(row, dict):
+            problems.append("acceptance trace matrix row must be an object")
+            continue
+        for key in ("requirement", "source", "planned_evidence", "package_ids", "status"):
+            if key not in row:
+                problems.append(f"acceptance trace matrix row missing {key}")
+        if not list_field(row.get("planned_evidence")):
+            problems.append(f"acceptance trace matrix row needs planned evidence: {row.get('requirement', '<unknown>')}")
+        if not list_field(row.get("package_ids")):
+            problems.append(f"acceptance trace matrix row needs package_ids: {row.get('requirement', '<unknown>')}")
+
     blueprint = object_field(packet, "implementation_brief_blueprint")
     if blueprint.get("target") != "CodeBrigade":
         problems.append("implementation brief blueprint must target CodeBrigade")
@@ -233,6 +252,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("implementation brief blueprint must require investigation_playbook")
     if "change_control_plan" not in list_field(blueprint.get("required_sections")):
         problems.append("implementation brief blueprint must require change_control_plan")
+    if "acceptance_trace_matrix" not in list_field(blueprint.get("required_sections")):
+        problems.append("implementation brief blueprint must require acceptance_trace_matrix")
 
     work_packages = object_field(packet, "implementation_work_packages")
     packages = list_field(work_packages.get("packages"))

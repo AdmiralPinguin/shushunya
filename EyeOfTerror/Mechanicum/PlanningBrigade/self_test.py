@@ -118,6 +118,11 @@ def main() -> int:
         raise AssertionError(f"risk register must reject missing negative tests: {security_packet}")
     if "test edits are needed but were not explicitly requested by the user" not in security_packet["execution_forecast"]["scope_budget"]["requires_ceraxia_replan_when"]:
         raise AssertionError(f"scope budget must force replan before unrequested test edits: {security_packet}")
+    if not security_packet["acceptance_trace_matrix"]["complete"] or not any(
+        "negative boundary test" in row["requirement"] and "security_boundary_package" in row["package_ids"]
+        for row in security_packet["acceptance_trace_matrix"]["rows"]
+    ):
+        raise AssertionError(f"security acceptance trace must map boundary evidence to security package: {security_packet}")
 
     migration_packet = planning_brigade.build_planning_packet(
         {
@@ -152,6 +157,13 @@ def main() -> int:
         or migration_packet["repo_survey_request"]["read_only"] is not True
     ):
         raise AssertionError(f"migration planning packet is incomplete: {migration_packet}")
+    if "acceptance_trace_matrix" not in migration_packet["implementation_brief_blueprint"]["required_sections"]:
+        raise AssertionError(f"migration brief blueprint must require acceptance trace matrix: {migration_packet}")
+    if not migration_packet["acceptance_trace_matrix"]["complete"] or not any(
+        row["requirement"] == "backward compatibility evidence is present" and "compatibility_package" in row["package_ids"]
+        for row in migration_packet["acceptance_trace_matrix"]["rows"]
+    ):
+        raise AssertionError(f"migration acceptance trace must map compatibility evidence to compatibility package: {migration_packet}")
     required_brief_sections = migration_packet["implementation_brief_blueprint"]["required_sections"]
     for section in ["surface_verification_matrix", "survey_quality_gate", "execution_forecast", "expert_quality_plan", "implementation_work_packages", "planning_review_gate"]:
         if section not in required_brief_sections:

@@ -44,6 +44,8 @@ Current contract:
   and blocks handoff when coverage is missing.
 - `acceptance_contract` records what the final package must prove and what
   shortcuts are forbidden.
+- `acceptance_trace_matrix` maps every definition-of-done, quality-bar, and
+  acceptance requirement to planned evidence and CodeBrigade package ids.
 - `implementation_brief_blueprint` defines the CodeBrigade handoff sections and
   mutation preconditions.
 - `implementation_work_packages` turns the plan into reviewable CodeBrigade
@@ -74,5 +76,6 @@ The trials cover failing-test repair, security boundaries, migration/API
 compatibility, architecture refactors, concurrency/cache failures, and unclear
 tasks that must be blocked. The runner also emits a coverage summary for task
 kinds, work phases, impacted surfaces, highest-risk surfaces, gate decisions,
-negative tests, implementation work packages, change-control invariants,
-change-control post-change proofs, rollback triggers, and planning scores.
+negative tests, implementation work packages, acceptance trace packages,
+change-control invariants, change-control post-change proofs, rollback
+triggers, and planning scores.

@@ -36,6 +36,9 @@
     "change_control_diff_review_question_count",
     "change_control_rollback_trigger_count",
     "change_control_post_change_proof_count",
+    "acceptance_trace_status",
+    "acceptance_trace_row_count",
+    "acceptance_trace_blocked_row_count",
     "execution_readiness",
     "worker_status",
     "code_brigade_execution_policy_status",
@@ -166,6 +169,15 @@
       "type": "integer"
     },
     "change_control_post_change_proof_count": {
+      "type": "integer"
+    },
+    "acceptance_trace_status": {
+      "type": "string"
+    },
+    "acceptance_trace_row_count": {
+      "type": "integer"
+    },
+    "acceptance_trace_blocked_row_count": {
       "type": "integer"
     },
     "execution_readiness": {

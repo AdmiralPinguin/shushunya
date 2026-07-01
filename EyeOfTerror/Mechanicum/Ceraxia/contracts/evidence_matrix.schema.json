@@ -82,6 +82,8 @@
         "change_diff_review_questions",
         "change_rollback_triggers",
         "change_post_change_proofs",
+        "acceptance_trace_rows",
+        "acceptance_trace_complete",
         "caller_candidates",
         "contract_surface_candidates",
         "verification_commands"

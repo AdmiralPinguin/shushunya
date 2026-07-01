@@ -22,6 +22,8 @@ Current capabilities:
 - surface verification matrix generation
 - execution forecast for CodeBrigade iterations, timeout, and escalation
 - risk register, quality bar, acceptance contract, and CodeBrigade handoff
+- acceptance trace matrix mapping definition-of-done, quality-bar, and
+  acceptance requirements to package ids and planned evidence
 - implementation work packages with read scope, edit scope, verification
   scope, risk controls, blocking policy, handoff criteria, and review order
 - specialized work packages for compatibility, security boundaries, runtime
@@ -32,7 +34,7 @@ Current capabilities:
 - role contracts for the five planning roles
 - field trials for multiple task shapes with coverage gates for task kinds,
   impacted surfaces, implementation work packages, and change-control
-  invariant/proof coverage
+  invariant/proof plus acceptance-trace package coverage
 - CLI validation mode
 
 Current boundaries:

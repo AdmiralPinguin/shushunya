@@ -20,6 +20,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
     acceptance = brief.get("acceptance_contract") if isinstance(brief.get("acceptance_contract"), dict) else {}
+    acceptance_trace = brief.get("acceptance_trace_matrix") if isinstance(brief.get("acceptance_trace_matrix"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     change_control = brief.get("change_control_plan") if isinstance(brief.get("change_control_plan"), dict) else {}
     playbook = brief.get("investigation_playbook") if isinstance(brief.get("investigation_playbook"), dict) else {}
@@ -90,6 +91,8 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "work_package_blocking_policies": package_blocking_policies,
         "work_package_handoff_criteria": work_packages.get("global_handoff_criteria", []) if isinstance(work_packages.get("global_handoff_criteria"), list) else [],
         "acceptance_evidence_required": acceptance.get("must_prove", []) if isinstance(acceptance.get("must_prove"), list) else [],
+        "acceptance_trace_rows": acceptance_trace.get("rows", []) if isinstance(acceptance_trace.get("rows"), list) else [],
+        "acceptance_trace_complete": acceptance_trace.get("complete") is True,
         "expert_quality_level": expert_plan.get("level", ""),
         "expert_quality_required": bool(expert_plan.get("required_for_expert_gate")),
         "expert_tradeoff_register": expert_plan.get("tradeoff_register", []) if isinstance(expert_plan.get("tradeoff_register"), list) else [],

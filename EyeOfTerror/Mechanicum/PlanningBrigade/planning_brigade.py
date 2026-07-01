@@ -922,6 +922,8 @@ def quality_bar(triage: dict[str, Any], verification: dict[str, Any]) -> dict[st
         must_have.append("backward compatibility evidence is present")
     if "security" in kinds:
         must_have.append("negative boundary test or explicit blocker is present")
+    if "config_runtime" in kinds:
+        must_have.append("runtime configuration evidence is present")
     if verification["broad_verification_required"]:
         must_have.append("broad verification is executed or blocked with a concrete reason")
     return {
@@ -1011,6 +1013,7 @@ def implementation_brief_blueprint(
             "acceptance_gates",
             "quality_bar",
             "acceptance_contract",
+            "acceptance_trace_matrix",
             "repo_survey_evidence",
             "work_breakdown",
             "impact_analysis",
@@ -1269,6 +1272,117 @@ def surface_package_matrix(surface_matrix: dict[str, Any], work_packages: dict[s
     }
 
 
+def trace_surfaces_for_requirement(requirement: str, surfaces: list[str]) -> list[str]:
+    lowered = requirement.lower()
+    matched: list[str] = []
+    rules = [
+        ("security_boundary", ["security", "boundary", "bypass", "auth", "token", "input", "path"]),
+        ("public_api_contract", ["api", "schema", "caller", "public", "contract", "response", "request"]),
+        ("data_compatibility", ["compatibility", "legacy", "old", "new", "mixed", "data", "record"]),
+        ("runtime_configuration", ["config", "runtime", "environment", "startup"]),
+        ("concurrency_runtime", ["parallel", "retry", "race", "cache", "state", "concurrency"]),
+        ("internal_architecture", ["architecture", "refactor", "dependency"]),
+        ("test_surface", ["test", "verification", "pytest", "unittest"]),
+    ]
+    for surface, needles in rules:
+        if surface in surfaces and any(needle in lowered for needle in needles):
+            matched.append(surface)
+    if "source_behavior" in surfaces and (
+        not matched
+        or any(needle in lowered for needle in ["behavior", "request", "task", "changed", "user-visible", "original"])
+    ):
+        matched.insert(0, "source_behavior")
+    return list(dict.fromkeys(matched or surfaces[:1]))
+
+
+def acceptance_trace_matrix(
+    problem: dict[str, Any],
+    quality: dict[str, Any],
+    acceptance: dict[str, Any],
+    verification: dict[str, Any],
+    surface_matrix: dict[str, Any],
+    work_packages: dict[str, Any],
+) -> dict[str, Any]:
+    surfaces = [
+        str(row.get("surface") or "")
+        for row in surface_matrix.get("rows", [])
+        if isinstance(row, dict) and row.get("surface")
+    ]
+    package_ids_by_surface: dict[str, list[str]] = {}
+    for package in work_packages.get("packages", []):
+        if not isinstance(package, dict):
+            continue
+        package_id = str(package.get("id") or "")
+        for surface in package.get("impact_surfaces", []):
+            if isinstance(surface, str) and package_id:
+                package_ids_by_surface.setdefault(surface, []).append(package_id)
+    surface_evidence = {
+        str(row.get("surface") or ""): row.get("covered_by", [])
+        for row in surface_matrix.get("rows", [])
+        if isinstance(row, dict) and row.get("surface")
+    }
+    requirement_sources: dict[str, list[str]] = {}
+    for source, items in [
+        ("problem_statement.definition_of_done", problem.get("definition_of_done", [])),
+        ("quality_bar.must_have_evidence", quality.get("must_have_evidence", [])),
+        ("acceptance_contract.must_prove", acceptance.get("must_prove", [])),
+    ]:
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            requirement = str(item)
+            if requirement:
+                requirement_sources.setdefault(requirement, []).append(source)
+    rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    fallback_packages = ["verification_evidence_package"] if "verification_evidence_package" in {
+        str(package.get("id") or "")
+        for package in work_packages.get("packages", [])
+        if isinstance(package, dict)
+    } else []
+    for requirement, sources in requirement_sources.items():
+        linked_surfaces = trace_surfaces_for_requirement(requirement, surfaces)
+        package_ids = sorted(
+            {
+                package_id
+                for surface in linked_surfaces
+                for package_id in package_ids_by_surface.get(surface, [])
+            }
+        ) or fallback_packages
+        planned_evidence = sorted(
+            {
+                str(item)
+                for surface in linked_surfaces
+                for item in surface_evidence.get(surface, [])
+                if str(item)
+            }
+        )
+        if not planned_evidence:
+            planned_evidence = [str(command) for command in verification.get("targeted_commands", []) if str(command)]
+        if "final report" in requirement.lower() and "final_report.md" not in planned_evidence:
+            planned_evidence.append("final_report.md")
+        status = "planned" if package_ids and planned_evidence else "blocked"
+        if status == "blocked":
+            blockers.append(f"acceptance requirement lacks trace evidence: {requirement}")
+        rows.append(
+            {
+                "requirement": requirement,
+                "source": sources,
+                "linked_surfaces": linked_surfaces,
+                "package_ids": package_ids,
+                "planned_evidence": planned_evidence,
+                "status": status,
+            }
+        )
+    return {
+        "role": "RiskScribe",
+        "rows": rows,
+        "row_count": len(rows),
+        "complete": not blockers and bool(rows),
+        "blockers": blockers,
+    }
+
+
 def planning_review_gate(
     triage: dict[str, Any],
     problem: dict[str, Any],
@@ -1282,6 +1396,7 @@ def planning_review_gate(
     change_control: dict[str, Any] | None = None,
     work_packages: dict[str, Any] | None = None,
     package_matrix: dict[str, Any] | None = None,
+    acceptance_trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -1318,6 +1433,12 @@ def planning_review_gate(
         blockers.extend(str(item) for item in surface_matrix.get("blockers", []))
     if package_matrix is not None and package_matrix.get("complete") is False:
         blockers.extend(str(item) for item in package_matrix.get("blockers", []))
+    if acceptance_trace is None:
+        blockers.append("acceptance trace matrix is missing")
+    elif acceptance_trace.get("complete") is not True:
+        blockers.extend(str(item) for item in acceptance_trace.get("blockers", []))
+        if not acceptance_trace.get("blockers"):
+            blockers.append("acceptance trace matrix is incomplete")
     if work_packages is not None:
         packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
         if len(packages) < 3:
@@ -1377,6 +1498,7 @@ def planning_review_gate(
             "change control planning",
             "implementation work package completeness",
             "acceptance evidence alignment",
+            "acceptance traceability",
         ],
     }
 
@@ -1460,7 +1582,8 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix, forecast, expert_plan, playbook, change_control)
     work_packages = implementation_work_packages(triage, problem, dependency, impact, verification, risks, forecast)
     package_matrix = surface_package_matrix(surface_matrix, work_packages)
-    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, change_control, work_packages, package_matrix)
+    acceptance_trace = acceptance_trace_matrix(problem, quality, acceptance, verification, surface_matrix, work_packages)
+    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, change_control, work_packages, package_matrix, acceptance_trace)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
         "ok": bool(task),
@@ -1486,6 +1609,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "risk_register": risks,
         "quality_bar": quality,
         "acceptance_contract": acceptance,
+        "acceptance_trace_matrix": acceptance_trace,
         "implementation_brief_blueprint": blueprint,
         "implementation_work_packages": work_packages,
         "planning_review_gate": review,

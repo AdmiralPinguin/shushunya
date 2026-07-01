@@ -91,6 +91,10 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "negative tests",
         trial_id,
     )
+    acceptance_trace = packet.get("acceptance_trace_matrix") if isinstance(packet.get("acceptance_trace_matrix"), dict) else {}
+    trace_rows = acceptance_trace.get("rows") if isinstance(acceptance_trace.get("rows"), list) else []
+    if acceptance_trace.get("complete") is not True or not trace_rows:
+        raise AssertionError(f"{trial_id}: acceptance trace matrix must be complete: {packet}")
     decision = packet["planning_review_gate"]["decision"]
     if decision != expected_decision:
         raise AssertionError(f"{trial_id}: expected decision {expected_decision}, got {decision}: {packet}")
@@ -110,6 +114,15 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "change_protected_invariants": change_control["protected_invariants"],
         "change_post_change_proofs": change_control["post_change_proofs"],
         "change_rollback_triggers": change_control["rollback_triggers"],
+        "acceptance_trace_requirements": [row["requirement"] for row in trace_rows if isinstance(row, dict) and row.get("requirement")],
+        "acceptance_trace_package_ids": [
+            package_id
+            for row in trace_rows
+            if isinstance(row, dict)
+            for package_id in row.get("package_ids", [])
+            if isinstance(package_id, str)
+        ],
+        "acceptance_trace_row_count": len(trace_rows),
         "change_control_counts": {
             "allowed_change_intents": len(change_control["allowed_change_intents"]),
             "protected_invariants": len(change_control["protected_invariants"]),
@@ -133,6 +146,9 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     change_invariants: Counter[str] = Counter()
     change_post_proofs: Counter[str] = Counter()
     change_rollback_triggers: Counter[str] = Counter()
+    acceptance_trace_packages: Counter[str] = Counter()
+    acceptance_trace_requirements: Counter[str] = Counter()
+    acceptance_trace_row_counts: list[int] = []
     minimum_change_control_counts: dict[str, int] = {}
     scores: list[int] = []
     for result in results:
@@ -147,6 +163,10 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         change_invariants.update(str(item) for item in result.get("change_protected_invariants", []))
         change_post_proofs.update(str(item) for item in result.get("change_post_change_proofs", []))
         change_rollback_triggers.update(str(item) for item in result.get("change_rollback_triggers", []))
+        acceptance_trace_packages.update(str(item) for item in result.get("acceptance_trace_package_ids", []))
+        acceptance_trace_requirements.update(str(item) for item in result.get("acceptance_trace_requirements", []))
+        if isinstance(result.get("acceptance_trace_row_count"), int):
+            acceptance_trace_row_counts.append(result["acceptance_trace_row_count"])
         counts = result.get("change_control_counts") if isinstance(result.get("change_control_counts"), dict) else {}
         for key, value in counts.items():
             if isinstance(value, int):
@@ -165,6 +185,9 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "change_invariant_counts": dict(sorted(change_invariants.items())),
         "change_post_proof_counts": dict(sorted(change_post_proofs.items())),
         "change_rollback_trigger_counts": dict(sorted(change_rollback_triggers.items())),
+        "acceptance_trace_package_counts": dict(sorted(acceptance_trace_packages.items())),
+        "acceptance_trace_requirement_counts": dict(sorted(acceptance_trace_requirements.items())),
+        "minimum_acceptance_trace_row_count": min(acceptance_trace_row_counts) if acceptance_trace_row_counts else 0,
         "minimum_change_control_counts": dict(sorted(minimum_change_control_counts.items())),
         "minimum_score": min(scores) if scores else 0,
         "average_score": round(sum(scores) / len(scores), 2) if scores else 0,
@@ -208,6 +231,7 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     invariant_counts = summary.get("change_invariant_counts") if isinstance(summary.get("change_invariant_counts"), dict) else {}
     post_proof_counts = summary.get("change_post_proof_counts") if isinstance(summary.get("change_post_proof_counts"), dict) else {}
     rollback_counts = summary.get("change_rollback_trigger_counts") if isinstance(summary.get("change_rollback_trigger_counts"), dict) else {}
+    acceptance_trace_package_counts = summary.get("acceptance_trace_package_counts") if isinstance(summary.get("acceptance_trace_package_counts"), dict) else {}
     minimum_change_counts = summary.get("minimum_change_control_counts") if isinstance(summary.get("minimum_change_control_counts"), dict) else {}
     missing_kinds = sorted(kind for kind in required_kinds if kind not in kind_counts)
     missing_surfaces = sorted(surface for surface in required_surfaces if surface not in surface_counts)
@@ -259,6 +283,11 @@ def assert_coverage(summary: dict[str, Any]) -> None:
             raise AssertionError(f"field trials have weak minimum change-control count for {key}: {summary}")
     if "verification cannot prove the changed behavior" not in rollback_counts:
         raise AssertionError(f"field trials must preserve verification rollback trigger coverage: {summary}")
+    for package in required_work_packages:
+        if package not in acceptance_trace_package_counts:
+            raise AssertionError(f"field trials are missing acceptance trace package coverage for {package}: {summary}")
+    if int(summary.get("minimum_acceptance_trace_row_count") or 0) < 3:
+        raise AssertionError(f"field trials have too few acceptance trace rows: {summary}")
 
 
 def main() -> int:

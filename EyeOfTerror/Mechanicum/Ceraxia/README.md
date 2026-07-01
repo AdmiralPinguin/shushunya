@@ -76,6 +76,9 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
 - `change_control_plan` is carried through the CodeBrigade implementation plan
   and review gate, so protected invariants, rollback triggers, and post-change
   proofs cannot disappear during handoff.
+- `acceptance_trace_matrix` is carried through the same path, so the review
+  gate can verify that definition-of-done and quality-bar requirements still
+  map to planned evidence and CodeBrigade package ownership.
 - `planning_review_gate` scores the packet and blocks unclear or structurally
   unsafe plans.
 - `run_summary.json` and `final_report.md` expose planning review and survey
