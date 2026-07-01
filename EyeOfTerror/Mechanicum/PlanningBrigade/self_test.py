@@ -116,6 +116,10 @@ def main() -> int:
         or migration_packet["repo_survey_request"]["read_only"] is not True
     ):
         raise AssertionError(f"migration planning packet is incomplete: {migration_packet}")
+    required_brief_sections = migration_packet["implementation_brief_blueprint"]["required_sections"]
+    for section in ["surface_verification_matrix", "survey_quality_gate", "execution_forecast", "planning_review_gate"]:
+        if section not in required_brief_sections:
+            raise AssertionError(f"implementation brief blueprint missing required section {section}: {migration_packet}")
 
     combined_packet = planning_brigade.build_planning_packet(
         {
