@@ -21,6 +21,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
     acceptance = brief.get("acceptance_contract") if isinstance(brief.get("acceptance_contract"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
+    playbook = brief.get("investigation_playbook") if isinstance(brief.get("investigation_playbook"), dict) else {}
     blueprint = brief.get("implementation_brief_blueprint") if isinstance(brief.get("implementation_brief_blueprint"), dict) else {}
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
@@ -93,6 +94,10 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "expert_observability_plan": expert_plan.get("observability_plan", []) if isinstance(expert_plan.get("observability_plan"), list) else [],
         "expert_review_checklist": expert_plan.get("review_checklist", []) if isinstance(expert_plan.get("review_checklist"), list) else [],
         "expert_escalation_policy": expert_plan.get("escalation_policy", []) if isinstance(expert_plan.get("escalation_policy"), list) else [],
+        "investigation_read_stages": playbook.get("read_stages", []) if isinstance(playbook.get("read_stages"), list) else [],
+        "investigation_evidence_questions": playbook.get("evidence_questions", []) if isinstance(playbook.get("evidence_questions"), list) else [],
+        "investigation_mutation_blockers": playbook.get("mutation_blockers", []) if isinstance(playbook.get("mutation_blockers"), list) else [],
+        "investigation_replan_triggers": playbook.get("replan_triggers", []) if isinstance(playbook.get("replan_triggers"), list) else [],
         "verification_commands": commands,
         "surface_verification_complete": bool(surface_matrix.get("complete")),
         "surface_verification_rows": surface_matrix.get("rows", []) if isinstance(surface_matrix.get("rows"), list) else [],

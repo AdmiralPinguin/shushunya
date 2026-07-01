@@ -23,6 +23,7 @@
     "quality_bar",
     "acceptance_contract",
     "expert_quality_plan",
+    "investigation_playbook",
     "implementation_brief_blueprint",
     "implementation_work_packages",
     "planning_review_gate",
@@ -145,6 +146,43 @@
         "escalation_policy": {
           "type": "array",
           "minItems": 2
+        }
+      }
+    },
+    "investigation_playbook": {
+      "type": "object",
+      "required": ["target", "read_stages", "evidence_questions", "mutation_blockers", "replan_triggers"],
+      "properties": {
+        "target": {
+          "const": "CodeBrigade"
+        },
+        "read_stages": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "object"
+          }
+        },
+        "evidence_questions": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "mutation_blockers": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "replan_triggers": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

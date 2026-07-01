@@ -12,6 +12,7 @@
     "problem_statement",
     "task_triage",
     "repo_survey_request",
+    "investigation_playbook",
     "dependency_map",
     "work_breakdown",
     "impact_analysis",
@@ -67,6 +68,37 @@
         "read_only": {"const": true},
         "expected_output": {"const": "repo_survey.json"},
         "handoff_to": {"const": "DesignStrategos"}
+      }
+    },
+    "investigation_playbook": {
+      "type": "object",
+      "required": ["target", "read_stages", "evidence_questions", "mutation_blockers", "replan_triggers", "handoff_to"],
+      "properties": {
+        "target": {"const": "CodeBrigade"},
+        "read_stages": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "object",
+            "required": ["stage", "must_collect", "blocks_mutation_until"]
+          }
+        },
+        "evidence_questions": {
+          "type": "array",
+          "minItems": 4,
+          "items": {"type": "string"}
+        },
+        "mutation_blockers": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"type": "string"}
+        },
+        "replan_triggers": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"type": "string"}
+        },
+        "handoff_to": {"const": "CodeBrigade"}
       }
     },
     "dependency_map": {

@@ -11,6 +11,8 @@ Current capabilities:
 - explicit path hint extraction
 - structured constraint and verification-command intake
 - read-only repository survey request shaping
+- investigation playbook with ordered read stages, evidence questions,
+  mutation blockers, and replan triggers for CodeBrigade
 - dependency map and work breakdown generation
 - impact analysis across source, tests, public API, security, runtime config,
   data compatibility, internal architecture, and concurrency runtime surfaces

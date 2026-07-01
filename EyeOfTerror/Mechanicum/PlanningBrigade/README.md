@@ -31,6 +31,10 @@ Current contract:
 - `impact_analysis` records affected engineering surfaces such as source
   behavior, tests, public API contracts, security boundaries, runtime config,
   data compatibility, and internal architecture.
+- `investigation_playbook` gives CodeBrigade an ordered investigation protocol:
+  entrypoints, candidate source, callers/dependencies, tests/oracles, contract
+  risk review, and specialized traces for security, compatibility, or
+  concurrency work.
 - `execution_forecast` estimates task complexity, expected CodeBrigade
   iterations, timeout budget, orchestration notes, and escalation triggers.
 - `surface_verification_matrix` maps each impacted surface to planned evidence

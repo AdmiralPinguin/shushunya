@@ -23,7 +23,7 @@ COMPONENTS = {
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
         ],
-        "maturity": "controller_with_planning_quality_survey_gate_read_order_generic_edges_per_surface_verification_and_work_package_review",
+        "maturity": "controller_with_planning_quality_survey_gate_read_order_investigation_playbook_generic_edges_per_surface_verification_and_work_package_review",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -43,7 +43,7 @@ COMPONENTS = {
             "VerificationArchitect/README.md",
             "RiskScribe/README.md",
         ],
-        "maturity": "contracted_planning_department_with_role_quality_gates_field_trial_coverage_and_code_work_packages",
+        "maturity": "contracted_planning_department_with_role_quality_gates_investigation_playbook_field_trial_coverage_and_code_work_packages",
     },
     "CodeBrigade": {
         "kind": "implementation_brigade_contract",
@@ -65,7 +65,7 @@ COMPONENTS = {
             "verification_execution.schema.json",
             "self_test.py",
         ],
-        "maturity": "handoff_with_read_order_preflight_explicit_text_ast_guarded_natural_language_and_test_inferred_literal_patch_adapter_package_statuses_and_allowlisted_verification",
+        "maturity": "handoff_with_read_order_investigation_playbook_preflight_explicit_text_ast_guarded_natural_language_and_test_inferred_literal_patch_adapter_package_statuses_and_allowlisted_verification",
     },
 }
 
@@ -80,7 +80,7 @@ ROADMAP = [
     {
         "priority": 2,
         "item": "deepen repository survey beyond shallow generic import edges",
-        "reason": "Ceraxia now records path hints, read order, Python import edges, source summaries, and local JS/TS relative import edges; cross-language call graphs and package-level dependency evidence are still shallow.",
+        "reason": "Ceraxia now records path hints, read order, investigation playbook stages, Python import edges, source summaries, and local JS/TS relative import edges; cross-language call graphs and package-level dependency evidence are still shallow.",
         "owner": "Ceraxia",
     },
     {
@@ -92,7 +92,7 @@ ROADMAP = [
     {
         "priority": 4,
         "item": "split PlanningBrigade roles into callable services after more field trials",
-        "reason": "PlanningBrigade now emits problem framing, path hints, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, CodeBrigade brief blueprints, and implementation work packages; role services should wait until these contracts survive more real tasks.",
+        "reason": "PlanningBrigade now emits problem framing, path hints, investigation playbooks, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, CodeBrigade brief blueprints, and implementation work packages; role services should wait until these contracts survive more real tasks.",
         "owner": "PlanningBrigade",
     },
 ]

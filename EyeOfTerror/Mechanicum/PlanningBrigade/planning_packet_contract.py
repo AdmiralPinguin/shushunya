@@ -18,6 +18,7 @@ REQUIRED_PACKET_OBJECTS = [
     "problem_statement",
     "task_triage",
     "repo_survey_request",
+    "investigation_playbook",
     "dependency_map",
     "work_breakdown",
     "impact_analysis",
@@ -75,6 +76,19 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("repo survey request must include focus areas")
     if survey.get("handoff_to") != "DesignStrategos":
         problems.append("repo survey request must hand off to DesignStrategos")
+
+    playbook = object_field(packet, "investigation_playbook")
+    stages = list_field(playbook.get("read_stages"))
+    if len(stages) < 5:
+        problems.append("investigation playbook must include ordered read stages")
+    elif not all(isinstance(stage, dict) and stage.get("stage") and stage.get("must_collect") for stage in stages):
+        problems.append("investigation playbook stages must include stage and must_collect")
+    if not isinstance(playbook.get("evidence_questions"), list) or len(playbook.get("evidence_questions", [])) < 4:
+        problems.append("investigation playbook must include evidence questions")
+    if not isinstance(playbook.get("mutation_blockers"), list) or len(playbook.get("mutation_blockers", [])) < 3:
+        problems.append("investigation playbook must include mutation blockers")
+    if playbook.get("handoff_to") != "CodeBrigade":
+        problems.append("investigation playbook must target CodeBrigade")
 
     problem = object_field(packet, "problem_statement")
     if not isinstance(problem.get("definition_of_done"), list) or len(problem.get("definition_of_done", [])) < 3:
@@ -203,6 +217,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("implementation brief blueprint must include mutation preconditions")
     if "expert_quality_plan" not in list_field(blueprint.get("required_sections")):
         problems.append("implementation brief blueprint must require expert_quality_plan")
+    if "investigation_playbook" not in list_field(blueprint.get("required_sections")):
+        problems.append("implementation brief blueprint must require investigation_playbook")
 
     work_packages = object_field(packet, "implementation_work_packages")
     packages = list_field(work_packages.get("packages"))

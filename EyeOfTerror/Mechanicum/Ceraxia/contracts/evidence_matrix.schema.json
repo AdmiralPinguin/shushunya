@@ -73,6 +73,9 @@
       "required": [
         "target_files_to_inspect",
         "test_files_to_preserve",
+        "investigation_read_stages",
+        "investigation_evidence_questions",
+        "investigation_mutation_blockers",
         "verification_commands"
       ]
     },

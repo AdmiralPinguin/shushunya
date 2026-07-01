@@ -184,6 +184,86 @@ def repo_survey_request(payload: dict[str, Any], triage: dict[str, Any]) -> dict
     }
 
 
+def investigation_playbook(triage: dict[str, Any], problem: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
+    kinds = set(triage.get("task_kinds", []))
+    stages: list[dict[str, Any]] = [
+        {
+            "stage": "entrypoints_first",
+            "must_collect": ["public entrypoints", "runtime or CLI/API boundaries"],
+            "blocks_mutation_until": "the user-visible surface is named or explicitly absent",
+        },
+        {
+            "stage": "candidate_source_second",
+            "must_collect": ["candidate source files", "reason each candidate is in scope"],
+            "blocks_mutation_until": "candidate files are justified by repo evidence, not only task wording",
+        },
+        {
+            "stage": "callers_and_dependencies",
+            "must_collect": ["direct callers", "local import edges", "reverse dependency impact"],
+            "blocks_mutation_until": "caller impact is mapped or a concrete blocker is recorded",
+        },
+        {
+            "stage": "tests_and_oracles",
+            "must_collect": ["existing tests", "failing diagnostics or explicit no-test blocker", "behavior oracle"],
+            "blocks_mutation_until": "verification can prove the requested behavior or is explicitly blocked",
+        },
+        {
+            "stage": "contract_and_risk_review",
+            "must_collect": ["public contract assumptions", "highest-risk surface", "rollback or refusal condition"],
+            "blocks_mutation_until": "risk controls and acceptance evidence are attached to the brief",
+        },
+    ]
+    if "security" in kinds:
+        stages.append(
+            {
+                "stage": "security_boundary_trace",
+                "must_collect": ["untrusted input source", "boundary enforcement point", "negative bypass case"],
+                "blocks_mutation_until": "the bypass path is traced from input to rejection point",
+            }
+        )
+    if kinds & {"api_compatibility", "migration"}:
+        stages.append(
+            {
+                "stage": "compatibility_shape_trace",
+                "must_collect": ["old shape", "new shape", "mixed/caller compatibility expectation"],
+                "blocks_mutation_until": "compatibility breakage is proven intentional or prevented",
+            }
+        )
+    if "concurrency" in kinds:
+        stages.append(
+            {
+                "stage": "state_transition_trace",
+                "must_collect": ["shared state owner", "retry/cache boundary", "nondeterministic failure mode"],
+                "blocks_mutation_until": "parallel state risk is named and bounded",
+            }
+        )
+    return {
+        "role": "PlanningBrigade",
+        "target": "CodeBrigade",
+        "path_hints": problem.get("explicit_path_hints", []),
+        "repo_focus": survey.get("focus", []),
+        "read_stages": stages,
+        "evidence_questions": [
+            "Which file or contract proves this is the right behavior to change?",
+            "Which callers, entrypoints, or schemas could break if the patch is too narrow?",
+            "Which existing or planned command proves the user-visible behavior rather than only syntax?",
+            "What concrete blocker should stop mutation if repository evidence is missing?",
+        ],
+        "mutation_blockers": [
+            "candidate files are absent or not justified by repository evidence",
+            "public caller or test surface is unknown for medium/high risk work",
+            "verification would be syntax-only for a behavior, security, compatibility, migration, or concurrency task",
+        ],
+        "replan_triggers": [
+            "new impacted surface appears outside the impact analysis",
+            "source edit scope exceeds the execution forecast budget",
+            "verification cannot be mapped to every high-risk surface",
+            "CodeBrigade needs to edit tests without explicit user permission",
+        ],
+        "handoff_to": "CodeBrigade",
+    }
+
+
 def dependency_map(triage: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
     nodes = [
         {
@@ -835,6 +915,7 @@ def implementation_brief_blueprint(
     surface_matrix: dict[str, Any],
     forecast: dict[str, Any],
     expert_plan: dict[str, Any],
+    playbook: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "role": "PlanningBrigade",
@@ -855,6 +936,7 @@ def implementation_brief_blueprint(
             "required_verification",
             "surface_verification_matrix",
             "surface_package_matrix",
+            "investigation_playbook",
             "survey_quality_gate",
             "acceptance_gates",
             "quality_bar",
@@ -879,8 +961,14 @@ def implementation_brief_blueprint(
         "expected_code_brigade_iterations": forecast["expected_code_brigade_iterations"],
         "expert_quality_level": expert_plan.get("level", "standard"),
         "expert_review_checklist": expert_plan.get("review_checklist", []),
+        "investigation_stages": [
+            str(stage.get("stage") or "")
+            for stage in playbook.get("read_stages", [])
+            if isinstance(stage, dict) and stage.get("stage")
+        ],
         "mutation_preconditions": [
             "implementation brief validates",
+            "investigation playbook read stages are acknowledged",
             "execution preflight passes",
             "candidate files are repo-relative existing non-symlink paths",
             "verification plan is attached to the worker report",
@@ -1272,6 +1360,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     triage = task_triage(payload)
     problem = problem_statement(payload, triage)
     survey = repo_survey_request(payload, triage)
+    playbook = investigation_playbook(triage, problem, survey)
     dependency = dependency_map(triage, survey)
     breakdown = work_breakdown(triage, dependency)
     impact = impact_analysis(triage, problem, survey)
@@ -1283,7 +1372,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     risks = risk_register(triage, survey, design, verification)
     quality = quality_bar(triage, verification)
     acceptance = acceptance_contract(problem, triage, verification, quality, surface_matrix, expert_plan)
-    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix, forecast, expert_plan)
+    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix, forecast, expert_plan, playbook)
     work_packages = implementation_work_packages(triage, problem, dependency, impact, verification, risks, forecast)
     package_matrix = surface_package_matrix(surface_matrix, work_packages)
     review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, work_packages, package_matrix)
@@ -1298,6 +1387,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "problem_statement": problem,
         "task_triage": triage,
         "repo_survey_request": survey,
+        "investigation_playbook": playbook,
         "dependency_map": dependency,
         "work_breakdown": breakdown,
         "impact_analysis": impact,

@@ -80,6 +80,10 @@ def main() -> int:
         or "prove_boundary" not in [phase["id"] for phase in security_packet["work_breakdown"]["phases"]]
         or "prove_boundary" not in next(phase for phase in security_packet["work_breakdown"]["phases"] if phase["id"] == "review_result")["depends_on"]
         or security_packet["impact_analysis"]["highest_risk_surface"] != "security_boundary"
+        or security_packet["investigation_playbook"]["target"] != "CodeBrigade"
+        or security_packet["investigation_playbook"]["read_stages"][0]["stage"] != "entrypoints_first"
+        or "security_boundary_trace" not in [stage["stage"] for stage in security_packet["investigation_playbook"]["read_stages"]]
+        or "verification would be syntax-only for a behavior, security, compatibility, migration, or concurrency task" not in security_packet["investigation_playbook"]["mutation_blockers"]
         or "security_boundary" not in [surface["surface"] for surface in security_packet["impact_analysis"]["surfaces"]]
         or not security_packet["surface_verification_matrix"]["complete"]
         or "security_boundary" not in [row["surface"] for row in security_packet["surface_verification_matrix"]["rows"]]
@@ -139,6 +143,8 @@ def main() -> int:
         or "runtime_configuration_package" not in migration_packet["implementation_work_packages"]["review_order"]
         or not any(package["id"] == "compatibility_package" and "Protect old/new public or data shapes across callers, readers, and writers." == package["purpose"] for package in migration_packet["implementation_work_packages"]["packages"])
         or "dependency_critical_path" not in migration_packet["implementation_brief_blueprint"]
+        or "investigation_playbook" not in migration_packet["implementation_brief_blueprint"]["required_sections"]
+        or "compatibility_shape_trace" not in [stage["stage"] for stage in migration_packet["investigation_playbook"]["read_stages"]]
         or "work_phases" not in migration_packet["implementation_brief_blueprint"]
         or migration_packet["expert_quality_plan"]["level"] != "expert"
         or "strict_new_shape_vs_backward_compatibility" not in [item["decision"] for item in migration_packet["expert_quality_plan"]["tradeoff_register"]]

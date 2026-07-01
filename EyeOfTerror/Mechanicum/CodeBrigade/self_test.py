@@ -118,15 +118,63 @@ def valid_brief() -> dict:
                 "return to PlanningBrigade when verification cannot prove the acceptance contract",
             ],
         },
+        "investigation_playbook": {
+            "target": "CodeBrigade",
+            "read_stages": [
+                {
+                    "stage": "entrypoints_first",
+                    "must_collect": ["public entrypoints", "runtime or CLI/API boundaries"],
+                    "blocks_mutation_until": "the user-visible surface is named or explicitly absent",
+                },
+                {
+                    "stage": "candidate_source_second",
+                    "must_collect": ["candidate source files", "reason each candidate is in scope"],
+                    "blocks_mutation_until": "candidate files are justified by repo evidence",
+                },
+                {
+                    "stage": "callers_and_dependencies",
+                    "must_collect": ["direct callers", "local import edges", "reverse dependency impact"],
+                    "blocks_mutation_until": "caller impact is mapped or blocked",
+                },
+                {
+                    "stage": "tests_and_oracles",
+                    "must_collect": ["existing tests", "behavior oracle"],
+                    "blocks_mutation_until": "verification can prove the requested behavior",
+                },
+                {
+                    "stage": "contract_and_risk_review",
+                    "must_collect": ["public contract assumptions", "highest-risk surface", "rollback or refusal condition"],
+                    "blocks_mutation_until": "risk controls and acceptance evidence are attached",
+                },
+            ],
+            "evidence_questions": [
+                "Which file proves this behavior?",
+                "Which callers could break?",
+                "Which command proves user-visible behavior?",
+                "What blocker stops mutation?",
+            ],
+            "mutation_blockers": [
+                "candidate files are absent",
+                "caller or test surface is unknown",
+                "verification would be syntax-only",
+            ],
+            "replan_triggers": [
+                "new impacted surface appears",
+                "source edit scope exceeds budget",
+                "verification cannot map to high-risk surface",
+            ],
+        },
         "implementation_brief_blueprint": {
             "target": "CodeBrigade",
             "required_sections": [
                 "task",
                 "repo_path",
                 "expert_quality_plan",
+                "investigation_playbook",
             ],
             "mutation_preconditions": [
                 "implementation brief validates",
+                "investigation playbook read stages are acknowledged",
                 "execution preflight passes",
                 "candidate files are repo-relative existing non-symlink paths",
             ],
@@ -294,6 +342,8 @@ def main() -> int:
         raise AssertionError(f"execution policy must require brief validation before mutation: {policy}")
     if "execution preflight passes before source mutation" not in policy["mutation_preconditions"]:
         raise AssertionError(f"execution policy must require preflight before mutation: {policy}")
+    if "investigation playbook read stages are acknowledged before source mutation" not in policy["mutation_preconditions"]:
+        raise AssertionError(f"execution policy must require investigation playbook before mutation: {policy}")
     dry_report = code_brigade_adapter.build_worker_report(valid_brief(), dry_run=True)
     if dry_report["status"] != "dry_run_handoff_ready" or not dry_report["implementation_brief_acknowledged"]:
         raise AssertionError(f"valid dry-run brief should be accepted: {dry_report}")
@@ -372,6 +422,12 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve expert observability requirements: {plan}")
     if "return to PlanningBrigade when verification cannot prove the acceptance contract" not in plan["expert_escalation_policy"]:
         raise AssertionError(f"implementation plan should preserve expert escalation policy: {plan}")
+    if plan["investigation_read_stages"][0]["stage"] != "entrypoints_first":
+        raise AssertionError(f"implementation plan should preserve investigation read stages: {plan}")
+    if "Which callers could break?" not in plan["investigation_evidence_questions"]:
+        raise AssertionError(f"implementation plan should preserve investigation evidence questions: {plan}")
+    if "verification would be syntax-only" not in plan["investigation_mutation_blockers"]:
+        raise AssertionError(f"implementation plan should preserve investigation mutation blockers: {plan}")
     if not plan["surface_verification_complete"] or plan["surface_verification_rows"][0]["surface"] != "source_behavior":
         raise AssertionError(f"implementation plan should preserve surface verification matrix: {plan}")
     if not plan["surface_package_matrix_complete"] or plan["surface_package_matrix_rows"][0]["package_ids"][0] != "evidence_survey_package":

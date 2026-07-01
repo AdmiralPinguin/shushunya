@@ -61,6 +61,18 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         expert_plan.get("level") != "expert" or expert_plan.get("required_for_expert_gate") is not True
     ):
         problems.append("brief high-risk work must include an expert quality plan")
+    playbook = brief.get("investigation_playbook") if isinstance(brief.get("investigation_playbook"), dict) else {}
+    if playbook.get("target") != "CodeBrigade":
+        problems.append("brief investigation_playbook must target CodeBrigade")
+    stages = playbook.get("read_stages") if isinstance(playbook.get("read_stages"), list) else []
+    if len(stages) < 5:
+        problems.append("brief investigation_playbook.read_stages are required")
+    elif not all(isinstance(stage, dict) and stage.get("stage") and stage.get("must_collect") for stage in stages):
+        problems.append("brief investigation_playbook stages must include stage and must_collect")
+    if not isinstance(playbook.get("evidence_questions"), list) or len(playbook.get("evidence_questions", [])) < 4:
+        problems.append("brief investigation_playbook.evidence_questions are required")
+    if not isinstance(playbook.get("mutation_blockers"), list) or len(playbook.get("mutation_blockers", [])) < 3:
+        problems.append("brief investigation_playbook.mutation_blockers are required")
     blueprint = brief.get("implementation_brief_blueprint") if isinstance(brief.get("implementation_brief_blueprint"), dict) else {}
     if blueprint.get("target") != "CodeBrigade":
         problems.append("brief implementation_brief_blueprint must target CodeBrigade")
@@ -68,6 +80,8 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief implementation_brief_blueprint mutation_preconditions are required")
     if "expert_quality_plan" not in blueprint.get("required_sections", []):
         problems.append("brief implementation_brief_blueprint must require expert_quality_plan")
+    if "investigation_playbook" not in blueprint.get("required_sections", []):
+        problems.append("brief implementation_brief_blueprint must require investigation_playbook")
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
     if len(packages) < 3:

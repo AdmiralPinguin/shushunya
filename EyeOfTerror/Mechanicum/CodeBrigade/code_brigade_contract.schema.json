@@ -83,6 +83,10 @@
         "expert_observability_plan",
         "expert_review_checklist",
         "expert_escalation_policy",
+        "investigation_read_stages",
+        "investigation_evidence_questions",
+        "investigation_mutation_blockers",
+        "investigation_replan_triggers",
         "verification_commands",
         "surface_verification_complete",
         "surface_verification_rows",
@@ -259,6 +263,34 @@
         },
         "expert_escalation_policy": {
           "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "investigation_read_stages": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "object"
+          }
+        },
+        "investigation_evidence_questions": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "investigation_mutation_blockers": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "investigation_replan_triggers": {
+          "type": "array",
+          "minItems": 3,
           "items": {
             "type": "string"
           }

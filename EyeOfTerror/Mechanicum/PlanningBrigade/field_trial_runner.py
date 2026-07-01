@@ -32,6 +32,14 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     work_packages = packet["implementation_work_packages"]["packages"]
     work_package_ids = [package["id"] for package in work_packages]
     require_subset(trial.get("expected_work_packages", []), work_package_ids, "implementation work packages", trial_id)
+    playbook = packet.get("investigation_playbook") if isinstance(packet.get("investigation_playbook"), dict) else {}
+    read_stages = playbook.get("read_stages") if isinstance(playbook.get("read_stages"), list) else []
+    if len(read_stages) < 5:
+        raise AssertionError(f"{trial_id}: investigation playbook must include ordered read stages: {packet}")
+    if not isinstance(playbook.get("evidence_questions"), list) or len(playbook.get("evidence_questions", [])) < 4:
+        raise AssertionError(f"{trial_id}: investigation playbook must include evidence questions: {packet}")
+    if not isinstance(playbook.get("mutation_blockers"), list) or len(playbook.get("mutation_blockers", [])) < 3:
+        raise AssertionError(f"{trial_id}: investigation playbook must include mutation blockers: {packet}")
     missing_blocking_policy = [package.get("id", "<unknown>") for package in work_packages if not package.get("blocking_policy")]
     if missing_blocking_policy:
         raise AssertionError(f"{trial_id}: work packages missing blocking_policy: {missing_blocking_policy}; packet={packet}")
