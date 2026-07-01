@@ -31,6 +31,7 @@ task
   -> verification_report.json
   -> review_gate.json
   -> execution_readiness.json
+  -> evidence_matrix.json
   -> run_summary.json
   -> artifact_manifest.json
   -> run_audit.json
@@ -52,6 +53,9 @@ CLI `ok` and `package_ok` mean the dry-run package is internally consistent;
 `ready_for_execution` remains false until real CodeBrigade execution is wired.
 Use `--execute-verification` to run allowlisted verification commands while
 keeping source mutation in dry-run mode.
+`evidence_matrix.json` maps the PlanningBrigade quality bar to concrete or
+planned evidence sources, and `run_summary.json` carries the same coverage
+counters for fast orchestration checks.
 
 Smoke command:
 
