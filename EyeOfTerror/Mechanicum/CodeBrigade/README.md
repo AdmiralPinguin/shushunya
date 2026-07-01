@@ -38,6 +38,9 @@ real executor.
 It also includes `execution_policy_status`; this must remain
 `blocked_until_adapter_is_wired` until a real source-mutation adapter is
 implemented and covered by the local gate.
+When that adapter is added, its result must satisfy
+`execution_result.schema.json`: status, changed files, patch summary, executed
+verification commands, blockers, and rollback notes.
 
 `verification_adapter.py` can run a narrow allowlist of verification commands
 without a shell. It is safe enough for explicit verification wiring, but source
