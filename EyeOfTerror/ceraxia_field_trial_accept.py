@@ -11,8 +11,8 @@ from ceraxia_field_trial_review import build_review_packet
 
 
 ROOT = Path(__file__).resolve().parent
-SPEC = ROOT / "InnerCircle" / "Ceraxia" / "field_trials.json"
-LEDGER = ROOT / "InnerCircle" / "Ceraxia" / "field_trial_ledger.json"
+SPEC = ROOT / "Mechanicum" / "Ceraxia" / "field_trials.json"
+LEDGER = ROOT / "Mechanicum" / "Ceraxia" / "field_trial_ledger.json"
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:

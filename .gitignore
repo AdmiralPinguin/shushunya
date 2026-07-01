@@ -108,6 +108,16 @@ Mechanicum/RoxDub/tmp/
 Mechanicum/RoxDub/videos/
 Mechanicum/RoxDub/cloudflared
 Mechanicum/RoxDub/*.apk
+Mechanicum/_temporary/RoxDub/RoxDub/
+Mechanicum/_temporary/RoxDub/.roxdub-server-token
+Mechanicum/_temporary/RoxDub/bin/
+Mechanicum/_temporary/RoxDub/models/
+Mechanicum/_temporary/RoxDub/runs/
+Mechanicum/_temporary/RoxDub/runtime/
+Mechanicum/_temporary/RoxDub/tmp/
+Mechanicum/_temporary/RoxDub/videos/
+Mechanicum/_temporary/RoxDub/cloudflared
+Mechanicum/_temporary/RoxDub/*.apk
 Mechanicum/ShushunyaAgent/ShushunyaAgent/
 Mechanicum/ShushunyaAgent/runtime/
 Mechanicum/SearXNG/runtime/

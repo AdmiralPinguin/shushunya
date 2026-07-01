@@ -21,7 +21,7 @@ from eye_of_terror.registry import worker_refs
 
 
 def documented_iskandar_pipeline() -> list[str]:
-    readme = Path(__file__).resolve().parent / "InnerCircle" / "IskandarKhayon" / "README.md"
+    readme = Path(__file__).resolve().parent / "_temporary" / "IskandarKhayon" / "governor" / "README.md"
     text = readme.read_text(encoding="utf-8")
     match = re.search(r"## Default Worker Pipeline\s+```text\n(?P<body>.*?)\n```", text, flags=re.S)
     if not match:

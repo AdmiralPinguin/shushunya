@@ -9,7 +9,7 @@
     "7101": {
       "name": "IskandarKhayon",
       "role": "lore research and reconstruction governor",
-      "path": "EyeOfTerror/InnerCircle/IskandarKhayon"
+      "path": "EyeOfTerror/_temporary/IskandarKhayon/governor"
     },
     "7102": {
       "name": "CogitatorCodewrightGovernor",
@@ -24,7 +24,7 @@
     "7104": {
       "name": "Ceraxia",
       "role": "code task governor",
-      "path": "EyeOfTerror/InnerCircle/Ceraxia"
+      "path": "EyeOfTerror/Mechanicum/Ceraxia"
     }
   },
   "mechanicum": {
@@ -36,37 +36,37 @@
     "7002": {
       "name": "Lexmechanic",
       "role": "source researcher",
-      "path": "Mechanicum/Lexmechanic"
+      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/Lexmechanic"
     },
     "7003": {
       "name": "NoosphericExtractor",
       "role": "fact extractor",
-      "path": "Mechanicum/NoosphericExtractor"
+      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/NoosphericExtractor"
     },
     "7004": {
       "name": "Chronologis",
       "role": "timeline builder",
-      "path": "Mechanicum/Chronologis"
+      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/Chronologis"
     },
     "7005": {
       "name": "ScriptoriumDaemon",
       "role": "writer",
-      "path": "Mechanicum/ScriptoriumDaemon"
+      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/ScriptoriumDaemon"
     },
     "7006": {
       "name": "ReductorVerifier",
       "role": "critic and verifier",
-      "path": "Mechanicum/ReductorVerifier"
+      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/ReductorVerifier"
     },
     "7007": {
       "name": "FabricatorFinalis",
       "role": "finalizer, packager, telegram sender",
-      "path": "Mechanicum/FabricatorFinalis"
+      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/FabricatorFinalis"
     },
     "7009": {
       "name": "AuspexBrowser",
       "role": "browser worker",
-      "path": "Mechanicum/AuspexBrowser"
+      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/AuspexBrowser"
     },
     "7010": {
       "name": "ForgeRelay",
@@ -88,7 +88,7 @@
     "7013": {
       "name": "CorpusIngestor",
       "role": "local corpus indexer",
-      "path": "Mechanicum/CorpusIngestor"
+      "path": "EyeOfTerror/_temporary/IskandarKhayon/brigade/CorpusIngestor"
     },
     "7014": {
       "name": "CogitatorCodewright",

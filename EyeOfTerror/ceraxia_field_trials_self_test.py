@@ -10,9 +10,9 @@ from ceraxia_field_trial_runner import apply_trial_checks_to_outcome, classify_t
 
 
 ROOT = Path(__file__).resolve().parent
-SPEC = ROOT / "InnerCircle" / "Ceraxia" / "field_trials.json"
-PROTOCOL = ROOT / "InnerCircle" / "Ceraxia" / "EVALUATION.md"
-LEDGER = ROOT / "InnerCircle" / "Ceraxia" / "field_trial_ledger.json"
+SPEC = ROOT / "Mechanicum" / "Ceraxia" / "field_trials.json"
+PROTOCOL = ROOT / "Mechanicum" / "Ceraxia" / "EVALUATION.md"
+LEDGER = ROOT / "Mechanicum" / "Ceraxia" / "field_trial_ledger.json"
 REPORTER = ROOT / "ceraxia_field_trial_report.py"
 RUNNER = ROOT / "ceraxia_field_trial_runner.py"
 EXPERT_SUITE = ROOT / "ceraxia_expert_suite.py"

@@ -11,17 +11,17 @@ from governors and return structured outputs.
 | Port | Worker | Role |
 | --- | --- | --- |
 | 7001 | ShushunyaAgent | General worker |
-| 7002 | Lexmechanic | Source researcher |
-| 7003 | NoosphericExtractor | Fact extractor |
-| 7004 | Chronologis | Timeline builder |
-| 7005 | ScriptoriumDaemon | Writer |
-| 7006 | ReductorVerifier | Critic/verifier |
-| 7007 | FabricatorFinalis | Finalizer/packager/Telegram |
-| 7009 | AuspexBrowser | Browser worker |
+| 7002 | Lexmechanic | Source researcher, parked under Iskandar temporary holding |
+| 7003 | NoosphericExtractor | Fact extractor, parked under Iskandar temporary holding |
+| 7004 | Chronologis | Timeline builder, parked under Iskandar temporary holding |
+| 7005 | ScriptoriumDaemon | Writer, parked under Iskandar temporary holding |
+| 7006 | ReductorVerifier | Critic/verifier, parked under Iskandar temporary holding |
+| 7007 | FabricatorFinalis | Finalizer/packager/Telegram, parked under Iskandar temporary holding |
+| 7009 | AuspexBrowser | Browser worker, parked under Iskandar temporary holding |
 | 7010 | ForgeRelay | DemonsForge adapter |
 | 7011 | MnemosyneRelay | ArchiveOfHeresy adapter |
 | 7012 | OcularisRenderium | Planned JavaScript render/screenshot worker |
-| 7013 | CorpusIngestor | Local corpus indexer |
+| 7013 | CorpusIngestor | Local corpus indexer, parked under Iskandar temporary holding |
 | 7014 | CogitatorCodewright | Code worker |
 | 7015 | LogisRepository | Code repository surveyor |
 | 7016 | MagosStrategos | Code change planner |

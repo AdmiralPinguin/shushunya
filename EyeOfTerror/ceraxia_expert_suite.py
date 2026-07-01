@@ -11,7 +11,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent
-SPEC = ROOT / "InnerCircle" / "Ceraxia" / "field_trials.json"
+SPEC = ROOT / "Mechanicum" / "Ceraxia" / "field_trials.json"
 RUNNER = ROOT / "ceraxia_field_trial_runner.py"
 
 

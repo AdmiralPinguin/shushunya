@@ -102,7 +102,16 @@ def check_worker_manifests(errors: list[str]) -> int:
     port_registry = load_json(REPO_ROOT / "EyeOfTerror" / "registry" / "ports.json").get("mechanicum", {})
     manifest_ports: dict[int, dict[str, Any]] = {}
     seen_ports: dict[int, str] = {}
-    metadata_paths = sorted((REPO_ROOT / "Mechanicum").glob("*/worker.json"))
+    metadata_paths = {
+        path
+        for path in (REPO_ROOT / "Mechanicum").glob("*/worker.json")
+    }
+    services = load_json(REPO_ROOT / "Mechanicum" / "worker_services.json")
+    if isinstance(services, dict):
+        for service in services.values():
+            if isinstance(service, dict) and service.get("module_path"):
+                metadata_paths.add(REPO_ROOT / str(service["module_path"]) / "worker.json")
+    metadata_paths = sorted(metadata_paths)
     for metadata_path in metadata_paths:
         metadata = load_json(metadata_path)
         name = str(metadata.get("name") or "")
@@ -161,7 +170,7 @@ def require_string_list(value: Any, message: str, errors: list[str], *, allow_em
 
 
 def check_source_playbooks(errors: list[str]) -> int:
-    playbook_dir = REPO_ROOT / "Mechanicum" / "Lexmechanic" / "playbooks"
+    playbook_dir = REPO_ROOT / "EyeOfTerror" / "_temporary" / "IskandarKhayon" / "brigade" / "Lexmechanic" / "playbooks"
     count = 0
     seen_names: set[str] = set()
     for path in sorted(playbook_dir.glob("*.json")):
@@ -198,7 +207,7 @@ def check_source_playbooks(errors: list[str]) -> int:
 
 
 def check_event_playbooks(errors: list[str]) -> int:
-    playbook_dir = REPO_ROOT / "Mechanicum" / "NoosphericExtractor" / "playbooks"
+    playbook_dir = REPO_ROOT / "EyeOfTerror" / "_temporary" / "IskandarKhayon" / "brigade" / "NoosphericExtractor" / "playbooks"
     count = 0
     for path in sorted(playbook_dir.glob("*.json")):
         count += 1

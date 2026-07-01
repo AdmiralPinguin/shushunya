@@ -8,7 +8,8 @@ from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
 
-SHUSHUNYA_AGENT_DIR = Path(__file__).resolve().parents[1] / "ShushunyaAgent"
+REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "Mechanicum" / "ShushunyaAgent").exists())
+SHUSHUNYA_AGENT_DIR = REPO_ROOT / "Mechanicum" / "ShushunyaAgent"
 if str(SHUSHUNYA_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(SHUSHUNYA_AGENT_DIR))
 

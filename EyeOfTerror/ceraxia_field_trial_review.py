@@ -8,8 +8,8 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent
-SPEC = ROOT / "InnerCircle" / "Ceraxia" / "field_trials.json"
-LEDGER = ROOT / "InnerCircle" / "Ceraxia" / "field_trial_ledger.json"
+SPEC = ROOT / "Mechanicum" / "Ceraxia" / "field_trials.json"
+LEDGER = ROOT / "Mechanicum" / "Ceraxia" / "field_trial_ledger.json"
 
 
 def load_json(path: Path) -> dict[str, Any]:

@@ -77,9 +77,18 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     services = load_services(repo_root)
     port_registry = load_port_registry(repo_root)
+    metadata_paths = {
+        path
+        for path in (repo_root / "Mechanicum").glob("*/worker.json")
+    }
+    for service in services.values():
+        if isinstance(service, dict) and service.get("module_path"):
+            metadata_paths.add(repo_root / str(service["module_path"]) / "worker.json")
     metadata_by_name: dict[str, dict] = {}
     seen_ports: dict[int, str] = {}
-    for metadata_path in sorted((repo_root / "Mechanicum").glob("*/worker.json")):
+    for metadata_path in sorted(metadata_paths):
+        if not metadata_path.exists():
+            continue
         metadata = load_worker_metadata(metadata_path)
         metadata_by_name[metadata["name"]] = metadata
         owner = seen_ports.setdefault(metadata["port"], metadata["name"])

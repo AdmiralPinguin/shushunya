@@ -15,7 +15,7 @@ from eye_of_terror.warmaster_gateway import prepare_task, research_loop_run
 
 
 ROOT = Path(__file__).resolve().parent
-LEDGER = ROOT / "InnerCircle" / "Ceraxia" / "field_trial_ledger.json"
+LEDGER = ROOT / "Mechanicum" / "Ceraxia" / "field_trial_ledger.json"
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:

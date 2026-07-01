@@ -9,7 +9,7 @@ Work for this project must stay inside this directory unless the user explicitly
 ## Active Work Focus
 
 Current active architecture work is Ceraxia, the code-brigade governor under
-`EyeOfTerror/InnerCircle/Ceraxia`, plus her Mechanicum code workers.
+`EyeOfTerror/Mechanicum/Ceraxia`, plus her Mechanicum code workers.
 
 `Mechanicum/ShushunyaAgent` is parked. Do not resume ShushunyaAgent arena
 stress tests, supervisor tuning, or standalone agent changes from old context
