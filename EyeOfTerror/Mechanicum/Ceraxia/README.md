@@ -59,6 +59,8 @@ counters for fast orchestration checks.
 `repo_survey.json.truncated=true` means the survey hit its file limit; Ceraxia
 keeps the package usable, but `review_gate.json` records a partial-coverage
 warning.
+`repo_survey.json.python_symbols_truncated=true` is narrower: source files were
+listed, but Python symbol/import evidence is partial.
 
 Smoke command:
 
