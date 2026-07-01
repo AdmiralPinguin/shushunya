@@ -33,9 +33,9 @@ dry-run handoff. Real source execution is intentionally narrow: only explicit
 `CERAXIA_PATCH` operations and guarded natural-language single-file operations
 against surveyed repo-relative files may pass. A second guarded diagnostic path
 can append one missing Python function or module-level constant when existing
-tests provide a single imported symbol and safe literal expectation, or replace
-a single literal return expression / module-level constant assignment when that
-same evidence proves a mismatch.
+tests provide a single imported or module-qualified symbol and safe literal
+expectation, or replace a single literal return expression / module-level
+constant assignment when that same evidence proves a mismatch.
 `implementation_brief_contract.py` owns brief validation shared by the report
 adapter and execution adapter.
 `execution_adapter.py` is that boundary today. It applies explicit

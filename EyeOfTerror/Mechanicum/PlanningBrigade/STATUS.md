@@ -65,6 +65,8 @@ Current boundaries:
 - CodeBrigade source mutation is limited to the explicit patch adapter and
   narrow guarded natural-language operations; broad natural-language mutation
   remains blocked
+- guarded create-file tasks may use explicit allowed new files even when the
+  repository has no existing source candidate for that module
 - planning quality is regression-tested, but real-world quality still depends
   on reviewed field-trial runs against varied repositories
 
