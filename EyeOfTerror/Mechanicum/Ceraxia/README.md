@@ -61,6 +61,10 @@ keeps the package usable, but `review_gate.json` records a partial-coverage
 warning.
 `repo_survey.json.python_symbols_truncated=true` is narrower: source files were
 listed, but Python symbol/import evidence is partial.
+When verification output contains failed, blocked, traceback, assertion,
+syntax, missing-import, or zero-test diagnostics, `review_gate.json` now
+builds a `diagnostic_repair_queue`; `run_summary.json` and `final_report.md`
+expose its status and item count for the next CodeBrigade repair pass.
 
 Current `EyeOfTerror/Mechanicum` planning quality gates:
 

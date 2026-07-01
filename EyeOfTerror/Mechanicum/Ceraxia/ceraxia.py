@@ -412,6 +412,72 @@ def output_diagnostic_counts_from_summary(output_summary: list[Any]) -> dict[str
     }
 
 
+def diagnostic_signals_from_summary_item(item: dict[str, Any]) -> list[str]:
+    signals: list[str] = []
+    for key, label in [
+        ("has_traceback", "traceback"),
+        ("has_assertion_failure", "assertion_failure"),
+        ("has_syntax_error", "syntax_error"),
+        ("has_no_tests_ran", "no_tests_ran"),
+    ]:
+        if item.get(key):
+            signals.append(label)
+    if item.get("missing_imports"):
+        signals.append("missing_import")
+    if not signals and str(item.get("status") or "") in {"failed", "blocked"}:
+        signals.append("failed_command")
+    return signals
+
+
+def build_diagnostic_repair_queue(
+    brief: dict[str, Any],
+    verification_report: dict[str, Any],
+    worker_report: dict[str, Any],
+) -> dict[str, Any]:
+    repair_plan = brief.get("diagnostic_repair_plan") if isinstance(brief.get("diagnostic_repair_plan"), dict) else {}
+    implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
+    output_summary = verification_report.get("output_summary") if isinstance(verification_report.get("output_summary"), list) else []
+    read_before_repair = repair_plan.get("read_before_repair") if isinstance(repair_plan.get("read_before_repair"), list) else []
+    stop_conditions = repair_plan.get("stop_conditions") if isinstance(repair_plan.get("stop_conditions"), list) else []
+    repair_evidence = repair_plan.get("repair_evidence_required") if isinstance(repair_plan.get("repair_evidence_required"), list) else []
+    default_targets = implementation_plan.get("target_files_to_inspect") if isinstance(implementation_plan.get("target_files_to_inspect"), list) else []
+    items: list[dict[str, Any]] = []
+    for item in output_summary:
+        if not isinstance(item, dict):
+            continue
+        command_status = str(item.get("status") or "")
+        signals = diagnostic_signals_from_summary_item(item)
+        if command_status not in {"failed", "blocked"} and not signals:
+            continue
+        traceback_files = item.get("traceback_files") if isinstance(item.get("traceback_files"), list) else []
+        missing_imports = item.get("missing_imports") if isinstance(item.get("missing_imports"), list) else []
+        concrete_read_targets = [str(path) for path in traceback_files if isinstance(path, str)]
+        if not concrete_read_targets:
+            concrete_read_targets = [str(path) for path in default_targets if isinstance(path, str)]
+        items.append(
+            {
+                "command": str(item.get("command") or ""),
+                "status": command_status,
+                "priority": "high" if "traceback" in signals or "syntax_error" in signals else "normal",
+                "diagnostic_signals": signals,
+                "traceback_files": traceback_files,
+                "missing_imports": missing_imports,
+                "read_before_repair": read_before_repair,
+                "concrete_read_targets": concrete_read_targets,
+                "stop_conditions": stop_conditions,
+                "repair_evidence_required": repair_evidence,
+                "max_repair_attempts": repair_plan.get("max_repair_attempts", 3),
+            }
+        )
+    return {
+        "status": "queued" if items else "empty",
+        "item_count": len(items),
+        "items": items,
+        "source": "verification_output_diagnostics",
+        "plan_present": bool(repair_plan),
+    }
+
+
 def output_consistency_findings(verification_report: dict[str, Any], output_summary: list[Any]) -> list[str]:
     problems: list[str] = []
     report_status = str(verification_report.get("status") or "")
@@ -777,6 +843,7 @@ def review_gate(
     acceptance_trace_sufficiency = acceptance_trace_sufficiency_from_worker(worker_report)
     constraint_trace_sufficiency = constraint_trace_sufficiency_from_worker(worker_report)
     assumption_sufficiency = assumption_sufficiency_from_worker(worker_report)
+    diagnostic_repair_queue = build_diagnostic_repair_queue(brief, verification_report, worker_report)
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
     if not worker_report.get("implementation_brief_acknowledged", False):
@@ -854,6 +921,7 @@ def review_gate(
         "acceptance_trace_sufficiency": acceptance_trace_sufficiency,
         "constraint_trace_sufficiency": constraint_trace_sufficiency,
         "assumption_sufficiency": assumption_sufficiency,
+        "diagnostic_repair_queue": diagnostic_repair_queue,
         "checked_against": [
             "planning packet completeness",
             "strategy approval",
@@ -907,6 +975,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     output_summary = verification.get("output_summary", []) if isinstance(verification.get("output_summary"), list) else []
     output_signal_counts = output_signal_counts_from_summary(output_summary)
     output_diagnostic_counts = output_diagnostic_counts_from_summary(output_summary)
+    repair_queue = review.get("diagnostic_repair_queue") if isinstance(review.get("diagnostic_repair_queue"), dict) else {}
     repo_evidence = brief.get("repo_survey_evidence", {}) if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     work_packages = brief.get("implementation_work_packages", {}) if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
@@ -961,6 +1030,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Verification output summary rows: {len(output_summary)}",
         f"Verification output signals: {json.dumps(output_signal_counts, ensure_ascii=False, sort_keys=True)}",
         f"Verification output diagnostics: {json.dumps(output_diagnostic_counts, ensure_ascii=False, sort_keys=True)}",
+        f"Diagnostic repair queue: {repair_queue.get('status', 'empty')} ({repair_queue.get('item_count', 0)} item(s))",
         f"Worker status: {worker_report.get('status', '')}",
         f"Execution policy status: {worker_report.get('execution_policy_status', '')}",
         f"Execution result status: {execution_result.get('status', '')}",
@@ -1120,6 +1190,11 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": "run_summary verification_output_signal_counts disagrees with review_gate.json"})
     if summary.get("verification_output_diagnostic_counts", {}) != verification_sufficiency.get("output_diagnostic_counts", {}):
         findings.append({"severity": "blocker", "finding": "run_summary verification_output_diagnostic_counts disagrees with review_gate.json"})
+    repair_queue = review.get("diagnostic_repair_queue") if isinstance(review.get("diagnostic_repair_queue"), dict) else {}
+    if summary.get("diagnostic_repair_queue_status", "empty") != repair_queue.get("status", "empty"):
+        findings.append({"severity": "blocker", "finding": "run_summary diagnostic_repair_queue_status disagrees with review_gate.json"})
+    if summary.get("diagnostic_repair_queue_item_count", 0) != repair_queue.get("item_count", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary diagnostic_repair_queue_item_count disagrees with review_gate.json"})
     investigation_sufficiency = review.get("investigation_sufficiency") if isinstance(review.get("investigation_sufficiency"), dict) else {}
     if summary.get("investigation_playbook_status", "") != investigation_sufficiency.get("status", ""):
         findings.append({"severity": "blocker", "finding": "run_summary investigation_playbook_status disagrees with review_gate.json"})
@@ -1372,6 +1447,7 @@ def build_run_summary(
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     verification_sufficiency = review.get("verification_sufficiency") if isinstance(review.get("verification_sufficiency"), dict) else {}
     surface_sufficiency = review.get("surface_verification_sufficiency") if isinstance(review.get("surface_verification_sufficiency"), dict) else {}
+    repair_queue = review.get("diagnostic_repair_queue") if isinstance(review.get("diagnostic_repair_queue"), dict) else {}
     investigation_sufficiency = review.get("investigation_sufficiency") if isinstance(review.get("investigation_sufficiency"), dict) else {}
     change_control_sufficiency = review.get("change_control_sufficiency") if isinstance(review.get("change_control_sufficiency"), dict) else {}
     acceptance_trace_sufficiency = review.get("acceptance_trace_sufficiency") if isinstance(review.get("acceptance_trace_sufficiency"), dict) else {}
@@ -1425,6 +1501,8 @@ def build_run_summary(
         "verification_output_summary_count": verification_sufficiency.get("output_summary_count", 0),
         "verification_output_signal_counts": verification_sufficiency.get("output_signal_counts", {}),
         "verification_output_diagnostic_counts": verification_sufficiency.get("output_diagnostic_counts", {}),
+        "diagnostic_repair_queue_status": repair_queue.get("status", "empty"),
+        "diagnostic_repair_queue_item_count": repair_queue.get("item_count", 0),
         "investigation_playbook_status": investigation_sufficiency.get("status", ""),
         "investigation_read_stage_count": investigation_sufficiency.get("read_stage_count", 0),
         "investigation_evidence_question_count": investigation_sufficiency.get("evidence_question_count", 0),

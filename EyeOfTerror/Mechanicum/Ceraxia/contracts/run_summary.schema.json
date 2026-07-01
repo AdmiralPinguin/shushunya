@@ -31,6 +31,8 @@
     "verification_output_summary_count",
     "verification_output_signal_counts",
     "verification_output_diagnostic_counts",
+    "diagnostic_repair_queue_status",
+    "diagnostic_repair_queue_item_count",
     "investigation_playbook_status",
     "investigation_read_stage_count",
     "investigation_evidence_question_count",
@@ -174,6 +176,12 @@
       "additionalProperties": {
         "type": "integer"
       }
+    },
+    "diagnostic_repair_queue_status": {
+      "type": "string"
+    },
+    "diagnostic_repair_queue_item_count": {
+      "type": "integer"
     },
     "investigation_playbook_status": {
       "type": "string"

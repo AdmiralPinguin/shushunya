@@ -862,6 +862,12 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertEqual(review["surface_verification_sufficiency"]["status"], "failed")
         self.assertEqual(review["verification_sufficiency"]["output_signal_counts"]["failure_text"], 1)
         self.assertEqual(review["verification_sufficiency"]["output_diagnostic_counts"]["assertion_failure"], 1)
+        self.assertEqual(review["diagnostic_repair_queue"]["status"], "queued")
+        self.assertEqual(review["diagnostic_repair_queue"]["item_count"], 1)
+        repair_item = review["diagnostic_repair_queue"]["items"][0]
+        self.assertIn("assertion_failure", repair_item["diagnostic_signals"])
+        self.assertEqual(repair_item["max_repair_attempts"], brief["diagnostic_repair_plan"]["max_repair_attempts"])
+        self.assertEqual(repair_item["stop_conditions"], brief["diagnostic_repair_plan"]["stop_conditions"])
 
     def test_review_gate_blocks_passed_report_with_failure_output(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
