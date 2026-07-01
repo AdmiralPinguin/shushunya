@@ -19,7 +19,9 @@ gates, handoff, and read-only boundary. The roles remain in-process until field
 trials prove the contracts are stable enough to split into services.
 `service_contracts.json` reserves planned read-only service interfaces for the
 same roles on ports 7111-7115, without starting or requiring those services
-yet.
+yet. Self-tests and field trials compare those reservations with
+`EyeOfTerror/registry/ports.json` and `Mechanicum/worker_services.json` so the
+future split cannot silently collide with active workers.
 `planning_packet_contract.py` owns strict packet validation so Ceraxia can
 import the contract gate without coupling review logic to packet generation.
 

@@ -11,7 +11,24 @@ from planning_packet_contract import validate_planning_packet
 
 
 ROOT = Path(__file__).resolve().parent
+REPO_ROOT = ROOT.parents[2]
 SERVICE_CONTRACTS = json.loads((ROOT / "service_contracts.json").read_text(encoding="utf-8"))
+
+
+def collect_active_ports() -> dict[int, str]:
+    active_ports: dict[int, str] = {}
+    registry = json.loads((REPO_ROOT / "EyeOfTerror" / "registry" / "ports.json").read_text(encoding="utf-8"))
+    for section_name in ["eye_of_terror", "mechanicum"]:
+        section = registry.get(section_name) if isinstance(registry.get(section_name), dict) else {}
+        for port, metadata in section.items():
+            name = metadata.get("name", "unknown") if isinstance(metadata, dict) else "unknown"
+            active_ports[int(port)] = f"EyeOfTerror/registry/ports.json:{section_name}:{name}"
+
+    worker_services = json.loads((REPO_ROOT / "Mechanicum" / "worker_services.json").read_text(encoding="utf-8"))
+    for name, metadata in worker_services.items():
+        if isinstance(metadata, dict) and isinstance(metadata.get("port"), int):
+            active_ports[int(metadata["port"])] = f"Mechanicum/worker_services.json:{name}"
+    return active_ports
 
 
 def require_subset(expected: list[str], actual: list[str], label: str, trial_id: str) -> None:
@@ -32,6 +49,10 @@ def validate_service_contracts_against_packet(packet: dict[str, Any], trial_id: 
         raise AssertionError(f"{trial_id}: planning service ports must remain reserved 7111-7115: {SERVICE_CONTRACTS}")
     if len(set(ports)) != len(ports):
         raise AssertionError(f"{trial_id}: planning service ports must be unique: {SERVICE_CONTRACTS}")
+    active_ports = collect_active_ports()
+    port_collisions = {port: active_ports[port] for port in ports if port in active_ports}
+    if port_collisions:
+        raise AssertionError(f"{trial_id}: planning service ports collide with active registry ports: {port_collisions}")
     missing_outputs: dict[str, list[str]] = {}
     mutating_services: list[str] = []
     for service in services:
@@ -57,6 +78,8 @@ def validate_service_contracts_against_packet(packet: dict[str, Any], trial_id: 
     return {
         "service_names": [str(service.get("name") or "") for service in services if isinstance(service, dict)],
         "service_ports": ports,
+        "active_registry_port_count": len(active_ports),
+        "service_port_collision_count": len(port_collisions),
         "service_split_gate_count": len(split_gates),
         "service_contract_active": port_policy.get("active"),
     }
@@ -201,6 +224,8 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "assumption_count": len(assumption_rows),
         "planning_service_names": service_contract_status["service_names"],
         "planning_service_ports": service_contract_status["service_ports"],
+        "planning_service_active_registry_port_count": service_contract_status["active_registry_port_count"],
+        "planning_service_port_collision_count": service_contract_status["service_port_collision_count"],
         "planning_service_split_gate_count": service_contract_status["service_split_gate_count"],
         "planning_service_contract_active": service_contract_status["service_contract_active"],
         "change_control_counts": {
@@ -240,6 +265,8 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     assumption_counts: list[int] = []
     planning_service_names: Counter[str] = Counter()
     planning_service_ports: Counter[str] = Counter()
+    planning_service_active_registry_port_counts: list[int] = []
+    planning_service_port_collision_counts: list[int] = []
     planning_service_split_gate_counts: list[int] = []
     planning_service_active_values: Counter[str] = Counter()
     minimum_change_control_counts: dict[str, int] = {}
@@ -276,6 +303,10 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
             assumption_counts.append(result["assumption_count"])
         planning_service_names.update(str(item) for item in result.get("planning_service_names", []))
         planning_service_ports.update(str(item) for item in result.get("planning_service_ports", []))
+        if isinstance(result.get("planning_service_active_registry_port_count"), int):
+            planning_service_active_registry_port_counts.append(result["planning_service_active_registry_port_count"])
+        if isinstance(result.get("planning_service_port_collision_count"), int):
+            planning_service_port_collision_counts.append(result["planning_service_port_collision_count"])
         if isinstance(result.get("planning_service_split_gate_count"), int):
             planning_service_split_gate_counts.append(result["planning_service_split_gate_count"])
         planning_service_active_values.update([str(result.get("planning_service_contract_active"))])
@@ -311,6 +342,8 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "minimum_assumption_count": min(assumption_counts) if assumption_counts else 0,
         "planning_service_name_counts": dict(sorted(planning_service_names.items())),
         "planning_service_port_counts": dict(sorted(planning_service_ports.items())),
+        "minimum_planning_service_active_registry_port_count": min(planning_service_active_registry_port_counts) if planning_service_active_registry_port_counts else 0,
+        "maximum_planning_service_port_collision_count": max(planning_service_port_collision_counts) if planning_service_port_collision_counts else 0,
         "minimum_planning_service_split_gate_count": min(planning_service_split_gate_counts) if planning_service_split_gate_counts else 0,
         "planning_service_active_value_counts": dict(sorted(planning_service_active_values.items())),
         "minimum_change_control_counts": dict(sorted(minimum_change_control_counts.items())),
@@ -449,6 +482,10 @@ def assert_coverage(summary: dict[str, Any]) -> None:
         raise AssertionError(f"field trials are missing planning service contract coverage: {missing_service_names}")
     if missing_service_ports:
         raise AssertionError(f"field trials are missing planning service port coverage: {missing_service_ports}")
+    if int(summary.get("minimum_planning_service_active_registry_port_count") or 0) < 1:
+        raise AssertionError(f"field trials must compare planning service ports with the active registry: {summary}")
+    if int(summary.get("maximum_planning_service_port_collision_count") or 0) != 0:
+        raise AssertionError(f"field trials found planning service port collisions: {summary}")
     if planning_service_active_values != {"False": summary["trial_count"]}:
         raise AssertionError(f"field trials must prove planning service contracts stay inactive: {summary}")
     if int(summary.get("minimum_planning_service_split_gate_count") or 0) < 5:

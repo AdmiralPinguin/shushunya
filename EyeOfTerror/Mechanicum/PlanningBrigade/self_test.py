@@ -11,6 +11,23 @@ from planning_packet_contract import REQUIRED_PACKET_OBJECTS
 
 
 ROOT = Path(__file__).resolve().parent
+REPO_ROOT = ROOT.parents[2]
+
+
+def collect_active_ports() -> dict[int, str]:
+    active_ports: dict[int, str] = {}
+    registry = json.loads((REPO_ROOT / "EyeOfTerror" / "registry" / "ports.json").read_text(encoding="utf-8"))
+    for section_name in ["eye_of_terror", "mechanicum"]:
+        section = registry.get(section_name) if isinstance(registry.get(section_name), dict) else {}
+        for port, metadata in section.items():
+            name = metadata.get("name", "unknown") if isinstance(metadata, dict) else "unknown"
+            active_ports[int(port)] = f"EyeOfTerror/registry/ports.json:{section_name}:{name}"
+
+    worker_services = json.loads((REPO_ROOT / "Mechanicum" / "worker_services.json").read_text(encoding="utf-8"))
+    for name, metadata in worker_services.items():
+        if isinstance(metadata, dict) and isinstance(metadata.get("port"), int):
+            active_ports[int(metadata["port"])] = f"Mechanicum/worker_services.json:{name}"
+    return active_ports
 
 
 def assert_packet_shape(packet: dict) -> None:
@@ -53,6 +70,10 @@ def assert_role_contracts() -> None:
     service_ports = [int(service.get("port") or 0) for service in services if isinstance(service, dict)]
     if service_ports != list(range(7111, 7116)):
         raise AssertionError(f"planning service ports must be stable reserved 7111-7115: {service_contracts}")
+    active_ports = collect_active_ports()
+    port_collisions = {port: active_ports[port] for port in service_ports if port in active_ports}
+    if port_collisions:
+        raise AssertionError(f"planning service ports collide with active registry ports: {port_collisions}")
     if service_contracts.get("port_policy", {}).get("active") is not False:
         raise AssertionError(f"planning service contracts should stay planned until split: {service_contracts}")
     externally_available = {"task", "constraints"}

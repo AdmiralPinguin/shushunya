@@ -38,6 +38,8 @@ Current capabilities:
 - role contracts for the five planning roles
 - planned read-only service interface contracts for future role split on
   reserved ports 7111-7115
+- service-port reservation checks against the active EyeOfTerror and
+  Mechanicum registries
 - field trials for multiple task shapes with coverage gates for task kinds,
   impacted surfaces, implementation work packages, and change-control
   invariant/proof, acceptance-trace package coverage, constraint-trace package
