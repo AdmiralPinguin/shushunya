@@ -29,6 +29,11 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     require_subset(trial.get("expected_kinds", []), packet["task_triage"]["task_kinds"], "task kinds", trial_id)
     phases = [phase["id"] for phase in packet["work_breakdown"]["phases"]]
     require_subset(trial.get("expected_phases", []), phases, "work phases", trial_id)
+    work_packages = packet["implementation_work_packages"]["packages"]
+    work_package_ids = [package["id"] for package in work_packages]
+    require_subset(trial.get("expected_work_packages", []), work_package_ids, "implementation work packages", trial_id)
+    if packet["implementation_work_packages"]["review_order"] != work_package_ids:
+        raise AssertionError(f"{trial_id}: work package review_order must match package order: {packet}")
     surfaces = [surface["surface"] for surface in packet["impact_analysis"]["surfaces"]]
     require_subset(trial.get("expected_surfaces", []), surfaces, "impact surfaces", trial_id)
     expected_highest_risk_surface = trial.get("expected_highest_risk_surface")
@@ -59,6 +64,7 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "score": packet["planning_review_gate"]["score"],
         "task_kinds": packet["task_triage"]["task_kinds"],
         "phases": phases,
+        "work_packages": work_package_ids,
         "surfaces": surfaces,
         "highest_risk_surface": packet["impact_analysis"]["highest_risk_surface"],
         "negative_tests": packet["verification_strategy"]["negative_tests"],
@@ -69,6 +75,7 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
 def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     kinds: Counter[str] = Counter()
     phases: Counter[str] = Counter()
+    work_packages: Counter[str] = Counter()
     surfaces: Counter[str] = Counter()
     highest_risk_surfaces: Counter[str] = Counter()
     decisions: Counter[str] = Counter()
@@ -77,6 +84,7 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     for result in results:
         kinds.update(str(item) for item in result.get("task_kinds", []))
         phases.update(str(item) for item in result.get("phases", []))
+        work_packages.update(str(item) for item in result.get("work_packages", []))
         surfaces.update(str(item) for item in result.get("surfaces", []))
         if result.get("highest_risk_surface"):
             highest_risk_surfaces.update([str(result["highest_risk_surface"])])
@@ -89,6 +97,7 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "decision_counts": dict(sorted(decisions.items())),
         "task_kind_counts": dict(sorted(kinds.items())),
         "phase_counts": dict(sorted(phases.items())),
+        "work_package_counts": dict(sorted(work_packages.items())),
         "surface_counts": dict(sorted(surfaces.items())),
         "highest_risk_surface_counts": dict(sorted(highest_risk_surfaces.items())),
         "negative_test_counts": dict(sorted(negative_tests.items())),
@@ -118,14 +127,26 @@ def assert_coverage(summary: dict[str, Any]) -> None:
         "source_behavior",
         "test_surface",
     }
+    required_work_packages = {
+        "compatibility_package",
+        "concurrency_runtime_package",
+        "evidence_survey_package",
+        "minimal_patch_package",
+        "security_boundary_package",
+        "verification_evidence_package",
+    }
     kind_counts = summary.get("task_kind_counts") if isinstance(summary.get("task_kind_counts"), dict) else {}
     surface_counts = summary.get("surface_counts") if isinstance(summary.get("surface_counts"), dict) else {}
+    work_package_counts = summary.get("work_package_counts") if isinstance(summary.get("work_package_counts"), dict) else {}
     missing_kinds = sorted(kind for kind in required_kinds if kind not in kind_counts)
     missing_surfaces = sorted(surface for surface in required_surfaces if surface not in surface_counts)
+    missing_work_packages = sorted(package for package in required_work_packages if package not in work_package_counts)
     if missing_kinds:
         raise AssertionError(f"field trials are missing task kind coverage: {missing_kinds}")
     if missing_surfaces:
         raise AssertionError(f"field trials are missing surface coverage: {missing_surfaces}")
+    if missing_work_packages:
+        raise AssertionError(f"field trials are missing implementation work package coverage: {missing_work_packages}")
     decision_counts = summary.get("decision_counts") if isinstance(summary.get("decision_counts"), dict) else {}
     if "blocked" not in decision_counts or "ready_for_ceraxia_review" not in decision_counts:
         raise AssertionError(f"field trials must cover blocked and ready decisions: {summary}")

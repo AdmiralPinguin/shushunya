@@ -8,6 +8,7 @@
       "repo_path": "/repo",
       "expected_kinds": ["test_repair"],
       "expected_phases": ["capture_failing_test"],
+      "expected_work_packages": ["evidence_survey_package", "minimal_patch_package", "verification_evidence_package"],
       "expected_surfaces": ["source_behavior", "test_surface"],
       "expected_negative_tests": [],
       "minimum_score": 80
@@ -18,6 +19,7 @@
       "repo_path": "/repo",
       "expected_kinds": ["security", "api_compatibility", "test_repair"],
       "expected_phases": ["prove_boundary"],
+      "expected_work_packages": ["evidence_survey_package", "minimal_patch_package", "verification_evidence_package", "compatibility_package", "security_boundary_package"],
       "expected_surfaces": ["source_behavior", "test_surface", "public_api_contract", "security_boundary"],
       "expected_highest_risk_surface": "security_boundary",
       "expected_negative_tests": ["untrusted input is rejected", "path/auth/token boundary cannot be bypassed"],
@@ -29,6 +31,7 @@
       "repo_path": "/repo",
       "expected_kinds": ["migration", "api_compatibility", "config_runtime"],
       "expected_phases": ["prove_compatibility"],
+      "expected_work_packages": ["evidence_survey_package", "minimal_patch_package", "verification_evidence_package", "compatibility_package"],
       "expected_surfaces": ["source_behavior", "test_surface", "public_api_contract", "runtime_configuration", "data_compatibility"],
       "expected_highest_risk_surface": "data_compatibility",
       "expected_negative_tests": ["old and new API shape compatibility", "missing/invalid config fails safely", "old, new, and mixed records round-trip correctly"],
@@ -40,6 +43,7 @@
       "repo_path": "/repo",
       "expected_kinds": ["refactor", "api_compatibility"],
       "expected_phases": ["prove_compatibility"],
+      "expected_work_packages": ["evidence_survey_package", "minimal_patch_package", "verification_evidence_package", "compatibility_package"],
       "expected_surfaces": ["source_behavior", "test_surface", "public_api_contract", "internal_architecture"],
       "expected_negative_tests": ["old and new API shape compatibility"],
       "minimum_score": 80
@@ -50,6 +54,7 @@
       "repo_path": "/repo",
       "expected_kinds": ["bugfix", "config_runtime", "concurrency"],
       "expected_phases": [],
+      "expected_work_packages": ["evidence_survey_package", "minimal_patch_package", "verification_evidence_package", "concurrency_runtime_package"],
       "expected_surfaces": ["source_behavior", "test_surface", "runtime_configuration", "concurrency_runtime"],
       "expected_highest_risk_surface": "concurrency_runtime",
       "expected_negative_tests": ["missing/invalid config fails safely", "parallel/retry behavior preserves state"],
@@ -60,6 +65,7 @@
       "task": "почини",
       "repo_path": "/repo",
       "expected_kinds": ["bugfix"],
+      "expected_work_packages": ["evidence_survey_package", "minimal_patch_package", "verification_evidence_package"],
       "expected_surfaces": ["source_behavior", "test_surface"],
       "expected_decision": "blocked",
       "minimum_score": 0

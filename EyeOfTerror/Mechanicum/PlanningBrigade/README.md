@@ -65,4 +65,4 @@ The trials cover failing-test repair, security boundaries, migration/API
 compatibility, architecture refactors, concurrency/cache failures, and unclear
 tasks that must be blocked. The runner also emits a coverage summary for task
 kinds, work phases, impacted surfaces, highest-risk surfaces, gate decisions,
-negative tests, and planning scores.
+negative tests, implementation work packages, and planning scores.

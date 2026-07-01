@@ -21,7 +21,8 @@ Current capabilities:
   scope, risk controls, handoff criteria, and review order
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
-- field trials for multiple task shapes
+- field trials for multiple task shapes with coverage gates for task kinds,
+  impacted surfaces, and implementation work packages
 - CLI validation mode
 
 Current boundaries:
