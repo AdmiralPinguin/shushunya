@@ -309,6 +309,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["assumption_register_status"], "complete")
             self.assertGreaterEqual(summary["assumption_count"], 4)
             self.assertGreaterEqual(summary["assumption_replan_trigger_count"], 4)
+            self.assertEqual(summary["worker_output_contract_status"], "complete")
+            self.assertEqual(summary["worker_output_required_package_count"], summary["implementation_work_package_count"])
+            self.assertEqual(summary["worker_output_reported_package_count"], summary["implementation_work_package_count"])
+            self.assertEqual(summary["worker_output_contract_row_count"], summary["implementation_work_package_count"])
             self.assertEqual(summary["worker_status"], "dry_run_handoff_ready")
             self.assertEqual(summary["code_brigade_execution_policy_status"], "blocked_until_adapter_is_wired")
             self.assertEqual(summary["code_brigade_autonomous_execution_request_status"], "required")
@@ -1407,6 +1411,27 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             audit = audit_run_package(run_dir)
             self.assertEqual(audit["decision"], "blocked")
             self.assertTrue(any("surface_verification_status disagrees" in item["finding"] for item in audit["findings"]))
+
+    def test_run_audit_blocks_worker_output_contract_summary_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="добавь helper в `app.py`",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            run_dir = Path(result["run_dir"])
+            summary_path = run_dir / "run_summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["worker_output_contract_status"] = "broken"
+            summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            audit = audit_run_package(run_dir)
+            self.assertEqual(audit["decision"], "blocked")
+            self.assertTrue(any("worker_output_contract_status disagrees" in item["finding"] for item in audit["findings"]))
 
 
 if __name__ == "__main__":

@@ -54,6 +54,10 @@
     "assumption_register_status",
     "assumption_count",
     "assumption_replan_trigger_count",
+    "worker_output_contract_status",
+    "worker_output_required_package_count",
+    "worker_output_reported_package_count",
+    "worker_output_contract_row_count",
     "execution_readiness",
     "worker_status",
     "code_brigade_execution_policy_status",
@@ -244,6 +248,18 @@
       "type": "integer"
     },
     "assumption_replan_trigger_count": {
+      "type": "integer"
+    },
+    "worker_output_contract_status": {
+      "type": "string"
+    },
+    "worker_output_required_package_count": {
+      "type": "integer"
+    },
+    "worker_output_reported_package_count": {
+      "type": "integer"
+    },
+    "worker_output_contract_row_count": {
       "type": "integer"
     },
     "execution_readiness": {
