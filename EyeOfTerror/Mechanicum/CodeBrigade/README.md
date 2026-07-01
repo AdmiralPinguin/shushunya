@@ -31,3 +31,7 @@ Workers return `worker_report.json` using
 local adapter: it validates the implementation brief and can acknowledge a
 dry-run handoff, but real source execution remains blocked until an execution
 adapter is intentionally wired.
+
+`verification_adapter.py` can run a narrow allowlist of verification commands
+without a shell. It is safe enough for explicit verification wiring, but source
+mutation remains outside this adapter.

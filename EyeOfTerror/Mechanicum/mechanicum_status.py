@@ -44,9 +44,10 @@ COMPONENTS = {
             "README.md",
             "code_brigade_contract.schema.json",
             "code_brigade_adapter.py",
+            "verification_adapter.py",
             "self_test.py",
         ],
-        "maturity": "dry_run_handoff_adapter",
+        "maturity": "dry_run_handoff_with_allowlisted_verification",
     },
 }
 
@@ -66,8 +67,8 @@ ROADMAP = [
     },
     {
         "priority": 3,
-        "item": "add verification execution adapter with allowlisted commands",
-        "reason": "Verification is planned, but dry-run packages do not execute commands inside this controller.",
+        "item": "wire allowlisted verification adapter into Ceraxia runs",
+        "reason": "CodeBrigade can execute allowlisted verification commands; Ceraxia still records them as planned.",
         "owner": "CodeBrigade",
     },
     {
