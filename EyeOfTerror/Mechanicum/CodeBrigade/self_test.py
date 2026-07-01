@@ -291,6 +291,11 @@ def main() -> int:
     missing_forecast_report = code_brigade_adapter.build_worker_report(missing_forecast, dry_run=True)
     if missing_forecast_report["status"] != "blocked" or not any("execution_forecast" in item for item in missing_forecast_report["validation_problems"]):
         raise AssertionError(f"missing execution forecast should be blocked: {missing_forecast_report}")
+    missing_evidence = valid_brief()
+    missing_evidence.pop("repo_survey_evidence")
+    missing_evidence_report = code_brigade_adapter.build_worker_report(missing_evidence, dry_run=True)
+    if missing_evidence_report["status"] != "blocked" or not any("repo_survey_evidence" in item for item in missing_evidence_report["validation_problems"]):
+        raise AssertionError(f"missing repo survey evidence should be blocked: {missing_evidence_report}")
     incomplete_surface_matrix = valid_brief()
     incomplete_surface_matrix["surface_verification_matrix"] = {"rows": [{"surface": "source_behavior"}], "complete": False}
     incomplete_surface_matrix_report = code_brigade_adapter.build_worker_report(incomplete_surface_matrix, dry_run=True)

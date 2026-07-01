@@ -34,6 +34,11 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief survey_quality_gate decision is required")
     if not isinstance(brief.get("acceptance_gates"), list) or not brief.get("acceptance_gates"):
         problems.append("brief acceptance_gates are required")
+    evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
+    if not evidence:
+        problems.append("brief repo_survey_evidence is required")
+    elif not isinstance(evidence.get("candidate_files"), list):
+        problems.append("brief repo_survey_evidence.candidate_files is required")
     quality = brief.get("quality_bar") if isinstance(brief.get("quality_bar"), dict) else {}
     if not isinstance(quality.get("must_have_evidence"), list) or not quality.get("must_have_evidence"):
         problems.append("brief quality_bar.must_have_evidence is required")
