@@ -216,6 +216,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "source_summaries": survey.get("source_summaries", []),
             "local_import_edges": survey.get("local_import_edges", []),
             "generic_import_edges": survey.get("generic_import_edges", []),
+            "recommended_read_order": survey.get("recommended_read_order", []),
             "survey_truncated": bool(survey.get("truncated")),
             "max_files_scanned": survey.get("max_files_scanned", 0),
             "python_symbols_truncated": bool(survey.get("python_symbols_truncated")),
@@ -508,6 +509,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
             "",
             f"- candidate files: {len(repo_evidence.get('candidate_files', []))}",
             f"- test files: {len(repo_evidence.get('test_files', []))}",
+            f"- recommended read order entries: {len(repo_evidence.get('recommended_read_order', []))}",
             f"- python symbol reports: {len(repo_evidence.get('python_symbols', []))}",
             f"- source summaries: {len(repo_evidence.get('source_summaries', []))}",
             f"- repository survey partial: {str(bool(repo_evidence.get('survey_truncated'))).lower()}",
@@ -821,6 +823,7 @@ def build_evidence_matrix(
         "implementation_plan_sources": {
             "target_files_to_inspect": implementation_plan.get("target_files_to_inspect", []),
             "test_files_to_preserve": implementation_plan.get("test_files_to_preserve", []),
+            "recommended_read_order": implementation_plan.get("recommended_read_order", []),
             "verification_commands": implementation_plan.get("verification_commands", []),
         },
     }

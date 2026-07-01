@@ -80,6 +80,9 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
   AST symbol/import path used for local dependency edges.
 - `repo_survey.json.generic_import_edges` resolves local relative JS/TS/TSX/JSX
   imports to repository files and passes them through the CodeBrigade handoff.
+- `repo_survey.json.recommended_read_order` ranks explicit path hints,
+  entrypoints, source candidates, dependency neighbours, and tests for worker
+  inspection before mutation.
 
 Smoke command:
 

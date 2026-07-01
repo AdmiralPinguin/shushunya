@@ -51,6 +51,7 @@
         "existing_path_hints",
         "missing_path_hints",
         "unsafe_path_hints",
+        "recommended_read_order",
         "source_summaries_to_consider",
         "dependency_edges_to_check",
         "survey_truncated",
@@ -107,6 +108,12 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "recommended_read_order": {
+          "type": "array",
+          "items": {
+            "type": "object"
           }
         },
         "source_summaries_to_consider": {

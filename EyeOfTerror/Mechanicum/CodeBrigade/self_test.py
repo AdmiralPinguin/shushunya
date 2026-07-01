@@ -124,6 +124,10 @@ def valid_brief() -> dict:
             "missing_path_hints": [],
             "unsafe_path_hints": [],
             "entrypoint_candidates": ["main.py"],
+            "recommended_read_order": [
+                {"path": "app.py", "reason": "explicit user path hint"},
+                {"path": "test_app.py", "reason": "explicit user path hint"},
+            ],
             "source_summaries": [{"path": "app.ts", "language": "typescript", "symbols": ["app"], "import_like": []}],
             "local_import_edges": [{"source": "app.py", "import": "util.enabled", "target": "util.py"}],
             "generic_import_edges": [{"source": "client.ts", "import": "./api", "target": "api.ts", "language": "typescript"}],
@@ -165,6 +169,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve test evidence: {plan}")
     if plan["existing_path_hints"] != ["app.py", "test_app.py"]:
         raise AssertionError(f"implementation plan should preserve explicit path hints: {plan}")
+    if plan["recommended_read_order"][0]["path"] != "app.py":
+        raise AssertionError(f"implementation plan should preserve recommended read order: {plan}")
     if plan["source_summaries_to_consider"] != [{"path": "app.ts", "language": "typescript", "symbols": ["app"], "import_like": []}]:
         raise AssertionError(f"implementation plan should preserve multi-language source summaries: {plan}")
     if "python -m pytest test_app.py" not in plan["verification_commands"]:

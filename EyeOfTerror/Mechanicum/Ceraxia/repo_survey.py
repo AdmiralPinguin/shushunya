@@ -281,6 +281,36 @@ def build_generic_import_edges(source_summaries: list[dict[str, Any]], rel_to_pa
     return edges[:80]
 
 
+def build_recommended_read_order(
+    existing_path_hints: list[str],
+    entrypoints: list[str],
+    candidates: list[str],
+    tests: list[str],
+    edges: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    ordered: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add(path: str, reason: str) -> None:
+        if not path or path in seen:
+            return
+        seen.add(path)
+        ordered.append({"path": path, "reason": reason})
+
+    for path in existing_path_hints:
+        add(path, "explicit user path hint")
+    for path in entrypoints:
+        add(path, "public entrypoint candidate")
+    for path in candidates:
+        add(path, "ranked source/config candidate")
+    for edge in edges:
+        add(str(edge.get("source", "")), "dependency edge source")
+        add(str(edge.get("target", "")), "dependency edge target")
+    for path in tests:
+        add(path, "test surface")
+    return ordered[:80]
+
+
 def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[str], path_hints: list[str] | None = None) -> dict[str, Any]:
     root = Path(repo_path)
     path_hints = path_hints or []
@@ -308,6 +338,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "source_summaries": [],
             "local_import_edges": [],
             "generic_import_edges": [],
+            "recommended_read_order": [],
             "suggested_verification_commands": [],
             "max_files_scanned": MAX_SURVEY_FILES,
             "truncated": False,
@@ -365,6 +396,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     source_summaries = [generic_source_summary(path, root) for path in all_source_files[:MAX_SOURCE_SUMMARY_FILES]]
     python_edges = build_local_import_edges(python_symbols, python_files, root)
     generic_edges = build_generic_import_edges(source_summaries, rel_to_path, root)
+    dependency_edges = unique_edges([*python_edges, *generic_edges])[:120]
+    recommended_read_order = build_recommended_read_order(existing_path_hints, entrypoints, candidates, tests, dependency_edges)
     suggested_commands: list[str] = []
     if tests:
         suggested_commands.append("python -m pytest " + " ".join(tests[:3]))
@@ -390,8 +423,9 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "entrypoint_candidates": entrypoints,
         "python_symbols": python_symbols,
         "source_summaries": source_summaries,
-        "local_import_edges": unique_edges([*python_edges, *generic_edges])[:120],
+        "local_import_edges": dependency_edges,
         "generic_import_edges": generic_edges,
+        "recommended_read_order": recommended_read_order,
         "suggested_verification_commands": suggested_commands,
         "max_files_scanned": MAX_SURVEY_FILES,
         "truncated": truncated,

@@ -47,6 +47,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "missing_path_hints": evidence.get("missing_path_hints", []) if isinstance(evidence.get("missing_path_hints"), list) else [],
         "unsafe_path_hints": evidence.get("unsafe_path_hints", []) if isinstance(evidence.get("unsafe_path_hints"), list) else [],
         "entrypoints_to_check": evidence.get("entrypoint_candidates", []) if isinstance(evidence.get("entrypoint_candidates"), list) else [],
+        "recommended_read_order": evidence.get("recommended_read_order", []) if isinstance(evidence.get("recommended_read_order"), list) else [],
         "source_summaries_to_consider": evidence.get("source_summaries", []) if isinstance(evidence.get("source_summaries"), list) else [],
         "dependency_edges_to_check": evidence.get("local_import_edges", []) if isinstance(evidence.get("local_import_edges"), list) else [],
         "generic_dependency_edges_to_check": evidence.get("generic_import_edges", []) if isinstance(evidence.get("generic_import_edges"), list) else [],
