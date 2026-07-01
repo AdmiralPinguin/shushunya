@@ -1576,7 +1576,13 @@ def planning_review_gate(
     }
 
 
-def code_brigade_handoff(triage: dict[str, Any], verification: dict[str, Any], quality: dict[str, Any]) -> dict[str, Any]:
+def code_brigade_handoff(
+    triage: dict[str, Any],
+    verification: dict[str, Any],
+    quality: dict[str, Any],
+    work_packages: dict[str, Any],
+    acceptance_trace: dict[str, Any],
+) -> dict[str, Any]:
     steps = [
         {
             "step": "inspect_repo_evidence",
@@ -1630,6 +1636,10 @@ def code_brigade_handoff(triage: dict[str, Any], verification: dict[str, Any], q
         "target": "CodeBrigade",
         "task_kinds": triage["task_kinds"],
         "steps": steps,
+        "package_review_order": work_packages.get("review_order", []),
+        "global_handoff_criteria": work_packages.get("global_handoff_criteria", []),
+        "acceptance_trace_required": acceptance_trace.get("complete") is True,
+        "acceptance_trace_row_count": acceptance_trace.get("row_count", 0),
         "required_quality_evidence": quality["must_have_evidence"],
     }
 
@@ -1658,7 +1668,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     package_matrix = surface_package_matrix(surface_matrix, work_packages)
     acceptance_trace = acceptance_trace_matrix(problem, quality, acceptance, verification, surface_matrix, work_packages)
     review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, change_control, work_packages, package_matrix, acceptance_trace)
-    handoff = code_brigade_handoff(triage, verification, quality)
+    handoff = code_brigade_handoff(triage, verification, quality, work_packages, acceptance_trace)
     return {
         "ok": bool(task),
         "contract_version": CONTRACT_VERSION,

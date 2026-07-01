@@ -292,6 +292,14 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
             problems.append(f"implementation work package blocking_policy must be non-empty: {package.get('id', '<unknown>')}")
     if not isinstance(work_packages.get("review_order"), list) or len(work_packages.get("review_order", [])) != len(packages):
         problems.append("implementation work packages must include review_order for every package")
+    package_ids = [
+        package.get("id")
+        for package in packages
+        if isinstance(package, dict) and isinstance(package.get("id"), str) and package.get("id")
+    ]
+    review_order = [item for item in list_field(work_packages.get("review_order")) if isinstance(item, str)]
+    if review_order and sorted(review_order) != sorted(package_ids):
+        problems.append("implementation work package review_order must match package ids")
     planned_surfaces = {
         row.get("surface")
         for row in list_field(surface_matrix.get("rows"))
@@ -344,6 +352,14 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("code brigade handoff must target CodeBrigade")
     if not isinstance(handoff.get("steps"), list) or not handoff.get("steps"):
         problems.append("code brigade handoff must include steps")
+    if list_field(handoff.get("package_review_order")) != list_field(work_packages.get("review_order")):
+        problems.append("code brigade handoff package_review_order must match implementation work packages")
+    if list_field(handoff.get("global_handoff_criteria")) != list_field(work_packages.get("global_handoff_criteria")):
+        problems.append("code brigade handoff global_handoff_criteria must match implementation work packages")
+    if handoff.get("acceptance_trace_required") is not True:
+        problems.append("code brigade handoff must require acceptance trace")
+    if handoff.get("acceptance_trace_row_count") != trace_matrix.get("row_count"):
+        problems.append("code brigade handoff acceptance_trace_row_count must match acceptance trace matrix")
     if packet.get("next_action", {}).get("owner") != "Ceraxia":
         problems.append("next action must be owned by Ceraxia")
     return problems

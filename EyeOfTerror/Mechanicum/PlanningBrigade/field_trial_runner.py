@@ -139,6 +139,15 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     trace_rows = acceptance_trace.get("rows") if isinstance(acceptance_trace.get("rows"), list) else []
     if acceptance_trace.get("complete") is not True or not trace_rows:
         raise AssertionError(f"{trial_id}: acceptance trace matrix must be complete: {packet}")
+    handoff = packet.get("code_brigade_handoff") if isinstance(packet.get("code_brigade_handoff"), dict) else {}
+    if handoff.get("package_review_order") != packet["implementation_work_packages"]["review_order"]:
+        raise AssertionError(f"{trial_id}: CodeBrigade handoff must carry package review order: {packet}")
+    if handoff.get("global_handoff_criteria") != packet["implementation_work_packages"]["global_handoff_criteria"]:
+        raise AssertionError(f"{trial_id}: CodeBrigade handoff must carry global handoff criteria: {packet}")
+    if handoff.get("acceptance_trace_required") is not True:
+        raise AssertionError(f"{trial_id}: CodeBrigade handoff must require acceptance trace: {packet}")
+    if handoff.get("acceptance_trace_row_count") != acceptance_trace.get("row_count"):
+        raise AssertionError(f"{trial_id}: CodeBrigade handoff acceptance row count drifted: {packet}")
     assumptions = packet.get("assumption_register") if isinstance(packet.get("assumption_register"), dict) else {}
     assumption_rows = assumptions.get("assumptions") if isinstance(assumptions.get("assumptions"), list) else []
     if len(assumption_rows) < 3:
@@ -171,6 +180,9 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
             if isinstance(package_id, str)
         ],
         "acceptance_trace_row_count": len(trace_rows),
+        "handoff_package_review_order": handoff.get("package_review_order", []) if isinstance(handoff.get("package_review_order"), list) else [],
+        "handoff_acceptance_trace_required": handoff.get("acceptance_trace_required"),
+        "handoff_acceptance_trace_row_count": handoff.get("acceptance_trace_row_count"),
         "assumption_ids": [row["id"] for row in assumption_rows if isinstance(row, dict) and row.get("id")],
         "assumption_replan_triggers": assumptions.get("replan_when_false", []) if isinstance(assumptions.get("replan_when_false"), list) else [],
         "assumption_count": len(assumption_rows),
@@ -204,6 +216,9 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     acceptance_trace_packages: Counter[str] = Counter()
     acceptance_trace_requirements: Counter[str] = Counter()
     acceptance_trace_row_counts: list[int] = []
+    handoff_package_review_orders: list[list[str]] = []
+    handoff_acceptance_trace_required: Counter[str] = Counter()
+    handoff_acceptance_trace_row_counts: list[int] = []
     assumption_ids: Counter[str] = Counter()
     assumption_replan_triggers: Counter[str] = Counter()
     assumption_counts: list[int] = []
@@ -229,6 +244,12 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         acceptance_trace_requirements.update(str(item) for item in result.get("acceptance_trace_requirements", []))
         if isinstance(result.get("acceptance_trace_row_count"), int):
             acceptance_trace_row_counts.append(result["acceptance_trace_row_count"])
+        handoff_order = result.get("handoff_package_review_order")
+        if isinstance(handoff_order, list):
+            handoff_package_review_orders.append([str(item) for item in handoff_order])
+        handoff_acceptance_trace_required.update([str(result.get("handoff_acceptance_trace_required"))])
+        if isinstance(result.get("handoff_acceptance_trace_row_count"), int):
+            handoff_acceptance_trace_row_counts.append(result["handoff_acceptance_trace_row_count"])
         assumption_ids.update(str(item) for item in result.get("assumption_ids", []))
         assumption_replan_triggers.update(str(item) for item in result.get("assumption_replan_triggers", []))
         if isinstance(result.get("assumption_count"), int):
@@ -259,6 +280,9 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "acceptance_trace_package_counts": dict(sorted(acceptance_trace_packages.items())),
         "acceptance_trace_requirement_counts": dict(sorted(acceptance_trace_requirements.items())),
         "minimum_acceptance_trace_row_count": min(acceptance_trace_row_counts) if acceptance_trace_row_counts else 0,
+        "handoff_package_review_orders": handoff_package_review_orders,
+        "handoff_acceptance_trace_required_counts": dict(sorted(handoff_acceptance_trace_required.items())),
+        "minimum_handoff_acceptance_trace_row_count": min(handoff_acceptance_trace_row_counts) if handoff_acceptance_trace_row_counts else 0,
         "assumption_id_counts": dict(sorted(assumption_ids.items())),
         "assumption_replan_trigger_counts": dict(sorted(assumption_replan_triggers.items())),
         "minimum_assumption_count": min(assumption_counts) if assumption_counts else 0,
@@ -310,6 +334,7 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     post_proof_counts = summary.get("change_post_proof_counts") if isinstance(summary.get("change_post_proof_counts"), dict) else {}
     rollback_counts = summary.get("change_rollback_trigger_counts") if isinstance(summary.get("change_rollback_trigger_counts"), dict) else {}
     acceptance_trace_package_counts = summary.get("acceptance_trace_package_counts") if isinstance(summary.get("acceptance_trace_package_counts"), dict) else {}
+    handoff_acceptance_required_counts = summary.get("handoff_acceptance_trace_required_counts") if isinstance(summary.get("handoff_acceptance_trace_required_counts"), dict) else {}
     assumption_id_counts = summary.get("assumption_id_counts") if isinstance(summary.get("assumption_id_counts"), dict) else {}
     planning_service_name_counts = summary.get("planning_service_name_counts") if isinstance(summary.get("planning_service_name_counts"), dict) else {}
     planning_service_port_counts = summary.get("planning_service_port_counts") if isinstance(summary.get("planning_service_port_counts"), dict) else {}
@@ -370,6 +395,10 @@ def assert_coverage(summary: dict[str, Any]) -> None:
             raise AssertionError(f"field trials are missing acceptance trace package coverage for {package}: {summary}")
     if int(summary.get("minimum_acceptance_trace_row_count") or 0) < 3:
         raise AssertionError(f"field trials have too few acceptance trace rows: {summary}")
+    if handoff_acceptance_required_counts != {"True": summary["trial_count"]}:
+        raise AssertionError(f"field trials must prove handoff requires acceptance trace: {summary}")
+    if int(summary.get("minimum_handoff_acceptance_trace_row_count") or 0) < int(summary.get("minimum_acceptance_trace_row_count") or 0):
+        raise AssertionError(f"field trials show handoff acceptance trace row count drift: {summary}")
     required_assumptions = {
         "task_contract_is_sufficient",
         "repo_survey_can_find_relevant_surface",

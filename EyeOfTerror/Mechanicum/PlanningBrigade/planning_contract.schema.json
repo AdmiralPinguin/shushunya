@@ -303,9 +303,33 @@
     },
     "code_brigade_handoff": {
       "type": "object",
-      "required": ["target", "steps"],
+      "required": ["target", "steps", "package_review_order", "global_handoff_criteria", "acceptance_trace_required", "acceptance_trace_row_count", "required_quality_evidence"],
       "properties": {
-        "target": {"const": "CodeBrigade"}
+        "target": {"const": "CodeBrigade"},
+        "steps": {
+          "type": "array",
+          "minItems": 1
+        },
+        "package_review_order": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"type": "string"}
+        },
+        "global_handoff_criteria": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"type": "string"}
+        },
+        "acceptance_trace_required": {"const": true},
+        "acceptance_trace_row_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "required_quality_evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string"}
+        }
       }
     },
     "next_action": {
