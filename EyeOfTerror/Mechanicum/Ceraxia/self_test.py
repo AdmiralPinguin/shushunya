@@ -40,6 +40,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                 CeraxiaInput(
                     task="почини security bug в `app.py`: token auth можно обойти через path traversal, добавь pytest negative tests для `test_app.py`",
                     repo_path=str(repo),
+                    constraints=("preserve mobile API response shape",),
+                    verification_commands=("python -m py_compile app.py",),
                     runs_root=runs,
                 )
             )
@@ -67,6 +69,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             ]
             for name in expected:
                 self.assertTrue((run_dir / name).exists(), name)
+            packet = json.loads((run_dir / "planning_packet.json").read_text(encoding="utf-8"))
+            self.assertIn("preserve mobile API response shape", packet["problem_statement"]["known_constraints"])
+            self.assertIn("python -m py_compile app.py", packet["verification_strategy"]["targeted_commands"])
             brief = json.loads((run_dir / "implementation_brief.json").read_text(encoding="utf-8"))
             self.assertEqual(brief["contract_version"], "eye-mechanicum.v1")
             self.assertEqual(brief["target"], "CodeBrigade")

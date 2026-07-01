@@ -68,6 +68,8 @@ class CeraxiaInput:
     repo_path: str
     dry_run: bool = True
     execute_verification: bool = False
+    constraints: tuple[str, ...] = ()
+    verification_commands: tuple[str, ...] = ()
     runs_root: Path = RUNS_ROOT
 
 
@@ -733,6 +735,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "task": task_input.task,
         "repo_path": task_input.repo_path,
         "dry_run": task_input.dry_run,
+        "constraints": list(task_input.constraints),
+        "verification_commands": list(task_input.verification_commands),
     }
     write_json(run_dir / "task.json", task_payload)
 
@@ -820,6 +824,8 @@ def main() -> int:
     parser.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     parser.add_argument("--execute", action="store_true", help="Reserved for future real CodeBrigade execution.")
     parser.add_argument("--execute-verification", action="store_true", help="Run allowlisted verification commands while keeping source mutation dry-run.")
+    parser.add_argument("--constraint", action="append", default=[], help="Structured planning constraint. Can be repeated.")
+    parser.add_argument("--verification-command", action="append", default=[], help="Structured verification command. Can be repeated.")
     args = parser.parse_args()
     result = run_ceraxia(
         CeraxiaInput(
@@ -827,6 +833,8 @@ def main() -> int:
             repo_path=args.repo_path,
             dry_run=not args.execute,
             execute_verification=args.execute_verification,
+            constraints=tuple(args.constraint),
+            verification_commands=tuple(args.verification_command),
             runs_root=args.runs_root,
         )
     )
