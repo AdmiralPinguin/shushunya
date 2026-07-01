@@ -36,10 +36,42 @@
       "type": "integer"
     },
     "rows": {
-      "type": "array"
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "requirement",
+          "status",
+          "sources",
+          "blocking_reason"
+        ],
+        "properties": {
+          "requirement": {
+            "type": "string"
+          },
+          "status": {
+            "enum": ["present", "planned", "blocked"]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blocking_reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
     },
     "implementation_plan_sources": {
-      "type": "object"
+      "type": "object",
+      "required": [
+        "target_files_to_inspect",
+        "test_files_to_preserve",
+        "verification_commands"
+      ]
     }
   },
   "additionalProperties": true

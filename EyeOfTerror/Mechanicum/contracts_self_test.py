@@ -55,6 +55,20 @@ def assert_nested_required(schema_path: Path, payload: dict, field: str, label: 
         raise AssertionError(f"{label}.{field} missing schema required fields {missing}: {nested_payload}")
 
 
+def assert_array_item_required(schema_path: Path, payload: dict, field: str, label: str) -> None:
+    schema = load_schema(schema_path)
+    item_required = schema.get("properties", {}).get(field, {}).get("items", {}).get("required", [])
+    items = payload.get(field)
+    if not isinstance(items, list):
+        raise AssertionError(f"{label} missing array {field}: {payload}")
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise AssertionError(f"{label}.{field}[{index}] must be object: {item}")
+        missing = [required for required in item_required if required not in item]
+        if missing:
+            raise AssertionError(f"{label}.{field}[{index}] missing schema required fields {missing}: {item}")
+
+
 def main() -> int:
     packet = build_planning_packet(
         {
@@ -75,7 +89,10 @@ def main() -> int:
     status = {"state": "finalized"}
     readiness = build_execution_readiness(status, brief, verification, review, dry_run=True)
     evidence_matrix = build_evidence_matrix(brief, worker_report, verification, readiness)
-    assert_required(ROOT / "Ceraxia" / "contracts" / "evidence_matrix.schema.json", evidence_matrix, "evidence matrix")
+    evidence_schema = ROOT / "Ceraxia" / "contracts" / "evidence_matrix.schema.json"
+    assert_required(evidence_schema, evidence_matrix, "evidence matrix")
+    assert_nested_required(evidence_schema, evidence_matrix, "implementation_plan_sources", "evidence matrix")
+    assert_array_item_required(evidence_schema, evidence_matrix, "rows", "evidence matrix")
 
     with tempfile.TemporaryDirectory() as tmp:
         repo = Path(tmp) / "repo"
