@@ -81,6 +81,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("untrusted input is rejected", verification["negative_tests_required"])
             self.assertTrue(any(command.startswith("python -m pytest test_app.py") for command in verification["commands_planned"]))
             worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(worker_report["execution_policy_status"], "blocked_until_adapter_is_wired")
             implementation_plan = worker_report["implementation_plan"]
             self.assertIn("app.py", implementation_plan["target_files_to_inspect"])
             self.assertIn("test_app.py", implementation_plan["test_files_to_preserve"])

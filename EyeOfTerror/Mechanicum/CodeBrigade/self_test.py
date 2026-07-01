@@ -53,6 +53,8 @@ def main() -> int:
         raise AssertionError(f"valid dry-run brief should be accepted: {dry_report}")
     if dry_report["contract_version"] != "eye-mechanicum.v1":
         raise AssertionError(f"worker report contract version drifted: {dry_report}")
+    if dry_report["execution_policy_status"] != "blocked_until_adapter_is_wired":
+        raise AssertionError(f"dry-run worker report must expose blocked execution policy: {dry_report}")
     plan = dry_report["implementation_plan"]
     if plan["target_files_to_inspect"] != ["app.py"]:
         raise AssertionError(f"implementation plan should preserve survey candidates: {plan}")

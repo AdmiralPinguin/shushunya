@@ -8,6 +8,7 @@ from typing import Any
 
 
 CONTRACT_VERSION = "eye-mechanicum.v1"
+REAL_EXECUTION_STATUS = "blocked_until_adapter_is_wired"
 
 
 def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
@@ -100,6 +101,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "dry_run": dry_run,
         "changed_files": changed_files,
         "implementation_plan": implementation_plan,
+        "execution_policy_status": REAL_EXECUTION_STATUS if dry_run or status == "blocked" else "real_execution_adapter_active",
         "notes": notes,
         "implementation_brief_acknowledged": not validation_problems,
         "validation_problems": validation_problems,

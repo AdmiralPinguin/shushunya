@@ -10,6 +10,7 @@
     "dry_run",
     "changed_files",
     "implementation_plan",
+    "execution_policy_status",
     "notes",
     "implementation_brief_acknowledged",
     "validation_problems",
@@ -52,6 +53,9 @@
         "acceptance_gates",
         "refusal_conditions"
       ]
+    },
+    "execution_policy_status": {
+      "enum": ["blocked_until_adapter_is_wired", "real_execution_adapter_active"]
     },
     "notes": {
       "type": "array",
