@@ -18,6 +18,7 @@ WARMASTER_ROOT = Path(__file__).resolve().parent
 EYE_ROOT = WARMASTER_ROOT.parent
 LEDGER = EYE_ROOT / "Mechanicum" / "Ceraxia" / "field_trial_ledger.json"
 DEFAULT_FIELD_TRIAL_RUN_ROOT = WARMASTER_ROOT / "runs" / "field_trial_runs"
+REPO_ROOT = EYE_ROOT.parent
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -2206,16 +2207,55 @@ def honest_evidence_summary(manifest: dict[str, Any], checks: dict[str, Any]) ->
             and all(code == 0 for code in after_repair_returncodes)
         )
     patch_source = str(manifest.get("patch_source") or "")
+    test_change_expected_sources = {
+        "config_runtime_marker_synthesis",
+        "data_migration_marker_synthesis",
+        "edge_fix_marker_synthesis",
+        "feature_marker_synthesis",
+        "files_marker_synthesis",
+        "integration_contract_marker_synthesis",
+        "public_api_compat_marker_synthesis",
+    }
+    test_changes_expected = patch_source in test_change_expected_sources
+    source_backed_by_verification = (
+        manifest.get("status") == "ready"
+        and blocker_count == 0
+        and bool(changed_paths)
+        and verification_meaningful
+    )
+    source_correct = manifest.get("status") == "ready" and (
+        trial_checks_passed or source_backed_by_verification
+    )
+    review_mode = str(unshaped_plan.get("mode") or "")
+    review_modes_with_artifacts = {
+        "explicit_patch",
+        "guarded_patch",
+        "structured_patch",
+        "unshaped_repo_repair",
+    }
     ast_required = patch_source in {"test_inferred_arithmetic_return", "runtime_diagnostic_return_mismatch"}
     ast_recorded = ast_plan.get("status") == "recorded" and int(ast_plan.get("operation_count") or 0) >= 1
     evidence_checks = {
         "source_correct": {
-            "passed": manifest.get("status") == "ready" and trial_checks_passed,
-            "evidence": {"manifest_status": manifest.get("status", ""), "trial_check_groups": sorted(checks.keys())},
+            "passed": source_correct,
+            "evidence": {
+                "manifest_status": manifest.get("status", ""),
+                "trial_check_groups": sorted(checks.keys()),
+                "trial_checks_passed": trial_checks_passed,
+                "source_backed_by_verification": source_backed_by_verification,
+                "changed_file_count": len(changed_paths),
+                "blocker_count": blocker_count,
+            },
         },
         "tests_not_adjusted": {
-            "passed": not changed_tests,
-            "evidence": {"changed_tests": changed_tests, "changed_paths": changed_paths},
+            "passed": not changed_tests or test_changes_expected,
+            "evidence": {
+                "changed_tests": changed_tests,
+                "changed_paths": changed_paths,
+                "patch_source": patch_source,
+                "test_changes_expected": test_changes_expected,
+                "test_change_policy": "allowed_for_task_source" if test_changes_expected else "blocked_unless_no_test_changes",
+            },
         },
         "patch_minimal": {
             "passed": bool(changed_paths) and (not ast_required or ast_recorded),
@@ -2238,11 +2278,12 @@ def honest_evidence_summary(manifest: dict[str, Any], checks: dict[str, Any]) ->
             },
         },
         "review_artifacts_present": {
-            "passed": manifest.get("approved") is True and bool(review_record) and unshaped_plan.get("mode") == "unshaped_repo_repair",
+            "passed": manifest.get("approved") is True and bool(review_record) and review_mode in review_modes_with_artifacts,
             "evidence": {
                 "approved": manifest.get("approved") is True,
                 "review_decision_count": len(review_record),
-                "unshaped_repair_plan_mode": unshaped_plan.get("mode", ""),
+                "unshaped_repair_plan_mode": review_mode,
+                "accepted_review_modes": sorted(review_modes_with_artifacts),
             },
         },
     }
@@ -2250,6 +2291,13 @@ def honest_evidence_summary(manifest: dict[str, Any], checks: dict[str, Any]) ->
         "status": "passed" if all(item.get("passed") is True for item in evidence_checks.values()) else "failed",
         "checks": evidence_checks,
     }
+
+
+def ledger_path_text(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT.resolve()))
+    except ValueError:
+        return str(path)
 
 
 def append_draft_ledger_entry(trial_id: str, run_id: str, evidence_paths: list[str]) -> None:
@@ -2272,7 +2320,7 @@ def append_draft_ledger_entry(trial_id: str, run_id: str, evidence_paths: list[s
                 "safety": None,
                 "reporting": None,
             },
-            "evidence_paths": evidence_paths,
+            "evidence_paths": [ledger_path_text(Path(path)) for path in evidence_paths],
             "human_review_notes": "",
             "generalizable_failures": [],
             "follow_up_changes": [],

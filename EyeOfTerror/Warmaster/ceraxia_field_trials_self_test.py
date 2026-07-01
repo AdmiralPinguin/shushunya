@@ -12,6 +12,7 @@ from ceraxia_field_trial_runner import (
     DEFAULT_FIELD_TRIAL_RUN_ROOT,
     apply_trial_checks_to_outcome,
     classify_trial_outcome,
+    honest_evidence_summary,
     resolve_run_storage,
 )
 
@@ -27,6 +28,7 @@ EXPERT_SUITE = WARMASTER_ROOT / "ceraxia_expert_suite.py"
 REVIEWER = WARMASTER_ROOT / "ceraxia_field_trial_review.py"
 EXPERT_REVIEWER = WARMASTER_ROOT / "ceraxia_expert_review.py"
 ACCEPTER = WARMASTER_ROOT / "ceraxia_field_trial_accept.py"
+AUTO_REVIEWER = WARMASTER_ROOT / "ceraxia_field_trial_auto_review.py"
 
 
 def main() -> int:
@@ -263,6 +265,46 @@ def main() -> int:
         raise AssertionError(f"Ceraxia trial result must expose honest evidence checks: {smoke_payload}")
     if not all(isinstance(item, dict) and item.get("passed") is True for item in honest_checks.values()):
         raise AssertionError(f"Ceraxia honest evidence checks must all pass for accepted smoke trial: {honest}")
+    structured_honest = honest_evidence_summary(
+        {
+            "status": "ready",
+            "approved": True,
+            "patch_source": "feature_marker_synthesis",
+            "changed_files": [
+                {"path": "billing/discounts.py"},
+                {"path": "tests/test_discounts.py"},
+            ],
+            "verification_executed": [
+                {"command": "python -m pytest tests/test_discounts.py", "returncode": 0}
+            ],
+            "verification_summary": {"repair_count": 0, "blocker_count": 0},
+            "review_decision_record": [{"decision": "approve"}],
+            "unshaped_repair_plan": {"mode": "structured_patch"},
+        },
+        {},
+    )
+    if structured_honest.get("status") != "passed":
+        raise AssertionError(f"Ceraxia structured patch honest evidence was falsely rejected: {structured_honest}")
+    unsafe_test_edit = honest_evidence_summary(
+        {
+            "status": "ready",
+            "approved": True,
+            "patch_source": "test_inferred_arithmetic_return",
+            "changed_files": [
+                {"path": "calculator.py"},
+                {"path": "tests/test_calculator.py"},
+            ],
+            "verification_executed": [
+                {"command": "python -m pytest tests/test_calculator.py", "returncode": 0}
+            ],
+            "verification_summary": {"repair_count": 0, "blocker_count": 0},
+            "review_decision_record": [{"decision": "approve"}],
+            "unshaped_repair_plan": {"mode": "structured_patch"},
+        },
+        {},
+    )
+    if unsafe_test_edit.get("checks", {}).get("tests_not_adjusted", {}).get("passed") is True:
+        raise AssertionError(f"Ceraxia inferred source repair must not hide changed tests: {unsafe_test_edit}")
     with tempfile.TemporaryDirectory() as tmp:
         tmp_root = Path(tmp)
         trial_result = tmp_root / "trial_result.json"
@@ -306,6 +348,18 @@ def main() -> int:
     expert_review_payload = json.loads(expert_review.stdout)
     if "review_count" not in expert_review_payload or "report" not in expert_review_payload or "rejected_entries" not in expert_review_payload:
         raise AssertionError(f"Ceraxia strict expert reviewer returned malformed payload: {expert_review_payload}")
+    auto_review = subprocess.run(
+        [sys.executable, str(AUTO_REVIEWER), "--dry-run"],
+        cwd=str(EYE_ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if auto_review.returncode != 0:
+        raise AssertionError(f"Ceraxia conservative auto reviewer failed: {auto_review.stdout} {auto_review.stderr}")
+    auto_review_payload = json.loads(auto_review.stdout)
+    if "review_count" not in auto_review_payload or "rejected_entries" not in auto_review_payload or "report" not in auto_review_payload:
+        raise AssertionError(f"Ceraxia conservative auto reviewer returned malformed payload: {auto_review_payload}")
     unshaped_draft_count = sum(
         1
         for entry in ledger.get("entries", [])
