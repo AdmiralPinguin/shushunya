@@ -50,6 +50,34 @@ COMPONENTS = {
 }
 
 
+ROADMAP = [
+    {
+        "priority": 1,
+        "item": "wire CodeBrigade real execution adapter",
+        "reason": "Ceraxia can produce a validated handoff, but source mutation is still intentionally blocked.",
+        "owner": "CodeBrigade",
+    },
+    {
+        "priority": 2,
+        "item": "replace repo_survey_stub with read-only repository survey adapter",
+        "reason": "Ceraxia currently proves survey intent but does not inspect candidate files itself.",
+        "owner": "Ceraxia",
+    },
+    {
+        "priority": 3,
+        "item": "add verification execution adapter with allowlisted commands",
+        "reason": "Verification is planned, but dry-run packages do not execute commands inside this controller.",
+        "owner": "CodeBrigade",
+    },
+    {
+        "priority": 4,
+        "item": "split PlanningBrigade roles into callable services only after packet stability",
+        "reason": "The advisory packet is now useful; process splitting should wait until contracts stop moving.",
+        "owner": "PlanningBrigade",
+    },
+]
+
+
 def component_status(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     missing: list[str] = []
     present: list[str] = []
@@ -78,7 +106,8 @@ def build_status() -> dict[str, Any]:
         "root": str(ROOT),
         "components": components,
         "incomplete_components": incomplete,
-        "next_architecture_step": "wire CodeBrigade real execution adapter" if not incomplete else "repair incomplete component contracts",
+        "roadmap": ROADMAP,
+        "next_architecture_step": ROADMAP[0]["item"] if not incomplete else "repair incomplete component contracts",
     }
 
 

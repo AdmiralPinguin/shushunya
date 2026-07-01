@@ -19,7 +19,8 @@ runtime until a worker is intentionally migrated.
 
 `mechanicum_status.py` reports component maturity for orchestration. It should
 stay honest: contract-only components must not be reported as executable
-workers until a real adapter exists.
+workers until a real adapter exists. Its JSON output also carries the current
+architecture roadmap, ordered by priority.
 
 `contracts_self_test.py` checks that generated packets still satisfy the
 required fields declared by the local JSON schema files. It is intentionally

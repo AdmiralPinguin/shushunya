@@ -15,6 +15,10 @@ def main() -> int:
         raise AssertionError(f"Ceraxia should honestly report dry-run maturity: {by_name['Ceraxia']}")
     if "wire CodeBrigade real execution adapter" not in status["next_architecture_step"]:
         raise AssertionError(f"status should point to the next architecture gap: {status}")
+    if status["roadmap"][0]["owner"] != "CodeBrigade":
+        raise AssertionError(f"first roadmap item should target CodeBrigade: {status}")
+    if [item["priority"] for item in status["roadmap"]] != sorted(item["priority"] for item in status["roadmap"]):
+        raise AssertionError(f"roadmap priorities should be sorted: {status}")
     print("[ok] EyeOfTerror Mechanicum status report")
     return 0
 
