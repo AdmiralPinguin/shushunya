@@ -413,6 +413,8 @@ def review_gate(
         warnings.append({"severity": "warning", "finding": "surface verification coverage is planned but not executed"})
     if surface_status == "partial":
         warnings.append({"severity": "warning", "finding": "surface verification has only partial executed evidence"})
+    if brief.get("risk_level") == "high" and surface_status == "partial" and meaningful_commands_executed:
+        findings.append({"severity": "blocker", "finding": "high-risk task has only partial executed surface evidence"})
     if verification_report.get("commands_executable") and not verification_report.get("commands_executed"):
         warnings.append({"severity": "warning", "finding": "executable verification commands exist but were not run"})
     if brief.get("risk_level") == "high" and not commands_executed:

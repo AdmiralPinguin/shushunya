@@ -349,6 +349,52 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertEqual(review["surface_verification_sufficiency"]["status"], "failed")
 
+    def test_review_gate_blocks_high_risk_partial_surface_execution(self) -> None:
+        packet = build_planning_packet(
+            {
+                "task": "почини security API bug: token boundary ломает public schema compatibility",
+                "repo_path": ".",
+            }
+        )
+        survey = {
+            "repo_exists": True,
+            "repo_path": ".",
+            "candidate_files": ["app.py"],
+            "test_files": ["test_app.py"],
+            "entrypoint_candidates": [],
+            "python_symbols": [],
+            "source_summaries": [],
+            "local_import_edges": [],
+            "generic_import_edges": [],
+            "recommended_read_order": [{"path": "app.py", "reason": "ranked source/config candidate"}],
+            "suggested_verification_commands": [],
+            "truncated": False,
+            "python_symbols_truncated": False,
+            "source_summaries_truncated": False,
+            "max_files_scanned": 1,
+            "max_python_symbol_files": 1,
+            "max_source_summary_files": 1,
+        }
+        brief = build_implementation_brief(packet, survey)
+        worker_report = {
+            "status": "dry_run_handoff_ready",
+            "dry_run": True,
+            "changed_files": [],
+            "implementation_brief_acknowledged": True,
+        }
+        verification_report = {
+            "status": "passed",
+            "negative_tests_required": ["untrusted input is rejected", "old and new API shape compatibility"],
+            "broad_verification_required": True,
+            "commands_planned": ["python -m py_compile app.py", "python -m pytest test_app.py"],
+            "commands_executable": ["python -m py_compile app.py", "python -m pytest test_app.py"],
+            "commands_executed": [{"command": "python -m py_compile app.py", "status": "passed"}],
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        self.assertEqual(review["surface_verification_sufficiency"]["status"], "partial")
+        self.assertEqual(review["decision"], "blocked")
+        self.assertTrue(any("partial executed surface evidence" in item["finding"] for item in review["findings"]))
+
     def test_non_dry_run_blocks_until_real_code_brigade_execution_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
