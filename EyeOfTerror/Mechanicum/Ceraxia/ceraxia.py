@@ -361,11 +361,14 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "unsafe_path_hints": survey.get("unsafe_path_hints", []),
             "entrypoint_candidates": survey.get("entrypoint_candidates", []),
             "python_symbols": survey.get("python_symbols", []),
+            "source_summaries": survey.get("source_summaries", []),
             "local_import_edges": survey.get("local_import_edges", []),
             "survey_truncated": bool(survey.get("truncated")),
             "max_files_scanned": survey.get("max_files_scanned", 0),
             "python_symbols_truncated": bool(survey.get("python_symbols_truncated")),
             "max_python_symbol_files": survey.get("max_python_symbol_files", 0),
+            "source_summaries_truncated": bool(survey.get("source_summaries_truncated")),
+            "max_source_summary_files": survey.get("max_source_summary_files", 0),
         },
         "suggested_verification_commands": survey.get("suggested_verification_commands", []),
         "blocked": blocked,
@@ -456,6 +459,8 @@ def review_gate(
         warnings.append({"severity": "warning", "finding": "repository survey reached file limit; coverage is partial"})
     if repo_evidence.get("python_symbols_truncated"):
         warnings.append({"severity": "warning", "finding": "python symbol survey reached file limit; dependency evidence is partial"})
+    if repo_evidence.get("source_summaries_truncated"):
+        warnings.append({"severity": "warning", "finding": "source summary survey reached file limit; multi-language evidence is partial"})
     if any("hardcode" in approach for approach in brief.get("forbidden_approaches", [])):
         hardcode_rejected = any(
             option.get("name") == "hardcode" and option.get("decision") == "reject"
@@ -539,10 +544,13 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
             f"- candidate files: {len(repo_evidence.get('candidate_files', []))}",
             f"- test files: {len(repo_evidence.get('test_files', []))}",
             f"- python symbol reports: {len(repo_evidence.get('python_symbols', []))}",
+            f"- source summaries: {len(repo_evidence.get('source_summaries', []))}",
             f"- repository survey partial: {str(bool(repo_evidence.get('survey_truncated'))).lower()}",
             f"- python symbol survey partial: {str(bool(repo_evidence.get('python_symbols_truncated'))).lower()}",
+            f"- source summary survey partial: {str(bool(repo_evidence.get('source_summaries_truncated'))).lower()}",
             f"- max files scanned: {repo_evidence.get('max_files_scanned', 0)}",
             f"- max python symbol files: {repo_evidence.get('max_python_symbol_files', 0)}",
+            f"- max source summary files: {repo_evidence.get('max_source_summary_files', 0)}",
             f"- code brigade handoff steps: {len(brief.get('code_brigade_handoff', {}).get('steps', []))}",
             "",
         ]

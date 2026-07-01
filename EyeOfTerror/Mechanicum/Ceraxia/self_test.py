@@ -33,6 +33,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             repo.mkdir()
             (repo / "app.py").write_text("from util import enabled\n\ndef app():\n    return enabled()\n", encoding="utf-8")
             (repo / "util.py").write_text("def enabled():\n    return True\n", encoding="utf-8")
+            (repo / "client.ts").write_text("import { api } from './api';\nexport function client() { return api(); }\n", encoding="utf-8")
             (repo / "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
             runs = Path(tmp) / "runs"
             result = run_ceraxia(
@@ -81,6 +82,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(brief["impact_analysis"]["requires_cross_surface_review"])
             self.assertEqual(brief["execution_forecast"]["complexity"], "high")
             self.assertGreaterEqual(brief["execution_forecast"]["expected_code_brigade_iterations"], 4)
+            self.assertTrue(any(item["path"] == "client.ts" and item["language"] == "typescript" for item in brief["repo_survey_evidence"]["source_summaries"]))
             self.assertTrue(brief["surface_verification_matrix"]["complete"])
             self.assertTrue(any(row["surface"] == "security_boundary" for row in brief["surface_verification_matrix"]["rows"]))
             self.assertEqual(brief["survey_quality_gate"]["decision"], "passed")
@@ -105,6 +107,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(implementation_plan["requires_cross_surface_review"])
             self.assertEqual(implementation_plan["execution_complexity"], "high")
             self.assertGreaterEqual(implementation_plan["expected_code_brigade_iterations"], 4)
+            self.assertTrue(any(item["path"] == "client.ts" and "client" in item["symbols"] for item in implementation_plan["source_summaries_to_consider"]))
             self.assertTrue(implementation_plan["surface_verification_complete"])
             self.assertTrue(any(row["surface"] == "security_boundary" for row in implementation_plan["surface_verification_rows"]))
             self.assertEqual(implementation_plan["survey_quality_decision"], "passed")
@@ -122,6 +125,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in survey["local_import_edges"]))
             app_symbols = next(item for item in survey["python_symbols"] if item["path"] == "app.py")
             self.assertIn("app", app_symbols["functions"])
+            client_summary = next(item for item in survey["source_summaries"] if item["path"] == "client.ts")
+            self.assertEqual(client_summary["language"], "typescript")
+            self.assertIn("client", client_summary["symbols"])
             audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
             self.assertEqual(audit["decision"], "passed")
             self.assertTrue(audit["manifest_complete"])
@@ -174,8 +180,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("WARNING: broad verification is planned but not executed", final_report)
             self.assertIn("- repository survey partial: false", final_report)
             self.assertIn("- python symbol survey partial: false", final_report)
+            self.assertIn("- source summary survey partial: false", final_report)
             self.assertIn("- max files scanned:", final_report)
             self.assertIn("- max python symbol files:", final_report)
+            self.assertIn("- max source summary files:", final_report)
 
     def test_missing_repo_blocks_before_claiming_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

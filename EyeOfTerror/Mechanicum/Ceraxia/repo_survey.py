@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml", ".ini", ".env"}
 DOC_SUFFIXES = {".md", ".rst", ".txt"}
 MAX_SURVEY_FILES = 2000
 MAX_PYTHON_SYMBOL_FILES = 40
+MAX_SOURCE_SUMMARY_FILES = 80
 
 
 def excluded(path: Path, root: Path, exclude_patterns: list[str]) -> bool:
@@ -96,6 +98,70 @@ def python_summary(path: Path, root: Path) -> dict[str, Any]:
     }
 
 
+def source_language(path: Path) -> str:
+    return {
+        ".py": "python",
+        ".js": "javascript",
+        ".jsx": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescript",
+        ".kt": "kotlin",
+        ".java": "java",
+        ".go": "go",
+        ".rs": "rust",
+        ".sh": "shell",
+    }.get(path.suffix.lower(), path.suffix.lower().lstrip(".") or "unknown")
+
+
+def generic_source_summary(path: Path, root: Path) -> dict[str, Any]:
+    rel = str(path.relative_to(root))
+    try:
+        text = path.read_text(encoding="utf-8")[:200_000]
+    except (OSError, UnicodeDecodeError) as exc:
+        return {"path": rel, "language": source_language(path), "parse_error": str(exc), "symbols": [], "import_like": []}
+    suffix = path.suffix.lower()
+    patterns = [
+        r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)",
+        r"\binterface\s+([A-Za-z_][A-Za-z0-9_]*)",
+        r"\btype\s+([A-Za-z_][A-Za-z0-9_]*)",
+    ]
+    if suffix in {".js", ".jsx", ".ts", ".tsx"}:
+        patterns.extend(
+            [
+                r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)",
+                r"\bconst\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?\(",
+                r"\bexport\s+default\s+function\s+([A-Za-z_][A-Za-z0-9_]*)",
+            ]
+        )
+    elif suffix == ".go":
+        patterns.append(r"\bfunc\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)")
+    elif suffix == ".rs":
+        patterns.append(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)")
+    elif suffix in {".java", ".kt"}:
+        patterns.append(r"\bfun\s+([A-Za-z_][A-Za-z0-9_]*)")
+    elif suffix == ".sh":
+        patterns.append(r"(?m)^([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{")
+    symbols: list[str] = []
+    for pattern in patterns:
+        for match in re.findall(pattern, text):
+            if match not in symbols:
+                symbols.append(match)
+    import_like: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("import ", "from ", "require(", "package ", "use ", "mod ")):
+            import_like.append(stripped[:160])
+        if len(import_like) >= 30:
+            break
+    return {
+        "path": rel,
+        "language": source_language(path),
+        "parse_error": "",
+        "symbols": symbols[:40],
+        "import_like": import_like,
+    }
+
+
 def module_name_for(path: Path, root: Path) -> str:
     rel = path.relative_to(root).with_suffix("")
     parts = list(rel.parts)
@@ -152,12 +218,15 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "test_files": [],
             "entrypoint_candidates": [],
             "python_symbols": [],
+            "source_summaries": [],
             "local_import_edges": [],
             "suggested_verification_commands": [],
             "max_files_scanned": MAX_SURVEY_FILES,
             "truncated": False,
             "max_python_symbol_files": MAX_PYTHON_SYMBOL_FILES,
             "python_symbols_truncated": False,
+            "max_source_summary_files": MAX_SOURCE_SUMMARY_FILES,
+            "source_summaries_truncated": False,
         }
     files: list[Path] = []
     truncated = False
@@ -203,6 +272,9 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     python_symbols_truncated = len(all_python_files) > MAX_PYTHON_SYMBOL_FILES
     python_files = all_python_files[:MAX_PYTHON_SYMBOL_FILES]
     python_symbols = [python_summary(path, root) for path in python_files]
+    all_source_files = [path for path in files if path.suffix.lower() in SOURCE_SUFFIXES]
+    source_summaries_truncated = len(all_source_files) > MAX_SOURCE_SUMMARY_FILES
+    source_summaries = [generic_source_summary(path, root) for path in all_source_files[:MAX_SOURCE_SUMMARY_FILES]]
     suggested_commands: list[str] = []
     if tests:
         suggested_commands.append("python -m pytest " + " ".join(tests[:3]))
@@ -227,10 +299,13 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "test_files": tests,
         "entrypoint_candidates": entrypoints,
         "python_symbols": python_symbols,
+        "source_summaries": source_summaries,
         "local_import_edges": build_local_import_edges(python_symbols, python_files, root),
         "suggested_verification_commands": suggested_commands,
         "max_files_scanned": MAX_SURVEY_FILES,
         "truncated": truncated,
         "max_python_symbol_files": MAX_PYTHON_SYMBOL_FILES,
         "python_symbols_truncated": python_symbols_truncated,
+        "max_source_summary_files": MAX_SOURCE_SUMMARY_FILES,
+        "source_summaries_truncated": source_summaries_truncated,
     }

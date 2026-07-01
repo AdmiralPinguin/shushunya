@@ -51,6 +51,7 @@
         "existing_path_hints",
         "missing_path_hints",
         "unsafe_path_hints",
+        "source_summaries_to_consider",
         "dependency_edges_to_check",
         "survey_truncated",
         "python_symbols_truncated",
@@ -106,6 +107,12 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "source_summaries_to_consider": {
+          "type": "array",
+          "items": {
+            "type": "object"
           }
         },
         "planning_critical_path": {

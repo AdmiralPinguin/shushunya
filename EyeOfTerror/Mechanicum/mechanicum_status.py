@@ -23,7 +23,7 @@ COMPONENTS = {
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
         ],
-        "maturity": "dry_run_controller_with_planning_quality_survey_gate_and_verification",
+        "maturity": "dry_run_controller_with_planning_quality_survey_gate_multilanguage_summaries_and_verification",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -76,8 +76,8 @@ ROADMAP = [
     },
     {
         "priority": 2,
-        "item": "deepen repository survey beyond Python import edges",
-        "reason": "Ceraxia now uses path hints, survey quality gates, Python symbols, and local imports; multi-language call/dependency evidence is still shallow.",
+        "item": "deepen repository survey into multi-language dependency graphs",
+        "reason": "Ceraxia now uses path hints, survey quality gates, Python symbols/imports, and generic multi-language source summaries; non-Python call/dependency graph evidence is still shallow.",
         "owner": "Ceraxia",
     },
     {

@@ -75,6 +75,9 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
   unsafe plans.
 - `run_summary.json` and `final_report.md` expose planning review and survey
   quality decisions for orchestration history.
+- `repo_survey.json.source_summaries` gives shallow multi-language symbol and
+  import-like evidence for common source files; Python still has the deeper
+  AST symbol/import path used for local dependency edges.
 
 Smoke command:
 
