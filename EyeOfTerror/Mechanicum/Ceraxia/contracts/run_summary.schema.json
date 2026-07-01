@@ -24,6 +24,11 @@
     "survey_quality_warning_count",
     "surface_verification_status",
     "surface_verification_surface_count",
+    "investigation_playbook_status",
+    "investigation_read_stage_count",
+    "investigation_evidence_question_count",
+    "investigation_mutation_blocker_count",
+    "investigation_replan_trigger_count",
     "execution_readiness",
     "worker_status",
     "code_brigade_execution_policy_status",
@@ -118,6 +123,21 @@
       "type": "string"
     },
     "surface_verification_surface_count": {
+      "type": "integer"
+    },
+    "investigation_playbook_status": {
+      "type": "string"
+    },
+    "investigation_read_stage_count": {
+      "type": "integer"
+    },
+    "investigation_evidence_question_count": {
+      "type": "integer"
+    },
+    "investigation_mutation_blocker_count": {
+      "type": "integer"
+    },
+    "investigation_replan_trigger_count": {
       "type": "integer"
     },
     "execution_readiness": {

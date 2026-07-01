@@ -218,6 +218,11 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["survey_quality_warning_count"], 0)
             self.assertEqual(summary["surface_verification_status"], "planned_only")
             self.assertGreaterEqual(summary["surface_verification_surface_count"], 1)
+            self.assertEqual(summary["investigation_playbook_status"], "complete")
+            self.assertGreaterEqual(summary["investigation_read_stage_count"], 5)
+            self.assertGreaterEqual(summary["investigation_evidence_question_count"], 4)
+            self.assertGreaterEqual(summary["investigation_mutation_blocker_count"], 3)
+            self.assertGreaterEqual(summary["investigation_replan_trigger_count"], 3)
             self.assertEqual(summary["worker_status"], "dry_run_handoff_ready")
             self.assertEqual(summary["code_brigade_execution_policy_status"], "blocked_until_adapter_is_wired")
             self.assertEqual(summary["code_brigade_autonomous_execution_request_status"], "required")
@@ -264,6 +269,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any(row["surface"] == "security_boundary" and "security_boundary_package" in row["package_ids"] for row in evidence_matrix["surface_package_summary"]["rows"]))
             final_report = (run_dir / "final_report.md").read_text(encoding="utf-8")
             self.assertIn("Execution readiness: blocked", final_report)
+            self.assertIn("Investigation playbook status: complete", final_report)
+            self.assertIn("Investigation read stages:", final_report)
             self.assertIn("- evidence_matrix.json", final_report)
             self.assertIn("BLOCKER: dry run requested; real CodeBrigade execution was intentionally skipped", final_report)
             self.assertIn("Verification commands planned:", final_report)
@@ -505,6 +512,63 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertIn("evidence_survey_package", review["surface_package_sufficiency"]["missing_status_package_ids"])
         self.assertTrue(any("work packages are blocked" in item["finding"] for item in review["findings"]))
         self.assertTrue(any("surface package matrix references packages without worker status" in item["finding"] for item in review["findings"]))
+
+    def test_review_gate_blocks_missing_investigation_playbook(self) -> None:
+        packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
+        survey = {
+            "repo_exists": True,
+            "repo_path": ".",
+            "candidate_files": ["app.py"],
+            "test_files": ["test_app.py"],
+            "entrypoint_candidates": [],
+            "python_symbols": [],
+            "source_summaries": [],
+            "local_import_edges": [],
+            "generic_import_edges": [],
+            "recommended_read_order": [{"path": "app.py", "reason": "ranked source/config candidate"}],
+            "suggested_verification_commands": [],
+            "truncated": False,
+            "python_symbols_truncated": False,
+            "source_summaries_truncated": False,
+            "max_files_scanned": 1,
+            "max_python_symbol_files": 1,
+            "max_source_summary_files": 1,
+        }
+        brief = build_implementation_brief(packet, survey)
+        packages = brief["implementation_work_packages"]["packages"]
+        worker_report = {
+            "status": "dry_run_handoff_ready",
+            "dry_run": True,
+            "changed_files": [],
+            "implementation_brief_acknowledged": True,
+            "implementation_plan": {
+                "investigation_read_stages": [],
+                "investigation_evidence_questions": [],
+                "investigation_mutation_blockers": [],
+                "investigation_replan_triggers": [],
+            },
+            "work_package_statuses": [
+                {
+                    "package_id": package["id"],
+                    "owner": "CodeBrigade",
+                    "impact_surfaces": package["impact_surfaces"],
+                    "status": "planned",
+                    "evidence_source": "implementation_plan",
+                }
+                for package in packages
+            ],
+        }
+        verification_report = {
+            "status": "planned_only",
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "commands_planned": ["python -m py_compile app.py"],
+            "commands_executed": [],
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        self.assertEqual(review["decision"], "blocked")
+        self.assertEqual(review["investigation_sufficiency"]["status"], "blocked")
+        self.assertTrue(any("investigation playbook is incomplete" in item["finding"] for item in review["findings"]))
 
     def test_review_gate_marks_failed_surface_verification(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
