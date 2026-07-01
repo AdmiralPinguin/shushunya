@@ -283,6 +283,7 @@ def review_gate(
     verification_report: dict[str, Any],
 ) -> dict[str, Any]:
     findings: list[dict[str, str]] = []
+    warnings: list[dict[str, str]] = []
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
     if not worker_report.get("implementation_brief_acknowledged", False):
@@ -294,6 +295,10 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "negative tests are missing or not planned"})
     if verification_report.get("broad_verification_required") and not verification_report.get("commands_planned"):
         findings.append({"severity": "blocker", "finding": "broad verification is required but no commands are planned"})
+    if verification_report.get("broad_verification_required") and verification_report.get("status") == "planned_only":
+        warnings.append({"severity": "warning", "finding": "broad verification is planned but not executed"})
+    if verification_report.get("commands_executable") and not verification_report.get("commands_executed"):
+        warnings.append({"severity": "warning", "finding": "executable verification commands exist but were not run"})
     if any("hardcode" in approach for approach in brief.get("forbidden_approaches", [])):
         hardcode_rejected = any(
             option.get("name") == "hardcode" and option.get("decision") == "reject"
@@ -308,6 +313,7 @@ def review_gate(
         "kind": "ceraxia_review_gate",
         "decision": decision,
         "findings": findings,
+        "warnings": warnings,
         "checked_against": [
             "planning packet completeness",
             "strategy approval",

@@ -86,6 +86,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
             self.assertEqual(audit["decision"], "passed")
             self.assertTrue(audit["manifest_complete"])
+            review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
+            self.assertTrue(any("broad verification is planned" in item["finding"] for item in review["warnings"]))
             readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
             self.assertEqual(readiness["decision"], "blocked")
             self.assertIn("real CodeBrigade execution is not wired in this controller yet", readiness["blockers"])
