@@ -366,6 +366,22 @@ def output_signal_counts_from_summary(output_summary: list[Any]) -> dict[str, in
     return counts
 
 
+def output_consistency_findings(verification_report: dict[str, Any], output_summary: list[Any]) -> list[str]:
+    problems: list[str] = []
+    report_status = str(verification_report.get("status") or "")
+    for item in output_summary:
+        if not isinstance(item, dict):
+            continue
+        signal = str(item.get("output_signal") or "")
+        command = str(item.get("command") or "<unknown command>")
+        command_status = str(item.get("status") or "")
+        if signal in {"failure_text", "traceback"} and command_status == "passed":
+            problems.append(f"verification command reported passed but output contains {signal}: {command}")
+        if signal in {"failure_text", "traceback"} and report_status == "passed":
+            problems.append(f"verification report is passed but output contains {signal}: {command}")
+    return problems
+
+
 def meaningful_executed_commands(verification_report: dict[str, Any]) -> list[dict[str, Any]]:
     commands = verification_report.get("commands_executed") if isinstance(verification_report.get("commands_executed"), list) else []
     return [item for item in commands if isinstance(item, dict) and item.get("status") in {"passed", "failed", "blocked"}]
@@ -741,6 +757,8 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "negative tests are missing or not planned"})
     if verification_report.get("status") in {"failed", "blocked"}:
         findings.append({"severity": "blocker", "finding": f"verification report status is {verification_report.get('status')}"})
+    for problem in output_consistency_findings(verification_report, output_summary):
+        findings.append({"severity": "blocker", "finding": problem})
     if verification_report.get("broad_verification_required") and not verification_report.get("commands_planned"):
         findings.append({"severity": "blocker", "finding": "broad verification is required but no commands are planned"})
     if verification_report.get("broad_verification_required") and verification_report.get("status") == "planned_only":
