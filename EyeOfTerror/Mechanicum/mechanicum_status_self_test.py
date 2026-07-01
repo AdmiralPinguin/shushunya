@@ -14,8 +14,9 @@ def main() -> int:
     code_maturity = by_name["CodeBrigade"]["maturity"]
     if "blocked_execution_adapter" not in code_maturity or "preflight" not in code_maturity or "allowlisted_verification" not in code_maturity:
         raise AssertionError(f"CodeBrigade should honestly report preflight and verification-adapter maturity: {by_name['CodeBrigade']}")
-    if by_name["Ceraxia"]["maturity"] != "dry_run_controller_with_import_edges_evidence_matrix_and_verification":
-        raise AssertionError(f"Ceraxia should honestly report dry-run survey and verification maturity: {by_name['Ceraxia']}")
+    ceraxia_maturity = by_name["Ceraxia"]["maturity"]
+    if not all(part in ceraxia_maturity for part in ["dry_run_controller", "planning_quality", "survey_gate", "verification"]):
+        raise AssertionError(f"Ceraxia should honestly report dry-run planning, survey, and verification maturity: {by_name['Ceraxia']}")
     if "replace blocked CodeBrigade execution adapter" not in status["next_architecture_step"]:
         raise AssertionError(f"status should point to the next architecture gap: {status}")
     if status["roadmap"][0]["owner"] != "CodeBrigade":

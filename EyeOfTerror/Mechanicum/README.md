@@ -10,8 +10,9 @@ This folder is the EyeOfTerror-side home for code-governance structure.
   perform read-only execution preflight checks, but real source mutation is
   still intentionally blocked.
 - `PlanningBrigade/` contains Ceraxia's advisory planning department: task
-  triage, repository survey request, design strategy, verification strategy,
-  and risk register.
+  triage, problem framing, path-hint extraction, repository survey request,
+  dependency mapping, work breakdown, impact analysis, surface verification
+  mapping, acceptance contracts, self-review, and risk register.
 
 Runtime worker implementations can stay in the top-level `Mechanicum/` service
 tree until each brigade boundary is stable.

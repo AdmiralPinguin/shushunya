@@ -23,7 +23,7 @@ COMPONENTS = {
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
         ],
-        "maturity": "dry_run_controller_with_import_edges_evidence_matrix_and_verification",
+        "maturity": "dry_run_controller_with_planning_quality_survey_gate_and_verification",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -40,7 +40,7 @@ COMPONENTS = {
             "VerificationArchitect/README.md",
             "RiskScribe/README.md",
         ],
-        "maturity": "contracted_planning_department_with_acceptance_and_dependency_handoff",
+        "maturity": "contracted_planning_department_with_impact_surface_and_quality_gates",
     },
     "CodeBrigade": {
         "kind": "implementation_brigade_contract",
@@ -77,19 +77,19 @@ ROADMAP = [
     {
         "priority": 2,
         "item": "deepen repository survey beyond Python import edges",
-        "reason": "Ceraxia now maps Python symbols and local imports; multi-language call/dependency evidence is still shallow.",
+        "reason": "Ceraxia now uses path hints, survey quality gates, Python symbols, and local imports; multi-language call/dependency evidence is still shallow.",
         "owner": "Ceraxia",
     },
     {
         "priority": 3,
         "item": "promote verification execution evidence into review-specific gates",
-        "reason": "Ceraxia can execute allowlisted verification and summarize evidence; review should next reason about which commands are sufficient for each risk.",
+        "reason": "PlanningBrigade maps impacted surfaces to planned evidence; review should next judge whether executed command output is sufficient for each surface.",
         "owner": "Ceraxia",
     },
     {
         "priority": 4,
         "item": "split PlanningBrigade roles into callable services after more field trials",
-        "reason": "PlanningBrigade now emits problem framing, dependency maps, acceptance contracts, and CodeBrigade brief blueprints; role services should wait until these contracts survive more real tasks.",
+        "reason": "PlanningBrigade now emits problem framing, path hints, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, and CodeBrigade brief blueprints; role services should wait until these contracts survive more real tasks.",
         "owner": "PlanningBrigade",
     },
 ]

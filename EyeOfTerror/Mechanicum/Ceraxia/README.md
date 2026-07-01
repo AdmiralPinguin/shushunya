@@ -62,6 +62,20 @@ warning.
 `repo_survey.json.python_symbols_truncated=true` is narrower: source files were
 listed, but Python symbol/import evidence is partial.
 
+Current `EyeOfTerror/Mechanicum` planning quality gates:
+
+- PlanningBrigade extracts explicit path hints and passes them to the repository
+  survey.
+- `survey_quality_gate` blocks missing/unsafe explicit path hints, missing
+  candidate files, and high-risk tasks with no discovered test surface.
+- `impact_analysis` names the affected engineering surfaces.
+- `surface_verification_matrix` maps those surfaces to planned evidence and
+  blocks incomplete coverage before CodeBrigade handoff.
+- `planning_review_gate` scores the packet and blocks unclear or structurally
+  unsafe plans.
+- `run_summary.json` and `final_report.md` expose planning review and survey
+  quality decisions for orchestration history.
+
 Smoke command:
 
 ```bash
