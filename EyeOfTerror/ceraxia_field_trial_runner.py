@@ -2189,7 +2189,7 @@ def honest_evidence_summary(manifest: dict[str, Any], checks: dict[str, Any]) ->
         if isinstance(item, dict)
     ]
     patch_source = str(manifest.get("patch_source") or "")
-    ast_required = patch_source.startswith(("test_inferred_", "runtime_diagnostic_"))
+    ast_required = patch_source in {"test_inferred_arithmetic_return", "runtime_diagnostic_return_mismatch"}
     ast_recorded = ast_plan.get("status") == "recorded" and int(ast_plan.get("operation_count") or 0) >= 1
     evidence_checks = {
         "source_correct": {

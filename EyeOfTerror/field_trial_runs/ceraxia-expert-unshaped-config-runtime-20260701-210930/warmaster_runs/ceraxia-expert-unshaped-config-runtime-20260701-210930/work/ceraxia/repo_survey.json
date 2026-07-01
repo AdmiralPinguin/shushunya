@@ -1,0 +1,395 @@
+{
+  "repo_root": "/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-config-runtime-20260701-210930/fixture/repo",
+  "goal": "кодовая expert-задача без structured config marker: исправь runtime config mismatch. Выведи контракт из tests/docs/repo: JSON config должен называться service_url, loader должен читать SERVICE_URL override, shell entrypoint должен экспортировать тот же env var. Не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-config-runtime-20260701-210930/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_config_loader\nCERAXIA_VERIFY: python -m py_compile app/config_loader.py",
+  "total_files_scanned": 5,
+  "dominant_extensions": [
+    {
+      "extension": ".py",
+      "count": 2
+    },
+    {
+      "extension": ".json",
+      "count": 1
+    },
+    {
+      "extension": ".sh",
+      "count": 1
+    },
+    {
+      "extension": ".md",
+      "count": 1
+    }
+  ],
+  "candidate_files": [
+    "app/config_loader.py",
+    "docs/config_runtime.md",
+    "tests/test_config_loader.py"
+  ],
+  "test_files": [
+    "tests/test_config_loader.py"
+  ],
+  "python_symbols": [
+    {
+      "path": "app/config_loader.py",
+      "module": "app.config_loader",
+      "functions": [
+        "load_settings"
+      ],
+      "classes": [],
+      "imports": [
+        "json",
+        "pathlib.Path"
+      ],
+      "calls": [
+        "Path",
+        "loads",
+        "read_text",
+        "resolve"
+      ]
+    },
+    {
+      "path": "tests/test_config_loader.py",
+      "module": "tests.test_config_loader",
+      "functions": [],
+      "classes": [
+        "ConfigLoaderTest"
+      ],
+      "imports": [
+        "os",
+        "unittest",
+        "app.config_loader.load_settings"
+      ],
+      "calls": [
+        "assertEqual",
+        "load_settings",
+        "main",
+        "pop"
+      ]
+    }
+  ],
+  "suggested_verification_commands": [
+    "python -m unittest discover",
+    "python -m unittest tests.test_config_loader"
+  ],
+  "repo_map": {
+    "ranked_files": [
+      {
+        "path": "app/config_loader.py",
+        "score": 23,
+        "reasons": [
+          "goal_filename_match",
+          "imported_by:tests/test_config_loader.py",
+          "goal_symbol_match:app,config,json,loader",
+          "python_source"
+        ]
+      },
+      {
+        "path": "tests/test_config_loader.py",
+        "score": 19,
+        "reasons": [
+          "goal_filename_match",
+          "test_surface",
+          "linked_test",
+          "goal_symbol_match:app,config,loader,test,tests"
+        ]
+      },
+      {
+        "path": "docs/config_runtime.md",
+        "score": 6,
+        "reasons": [
+          "goal_filename_match"
+        ]
+      }
+    ],
+    "test_source_links": [
+      {
+        "test_path": "tests/test_config_loader.py",
+        "source_paths": [
+          "app/config_loader.py"
+        ]
+      }
+    ],
+    "recommended_read_order": [
+      {
+        "path": "app/config_loader.py",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match, imported_by:tests/test_config_loader.py, goal_symbol_match:app,config,json,loader"
+      },
+      {
+        "path": "tests/test_config_loader.py",
+        "phase": "inspect_test",
+        "reason": "goal_filename_match, test_surface, linked_test"
+      },
+      {
+        "path": "docs/config_runtime.md",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match"
+      }
+    ],
+    "notes": [
+      "ranked_files combines goal filename matches, symbol matches, test surfaces, and test-to-source imports",
+      "test_source_links are derived from static Python imports and are advisory, not proof of coverage",
+      "recommended_read_order lists files to inspect before patch planning or source mutation"
+    ]
+  },
+  "engineering_investigation": {
+    "dependency_graph": {
+      "edges": [
+        {
+          "from": "tests/test_config_loader.py",
+          "to": "app/config_loader.py",
+          "import": "app.config_loader.load_settings"
+        }
+      ],
+      "reverse_dependents": {
+        "app/config_loader.py": [
+          "tests/test_config_loader.py"
+        ]
+      },
+      "edge_count": 1
+    },
+    "call_graph": {
+      "edges": [
+        {
+          "from": "tests/test_config_loader.py",
+          "to": "app/config_loader.py",
+          "call": "load_settings"
+        }
+      ],
+      "edge_count": 1,
+      "known_function_count": 1
+    },
+    "targeted_reading_plan": [
+      {
+        "path": "app/config_loader.py",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match, imported_by:tests/test_config_loader.py, goal_symbol_match:app,config,json,loader",
+        "dependent_count": 1,
+        "sample_dependents": [
+          "tests/test_config_loader.py"
+        ],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      },
+      {
+        "path": "tests/test_config_loader.py",
+        "phase": "inspect_test",
+        "reason": "goal_filename_match, test_surface, linked_test",
+        "dependent_count": 0,
+        "sample_dependents": [],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      },
+      {
+        "path": "docs/config_runtime.md",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match",
+        "dependent_count": 0,
+        "sample_dependents": [],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis": "app/config_loader.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "goal_filename_match",
+          "imported_by:tests/test_config_loader.py",
+          "goal_symbol_match:app,config,json,loader",
+          "python_source"
+        ],
+        "risk": "public behavior may affect dependents",
+        "next_read": "app/config_loader.py"
+      },
+      {
+        "hypothesis": "tests/test_config_loader.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "goal_filename_match",
+          "test_surface",
+          "linked_test",
+          "goal_symbol_match:app,config,loader,test,tests"
+        ],
+        "risk": "local change risk appears limited",
+        "next_read": "tests/test_config_loader.py"
+      },
+      {
+        "hypothesis": "docs/config_runtime.md is likely relevant to the requested code change.",
+        "confidence": "medium",
+        "evidence": [
+          "goal_filename_match"
+        ],
+        "risk": "local change risk appears limited",
+        "next_read": "docs/config_runtime.md"
+      }
+    ],
+    "design_decision_seed": [
+      "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+      "Inspect dependents before changing public functions or modules with reverse dependencies.",
+      "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+    ]
+  },
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "app/config_loader.py",
+        "impact_level": "medium",
+        "rank_score": 23,
+        "dependent_count": 1,
+        "linked_tests": [
+          "tests/test_config_loader.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "tests/test_config_loader.py",
+        "impact_level": "medium",
+        "rank_score": 19,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      },
+      {
+        "path": "docs/config_runtime.md",
+        "impact_level": "low",
+        "rank_score": 6,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      }
+    ],
+    "risk_register": [],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [
+        "python -m unittest discover",
+        "python -m unittest tests.test_config_loader"
+      ],
+      "linked_test_targets": [
+        "tests/test_config_loader.py"
+      ],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "config_files": [],
+  "excluded_dirs": [
+    ".cache",
+    ".git",
+    ".gradle",
+    ".venv",
+    "__pycache__",
+    "build",
+    "cache",
+    "dist",
+    "live_runs",
+    "models",
+    "node_modules",
+    "outputs",
+    "runtime",
+    "tmp"
+  ],
+  "summary": "Surveyed 5 files; found 1 test-like files and 3 goal-matching candidates.",
+  "role_policy": {
+    "role": "repository_mapper",
+    "authority": "read_only_repository_mapping",
+    "may_mutate_source": false,
+    "required_evidence": [
+      "repo_root",
+      "dominant_extensions",
+      "test_files",
+      "python_symbols"
+    ],
+    "forbidden_actions": [
+      "source_mutation",
+      "verification_claim_without_artifacts"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 2,
+    "workflow_mode": "focused_fix",
+    "repo_grade_required_evidence": [],
+    "risk_flags": [
+      "test_diagnostic_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "repository_survey",
+    "worker": "LogisRepository",
+    "purpose": "Inspect repository shape, likely ownership boundaries, risky files, and available test surfaces.",
+    "brief": "Map the repository before anyone edits it.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 2,
+      "workflow_mode": "focused_fix",
+      "repo_grade_required_evidence": [],
+      "risk_flags": [
+        "test_diagnostic_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+      ]
+    },
+    "must_produce": [
+      "repo_map",
+      "candidate_files",
+      "test_files",
+      "recommended_read_order"
+    ],
+    "handoff_question": "Which files should the strategist inspect first, and why?",
+    "authority_boundary": "read_only_repository_mapping"
+  }
+}

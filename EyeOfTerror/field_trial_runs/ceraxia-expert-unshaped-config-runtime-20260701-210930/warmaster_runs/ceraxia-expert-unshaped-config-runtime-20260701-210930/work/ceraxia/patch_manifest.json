@@ -1,0 +1,666 @@
+{
+  "status": "applied",
+  "mode": "explicit_patch_apply",
+  "task_id": "ceraxia-expert-unshaped-config-runtime-20260701-210930:implementation",
+  "summary": "Ceraxia applied scoped patch operations.",
+  "intended_actions": [
+    "read concrete target files before editing",
+    "apply minimal scoped patch",
+    "run verification commands from verification_report.json",
+    "return focused revision steps on failure"
+  ],
+  "plan_excerpt": "# Ceraxia Change Plan\n\nGoal: кодовая expert-задача без structured config marker: исправь runtime config mismatch. Выведи контракт из tests/docs/repo: JSON config должен называться service_url, loader должен читать SERVICE_URL override, shell entrypoint должен экспортировать тот же env var. Не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-config-runtime-20260701-210930/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_config_loader\nCERAXIA_VERIFY: python -m py_compile app/config_loader.py\n\n## Scope\n- Inspect the named task and constrain edits to the smallest coherent module set.\n- Preserve user changes and expose blockers instead of guessing.\n\n## Candidate Files\n- app/config_loader.py\n- docs/config_runtime.md\n- tests/test_config_loader.py\n\n## Ranked Repo Map\n- app/config_loader.py: score=23 reasons=[goal_filename_match, imported_by:tests/test_config_loader.py, goal_symbol_match:app,config,json,loader, python_source]\n- tests/test_config_loader.py: score=19 reasons=[goal_filename_match, test_surface, linked_test, goal_symbol_match:app,config,loader,test,tests]\n- docs/config_runtime.md: score=6 reasons=[goal_filename_match]\n\n## Test Source Links\n- tests/test_config_loader.py -> app/config_loader.py\n\n## Recommended Read Order\n- inspect_source: app/config_loader.py (goal_filename_match, imported_by:tests/test_config_loader.py, goal_symbol_match:app,config,json,loader)\n- inspect_test: tests/test_config_loader.py (goal_filename_match, test_surface, linked_test)\n- inspect_source: docs/config_runtime.md (goal_filename_match)\n\n## Targeted Reading Plan\n- app/config_loader.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=1\n- tests/test_config_loader.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=0\n- docs/config_runtime.md: What contract does this file expose, and what tests or dependents would break if it changes? dependents=0\n\n## Hypothesis Log\n- [high] app/config_loader.py is likely relevant to the requested code change. evidence=[goal_filename_match, imported_by:tests/test_config_loader.py, goal_symbol_match:app,config,json,loader, python_source] risk=public behavior may affect dependents\n- [high] tests/test_config_loader.py is likely relevant to the requested code change. evidence=[goal_filename_match, test_surface, linked_test, goal_symbol_match:app,config,loader,test,tests] risk=local change risk appears limited\n- [medium] docs/config_runtime.md is likely relevant to the requested code change. evidence=[goal_filename_match] risk=local change risk appears limited\n\n## Problem Statement\n- status: recorded\n- observed_problem: Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.\n- success_criteria: changed files directly address the requested behavior\n- success_criteria: source scope is justified by repo survey or explicit ",
+  "problem_statement": {
+    "status": "recorded",
+    "goal": "кодовая expert-задача без structured config marker: исправь runtime config mismatch. Выведи контракт из tests/docs/repo: JSON config должен называться service_url, loader должен читать SERVICE_URL override, shell entrypoint должен экспортировать тот же env var. Не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-config-runtime-20260701-210930/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_config_loader\nCERAXIA_VERIFY: python -m py_compile app/config_loader.py",
+    "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+    "success_criteria": [
+      "changed files directly address the requested behavior",
+      "source scope is justified by repo survey or explicit patch contract",
+      "verification evidence is preserved after the final mutation",
+      "review either approves with evidence or blocks with focused revision steps"
+    ],
+    "evidence_to_inspect": [
+      "app/config_loader.py",
+      "tests/test_config_loader.py",
+      "docs/config_runtime.md"
+    ],
+    "working_hypotheses": [
+      "app/config_loader.py is likely relevant to the requested code change.",
+      "tests/test_config_loader.py is likely relevant to the requested code change.",
+      "docs/config_runtime.md is likely relevant to the requested code change."
+    ],
+    "verification_candidates": [
+      "python -m unittest discover",
+      "python -m unittest tests.test_config_loader",
+      "tests/test_config_loader.py",
+      "python -m py_compile <changed .py files>",
+      "git diff --check"
+    ],
+    "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+  },
+  "architecture_options": {
+    "status": "recorded",
+    "problem_status": "recorded",
+    "options": [
+      {
+        "id": "minimal_targeted_patch",
+        "summary": "Patch the narrowest source surface that satisfies the observed behavior gap.",
+        "recommended": true,
+        "tradeoffs": [
+          "lowest churn",
+          "requires focused verification to prove behavior"
+        ],
+        "applies_to": [
+          "app/config_loader.py",
+          "tests/test_config_loader.py"
+        ]
+      },
+      {
+        "id": "compatibility_wrapper",
+        "summary": "Preserve old callers while adding the new behavior behind a compatible boundary.",
+        "recommended": false,
+        "tradeoffs": [
+          "safer public API evolution",
+          "may require deprecation docs and caller tests"
+        ],
+        "applies_to": [
+          "app/config_loader.py",
+          "tests/test_config_loader.py"
+        ]
+      },
+      {
+        "id": "broad_rewrite",
+        "summary": "Rewrite the surrounding module or subsystem.",
+        "recommended": false,
+        "tradeoffs": [
+          "higher regression risk",
+          "harder review",
+          "should be rejected unless the task explicitly demands it"
+        ],
+        "applies_to": [
+          "app/config_loader.py",
+          "tests/test_config_loader.py"
+        ]
+      }
+    ],
+    "selection_rule": "Choose the first option that satisfies the task with the least public-surface churn and adequate verification."
+  },
+  "role_policy": {
+    "role": "patchwright",
+    "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unsafe_overwrite",
+      "duplicate_function_append"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 2,
+    "workflow_mode": "focused_fix",
+    "repo_grade_required_evidence": [],
+    "risk_flags": [
+      "test_diagnostic_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "implementation",
+    "worker": "FerrumPatchwright",
+    "purpose": "Prepare an auditable patch manifest and implementation handoff for code changes.",
+    "brief": "Apply only explicit or safely inferred scoped patch operations.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 2,
+      "workflow_mode": "focused_fix",
+      "repo_grade_required_evidence": [],
+      "risk_flags": [
+        "test_diagnostic_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair"
+      ]
+    },
+    "must_produce": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "handoff_question": "What exactly changed, and what should verification run?",
+    "authority_boundary": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+  },
+  "dirty_worktree": {
+    "git_repo": false,
+    "dirty_targets": []
+  },
+  "ambiguity_analysis": {},
+  "patch_spec_present": true,
+  "patch_source": "test_inferred_config_runtime",
+  "patch_candidates": [
+    {
+      "source": "explicit_json_patch",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "marker_synthesis",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_api_deprecation",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_data_migration",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_config_runtime",
+      "status": "selected",
+      "operation_count": 3,
+      "verification_command_count": 2,
+      "diagnostics": {
+        "kind": "test_inferred_config_runtime",
+        "test_path": "tests/test_config_loader.py",
+        "loader_path": "app/config_loader.py",
+        "config_path": "app/settings.json",
+        "entrypoint_path": "bin/run-app.sh",
+        "setting_key": "service_url",
+        "env_var": "SERVICE_URL",
+        "default_value": "http://localhost:8080"
+      }
+    }
+  ],
+  "selected_patch_candidate": {
+    "source": "test_inferred_config_runtime",
+    "status": "selected",
+    "operation_count": 3,
+    "verification_command_count": 2,
+    "diagnostics": {
+      "kind": "test_inferred_config_runtime",
+      "test_path": "tests/test_config_loader.py",
+      "loader_path": "app/config_loader.py",
+      "config_path": "app/settings.json",
+      "entrypoint_path": "bin/run-app.sh",
+      "setting_key": "service_url",
+      "env_var": "SERVICE_URL",
+      "default_value": "http://localhost:8080"
+    }
+  },
+  "source_excerpt_pack": [
+    {
+      "path": "app/config_loader.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, imported_by:tests/test_config_loader.py, goal_symbol_match:app,config,json,loader",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 1,
+      "bytes": 233,
+      "status": "read",
+      "excerpt": "import json\nfrom pathlib import Path\n\nCONFIG_PATH = Path(__file__).resolve().parent / 'settings.json'\n\ndef load_settings():\n    data = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))\n    return {'serviceUrl': data['serviceUrl']}\n",
+      "truncated": false
+    },
+    {
+      "path": "tests/test_config_loader.py",
+      "phase": "inspect_test",
+      "reason": "goal_filename_match, test_surface, linked_test",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 0,
+      "bytes": 584,
+      "status": "read",
+      "excerpt": "import os\nimport unittest\nfrom app.config_loader import load_settings\n\nclass ConfigLoaderTest(unittest.TestCase):\n    def test_default_service_url(self):\n        os.environ.pop('SERVICE_URL', None)\n        self.assertEqual(load_settings()['service_url'], 'http://localhost:8080')\n\n    def test_env_override(self):\n        os.environ['SERVICE_URL'] = 'https://prod.example'\n        try:\n            self.assertEqual(load_settings()['service_url'], 'https://prod.example')\n        finally:\n            os.environ.pop('SERVICE_URL', None)\n\nif __name__ == '__main__':\n    unittest.main()\n",
+      "truncated": false
+    },
+    {
+      "path": "docs/config_runtime.md",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 0,
+      "bytes": 126,
+      "status": "read",
+      "excerpt": "# Runtime Config\n\nTests define the public runtime contract: JSON key `service_url` and env override `SERVICE_URL` must agree.\n",
+      "truncated": false
+    }
+  ],
+  "source_excerpt_summary": [
+    {
+      "path": "app/config_loader.py",
+      "status": "read",
+      "bytes": 233,
+      "truncated": false
+    },
+    {
+      "path": "tests/test_config_loader.py",
+      "status": "read",
+      "bytes": 584,
+      "truncated": false
+    },
+    {
+      "path": "docs/config_runtime.md",
+      "status": "read",
+      "bytes": 126,
+      "truncated": false
+    }
+  ],
+  "implementation_decision_record": [
+    {
+      "check": "source_evidence_loaded",
+      "status": "pass",
+      "detail": "3 targeted files read"
+    },
+    {
+      "check": "patch_candidate_selected",
+      "status": "pass",
+      "detail": "test_inferred_config_runtime"
+    },
+    {
+      "check": "mutation_authority",
+      "status": "pass",
+      "detail": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+    }
+  ],
+  "architecture_decision_record": {
+    "status": "recorded",
+    "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+    "drivers": [
+      "preserve existing public behavior unless the task explicitly changes it",
+      "prefer source changes backed by focused tests and broad regression checks",
+      "keep rollback evidence and changed-file scope review in the final package"
+    ],
+    "alternatives_considered": [
+      {
+        "option": "single-file shortcut",
+        "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+      },
+      {
+        "option": "broad rewrite",
+        "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+      }
+    ],
+    "seed_rules": [
+      "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+      "Inspect dependents before changing public functions or modules with reverse dependencies.",
+      "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+    ],
+    "impacted_files": [
+      "app/settings.json",
+      "app/config_loader.py",
+      "bin/run-app.sh"
+    ],
+    "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+  },
+  "repo_grade_workflow": {
+    "mode": "focused_fix",
+    "required_passes": [
+      "survey",
+      "implementation",
+      "verification",
+      "self_review",
+      "final_package"
+    ],
+    "requires_architecture_decision_record": false,
+    "requires_focused_and_broad_verification": false,
+    "requires_compatibility_and_rollback_notes": false,
+    "requires_pr_summary": true
+  },
+  "unshaped_repair_plan": {
+    "status": "recorded",
+    "mode": "unshaped_repo_repair",
+    "task_id": "ceraxia-expert-unshaped-config-runtime-20260701-210930:implementation",
+    "goal_excerpt": "кодовая expert-задача без structured config marker: исправь runtime config mismatch. Выведи контракт из tests/docs/repo: JSON config должен называться service_url, loader должен читать SERVICE_URL override, shell entrypoint должен экспортировать тот же env var. Не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-config-runtime-20260701-210930/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_config_loader\nCERAXIA_VERIFY: python -m py_compile app/config_loader.py",
+    "selected_source": "test_inferred_config_runtime",
+    "selected_candidate": {
+      "source": "test_inferred_config_runtime",
+      "status": "selected",
+      "operation_count": 3,
+      "verification_command_count": 2,
+      "diagnostics": {
+        "kind": "test_inferred_config_runtime",
+        "test_path": "tests/test_config_loader.py",
+        "loader_path": "app/config_loader.py",
+        "config_path": "app/settings.json",
+        "entrypoint_path": "bin/run-app.sh",
+        "setting_key": "service_url",
+        "env_var": "SERVICE_URL",
+        "default_value": "http://localhost:8080"
+      }
+    },
+    "files_to_read": [
+      "app/settings.json",
+      "app/config_loader.py",
+      "bin/run-app.sh",
+      "tests/test_config_loader.py",
+      "docs/config_runtime.md"
+    ],
+    "test_symbol_links": [],
+    "patch_operations": [
+      {
+        "type": "write_file",
+        "path": "app/settings.json"
+      },
+      {
+        "type": "write_file",
+        "path": "app/config_loader.py"
+      },
+      {
+        "type": "write_file",
+        "path": "bin/run-app.sh"
+      }
+    ],
+    "runtime_evidence": {},
+    "commands_to_run": [
+      "python -m unittest tests.test_config_loader",
+      "python -m py_compile app/config_loader.py"
+    ],
+    "defect_hypotheses": [
+      {
+        "source": "test_inferred_config_runtime",
+        "kind": "test_inferred_config_runtime",
+        "test_path": "tests/test_config_loader.py",
+        "module_path": "",
+        "function_name": "",
+        "delegated_from": {},
+        "expected": "",
+        "actual": "",
+        "evidence": {
+          "kind": "test_inferred_config_runtime",
+          "test_path": "tests/test_config_loader.py",
+          "loader_path": "app/config_loader.py",
+          "config_path": "app/settings.json",
+          "entrypoint_path": "bin/run-app.sh",
+          "setting_key": "service_url",
+          "env_var": "SERVICE_URL",
+          "default_value": "http://localhost:8080"
+        }
+      }
+    ],
+    "minimal_patch_candidates": [
+      {
+        "source": "test_inferred_config_runtime",
+        "status": "selected",
+        "operation_count": 3,
+        "verification_command_count": 2,
+        "diagnostics": {
+          "kind": "test_inferred_config_runtime",
+          "test_path": "tests/test_config_loader.py",
+          "loader_path": "app/config_loader.py",
+          "config_path": "app/settings.json",
+          "entrypoint_path": "bin/run-app.sh",
+          "setting_key": "service_url",
+          "env_var": "SERVICE_URL",
+          "default_value": "http://localhost:8080"
+        },
+        "operations": [
+          {
+            "type": "write_file",
+            "path": "app/settings.json"
+          },
+          {
+            "type": "write_file",
+            "path": "app/config_loader.py"
+          },
+          {
+            "type": "write_file",
+            "path": "bin/run-app.sh"
+          }
+        ],
+        "runtime_evidence": {}
+      }
+    ],
+    "proof_plan": {
+      "focused_verification": [
+        "python -m unittest tests.test_config_loader",
+        "python -m py_compile app/config_loader.py"
+      ],
+      "source_must_change": true,
+      "tests_must_not_be_edited_for_test_inferred_repairs": true,
+      "test_to_source_linkage_required": true,
+      "runtime_diagnostic_required": false,
+      "ast_patch_plan_required": false,
+      "review_gates": [
+        "diagnostic_linkage",
+        "test_symbol_linkage",
+        "patch_scope_review",
+        "verification_passed",
+        "review_discipline_findings"
+      ]
+    },
+    "safety_constraints": [
+      "prefer the smallest source patch that satisfies test and contract evidence",
+      "do not edit tests to make an inferred repair pass",
+      "block instead of mutating when source mapping is ambiguous"
+    ]
+  },
+  "ast_patch_plan": {
+    "status": "not_applicable",
+    "patch_source": "test_inferred_config_runtime",
+    "planned_operations": [],
+    "operation_count": 0,
+    "blockers": [],
+    "strategy": "not_applicable"
+  },
+  "diagnostics": {
+    "kind": "test_inferred_config_runtime",
+    "test_path": "tests/test_config_loader.py",
+    "loader_path": "app/config_loader.py",
+    "config_path": "app/settings.json",
+    "entrypoint_path": "bin/run-app.sh",
+    "setting_key": "service_url",
+    "env_var": "SERVICE_URL",
+    "default_value": "http://localhost:8080"
+  },
+  "operation_count": 3,
+  "changed_files": [
+    {
+      "path": "app/settings.json",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "b366b2673e3d3ce98c3bdfed2d7182e2817b70e1165512cd7aec0d02894b18f4",
+      "after_sha256": "c953901906fafdd65f78aa61cafa6f29e5ae9e8ce09799061d2014e13f9d15dc",
+      "changed": true
+    },
+    {
+      "path": "app/config_loader.py",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "eb36203bd5c14ba9e82ce9b684be7c5634cf0bdd1033936eea270c24886c6012",
+      "after_sha256": "2c77ea6a82f77144452d3d903605e83367fb7db1dd216057df6bf815f450b2db",
+      "changed": true
+    },
+    {
+      "path": "bin/run-app.sh",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "bb77c4ce7ffa0422a074dd619afaad4336251618eeea7889b41198ff6d8445ff",
+      "after_sha256": "05f507caa9a2553571c0170e7e901f0ea680b62dbfd6fbfc1501bff58d955f5f",
+      "changed": true
+    }
+  ],
+  "recommended_read_order": [
+    {
+      "path": "app/config_loader.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, imported_by:tests/test_config_loader.py, goal_symbol_match:app,config,json,loader"
+    },
+    {
+      "path": "tests/test_config_loader.py",
+      "phase": "inspect_test",
+      "reason": "goal_filename_match, test_surface, linked_test"
+    },
+    {
+      "path": "docs/config_runtime.md",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match"
+    }
+  ],
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "app/config_loader.py",
+        "impact_level": "medium",
+        "rank_score": 23,
+        "dependent_count": 1,
+        "linked_tests": [
+          "tests/test_config_loader.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "tests/test_config_loader.py",
+        "impact_level": "medium",
+        "rank_score": 19,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      },
+      {
+        "path": "docs/config_runtime.md",
+        "impact_level": "low",
+        "rank_score": 6,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      }
+    ],
+    "risk_register": [],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [
+        "python -m unittest discover",
+        "python -m unittest tests.test_config_loader"
+      ],
+      "linked_test_targets": [
+        "tests/test_config_loader.py"
+      ],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "patch_scope_evidence": {
+    "changed_files_in_repo_map": [
+      "app/config_loader.py"
+    ],
+    "changed_files_outside_repo_map": [
+      "app/settings.json",
+      "bin/run-app.sh"
+    ],
+    "changed_sources_with_linked_tests": [
+      {
+        "path": "app/config_loader.py",
+        "tests": [
+          "tests/test_config_loader.py"
+        ]
+      }
+    ],
+    "changed_tests_with_linked_sources": [],
+    "evidence": [
+      {
+        "path": "app/settings.json",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      },
+      {
+        "path": "app/config_loader.py",
+        "in_repo_map": true,
+        "score": 23,
+        "reasons": [
+          "goal_filename_match",
+          "imported_by:tests/test_config_loader.py",
+          "goal_symbol_match:app,config,json,loader",
+          "python_source"
+        ],
+        "linked_tests": [
+          "tests/test_config_loader.py"
+        ],
+        "linked_sources": []
+      },
+      {
+        "path": "bin/run-app.sh",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      }
+    ]
+  },
+  "rollback": {
+    "applied": false,
+    "files": []
+  },
+  "verification_commands": [
+    "python -m unittest tests.test_config_loader",
+    "python -m py_compile app/config_loader.py"
+  ],
+  "blockers": [],
+  "warnings": [
+    "Patch was selected from Ceraxia's guarded patch contracts or safe inference modes; broad synthesis still requires explicit evidence."
+  ]
+}
