@@ -22,6 +22,8 @@ Current capabilities:
 - impact analysis across source, tests, public API, security, runtime config,
   data compatibility, internal architecture, and concurrency runtime surfaces
 - surface verification matrix generation
+- surface-specific output evidence requirements for every planned verification
+  row
 - execution forecast for CodeBrigade iterations, timeout, and escalation
 - risk register, quality bar, acceptance contract, and CodeBrigade handoff
 - acceptance trace matrix mapping definition-of-done, quality-bar, and
@@ -57,7 +59,7 @@ Current capabilities:
 - field trials for multiple task shapes with coverage gates for task kinds,
   impacted surfaces, implementation work packages, and change-control
   invariant/proof, acceptance-trace package coverage, constraint-trace package
-  coverage, and assumption coverage
+  coverage, assumption coverage, and surface-output evidence coverage
 - CLI validation mode
 
 Current boundaries:

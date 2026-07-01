@@ -215,6 +215,17 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
             raise AssertionError(f"{trial_id}: worker output contract row must include blocker contract: {packet}")
     if handoff.get("worker_output_contract") != output_contract:
         raise AssertionError(f"{trial_id}: CodeBrigade handoff must carry worker output contract: {packet}")
+    surface_matrix = packet.get("surface_verification_matrix") if isinstance(packet.get("surface_verification_matrix"), dict) else {}
+    surface_rows = surface_matrix.get("rows") if isinstance(surface_matrix.get("rows"), list) else []
+    surface_output_evidence_required = [
+        str(item)
+        for row in surface_rows
+        if isinstance(row, dict)
+        for item in (row.get("output_evidence_required") if isinstance(row.get("output_evidence_required"), list) else [])
+        if isinstance(item, str) and item
+    ]
+    if not surface_output_evidence_required:
+        raise AssertionError(f"{trial_id}: surface verification rows must require output evidence: {packet}")
     assumptions = packet.get("assumption_register") if isinstance(packet.get("assumption_register"), dict) else {}
     assumption_rows = assumptions.get("assumptions") if isinstance(assumptions.get("assumptions"), list) else []
     if len(assumption_rows) < 3:
@@ -260,6 +271,8 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "worker_output_required_report_count": len(output_contract.get("required_reports", [])) if isinstance(output_contract.get("required_reports"), list) else 0,
         "worker_output_final_review_input_count": len(output_contract.get("final_review_inputs", [])) if isinstance(output_contract.get("final_review_inputs"), list) else 0,
         "worker_output_failure_contract_count": len(output_contract.get("failure_contract", [])) if isinstance(output_contract.get("failure_contract"), list) else 0,
+        "surface_output_evidence_required": surface_output_evidence_required,
+        "surface_output_evidence_required_count": len(surface_output_evidence_required),
         "constraint_trace_constraints": [row["constraint"] for row in constraint_rows if isinstance(row, dict) and row.get("constraint")],
         "constraint_trace_package_ids": [
             package_id
@@ -317,6 +330,8 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     worker_output_required_report_counts: list[int] = []
     worker_output_final_review_input_counts: list[int] = []
     worker_output_failure_contract_counts: list[int] = []
+    surface_output_evidence_required: Counter[str] = Counter()
+    surface_output_evidence_required_counts: list[int] = []
     constraint_trace_constraints: Counter[str] = Counter()
     constraint_trace_packages: Counter[str] = Counter()
     constraint_trace_row_counts: list[int] = []
@@ -366,6 +381,9 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
             worker_output_final_review_input_counts.append(result["worker_output_final_review_input_count"])
         if isinstance(result.get("worker_output_failure_contract_count"), int):
             worker_output_failure_contract_counts.append(result["worker_output_failure_contract_count"])
+        surface_output_evidence_required.update(str(item) for item in result.get("surface_output_evidence_required", []))
+        if isinstance(result.get("surface_output_evidence_required_count"), int):
+            surface_output_evidence_required_counts.append(result["surface_output_evidence_required_count"])
         constraint_trace_constraints.update(str(item) for item in result.get("constraint_trace_constraints", []))
         constraint_trace_packages.update(str(item) for item in result.get("constraint_trace_package_ids", []))
         if isinstance(result.get("constraint_trace_row_count"), int):
@@ -417,6 +435,8 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "minimum_worker_output_required_report_count": min(worker_output_required_report_counts) if worker_output_required_report_counts else 0,
         "minimum_worker_output_final_review_input_count": min(worker_output_final_review_input_counts) if worker_output_final_review_input_counts else 0,
         "minimum_worker_output_failure_contract_count": min(worker_output_failure_contract_counts) if worker_output_failure_contract_counts else 0,
+        "surface_output_evidence_required_counts": dict(sorted(surface_output_evidence_required.items())),
+        "minimum_surface_output_evidence_required_count": min(surface_output_evidence_required_counts) if surface_output_evidence_required_counts else 0,
         "constraint_trace_constraint_counts": dict(sorted(constraint_trace_constraints.items())),
         "constraint_trace_package_counts": dict(sorted(constraint_trace_packages.items())),
         "minimum_constraint_trace_row_count": min(constraint_trace_row_counts) if constraint_trace_row_counts else 0,
@@ -476,6 +496,7 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     handoff_acceptance_required_counts = summary.get("handoff_acceptance_trace_required_counts") if isinstance(summary.get("handoff_acceptance_trace_required_counts"), dict) else {}
     worker_output_required_package_counts = summary.get("worker_output_required_package_counts") if isinstance(summary.get("worker_output_required_package_counts"), dict) else {}
     worker_output_result_package_counts = summary.get("worker_output_result_package_counts") if isinstance(summary.get("worker_output_result_package_counts"), dict) else {}
+    surface_output_evidence_counts = summary.get("surface_output_evidence_required_counts") if isinstance(summary.get("surface_output_evidence_required_counts"), dict) else {}
     constraint_trace_package_counts = summary.get("constraint_trace_package_counts") if isinstance(summary.get("constraint_trace_package_counts"), dict) else {}
     assumption_id_counts = summary.get("assumption_id_counts") if isinstance(summary.get("assumption_id_counts"), dict) else {}
     planning_service_name_counts = summary.get("planning_service_name_counts") if isinstance(summary.get("planning_service_name_counts"), dict) else {}
@@ -566,6 +587,24 @@ def assert_coverage(summary: dict[str, Any]) -> None:
         raise AssertionError(f"field trials have too few worker-output final review inputs: {summary}")
     if int(summary.get("minimum_worker_output_failure_contract_count") or 0) < 3:
         raise AssertionError(f"field trials have too few worker-output failure contract rows: {summary}")
+    if int(summary.get("minimum_surface_output_evidence_required_count") or 0) < 2:
+        raise AssertionError(f"field trials have too few surface output evidence requirements: {summary}")
+    required_surface_output_fragments = [
+        "command status is recorded",
+        "output signal is classified",
+        "negative boundary output",
+        "compatibility output",
+        "runtime configuration output",
+        "parallel or retry output",
+        "dependency or behavior output",
+    ]
+    missing_surface_output_fragments = [
+        fragment
+        for fragment in required_surface_output_fragments
+        if not any(fragment in evidence for evidence in surface_output_evidence_counts)
+    ]
+    if missing_surface_output_fragments:
+        raise AssertionError(f"field trials are missing surface output evidence coverage: {missing_surface_output_fragments}")
     if int(summary.get("minimum_constraint_trace_row_count") or 0) < 3:
         raise AssertionError(f"field trials have too few constraint trace rows: {summary}")
     for package in {"evidence_survey_package", "minimal_patch_package", "verification_evidence_package"}:

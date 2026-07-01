@@ -57,7 +57,8 @@ Current contract:
   verification: required diagnostic inputs, read-before-edit evidence, stop
   conditions, max attempts, and required repair evidence.
 - `surface_verification_matrix` maps each impacted surface to planned evidence
-  and blocks handoff when coverage is missing.
+  and blocks handoff when coverage is missing. Each row also states the command
+  output or diagnostic evidence that must be linked back to that surface.
 - `acceptance_contract` records what the final package must prove and what
   shortcuts are forbidden.
 - `acceptance_trace_matrix` maps every definition-of-done, quality-bar, and
@@ -108,4 +109,5 @@ tasks that must be blocked. The runner also emits a coverage summary for task
 kinds, work phases, impacted surfaces, highest-risk surfaces, gate decisions,
 negative tests, implementation work packages, acceptance trace packages,
 assumption coverage, change-control invariants, change-control post-change
-proofs, rollback triggers, and planning scores.
+proofs, rollback triggers, surface-specific output evidence requirements, and
+planning scores.
