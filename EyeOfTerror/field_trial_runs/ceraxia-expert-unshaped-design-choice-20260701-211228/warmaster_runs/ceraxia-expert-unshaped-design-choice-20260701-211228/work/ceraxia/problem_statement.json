@@ -1,0 +1,27 @@
+{
+  "status": "recorded",
+  "goal": "кодовая expert-задача без structured marker: выбери правильный маленький design для tax categories. Есть три варианта: hardcode под текущие assertions, широкий rewrite всего billing, или маленькая таблица rates с caller compatibility. Выбери нормальный вариант, объясни rejected options, не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260701-211228/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_tax_rates\nCERAXIA_VERIFY: python -m py_compile tax/rates.py tax/invoice.py",
+  "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+  "success_criteria": [
+    "changed files directly address the requested behavior",
+    "source scope is justified by repo survey or explicit patch contract",
+    "verification evidence is preserved after the final mutation",
+    "review either approves with evidence or blocks with focused revision steps"
+  ],
+  "evidence_to_inspect": [
+    "tax/rates.py",
+    "tests/test_tax_rates.py"
+  ],
+  "working_hypotheses": [
+    "tax/rates.py is likely relevant to the requested code change.",
+    "tests/test_tax_rates.py is likely relevant to the requested code change."
+  ],
+  "verification_candidates": [
+    "python -m unittest discover",
+    "python -m unittest tests.test_tax_rates",
+    "tests/test_tax_rates.py",
+    "python -m py_compile <changed .py files>",
+    "git diff --check"
+  ],
+  "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+}

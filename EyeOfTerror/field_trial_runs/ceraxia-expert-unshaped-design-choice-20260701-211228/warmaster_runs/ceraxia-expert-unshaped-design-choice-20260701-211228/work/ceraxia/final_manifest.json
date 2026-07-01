@@ -1,0 +1,2551 @@
+{
+  "status": "ready",
+  "approved": true,
+  "role_policy": {
+    "role": "final_packager",
+    "authority": "read_only_final_manifest_packaging",
+    "may_mutate_source": false,
+    "required_evidence": [
+      "deliverables",
+      "verification_summary",
+      "next_safe_action"
+    ],
+    "forbidden_actions": [
+      "source_mutation",
+      "hiding_blockers"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "repo_grade",
+      "bugfix"
+    ],
+    "complexity": "medium",
+    "complexity_score": 4,
+    "workflow_mode": "repo_grade",
+    "repo_grade_required_evidence": [
+      "architecture decision record with alternatives and tradeoffs",
+      "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+      "focused verification for the changed behavior",
+      "broad verification for repo-level regressions or an explicit blocker",
+      "self-review decision record before final packaging",
+      "PR-style final summary with changed files, verification, risks, and rollback notes"
+    ],
+    "risk_flags": [
+      "test_diagnostic_required",
+      "repo_grade_evidence_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+      "architecture decision record with alternatives and tradeoffs",
+      "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+      "focused verification for the changed behavior",
+      "broad verification for repo-level regressions or an explicit blocker",
+      "self-review decision record before final packaging",
+      "PR-style final summary with changed files, verification, risks, and rollback notes"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "finalize",
+    "worker": "SealwrightFinalis",
+    "purpose": "Package the coding task result, blockers, changed-file intent, and next actions.",
+    "brief": "Package final evidence for Warmaster and chat clients.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "repo_grade",
+        "bugfix"
+      ],
+      "complexity": "medium",
+      "complexity_score": 4,
+      "workflow_mode": "repo_grade",
+      "repo_grade_required_evidence": [
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ],
+      "risk_flags": [
+        "test_diagnostic_required",
+        "repo_grade_evidence_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ]
+    },
+    "must_produce": [
+      "deliverables",
+      "execution_report",
+      "patch_package",
+      "pr_summary",
+      "next_safe_action",
+      "blockers"
+    ],
+    "handoff_question": "What should the operator or Warmaster do next?",
+    "authority_boundary": "read_only_final_manifest_packaging"
+  },
+  "role_policies": {
+    "implementation": {
+      "role": "patchwright",
+      "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+      "may_mutate_source": true,
+      "required_evidence": [
+        "patch_source",
+        "operation_count",
+        "changed_files",
+        "rollback"
+      ],
+      "forbidden_actions": [
+        "shell_execution",
+        "unsafe_overwrite",
+        "duplicate_function_append"
+      ]
+    },
+    "verification": {
+      "role": "verifier",
+      "authority": "allowlisted_verification_and_narrow_repairs",
+      "may_mutate_source": true,
+      "required_evidence": [
+        "verification_executed",
+        "verification_blockers",
+        "verification_repairs"
+      ],
+      "forbidden_actions": [
+        "shell_execution",
+        "unallowlisted_command",
+        "broad_unscoped_rewrite"
+      ]
+    },
+    "code_review": {
+      "role": "critic",
+      "authority": "read_only_package_review_and_revision_ordering",
+      "may_mutate_source": false,
+      "required_evidence": [
+        "review_status",
+        "findings",
+        "revision_plan"
+      ],
+      "forbidden_actions": [
+        "source_mutation",
+        "approving_without_verification_evidence"
+      ]
+    },
+    "finalize": {
+      "role": "final_packager",
+      "authority": "read_only_final_manifest_packaging",
+      "may_mutate_source": false,
+      "required_evidence": [
+        "deliverables",
+        "verification_summary",
+        "next_safe_action"
+      ],
+      "forbidden_actions": [
+        "source_mutation",
+        "hiding_blockers"
+      ]
+    }
+  },
+  "deliverables": [
+    "/work/ceraxia/repo_survey.json",
+    "/work/ceraxia/problem_statement.json",
+    "/work/ceraxia/architecture_options.json",
+    "/work/ceraxia/change_plan.md",
+    "/work/ceraxia/patch_manifest.json",
+    "/work/ceraxia/unshaped_repair_plan.json",
+    "/work/ceraxia/verification_report.json",
+    "/work/ceraxia/repair_loop_state.json",
+    "/work/ceraxia/diagnostic_extraction.json",
+    "/work/ceraxia/code_review.json"
+  ],
+  "changed_files": [
+    {
+      "path": "tax/rates.py",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "d21abe34598b491a451f764abc7ffedd3bc3c22ce18ba6f0389940f4c75d21e9",
+      "after_sha256": "50bbf1e7c0135948bf146536228240a4f90c181a7bb84fdd95cc390bc5673b8d",
+      "changed": true
+    },
+    {
+      "path": "tax/invoice.py",
+      "operation": "write_file",
+      "created": true,
+      "before_sha256": "",
+      "after_sha256": "7f04c84200d4ec7744b58b89d6ac18a1532ee8e76605a3b78aa944da86739b47",
+      "changed": true
+    },
+    {
+      "path": "docs/tax_rates.md",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "10d711fc831e49da6ffd7d1706a17ee336ad57b5b9fdaa2a8a85941da181aa85",
+      "after_sha256": "adf6c5cd73e09ed364c252ddf18136a99a9c5d1b258da29c80371affee160c14",
+      "changed": true
+    }
+  ],
+  "repo_grade_workflow": {
+    "mode": "focused_fix",
+    "required_passes": [
+      "survey",
+      "implementation",
+      "verification",
+      "self_review",
+      "final_package"
+    ],
+    "requires_architecture_decision_record": false,
+    "requires_focused_and_broad_verification": false,
+    "requires_compatibility_and_rollback_notes": false,
+    "requires_pr_summary": true
+  },
+  "unshaped_repair_plan": {
+    "status": "recorded",
+    "mode": "unshaped_repo_repair",
+    "task_id": "ceraxia-expert-unshaped-design-choice-20260701-211228:implementation",
+    "goal_excerpt": "кодовая expert-задача без structured marker: выбери правильный маленький design для tax categories. Есть три варианта: hardcode под текущие assertions, широкий rewrite всего billing, или маленькая таблица rates с caller compatibility. Выбери нормальный вариант, объясни rejected options, не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260701-211228/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_tax_rates\nCERAXIA_VERIFY: python -m py_compile tax/rates.py tax/invoice.py",
+    "selected_source": "test_inferred_design_choice_tax",
+    "selected_candidate": {
+      "source": "test_inferred_design_choice_tax",
+      "status": "selected",
+      "operation_count": 3,
+      "verification_command_count": 3,
+      "diagnostics": {
+        "kind": "test_inferred_design_choice_tax",
+        "test_path": "tests/test_tax_rates.py",
+        "source_path": "tax/rates.py",
+        "caller_path": "tax/invoice.py",
+        "docs_path": "docs/tax_rates.md",
+        "selected_design": "rate_table_with_compatible_caller",
+        "rejected_options": [
+          {
+            "option": "hardcode_fixture_values",
+            "reason": "does not generalize beyond current examples"
+          },
+          {
+            "option": "broad_rewrite",
+            "reason": "unnecessary churn for a two-function contract"
+          }
+        ],
+        "rate_cases": {
+          "standard": 0.2,
+          "reduced": 0.05
+        }
+      }
+    },
+    "files_to_read": [
+      "tax/rates.py",
+      "tax/invoice.py",
+      "docs/tax_rates.md",
+      "tests/test_tax_rates.py"
+    ],
+    "test_symbol_links": [
+      {
+        "test_path": "tests/test_tax_rates.py",
+        "test_class": "TaxRatesTest",
+        "test_function": "test_standard_and_reduced_rates",
+        "assertion": "assertEqual",
+        "actual_expression": "tax_for(100)",
+        "expected_expression": "20",
+        "imported_symbol": "tax_for",
+        "local_symbol": "tax_for",
+        "source_module": "tax.rates",
+        "source_path": "tax/rates.py",
+        "source_exists": true
+      },
+      {
+        "test_path": "tests/test_tax_rates.py",
+        "test_class": "TaxRatesTest",
+        "test_function": "test_standard_and_reduced_rates",
+        "assertion": "assertEqual",
+        "actual_expression": "invoice_tax(100, 'reduced')",
+        "expected_expression": "5",
+        "imported_symbol": "invoice_tax",
+        "local_symbol": "invoice_tax",
+        "source_module": "tax.invoice",
+        "source_path": "tax/invoice.py",
+        "source_exists": true
+      }
+    ],
+    "patch_operations": [
+      {
+        "type": "write_file",
+        "path": "tax/rates.py"
+      },
+      {
+        "type": "write_file",
+        "path": "tax/invoice.py"
+      },
+      {
+        "type": "write_file",
+        "path": "docs/tax_rates.md"
+      }
+    ],
+    "runtime_evidence": {},
+    "commands_to_run": [
+      "python -m unittest tests.test_tax_rates",
+      "python -m py_compile tax/rates.py tax/invoice.py",
+      "python -m unittest discover -s tests"
+    ],
+    "defect_hypotheses": [
+      {
+        "source": "test_inferred_design_choice_tax",
+        "kind": "test_inferred_design_choice_tax",
+        "test_path": "tests/test_tax_rates.py",
+        "module_path": "",
+        "function_name": "",
+        "delegated_from": {},
+        "expected": "",
+        "actual": "",
+        "evidence": {
+          "kind": "test_inferred_design_choice_tax",
+          "test_path": "tests/test_tax_rates.py",
+          "source_path": "tax/rates.py",
+          "caller_path": "tax/invoice.py",
+          "docs_path": "docs/tax_rates.md",
+          "selected_design": "rate_table_with_compatible_caller",
+          "rejected_options": [
+            {
+              "option": "hardcode_fixture_values",
+              "reason": "does not generalize beyond current examples"
+            },
+            {
+              "option": "broad_rewrite",
+              "reason": "unnecessary churn for a two-function contract"
+            }
+          ],
+          "rate_cases": {
+            "standard": 0.2,
+            "reduced": 0.05
+          }
+        }
+      }
+    ],
+    "minimal_patch_candidates": [
+      {
+        "source": "test_inferred_design_choice_tax",
+        "status": "selected",
+        "operation_count": 3,
+        "verification_command_count": 3,
+        "diagnostics": {
+          "kind": "test_inferred_design_choice_tax",
+          "test_path": "tests/test_tax_rates.py",
+          "source_path": "tax/rates.py",
+          "caller_path": "tax/invoice.py",
+          "docs_path": "docs/tax_rates.md",
+          "selected_design": "rate_table_with_compatible_caller",
+          "rejected_options": [
+            {
+              "option": "hardcode_fixture_values",
+              "reason": "does not generalize beyond current examples"
+            },
+            {
+              "option": "broad_rewrite",
+              "reason": "unnecessary churn for a two-function contract"
+            }
+          ],
+          "rate_cases": {
+            "standard": 0.2,
+            "reduced": 0.05
+          }
+        },
+        "operations": [
+          {
+            "type": "write_file",
+            "path": "tax/rates.py"
+          },
+          {
+            "type": "write_file",
+            "path": "tax/invoice.py"
+          },
+          {
+            "type": "write_file",
+            "path": "docs/tax_rates.md"
+          }
+        ],
+        "runtime_evidence": {}
+      }
+    ],
+    "proof_plan": {
+      "focused_verification": [
+        "python -m unittest tests.test_tax_rates",
+        "python -m py_compile tax/rates.py tax/invoice.py",
+        "python -m unittest discover -s tests"
+      ],
+      "source_must_change": true,
+      "tests_must_not_be_edited_for_test_inferred_repairs": true,
+      "test_to_source_linkage_required": true,
+      "runtime_diagnostic_required": false,
+      "ast_patch_plan_required": false,
+      "review_gates": [
+        "diagnostic_linkage",
+        "test_symbol_linkage",
+        "patch_scope_review",
+        "verification_passed",
+        "review_discipline_findings"
+      ]
+    },
+    "safety_constraints": [
+      "prefer the smallest source patch that satisfies test and contract evidence",
+      "do not edit tests to make an inferred repair pass",
+      "block instead of mutating when source mapping is ambiguous"
+    ]
+  },
+  "diagnostic_extraction": {
+    "status": "recorded",
+    "mode": "unshaped_repo_repair",
+    "patch_source": "test_inferred_design_choice_tax",
+    "runtime_failures": [],
+    "assertions": [],
+    "traceback_frames": [],
+    "runtime_test_failures": [],
+    "traceback_source_candidates": [],
+    "runtime_source_candidates": [],
+    "runtime_minimal_patch_candidates": [],
+    "static_test_expectations": [
+      {
+        "source": "test_inferred_design_choice_tax",
+        "kind": "test_inferred_design_choice_tax",
+        "test_path": "tests/test_tax_rates.py",
+        "module_path": "",
+        "function_name": "",
+        "delegated_from": {},
+        "expected": "",
+        "actual": "",
+        "evidence": {
+          "kind": "test_inferred_design_choice_tax",
+          "test_path": "tests/test_tax_rates.py",
+          "source_path": "tax/rates.py",
+          "caller_path": "tax/invoice.py",
+          "docs_path": "docs/tax_rates.md",
+          "selected_design": "rate_table_with_compatible_caller",
+          "rejected_options": [
+            {
+              "option": "hardcode_fixture_values",
+              "reason": "does not generalize beyond current examples"
+            },
+            {
+              "option": "broad_rewrite",
+              "reason": "unnecessary churn for a two-function contract"
+            }
+          ],
+          "rate_cases": {
+            "standard": 0.2,
+            "reduced": 0.05
+          }
+        }
+      }
+    ],
+    "selected_diagnostics": {
+      "kind": "test_inferred_design_choice_tax",
+      "test_path": "tests/test_tax_rates.py",
+      "source_path": "tax/rates.py",
+      "caller_path": "tax/invoice.py",
+      "docs_path": "docs/tax_rates.md",
+      "selected_design": "rate_table_with_compatible_caller",
+      "rejected_options": [
+        {
+          "option": "hardcode_fixture_values",
+          "reason": "does not generalize beyond current examples"
+        },
+        {
+          "option": "broad_rewrite",
+          "reason": "unnecessary churn for a two-function contract"
+        }
+      ],
+      "rate_cases": {
+        "standard": 0.2,
+        "reduced": 0.05
+      }
+    },
+    "parser_coverage": {
+      "unittest_assertions": 0,
+      "traceback_frames": 0,
+      "runtime_test_failures": 0,
+      "runtime_minimal_patch_candidates": 0,
+      "traceback_source_candidates": 0,
+      "static_test_expectations": 1
+    }
+  },
+  "ast_patch_plan": {
+    "status": "not_applicable",
+    "patch_source": "test_inferred_design_choice_tax",
+    "planned_operations": [],
+    "operation_count": 0,
+    "blockers": [],
+    "strategy": "not_applicable"
+  },
+  "problem_statement": {
+    "status": "recorded",
+    "goal": "кодовая expert-задача без structured marker: выбери правильный маленький design для tax categories. Есть три варианта: hardcode под текущие assertions, широкий rewrite всего billing, или маленькая таблица rates с caller compatibility. Выбери нормальный вариант, объясни rejected options, не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260701-211228/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_tax_rates\nCERAXIA_VERIFY: python -m py_compile tax/rates.py tax/invoice.py",
+    "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+    "success_criteria": [
+      "changed files directly address the requested behavior",
+      "source scope is justified by repo survey or explicit patch contract",
+      "verification evidence is preserved after the final mutation",
+      "review either approves with evidence or blocks with focused revision steps"
+    ],
+    "evidence_to_inspect": [
+      "tax/rates.py",
+      "tests/test_tax_rates.py"
+    ],
+    "working_hypotheses": [
+      "tax/rates.py is likely relevant to the requested code change.",
+      "tests/test_tax_rates.py is likely relevant to the requested code change."
+    ],
+    "verification_candidates": [
+      "python -m unittest discover",
+      "python -m unittest tests.test_tax_rates",
+      "tests/test_tax_rates.py",
+      "python -m py_compile <changed .py files>",
+      "git diff --check"
+    ],
+    "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+  },
+  "architecture_options": {
+    "status": "recorded",
+    "problem_status": "recorded",
+    "options": [
+      {
+        "id": "minimal_targeted_patch",
+        "summary": "Patch the narrowest source surface that satisfies the observed behavior gap.",
+        "recommended": true,
+        "tradeoffs": [
+          "lowest churn",
+          "requires focused verification to prove behavior"
+        ],
+        "applies_to": [
+          "tax/rates.py",
+          "tests/test_tax_rates.py"
+        ]
+      },
+      {
+        "id": "compatibility_wrapper",
+        "summary": "Preserve old callers while adding the new behavior behind a compatible boundary.",
+        "recommended": false,
+        "tradeoffs": [
+          "safer public API evolution",
+          "may require deprecation docs and caller tests"
+        ],
+        "applies_to": [
+          "tax/rates.py",
+          "tests/test_tax_rates.py"
+        ]
+      },
+      {
+        "id": "broad_rewrite",
+        "summary": "Rewrite the surrounding module or subsystem.",
+        "recommended": false,
+        "tradeoffs": [
+          "higher regression risk",
+          "harder review",
+          "should be rejected unless the task explicitly demands it"
+        ],
+        "applies_to": [
+          "tax/rates.py",
+          "tests/test_tax_rates.py"
+        ]
+      }
+    ],
+    "selection_rule": "Choose the first option that satisfies the task with the least public-surface churn and adequate verification."
+  },
+  "architecture_decision_record": {
+    "status": "recorded",
+    "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+    "drivers": [
+      "preserve existing public behavior unless the task explicitly changes it",
+      "prefer source changes backed by focused tests and broad regression checks",
+      "keep rollback evidence and changed-file scope review in the final package"
+    ],
+    "alternatives_considered": [
+      {
+        "option": "single-file shortcut",
+        "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+      },
+      {
+        "option": "broad rewrite",
+        "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+      }
+    ],
+    "seed_rules": [
+      "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+      "Inspect dependents before changing public functions or modules with reverse dependencies.",
+      "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+    ],
+    "impacted_files": [
+      "tax/rates.py",
+      "tax/invoice.py",
+      "docs/tax_rates.md"
+    ],
+    "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+  },
+  "verification_strategy": {
+    "focused_commands": [
+      "/usr/bin/python3 -m py_compile tax/rates.py tax/invoice.py",
+      "python -m unittest tests.test_tax_rates",
+      "python -m py_compile tax/rates.py tax/invoice.py"
+    ],
+    "broad_commands": [
+      "python -m unittest discover -s tests"
+    ]
+  },
+  "patch_package": {
+    "kind": "ceraxia_patch_package",
+    "workflow_mode": "focused_fix",
+    "changed_files": [
+      {
+        "path": "tax/rates.py",
+        "operation": "write_file",
+        "created": false,
+        "before_sha256": "d21abe34598b491a451f764abc7ffedd3bc3c22ce18ba6f0389940f4c75d21e9",
+        "after_sha256": "50bbf1e7c0135948bf146536228240a4f90c181a7bb84fdd95cc390bc5673b8d",
+        "changed": true
+      },
+      {
+        "path": "tax/invoice.py",
+        "operation": "write_file",
+        "created": true,
+        "before_sha256": "",
+        "after_sha256": "7f04c84200d4ec7744b58b89d6ac18a1532ee8e76605a3b78aa944da86739b47",
+        "changed": true
+      },
+      {
+        "path": "docs/tax_rates.md",
+        "operation": "write_file",
+        "created": false,
+        "before_sha256": "10d711fc831e49da6ffd7d1706a17ee336ad57b5b9fdaa2a8a85941da181aa85",
+        "after_sha256": "adf6c5cd73e09ed364c252ddf18136a99a9c5d1b258da29c80371affee160c14",
+        "changed": true
+      }
+    ],
+    "patch_source": "test_inferred_design_choice_tax",
+    "operation_count": 3,
+    "problem_statement": {
+      "status": "recorded",
+      "goal": "кодовая expert-задача без structured marker: выбери правильный маленький design для tax categories. Есть три варианта: hardcode под текущие assertions, широкий rewrite всего billing, или маленькая таблица rates с caller compatibility. Выбери нормальный вариант, объясни rejected options, не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260701-211228/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_tax_rates\nCERAXIA_VERIFY: python -m py_compile tax/rates.py tax/invoice.py",
+      "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+      "success_criteria": [
+        "changed files directly address the requested behavior",
+        "source scope is justified by repo survey or explicit patch contract",
+        "verification evidence is preserved after the final mutation",
+        "review either approves with evidence or blocks with focused revision steps"
+      ],
+      "evidence_to_inspect": [
+        "tax/rates.py",
+        "tests/test_tax_rates.py"
+      ],
+      "working_hypotheses": [
+        "tax/rates.py is likely relevant to the requested code change.",
+        "tests/test_tax_rates.py is likely relevant to the requested code change."
+      ],
+      "verification_candidates": [
+        "python -m unittest discover",
+        "python -m unittest tests.test_tax_rates",
+        "tests/test_tax_rates.py",
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+    },
+    "architecture_options": {
+      "status": "recorded",
+      "problem_status": "recorded",
+      "options": [
+        {
+          "id": "minimal_targeted_patch",
+          "summary": "Patch the narrowest source surface that satisfies the observed behavior gap.",
+          "recommended": true,
+          "tradeoffs": [
+            "lowest churn",
+            "requires focused verification to prove behavior"
+          ],
+          "applies_to": [
+            "tax/rates.py",
+            "tests/test_tax_rates.py"
+          ]
+        },
+        {
+          "id": "compatibility_wrapper",
+          "summary": "Preserve old callers while adding the new behavior behind a compatible boundary.",
+          "recommended": false,
+          "tradeoffs": [
+            "safer public API evolution",
+            "may require deprecation docs and caller tests"
+          ],
+          "applies_to": [
+            "tax/rates.py",
+            "tests/test_tax_rates.py"
+          ]
+        },
+        {
+          "id": "broad_rewrite",
+          "summary": "Rewrite the surrounding module or subsystem.",
+          "recommended": false,
+          "tradeoffs": [
+            "higher regression risk",
+            "harder review",
+            "should be rejected unless the task explicitly demands it"
+          ],
+          "applies_to": [
+            "tax/rates.py",
+            "tests/test_tax_rates.py"
+          ]
+        }
+      ],
+      "selection_rule": "Choose the first option that satisfies the task with the least public-surface churn and adequate verification."
+    },
+    "architecture_decision_record": {
+      "status": "recorded",
+      "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+      "drivers": [
+        "preserve existing public behavior unless the task explicitly changes it",
+        "prefer source changes backed by focused tests and broad regression checks",
+        "keep rollback evidence and changed-file scope review in the final package"
+      ],
+      "alternatives_considered": [
+        {
+          "option": "single-file shortcut",
+          "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+        },
+        {
+          "option": "broad rewrite",
+          "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+        }
+      ],
+      "seed_rules": [
+        "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+        "Inspect dependents before changing public functions or modules with reverse dependencies.",
+        "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+      ],
+      "impacted_files": [
+        "tax/rates.py",
+        "tax/invoice.py",
+        "docs/tax_rates.md"
+      ],
+      "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+    },
+    "verification_strategy": {
+      "focused_commands": [
+        "/usr/bin/python3 -m py_compile tax/rates.py tax/invoice.py",
+        "python -m unittest tests.test_tax_rates",
+        "python -m py_compile tax/rates.py tax/invoice.py"
+      ],
+      "broad_commands": [
+        "python -m unittest discover -s tests"
+      ]
+    },
+    "unshaped_repair_plan": {
+      "status": "recorded",
+      "mode": "unshaped_repo_repair",
+      "task_id": "ceraxia-expert-unshaped-design-choice-20260701-211228:implementation",
+      "goal_excerpt": "кодовая expert-задача без structured marker: выбери правильный маленький design для tax categories. Есть три варианта: hardcode под текущие assertions, широкий rewrite всего billing, или маленькая таблица rates с caller compatibility. Выбери нормальный вариант, объясни rejected options, не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260701-211228/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_tax_rates\nCERAXIA_VERIFY: python -m py_compile tax/rates.py tax/invoice.py",
+      "selected_source": "test_inferred_design_choice_tax",
+      "selected_candidate": {
+        "source": "test_inferred_design_choice_tax",
+        "status": "selected",
+        "operation_count": 3,
+        "verification_command_count": 3,
+        "diagnostics": {
+          "kind": "test_inferred_design_choice_tax",
+          "test_path": "tests/test_tax_rates.py",
+          "source_path": "tax/rates.py",
+          "caller_path": "tax/invoice.py",
+          "docs_path": "docs/tax_rates.md",
+          "selected_design": "rate_table_with_compatible_caller",
+          "rejected_options": [
+            {
+              "option": "hardcode_fixture_values",
+              "reason": "does not generalize beyond current examples"
+            },
+            {
+              "option": "broad_rewrite",
+              "reason": "unnecessary churn for a two-function contract"
+            }
+          ],
+          "rate_cases": {
+            "standard": 0.2,
+            "reduced": 0.05
+          }
+        }
+      },
+      "files_to_read": [
+        "tax/rates.py",
+        "tax/invoice.py",
+        "docs/tax_rates.md",
+        "tests/test_tax_rates.py"
+      ],
+      "test_symbol_links": [
+        {
+          "test_path": "tests/test_tax_rates.py",
+          "test_class": "TaxRatesTest",
+          "test_function": "test_standard_and_reduced_rates",
+          "assertion": "assertEqual",
+          "actual_expression": "tax_for(100)",
+          "expected_expression": "20",
+          "imported_symbol": "tax_for",
+          "local_symbol": "tax_for",
+          "source_module": "tax.rates",
+          "source_path": "tax/rates.py",
+          "source_exists": true
+        },
+        {
+          "test_path": "tests/test_tax_rates.py",
+          "test_class": "TaxRatesTest",
+          "test_function": "test_standard_and_reduced_rates",
+          "assertion": "assertEqual",
+          "actual_expression": "invoice_tax(100, 'reduced')",
+          "expected_expression": "5",
+          "imported_symbol": "invoice_tax",
+          "local_symbol": "invoice_tax",
+          "source_module": "tax.invoice",
+          "source_path": "tax/invoice.py",
+          "source_exists": true
+        }
+      ],
+      "patch_operations": [
+        {
+          "type": "write_file",
+          "path": "tax/rates.py"
+        },
+        {
+          "type": "write_file",
+          "path": "tax/invoice.py"
+        },
+        {
+          "type": "write_file",
+          "path": "docs/tax_rates.md"
+        }
+      ],
+      "runtime_evidence": {},
+      "commands_to_run": [
+        "python -m unittest tests.test_tax_rates",
+        "python -m py_compile tax/rates.py tax/invoice.py",
+        "python -m unittest discover -s tests"
+      ],
+      "defect_hypotheses": [
+        {
+          "source": "test_inferred_design_choice_tax",
+          "kind": "test_inferred_design_choice_tax",
+          "test_path": "tests/test_tax_rates.py",
+          "module_path": "",
+          "function_name": "",
+          "delegated_from": {},
+          "expected": "",
+          "actual": "",
+          "evidence": {
+            "kind": "test_inferred_design_choice_tax",
+            "test_path": "tests/test_tax_rates.py",
+            "source_path": "tax/rates.py",
+            "caller_path": "tax/invoice.py",
+            "docs_path": "docs/tax_rates.md",
+            "selected_design": "rate_table_with_compatible_caller",
+            "rejected_options": [
+              {
+                "option": "hardcode_fixture_values",
+                "reason": "does not generalize beyond current examples"
+              },
+              {
+                "option": "broad_rewrite",
+                "reason": "unnecessary churn for a two-function contract"
+              }
+            ],
+            "rate_cases": {
+              "standard": 0.2,
+              "reduced": 0.05
+            }
+          }
+        }
+      ],
+      "minimal_patch_candidates": [
+        {
+          "source": "test_inferred_design_choice_tax",
+          "status": "selected",
+          "operation_count": 3,
+          "verification_command_count": 3,
+          "diagnostics": {
+            "kind": "test_inferred_design_choice_tax",
+            "test_path": "tests/test_tax_rates.py",
+            "source_path": "tax/rates.py",
+            "caller_path": "tax/invoice.py",
+            "docs_path": "docs/tax_rates.md",
+            "selected_design": "rate_table_with_compatible_caller",
+            "rejected_options": [
+              {
+                "option": "hardcode_fixture_values",
+                "reason": "does not generalize beyond current examples"
+              },
+              {
+                "option": "broad_rewrite",
+                "reason": "unnecessary churn for a two-function contract"
+              }
+            ],
+            "rate_cases": {
+              "standard": 0.2,
+              "reduced": 0.05
+            }
+          },
+          "operations": [
+            {
+              "type": "write_file",
+              "path": "tax/rates.py"
+            },
+            {
+              "type": "write_file",
+              "path": "tax/invoice.py"
+            },
+            {
+              "type": "write_file",
+              "path": "docs/tax_rates.md"
+            }
+          ],
+          "runtime_evidence": {}
+        }
+      ],
+      "proof_plan": {
+        "focused_verification": [
+          "python -m unittest tests.test_tax_rates",
+          "python -m py_compile tax/rates.py tax/invoice.py",
+          "python -m unittest discover -s tests"
+        ],
+        "source_must_change": true,
+        "tests_must_not_be_edited_for_test_inferred_repairs": true,
+        "test_to_source_linkage_required": true,
+        "runtime_diagnostic_required": false,
+        "ast_patch_plan_required": false,
+        "review_gates": [
+          "diagnostic_linkage",
+          "test_symbol_linkage",
+          "patch_scope_review",
+          "verification_passed",
+          "review_discipline_findings"
+        ]
+      },
+      "safety_constraints": [
+        "prefer the smallest source patch that satisfies test and contract evidence",
+        "do not edit tests to make an inferred repair pass",
+        "block instead of mutating when source mapping is ambiguous"
+      ]
+    },
+    "diagnostic_extraction": {
+      "status": "recorded",
+      "mode": "unshaped_repo_repair",
+      "patch_source": "test_inferred_design_choice_tax",
+      "runtime_failures": [],
+      "assertions": [],
+      "traceback_frames": [],
+      "runtime_test_failures": [],
+      "traceback_source_candidates": [],
+      "runtime_source_candidates": [],
+      "runtime_minimal_patch_candidates": [],
+      "static_test_expectations": [
+        {
+          "source": "test_inferred_design_choice_tax",
+          "kind": "test_inferred_design_choice_tax",
+          "test_path": "tests/test_tax_rates.py",
+          "module_path": "",
+          "function_name": "",
+          "delegated_from": {},
+          "expected": "",
+          "actual": "",
+          "evidence": {
+            "kind": "test_inferred_design_choice_tax",
+            "test_path": "tests/test_tax_rates.py",
+            "source_path": "tax/rates.py",
+            "caller_path": "tax/invoice.py",
+            "docs_path": "docs/tax_rates.md",
+            "selected_design": "rate_table_with_compatible_caller",
+            "rejected_options": [
+              {
+                "option": "hardcode_fixture_values",
+                "reason": "does not generalize beyond current examples"
+              },
+              {
+                "option": "broad_rewrite",
+                "reason": "unnecessary churn for a two-function contract"
+              }
+            ],
+            "rate_cases": {
+              "standard": 0.2,
+              "reduced": 0.05
+            }
+          }
+        }
+      ],
+      "selected_diagnostics": {
+        "kind": "test_inferred_design_choice_tax",
+        "test_path": "tests/test_tax_rates.py",
+        "source_path": "tax/rates.py",
+        "caller_path": "tax/invoice.py",
+        "docs_path": "docs/tax_rates.md",
+        "selected_design": "rate_table_with_compatible_caller",
+        "rejected_options": [
+          {
+            "option": "hardcode_fixture_values",
+            "reason": "does not generalize beyond current examples"
+          },
+          {
+            "option": "broad_rewrite",
+            "reason": "unnecessary churn for a two-function contract"
+          }
+        ],
+        "rate_cases": {
+          "standard": 0.2,
+          "reduced": 0.05
+        }
+      },
+      "parser_coverage": {
+        "unittest_assertions": 0,
+        "traceback_frames": 0,
+        "runtime_test_failures": 0,
+        "runtime_minimal_patch_candidates": 0,
+        "traceback_source_candidates": 0,
+        "static_test_expectations": 1
+      }
+    },
+    "ast_patch_plan": {
+      "status": "not_applicable",
+      "patch_source": "test_inferred_design_choice_tax",
+      "planned_operations": [],
+      "operation_count": 0,
+      "blockers": [],
+      "strategy": "not_applicable"
+    },
+    "review_decision_record": [
+      {
+        "check": "patch_applied",
+        "status": "pass",
+        "evidence": "applied"
+      },
+      {
+        "check": "verification_passed",
+        "status": "pass",
+        "evidence": "passed"
+      },
+      {
+        "check": "scope_review",
+        "status": "needs_attention",
+        "evidence": {
+          "status": "needs_attention",
+          "changed_file_count": 3,
+          "mapped_changed_file_count": 1,
+          "unmapped_changed_file_count": 2,
+          "unmapped_changed_files": [
+            "tax/invoice.py",
+            "docs/tax_rates.md"
+          ],
+          "source_without_linked_tests": [
+            "tax/invoice.py"
+          ]
+        }
+      },
+      {
+        "check": "diagnostic_linkage",
+        "status": "pass",
+        "evidence": {
+          "kind": "test_inferred_design_choice_tax",
+          "test_path": "tests/test_tax_rates.py",
+          "source_path": "tax/rates.py",
+          "caller_path": "tax/invoice.py",
+          "docs_path": "docs/tax_rates.md",
+          "selected_design": "rate_table_with_compatible_caller",
+          "rejected_options": [
+            {
+              "option": "hardcode_fixture_values",
+              "reason": "does not generalize beyond current examples"
+            },
+            {
+              "option": "broad_rewrite",
+              "reason": "unnecessary churn for a two-function contract"
+            }
+          ],
+          "rate_cases": {
+            "standard": 0.2,
+            "reduced": 0.05
+          }
+        }
+      },
+      {
+        "check": "unshaped_repair_plan_present",
+        "status": "pass",
+        "evidence": {
+          "required": true,
+          "status": "recorded",
+          "mode": "unshaped_repo_repair",
+          "hypothesis_count": 1,
+          "candidate_count": 1
+        }
+      },
+      {
+        "check": "diagnostic_extraction_present",
+        "status": "pass",
+        "evidence": {
+          "unittest_assertions": 0,
+          "traceback_frames": 0,
+          "runtime_test_failures": 0,
+          "runtime_minimal_patch_candidates": 0,
+          "traceback_source_candidates": 0,
+          "static_test_expectations": 1
+        }
+      },
+      {
+        "check": "ast_minimal_patch_plan_present",
+        "status": "pass",
+        "evidence": {
+          "required": false,
+          "status": "not_applicable",
+          "operation_count": 0,
+          "blockers": []
+        }
+      },
+      {
+        "check": "readiness_model_present",
+        "status": "pass",
+        "evidence": {
+          "has_ranked_sources": true,
+          "has_acceptance_criteria": true,
+          "has_test_strategy": true,
+          "high_risk_count": 0
+        }
+      },
+      {
+        "check": "impact_matrix_present",
+        "status": "pass",
+        "evidence": {
+          "impact_file_count": 2
+        }
+      },
+      {
+        "check": "repository_investigation_review",
+        "status": "pass",
+        "evidence": {
+          "status": "covered",
+          "checks": [
+            {
+              "check": "ranked_repo_map_present",
+              "status": "pass",
+              "evidence": {
+                "ranked_file_count": 2,
+                "explicit_output_surface": false,
+                "planned_output_paths": [
+                  "tests/test_tax_rates.py",
+                  "tax/rates.py",
+                  "tax/invoice.py",
+                  "docs/tax_rates.md"
+                ]
+              }
+            },
+            {
+              "check": "targeted_reading_plan_present",
+              "status": "pass",
+              "evidence": {
+                "targeted_read_count": 2,
+                "recommended_read_count": 2,
+                "explicit_output_surface": false
+              }
+            },
+            {
+              "check": "hypotheses_present",
+              "status": "pass",
+              "evidence": {
+                "hypothesis_count": 2
+              }
+            },
+            {
+              "check": "impact_matrix_present",
+              "status": "pass",
+              "evidence": {
+                "impact_file_count": 2,
+                "explicit_output_surface": false
+              }
+            },
+            {
+              "check": "pre_mutation_source_reads_present",
+              "status": "pass",
+              "evidence": {
+                "read_excerpt_count": 2,
+                "read_paths": [
+                  "tax/rates.py",
+                  "tests/test_tax_rates.py"
+                ],
+                "explicit_output_surface": false
+              }
+            },
+            {
+              "check": "changed_files_mapped_to_survey",
+              "status": "pass",
+              "evidence": {
+                "changed_file_count": 3,
+                "preexisting_changed_file_count": 2,
+                "mapped_changed_file_count": 1,
+                "created_changes_allowed_as_explicit_outputs": [
+                  "tax/invoice.py"
+                ],
+                "unmapped_preexisting_changed_files": []
+              }
+            }
+          ],
+          "blockers": [],
+          "summary": "Repository investigation evidence is sufficient."
+        }
+      },
+      {
+        "check": "problem_statement_present",
+        "status": "pass",
+        "evidence": {
+          "status": "recorded",
+          "goal": "кодовая expert-задача без structured marker: выбери правильный маленький design для tax categories. Есть три варианта: hardcode под текущие assertions, широкий rewrite всего billing, или маленькая таблица rates с caller compatibility. Выбери нормальный вариант, объясни rejected options, не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260701-211228/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_tax_rates\nCERAXIA_VERIFY: python -m py_compile tax/rates.py tax/invoice.py",
+          "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+          "success_criteria": [
+            "changed files directly address the requested behavior",
+            "source scope is justified by repo survey or explicit patch contract",
+            "verification evidence is preserved after the final mutation",
+            "review either approves with evidence or blocks with focused revision steps"
+          ],
+          "evidence_to_inspect": [
+            "tax/rates.py",
+            "tests/test_tax_rates.py"
+          ],
+          "working_hypotheses": [
+            "tax/rates.py is likely relevant to the requested code change.",
+            "tests/test_tax_rates.py is likely relevant to the requested code change."
+          ],
+          "verification_candidates": [
+            "python -m unittest discover",
+            "python -m unittest tests.test_tax_rates",
+            "tests/test_tax_rates.py",
+            "python -m py_compile <changed .py files>",
+            "git diff --check"
+          ],
+          "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+        }
+      },
+      {
+        "check": "architecture_options_present",
+        "status": "pass",
+        "evidence": {
+          "status": "recorded",
+          "problem_status": "recorded",
+          "options": [
+            {
+              "id": "minimal_targeted_patch",
+              "summary": "Patch the narrowest source surface that satisfies the observed behavior gap.",
+              "recommended": true,
+              "tradeoffs": [
+                "lowest churn",
+                "requires focused verification to prove behavior"
+              ],
+              "applies_to": [
+                "tax/rates.py",
+                "tests/test_tax_rates.py"
+              ]
+            },
+            {
+              "id": "compatibility_wrapper",
+              "summary": "Preserve old callers while adding the new behavior behind a compatible boundary.",
+              "recommended": false,
+              "tradeoffs": [
+                "safer public API evolution",
+                "may require deprecation docs and caller tests"
+              ],
+              "applies_to": [
+                "tax/rates.py",
+                "tests/test_tax_rates.py"
+              ]
+            },
+            {
+              "id": "broad_rewrite",
+              "summary": "Rewrite the surrounding module or subsystem.",
+              "recommended": false,
+              "tradeoffs": [
+                "higher regression risk",
+                "harder review",
+                "should be rejected unless the task explicitly demands it"
+              ],
+              "applies_to": [
+                "tax/rates.py",
+                "tests/test_tax_rates.py"
+              ]
+            }
+          ],
+          "selection_rule": "Choose the first option that satisfies the task with the least public-surface churn and adequate verification."
+        }
+      },
+      {
+        "check": "architecture_decision_record_present",
+        "status": "pass",
+        "evidence": {
+          "status": "recorded",
+          "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+          "drivers": [
+            "preserve existing public behavior unless the task explicitly changes it",
+            "prefer source changes backed by focused tests and broad regression checks",
+            "keep rollback evidence and changed-file scope review in the final package"
+          ],
+          "alternatives_considered": [
+            {
+              "option": "single-file shortcut",
+              "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+            },
+            {
+              "option": "broad rewrite",
+              "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+            }
+          ],
+          "seed_rules": [
+            "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+            "Inspect dependents before changing public functions or modules with reverse dependencies.",
+            "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+          ],
+          "impacted_files": [
+            "tax/rates.py",
+            "tax/invoice.py",
+            "docs/tax_rates.md"
+          ],
+          "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+        }
+      },
+      {
+        "check": "focused_verification_present",
+        "status": "pass",
+        "evidence": [
+          "/usr/bin/python3 -m py_compile tax/rates.py tax/invoice.py",
+          "python -m unittest tests.test_tax_rates",
+          "python -m py_compile tax/rates.py tax/invoice.py"
+        ]
+      },
+      {
+        "check": "broad_verification_present",
+        "status": "pass",
+        "evidence": [
+          "python -m unittest discover -s tests"
+        ]
+      },
+      {
+        "check": "public_surface_review",
+        "status": "pass",
+        "evidence": {
+          "status": "covered",
+          "required": false,
+          "checks": [
+            {
+              "check": "public_surface_review_required",
+              "status": "not_applicable",
+              "evidence": {
+                "patch_source": "test_inferred_design_choice_tax"
+              }
+            },
+            {
+              "check": "docs_surface_updated",
+              "status": "pass",
+              "evidence": {
+                "docs_path": "docs/tax_rates.md",
+                "changed": true
+              }
+            },
+            {
+              "check": "caller_surface_updated_or_not_required",
+              "status": "pass",
+              "evidence": {
+                "caller_path": "tax/invoice.py",
+                "changed": true
+              }
+            },
+            {
+              "check": "public_surface_broad_verification",
+              "status": "pass",
+              "evidence": {
+                "broad_commands": [
+                  "python -m unittest discover -s tests"
+                ]
+              }
+            }
+          ],
+          "blockers": []
+        }
+      },
+      {
+        "check": "review_discipline_findings",
+        "status": "pass",
+        "evidence": []
+      }
+    ],
+    "review_repair_loop": {
+      "required": false,
+      "trigger": "",
+      "blocked_checks": [],
+      "rerun_steps": [],
+      "focused_context": {},
+      "completion_gate": "rerun implementation and verification, then rerun code_review and finalize"
+    },
+    "pr_summary": {
+      "title": "Ceraxia code task package",
+      "status": "ready",
+      "scope": [
+        "tax/rates.py",
+        "tax/invoice.py",
+        "docs/tax_rates.md"
+      ],
+      "verification": {
+        "status": "passed",
+        "focused_commands": [
+          "/usr/bin/python3 -m py_compile tax/rates.py tax/invoice.py",
+          "python -m unittest tests.test_tax_rates",
+          "python -m py_compile tax/rates.py tax/invoice.py"
+        ],
+        "broad_commands": [
+          "python -m unittest discover -s tests"
+        ],
+        "repair_count": 0
+      },
+      "architecture": {
+        "status": "recorded",
+        "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+        "drivers": [
+          "preserve existing public behavior unless the task explicitly changes it",
+          "prefer source changes backed by focused tests and broad regression checks",
+          "keep rollback evidence and changed-file scope review in the final package"
+        ],
+        "alternatives_considered": [
+          {
+            "option": "single-file shortcut",
+            "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+          },
+          {
+            "option": "broad rewrite",
+            "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+          }
+        ],
+        "seed_rules": [
+          "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+          "Inspect dependents before changing public functions or modules with reverse dependencies.",
+          "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+        ],
+        "impacted_files": [
+          "tax/rates.py",
+          "tax/invoice.py",
+          "docs/tax_rates.md"
+        ],
+        "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+      },
+      "risks": [],
+      "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed.",
+      "next_safe_action": "inspect_final_package"
+    }
+  },
+  "pr_summary": {
+    "title": "Ceraxia code task package",
+    "status": "ready",
+    "scope": [
+      "tax/rates.py",
+      "tax/invoice.py",
+      "docs/tax_rates.md"
+    ],
+    "verification": {
+      "status": "passed",
+      "focused_commands": [
+        "/usr/bin/python3 -m py_compile tax/rates.py tax/invoice.py",
+        "python -m unittest tests.test_tax_rates",
+        "python -m py_compile tax/rates.py tax/invoice.py"
+      ],
+      "broad_commands": [
+        "python -m unittest discover -s tests"
+      ],
+      "repair_count": 0
+    },
+    "architecture": {
+      "status": "recorded",
+      "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+      "drivers": [
+        "preserve existing public behavior unless the task explicitly changes it",
+        "prefer source changes backed by focused tests and broad regression checks",
+        "keep rollback evidence and changed-file scope review in the final package"
+      ],
+      "alternatives_considered": [
+        {
+          "option": "single-file shortcut",
+          "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+        },
+        {
+          "option": "broad rewrite",
+          "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+        }
+      ],
+      "seed_rules": [
+        "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+        "Inspect dependents before changing public functions or modules with reverse dependencies.",
+        "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+      ],
+      "impacted_files": [
+        "tax/rates.py",
+        "tax/invoice.py",
+        "docs/tax_rates.md"
+      ],
+      "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+    },
+    "risks": [],
+    "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed.",
+    "next_safe_action": "inspect_final_package"
+  },
+  "recommended_read_order": [
+    {
+      "path": "tax/rates.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, imported_by:tests/test_tax_rates.py, goal_symbol_match:rates,tax"
+    },
+    {
+      "path": "tests/test_tax_rates.py",
+      "phase": "inspect_test",
+      "reason": "goal_filename_match, test_surface, linked_test"
+    }
+  ],
+  "engineering_investigation": {
+    "dependency_graph": {
+      "edges": [
+        {
+          "from": "tests/test_tax_rates.py",
+          "to": "tax/rates.py",
+          "import": "tax.rates.tax_for"
+        }
+      ],
+      "reverse_dependents": {
+        "tax/rates.py": [
+          "tests/test_tax_rates.py"
+        ]
+      },
+      "edge_count": 1
+    },
+    "call_graph": {
+      "edges": [
+        {
+          "from": "tests/test_tax_rates.py",
+          "to": "tax/rates.py",
+          "call": "tax_for"
+        }
+      ],
+      "edge_count": 1,
+      "known_function_count": 1
+    },
+    "targeted_reading_plan": [
+      {
+        "path": "tax/rates.py",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match, imported_by:tests/test_tax_rates.py, goal_symbol_match:rates,tax",
+        "dependent_count": 1,
+        "sample_dependents": [
+          "tests/test_tax_rates.py"
+        ],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      },
+      {
+        "path": "tests/test_tax_rates.py",
+        "phase": "inspect_test",
+        "reason": "goal_filename_match, test_surface, linked_test",
+        "dependent_count": 0,
+        "sample_dependents": [],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis": "tax/rates.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "goal_filename_match",
+          "imported_by:tests/test_tax_rates.py",
+          "goal_symbol_match:rates,tax",
+          "python_source"
+        ],
+        "risk": "public behavior may affect dependents",
+        "next_read": "tax/rates.py"
+      },
+      {
+        "hypothesis": "tests/test_tax_rates.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "goal_filename_match",
+          "test_surface",
+          "linked_test",
+          "goal_symbol_match:invoice,rates,tax,test,tests"
+        ],
+        "risk": "local change risk appears limited",
+        "next_read": "tests/test_tax_rates.py"
+      }
+    ],
+    "design_decision_seed": [
+      "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+      "Inspect dependents before changing public functions or modules with reverse dependencies.",
+      "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+    ]
+  },
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "tax/rates.py",
+        "impact_level": "medium",
+        "rank_score": 21,
+        "dependent_count": 1,
+        "linked_tests": [
+          "tests/test_tax_rates.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "tests/test_tax_rates.py",
+        "impact_level": "medium",
+        "rank_score": 19,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      }
+    ],
+    "risk_register": [],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [
+        "python -m unittest discover",
+        "python -m unittest tests.test_tax_rates"
+      ],
+      "linked_test_targets": [
+        "tests/test_tax_rates.py"
+      ],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "engineering_readiness_review": {
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    },
+    "acceptance_criteria_count": 5,
+    "risk_count": 0,
+    "high_risk_count": 0,
+    "impact_file_count": 2
+  },
+  "architect_review": {
+    "problem_statement_present": true,
+    "architecture_options_present": true,
+    "architecture_decision_record_present": true
+  },
+  "code_review_discipline": {
+    "findings": [],
+    "blocker_count": 0
+  },
+  "repository_investigation_review": {
+    "status": "covered",
+    "checks": [
+      {
+        "check": "ranked_repo_map_present",
+        "status": "pass",
+        "evidence": {
+          "ranked_file_count": 2,
+          "explicit_output_surface": false,
+          "planned_output_paths": [
+            "tests/test_tax_rates.py",
+            "tax/rates.py",
+            "tax/invoice.py",
+            "docs/tax_rates.md"
+          ]
+        }
+      },
+      {
+        "check": "targeted_reading_plan_present",
+        "status": "pass",
+        "evidence": {
+          "targeted_read_count": 2,
+          "recommended_read_count": 2,
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "hypotheses_present",
+        "status": "pass",
+        "evidence": {
+          "hypothesis_count": 2
+        }
+      },
+      {
+        "check": "impact_matrix_present",
+        "status": "pass",
+        "evidence": {
+          "impact_file_count": 2,
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "pre_mutation_source_reads_present",
+        "status": "pass",
+        "evidence": {
+          "read_excerpt_count": 2,
+          "read_paths": [
+            "tax/rates.py",
+            "tests/test_tax_rates.py"
+          ],
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "changed_files_mapped_to_survey",
+        "status": "pass",
+        "evidence": {
+          "changed_file_count": 3,
+          "preexisting_changed_file_count": 2,
+          "mapped_changed_file_count": 1,
+          "created_changes_allowed_as_explicit_outputs": [
+            "tax/invoice.py"
+          ],
+          "unmapped_preexisting_changed_files": []
+        }
+      }
+    ],
+    "blockers": [],
+    "summary": "Repository investigation evidence is sufficient."
+  },
+  "patch_scope_evidence": {
+    "changed_files_in_repo_map": [
+      "tax/rates.py"
+    ],
+    "changed_files_outside_repo_map": [
+      "tax/invoice.py",
+      "docs/tax_rates.md"
+    ],
+    "changed_sources_with_linked_tests": [
+      {
+        "path": "tax/rates.py",
+        "tests": [
+          "tests/test_tax_rates.py"
+        ]
+      }
+    ],
+    "changed_tests_with_linked_sources": [],
+    "evidence": [
+      {
+        "path": "tax/rates.py",
+        "in_repo_map": true,
+        "score": 21,
+        "reasons": [
+          "goal_filename_match",
+          "imported_by:tests/test_tax_rates.py",
+          "goal_symbol_match:rates,tax",
+          "python_source"
+        ],
+        "linked_tests": [
+          "tests/test_tax_rates.py"
+        ],
+        "linked_sources": []
+      },
+      {
+        "path": "tax/invoice.py",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      },
+      {
+        "path": "docs/tax_rates.md",
+        "in_repo_map": false,
+        "score": 0,
+        "reasons": [],
+        "linked_tests": [],
+        "linked_sources": []
+      }
+    ]
+  },
+  "patch_source": "test_inferred_design_choice_tax",
+  "patch_candidates": [
+    {
+      "source": "explicit_json_patch",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "marker_synthesis",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_api_deprecation",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_data_migration",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_config_runtime",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_security_boundary",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_design_choice_tax",
+      "status": "selected",
+      "operation_count": 3,
+      "verification_command_count": 3,
+      "diagnostics": {
+        "kind": "test_inferred_design_choice_tax",
+        "test_path": "tests/test_tax_rates.py",
+        "source_path": "tax/rates.py",
+        "caller_path": "tax/invoice.py",
+        "docs_path": "docs/tax_rates.md",
+        "selected_design": "rate_table_with_compatible_caller",
+        "rejected_options": [
+          {
+            "option": "hardcode_fixture_values",
+            "reason": "does not generalize beyond current examples"
+          },
+          {
+            "option": "broad_rewrite",
+            "reason": "unnecessary churn for a two-function contract"
+          }
+        ],
+        "rate_cases": {
+          "standard": 0.2,
+          "reduced": 0.05
+        }
+      }
+    }
+  ],
+  "selected_patch_candidate": {
+    "source": "test_inferred_design_choice_tax",
+    "status": "selected",
+    "operation_count": 3,
+    "verification_command_count": 3,
+    "diagnostics": {
+      "kind": "test_inferred_design_choice_tax",
+      "test_path": "tests/test_tax_rates.py",
+      "source_path": "tax/rates.py",
+      "caller_path": "tax/invoice.py",
+      "docs_path": "docs/tax_rates.md",
+      "selected_design": "rate_table_with_compatible_caller",
+      "rejected_options": [
+        {
+          "option": "hardcode_fixture_values",
+          "reason": "does not generalize beyond current examples"
+        },
+        {
+          "option": "broad_rewrite",
+          "reason": "unnecessary churn for a two-function contract"
+        }
+      ],
+      "rate_cases": {
+        "standard": 0.2,
+        "reduced": 0.05
+      }
+    }
+  },
+  "dirty_worktree": {
+    "git_repo": false,
+    "dirty_targets": []
+  },
+  "ambiguity_analysis": {},
+  "source_excerpt_summary": [
+    {
+      "path": "tax/rates.py",
+      "status": "read",
+      "bytes": 45,
+      "truncated": false
+    },
+    {
+      "path": "tests/test_tax_rates.py",
+      "status": "read",
+      "bytes": 370,
+      "truncated": false
+    }
+  ],
+  "implementation_decision_record": [
+    {
+      "check": "source_evidence_loaded",
+      "status": "pass",
+      "detail": "2 targeted files read"
+    },
+    {
+      "check": "patch_candidate_selected",
+      "status": "pass",
+      "detail": "test_inferred_design_choice_tax"
+    },
+    {
+      "check": "mutation_authority",
+      "status": "pass",
+      "detail": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+    }
+  ],
+  "diagnostics": {
+    "kind": "test_inferred_design_choice_tax",
+    "test_path": "tests/test_tax_rates.py",
+    "source_path": "tax/rates.py",
+    "caller_path": "tax/invoice.py",
+    "docs_path": "docs/tax_rates.md",
+    "selected_design": "rate_table_with_compatible_caller",
+    "rejected_options": [
+      {
+        "option": "hardcode_fixture_values",
+        "reason": "does not generalize beyond current examples"
+      },
+      {
+        "option": "broad_rewrite",
+        "reason": "unnecessary churn for a two-function contract"
+      }
+    ],
+    "rate_cases": {
+      "standard": 0.2,
+      "reduced": 0.05
+    }
+  },
+  "operation_count": 3,
+  "verification_status": "passed",
+  "verification_executed": [
+    {
+      "command": "/usr/bin/python3 -m py_compile tax/rates.py tax/invoice.py",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": "python -m unittest tests.test_tax_rates",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ".\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK\n"
+    },
+    {
+      "command": "python -m py_compile tax/rates.py tax/invoice.py",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": "python -m unittest discover -s tests",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ".\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK\n"
+    }
+  ],
+  "verification_repairs": [],
+  "repair_loop_state": {
+    "status": "passed",
+    "task_id": "ceraxia-expert-unshaped-design-choice-20260701-211228:verification",
+    "role_policy": {
+      "role": "verifier",
+      "authority": "allowlisted_verification_and_narrow_repairs",
+      "may_mutate_source": true,
+      "required_evidence": [
+        "verification_executed",
+        "verification_blockers",
+        "verification_repairs"
+      ],
+      "forbidden_actions": [
+        "shell_execution",
+        "unallowlisted_command",
+        "broad_unscoped_rewrite"
+      ]
+    },
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "repo_grade",
+        "bugfix"
+      ],
+      "complexity": "medium",
+      "complexity_score": 4,
+      "workflow_mode": "repo_grade",
+      "repo_grade_required_evidence": [
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ],
+      "risk_flags": [
+        "test_diagnostic_required",
+        "repo_grade_evidence_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ]
+    },
+    "worker_brief": {
+      "step_id": "verification",
+      "worker": "OrdinatusVerifier",
+      "purpose": "Define and record the verification commands or blockers for the implementation.",
+      "brief": "Run allowlisted checks and perform only narrow repair loops.",
+      "task_profile": {
+        "kinds": [
+          "test_repair",
+          "repo_grade",
+          "bugfix"
+        ],
+        "complexity": "medium",
+        "complexity_score": 4,
+        "workflow_mode": "repo_grade",
+        "repo_grade_required_evidence": [
+          "architecture decision record with alternatives and tradeoffs",
+          "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+          "focused verification for the changed behavior",
+          "broad verification for repo-level regressions or an explicit blocker",
+          "self-review decision record before final packaging",
+          "PR-style final summary with changed files, verification, risks, and rollback notes"
+        ],
+        "risk_flags": [
+          "test_diagnostic_required",
+          "repo_grade_evidence_required",
+          "natural_language_patch_inference"
+        ],
+        "required_governor_checks": [
+          "repository survey must identify candidate source and test files before mutation",
+          "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+          "verification must run allowlisted commands or record explicit blockers",
+          "review must approve or produce a focused revision_plan",
+          "final manifest must preserve execution evidence, blockers, and next_safe_action",
+          "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+          "architecture decision record with alternatives and tradeoffs",
+          "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+          "focused verification for the changed behavior",
+          "broad verification for repo-level regressions or an explicit blocker",
+          "self-review decision record before final packaging",
+          "PR-style final summary with changed files, verification, risks, and rollback notes"
+        ]
+      },
+      "must_produce": [
+        "executed commands",
+        "focused verification",
+        "broad verification or blocker",
+        "repair_loop_state",
+        "failed_commands",
+        "candidate_source_paths"
+      ],
+      "handoff_question": "Did checks pass after repair, or what blocks review?",
+      "authority_boundary": "allowlisted_verification_and_narrow_repairs"
+    },
+    "repairs_allowed": true,
+    "repair_attempts": [],
+    "blocked_repairs": [],
+    "commands_executed_count": 4,
+    "failed_commands": [],
+    "candidate_source_paths": [],
+    "pending_blockers": [],
+    "next_action": "continue_to_code_review",
+    "summary": "Repair loop state recorded for verification step."
+  },
+  "verification_blockers": [],
+  "verification_summary": {
+    "executed_count": 4,
+    "repair_count": 0,
+    "blocker_count": 0
+  },
+  "execution_report": {
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "repo_grade",
+        "bugfix"
+      ],
+      "complexity": "medium",
+      "complexity_score": 4,
+      "workflow_mode": "repo_grade",
+      "repo_grade_required_evidence": [
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ],
+      "risk_flags": [
+        "test_diagnostic_required",
+        "repo_grade_evidence_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ]
+    },
+    "worker_briefs_present": {
+      "repository_survey": true,
+      "implementation": true,
+      "verification": true,
+      "code_review": true,
+      "finalize": true
+    },
+    "changed_file_count": 3,
+    "verification_command_count": 4,
+    "repair_attempt_count": 0,
+    "patch_candidate_count": 7,
+    "source_excerpt_count": 2,
+    "acceptance_criteria_count": 5,
+    "risk_count": 0,
+    "impact_file_count": 2,
+    "blocker_count": 0,
+    "revision_required": false
+  },
+  "review_status": "passed",
+  "patch_scope_review": {
+    "status": "needs_attention",
+    "changed_file_count": 3,
+    "mapped_changed_file_count": 1,
+    "unmapped_changed_file_count": 2,
+    "unmapped_changed_files": [
+      "tax/invoice.py",
+      "docs/tax_rates.md"
+    ],
+    "source_without_linked_tests": [
+      "tax/invoice.py"
+    ]
+  },
+  "review_decision_record": [
+    {
+      "check": "patch_applied",
+      "status": "pass",
+      "evidence": "applied"
+    },
+    {
+      "check": "verification_passed",
+      "status": "pass",
+      "evidence": "passed"
+    },
+    {
+      "check": "scope_review",
+      "status": "needs_attention",
+      "evidence": {
+        "status": "needs_attention",
+        "changed_file_count": 3,
+        "mapped_changed_file_count": 1,
+        "unmapped_changed_file_count": 2,
+        "unmapped_changed_files": [
+          "tax/invoice.py",
+          "docs/tax_rates.md"
+        ],
+        "source_without_linked_tests": [
+          "tax/invoice.py"
+        ]
+      }
+    },
+    {
+      "check": "diagnostic_linkage",
+      "status": "pass",
+      "evidence": {
+        "kind": "test_inferred_design_choice_tax",
+        "test_path": "tests/test_tax_rates.py",
+        "source_path": "tax/rates.py",
+        "caller_path": "tax/invoice.py",
+        "docs_path": "docs/tax_rates.md",
+        "selected_design": "rate_table_with_compatible_caller",
+        "rejected_options": [
+          {
+            "option": "hardcode_fixture_values",
+            "reason": "does not generalize beyond current examples"
+          },
+          {
+            "option": "broad_rewrite",
+            "reason": "unnecessary churn for a two-function contract"
+          }
+        ],
+        "rate_cases": {
+          "standard": 0.2,
+          "reduced": 0.05
+        }
+      }
+    },
+    {
+      "check": "unshaped_repair_plan_present",
+      "status": "pass",
+      "evidence": {
+        "required": true,
+        "status": "recorded",
+        "mode": "unshaped_repo_repair",
+        "hypothesis_count": 1,
+        "candidate_count": 1
+      }
+    },
+    {
+      "check": "diagnostic_extraction_present",
+      "status": "pass",
+      "evidence": {
+        "unittest_assertions": 0,
+        "traceback_frames": 0,
+        "runtime_test_failures": 0,
+        "runtime_minimal_patch_candidates": 0,
+        "traceback_source_candidates": 0,
+        "static_test_expectations": 1
+      }
+    },
+    {
+      "check": "ast_minimal_patch_plan_present",
+      "status": "pass",
+      "evidence": {
+        "required": false,
+        "status": "not_applicable",
+        "operation_count": 0,
+        "blockers": []
+      }
+    },
+    {
+      "check": "readiness_model_present",
+      "status": "pass",
+      "evidence": {
+        "has_ranked_sources": true,
+        "has_acceptance_criteria": true,
+        "has_test_strategy": true,
+        "high_risk_count": 0
+      }
+    },
+    {
+      "check": "impact_matrix_present",
+      "status": "pass",
+      "evidence": {
+        "impact_file_count": 2
+      }
+    },
+    {
+      "check": "repository_investigation_review",
+      "status": "pass",
+      "evidence": {
+        "status": "covered",
+        "checks": [
+          {
+            "check": "ranked_repo_map_present",
+            "status": "pass",
+            "evidence": {
+              "ranked_file_count": 2,
+              "explicit_output_surface": false,
+              "planned_output_paths": [
+                "tests/test_tax_rates.py",
+                "tax/rates.py",
+                "tax/invoice.py",
+                "docs/tax_rates.md"
+              ]
+            }
+          },
+          {
+            "check": "targeted_reading_plan_present",
+            "status": "pass",
+            "evidence": {
+              "targeted_read_count": 2,
+              "recommended_read_count": 2,
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "hypotheses_present",
+            "status": "pass",
+            "evidence": {
+              "hypothesis_count": 2
+            }
+          },
+          {
+            "check": "impact_matrix_present",
+            "status": "pass",
+            "evidence": {
+              "impact_file_count": 2,
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "pre_mutation_source_reads_present",
+            "status": "pass",
+            "evidence": {
+              "read_excerpt_count": 2,
+              "read_paths": [
+                "tax/rates.py",
+                "tests/test_tax_rates.py"
+              ],
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "changed_files_mapped_to_survey",
+            "status": "pass",
+            "evidence": {
+              "changed_file_count": 3,
+              "preexisting_changed_file_count": 2,
+              "mapped_changed_file_count": 1,
+              "created_changes_allowed_as_explicit_outputs": [
+                "tax/invoice.py"
+              ],
+              "unmapped_preexisting_changed_files": []
+            }
+          }
+        ],
+        "blockers": [],
+        "summary": "Repository investigation evidence is sufficient."
+      }
+    },
+    {
+      "check": "problem_statement_present",
+      "status": "pass",
+      "evidence": {
+        "status": "recorded",
+        "goal": "кодовая expert-задача без structured marker: выбери правильный маленький design для tax categories. Есть три варианта: hardcode под текущие assertions, широкий rewrite всего billing, или маленькая таблица rates с caller compatibility. Выбери нормальный вариант, объясни rejected options, не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260701-211228/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_tax_rates\nCERAXIA_VERIFY: python -m py_compile tax/rates.py tax/invoice.py",
+        "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+        "success_criteria": [
+          "changed files directly address the requested behavior",
+          "source scope is justified by repo survey or explicit patch contract",
+          "verification evidence is preserved after the final mutation",
+          "review either approves with evidence or blocks with focused revision steps"
+        ],
+        "evidence_to_inspect": [
+          "tax/rates.py",
+          "tests/test_tax_rates.py"
+        ],
+        "working_hypotheses": [
+          "tax/rates.py is likely relevant to the requested code change.",
+          "tests/test_tax_rates.py is likely relevant to the requested code change."
+        ],
+        "verification_candidates": [
+          "python -m unittest discover",
+          "python -m unittest tests.test_tax_rates",
+          "tests/test_tax_rates.py",
+          "python -m py_compile <changed .py files>",
+          "git diff --check"
+        ],
+        "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+      }
+    },
+    {
+      "check": "architecture_options_present",
+      "status": "pass",
+      "evidence": {
+        "status": "recorded",
+        "problem_status": "recorded",
+        "options": [
+          {
+            "id": "minimal_targeted_patch",
+            "summary": "Patch the narrowest source surface that satisfies the observed behavior gap.",
+            "recommended": true,
+            "tradeoffs": [
+              "lowest churn",
+              "requires focused verification to prove behavior"
+            ],
+            "applies_to": [
+              "tax/rates.py",
+              "tests/test_tax_rates.py"
+            ]
+          },
+          {
+            "id": "compatibility_wrapper",
+            "summary": "Preserve old callers while adding the new behavior behind a compatible boundary.",
+            "recommended": false,
+            "tradeoffs": [
+              "safer public API evolution",
+              "may require deprecation docs and caller tests"
+            ],
+            "applies_to": [
+              "tax/rates.py",
+              "tests/test_tax_rates.py"
+            ]
+          },
+          {
+            "id": "broad_rewrite",
+            "summary": "Rewrite the surrounding module or subsystem.",
+            "recommended": false,
+            "tradeoffs": [
+              "higher regression risk",
+              "harder review",
+              "should be rejected unless the task explicitly demands it"
+            ],
+            "applies_to": [
+              "tax/rates.py",
+              "tests/test_tax_rates.py"
+            ]
+          }
+        ],
+        "selection_rule": "Choose the first option that satisfies the task with the least public-surface churn and adequate verification."
+      }
+    },
+    {
+      "check": "architecture_decision_record_present",
+      "status": "pass",
+      "evidence": {
+        "status": "recorded",
+        "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+        "drivers": [
+          "preserve existing public behavior unless the task explicitly changes it",
+          "prefer source changes backed by focused tests and broad regression checks",
+          "keep rollback evidence and changed-file scope review in the final package"
+        ],
+        "alternatives_considered": [
+          {
+            "option": "single-file shortcut",
+            "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+          },
+          {
+            "option": "broad rewrite",
+            "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+          }
+        ],
+        "seed_rules": [
+          "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+          "Inspect dependents before changing public functions or modules with reverse dependencies.",
+          "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+        ],
+        "impacted_files": [
+          "tax/rates.py",
+          "tax/invoice.py",
+          "docs/tax_rates.md"
+        ],
+        "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+      }
+    },
+    {
+      "check": "focused_verification_present",
+      "status": "pass",
+      "evidence": [
+        "/usr/bin/python3 -m py_compile tax/rates.py tax/invoice.py",
+        "python -m unittest tests.test_tax_rates",
+        "python -m py_compile tax/rates.py tax/invoice.py"
+      ]
+    },
+    {
+      "check": "broad_verification_present",
+      "status": "pass",
+      "evidence": [
+        "python -m unittest discover -s tests"
+      ]
+    },
+    {
+      "check": "public_surface_review",
+      "status": "pass",
+      "evidence": {
+        "status": "covered",
+        "required": false,
+        "checks": [
+          {
+            "check": "public_surface_review_required",
+            "status": "not_applicable",
+            "evidence": {
+              "patch_source": "test_inferred_design_choice_tax"
+            }
+          },
+          {
+            "check": "docs_surface_updated",
+            "status": "pass",
+            "evidence": {
+              "docs_path": "docs/tax_rates.md",
+              "changed": true
+            }
+          },
+          {
+            "check": "caller_surface_updated_or_not_required",
+            "status": "pass",
+            "evidence": {
+              "caller_path": "tax/invoice.py",
+              "changed": true
+            }
+          },
+          {
+            "check": "public_surface_broad_verification",
+            "status": "pass",
+            "evidence": {
+              "broad_commands": [
+                "python -m unittest discover -s tests"
+              ]
+            }
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "check": "review_discipline_findings",
+      "status": "pass",
+      "evidence": []
+    }
+  ],
+  "review_repair_loop": {
+    "required": false,
+    "trigger": "",
+    "blocked_checks": [],
+    "rerun_steps": [],
+    "focused_context": {},
+    "completion_gate": "rerun implementation and verification, then rerun code_review and finalize"
+  },
+  "blockers": [],
+  "next_safe_action": "inspect_final_package",
+  "summary": "Ceraxia code task package finalized.",
+  "revision_plan": {
+    "required": false,
+    "focused_context": {},
+    "steps": []
+  }
+}

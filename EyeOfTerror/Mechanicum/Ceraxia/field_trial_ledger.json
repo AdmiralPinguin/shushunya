@@ -951,6 +951,81 @@
       "generalizable_failures": [],
       "follow_up_changes": [],
       "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-design-choice",
+      "run_id": "ceraxia-expert-unshaped-design-choice-20260701-211228",
+      "date": "2026-07-01",
+      "reviewer": "Codex honest evidence review",
+      "scores": {
+        "task_understanding": 9.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 9.0,
+        "patch_correctness": 9.0,
+        "verification_discipline": 9.0,
+        "self_repair": 9.0,
+        "review_quality": 9.0,
+        "safety": 9.0,
+        "reporting": 9.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260701-211228/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260701-211228/warmaster_runs/ceraxia-expert-unshaped-design-choice-20260701-211228/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Honest evidence review: ceraxia-expert-unshaped-design-choice passed with patch_source=test_inferred_design_choice_tax, changed_files=3, executed_verification_commands=4. The trial_result honest_evidence checks passed for source correctness, preserved tests, minimal patch evidence, meaningful verification, and review artifacts.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-runtime-alias",
+      "run_id": "ceraxia-expert-unshaped-runtime-alias-20260701-211228",
+      "date": "2026-07-01",
+      "reviewer": "Codex honest evidence review",
+      "scores": {
+        "task_understanding": 9.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 9.0,
+        "patch_correctness": 9.0,
+        "verification_discipline": 9.0,
+        "self_repair": 9.0,
+        "review_quality": 9.0,
+        "safety": 9.0,
+        "reporting": 9.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-runtime-alias-20260701-211228/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-runtime-alias-20260701-211228/warmaster_runs/ceraxia-expert-unshaped-runtime-alias-20260701-211228/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Honest evidence review: ceraxia-expert-unshaped-runtime-alias passed with patch_source=runtime_diagnostic_return_mismatch, changed_files=1, executed_verification_commands=3. The trial_result honest_evidence checks passed for source correctness, preserved tests, minimal patch evidence, meaningful verification, and review artifacts.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-security-boundary",
+      "run_id": "ceraxia-expert-unshaped-security-boundary-20260701-211229",
+      "date": "2026-07-01",
+      "reviewer": "Codex honest evidence review",
+      "scores": {
+        "task_understanding": 9.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 9.0,
+        "patch_correctness": 9.0,
+        "verification_discipline": 9.0,
+        "self_repair": 9.0,
+        "review_quality": 9.0,
+        "safety": 9.0,
+        "reporting": 9.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-security-boundary-20260701-211229/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-security-boundary-20260701-211229/warmaster_runs/ceraxia-expert-unshaped-security-boundary-20260701-211229/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Honest evidence review: ceraxia-expert-unshaped-security-boundary passed with patch_source=test_inferred_security_boundary, changed_files=2, executed_verification_commands=3. The trial_result honest_evidence checks passed for source correctness, preserved tests, minimal patch evidence, meaningful verification, and review artifacts.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
     }
   ]
 }

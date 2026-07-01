@@ -1,0 +1,192 @@
+{
+  "status": "recorded",
+  "mode": "unshaped_repo_repair",
+  "task_id": "ceraxia-expert-unshaped-design-choice-20260701-211228:implementation",
+  "goal_excerpt": "кодовая expert-задача без structured marker: выбери правильный маленький design для tax categories. Есть три варианта: hardcode под текущие assertions, широкий rewrite всего billing, или маленькая таблица rates с caller compatibility. Выбери нормальный вариант, объясни rejected options, не редактируй tests.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-design-choice-20260701-211228/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_tax_rates\nCERAXIA_VERIFY: python -m py_compile tax/rates.py tax/invoice.py",
+  "selected_source": "test_inferred_design_choice_tax",
+  "selected_candidate": {
+    "source": "test_inferred_design_choice_tax",
+    "status": "selected",
+    "operation_count": 3,
+    "verification_command_count": 3,
+    "diagnostics": {
+      "kind": "test_inferred_design_choice_tax",
+      "test_path": "tests/test_tax_rates.py",
+      "source_path": "tax/rates.py",
+      "caller_path": "tax/invoice.py",
+      "docs_path": "docs/tax_rates.md",
+      "selected_design": "rate_table_with_compatible_caller",
+      "rejected_options": [
+        {
+          "option": "hardcode_fixture_values",
+          "reason": "does not generalize beyond current examples"
+        },
+        {
+          "option": "broad_rewrite",
+          "reason": "unnecessary churn for a two-function contract"
+        }
+      ],
+      "rate_cases": {
+        "standard": 0.2,
+        "reduced": 0.05
+      }
+    }
+  },
+  "files_to_read": [
+    "tax/rates.py",
+    "tax/invoice.py",
+    "docs/tax_rates.md",
+    "tests/test_tax_rates.py"
+  ],
+  "test_symbol_links": [
+    {
+      "test_path": "tests/test_tax_rates.py",
+      "test_class": "TaxRatesTest",
+      "test_function": "test_standard_and_reduced_rates",
+      "assertion": "assertEqual",
+      "actual_expression": "tax_for(100)",
+      "expected_expression": "20",
+      "imported_symbol": "tax_for",
+      "local_symbol": "tax_for",
+      "source_module": "tax.rates",
+      "source_path": "tax/rates.py",
+      "source_exists": true
+    },
+    {
+      "test_path": "tests/test_tax_rates.py",
+      "test_class": "TaxRatesTest",
+      "test_function": "test_standard_and_reduced_rates",
+      "assertion": "assertEqual",
+      "actual_expression": "invoice_tax(100, 'reduced')",
+      "expected_expression": "5",
+      "imported_symbol": "invoice_tax",
+      "local_symbol": "invoice_tax",
+      "source_module": "tax.invoice",
+      "source_path": "tax/invoice.py",
+      "source_exists": true
+    }
+  ],
+  "patch_operations": [
+    {
+      "type": "write_file",
+      "path": "tax/rates.py"
+    },
+    {
+      "type": "write_file",
+      "path": "tax/invoice.py"
+    },
+    {
+      "type": "write_file",
+      "path": "docs/tax_rates.md"
+    }
+  ],
+  "runtime_evidence": {},
+  "commands_to_run": [
+    "python -m unittest tests.test_tax_rates",
+    "python -m py_compile tax/rates.py tax/invoice.py",
+    "python -m unittest discover -s tests"
+  ],
+  "defect_hypotheses": [
+    {
+      "source": "test_inferred_design_choice_tax",
+      "kind": "test_inferred_design_choice_tax",
+      "test_path": "tests/test_tax_rates.py",
+      "module_path": "",
+      "function_name": "",
+      "delegated_from": {},
+      "expected": "",
+      "actual": "",
+      "evidence": {
+        "kind": "test_inferred_design_choice_tax",
+        "test_path": "tests/test_tax_rates.py",
+        "source_path": "tax/rates.py",
+        "caller_path": "tax/invoice.py",
+        "docs_path": "docs/tax_rates.md",
+        "selected_design": "rate_table_with_compatible_caller",
+        "rejected_options": [
+          {
+            "option": "hardcode_fixture_values",
+            "reason": "does not generalize beyond current examples"
+          },
+          {
+            "option": "broad_rewrite",
+            "reason": "unnecessary churn for a two-function contract"
+          }
+        ],
+        "rate_cases": {
+          "standard": 0.2,
+          "reduced": 0.05
+        }
+      }
+    }
+  ],
+  "minimal_patch_candidates": [
+    {
+      "source": "test_inferred_design_choice_tax",
+      "status": "selected",
+      "operation_count": 3,
+      "verification_command_count": 3,
+      "diagnostics": {
+        "kind": "test_inferred_design_choice_tax",
+        "test_path": "tests/test_tax_rates.py",
+        "source_path": "tax/rates.py",
+        "caller_path": "tax/invoice.py",
+        "docs_path": "docs/tax_rates.md",
+        "selected_design": "rate_table_with_compatible_caller",
+        "rejected_options": [
+          {
+            "option": "hardcode_fixture_values",
+            "reason": "does not generalize beyond current examples"
+          },
+          {
+            "option": "broad_rewrite",
+            "reason": "unnecessary churn for a two-function contract"
+          }
+        ],
+        "rate_cases": {
+          "standard": 0.2,
+          "reduced": 0.05
+        }
+      },
+      "operations": [
+        {
+          "type": "write_file",
+          "path": "tax/rates.py"
+        },
+        {
+          "type": "write_file",
+          "path": "tax/invoice.py"
+        },
+        {
+          "type": "write_file",
+          "path": "docs/tax_rates.md"
+        }
+      ],
+      "runtime_evidence": {}
+    }
+  ],
+  "proof_plan": {
+    "focused_verification": [
+      "python -m unittest tests.test_tax_rates",
+      "python -m py_compile tax/rates.py tax/invoice.py",
+      "python -m unittest discover -s tests"
+    ],
+    "source_must_change": true,
+    "tests_must_not_be_edited_for_test_inferred_repairs": true,
+    "test_to_source_linkage_required": true,
+    "runtime_diagnostic_required": false,
+    "ast_patch_plan_required": false,
+    "review_gates": [
+      "diagnostic_linkage",
+      "test_symbol_linkage",
+      "patch_scope_review",
+      "verification_passed",
+      "review_discipline_findings"
+    ]
+  },
+  "safety_constraints": [
+    "prefer the smallest source patch that satisfies test and contract evidence",
+    "do not edit tests to make an inferred repair pass",
+    "block instead of mutating when source mapping is ambiguous"
+  ]
+}

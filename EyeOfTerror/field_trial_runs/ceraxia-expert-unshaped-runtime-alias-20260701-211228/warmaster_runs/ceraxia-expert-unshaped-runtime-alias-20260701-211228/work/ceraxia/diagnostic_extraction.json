@@ -1,0 +1,264 @@
+{
+  "status": "recorded",
+  "mode": "unshaped_repo_repair",
+  "patch_source": "runtime_diagnostic_return_mismatch",
+  "runtime_failures": [],
+  "assertions": [],
+  "traceback_frames": [],
+  "runtime_test_failures": [],
+  "traceback_source_candidates": [],
+  "runtime_source_candidates": [],
+  "runtime_minimal_patch_candidates": [],
+  "static_test_expectations": [
+    {
+      "source": "runtime_diagnostic_return_mismatch",
+      "kind": "runtime_diagnostic_return_mismatch",
+      "test_path": "tests/test_quota_alias.py",
+      "module_path": "quota.py",
+      "function_name": "max_daily_exports",
+      "delegated_from": {},
+      "expected": "7",
+      "actual": "1",
+      "evidence": {
+        "kind": "runtime_diagnostic_return_mismatch",
+        "test_path": "tests/test_quota_alias.py",
+        "test_function": "test_alias_limit",
+        "module_path": "quota.py",
+        "function_name": "max_daily_exports",
+        "actual": "1",
+        "expected": "7",
+        "runtime_diagnostic_extraction": {
+          "status": "recorded",
+          "mode": "unshaped_repo_repair",
+          "patch_source": "runtime_diagnostic_return_mismatch",
+          "runtime_failures": [
+            {
+              "command": "python -m unittest tests.test_quota_alias",
+              "returncode": 1,
+              "assertion_count": 1,
+              "traceback_frame_count": 1,
+              "test_failure_count": 1,
+              "stderr_excerpt": "F\n======================================================================\nFAIL: test_alias_limit (tests.test_quota_alias.QuotaAliasTest.test_alias_limit)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-runtime-alias-20260701-211228/fixture/repo/tests/test_quota_alias.py\", line 6, in test_alias_limit\n    self.assertEqual(limit(), 7)\nAssertionError: 1 != 7\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (failures=1)\n",
+              "stdout_excerpt": ""
+            }
+          ],
+          "assertions": [
+            {
+              "kind": "assert_not_equal",
+              "actual": "1",
+              "expected": "7",
+              "excerpt": "AssertionError: 1 != 7"
+            }
+          ],
+          "traceback_frames": [
+            {
+              "path": "tests/test_quota_alias.py",
+              "line": 6,
+              "function_name": "test_alias_limit",
+              "is_test": true
+            }
+          ],
+          "runtime_test_failures": [
+            {
+              "test_path": "tests/test_quota_alias.py",
+              "test_function": "test_alias_limit",
+              "line": 6,
+              "assertions": [
+                {
+                  "kind": "assert_not_equal",
+                  "actual": "1",
+                  "expected": "7",
+                  "excerpt": "AssertionError: 1 != 7"
+                }
+              ],
+              "imported_symbol_links": [
+                {
+                  "test_path": "tests/test_quota_alias.py",
+                  "test_class": "QuotaAliasTest",
+                  "test_function": "test_alias_limit",
+                  "assertion": "assertEqual",
+                  "actual_expression": "limit()",
+                  "expected_expression": "7",
+                  "imported_symbol": "max_daily_exports",
+                  "local_symbol": "limit",
+                  "source_module": "quota",
+                  "source_path": "quota.py",
+                  "source_exists": true
+                }
+              ],
+              "source_frames": [],
+              "candidate_source_paths": [
+                "quota.py"
+              ]
+            }
+          ],
+          "traceback_source_candidates": [
+            "tests/test_quota_alias.py"
+          ],
+          "runtime_source_candidates": [
+            "quota.py"
+          ],
+          "runtime_minimal_patch_candidates": [
+            {
+              "source": "runtime_traceback_assertion_mismatch",
+              "status": "candidate",
+              "kind": "replace_return_expression",
+              "path": "quota.py",
+              "function_name": "max_daily_exports",
+              "old_expression": "1",
+              "new_expression": "7",
+              "current_expression": "1",
+              "test_path": "tests/test_quota_alias.py",
+              "test_function": "test_alias_limit",
+              "minimality": "single_return_expression_from_runtime_assertion",
+              "application_status": "pending",
+              "proof": {
+                "assertion": {
+                  "kind": "assert_not_equal",
+                  "actual": "1",
+                  "expected": "7",
+                  "excerpt": "AssertionError: 1 != 7"
+                },
+                "line": 6
+              }
+            }
+          ],
+          "static_test_expectations": [],
+          "selected_diagnostics": {},
+          "parser_coverage": {
+            "unittest_assertions": 1,
+            "traceback_frames": 1,
+            "runtime_test_failures": 1,
+            "runtime_minimal_patch_candidates": 1,
+            "traceback_source_candidates": 1,
+            "static_test_expectations": 0
+          }
+        }
+      }
+    }
+  ],
+  "selected_diagnostics": {
+    "kind": "runtime_diagnostic_return_mismatch",
+    "test_path": "tests/test_quota_alias.py",
+    "test_function": "test_alias_limit",
+    "module_path": "quota.py",
+    "function_name": "max_daily_exports",
+    "actual": "1",
+    "expected": "7",
+    "runtime_diagnostic_extraction": {
+      "status": "recorded",
+      "mode": "unshaped_repo_repair",
+      "patch_source": "runtime_diagnostic_return_mismatch",
+      "runtime_failures": [
+        {
+          "command": "python -m unittest tests.test_quota_alias",
+          "returncode": 1,
+          "assertion_count": 1,
+          "traceback_frame_count": 1,
+          "test_failure_count": 1,
+          "stderr_excerpt": "F\n======================================================================\nFAIL: test_alias_limit (tests.test_quota_alias.QuotaAliasTest.test_alias_limit)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-runtime-alias-20260701-211228/fixture/repo/tests/test_quota_alias.py\", line 6, in test_alias_limit\n    self.assertEqual(limit(), 7)\nAssertionError: 1 != 7\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (failures=1)\n",
+          "stdout_excerpt": ""
+        }
+      ],
+      "assertions": [
+        {
+          "kind": "assert_not_equal",
+          "actual": "1",
+          "expected": "7",
+          "excerpt": "AssertionError: 1 != 7"
+        }
+      ],
+      "traceback_frames": [
+        {
+          "path": "tests/test_quota_alias.py",
+          "line": 6,
+          "function_name": "test_alias_limit",
+          "is_test": true
+        }
+      ],
+      "runtime_test_failures": [
+        {
+          "test_path": "tests/test_quota_alias.py",
+          "test_function": "test_alias_limit",
+          "line": 6,
+          "assertions": [
+            {
+              "kind": "assert_not_equal",
+              "actual": "1",
+              "expected": "7",
+              "excerpt": "AssertionError: 1 != 7"
+            }
+          ],
+          "imported_symbol_links": [
+            {
+              "test_path": "tests/test_quota_alias.py",
+              "test_class": "QuotaAliasTest",
+              "test_function": "test_alias_limit",
+              "assertion": "assertEqual",
+              "actual_expression": "limit()",
+              "expected_expression": "7",
+              "imported_symbol": "max_daily_exports",
+              "local_symbol": "limit",
+              "source_module": "quota",
+              "source_path": "quota.py",
+              "source_exists": true
+            }
+          ],
+          "source_frames": [],
+          "candidate_source_paths": [
+            "quota.py"
+          ]
+        }
+      ],
+      "traceback_source_candidates": [
+        "tests/test_quota_alias.py"
+      ],
+      "runtime_source_candidates": [
+        "quota.py"
+      ],
+      "runtime_minimal_patch_candidates": [
+        {
+          "source": "runtime_traceback_assertion_mismatch",
+          "status": "candidate",
+          "kind": "replace_return_expression",
+          "path": "quota.py",
+          "function_name": "max_daily_exports",
+          "old_expression": "1",
+          "new_expression": "7",
+          "current_expression": "1",
+          "test_path": "tests/test_quota_alias.py",
+          "test_function": "test_alias_limit",
+          "minimality": "single_return_expression_from_runtime_assertion",
+          "application_status": "pending",
+          "proof": {
+            "assertion": {
+              "kind": "assert_not_equal",
+              "actual": "1",
+              "expected": "7",
+              "excerpt": "AssertionError: 1 != 7"
+            },
+            "line": 6
+          }
+        }
+      ],
+      "static_test_expectations": [],
+      "selected_diagnostics": {},
+      "parser_coverage": {
+        "unittest_assertions": 1,
+        "traceback_frames": 1,
+        "runtime_test_failures": 1,
+        "runtime_minimal_patch_candidates": 1,
+        "traceback_source_candidates": 1,
+        "static_test_expectations": 0
+      }
+    }
+  },
+  "parser_coverage": {
+    "unittest_assertions": 0,
+    "traceback_frames": 0,
+    "runtime_test_failures": 0,
+    "runtime_minimal_patch_candidates": 0,
+    "traceback_source_candidates": 0,
+    "static_test_expectations": 1
+  }
+}

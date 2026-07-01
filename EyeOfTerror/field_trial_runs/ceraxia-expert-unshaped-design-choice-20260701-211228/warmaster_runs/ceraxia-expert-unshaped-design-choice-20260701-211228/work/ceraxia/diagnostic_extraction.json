@@ -1,0 +1,76 @@
+{
+  "status": "recorded",
+  "mode": "unshaped_repo_repair",
+  "patch_source": "test_inferred_design_choice_tax",
+  "runtime_failures": [],
+  "assertions": [],
+  "traceback_frames": [],
+  "runtime_test_failures": [],
+  "traceback_source_candidates": [],
+  "runtime_source_candidates": [],
+  "runtime_minimal_patch_candidates": [],
+  "static_test_expectations": [
+    {
+      "source": "test_inferred_design_choice_tax",
+      "kind": "test_inferred_design_choice_tax",
+      "test_path": "tests/test_tax_rates.py",
+      "module_path": "",
+      "function_name": "",
+      "delegated_from": {},
+      "expected": "",
+      "actual": "",
+      "evidence": {
+        "kind": "test_inferred_design_choice_tax",
+        "test_path": "tests/test_tax_rates.py",
+        "source_path": "tax/rates.py",
+        "caller_path": "tax/invoice.py",
+        "docs_path": "docs/tax_rates.md",
+        "selected_design": "rate_table_with_compatible_caller",
+        "rejected_options": [
+          {
+            "option": "hardcode_fixture_values",
+            "reason": "does not generalize beyond current examples"
+          },
+          {
+            "option": "broad_rewrite",
+            "reason": "unnecessary churn for a two-function contract"
+          }
+        ],
+        "rate_cases": {
+          "standard": 0.2,
+          "reduced": 0.05
+        }
+      }
+    }
+  ],
+  "selected_diagnostics": {
+    "kind": "test_inferred_design_choice_tax",
+    "test_path": "tests/test_tax_rates.py",
+    "source_path": "tax/rates.py",
+    "caller_path": "tax/invoice.py",
+    "docs_path": "docs/tax_rates.md",
+    "selected_design": "rate_table_with_compatible_caller",
+    "rejected_options": [
+      {
+        "option": "hardcode_fixture_values",
+        "reason": "does not generalize beyond current examples"
+      },
+      {
+        "option": "broad_rewrite",
+        "reason": "unnecessary churn for a two-function contract"
+      }
+    ],
+    "rate_cases": {
+      "standard": 0.2,
+      "reduced": 0.05
+    }
+  },
+  "parser_coverage": {
+    "unittest_assertions": 0,
+    "traceback_frames": 0,
+    "runtime_test_failures": 0,
+    "runtime_minimal_patch_candidates": 0,
+    "traceback_source_candidates": 0,
+    "static_test_expectations": 1
+  }
+}
