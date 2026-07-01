@@ -47,6 +47,7 @@ REQUIRED_RUN_ARTIFACTS = [
     "review_gate.json",
     "status.json",
     "final_report.md",
+    "execution_readiness.json",
 ]
 
 
@@ -370,6 +371,41 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     }
 
 
+def build_execution_readiness(
+    status: dict[str, Any],
+    brief: dict[str, Any],
+    verification_report: dict[str, Any],
+    review: dict[str, Any],
+    dry_run: bool,
+) -> dict[str, Any]:
+    blockers: list[str] = []
+    ready_conditions = [
+        "planning packet passed contract validation",
+        "implementation brief is not blocked",
+        "verification strategy is planned",
+        "review gate is ready or dry-run-ready",
+        "run package audit passes",
+    ]
+    if status.get("state") != "finalized":
+        blockers.append("run lifecycle is not finalized")
+    if brief.get("blocked"):
+        blockers.extend(str(item) for item in brief.get("blockers", []))
+    if verification_report.get("status") == "blocked":
+        blockers.extend(str(item) for item in verification_report.get("blockers", []))
+    if review.get("decision") not in {"ready", "dry_run_ready"}:
+        blockers.append("review gate did not approve the handoff")
+    if dry_run:
+        blockers.append("real CodeBrigade execution is not wired in this controller yet")
+    return {
+        "kind": "ceraxia_execution_readiness",
+        "decision": "blocked" if blockers else "ready_for_real_execution",
+        "dry_run": dry_run,
+        "ready_conditions": ready_conditions,
+        "blockers": blockers,
+        "next_capability_to_wire": "CodeBrigade real execution adapter" if dry_run else "",
+    }
+
+
 def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     run_id = f"ceraxia-{utc_stamp()}-{task_slug(task_input.task)}"
     run_dir = task_input.runs_root / run_id
@@ -435,6 +471,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     }
     write_json(run_dir / "status.json", status)
     write_text(run_dir / "final_report.md", final_report_markdown(run_id, artifacts))
+    readiness = build_execution_readiness(status, brief, verification_report, review, task_input.dry_run)
+    write_json(run_dir / "execution_readiness.json", readiness)
     manifest = build_artifact_manifest(run_dir)
     write_json(run_dir / "artifact_manifest.json", manifest)
     audit = audit_run_package(run_dir)
@@ -445,6 +483,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "run_dir": str(run_dir),
         "state": status["state"],
         "audit_decision": audit["decision"],
+        "execution_readiness": readiness["decision"],
         "lifecycle": status["lifecycle"],
         "review_decision": review["decision"],
         "next_action": status["next_action"],

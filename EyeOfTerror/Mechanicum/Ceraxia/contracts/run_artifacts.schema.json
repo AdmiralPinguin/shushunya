@@ -12,6 +12,7 @@
     "review_gate.json",
     "status.json",
     "final_report.md",
+    "execution_readiness.json",
     "artifact_manifest.json",
     "run_audit.json"
   ],
@@ -41,6 +42,9 @@
       "type": "string"
     },
     "final_report.md": {
+      "type": "string"
+    },
+    "execution_readiness.json": {
       "type": "string"
     },
     "artifact_manifest.json": {

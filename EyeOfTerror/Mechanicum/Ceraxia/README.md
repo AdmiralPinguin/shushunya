@@ -30,6 +30,7 @@ task
   -> worker_report.json
   -> verification_report.json
   -> review_gate.json
+  -> execution_readiness.json
   -> artifact_manifest.json
   -> run_audit.json
   -> final_report.md

@@ -53,6 +53,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                 "review_gate.json",
                 "status.json",
                 "final_report.md",
+                "execution_readiness.json",
                 "artifact_manifest.json",
                 "run_audit.json",
             ]
@@ -67,6 +68,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
             self.assertEqual(audit["decision"], "passed")
             self.assertTrue(audit["manifest_complete"])
+            readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
+            self.assertEqual(readiness["decision"], "blocked")
+            self.assertIn("real CodeBrigade execution is not wired in this controller yet", readiness["blockers"])
 
     def test_missing_repo_blocks_before_claiming_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,6 +86,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             run_dir = Path(result["run_dir"])
             brief = json.loads((run_dir / "implementation_brief.json").read_text(encoding="utf-8"))
             self.assertTrue(brief["blocked"])
+            readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
+            self.assertEqual(readiness["decision"], "blocked")
             status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
             self.assertIn("failed", status["lifecycle"])
 
