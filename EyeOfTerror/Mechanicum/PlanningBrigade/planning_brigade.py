@@ -446,20 +446,33 @@ def execution_forecast(triage: dict[str, Any], breakdown: dict[str, Any], impact
         complexity = "high"
         expected_iterations = 4
         recommended_timeout_minutes = 60
+        max_source_files_to_edit = 6
     elif complexity_score >= 10:
         complexity = "medium"
         expected_iterations = 2
         recommended_timeout_minutes = 30
+        max_source_files_to_edit = 4
     else:
         complexity = "low"
         expected_iterations = 1
         recommended_timeout_minutes = 15
+        max_source_files_to_edit = 2
     return {
         "role": "PlanningBrigade",
         "complexity": complexity,
         "complexity_score": complexity_score,
         "expected_code_brigade_iterations": expected_iterations,
         "recommended_timeout_minutes": recommended_timeout_minutes,
+        "scope_budget": {
+            "max_source_files_to_edit": max_source_files_to_edit,
+            "max_test_files_to_edit_without_explicit_user_request": 0,
+            "max_docs_files_to_edit": 2 if complexity != "low" else 1,
+            "requires_ceraxia_replan_when": [
+                "needed source edits exceed max_source_files_to_edit",
+                "test edits are needed but were not explicitly requested by the user",
+                "new public contract breakage appears outside the planned impact surfaces",
+            ],
+        },
         "orchestration_notes": [
             "run repository survey before source mutation",
             "preserve planning packet and implementation brief in the final package",

@@ -149,6 +149,13 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief execution_forecast.complexity is required")
     if not isinstance(forecast.get("expected_code_brigade_iterations"), int) or forecast.get("expected_code_brigade_iterations", 0) < 1:
         problems.append("brief execution_forecast.expected_code_brigade_iterations is required")
+    scope_budget = forecast.get("scope_budget") if isinstance(forecast.get("scope_budget"), dict) else {}
+    if not isinstance(scope_budget.get("max_source_files_to_edit"), int) or scope_budget.get("max_source_files_to_edit", 0) < 1:
+        problems.append("brief execution_forecast.scope_budget.max_source_files_to_edit is required")
+    if scope_budget.get("max_test_files_to_edit_without_explicit_user_request") != 0:
+        problems.append("brief execution_forecast.scope_budget must forbid unrequested test edits")
+    if not isinstance(scope_budget.get("requires_ceraxia_replan_when"), list) or not scope_budget.get("requires_ceraxia_replan_when"):
+        problems.append("brief execution_forecast.scope_budget replan triggers are required")
     execution_intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
     if execution_intent.get("kind") != "ceraxia_code_brigade_execution_intent":
         problems.append("brief execution_intent kind is required")

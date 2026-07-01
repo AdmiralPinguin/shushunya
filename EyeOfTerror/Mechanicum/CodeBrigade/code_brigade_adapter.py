@@ -75,6 +75,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "execution_complexity": forecast.get("complexity", ""),
         "expected_code_brigade_iterations": forecast.get("expected_code_brigade_iterations", 0),
         "recommended_timeout_minutes": forecast.get("recommended_timeout_minutes", 0),
+        "scope_budget": forecast.get("scope_budget", {}) if isinstance(forecast.get("scope_budget"), dict) else {},
         "escalation_triggers": forecast.get("escalation_triggers", []) if isinstance(forecast.get("escalation_triggers"), list) else [],
         "execution_intent": execution_intent,
         "mutation_preconditions": blueprint.get("mutation_preconditions", []) if isinstance(blueprint.get("mutation_preconditions"), list) else [],

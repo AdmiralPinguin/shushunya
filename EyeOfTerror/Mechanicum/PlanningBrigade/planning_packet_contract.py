@@ -121,6 +121,13 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("execution forecast must include complexity")
     if not isinstance(forecast.get("expected_code_brigade_iterations"), int) or forecast.get("expected_code_brigade_iterations", 0) < 1:
         problems.append("execution forecast must include expected_code_brigade_iterations")
+    scope_budget = forecast.get("scope_budget") if isinstance(forecast.get("scope_budget"), dict) else {}
+    if not isinstance(scope_budget.get("max_source_files_to_edit"), int) or scope_budget.get("max_source_files_to_edit", 0) < 1:
+        problems.append("execution forecast must include scope_budget.max_source_files_to_edit")
+    if scope_budget.get("max_test_files_to_edit_without_explicit_user_request") != 0:
+        problems.append("execution forecast must forbid unrequested test edits")
+    if not isinstance(scope_budget.get("requires_ceraxia_replan_when"), list) or not scope_budget.get("requires_ceraxia_replan_when"):
+        problems.append("execution forecast must include scope budget replan triggers")
 
     expert_plan = object_field(packet, "expert_quality_plan")
     if expert_plan.get("level") not in {"standard", "expert"}:

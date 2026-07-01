@@ -87,6 +87,8 @@ def main() -> int:
         or not any(row["surface"] == "security_boundary" and "security_boundary_package" in row["package_ids"] for row in security_packet["surface_package_matrix"]["rows"])
         or security_packet["execution_forecast"]["complexity"] != "high"
         or security_packet["execution_forecast"]["expected_code_brigade_iterations"] < 4
+        or security_packet["execution_forecast"]["scope_budget"]["max_source_files_to_edit"] < 4
+        or security_packet["execution_forecast"]["scope_budget"]["max_test_files_to_edit_without_explicit_user_request"] != 0
         or security_packet["expert_quality_plan"]["level"] != "expert"
         or security_packet["expert_quality_plan"]["required_for_expert_gate"] is not True
         or "negative boundary evidence proves the bypass is closed" not in security_packet["expert_quality_plan"]["review_checklist"]
@@ -110,6 +112,8 @@ def main() -> int:
         raise AssertionError(f"selected security strategy must be preferred: {security_packet}")
     if not any(item["risk"] == "missing_negative_boundary_test" for item in security_packet["risk_register"]["risks"]):
         raise AssertionError(f"risk register must reject missing negative tests: {security_packet}")
+    if "test edits are needed but were not explicitly requested by the user" not in security_packet["execution_forecast"]["scope_budget"]["requires_ceraxia_replan_when"]:
+        raise AssertionError(f"scope budget must force replan before unrequested test edits: {security_packet}")
 
     migration_packet = planning_brigade.build_planning_packet(
         {

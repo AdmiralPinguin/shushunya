@@ -231,6 +231,15 @@ def valid_brief() -> dict:
             "complexity": "medium",
             "expected_code_brigade_iterations": 2,
             "recommended_timeout_minutes": 30,
+            "scope_budget": {
+                "max_source_files_to_edit": 4,
+                "max_test_files_to_edit_without_explicit_user_request": 0,
+                "max_docs_files_to_edit": 2,
+                "requires_ceraxia_replan_when": [
+                    "needed source edits exceed max_source_files_to_edit",
+                    "test edits are needed but were not explicitly requested by the user",
+                ],
+            },
             "escalation_triggers": ["verification fails twice on the same behavior"],
         },
         "execution_intent": {
@@ -325,6 +334,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve impacted surfaces: {plan}")
     if plan["execution_complexity"] != "medium" or plan["expected_code_brigade_iterations"] != 2:
         raise AssertionError(f"implementation plan should preserve execution forecast: {plan}")
+    if plan["scope_budget"]["max_test_files_to_edit_without_explicit_user_request"] != 0:
+        raise AssertionError(f"implementation plan should forbid unrequested test edits: {plan}")
     if plan["execution_intent"]["required_next_adapter"] != "autonomous CodeBrigade source-edit adapter":
         raise AssertionError(f"implementation plan should preserve execution intent: {plan}")
     if "execution preflight passes" not in plan["mutation_preconditions"]:
@@ -586,6 +597,15 @@ def main() -> int:
     missing_forecast_report = code_brigade_adapter.build_worker_report(missing_forecast, dry_run=True)
     if missing_forecast_report["status"] != "blocked" or not any("execution_forecast" in item for item in missing_forecast_report["validation_problems"]):
         raise AssertionError(f"missing execution forecast should be blocked: {missing_forecast_report}")
+    weak_scope_budget = valid_brief()
+    weak_scope_budget["execution_forecast"]["scope_budget"] = {
+        "max_source_files_to_edit": 4,
+        "max_test_files_to_edit_without_explicit_user_request": 1,
+        "requires_ceraxia_replan_when": [],
+    }
+    weak_scope_budget_report = code_brigade_adapter.build_worker_report(weak_scope_budget, dry_run=True)
+    if weak_scope_budget_report["status"] != "blocked" or not any("scope_budget" in item for item in weak_scope_budget_report["validation_problems"]):
+        raise AssertionError(f"weak scope budget should be blocked: {weak_scope_budget_report}")
     missing_work_packages = valid_brief()
     missing_work_packages["implementation_work_packages"] = {"packages": []}
     missing_work_packages_report = code_brigade_adapter.build_worker_report(missing_work_packages, dry_run=True)
