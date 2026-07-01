@@ -131,6 +131,20 @@ def main() -> int:
         unsafe_test_preflight = build_execution_preflight(unsafe_test_brief)
         if unsafe_test_preflight["ok"] or unsafe_test_preflight["unsafe_test_files"] != ["/tmp/test_app.py"]:
             raise AssertionError(f"preflight should block unsafe test paths: {unsafe_test_preflight}")
+        Path(tmp, "linked_app.py").symlink_to(Path(tmp, "app.py"))
+        symlink_candidate_brief = valid_brief()
+        symlink_candidate_brief["repo_path"] = tmp
+        symlink_candidate_brief["repo_survey_evidence"]["candidate_files"] = ["linked_app.py"]
+        symlink_candidate_preflight = build_execution_preflight(symlink_candidate_brief)
+        if symlink_candidate_preflight["ok"] or symlink_candidate_preflight["symlink_candidate_files"] != ["linked_app.py"]:
+            raise AssertionError(f"preflight should block symlink candidate paths: {symlink_candidate_preflight}")
+        Path(tmp, "linked_test_app.py").symlink_to(Path(tmp, "test_app.py"))
+        symlink_test_brief = valid_brief()
+        symlink_test_brief["repo_path"] = tmp
+        symlink_test_brief["repo_survey_evidence"]["test_files"] = ["linked_test_app.py"]
+        symlink_test_preflight = build_execution_preflight(symlink_test_brief)
+        if symlink_test_preflight["ok"] or symlink_test_preflight["symlink_test_files"] != ["linked_test_app.py"]:
+            raise AssertionError(f"preflight should block symlink test paths: {symlink_test_preflight}")
     invalid = valid_brief()
     invalid.pop("allowed_scope")
     invalid_report = code_brigade_adapter.build_worker_report(invalid, dry_run=True)

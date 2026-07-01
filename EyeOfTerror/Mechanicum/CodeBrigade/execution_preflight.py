@@ -26,17 +26,23 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
     unsafe_candidate_files = [str(path) for path in candidate_files if not is_repo_relative_path(path)]
     safe_test_files = [path for path in test_files if is_repo_relative_path(path)]
     unsafe_test_files = [str(path) for path in test_files if not is_repo_relative_path(path)]
+    symlink_candidate_files = [
+        path for path in safe_candidate_files if (repo_path / path).is_symlink()
+    ]
+    symlink_test_files = [
+        path for path in safe_test_files if (repo_path / path).is_symlink()
+    ]
     existing_candidate_files = [
-        path for path in safe_candidate_files if (repo_path / path).is_file()
+        path for path in safe_candidate_files if (repo_path / path).is_file() and not (repo_path / path).is_symlink()
     ]
     missing_candidate_files = [
-        path for path in safe_candidate_files if not (repo_path / path).is_file()
+        path for path in safe_candidate_files if not (repo_path / path).is_file() and not (repo_path / path).is_symlink()
     ]
     existing_test_files = [
-        path for path in safe_test_files if (repo_path / path).is_file()
+        path for path in safe_test_files if (repo_path / path).is_file() and not (repo_path / path).is_symlink()
     ]
     missing_test_files = [
-        path for path in safe_test_files if not (repo_path / path).is_file()
+        path for path in safe_test_files if not (repo_path / path).is_file() and not (repo_path / path).is_symlink()
     ]
     blockers: list[str] = []
     if not str(brief.get("repo_path") or ""):
@@ -51,10 +57,14 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
         blockers.append("repository survey has no candidate files")
     elif unsafe_candidate_files:
         blockers.append("repository survey candidate files must be repo-relative")
+    elif symlink_candidate_files:
+        blockers.append("repository survey candidate files must not be symlinks")
     elif missing_candidate_files:
         blockers.append("repository survey candidate files are missing")
     if unsafe_test_files:
         blockers.append("repository survey test files must be repo-relative")
+    if symlink_test_files:
+        blockers.append("repository survey test files must not be symlinks")
     if missing_test_files:
         blockers.append("repository survey test files are missing")
     if not targeted_commands and not suggested_commands:
@@ -69,10 +79,12 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
         "existing_candidate_file_count": len(existing_candidate_files),
         "missing_candidate_files": missing_candidate_files[:20],
         "unsafe_candidate_files": unsafe_candidate_files[:20],
+        "symlink_candidate_files": symlink_candidate_files[:20],
         "test_file_count": len(test_files),
         "existing_test_file_count": len(existing_test_files),
         "missing_test_files": missing_test_files[:20],
         "unsafe_test_files": unsafe_test_files[:20],
+        "symlink_test_files": symlink_test_files[:20],
         "targeted_command_count": len(targeted_commands),
         "suggested_command_count": len(suggested_commands),
         "blockers": blockers,
