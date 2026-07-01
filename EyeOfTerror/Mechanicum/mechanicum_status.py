@@ -65,7 +65,7 @@ COMPONENTS = {
             "verification_execution.schema.json",
             "self_test.py",
         ],
-        "maturity": "handoff_with_read_order_preflight_explicit_text_and_ast_patch_adapter_package_statuses_and_allowlisted_verification",
+        "maturity": "handoff_with_read_order_preflight_explicit_text_ast_and_guarded_natural_language_patch_adapter_package_statuses_and_allowlisted_verification",
     },
 }
 
@@ -73,8 +73,8 @@ COMPONENTS = {
 ROADMAP = [
     {
         "priority": 1,
-        "item": "expand CodeBrigade execution beyond explicit CERAXIA_PATCH",
-        "reason": "CodeBrigade can now apply explicit text and AST return-expression patch operations after preflight, but natural-language patch planning and broader safe mutation are still blocked.",
+        "item": "expand CodeBrigade from guarded inference to diagnostic autonomous source edits",
+        "reason": "CodeBrigade can now apply explicit patch operations and two guarded natural-language single-file operations after preflight, but broader mutation still needs diagnostics, source evidence, verification feedback, and refusal controls before execution.",
         "owner": "CodeBrigade",
     },
     {

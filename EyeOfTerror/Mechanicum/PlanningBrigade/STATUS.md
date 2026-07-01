@@ -46,6 +46,6 @@ Next useful upgrades:
 - add richer multi-language dependency graphs
 - teach review gates to compare executed command output with each impacted
   surface
-- expand CodeBrigade from explicit patch operations toward safe
-  natural-language patch planning behind the existing preflight, verification,
-  rollback, and audit contracts
+- expand CodeBrigade from explicit and guarded natural-language patch
+  operations toward diagnostic autonomous source edits behind the existing
+  preflight, verification, rollback, and audit contracts

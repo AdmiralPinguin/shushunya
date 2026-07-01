@@ -30,14 +30,16 @@ Workers return `worker_report.json` using
 `code_brigade_contract.schema.json`. `code_brigade_adapter.py` is the current
 local adapter: it validates the implementation brief and can acknowledge a
 dry-run handoff. Real source execution is intentionally narrow: only explicit
-`CERAXIA_PATCH` operations against surveyed repo-relative files may pass.
+`CERAXIA_PATCH` operations and guarded natural-language single-file operations
+against surveyed repo-relative files may pass.
 `implementation_brief_contract.py` owns brief validation shared by the report
 adapter and execution adapter.
 `execution_adapter.py` is that boundary today. It applies explicit
-`CERAXIA_PATCH` `replace`, `replace_return_expression`, and guarded
-`write_file` operations only after brief validation and read-only preflight;
-tasks without that marker still return a formal `code_brigade_execution_result`
-blocker.
+`CERAXIA_PATCH` `replace`, `replace_return_expression`, `write_file`, and
+`create_file` operations, plus guarded natural-language simple replace and
+Python add-function operations, only after brief validation and read-only
+preflight. Ambiguous tasks still return a formal
+`code_brigade_execution_result` blocker.
 `execution_contract.py` owns the formal execution result builders so the
 execution boundary does not depend on the full worker-report adapter.
 `execution_preflight.py` performs read-only mutation preflight checks for the
