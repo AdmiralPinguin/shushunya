@@ -15,7 +15,7 @@ from ceraxia_field_trial_runner import (
     honest_evidence_summary,
     resolve_run_storage,
 )
-from ceraxia_field_trial_auto_review import senior_evidence_signals
+from ceraxia_field_trial_auto_review import repair_evidence_signals, senior_evidence_signals
 
 
 WARMASTER_ROOT = Path(__file__).resolve().parent
@@ -238,6 +238,8 @@ def main() -> int:
         "ceraxia-expert-unshaped-design-choice",
         "ceraxia-expert-unshaped-pytest-runtime",
         "ceraxia-expert-unshaped-runtime-alias",
+        "ceraxia-expert-unshaped-self-repair-batch-limit",
+        "ceraxia-expert-unshaped-self-repair-retention-days",
         "ceraxia-field-integration-contract",
         "ceraxia-field-large-file-restraint",
         "ceraxia-field-multifile-feature",
@@ -331,6 +333,29 @@ def main() -> int:
     unexplained_scope["diagnostics"] = {"source_path": "app/config.py"}
     if senior_evidence_signals(unexplained_scope).get("patch_scope_mapped") is True:
         raise AssertionError(f"Ceraxia senior evidence signals accepted unexplained outside scope: {senior_evidence_signals(unexplained_scope)}")
+    repair_manifest = {
+        "verification_summary": {"repair_count": 1},
+        "verification_executed": [
+            {"command": "python -m unittest tests.test_quota", "returncode": 1},
+            {"command": "python -m unittest tests.test_quota", "returncode": 0, "after_repair": True},
+        ],
+        "verification_repairs": [{"applied": True, "kind": "assertion_return_mismatch", "path": "quota.py"}],
+        "repair_loop_state": {
+            "status": "passed",
+            "failed_commands": [{"command": "python -m unittest tests.test_quota", "returncode": 1}],
+        },
+        "diagnostic_extraction": {
+            "parser_coverage": {"runtime_test_failures": 1, "runtime_minimal_patch_candidates": 1},
+            "runtime_minimal_patch_candidates": [{"kind": "replace_return_expression", "path": "quota.py"}],
+        },
+        "changed_files": [{"path": "quota.py"}],
+    }
+    if repair_evidence_signals(repair_manifest).get("complete") is not True:
+        raise AssertionError(f"Ceraxia repair evidence signals rejected complete repair loop: {repair_evidence_signals(repair_manifest)}")
+    incomplete_repair = json.loads(json.dumps(repair_manifest))
+    incomplete_repair["verification_executed"] = [{"command": "python -m unittest tests.test_quota", "returncode": 0}]
+    if repair_evidence_signals(incomplete_repair).get("complete") is True:
+        raise AssertionError(f"Ceraxia repair evidence signals accepted repair without failed/after-repair evidence: {repair_evidence_signals(incomplete_repair)}")
     with tempfile.TemporaryDirectory() as tmp:
         tmp_root = Path(tmp)
         trial_result = tmp_root / "trial_result.json"

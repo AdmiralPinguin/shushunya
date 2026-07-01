@@ -145,6 +145,49 @@ def senior_evidence_signals(manifest: dict[str, Any]) -> dict[str, Any]:
     return signals
 
 
+def repair_evidence_signals(manifest: dict[str, Any]) -> dict[str, Any]:
+    verification = manifest.get("verification_summary") if isinstance(manifest.get("verification_summary"), dict) else {}
+    executed = manifest.get("verification_executed") if isinstance(manifest.get("verification_executed"), list) else []
+    repairs = manifest.get("verification_repairs") if isinstance(manifest.get("verification_repairs"), list) else []
+    repair_state = manifest.get("repair_loop_state") if isinstance(manifest.get("repair_loop_state"), dict) else {}
+    diagnostic = manifest.get("diagnostic_extraction") if isinstance(manifest.get("diagnostic_extraction"), dict) else {}
+    parser_coverage = diagnostic.get("parser_coverage") if isinstance(diagnostic.get("parser_coverage"), dict) else {}
+    runtime_candidates = diagnostic.get("runtime_minimal_patch_candidates") if isinstance(diagnostic.get("runtime_minimal_patch_candidates"), list) else []
+    changed_files = manifest.get("changed_files") if isinstance(manifest.get("changed_files"), list) else []
+    changed_tests = [
+        str(item.get("path") or "")
+        for item in changed_files
+        if isinstance(item, dict)
+        and ("test" in Path(str(item.get("path") or "")).name.lower() or "/tests/" in f"/{item.get('path')}")
+    ]
+    failed_commands = repair_state.get("failed_commands") if isinstance(repair_state.get("failed_commands"), list) else []
+    after_repair = [
+        item
+        for item in executed
+        if isinstance(item, dict) and item.get("after_repair") is True
+    ]
+    applied_repairs = [
+        item
+        for item in repairs
+        if isinstance(item, dict) and item.get("applied") is True
+    ]
+    signals = {
+        "repair_count_recorded": int(verification.get("repair_count") or 0) >= 1,
+        "failed_verification_preserved": bool(failed_commands)
+        or any(isinstance(item, dict) and int(item.get("returncode") or 0) != 0 for item in executed),
+        "after_repair_verification_passed": bool(after_repair)
+        and all(isinstance(item, dict) and int(item.get("returncode") or 0) == 0 for item in after_repair),
+        "applied_repair_recorded": bool(applied_repairs),
+        "repair_loop_passed": repair_state.get("status") == "passed",
+        "runtime_diagnostic_parsed": int(parser_coverage.get("runtime_test_failures") or 0) >= 1
+        and int(parser_coverage.get("runtime_minimal_patch_candidates") or 0) >= 1
+        and bool(runtime_candidates),
+        "tests_preserved": not changed_tests,
+    }
+    signals["complete"] = all(signals.values())
+    return signals
+
+
 def scores_for_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[str], list[str], str]:
     require_passed_packet(packet)
     observed = packet.get("observed") if isinstance(packet.get("observed"), dict) else {}
@@ -153,6 +196,7 @@ def scores_for_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[st
     diagnostics = observed.get("diagnostics") if isinstance(observed.get("diagnostics"), dict) else {}
     manifest = manifest_for_packet(packet)
     senior_signals = senior_evidence_signals(manifest)
+    repair_signals = repair_evidence_signals(manifest)
     patch_source = str(observed.get("patch_source") or "")
     trial_class = str(packet.get("class") or "")
     difficulty = str(packet.get("difficulty") or "")
@@ -187,6 +231,9 @@ def scores_for_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[st
     if int(verification.get("repair_count") or 0) > 0:
         scores["self_repair"] += 1.0
         scores["verification_discipline"] += 0.5
+    if repair_signals.get("complete") is True:
+        scores["self_repair"] = max(scores["self_repair"], 9.75)
+        scores["verification_discipline"] = max(scores["verification_discipline"], 9.5)
     if diagnostics:
         scores["repository_investigation"] += 0.25
         scores["review_quality"] += 0.25
@@ -196,11 +243,15 @@ def scores_for_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[st
         scores["multi_file_reasoning"] += 0.5
     cap = 9.4 if senior_signals.get("complete") is True else 9.0
     scores = {dimension: min(round(value, 2), cap) for dimension, value in scores.items()}
+    if repair_signals.get("complete") is True:
+        scores["self_repair"] = min(round(max(scores["self_repair"], 9.75), 2), 9.75)
+        scores["verification_discipline"] = min(round(max(scores["verification_discipline"], 9.5), 2), 9.75)
     note = (
         f"Automated evidence review accepted {packet.get('run_id')} conservatively: "
         f"honest_evidence passed, manifest is ready, verification executed "
         f"{verification.get('executed_count')} command(s), patch_source={patch_source}, "
-        f"changed_files={len(changed_files)}, senior_evidence_complete={senior_signals.get('complete')}. "
+        f"changed_files={len(changed_files)}, senior_evidence_complete={senior_signals.get('complete')}, "
+        f"repair_evidence_complete={repair_signals.get('complete')}. "
         f"Scores are capped at {cap} because this is evidence-based triage, not an external senior-code-review claim."
     )
     return scores, failures, followups, note

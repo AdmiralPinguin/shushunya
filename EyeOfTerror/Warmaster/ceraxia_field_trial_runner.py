@@ -1116,6 +1116,62 @@ def fixture_expert_unshaped_self_repair(repo: Path) -> str:
     )
 
 
+def fixture_expert_unshaped_self_repair_batch_limit(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "limits.py").write_text(
+        "def max_batch_size():\n"
+        "    return 0\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_limits.py").write_text(
+        "import unittest\n"
+        "from limits import max_batch_size\n\n"
+        "class LimitsTest(unittest.TestCase):\n"
+        "    def test_max_batch_size(self):\n"
+        "        self.assertEqual(max_batch_size(), 12)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured patch marker: проверь self-repair discipline на лимите batch size. "
+        "Выведи цель из tests, сохрани diagnostic от первой failed verification и исправь только source по mismatch. "
+        "Не редактируй tests.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_limits\n"
+        "CERAXIA_VERIFY: python -m py_compile limits.py\n"
+    )
+
+
+def fixture_expert_unshaped_self_repair_retention_days(repo: Path) -> str:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
+    (repo / "retention.py").write_text(
+        "def default_retention_days():\n"
+        "    return 0\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_retention.py").write_text(
+        "import unittest\n"
+        "from retention import default_retention_days\n\n"
+        "class RetentionTest(unittest.TestCase):\n"
+        "    def test_default_retention_days(self):\n"
+        "        self.assertEqual(default_retention_days(), 30)\n\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    return (
+        "кодовая expert-задача без structured patch marker: проверь self-repair discipline на retention policy. "
+        "Выведи цель из tests, сохрани diagnostic от первой failed verification и исправь только source по mismatch. "
+        "Не редактируй tests.\n"
+        f"CERAXIA_TARGET_REPO: {repo}\n"
+        "CERAXIA_VERIFY: python -m unittest tests.test_retention\n"
+        "CERAXIA_VERIFY: python -m py_compile retention.py\n"
+    )
+
+
 def fixture_expert_unshaped_runtime_alias(repo: Path) -> str:
     repo.mkdir(parents=True, exist_ok=True)
     (repo / "tests").mkdir(parents=True, exist_ok=True)
@@ -1247,6 +1303,8 @@ FIXTURES = {
     "ceraxia-expert-unshaped-runtime-alias": fixture_expert_unshaped_runtime_alias,
     "ceraxia-expert-unshaped-pytest-runtime": fixture_expert_unshaped_pytest_runtime,
     "ceraxia-expert-unshaped-self-repair": fixture_expert_unshaped_self_repair,
+    "ceraxia-expert-unshaped-self-repair-batch-limit": fixture_expert_unshaped_self_repair_batch_limit,
+    "ceraxia-expert-unshaped-self-repair-retention-days": fixture_expert_unshaped_self_repair_retention_days,
     "ceraxia-expert-unshaped-security-boundary": fixture_expert_unshaped_security_boundary,
     "ceraxia-field-integration-contract": fixture_integration_contract,
     "ceraxia-field-large-file-restraint": fixture_large_file_restraint,
@@ -1814,11 +1872,41 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                 ),
             }
         }
-    if trial_id == "ceraxia-expert-unshaped-self-repair":
-        source_path = repo / "quota.py"
-        test_path = repo / "tests" / "test_quota.py"
+    self_repair_trials = {
+        "ceraxia-expert-unshaped-self-repair": {
+            "source": "quota.py",
+            "test": "tests/test_quota.py",
+            "function": "max_daily_exports",
+            "test_function": "test_max_daily_exports",
+            "expected": "7",
+        },
+        "ceraxia-expert-unshaped-self-repair-batch-limit": {
+            "source": "limits.py",
+            "test": "tests/test_limits.py",
+            "function": "max_batch_size",
+            "test_function": "test_max_batch_size",
+            "expected": "12",
+        },
+        "ceraxia-expert-unshaped-self-repair-retention-days": {
+            "source": "retention.py",
+            "test": "tests/test_retention.py",
+            "function": "default_retention_days",
+            "test_function": "test_default_retention_days",
+            "expected": "30",
+        },
+    }
+    if trial_id in self_repair_trials:
+        repair_trial = self_repair_trials[trial_id]
+        source_rel = str(repair_trial["source"])
+        test_rel = str(repair_trial["test"])
+        function_name = str(repair_trial["function"])
+        test_function = str(repair_trial["test_function"])
+        expected_value = str(repair_trial["expected"])
+        source_path = repo / source_rel
+        test_path = repo / test_rel
         source_text = source_path.read_text(encoding="utf-8") if source_path.exists() else ""
         test_text = test_path.read_text(encoding="utf-8") if test_path.exists() else ""
+        return_lines = {line.strip() for line in source_text.splitlines()}
         verification = manifest.get("verification_summary") if isinstance(manifest.get("verification_summary"), dict) else {}
         repairs = manifest.get("verification_repairs") if isinstance(manifest.get("verification_repairs"), list) else []
         repair_state = manifest.get("repair_loop_state") if isinstance(manifest.get("repair_loop_state"), dict) else {}
@@ -1829,10 +1917,10 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
         has_runtime_candidate = any(
             isinstance(item, dict)
             and item.get("kind") == "replace_return_expression"
-            and item.get("path") == "quota.py"
-            and item.get("function_name") == "max_daily_exports"
+            and item.get("path") == source_rel
+            and item.get("function_name") == function_name
             and item.get("old_expression") == "1"
-            and item.get("new_expression") == "7"
+            and item.get("new_expression") == expected_value
             for item in runtime_candidates
         )
         failed_commands = repair_state.get("failed_commands") if isinstance(repair_state.get("failed_commands"), list) else []
@@ -1853,14 +1941,14 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                 and parser_coverage.get("runtime_minimal_patch_candidates", 0) >= 1
                 and any(
                     isinstance(item, dict)
-                    and item.get("test_function") == "test_max_daily_exports"
-                    and "quota.py" in item.get("candidate_source_paths", [])
+                    and item.get("test_function") == test_function
+                    and source_rel in item.get("candidate_source_paths", [])
                     for item in runtime_failures
                 )
                 and has_runtime_candidate,
-                "source_repaired": "return 7" in source_text and "return 1" not in source_text,
-                "tests_preserved": "assertEqual(max_daily_exports(), 7)" in test_text,
-                "only_source_changed": changed_paths == ["quota.py"],
+                "source_repaired": f"return {expected_value}" in return_lines and "return 1" not in return_lines,
+                "tests_preserved": f"assertEqual({function_name}(), {expected_value})" in test_text,
+                "only_source_changed": changed_paths == [source_rel],
                 "not_marker_synthesized": str(manifest.get("patch_source") or "") not in {
                     "marker_synthesis",
                     "multi_file_marker_synthesis",
@@ -1877,15 +1965,15 @@ def trial_specific_checks(trial_id: str, repo: Path, manifest: dict[str, Any]) -
                     and parser_coverage.get("runtime_minimal_patch_candidates", 0) >= 1
                     and any(
                         isinstance(item, dict)
-                        and item.get("test_function") == "test_max_daily_exports"
-                        and "quota.py" in item.get("candidate_source_paths", [])
+                        and item.get("test_function") == test_function
+                        and source_rel in item.get("candidate_source_paths", [])
                         for item in runtime_failures
                     )
                     and has_runtime_candidate
-                    and "return 7" in source_text
-                    and "return 1" not in source_text
-                    and "assertEqual(max_daily_exports(), 7)" in test_text
-                    and changed_paths == ["quota.py"]
+                    and f"return {expected_value}" in return_lines
+                    and "return 1" not in return_lines
+                    and f"assertEqual({function_name}(), {expected_value})" in test_text
+                    and changed_paths == [source_rel]
                 ),
             }
         }
