@@ -24,7 +24,7 @@ COMPONENTS = {
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
         ],
-        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_caller_contract_evidence_generic_edges_per_surface_verification_work_package_review_and_diagnostic_repair_requests",
+        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_caller_contract_evidence_generic_edges_per_surface_verification_work_package_review_diagnostic_repair_requests_and_optional_guarded_repair_execution",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -77,7 +77,7 @@ ROADMAP = [
     {
         "priority": 1,
         "item": "expand CodeBrigade from guarded inference to diagnostic autonomous source edits",
-        "reason": "PlanningBrigade now emits a diagnostic repair plan, Ceraxia writes diagnostic repair request artifacts, and CodeBrigade validates repair intake plus executes narrow assertion-failure guarded repairs, but the broader source-edit adapter still needs to handle more diagnostic classes against repo evidence, verification feedback, scope budgets, and refusal controls.",
+        "reason": "PlanningBrigade now emits a diagnostic repair plan, Ceraxia writes diagnostic repair request artifacts and can optionally invoke the guarded repair adapter, and CodeBrigade validates repair intake plus executes narrow assertion-failure guarded repairs, but the broader source-edit adapter still needs to handle more diagnostic classes against repo evidence, verification feedback, scope budgets, and refusal controls.",
         "owner": "CodeBrigade",
     },
     {
