@@ -172,7 +172,7 @@ def generic_source_summary(path: Path, root: Path) -> dict[str, Any]:
     import_like: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped.startswith(("import ", "from ", "require(", "package ", "use ", "mod ")):
+        if stripped.startswith(("import ", "from ", "export ", "require(", "package ", "use ", "mod ")):
             import_like.append(stripped[:160])
         if len(import_like) >= 30:
             break
@@ -221,6 +221,8 @@ def relative_import_target(line: str) -> str:
     patterns = [
         r"\bfrom\s+['\"](\.[^'\"]+)['\"]",
         r"\bimport\s+[^'\"]+\s+from\s+['\"](\.[^'\"]+)['\"]",
+        r"\bimport\s+['\"](\.[^'\"]+)['\"]",
+        r"\bexport\s+[^'\"]+\s+from\s+['\"](\.[^'\"]+)['\"]",
         r"\bimport\s*\(\s*['\"](\.[^'\"]+)['\"]\s*\)",
         r"\brequire\s*\(\s*['\"](\.[^'\"]+)['\"]\s*\)",
     ]
