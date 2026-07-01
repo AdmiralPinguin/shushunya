@@ -31,6 +31,7 @@ from code_brigade_adapter import build_worker_report  # noqa: E402
 from code_brigade_adapter import build_blocked_execution_result  # noqa: E402
 from execution_adapter import execute_implementation_brief  # noqa: E402
 from planning_brigade import build_planning_packet  # noqa: E402
+from planning_feedback_contract import build_planning_feedback_intake  # noqa: E402
 
 
 def load_schema(path: Path) -> dict:
@@ -151,6 +152,7 @@ def assert_execution_policy_matches_result_schema() -> None:
 def assert_contract_version_consts() -> None:
     schema_paths = [
         ROOT / "PlanningBrigade" / "planning_contract.schema.json",
+        ROOT / "PlanningBrigade" / "planning_feedback_intake.schema.json",
         ROOT / "Ceraxia" / "contracts" / "implementation_brief.schema.json",
         ROOT / "Ceraxia" / "contracts" / "diagnostic_repair_request.schema.json",
         ROOT / "Ceraxia" / "contracts" / "planning_feedback_request.schema.json",
@@ -226,6 +228,12 @@ def main() -> int:
         load_schema(ROOT / "Ceraxia" / "contracts" / "planning_feedback_request.schema.json"),
         planning_feedback_request,
         "planning feedback request",
+    )
+    planning_feedback_intake = build_planning_feedback_intake(planning_feedback_request)
+    assert_schema_subset(
+        load_schema(ROOT / "PlanningBrigade" / "planning_feedback_intake.schema.json"),
+        planning_feedback_intake,
+        "planning feedback intake",
     )
     status = {"state": "finalized"}
     readiness = build_execution_readiness(status, brief, worker_report, verification, review, dry_run=True)

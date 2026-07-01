@@ -28,6 +28,8 @@ import the contract gate without coupling review logic to packet generation.
 validates `planning_feedback_request.json` and turns review findings into a
 PlanningBrigade replan checklist plus a `replan_payload` suitable for rebuilding
 the packet, then hands authority back to Ceraxia.
+`planning_feedback_intake.schema.json` fixes that reverse-intake output shape
+for orchestration and regression tests.
 
 Current contract:
 
