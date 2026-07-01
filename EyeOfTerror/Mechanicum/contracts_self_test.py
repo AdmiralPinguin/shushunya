@@ -198,6 +198,9 @@ def main() -> int:
         verification_policy,
         "verification policy",
     )
+    output_contract = verification_policy.get("output_contract")
+    if output_contract != "verification_execution.schema.json" or not (ROOT / "CodeBrigade" / str(output_contract)).is_file():
+        raise AssertionError(f"verification policy output_contract is invalid: {verification_policy}")
     assert_schema_subset(
         load_schema(ROOT / "CodeBrigade" / "verification_execution.schema.json"),
         verification["verification_execution"],
