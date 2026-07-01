@@ -29,6 +29,7 @@
     "code_brigade_execution_policy_status",
     "code_brigade_execution_intent_mode",
     "code_brigade_execution_real_supported",
+    "code_brigade_autonomous_execution_request_status",
     "code_brigade_execution_result_status",
     "code_brigade_execution_preflight_ok",
     "code_brigade_execution_preflight_blocker_count",
@@ -133,6 +134,9 @@
     },
     "code_brigade_execution_real_supported": {
       "type": "boolean"
+    },
+    "code_brigade_autonomous_execution_request_status": {
+      "type": "string"
     },
     "code_brigade_execution_result_status": {
       "type": "string"

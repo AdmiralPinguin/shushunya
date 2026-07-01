@@ -548,6 +548,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     worker_report = artifacts.get("worker_report", {}) if isinstance(artifacts.get("worker_report"), dict) else {}
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
+    autonomous_request = worker_report.get("autonomous_execution_request") if isinstance(worker_report.get("autonomous_execution_request"), dict) else {}
     package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
     package_status_counts = {
         status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
@@ -604,6 +605,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Execution policy status: {worker_report.get('execution_policy_status', '')}",
         f"Execution result status: {execution_result.get('status', '')}",
         f"Execution preflight ok: {preflight.get('ok') if preflight else 'n/a'}",
+        f"Autonomous execution request: {autonomous_request.get('status', '')}",
         f"Execution intent: {execution_intent.get('mode', '')}",
         f"Execution adapter capability: {execution_intent.get('adapter_capability', '')}",
         f"Scope budget source files: {scope_budget.get('max_source_files_to_edit', 0)}",
@@ -760,6 +762,9 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": "run_summary code_brigade_execution_result_status disagrees with worker_report.json"})
     if summary.get("code_brigade_execution_intent_mode", "") != worker_report.get("execution_intent", {}).get("mode", ""):
         findings.append({"severity": "blocker", "finding": "run_summary code_brigade_execution_intent_mode disagrees with worker_report.json"})
+    autonomous_request = worker_report.get("autonomous_execution_request") if isinstance(worker_report.get("autonomous_execution_request"), dict) else {}
+    if summary.get("code_brigade_autonomous_execution_request_status", "") != autonomous_request.get("status", ""):
+        findings.append({"severity": "blocker", "finding": "run_summary code_brigade_autonomous_execution_request_status disagrees with worker_report.json"})
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
     if summary.get("planning_review_decision", "") != planning_review.get("decision", ""):
         findings.append({"severity": "blocker", "finding": "run_summary planning_review_decision disagrees with implementation_brief.json"})
@@ -922,6 +927,7 @@ def build_run_summary(
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
     execution_intent = worker_report.get("execution_intent") if isinstance(worker_report.get("execution_intent"), dict) else {}
+    autonomous_request = worker_report.get("autonomous_execution_request") if isinstance(worker_report.get("autonomous_execution_request"), dict) else {}
     forecast = brief.get("execution_forecast") if isinstance(brief.get("execution_forecast"), dict) else {}
     scope_budget = forecast.get("scope_budget") if isinstance(forecast.get("scope_budget"), dict) else {}
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
@@ -973,6 +979,7 @@ def build_run_summary(
         "code_brigade_execution_policy_status": worker_report.get("execution_policy_status"),
         "code_brigade_execution_intent_mode": execution_intent.get("mode", ""),
         "code_brigade_execution_real_supported": bool(execution_intent.get("real_execution_supported")),
+        "code_brigade_autonomous_execution_request_status": autonomous_request.get("status", ""),
         "code_brigade_execution_result_status": execution_result.get("status", ""),
         "code_brigade_execution_preflight_ok": preflight.get("ok") if preflight else None,
         "code_brigade_execution_preflight_blocker_count": len(preflight.get("blockers", [])) if preflight else 0,
@@ -1009,6 +1016,7 @@ def build_evidence_matrix(
     required_evidence = quality.get("must_have_evidence") if isinstance(quality.get("must_have_evidence"), list) else []
     repo_evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
+    autonomous_request = worker_report.get("autonomous_execution_request") if isinstance(worker_report.get("autonomous_execution_request"), dict) else {}
     work_packages = implementation_plan.get("implementation_work_packages") if isinstance(implementation_plan.get("implementation_work_packages"), list) else []
     work_package_review_order = implementation_plan.get("work_package_review_order") if isinstance(implementation_plan.get("work_package_review_order"), list) else []
     surface_package_rows = implementation_plan.get("surface_package_matrix_rows") if isinstance(implementation_plan.get("surface_package_matrix_rows"), list) else []
@@ -1077,6 +1085,7 @@ def build_evidence_matrix(
             "reverse_dependency_index": implementation_plan.get("reverse_dependency_index", {}),
             "test_coverage_links": implementation_plan.get("test_coverage_links", []),
         },
+        "autonomous_execution_request": autonomous_request,
         "implementation_work_package_summary": {
             "package_count": len(work_packages),
             "review_order": work_package_review_order,

@@ -303,6 +303,10 @@ def main() -> int:
         raise AssertionError(f"dry-run worker report must expose blocked execution policy: {dry_report}")
     if dry_report["execution_intent"]["mode"] != "planning_handoff_only" or dry_report["execution_intent"]["real_execution_supported"]:
         raise AssertionError(f"dry-run unshaped worker report should expose planning-only execution intent: {dry_report}")
+    if dry_report["autonomous_execution_request"]["status"] != "required":
+        raise AssertionError(f"dry-run unshaped worker report should prepare autonomous execution request: {dry_report}")
+    if dry_report["autonomous_execution_request"]["scope_budget"]["max_test_files_to_edit_without_explicit_user_request"] != 0:
+        raise AssertionError(f"autonomous request should preserve scope budget: {dry_report}")
     if not dry_report["work_package_statuses"] or any(item["status"] != "planned" for item in dry_report["work_package_statuses"]):
         raise AssertionError(f"dry-run worker report should mark work packages planned: {dry_report}")
     plan = dry_report["implementation_plan"]
@@ -425,6 +429,8 @@ def main() -> int:
             raise AssertionError(f"explicit patch execution should report implemented changed files: {patch_report}")
         if patch_report["execution_intent"]["mode"] != "explicit_patch_execution" or not patch_report["execution_intent"]["real_execution_supported"]:
             raise AssertionError(f"explicit patch execution should expose executable intent: {patch_report}")
+        if patch_report["autonomous_execution_request"]["status"] != "not_required":
+            raise AssertionError(f"explicit patch execution should not request autonomous adapter: {patch_report}")
         if not patch_report["work_package_statuses"] or any(item["status"] != "implemented" for item in patch_report["work_package_statuses"]):
             raise AssertionError(f"implemented patch should mark work packages implemented: {patch_report}")
         if patch_report["execution_result"]["status"] != "implemented":

@@ -111,10 +111,52 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_autonomous_execution_request(brief: dict[str, Any], implementation_plan: dict[str, Any]) -> dict[str, Any]:
+    execution_intent = brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {}
+    return {
+        "kind": "code_brigade_autonomous_execution_request",
+        "contract_version": CONTRACT_VERSION,
+        "status": "required" if execution_intent.get("real_execution_supported") is False else "not_required",
+        "target_adapter": "autonomous CodeBrigade source-edit adapter",
+        "repo_path": brief.get("repo_path", ""),
+        "task": brief.get("task", ""),
+        "reason": "unshaped task has no explicit CERAXIA_PATCH payload",
+        "scope_budget": implementation_plan.get("scope_budget", {}),
+        "target_files_to_inspect": implementation_plan.get("target_files_to_inspect", []),
+        "test_files_to_preserve": implementation_plan.get("test_files_to_preserve", []),
+        "recommended_read_order": implementation_plan.get("recommended_read_order", []),
+        "reverse_dependency_index": implementation_plan.get("reverse_dependency_index", {}),
+        "test_coverage_links": implementation_plan.get("test_coverage_links", []),
+        "verification_commands": implementation_plan.get("verification_commands", []),
+        "acceptance_evidence_required": implementation_plan.get("acceptance_evidence_required", []),
+        "refusal_conditions": implementation_plan.get("refusal_conditions", []),
+        "return_contract": [
+            "patch_manifest.json with changed files and rationale",
+            "verification_report.json with executed, failed, skipped, or blocked commands",
+            "worker_report.json with package statuses and blockers",
+        ],
+    }
+
+
 def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     validation_problems = validate_implementation_brief(brief)
     implementation_plan = build_implementation_plan(brief)
     execution_intent = dict(brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {})
+    if "CERAXIA_PATCH:" in str(brief.get("task") or ""):
+        intent_blockers = execution_intent.get("blockers") if isinstance(execution_intent.get("blockers"), list) else []
+        execution_intent.update(
+            {
+                "mode": "explicit_patch_execution",
+                "explicit_patch_present": True,
+                "real_execution_supported": True,
+                "required_next_adapter": "",
+                "blockers": [
+                    blocker
+                    for blocker in intent_blockers
+                    if "unshaped source mutation" not in str(blocker)
+                ],
+            }
+        )
     execution_intent["dry_run_requested"] = dry_run
     if dry_run and "dry run requested; source mutation is intentionally skipped" not in execution_intent.get("blockers", []):
         blockers = execution_intent.get("blockers") if isinstance(execution_intent.get("blockers"), list) else []
@@ -169,6 +211,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "dry_run": dry_run,
         "changed_files": changed_files,
         "execution_intent": execution_intent,
+        "autonomous_execution_request": build_autonomous_execution_request(brief, implementation_plan),
         "implementation_plan": implementation_plan,
         "work_package_statuses": package_statuses,
         "execution_policy_status": REAL_EXECUTION_STATUS if dry_run or status == "blocked" else "real_execution_adapter_active",
