@@ -45,6 +45,7 @@ COMPONENTS = {
             "README.md",
             "code_brigade_contract.schema.json",
             "code_brigade_adapter.py",
+            "execution_result.schema.json",
             "execution_policy.json",
             "verification_adapter.py",
             "self_test.py",

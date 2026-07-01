@@ -120,6 +120,21 @@ def main() -> int:
     code_schema = ROOT / "CodeBrigade" / "code_brigade_contract.schema.json"
     assert_schema_subset(load_schema(code_schema), worker_report, "worker report")
     assert_nested_required(code_schema, worker_report, "implementation_plan", "worker report")
+    blocked_execution_result = {
+        "kind": "code_brigade_execution_result",
+        "contract_version": "eye-mechanicum.v1",
+        "status": "blocked",
+        "changed_files": [],
+        "patch_summary": "",
+        "verification_commands_executed": [],
+        "blockers": ["real CodeBrigade execution adapter is not configured"],
+        "rollback_notes": "",
+    }
+    assert_schema_subset(
+        load_schema(ROOT / "CodeBrigade" / "execution_result.schema.json"),
+        blocked_execution_result,
+        "execution result",
+    )
     verification = build_verification_report(brief, worker_report)
     review = review_gate(packet, brief, worker_report, verification)
     status = {"state": "finalized"}

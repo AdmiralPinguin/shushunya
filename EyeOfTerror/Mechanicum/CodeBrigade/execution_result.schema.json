@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodeBrigade Real Execution Result",
+  "type": "object",
+  "required": [
+    "kind",
+    "contract_version",
+    "status",
+    "changed_files",
+    "patch_summary",
+    "verification_commands_executed",
+    "blockers",
+    "rollback_notes"
+  ],
+  "properties": {
+    "kind": {
+      "const": "code_brigade_execution_result"
+    },
+    "contract_version": {
+      "const": "eye-mechanicum.v1"
+    },
+    "status": {
+      "enum": ["implemented", "blocked", "rolled_back"]
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "patch_summary": {
+      "type": "string"
+    },
+    "verification_commands_executed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "rollback_notes": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}
