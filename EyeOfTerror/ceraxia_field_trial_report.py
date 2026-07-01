@@ -118,7 +118,9 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     entries = [item for item in ledger.get("entries", []) if isinstance(item, dict)]
     accepted = [item for item in entries if item.get("accepted_for_rolling_score") is True]
     scores_by_dimension: dict[str, list[float]] = {dimension: [] for dimension in dimensions}
+    honest_scores_by_dimension: dict[str, list[float]] = {dimension: [] for dimension in dimensions}
     expert_scores_by_dimension: dict[str, list[float]] = {dimension: [] for dimension in dimensions}
+    honest_expert_scores_by_dimension: dict[str, list[float]] = {dimension: [] for dimension in dimensions}
     low_score_entries: dict[str, list[dict[str, Any]]] = {dimension: [] for dimension in dimensions}
     classes: set[str] = set()
     expert_classes: set[str] = set()
@@ -135,8 +137,9 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
         trial = trial_by_id.get(str(entry.get("trial_id") or ""), {})
         run_id = str(entry.get("run_id") or "")
         honest_status = honest_evidence_status(entry)
+        honest_passed = honest_status.get("passed") is True
         honest_evidence_by_run[run_id] = honest_status
-        if not honest_status.get("passed"):
+        if not honest_passed:
             accepted_legacy_without_honest_evidence.append(
                 {
                     "trial_id": str(entry.get("trial_id") or ""),
@@ -152,11 +155,11 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
                 expert_classes.add(str(trial.get("class")))
         if trial.get("difficulty") == "expert":
             expert_entries.append(entry)
-            if honest_status.get("passed"):
+            if honest_passed:
                 honest_expert_entries.append(entry)
             if str(entry.get("trial_id") or "").startswith("ceraxia-expert-unshaped-"):
                 unshaped_expert_entries.append(entry)
-                if honest_status.get("passed"):
+                if honest_passed:
                     honest_unshaped_expert_entries.append(entry)
         applicable = trial.get("applicable_dimensions")
         applicable_dimensions = (
@@ -171,8 +174,12 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
             value = scores.get(dimension)
             if isinstance(value, (int, float)):
                 scores_by_dimension[dimension].append(float(value))
+                if honest_passed:
+                    honest_scores_by_dimension[dimension].append(float(value))
                 if trial.get("difficulty") == "expert":
                     expert_scores_by_dimension[dimension].append(float(value))
+                    if honest_passed:
+                        honest_expert_scores_by_dimension[dimension].append(float(value))
                 if float(value) < dimension_min:
                     low_score_entries[dimension].append(
                         {
@@ -192,6 +199,14 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
         dimension: average(values)
         for dimension, values in expert_scores_by_dimension.items()
     }
+    honest_dimension_averages = {
+        dimension: average(values)
+        for dimension, values in honest_scores_by_dimension.items()
+    }
+    honest_expert_dimension_averages = {
+        dimension: average(values)
+        for dimension, values in honest_expert_scores_by_dimension.items()
+    }
     dimension_sample_counts = {
         dimension: len(values)
         for dimension, values in scores_by_dimension.items()
@@ -200,19 +215,38 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
         dimension: len(values)
         for dimension, values in expert_scores_by_dimension.items()
     }
+    honest_dimension_sample_counts = {
+        dimension: len(values)
+        for dimension, values in honest_scores_by_dimension.items()
+    }
+    honest_expert_dimension_sample_counts = {
+        dimension: len(values)
+        for dimension, values in honest_expert_scores_by_dimension.items()
+    }
     overall = average(list(dimension_averages.values())) if dimension_averages else 0.0
     expert_overall = average(list(expert_dimension_averages.values())) if expert_dimension_averages else 0.0
+    honest_overall = average(list(honest_dimension_averages.values())) if honest_dimension_averages else 0.0
+    honest_expert_overall = average(list(honest_expert_dimension_averages.values())) if honest_expert_dimension_averages else 0.0
     enough_trials = len(accepted) >= int(target.get("minimum_representative_trials") or 0)
     enough_dimensions = all(value >= dimension_min for value in dimension_averages.values())
     enough_dimension_samples = all(count >= dimension_sample_min for count in dimension_sample_counts.values())
     enough_overall = overall >= float(target.get("rolling_average_min") or 0)
     enough_honest_trials = len(honest_entries) >= int(target.get("minimum_representative_trials") or 0)
+    enough_honest_dimensions = all(value >= dimension_min for value in honest_dimension_averages.values())
+    enough_honest_dimension_samples = all(count >= dimension_sample_min for count in honest_dimension_sample_counts.values())
+    enough_honest_overall = honest_overall >= float(target.get("rolling_average_min") or 0)
     legacy_score_target_met = bool(enough_trials and enough_dimensions and enough_dimension_samples and enough_overall)
-    target_met = bool(legacy_score_target_met and enough_honest_trials)
+    target_met = bool(
+        enough_honest_trials
+        and enough_honest_dimensions
+        and enough_honest_dimension_samples
+        and enough_honest_overall
+    )
     expert_dimension_min = float(expert_target.get("dimension_average_min") or 0)
     expert_sample_min = int(expert_target.get("dimension_sample_min") or 0)
     expert_entry_min = float(expert_target.get("minimum_entry_score") or 0)
     expert_low_entry_scores: dict[str, list[dict[str, Any]]] = {dimension: [] for dimension in dimensions}
+    honest_expert_low_entry_scores: dict[str, list[dict[str, Any]]] = {dimension: [] for dimension in dimensions}
     if expert_entry_min:
         for entry in expert_entries:
             trial = trial_by_id.get(str(entry.get("trial_id") or ""), {})
@@ -237,6 +271,29 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
                             "score": float(value),
                         }
                     )
+        for entry in honest_expert_entries:
+            trial = trial_by_id.get(str(entry.get("trial_id") or ""), {})
+            applicable = trial.get("applicable_dimensions")
+            applicable_dimensions = (
+                {str(item) for item in applicable}
+                if isinstance(applicable, list) and applicable
+                else set(dimensions)
+            )
+            scores = entry.get("scores") if isinstance(entry.get("scores"), dict) else {}
+            for dimension in dimensions:
+                if dimension not in applicable_dimensions:
+                    continue
+                value = scores.get(dimension)
+                if isinstance(value, (int, float)) and float(value) < expert_entry_min:
+                    honest_expert_low_entry_scores[dimension].append(
+                        {
+                            "trial_id": entry.get("trial_id", ""),
+                            "run_id": entry.get("run_id", ""),
+                            "class": trial.get("class", ""),
+                            "difficulty": trial.get("difficulty", ""),
+                            "score": float(value),
+                        }
+                    )
     enough_expert_trials = len(expert_entries) >= int(expert_target.get("minimum_expert_trials") or 0)
     enough_honest_expert_trials = len(honest_expert_entries) >= int(expert_target.get("minimum_expert_trials") or 0)
     enough_expert_classes = len(expert_classes) >= int(expert_target.get("minimum_expert_classes") or 0)
@@ -245,18 +302,20 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     enough_expert_dimensions = all(value >= expert_dimension_min for value in expert_dimension_averages.values())
     enough_expert_samples = all(count >= expert_sample_min for count in expert_dimension_sample_counts.values())
     enough_expert_overall = expert_overall >= float(expert_target.get("rolling_average_min") or 0)
+    enough_honest_expert_dimensions = all(value >= expert_dimension_min for value in honest_expert_dimension_averages.values())
+    enough_honest_expert_samples = all(count >= expert_sample_min for count in honest_expert_dimension_sample_counts.values())
+    enough_honest_expert_overall = honest_expert_overall >= float(expert_target.get("rolling_average_min") or 0)
     enough_expert_entry_scores = not any(expert_low_entry_scores.values())
+    enough_honest_expert_entry_scores = not any(honest_expert_low_entry_scores.values())
     expert_target_met = bool(
         expert_target
-        and enough_expert_trials
         and enough_honest_expert_trials
         and enough_expert_classes
-        and enough_unshaped_expert_trials
         and enough_honest_unshaped_expert_trials
-        and enough_expert_dimensions
-        and enough_expert_samples
-        and enough_expert_overall
-        and enough_expert_entry_scores
+        and enough_honest_expert_dimensions
+        and enough_honest_expert_samples
+        and enough_honest_expert_overall
+        and enough_honest_expert_entry_scores
     )
     return {
         "target_met": target_met,
@@ -264,10 +323,16 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
         "expert_target_met": expert_target_met,
         "overall_score": overall,
         "expert_overall_score": expert_overall,
+        "honest_overall_score": honest_overall,
+        "honest_expert_overall_score": honest_expert_overall,
         "dimension_averages": dimension_averages,
         "expert_dimension_averages": expert_dimension_averages,
+        "honest_dimension_averages": honest_dimension_averages,
+        "honest_expert_dimension_averages": honest_expert_dimension_averages,
         "dimension_sample_counts": dimension_sample_counts,
         "expert_dimension_sample_counts": expert_dimension_sample_counts,
+        "honest_dimension_sample_counts": honest_dimension_sample_counts,
+        "honest_expert_dimension_sample_counts": honest_expert_dimension_sample_counts,
         "accepted_trial_count": len(accepted),
         "accepted_honest_evidence_count": sum(
             1 for status in honest_evidence_by_run.values() if status.get("passed")
@@ -282,13 +347,24 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
             "needs_more_accepted_trials": not enough_trials,
             "honest_trial_count": len(honest_entries),
             "needs_more_honest_evidence": not enough_honest_trials,
-            "needs_higher_overall": not enough_overall,
+            "needs_higher_overall": not enough_honest_overall,
+            "legacy_needs_higher_overall": not enough_overall,
             "needs_more_dimension_evidence": [
+                dimension
+                for dimension, count in honest_dimension_sample_counts.items()
+                if count < dimension_sample_min
+            ],
+            "needs_higher_dimension_scores": [
+                dimension
+                for dimension, value in honest_dimension_averages.items()
+                if value < dimension_min
+            ],
+            "legacy_needs_more_dimension_evidence": [
                 dimension
                 for dimension, count in dimension_sample_counts.items()
                 if count < dimension_sample_min
             ],
-            "needs_higher_dimension_scores": [
+            "legacy_needs_higher_dimension_scores": [
                 dimension
                 for dimension, value in dimension_averages.items()
                 if value < dimension_min
@@ -302,18 +378,34 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
         "expert_gaps": {
             "needs_more_expert_trials": not enough_expert_trials,
             "needs_more_expert_classes": not enough_expert_classes,
-            "needs_higher_overall": not enough_expert_overall,
+            "needs_higher_overall": not enough_honest_expert_overall,
+            "legacy_needs_higher_overall": not enough_expert_overall,
             "needs_more_dimension_evidence": [
+                dimension
+                for dimension, count in honest_expert_dimension_sample_counts.items()
+                if count < expert_sample_min
+            ],
+            "needs_higher_dimension_scores": [
+                dimension
+                for dimension, value in honest_expert_dimension_averages.items()
+                if value < expert_dimension_min
+            ],
+            "legacy_needs_more_dimension_evidence": [
                 dimension
                 for dimension, count in expert_dimension_sample_counts.items()
                 if count < expert_sample_min
             ],
-            "needs_higher_dimension_scores": [
+            "legacy_needs_higher_dimension_scores": [
                 dimension
                 for dimension, value in expert_dimension_averages.items()
                 if value < expert_dimension_min
             ],
             "needs_higher_entry_scores": {
+                dimension: items
+                for dimension, items in honest_expert_low_entry_scores.items()
+                if items
+            },
+            "legacy_needs_higher_entry_scores": {
                 dimension: items
                 for dimension, items in expert_low_entry_scores.items()
                 if items

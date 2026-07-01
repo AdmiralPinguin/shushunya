@@ -82,21 +82,38 @@ def main() -> int:
         raise AssertionError(f"Ceraxia report must expose honest accepted evidence count: {report_payload}")
     if "legacy_score_target_met" not in report_payload:
         raise AssertionError(f"Ceraxia report must expose legacy score target separately from honest target: {report_payload}")
+    for key in {
+        "honest_overall_score",
+        "honest_dimension_averages",
+        "honest_dimension_sample_counts",
+        "honest_expert_overall_score",
+        "honest_expert_dimension_averages",
+        "honest_expert_dimension_sample_counts",
+    }:
+        if key not in report_payload:
+            raise AssertionError(f"Ceraxia report must expose honest-only metric {key}: {report_payload}")
     if not isinstance(report_payload.get("accepted_legacy_without_honest_evidence"), list):
         raise AssertionError(f"Ceraxia report must expose accepted legacy honest-evidence gaps: {report_payload}")
     if report_payload.get("target_met") is True and report_payload.get("accepted_honest_evidence_count", 0) < target.get("minimum_representative_trials", 0):
         raise AssertionError(f"Ceraxia target cannot pass without enough honest evidence: {report_payload}")
+    if report_payload.get("target_met") is True:
+        if report_payload.get("honest_overall_score", 0) < target.get("rolling_average_min", 0):
+            raise AssertionError(f"Ceraxia target cannot pass on legacy-only overall score: {report_payload}")
+        honest_counts = report_payload.get("honest_dimension_sample_counts", {})
+        honest_averages = report_payload.get("honest_dimension_averages", {})
+        if any(honest_counts.get(dimension, 0) < target.get("dimension_sample_min", 0) for dimension in dimensions):
+            raise AssertionError(f"Ceraxia target cannot pass on legacy-only dimension samples: {report_payload}")
+        if any(honest_averages.get(dimension, 0) < target.get("dimension_average_min", 0) for dimension in dimensions):
+            raise AssertionError(f"Ceraxia target cannot pass on legacy-only dimension averages: {report_payload}")
     if report_payload.get("target_met") is True and not ledger.get("entries"):
         raise AssertionError(f"empty Ceraxia ledger must not prove target completion: {report_payload}")
     if report_payload.get("expert_target_met") is True:
         expert_gaps = report_payload.get("expert_gaps", {})
         if (
-            expert_gaps.get("expert_trial_count", 0) < expert_target.get("minimum_expert_trials", 0)
-            or expert_gaps.get("honest_expert_trial_count", 0) < expert_target.get("minimum_expert_trials", 0)
+            expert_gaps.get("honest_expert_trial_count", 0) < expert_target.get("minimum_expert_trials", 0)
             or expert_gaps.get("expert_class_count", 0) < expert_target.get("minimum_expert_classes", 0)
-            or expert_gaps.get("unshaped_expert_trial_count", 0) < expert_target.get("minimum_unshaped_expert_trials", 0)
             or expert_gaps.get("honest_unshaped_expert_trial_count", 0) < expert_target.get("minimum_unshaped_expert_trials", 0)
-            or report_payload.get("expert_overall_score", 0) < expert_target.get("rolling_average_min", 0)
+            or report_payload.get("honest_expert_overall_score", 0) < expert_target.get("rolling_average_min", 0)
         ):
             raise AssertionError(f"Ceraxia expert target cannot pass without required evidence: {report_payload}")
     if report_payload.get("accepted_trial_count", 0) and report_payload.get("target_met") is not True:
@@ -108,12 +125,24 @@ def main() -> int:
     sample_counts = report_payload.get("dimension_sample_counts", {})
     if set(sample_counts) != set(dimensions):
         raise AssertionError(f"Ceraxia report must expose sample counts for every dimension: {report_payload}")
+    honest_sample_counts = report_payload.get("honest_dimension_sample_counts", {})
+    if set(honest_sample_counts) != set(dimensions):
+        raise AssertionError(f"Ceraxia report must expose honest sample counts for every dimension: {report_payload}")
     expert_sample_counts = report_payload.get("expert_dimension_sample_counts", {})
     if set(expert_sample_counts) != set(dimensions):
         raise AssertionError(f"Ceraxia report must expose expert sample counts for every dimension: {report_payload}")
+    honest_expert_sample_counts = report_payload.get("honest_expert_dimension_sample_counts", {})
+    if set(honest_expert_sample_counts) != set(dimensions):
+        raise AssertionError(f"Ceraxia report must expose honest expert sample counts for every dimension: {report_payload}")
     expert_dimension_averages = report_payload.get("expert_dimension_averages", {})
     if set(expert_dimension_averages) != set(dimensions):
         raise AssertionError(f"Ceraxia report must expose expert averages for every dimension: {report_payload}")
+    honest_dimension_averages = report_payload.get("honest_dimension_averages", {})
+    if set(honest_dimension_averages) != set(dimensions):
+        raise AssertionError(f"Ceraxia report must expose honest averages for every dimension: {report_payload}")
+    honest_expert_dimension_averages = report_payload.get("honest_expert_dimension_averages", {})
+    if set(honest_expert_dimension_averages) != set(dimensions):
+        raise AssertionError(f"Ceraxia report must expose honest expert averages for every dimension: {report_payload}")
     expert_gaps = report_payload.get("expert_gaps", {})
     for key in {
         "honest_expert_trial_count",
