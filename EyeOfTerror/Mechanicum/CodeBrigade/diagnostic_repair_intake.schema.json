@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodeBrigade Diagnostic Repair Intake",
+  "type": "object",
+  "required": [
+    "kind",
+    "contract_version",
+    "status",
+    "request_status",
+    "item_count",
+    "attempt_plan",
+    "high_priority_count",
+    "impacted_surfaces",
+    "package_ids",
+    "target_files_to_inspect",
+    "test_files_to_preserve",
+    "refusal_conditions",
+    "blockers"
+  ],
+  "properties": {
+    "kind": {
+      "const": "code_brigade_diagnostic_repair_intake"
+    },
+    "contract_version": {
+      "const": "eye-mechanicum.v1"
+    },
+    "status": {
+      "enum": ["blocked", "ready", "not_required"]
+    },
+    "request_status": {
+      "enum": ["required", "not_required", ""]
+    },
+    "item_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "attempt_plan": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "command",
+          "priority",
+          "diagnostic_signals",
+          "executor_supported",
+          "unsupported_reason",
+          "read_order",
+          "package_ids",
+          "stop_conditions",
+          "required_evidence"
+        ],
+        "properties": {
+          "attempt_id": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "diagnostic_signals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "executor_supported": {
+            "type": "boolean"
+          },
+          "unsupported_reason": {
+            "type": "string"
+          },
+          "read_order": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "package_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stop_conditions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "required_evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "high_priority_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "impacted_surfaces": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "package_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "target_files_to_inspect": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "test_files_to_preserve": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "refusal_conditions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

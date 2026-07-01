@@ -740,6 +740,10 @@ def valid_brief() -> dict:
 
 
 def main() -> int:
+    intake_schema = json.loads((Path(__file__).resolve().parent / "diagnostic_repair_intake.schema.json").read_text(encoding="utf-8"))
+    attempt_required = intake_schema["properties"]["attempt_plan"]["items"]["required"]
+    if "executor_supported" not in attempt_required or "unsupported_reason" not in attempt_required:
+        raise AssertionError(f"diagnostic repair intake schema must contract executor support classification: {intake_schema}")
     policy = json.loads((Path(__file__).resolve().parent / "execution_policy.json").read_text(encoding="utf-8"))
     if policy["real_execution_status"] != "explicit_or_guarded_inference_adapter":
         raise AssertionError(f"execution policy must stay honest about narrow guarded execution: {policy}")

@@ -77,7 +77,9 @@ test-inferred source patch adapter; missing-import repair requests can use the
 same guarded path when tests identify the missing source symbol. Unsupported
 diagnostics, such as raw syntax-error repair without a guarded oracle, return
 blocked execution results with the unsupported reason attached to the attempt.
-The
+`diagnostic_repair_intake.schema.json` contracts that intake shape so future
+orchestrators can decide whether to execute, replan, or escalate before trying
+an unsupported repair. The
 repair execution brief includes the same worker-output contract shape as normal
 Ceraxia handoff, so diagnostic repair cannot bypass package-status auditing.
 Use it directly when inspecting a run package:
