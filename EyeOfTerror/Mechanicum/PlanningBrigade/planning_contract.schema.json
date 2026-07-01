@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ceraxia Planning Packet",
+  "type": "object",
+  "required": [
+    "ok",
+    "worker",
+    "kind",
+    "task",
+    "roles_completed",
+    "task_triage",
+    "repo_survey_request",
+    "design_options",
+    "verification_strategy",
+    "risk_register",
+    "next_action"
+  ],
+  "properties": {
+    "ok": {"type": "boolean"},
+    "worker": {"const": "PlanningBrigade"},
+    "kind": {"const": "ceraxia_planning_packet"},
+    "task": {"type": "string"},
+    "roles_completed": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 5
+    },
+    "task_triage": {"type": "object"},
+    "repo_survey_request": {"type": "object"},
+    "design_options": {"type": "object"},
+    "verification_strategy": {"type": "object"},
+    "risk_register": {"type": "object"},
+    "next_action": {"type": "object"}
+  }
+}
