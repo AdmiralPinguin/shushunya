@@ -6,7 +6,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ceraxia_field_trial_runner import apply_trial_checks_to_outcome, classify_trial_outcome
+from ceraxia_field_trial_runner import (
+    DEFAULT_FIELD_TRIAL_RUN_ROOT,
+    apply_trial_checks_to_outcome,
+    classify_trial_outcome,
+    resolve_run_storage,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -38,6 +43,12 @@ def main() -> int:
         raise AssertionError(f"Ceraxia expert target needs enough expert trials: {expert_target}")
     if expert_target.get("minimum_unshaped_expert_trials", 0) < 4:
         raise AssertionError(f"Ceraxia expert target must require unshaped expert evidence: {expert_target}")
+    storage_root, storage_keep, storage_ledger = resolve_run_storage(None, keep=False, ledger_draft=True)
+    if storage_root != DEFAULT_FIELD_TRIAL_RUN_ROOT or storage_keep is not True or storage_ledger is not True:
+        raise AssertionError("ledger draft field trials must default to persistent evidence storage")
+    temp_root, temp_keep, temp_ledger = resolve_run_storage(None, keep=False, ledger_draft=False)
+    if temp_root is not None or temp_keep is not False or temp_ledger is not False:
+        raise AssertionError("plain field trial runs should remain temporary by default")
     if len(trials) < target.get("minimum_representative_trials", 0):
         raise AssertionError(f"Ceraxia field trial suite is undersized: {len(trials)} {target}")
     if len(set(dimensions)) != len(dimensions) or len(dimensions) < 8:
@@ -285,10 +296,10 @@ def main() -> int:
         if expert_review_unshaped.returncode != 0:
             raise AssertionError(f"Ceraxia unshaped expert reviewer failed: {expert_review_unshaped.stdout} {expert_review_unshaped.stderr}")
         unshaped_payload = json.loads(expert_review_unshaped.stdout)
-        if unshaped_payload.get("review_count", 0) < expert_target.get("minimum_unshaped_expert_trials", 0):
-            raise AssertionError(f"Ceraxia unshaped expert reviewer lacks enough drafts: {unshaped_payload}")
-        if unshaped_payload.get("report", {}).get("expert_target_met") is not True:
-            raise AssertionError(f"Ceraxia unshaped expert reviewer should prove the strict expert target before acceptance: {unshaped_payload}")
+        if unshaped_payload.get("review_count", 0) != unshaped_draft_count:
+            raise AssertionError(f"Ceraxia unshaped expert reviewer must cover every current draft: {unshaped_payload}")
+        if unshaped_payload.get("rejected_count", 0) != 0:
+            raise AssertionError(f"Ceraxia unshaped expert reviewer rejected current drafts: {unshaped_payload}")
     review_all = subprocess.run(
         [sys.executable, str(REVIEWER), "--all"],
         cwd=str(ROOT.parent),

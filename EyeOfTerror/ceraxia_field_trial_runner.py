@@ -16,6 +16,7 @@ from eye_of_terror.warmaster_gateway import prepare_task, research_loop_run
 
 ROOT = Path(__file__).resolve().parent
 LEDGER = ROOT / "Mechanicum" / "Ceraxia" / "field_trial_ledger.json"
+DEFAULT_FIELD_TRIAL_RUN_ROOT = ROOT / "field_trial_runs"
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -2339,6 +2340,12 @@ def run_trial(trial_id: str, root: Path, keep: bool, ledger_draft: bool) -> dict
     return report
 
 
+def resolve_run_storage(run_root: Path | None, keep: bool, ledger_draft: bool) -> tuple[Path | None, bool, bool]:
+    if run_root or keep or ledger_draft:
+        return run_root or DEFAULT_FIELD_TRIAL_RUN_ROOT, bool(keep or ledger_draft), ledger_draft
+    return None, False, False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run reproducible Ceraxia field trial fixtures.")
     parser.add_argument("--list", action="store_true", help="List supported field trial fixtures.")
@@ -2352,11 +2359,10 @@ def main() -> int:
         return 0
     if not args.trial:
         parser.error("--trial is required unless --list is used")
-    if args.run_root:
-        root = args.run_root
+    root, keep, ledger_draft = resolve_run_storage(args.run_root, args.keep, args.ledger_draft)
+    if root is not None:
         root.mkdir(parents=True, exist_ok=True)
-        keep = True if args.keep or args.ledger_draft else args.keep
-        report = run_trial(args.trial, root, keep=keep, ledger_draft=args.ledger_draft)
+        report = run_trial(args.trial, root, keep=keep, ledger_draft=ledger_draft)
     else:
         with tempfile.TemporaryDirectory() as temp_dir:
             report = run_trial(args.trial, Path(temp_dir), keep=False, ledger_draft=False)

@@ -1,0 +1,2580 @@
+{
+  "status": "ready",
+  "approved": true,
+  "role_policy": {
+    "role": "final_packager",
+    "authority": "read_only_final_manifest_packaging",
+    "may_mutate_source": false,
+    "required_evidence": [
+      "deliverables",
+      "verification_summary",
+      "next_safe_action"
+    ],
+    "forbidden_actions": [
+      "source_mutation",
+      "hiding_blockers"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "api_contract",
+      "multi_file",
+      "new_feature",
+      "bugfix"
+    ],
+    "complexity": "high",
+    "complexity_score": 5,
+    "workflow_mode": "repo_grade",
+    "repo_grade_required_evidence": [
+      "architecture decision record with alternatives and tradeoffs",
+      "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+      "focused verification for the changed behavior",
+      "broad verification for repo-level regressions or an explicit blocker",
+      "self-review decision record before final packaging",
+      "PR-style final summary with changed files, verification, risks, and rollback notes"
+    ],
+    "risk_flags": [
+      "multi_file_scope_drift",
+      "test_diagnostic_required",
+      "public_contract_regression",
+      "repo_grade_evidence_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+      "multi-file tasks must keep changed-file scope evidence for every mutated file",
+      "API/contract tasks must preserve public response shape and schema compatibility evidence",
+      "architecture decision record with alternatives and tradeoffs",
+      "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+      "focused verification for the changed behavior",
+      "broad verification for repo-level regressions or an explicit blocker",
+      "self-review decision record before final packaging",
+      "PR-style final summary with changed files, verification, risks, and rollback notes"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "finalize",
+    "worker": "SealwrightFinalis",
+    "purpose": "Package the coding task result, blockers, changed-file intent, and next actions.",
+    "brief": "Package final evidence for Warmaster and chat clients.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "api_contract",
+        "multi_file",
+        "new_feature",
+        "bugfix"
+      ],
+      "complexity": "high",
+      "complexity_score": 5,
+      "workflow_mode": "repo_grade",
+      "repo_grade_required_evidence": [
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ],
+      "risk_flags": [
+        "multi_file_scope_drift",
+        "test_diagnostic_required",
+        "public_contract_regression",
+        "repo_grade_evidence_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+        "multi-file tasks must keep changed-file scope evidence for every mutated file",
+        "API/contract tasks must preserve public response shape and schema compatibility evidence",
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ]
+    },
+    "must_produce": [
+      "deliverables",
+      "execution_report",
+      "patch_package",
+      "pr_summary",
+      "next_safe_action",
+      "blockers"
+    ],
+    "handoff_question": "What should the operator or Warmaster do next?",
+    "authority_boundary": "read_only_final_manifest_packaging"
+  },
+  "role_policies": {
+    "implementation": {
+      "role": "patchwright",
+      "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+      "may_mutate_source": true,
+      "required_evidence": [
+        "patch_source",
+        "operation_count",
+        "changed_files",
+        "rollback"
+      ],
+      "forbidden_actions": [
+        "shell_execution",
+        "unsafe_overwrite",
+        "duplicate_function_append"
+      ]
+    },
+    "verification": {
+      "role": "verifier",
+      "authority": "allowlisted_verification_and_narrow_repairs",
+      "may_mutate_source": true,
+      "required_evidence": [
+        "verification_executed",
+        "verification_blockers",
+        "verification_repairs"
+      ],
+      "forbidden_actions": [
+        "shell_execution",
+        "unallowlisted_command",
+        "broad_unscoped_rewrite"
+      ]
+    },
+    "code_review": {
+      "role": "critic",
+      "authority": "read_only_package_review_and_revision_ordering",
+      "may_mutate_source": false,
+      "required_evidence": [
+        "review_status",
+        "findings",
+        "revision_plan"
+      ],
+      "forbidden_actions": [
+        "source_mutation",
+        "approving_without_verification_evidence"
+      ]
+    },
+    "finalize": {
+      "role": "final_packager",
+      "authority": "read_only_final_manifest_packaging",
+      "may_mutate_source": false,
+      "required_evidence": [
+        "deliverables",
+        "verification_summary",
+        "next_safe_action"
+      ],
+      "forbidden_actions": [
+        "source_mutation",
+        "hiding_blockers"
+      ]
+    }
+  },
+  "deliverables": [
+    "/work/ceraxia/repo_survey.json",
+    "/work/ceraxia/problem_statement.json",
+    "/work/ceraxia/architecture_options.json",
+    "/work/ceraxia/change_plan.md",
+    "/work/ceraxia/patch_manifest.json",
+    "/work/ceraxia/unshaped_repair_plan.json",
+    "/work/ceraxia/verification_report.json",
+    "/work/ceraxia/repair_loop_state.json",
+    "/work/ceraxia/diagnostic_extraction.json",
+    "/work/ceraxia/code_review.json"
+  ],
+  "changed_files": [
+    {
+      "path": "payments/api.py",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "2e46cc2b4c71932d05440a2e7c44c7cd60aaef0c026e5eb7aa77df1d6f339ba0",
+      "after_sha256": "9772013c60bd6149818276661ff7a28c14cb38ad3e1598f54056232b174350bd",
+      "changed": true
+    },
+    {
+      "path": "payments/client.py",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "4532d16567d0d90029cd54ec089f14e1d524c5b92e15c23a52a9853da0efa54f",
+      "after_sha256": "2046c46389e8875b13ff1a04d643fd3751b0b0c35693af34dc517b3fdc55ee3f",
+      "changed": true
+    },
+    {
+      "path": "docs/payments_api.md",
+      "operation": "write_file",
+      "created": false,
+      "before_sha256": "2ab99ba885c24554dd8ad72e40f5794c2c627d9c45a4024847c7c00d6d2059fb",
+      "after_sha256": "5299434f9c37b2931b9180c852ef1a3679548e3e9bcbec7a48a6297b98032aa4",
+      "changed": true
+    }
+  ],
+  "repo_grade_workflow": {
+    "mode": "focused_fix",
+    "required_passes": [
+      "survey",
+      "implementation",
+      "verification",
+      "self_review",
+      "final_package"
+    ],
+    "requires_architecture_decision_record": false,
+    "requires_focused_and_broad_verification": false,
+    "requires_compatibility_and_rollback_notes": true,
+    "requires_pr_summary": true
+  },
+  "unshaped_repair_plan": {
+    "status": "recorded",
+    "mode": "unshaped_repo_repair",
+    "task_id": "ceraxia-expert-unshaped-api-evolution-20260701-213725:implementation",
+    "goal_excerpt": "кодовая expert-задача без structured patch marker: публичный API payments должен перейти с positional fee на preferred keyword-only service_fee, но старые positional callers должны продолжить работать с DeprecationWarning. Найди и обнови implementation, caller, docs и tests по evidence из репозитория, не угадывай и не переписывай unrelated files.\nCERAXIA_TARGET_REPO: /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260701-213725/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_api_evolution\nCERAXIA_VERIFY: python -m py_compile payments/api.py payments/client.py",
+    "selected_source": "test_inferred_api_deprecation",
+    "selected_candidate": {
+      "source": "test_inferred_api_deprecation",
+      "status": "selected",
+      "operation_count": 3,
+      "verification_command_count": 3,
+      "diagnostics": {
+        "kind": "test_inferred_api_deprecation",
+        "test_path": "tests/test_api_evolution.py",
+        "source_path": "payments/api.py",
+        "function_name": "calculate_total",
+        "old_param": "fee",
+        "new_param": "service_fee",
+        "caller": {
+          "caller_name": "client_total",
+          "caller_path": "payments/client.py"
+        },
+        "docs_path": "docs/payments_api.md"
+      }
+    },
+    "files_to_read": [
+      "payments/api.py",
+      "payments/client.py",
+      "docs/payments_api.md",
+      "tests/test_api_evolution.py"
+    ],
+    "test_symbol_links": [
+      {
+        "test_path": "tests/test_api_evolution.py",
+        "test_class": "ApiEvolutionTest",
+        "test_function": "test_old_positional_fee_still_works_with_warning",
+        "assertion": "assertEqual",
+        "actual_expression": "calculate_total(100, 15)",
+        "expected_expression": "85",
+        "imported_symbol": "calculate_total",
+        "local_symbol": "calculate_total",
+        "source_module": "payments.api",
+        "source_path": "payments/api.py",
+        "source_exists": true
+      },
+      {
+        "test_path": "tests/test_api_evolution.py",
+        "test_class": "ApiEvolutionTest",
+        "test_function": "test_new_keyword_service_fee_path",
+        "assertion": "assertEqual",
+        "actual_expression": "calculate_total(80, service_fee=5)",
+        "expected_expression": "75",
+        "imported_symbol": "calculate_total",
+        "local_symbol": "calculate_total",
+        "source_module": "payments.api",
+        "source_path": "payments/api.py",
+        "source_exists": true
+      },
+      {
+        "test_path": "tests/test_api_evolution.py",
+        "test_class": "ApiEvolutionTest",
+        "test_function": "test_new_keyword_service_fee_path",
+        "assertion": "assertEqual",
+        "actual_expression": "client_total(80, service_fee=5)",
+        "expected_expression": "75",
+        "imported_symbol": "client_total",
+        "local_symbol": "client_total",
+        "source_module": "payments.client",
+        "source_path": "payments/client.py",
+        "source_exists": true
+      }
+    ],
+    "patch_operations": [
+      {
+        "type": "write_file",
+        "path": "payments/api.py"
+      },
+      {
+        "type": "write_file",
+        "path": "payments/client.py"
+      },
+      {
+        "type": "write_file",
+        "path": "docs/payments_api.md"
+      }
+    ],
+    "runtime_evidence": {},
+    "commands_to_run": [
+      "python -m unittest tests.test_api_evolution",
+      "python -m py_compile payments/api.py payments/client.py",
+      "python -m unittest discover -s tests"
+    ],
+    "defect_hypotheses": [
+      {
+        "source": "test_inferred_api_deprecation",
+        "kind": "test_inferred_api_deprecation",
+        "test_path": "tests/test_api_evolution.py",
+        "module_path": "",
+        "function_name": "calculate_total",
+        "delegated_from": {},
+        "expected": "",
+        "actual": "",
+        "evidence": {
+          "kind": "test_inferred_api_deprecation",
+          "test_path": "tests/test_api_evolution.py",
+          "source_path": "payments/api.py",
+          "function_name": "calculate_total",
+          "old_param": "fee",
+          "new_param": "service_fee",
+          "caller": {
+            "caller_name": "client_total",
+            "caller_path": "payments/client.py"
+          },
+          "docs_path": "docs/payments_api.md"
+        }
+      }
+    ],
+    "minimal_patch_candidates": [
+      {
+        "source": "test_inferred_api_deprecation",
+        "status": "selected",
+        "operation_count": 3,
+        "verification_command_count": 3,
+        "diagnostics": {
+          "kind": "test_inferred_api_deprecation",
+          "test_path": "tests/test_api_evolution.py",
+          "source_path": "payments/api.py",
+          "function_name": "calculate_total",
+          "old_param": "fee",
+          "new_param": "service_fee",
+          "caller": {
+            "caller_name": "client_total",
+            "caller_path": "payments/client.py"
+          },
+          "docs_path": "docs/payments_api.md"
+        },
+        "operations": [
+          {
+            "type": "write_file",
+            "path": "payments/api.py"
+          },
+          {
+            "type": "write_file",
+            "path": "payments/client.py"
+          },
+          {
+            "type": "write_file",
+            "path": "docs/payments_api.md"
+          }
+        ],
+        "runtime_evidence": {}
+      }
+    ],
+    "proof_plan": {
+      "focused_verification": [
+        "python -m unittest tests.test_api_evolution",
+        "python -m py_compile payments/api.py payments/client.py",
+        "python -m unittest discover -s tests"
+      ],
+      "source_must_change": true,
+      "tests_must_not_be_edited_for_test_inferred_repairs": true,
+      "test_to_source_linkage_required": true,
+      "runtime_diagnostic_required": false,
+      "ast_patch_plan_required": false,
+      "review_gates": [
+        "diagnostic_linkage",
+        "test_symbol_linkage",
+        "patch_scope_review",
+        "verification_passed",
+        "review_discipline_findings"
+      ]
+    },
+    "safety_constraints": [
+      "prefer the smallest source patch that satisfies test and contract evidence",
+      "do not edit tests to make an inferred repair pass",
+      "block instead of mutating when source mapping is ambiguous"
+    ]
+  },
+  "diagnostic_extraction": {
+    "status": "recorded",
+    "mode": "unshaped_repo_repair",
+    "patch_source": "test_inferred_api_deprecation",
+    "runtime_failures": [],
+    "assertions": [],
+    "traceback_frames": [],
+    "runtime_test_failures": [],
+    "traceback_source_candidates": [],
+    "runtime_source_candidates": [],
+    "runtime_minimal_patch_candidates": [],
+    "static_test_expectations": [
+      {
+        "source": "test_inferred_api_deprecation",
+        "kind": "test_inferred_api_deprecation",
+        "test_path": "tests/test_api_evolution.py",
+        "module_path": "",
+        "function_name": "calculate_total",
+        "delegated_from": {},
+        "expected": "",
+        "actual": "",
+        "evidence": {
+          "kind": "test_inferred_api_deprecation",
+          "test_path": "tests/test_api_evolution.py",
+          "source_path": "payments/api.py",
+          "function_name": "calculate_total",
+          "old_param": "fee",
+          "new_param": "service_fee",
+          "caller": {
+            "caller_name": "client_total",
+            "caller_path": "payments/client.py"
+          },
+          "docs_path": "docs/payments_api.md"
+        }
+      }
+    ],
+    "selected_diagnostics": {
+      "kind": "test_inferred_api_deprecation",
+      "test_path": "tests/test_api_evolution.py",
+      "source_path": "payments/api.py",
+      "function_name": "calculate_total",
+      "old_param": "fee",
+      "new_param": "service_fee",
+      "caller": {
+        "caller_name": "client_total",
+        "caller_path": "payments/client.py"
+      },
+      "docs_path": "docs/payments_api.md"
+    },
+    "parser_coverage": {
+      "unittest_assertions": 0,
+      "traceback_frames": 0,
+      "runtime_test_failures": 0,
+      "runtime_minimal_patch_candidates": 0,
+      "traceback_source_candidates": 0,
+      "static_test_expectations": 1
+    }
+  },
+  "ast_patch_plan": {
+    "status": "not_applicable",
+    "patch_source": "test_inferred_api_deprecation",
+    "planned_operations": [],
+    "operation_count": 0,
+    "blockers": [],
+    "strategy": "not_applicable"
+  },
+  "problem_statement": {
+    "status": "recorded",
+    "goal": "кодовая expert-задача без structured patch marker: публичный API payments должен перейти с positional fee на preferred keyword-only service_fee, но старые positional callers должны продолжить работать с DeprecationWarning. Найди и обнови implementation, caller, docs и tests по evidence из репозитория, не угадывай и не переписывай unrelated files.\nCERAXIA_TARGET_REPO: /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260701-213725/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_api_evolution\nCERAXIA_VERIFY: python -m py_compile payments/api.py payments/client.py",
+    "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+    "success_criteria": [
+      "changed files directly address the requested behavior",
+      "source scope is justified by repo survey or explicit patch contract",
+      "verification evidence is preserved after the final mutation",
+      "review either approves with evidence or blocks with focused revision steps"
+    ],
+    "evidence_to_inspect": [
+      "payments/client.py",
+      "payments/api.py",
+      "tests/test_api_evolution.py",
+      "docs/payments_api.md"
+    ],
+    "working_hypotheses": [
+      "payments/client.py is likely relevant to the requested code change.",
+      "payments/api.py is likely relevant to the requested code change.",
+      "tests/test_api_evolution.py is likely relevant to the requested code change.",
+      "docs/payments_api.md is likely relevant to the requested code change."
+    ],
+    "verification_candidates": [
+      "python -m unittest discover",
+      "python -m unittest tests.test_api_evolution",
+      "tests/test_api_evolution.py",
+      "python -m py_compile <changed .py files>",
+      "git diff --check"
+    ],
+    "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+  },
+  "architecture_options": {
+    "status": "recorded",
+    "problem_status": "recorded",
+    "options": [
+      {
+        "id": "minimal_targeted_patch",
+        "summary": "Patch the narrowest source surface that satisfies the observed behavior gap.",
+        "recommended": true,
+        "tradeoffs": [
+          "lowest churn",
+          "requires focused verification to prove behavior"
+        ],
+        "applies_to": [
+          "payments/client.py",
+          "payments/api.py",
+          "tests/test_api_evolution.py"
+        ]
+      },
+      {
+        "id": "compatibility_wrapper",
+        "summary": "Preserve old callers while adding the new behavior behind a compatible boundary.",
+        "recommended": true,
+        "tradeoffs": [
+          "safer public API evolution",
+          "may require deprecation docs and caller tests"
+        ],
+        "applies_to": [
+          "payments/client.py",
+          "payments/api.py",
+          "tests/test_api_evolution.py"
+        ]
+      },
+      {
+        "id": "broad_rewrite",
+        "summary": "Rewrite the surrounding module or subsystem.",
+        "recommended": false,
+        "tradeoffs": [
+          "higher regression risk",
+          "harder review",
+          "should be rejected unless the task explicitly demands it"
+        ],
+        "applies_to": [
+          "payments/client.py",
+          "payments/api.py",
+          "tests/test_api_evolution.py"
+        ]
+      }
+    ],
+    "selection_rule": "Choose the first option that satisfies the task with the least public-surface churn and adequate verification."
+  },
+  "architecture_decision_record": {
+    "status": "recorded",
+    "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+    "drivers": [
+      "preserve existing public behavior unless the task explicitly changes it",
+      "prefer source changes backed by focused tests and broad regression checks",
+      "keep rollback evidence and changed-file scope review in the final package"
+    ],
+    "alternatives_considered": [
+      {
+        "option": "single-file shortcut",
+        "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+      },
+      {
+        "option": "broad rewrite",
+        "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+      }
+    ],
+    "seed_rules": [
+      "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+      "Inspect dependents before changing public functions or modules with reverse dependencies.",
+      "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+    ],
+    "impacted_files": [
+      "payments/api.py",
+      "payments/client.py",
+      "docs/payments_api.md"
+    ],
+    "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+  },
+  "verification_strategy": {
+    "focused_commands": [
+      "/usr/bin/python3 -m py_compile payments/api.py payments/client.py",
+      "python -m unittest tests.test_api_evolution",
+      "python -m py_compile payments/api.py payments/client.py"
+    ],
+    "broad_commands": [
+      "python -m unittest discover -s tests"
+    ]
+  },
+  "patch_package": {
+    "kind": "ceraxia_patch_package",
+    "workflow_mode": "focused_fix",
+    "changed_files": [
+      {
+        "path": "payments/api.py",
+        "operation": "write_file",
+        "created": false,
+        "before_sha256": "2e46cc2b4c71932d05440a2e7c44c7cd60aaef0c026e5eb7aa77df1d6f339ba0",
+        "after_sha256": "9772013c60bd6149818276661ff7a28c14cb38ad3e1598f54056232b174350bd",
+        "changed": true
+      },
+      {
+        "path": "payments/client.py",
+        "operation": "write_file",
+        "created": false,
+        "before_sha256": "4532d16567d0d90029cd54ec089f14e1d524c5b92e15c23a52a9853da0efa54f",
+        "after_sha256": "2046c46389e8875b13ff1a04d643fd3751b0b0c35693af34dc517b3fdc55ee3f",
+        "changed": true
+      },
+      {
+        "path": "docs/payments_api.md",
+        "operation": "write_file",
+        "created": false,
+        "before_sha256": "2ab99ba885c24554dd8ad72e40f5794c2c627d9c45a4024847c7c00d6d2059fb",
+        "after_sha256": "5299434f9c37b2931b9180c852ef1a3679548e3e9bcbec7a48a6297b98032aa4",
+        "changed": true
+      }
+    ],
+    "patch_source": "test_inferred_api_deprecation",
+    "operation_count": 3,
+    "problem_statement": {
+      "status": "recorded",
+      "goal": "кодовая expert-задача без structured patch marker: публичный API payments должен перейти с positional fee на preferred keyword-only service_fee, но старые positional callers должны продолжить работать с DeprecationWarning. Найди и обнови implementation, caller, docs и tests по evidence из репозитория, не угадывай и не переписывай unrelated files.\nCERAXIA_TARGET_REPO: /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260701-213725/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_api_evolution\nCERAXIA_VERIFY: python -m py_compile payments/api.py payments/client.py",
+      "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+      "success_criteria": [
+        "changed files directly address the requested behavior",
+        "source scope is justified by repo survey or explicit patch contract",
+        "verification evidence is preserved after the final mutation",
+        "review either approves with evidence or blocks with focused revision steps"
+      ],
+      "evidence_to_inspect": [
+        "payments/client.py",
+        "payments/api.py",
+        "tests/test_api_evolution.py",
+        "docs/payments_api.md"
+      ],
+      "working_hypotheses": [
+        "payments/client.py is likely relevant to the requested code change.",
+        "payments/api.py is likely relevant to the requested code change.",
+        "tests/test_api_evolution.py is likely relevant to the requested code change.",
+        "docs/payments_api.md is likely relevant to the requested code change."
+      ],
+      "verification_candidates": [
+        "python -m unittest discover",
+        "python -m unittest tests.test_api_evolution",
+        "tests/test_api_evolution.py",
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+    },
+    "architecture_options": {
+      "status": "recorded",
+      "problem_status": "recorded",
+      "options": [
+        {
+          "id": "minimal_targeted_patch",
+          "summary": "Patch the narrowest source surface that satisfies the observed behavior gap.",
+          "recommended": true,
+          "tradeoffs": [
+            "lowest churn",
+            "requires focused verification to prove behavior"
+          ],
+          "applies_to": [
+            "payments/client.py",
+            "payments/api.py",
+            "tests/test_api_evolution.py"
+          ]
+        },
+        {
+          "id": "compatibility_wrapper",
+          "summary": "Preserve old callers while adding the new behavior behind a compatible boundary.",
+          "recommended": true,
+          "tradeoffs": [
+            "safer public API evolution",
+            "may require deprecation docs and caller tests"
+          ],
+          "applies_to": [
+            "payments/client.py",
+            "payments/api.py",
+            "tests/test_api_evolution.py"
+          ]
+        },
+        {
+          "id": "broad_rewrite",
+          "summary": "Rewrite the surrounding module or subsystem.",
+          "recommended": false,
+          "tradeoffs": [
+            "higher regression risk",
+            "harder review",
+            "should be rejected unless the task explicitly demands it"
+          ],
+          "applies_to": [
+            "payments/client.py",
+            "payments/api.py",
+            "tests/test_api_evolution.py"
+          ]
+        }
+      ],
+      "selection_rule": "Choose the first option that satisfies the task with the least public-surface churn and adequate verification."
+    },
+    "architecture_decision_record": {
+      "status": "recorded",
+      "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+      "drivers": [
+        "preserve existing public behavior unless the task explicitly changes it",
+        "prefer source changes backed by focused tests and broad regression checks",
+        "keep rollback evidence and changed-file scope review in the final package"
+      ],
+      "alternatives_considered": [
+        {
+          "option": "single-file shortcut",
+          "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+        },
+        {
+          "option": "broad rewrite",
+          "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+        }
+      ],
+      "seed_rules": [
+        "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+        "Inspect dependents before changing public functions or modules with reverse dependencies.",
+        "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+      ],
+      "impacted_files": [
+        "payments/api.py",
+        "payments/client.py",
+        "docs/payments_api.md"
+      ],
+      "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+    },
+    "verification_strategy": {
+      "focused_commands": [
+        "/usr/bin/python3 -m py_compile payments/api.py payments/client.py",
+        "python -m unittest tests.test_api_evolution",
+        "python -m py_compile payments/api.py payments/client.py"
+      ],
+      "broad_commands": [
+        "python -m unittest discover -s tests"
+      ]
+    },
+    "unshaped_repair_plan": {
+      "status": "recorded",
+      "mode": "unshaped_repo_repair",
+      "task_id": "ceraxia-expert-unshaped-api-evolution-20260701-213725:implementation",
+      "goal_excerpt": "кодовая expert-задача без structured patch marker: публичный API payments должен перейти с positional fee на preferred keyword-only service_fee, но старые positional callers должны продолжить работать с DeprecationWarning. Найди и обнови implementation, caller, docs и tests по evidence из репозитория, не угадывай и не переписывай unrelated files.\nCERAXIA_TARGET_REPO: /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260701-213725/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_api_evolution\nCERAXIA_VERIFY: python -m py_compile payments/api.py payments/client.py",
+      "selected_source": "test_inferred_api_deprecation",
+      "selected_candidate": {
+        "source": "test_inferred_api_deprecation",
+        "status": "selected",
+        "operation_count": 3,
+        "verification_command_count": 3,
+        "diagnostics": {
+          "kind": "test_inferred_api_deprecation",
+          "test_path": "tests/test_api_evolution.py",
+          "source_path": "payments/api.py",
+          "function_name": "calculate_total",
+          "old_param": "fee",
+          "new_param": "service_fee",
+          "caller": {
+            "caller_name": "client_total",
+            "caller_path": "payments/client.py"
+          },
+          "docs_path": "docs/payments_api.md"
+        }
+      },
+      "files_to_read": [
+        "payments/api.py",
+        "payments/client.py",
+        "docs/payments_api.md",
+        "tests/test_api_evolution.py"
+      ],
+      "test_symbol_links": [
+        {
+          "test_path": "tests/test_api_evolution.py",
+          "test_class": "ApiEvolutionTest",
+          "test_function": "test_old_positional_fee_still_works_with_warning",
+          "assertion": "assertEqual",
+          "actual_expression": "calculate_total(100, 15)",
+          "expected_expression": "85",
+          "imported_symbol": "calculate_total",
+          "local_symbol": "calculate_total",
+          "source_module": "payments.api",
+          "source_path": "payments/api.py",
+          "source_exists": true
+        },
+        {
+          "test_path": "tests/test_api_evolution.py",
+          "test_class": "ApiEvolutionTest",
+          "test_function": "test_new_keyword_service_fee_path",
+          "assertion": "assertEqual",
+          "actual_expression": "calculate_total(80, service_fee=5)",
+          "expected_expression": "75",
+          "imported_symbol": "calculate_total",
+          "local_symbol": "calculate_total",
+          "source_module": "payments.api",
+          "source_path": "payments/api.py",
+          "source_exists": true
+        },
+        {
+          "test_path": "tests/test_api_evolution.py",
+          "test_class": "ApiEvolutionTest",
+          "test_function": "test_new_keyword_service_fee_path",
+          "assertion": "assertEqual",
+          "actual_expression": "client_total(80, service_fee=5)",
+          "expected_expression": "75",
+          "imported_symbol": "client_total",
+          "local_symbol": "client_total",
+          "source_module": "payments.client",
+          "source_path": "payments/client.py",
+          "source_exists": true
+        }
+      ],
+      "patch_operations": [
+        {
+          "type": "write_file",
+          "path": "payments/api.py"
+        },
+        {
+          "type": "write_file",
+          "path": "payments/client.py"
+        },
+        {
+          "type": "write_file",
+          "path": "docs/payments_api.md"
+        }
+      ],
+      "runtime_evidence": {},
+      "commands_to_run": [
+        "python -m unittest tests.test_api_evolution",
+        "python -m py_compile payments/api.py payments/client.py",
+        "python -m unittest discover -s tests"
+      ],
+      "defect_hypotheses": [
+        {
+          "source": "test_inferred_api_deprecation",
+          "kind": "test_inferred_api_deprecation",
+          "test_path": "tests/test_api_evolution.py",
+          "module_path": "",
+          "function_name": "calculate_total",
+          "delegated_from": {},
+          "expected": "",
+          "actual": "",
+          "evidence": {
+            "kind": "test_inferred_api_deprecation",
+            "test_path": "tests/test_api_evolution.py",
+            "source_path": "payments/api.py",
+            "function_name": "calculate_total",
+            "old_param": "fee",
+            "new_param": "service_fee",
+            "caller": {
+              "caller_name": "client_total",
+              "caller_path": "payments/client.py"
+            },
+            "docs_path": "docs/payments_api.md"
+          }
+        }
+      ],
+      "minimal_patch_candidates": [
+        {
+          "source": "test_inferred_api_deprecation",
+          "status": "selected",
+          "operation_count": 3,
+          "verification_command_count": 3,
+          "diagnostics": {
+            "kind": "test_inferred_api_deprecation",
+            "test_path": "tests/test_api_evolution.py",
+            "source_path": "payments/api.py",
+            "function_name": "calculate_total",
+            "old_param": "fee",
+            "new_param": "service_fee",
+            "caller": {
+              "caller_name": "client_total",
+              "caller_path": "payments/client.py"
+            },
+            "docs_path": "docs/payments_api.md"
+          },
+          "operations": [
+            {
+              "type": "write_file",
+              "path": "payments/api.py"
+            },
+            {
+              "type": "write_file",
+              "path": "payments/client.py"
+            },
+            {
+              "type": "write_file",
+              "path": "docs/payments_api.md"
+            }
+          ],
+          "runtime_evidence": {}
+        }
+      ],
+      "proof_plan": {
+        "focused_verification": [
+          "python -m unittest tests.test_api_evolution",
+          "python -m py_compile payments/api.py payments/client.py",
+          "python -m unittest discover -s tests"
+        ],
+        "source_must_change": true,
+        "tests_must_not_be_edited_for_test_inferred_repairs": true,
+        "test_to_source_linkage_required": true,
+        "runtime_diagnostic_required": false,
+        "ast_patch_plan_required": false,
+        "review_gates": [
+          "diagnostic_linkage",
+          "test_symbol_linkage",
+          "patch_scope_review",
+          "verification_passed",
+          "review_discipline_findings"
+        ]
+      },
+      "safety_constraints": [
+        "prefer the smallest source patch that satisfies test and contract evidence",
+        "do not edit tests to make an inferred repair pass",
+        "block instead of mutating when source mapping is ambiguous"
+      ]
+    },
+    "diagnostic_extraction": {
+      "status": "recorded",
+      "mode": "unshaped_repo_repair",
+      "patch_source": "test_inferred_api_deprecation",
+      "runtime_failures": [],
+      "assertions": [],
+      "traceback_frames": [],
+      "runtime_test_failures": [],
+      "traceback_source_candidates": [],
+      "runtime_source_candidates": [],
+      "runtime_minimal_patch_candidates": [],
+      "static_test_expectations": [
+        {
+          "source": "test_inferred_api_deprecation",
+          "kind": "test_inferred_api_deprecation",
+          "test_path": "tests/test_api_evolution.py",
+          "module_path": "",
+          "function_name": "calculate_total",
+          "delegated_from": {},
+          "expected": "",
+          "actual": "",
+          "evidence": {
+            "kind": "test_inferred_api_deprecation",
+            "test_path": "tests/test_api_evolution.py",
+            "source_path": "payments/api.py",
+            "function_name": "calculate_total",
+            "old_param": "fee",
+            "new_param": "service_fee",
+            "caller": {
+              "caller_name": "client_total",
+              "caller_path": "payments/client.py"
+            },
+            "docs_path": "docs/payments_api.md"
+          }
+        }
+      ],
+      "selected_diagnostics": {
+        "kind": "test_inferred_api_deprecation",
+        "test_path": "tests/test_api_evolution.py",
+        "source_path": "payments/api.py",
+        "function_name": "calculate_total",
+        "old_param": "fee",
+        "new_param": "service_fee",
+        "caller": {
+          "caller_name": "client_total",
+          "caller_path": "payments/client.py"
+        },
+        "docs_path": "docs/payments_api.md"
+      },
+      "parser_coverage": {
+        "unittest_assertions": 0,
+        "traceback_frames": 0,
+        "runtime_test_failures": 0,
+        "runtime_minimal_patch_candidates": 0,
+        "traceback_source_candidates": 0,
+        "static_test_expectations": 1
+      }
+    },
+    "ast_patch_plan": {
+      "status": "not_applicable",
+      "patch_source": "test_inferred_api_deprecation",
+      "planned_operations": [],
+      "operation_count": 0,
+      "blockers": [],
+      "strategy": "not_applicable"
+    },
+    "review_decision_record": [
+      {
+        "check": "patch_applied",
+        "status": "pass",
+        "evidence": "applied"
+      },
+      {
+        "check": "verification_passed",
+        "status": "pass",
+        "evidence": "passed"
+      },
+      {
+        "check": "scope_review",
+        "status": "covered",
+        "evidence": {
+          "status": "covered",
+          "changed_file_count": 3,
+          "mapped_changed_file_count": 3,
+          "unmapped_changed_file_count": 0,
+          "unmapped_changed_files": [],
+          "source_without_linked_tests": []
+        }
+      },
+      {
+        "check": "diagnostic_linkage",
+        "status": "pass",
+        "evidence": {
+          "kind": "test_inferred_api_deprecation",
+          "test_path": "tests/test_api_evolution.py",
+          "source_path": "payments/api.py",
+          "function_name": "calculate_total",
+          "old_param": "fee",
+          "new_param": "service_fee",
+          "caller": {
+            "caller_name": "client_total",
+            "caller_path": "payments/client.py"
+          },
+          "docs_path": "docs/payments_api.md"
+        }
+      },
+      {
+        "check": "unshaped_repair_plan_present",
+        "status": "pass",
+        "evidence": {
+          "required": true,
+          "status": "recorded",
+          "mode": "unshaped_repo_repair",
+          "hypothesis_count": 1,
+          "candidate_count": 1
+        }
+      },
+      {
+        "check": "diagnostic_extraction_present",
+        "status": "pass",
+        "evidence": {
+          "unittest_assertions": 0,
+          "traceback_frames": 0,
+          "runtime_test_failures": 0,
+          "runtime_minimal_patch_candidates": 0,
+          "traceback_source_candidates": 0,
+          "static_test_expectations": 1
+        }
+      },
+      {
+        "check": "ast_minimal_patch_plan_present",
+        "status": "pass",
+        "evidence": {
+          "required": false,
+          "status": "not_applicable",
+          "operation_count": 0,
+          "blockers": []
+        }
+      },
+      {
+        "check": "readiness_model_present",
+        "status": "pass",
+        "evidence": {
+          "has_ranked_sources": true,
+          "has_acceptance_criteria": true,
+          "has_test_strategy": true,
+          "high_risk_count": 0
+        }
+      },
+      {
+        "check": "impact_matrix_present",
+        "status": "pass",
+        "evidence": {
+          "impact_file_count": 4
+        }
+      },
+      {
+        "check": "repository_investigation_review",
+        "status": "pass",
+        "evidence": {
+          "status": "covered",
+          "checks": [
+            {
+              "check": "ranked_repo_map_present",
+              "status": "pass",
+              "evidence": {
+                "ranked_file_count": 4,
+                "explicit_output_surface": false,
+                "planned_output_paths": [
+                  "tests/test_api_evolution.py",
+                  "payments/api.py",
+                  "docs/payments_api.md"
+                ]
+              }
+            },
+            {
+              "check": "targeted_reading_plan_present",
+              "status": "pass",
+              "evidence": {
+                "targeted_read_count": 4,
+                "recommended_read_count": 4,
+                "explicit_output_surface": false
+              }
+            },
+            {
+              "check": "hypotheses_present",
+              "status": "pass",
+              "evidence": {
+                "hypothesis_count": 4
+              }
+            },
+            {
+              "check": "impact_matrix_present",
+              "status": "pass",
+              "evidence": {
+                "impact_file_count": 4,
+                "explicit_output_surface": false
+              }
+            },
+            {
+              "check": "pre_mutation_source_reads_present",
+              "status": "pass",
+              "evidence": {
+                "read_excerpt_count": 4,
+                "read_paths": [
+                  "payments/client.py",
+                  "payments/api.py",
+                  "tests/test_api_evolution.py",
+                  "docs/payments_api.md"
+                ],
+                "explicit_output_surface": false
+              }
+            },
+            {
+              "check": "changed_files_mapped_to_survey",
+              "status": "pass",
+              "evidence": {
+                "changed_file_count": 3,
+                "preexisting_changed_file_count": 3,
+                "mapped_changed_file_count": 3,
+                "created_changes_allowed_as_explicit_outputs": [],
+                "unmapped_preexisting_changed_files": []
+              }
+            }
+          ],
+          "blockers": [],
+          "summary": "Repository investigation evidence is sufficient."
+        }
+      },
+      {
+        "check": "problem_statement_present",
+        "status": "pass",
+        "evidence": {
+          "status": "recorded",
+          "goal": "кодовая expert-задача без structured patch marker: публичный API payments должен перейти с positional fee на preferred keyword-only service_fee, но старые positional callers должны продолжить работать с DeprecationWarning. Найди и обнови implementation, caller, docs и tests по evidence из репозитория, не угадывай и не переписывай unrelated files.\nCERAXIA_TARGET_REPO: /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260701-213725/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_api_evolution\nCERAXIA_VERIFY: python -m py_compile payments/api.py payments/client.py",
+          "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+          "success_criteria": [
+            "changed files directly address the requested behavior",
+            "source scope is justified by repo survey or explicit patch contract",
+            "verification evidence is preserved after the final mutation",
+            "review either approves with evidence or blocks with focused revision steps"
+          ],
+          "evidence_to_inspect": [
+            "payments/client.py",
+            "payments/api.py",
+            "tests/test_api_evolution.py",
+            "docs/payments_api.md"
+          ],
+          "working_hypotheses": [
+            "payments/client.py is likely relevant to the requested code change.",
+            "payments/api.py is likely relevant to the requested code change.",
+            "tests/test_api_evolution.py is likely relevant to the requested code change.",
+            "docs/payments_api.md is likely relevant to the requested code change."
+          ],
+          "verification_candidates": [
+            "python -m unittest discover",
+            "python -m unittest tests.test_api_evolution",
+            "tests/test_api_evolution.py",
+            "python -m py_compile <changed .py files>",
+            "git diff --check"
+          ],
+          "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+        }
+      },
+      {
+        "check": "architecture_options_present",
+        "status": "pass",
+        "evidence": {
+          "status": "recorded",
+          "problem_status": "recorded",
+          "options": [
+            {
+              "id": "minimal_targeted_patch",
+              "summary": "Patch the narrowest source surface that satisfies the observed behavior gap.",
+              "recommended": true,
+              "tradeoffs": [
+                "lowest churn",
+                "requires focused verification to prove behavior"
+              ],
+              "applies_to": [
+                "payments/client.py",
+                "payments/api.py",
+                "tests/test_api_evolution.py"
+              ]
+            },
+            {
+              "id": "compatibility_wrapper",
+              "summary": "Preserve old callers while adding the new behavior behind a compatible boundary.",
+              "recommended": true,
+              "tradeoffs": [
+                "safer public API evolution",
+                "may require deprecation docs and caller tests"
+              ],
+              "applies_to": [
+                "payments/client.py",
+                "payments/api.py",
+                "tests/test_api_evolution.py"
+              ]
+            },
+            {
+              "id": "broad_rewrite",
+              "summary": "Rewrite the surrounding module or subsystem.",
+              "recommended": false,
+              "tradeoffs": [
+                "higher regression risk",
+                "harder review",
+                "should be rejected unless the task explicitly demands it"
+              ],
+              "applies_to": [
+                "payments/client.py",
+                "payments/api.py",
+                "tests/test_api_evolution.py"
+              ]
+            }
+          ],
+          "selection_rule": "Choose the first option that satisfies the task with the least public-surface churn and adequate verification."
+        }
+      },
+      {
+        "check": "architecture_decision_record_present",
+        "status": "pass",
+        "evidence": {
+          "status": "recorded",
+          "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+          "drivers": [
+            "preserve existing public behavior unless the task explicitly changes it",
+            "prefer source changes backed by focused tests and broad regression checks",
+            "keep rollback evidence and changed-file scope review in the final package"
+          ],
+          "alternatives_considered": [
+            {
+              "option": "single-file shortcut",
+              "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+            },
+            {
+              "option": "broad rewrite",
+              "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+            }
+          ],
+          "seed_rules": [
+            "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+            "Inspect dependents before changing public functions or modules with reverse dependencies.",
+            "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+          ],
+          "impacted_files": [
+            "payments/api.py",
+            "payments/client.py",
+            "docs/payments_api.md"
+          ],
+          "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+        }
+      },
+      {
+        "check": "focused_verification_present",
+        "status": "pass",
+        "evidence": [
+          "/usr/bin/python3 -m py_compile payments/api.py payments/client.py",
+          "python -m unittest tests.test_api_evolution",
+          "python -m py_compile payments/api.py payments/client.py"
+        ]
+      },
+      {
+        "check": "broad_verification_present",
+        "status": "pass",
+        "evidence": [
+          "python -m unittest discover -s tests"
+        ]
+      },
+      {
+        "check": "public_surface_review",
+        "status": "pass",
+        "evidence": {
+          "status": "covered",
+          "required": true,
+          "checks": [
+            {
+              "check": "public_surface_review_required",
+              "status": "pass",
+              "evidence": {
+                "patch_source": "test_inferred_api_deprecation"
+              }
+            },
+            {
+              "check": "docs_surface_updated",
+              "status": "pass",
+              "evidence": {
+                "docs_path": "docs/payments_api.md",
+                "changed": true
+              }
+            },
+            {
+              "check": "caller_surface_updated_or_not_required",
+              "status": "pass",
+              "evidence": {
+                "caller_path": "payments/client.py",
+                "changed": true
+              }
+            },
+            {
+              "check": "public_surface_broad_verification",
+              "status": "pass",
+              "evidence": {
+                "broad_commands": [
+                  "python -m unittest discover -s tests"
+                ]
+              }
+            }
+          ],
+          "blockers": []
+        }
+      },
+      {
+        "check": "review_discipline_findings",
+        "status": "pass",
+        "evidence": []
+      }
+    ],
+    "review_repair_loop": {
+      "required": false,
+      "trigger": "",
+      "blocked_checks": [],
+      "rerun_steps": [],
+      "focused_context": {},
+      "completion_gate": "rerun implementation and verification, then rerun code_review and finalize"
+    },
+    "pr_summary": {
+      "title": "Ceraxia code task package",
+      "status": "ready",
+      "scope": [
+        "payments/api.py",
+        "payments/client.py",
+        "docs/payments_api.md"
+      ],
+      "verification": {
+        "status": "passed",
+        "focused_commands": [
+          "/usr/bin/python3 -m py_compile payments/api.py payments/client.py",
+          "python -m unittest tests.test_api_evolution",
+          "python -m py_compile payments/api.py payments/client.py"
+        ],
+        "broad_commands": [
+          "python -m unittest discover -s tests"
+        ],
+        "repair_count": 0
+      },
+      "architecture": {
+        "status": "recorded",
+        "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+        "drivers": [
+          "preserve existing public behavior unless the task explicitly changes it",
+          "prefer source changes backed by focused tests and broad regression checks",
+          "keep rollback evidence and changed-file scope review in the final package"
+        ],
+        "alternatives_considered": [
+          {
+            "option": "single-file shortcut",
+            "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+          },
+          {
+            "option": "broad rewrite",
+            "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+          }
+        ],
+        "seed_rules": [
+          "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+          "Inspect dependents before changing public functions or modules with reverse dependencies.",
+          "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+        ],
+        "impacted_files": [
+          "payments/api.py",
+          "payments/client.py",
+          "docs/payments_api.md"
+        ],
+        "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+      },
+      "risks": [],
+      "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed.",
+      "next_safe_action": "inspect_final_package"
+    }
+  },
+  "pr_summary": {
+    "title": "Ceraxia code task package",
+    "status": "ready",
+    "scope": [
+      "payments/api.py",
+      "payments/client.py",
+      "docs/payments_api.md"
+    ],
+    "verification": {
+      "status": "passed",
+      "focused_commands": [
+        "/usr/bin/python3 -m py_compile payments/api.py payments/client.py",
+        "python -m unittest tests.test_api_evolution",
+        "python -m py_compile payments/api.py payments/client.py"
+      ],
+      "broad_commands": [
+        "python -m unittest discover -s tests"
+      ],
+      "repair_count": 0
+    },
+    "architecture": {
+      "status": "recorded",
+      "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+      "drivers": [
+        "preserve existing public behavior unless the task explicitly changes it",
+        "prefer source changes backed by focused tests and broad regression checks",
+        "keep rollback evidence and changed-file scope review in the final package"
+      ],
+      "alternatives_considered": [
+        {
+          "option": "single-file shortcut",
+          "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+        },
+        {
+          "option": "broad rewrite",
+          "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+        }
+      ],
+      "seed_rules": [
+        "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+        "Inspect dependents before changing public functions or modules with reverse dependencies.",
+        "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+      ],
+      "impacted_files": [
+        "payments/api.py",
+        "payments/client.py",
+        "docs/payments_api.md"
+      ],
+      "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+    },
+    "risks": [],
+    "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed.",
+    "next_safe_action": "inspect_final_package"
+  },
+  "recommended_read_order": [
+    {
+      "path": "payments/client.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, imported_by:tests/test_api_evolution.py, goal_symbol_match:api,client,payments"
+    },
+    {
+      "path": "payments/api.py",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match, imported_by:tests/test_api_evolution.py, goal_symbol_match:api,payments"
+    },
+    {
+      "path": "tests/test_api_evolution.py",
+      "phase": "inspect_test",
+      "reason": "goal_filename_match, test_surface, linked_test"
+    },
+    {
+      "path": "docs/payments_api.md",
+      "phase": "inspect_source",
+      "reason": "goal_filename_match"
+    }
+  ],
+  "engineering_investigation": {
+    "dependency_graph": {
+      "edges": [
+        {
+          "from": "payments/client.py",
+          "to": "payments/api.py",
+          "import": "payments.api.calculate_total"
+        },
+        {
+          "from": "tests/test_api_evolution.py",
+          "to": "payments/api.py",
+          "import": "payments.api.calculate_total"
+        },
+        {
+          "from": "tests/test_api_evolution.py",
+          "to": "payments/client.py",
+          "import": "payments.client.client_total"
+        }
+      ],
+      "reverse_dependents": {
+        "payments/api.py": [
+          "payments/client.py",
+          "tests/test_api_evolution.py"
+        ],
+        "payments/client.py": [
+          "tests/test_api_evolution.py"
+        ]
+      },
+      "edge_count": 3
+    },
+    "call_graph": {
+      "edges": [
+        {
+          "from": "payments/client.py",
+          "to": "payments/api.py",
+          "call": "calculate_total"
+        },
+        {
+          "from": "tests/test_api_evolution.py",
+          "to": "payments/api.py",
+          "call": "calculate_total"
+        },
+        {
+          "from": "tests/test_api_evolution.py",
+          "to": "payments/client.py",
+          "call": "client_total"
+        }
+      ],
+      "edge_count": 3,
+      "known_function_count": 2
+    },
+    "targeted_reading_plan": [
+      {
+        "path": "payments/client.py",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match, imported_by:tests/test_api_evolution.py, goal_symbol_match:api,client,payments",
+        "dependent_count": 1,
+        "sample_dependents": [
+          "tests/test_api_evolution.py"
+        ],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      },
+      {
+        "path": "payments/api.py",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match, imported_by:tests/test_api_evolution.py, goal_symbol_match:api,payments",
+        "dependent_count": 2,
+        "sample_dependents": [
+          "payments/client.py",
+          "tests/test_api_evolution.py"
+        ],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      },
+      {
+        "path": "tests/test_api_evolution.py",
+        "phase": "inspect_test",
+        "reason": "goal_filename_match, test_surface, linked_test",
+        "dependent_count": 0,
+        "sample_dependents": [],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      },
+      {
+        "path": "docs/payments_api.md",
+        "phase": "inspect_source",
+        "reason": "goal_filename_match",
+        "dependent_count": 0,
+        "sample_dependents": [],
+        "question": "What contract does this file expose, and what tests or dependents would break if it changes?"
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis": "payments/client.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "goal_filename_match",
+          "imported_by:tests/test_api_evolution.py",
+          "goal_symbol_match:api,client,payments",
+          "python_source"
+        ],
+        "risk": "public behavior may affect dependents",
+        "next_read": "payments/client.py"
+      },
+      {
+        "hypothesis": "payments/api.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "goal_filename_match",
+          "imported_by:tests/test_api_evolution.py",
+          "goal_symbol_match:api,payments",
+          "python_source"
+        ],
+        "risk": "public behavior may affect dependents",
+        "next_read": "payments/api.py"
+      },
+      {
+        "hypothesis": "tests/test_api_evolution.py is likely relevant to the requested code change.",
+        "confidence": "high",
+        "evidence": [
+          "goal_filename_match",
+          "test_surface",
+          "linked_test",
+          "goal_symbol_match:api,client,evolution,payments,test"
+        ],
+        "risk": "local change risk appears limited",
+        "next_read": "tests/test_api_evolution.py"
+      },
+      {
+        "hypothesis": "docs/payments_api.md is likely relevant to the requested code change.",
+        "confidence": "medium",
+        "evidence": [
+          "goal_filename_match"
+        ],
+        "risk": "local change risk appears limited",
+        "next_read": "docs/payments_api.md"
+      }
+    ],
+    "design_decision_seed": [
+      "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+      "Inspect dependents before changing public functions or modules with reverse dependencies.",
+      "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+    ]
+  },
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "payments/client.py",
+        "impact_level": "medium",
+        "rank_score": 22,
+        "dependent_count": 1,
+        "linked_tests": [
+          "tests/test_api_evolution.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "payments/api.py",
+        "impact_level": "medium",
+        "rank_score": 21,
+        "dependent_count": 2,
+        "linked_tests": [
+          "tests/test_api_evolution.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "tests/test_api_evolution.py",
+        "impact_level": "medium",
+        "rank_score": 19,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      },
+      {
+        "path": "docs/payments_api.md",
+        "impact_level": "low",
+        "rank_score": 6,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      }
+    ],
+    "risk_register": [],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [
+        "python -m unittest discover",
+        "python -m unittest tests.test_api_evolution"
+      ],
+      "linked_test_targets": [
+        "tests/test_api_evolution.py"
+      ],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "engineering_readiness_review": {
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    },
+    "acceptance_criteria_count": 5,
+    "risk_count": 0,
+    "high_risk_count": 0,
+    "impact_file_count": 4
+  },
+  "architect_review": {
+    "problem_statement_present": true,
+    "architecture_options_present": true,
+    "architecture_decision_record_present": true
+  },
+  "code_review_discipline": {
+    "findings": [],
+    "blocker_count": 0
+  },
+  "repository_investigation_review": {
+    "status": "covered",
+    "checks": [
+      {
+        "check": "ranked_repo_map_present",
+        "status": "pass",
+        "evidence": {
+          "ranked_file_count": 4,
+          "explicit_output_surface": false,
+          "planned_output_paths": [
+            "tests/test_api_evolution.py",
+            "payments/api.py",
+            "docs/payments_api.md"
+          ]
+        }
+      },
+      {
+        "check": "targeted_reading_plan_present",
+        "status": "pass",
+        "evidence": {
+          "targeted_read_count": 4,
+          "recommended_read_count": 4,
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "hypotheses_present",
+        "status": "pass",
+        "evidence": {
+          "hypothesis_count": 4
+        }
+      },
+      {
+        "check": "impact_matrix_present",
+        "status": "pass",
+        "evidence": {
+          "impact_file_count": 4,
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "pre_mutation_source_reads_present",
+        "status": "pass",
+        "evidence": {
+          "read_excerpt_count": 4,
+          "read_paths": [
+            "payments/client.py",
+            "payments/api.py",
+            "tests/test_api_evolution.py",
+            "docs/payments_api.md"
+          ],
+          "explicit_output_surface": false
+        }
+      },
+      {
+        "check": "changed_files_mapped_to_survey",
+        "status": "pass",
+        "evidence": {
+          "changed_file_count": 3,
+          "preexisting_changed_file_count": 3,
+          "mapped_changed_file_count": 3,
+          "created_changes_allowed_as_explicit_outputs": [],
+          "unmapped_preexisting_changed_files": []
+        }
+      }
+    ],
+    "blockers": [],
+    "summary": "Repository investigation evidence is sufficient."
+  },
+  "patch_scope_evidence": {
+    "changed_files_in_repo_map": [
+      "payments/api.py",
+      "payments/client.py",
+      "docs/payments_api.md"
+    ],
+    "changed_files_outside_repo_map": [],
+    "changed_sources_with_linked_tests": [
+      {
+        "path": "payments/api.py",
+        "tests": [
+          "tests/test_api_evolution.py"
+        ]
+      },
+      {
+        "path": "payments/client.py",
+        "tests": [
+          "tests/test_api_evolution.py"
+        ]
+      }
+    ],
+    "changed_tests_with_linked_sources": [],
+    "evidence": [
+      {
+        "path": "payments/api.py",
+        "in_repo_map": true,
+        "score": 21,
+        "reasons": [
+          "goal_filename_match",
+          "imported_by:tests/test_api_evolution.py",
+          "goal_symbol_match:api,payments",
+          "python_source"
+        ],
+        "linked_tests": [
+          "tests/test_api_evolution.py"
+        ],
+        "linked_sources": []
+      },
+      {
+        "path": "payments/client.py",
+        "in_repo_map": true,
+        "score": 22,
+        "reasons": [
+          "goal_filename_match",
+          "imported_by:tests/test_api_evolution.py",
+          "goal_symbol_match:api,client,payments",
+          "python_source"
+        ],
+        "linked_tests": [
+          "tests/test_api_evolution.py"
+        ],
+        "linked_sources": []
+      },
+      {
+        "path": "docs/payments_api.md",
+        "in_repo_map": true,
+        "score": 6,
+        "reasons": [
+          "goal_filename_match"
+        ],
+        "linked_tests": [],
+        "linked_sources": []
+      }
+    ]
+  },
+  "patch_source": "test_inferred_api_deprecation",
+  "patch_candidates": [
+    {
+      "source": "explicit_json_patch",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "marker_synthesis",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_api_deprecation",
+      "status": "selected",
+      "operation_count": 3,
+      "verification_command_count": 3,
+      "diagnostics": {
+        "kind": "test_inferred_api_deprecation",
+        "test_path": "tests/test_api_evolution.py",
+        "source_path": "payments/api.py",
+        "function_name": "calculate_total",
+        "old_param": "fee",
+        "new_param": "service_fee",
+        "caller": {
+          "caller_name": "client_total",
+          "caller_path": "payments/client.py"
+        },
+        "docs_path": "docs/payments_api.md"
+      }
+    }
+  ],
+  "selected_patch_candidate": {
+    "source": "test_inferred_api_deprecation",
+    "status": "selected",
+    "operation_count": 3,
+    "verification_command_count": 3,
+    "diagnostics": {
+      "kind": "test_inferred_api_deprecation",
+      "test_path": "tests/test_api_evolution.py",
+      "source_path": "payments/api.py",
+      "function_name": "calculate_total",
+      "old_param": "fee",
+      "new_param": "service_fee",
+      "caller": {
+        "caller_name": "client_total",
+        "caller_path": "payments/client.py"
+      },
+      "docs_path": "docs/payments_api.md"
+    }
+  },
+  "dirty_worktree": {
+    "git_repo": false,
+    "dirty_targets": []
+  },
+  "ambiguity_analysis": {},
+  "source_excerpt_summary": [
+    {
+      "path": "payments/client.py",
+      "status": "read",
+      "bytes": 111,
+      "truncated": false
+    },
+    {
+      "path": "payments/api.py",
+      "status": "read",
+      "bytes": 56,
+      "truncated": false
+    },
+    {
+      "path": "tests/test_api_evolution.py",
+      "status": "read",
+      "bytes": 696,
+      "truncated": false
+    },
+    {
+      "path": "docs/payments_api.md",
+      "status": "read",
+      "bytes": 95,
+      "truncated": false
+    }
+  ],
+  "implementation_decision_record": [
+    {
+      "check": "source_evidence_loaded",
+      "status": "pass",
+      "detail": "4 targeted files read"
+    },
+    {
+      "check": "patch_candidate_selected",
+      "status": "pass",
+      "detail": "test_inferred_api_deprecation"
+    },
+    {
+      "check": "mutation_authority",
+      "status": "pass",
+      "detail": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+    }
+  ],
+  "diagnostics": {
+    "kind": "test_inferred_api_deprecation",
+    "test_path": "tests/test_api_evolution.py",
+    "source_path": "payments/api.py",
+    "function_name": "calculate_total",
+    "old_param": "fee",
+    "new_param": "service_fee",
+    "caller": {
+      "caller_name": "client_total",
+      "caller_path": "payments/client.py"
+    },
+    "docs_path": "docs/payments_api.md"
+  },
+  "operation_count": 3,
+  "verification_status": "passed",
+  "verification_executed": [
+    {
+      "command": "/usr/bin/python3 -m py_compile payments/api.py payments/client.py",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": "python -m unittest tests.test_api_evolution",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n"
+    },
+    {
+      "command": "python -m py_compile payments/api.py payments/client.py",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": "python -m unittest discover -s tests",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n"
+    }
+  ],
+  "verification_repairs": [],
+  "repair_loop_state": {
+    "status": "passed",
+    "task_id": "ceraxia-expert-unshaped-api-evolution-20260701-213725:verification",
+    "role_policy": {
+      "role": "verifier",
+      "authority": "allowlisted_verification_and_narrow_repairs",
+      "may_mutate_source": true,
+      "required_evidence": [
+        "verification_executed",
+        "verification_blockers",
+        "verification_repairs"
+      ],
+      "forbidden_actions": [
+        "shell_execution",
+        "unallowlisted_command",
+        "broad_unscoped_rewrite"
+      ]
+    },
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "api_contract",
+        "multi_file",
+        "new_feature",
+        "bugfix"
+      ],
+      "complexity": "high",
+      "complexity_score": 5,
+      "workflow_mode": "repo_grade",
+      "repo_grade_required_evidence": [
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ],
+      "risk_flags": [
+        "multi_file_scope_drift",
+        "test_diagnostic_required",
+        "public_contract_regression",
+        "repo_grade_evidence_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+        "multi-file tasks must keep changed-file scope evidence for every mutated file",
+        "API/contract tasks must preserve public response shape and schema compatibility evidence",
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ]
+    },
+    "worker_brief": {
+      "step_id": "verification",
+      "worker": "OrdinatusVerifier",
+      "purpose": "Define and record the verification commands or blockers for the implementation.",
+      "brief": "Run allowlisted checks and perform only narrow repair loops.",
+      "task_profile": {
+        "kinds": [
+          "test_repair",
+          "api_contract",
+          "multi_file",
+          "new_feature",
+          "bugfix"
+        ],
+        "complexity": "high",
+        "complexity_score": 5,
+        "workflow_mode": "repo_grade",
+        "repo_grade_required_evidence": [
+          "architecture decision record with alternatives and tradeoffs",
+          "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+          "focused verification for the changed behavior",
+          "broad verification for repo-level regressions or an explicit blocker",
+          "self-review decision record before final packaging",
+          "PR-style final summary with changed files, verification, risks, and rollback notes"
+        ],
+        "risk_flags": [
+          "multi_file_scope_drift",
+          "test_diagnostic_required",
+          "public_contract_regression",
+          "repo_grade_evidence_required",
+          "natural_language_patch_inference"
+        ],
+        "required_governor_checks": [
+          "repository survey must identify candidate source and test files before mutation",
+          "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+          "verification must run allowlisted commands or record explicit blockers",
+          "review must approve or produce a focused revision_plan",
+          "final manifest must preserve execution evidence, blockers, and next_safe_action",
+          "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+          "multi-file tasks must keep changed-file scope evidence for every mutated file",
+          "API/contract tasks must preserve public response shape and schema compatibility evidence",
+          "architecture decision record with alternatives and tradeoffs",
+          "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+          "focused verification for the changed behavior",
+          "broad verification for repo-level regressions or an explicit blocker",
+          "self-review decision record before final packaging",
+          "PR-style final summary with changed files, verification, risks, and rollback notes"
+        ]
+      },
+      "must_produce": [
+        "executed commands",
+        "focused verification",
+        "broad verification or blocker",
+        "repair_loop_state",
+        "failed_commands",
+        "candidate_source_paths"
+      ],
+      "handoff_question": "Did checks pass after repair, or what blocks review?",
+      "authority_boundary": "allowlisted_verification_and_narrow_repairs"
+    },
+    "repairs_allowed": true,
+    "repair_attempts": [],
+    "blocked_repairs": [],
+    "commands_executed_count": 4,
+    "failed_commands": [],
+    "candidate_source_paths": [],
+    "pending_blockers": [],
+    "next_action": "continue_to_code_review",
+    "summary": "Repair loop state recorded for verification step."
+  },
+  "verification_blockers": [],
+  "verification_summary": {
+    "executed_count": 4,
+    "repair_count": 0,
+    "blocker_count": 0
+  },
+  "execution_report": {
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "api_contract",
+        "multi_file",
+        "new_feature",
+        "bugfix"
+      ],
+      "complexity": "high",
+      "complexity_score": 5,
+      "workflow_mode": "repo_grade",
+      "repo_grade_required_evidence": [
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ],
+      "risk_flags": [
+        "multi_file_scope_drift",
+        "test_diagnostic_required",
+        "public_contract_regression",
+        "repo_grade_evidence_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+        "multi-file tasks must keep changed-file scope evidence for every mutated file",
+        "API/contract tasks must preserve public response shape and schema compatibility evidence",
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ]
+    },
+    "worker_briefs_present": {
+      "repository_survey": true,
+      "implementation": true,
+      "verification": true,
+      "code_review": true,
+      "finalize": true
+    },
+    "changed_file_count": 3,
+    "verification_command_count": 4,
+    "repair_attempt_count": 0,
+    "patch_candidate_count": 3,
+    "source_excerpt_count": 4,
+    "acceptance_criteria_count": 5,
+    "risk_count": 0,
+    "impact_file_count": 4,
+    "blocker_count": 0,
+    "revision_required": false
+  },
+  "review_status": "passed",
+  "patch_scope_review": {
+    "status": "covered",
+    "changed_file_count": 3,
+    "mapped_changed_file_count": 3,
+    "unmapped_changed_file_count": 0,
+    "unmapped_changed_files": [],
+    "source_without_linked_tests": []
+  },
+  "review_decision_record": [
+    {
+      "check": "patch_applied",
+      "status": "pass",
+      "evidence": "applied"
+    },
+    {
+      "check": "verification_passed",
+      "status": "pass",
+      "evidence": "passed"
+    },
+    {
+      "check": "scope_review",
+      "status": "covered",
+      "evidence": {
+        "status": "covered",
+        "changed_file_count": 3,
+        "mapped_changed_file_count": 3,
+        "unmapped_changed_file_count": 0,
+        "unmapped_changed_files": [],
+        "source_without_linked_tests": []
+      }
+    },
+    {
+      "check": "diagnostic_linkage",
+      "status": "pass",
+      "evidence": {
+        "kind": "test_inferred_api_deprecation",
+        "test_path": "tests/test_api_evolution.py",
+        "source_path": "payments/api.py",
+        "function_name": "calculate_total",
+        "old_param": "fee",
+        "new_param": "service_fee",
+        "caller": {
+          "caller_name": "client_total",
+          "caller_path": "payments/client.py"
+        },
+        "docs_path": "docs/payments_api.md"
+      }
+    },
+    {
+      "check": "unshaped_repair_plan_present",
+      "status": "pass",
+      "evidence": {
+        "required": true,
+        "status": "recorded",
+        "mode": "unshaped_repo_repair",
+        "hypothesis_count": 1,
+        "candidate_count": 1
+      }
+    },
+    {
+      "check": "diagnostic_extraction_present",
+      "status": "pass",
+      "evidence": {
+        "unittest_assertions": 0,
+        "traceback_frames": 0,
+        "runtime_test_failures": 0,
+        "runtime_minimal_patch_candidates": 0,
+        "traceback_source_candidates": 0,
+        "static_test_expectations": 1
+      }
+    },
+    {
+      "check": "ast_minimal_patch_plan_present",
+      "status": "pass",
+      "evidence": {
+        "required": false,
+        "status": "not_applicable",
+        "operation_count": 0,
+        "blockers": []
+      }
+    },
+    {
+      "check": "readiness_model_present",
+      "status": "pass",
+      "evidence": {
+        "has_ranked_sources": true,
+        "has_acceptance_criteria": true,
+        "has_test_strategy": true,
+        "high_risk_count": 0
+      }
+    },
+    {
+      "check": "impact_matrix_present",
+      "status": "pass",
+      "evidence": {
+        "impact_file_count": 4
+      }
+    },
+    {
+      "check": "repository_investigation_review",
+      "status": "pass",
+      "evidence": {
+        "status": "covered",
+        "checks": [
+          {
+            "check": "ranked_repo_map_present",
+            "status": "pass",
+            "evidence": {
+              "ranked_file_count": 4,
+              "explicit_output_surface": false,
+              "planned_output_paths": [
+                "tests/test_api_evolution.py",
+                "payments/api.py",
+                "docs/payments_api.md"
+              ]
+            }
+          },
+          {
+            "check": "targeted_reading_plan_present",
+            "status": "pass",
+            "evidence": {
+              "targeted_read_count": 4,
+              "recommended_read_count": 4,
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "hypotheses_present",
+            "status": "pass",
+            "evidence": {
+              "hypothesis_count": 4
+            }
+          },
+          {
+            "check": "impact_matrix_present",
+            "status": "pass",
+            "evidence": {
+              "impact_file_count": 4,
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "pre_mutation_source_reads_present",
+            "status": "pass",
+            "evidence": {
+              "read_excerpt_count": 4,
+              "read_paths": [
+                "payments/client.py",
+                "payments/api.py",
+                "tests/test_api_evolution.py",
+                "docs/payments_api.md"
+              ],
+              "explicit_output_surface": false
+            }
+          },
+          {
+            "check": "changed_files_mapped_to_survey",
+            "status": "pass",
+            "evidence": {
+              "changed_file_count": 3,
+              "preexisting_changed_file_count": 3,
+              "mapped_changed_file_count": 3,
+              "created_changes_allowed_as_explicit_outputs": [],
+              "unmapped_preexisting_changed_files": []
+            }
+          }
+        ],
+        "blockers": [],
+        "summary": "Repository investigation evidence is sufficient."
+      }
+    },
+    {
+      "check": "problem_statement_present",
+      "status": "pass",
+      "evidence": {
+        "status": "recorded",
+        "goal": "кодовая expert-задача без structured patch marker: публичный API payments должен перейти с positional fee на preferred keyword-only service_fee, но старые positional callers должны продолжить работать с DeprecationWarning. Найди и обнови implementation, caller, docs и tests по evidence из репозитория, не угадывай и не переписывай unrelated files.\nCERAXIA_TARGET_REPO: /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260701-213725/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_api_evolution\nCERAXIA_VERIFY: python -m py_compile payments/api.py payments/client.py",
+        "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+        "success_criteria": [
+          "changed files directly address the requested behavior",
+          "source scope is justified by repo survey or explicit patch contract",
+          "verification evidence is preserved after the final mutation",
+          "review either approves with evidence or blocks with focused revision steps"
+        ],
+        "evidence_to_inspect": [
+          "payments/client.py",
+          "payments/api.py",
+          "tests/test_api_evolution.py",
+          "docs/payments_api.md"
+        ],
+        "working_hypotheses": [
+          "payments/client.py is likely relevant to the requested code change.",
+          "payments/api.py is likely relevant to the requested code change.",
+          "tests/test_api_evolution.py is likely relevant to the requested code change.",
+          "docs/payments_api.md is likely relevant to the requested code change."
+        ],
+        "verification_candidates": [
+          "python -m unittest discover",
+          "python -m unittest tests.test_api_evolution",
+          "tests/test_api_evolution.py",
+          "python -m py_compile <changed .py files>",
+          "git diff --check"
+        ],
+        "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+      }
+    },
+    {
+      "check": "architecture_options_present",
+      "status": "pass",
+      "evidence": {
+        "status": "recorded",
+        "problem_status": "recorded",
+        "options": [
+          {
+            "id": "minimal_targeted_patch",
+            "summary": "Patch the narrowest source surface that satisfies the observed behavior gap.",
+            "recommended": true,
+            "tradeoffs": [
+              "lowest churn",
+              "requires focused verification to prove behavior"
+            ],
+            "applies_to": [
+              "payments/client.py",
+              "payments/api.py",
+              "tests/test_api_evolution.py"
+            ]
+          },
+          {
+            "id": "compatibility_wrapper",
+            "summary": "Preserve old callers while adding the new behavior behind a compatible boundary.",
+            "recommended": true,
+            "tradeoffs": [
+              "safer public API evolution",
+              "may require deprecation docs and caller tests"
+            ],
+            "applies_to": [
+              "payments/client.py",
+              "payments/api.py",
+              "tests/test_api_evolution.py"
+            ]
+          },
+          {
+            "id": "broad_rewrite",
+            "summary": "Rewrite the surrounding module or subsystem.",
+            "recommended": false,
+            "tradeoffs": [
+              "higher regression risk",
+              "harder review",
+              "should be rejected unless the task explicitly demands it"
+            ],
+            "applies_to": [
+              "payments/client.py",
+              "payments/api.py",
+              "tests/test_api_evolution.py"
+            ]
+          }
+        ],
+        "selection_rule": "Choose the first option that satisfies the task with the least public-surface churn and adequate verification."
+      }
+    },
+    {
+      "check": "architecture_decision_record_present",
+      "status": "pass",
+      "evidence": {
+        "status": "recorded",
+        "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+        "drivers": [
+          "preserve existing public behavior unless the task explicitly changes it",
+          "prefer source changes backed by focused tests and broad regression checks",
+          "keep rollback evidence and changed-file scope review in the final package"
+        ],
+        "alternatives_considered": [
+          {
+            "option": "single-file shortcut",
+            "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+          },
+          {
+            "option": "broad rewrite",
+            "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+          }
+        ],
+        "seed_rules": [
+          "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+          "Inspect dependents before changing public functions or modules with reverse dependencies.",
+          "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+        ],
+        "impacted_files": [
+          "payments/api.py",
+          "payments/client.py",
+          "docs/payments_api.md"
+        ],
+        "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+      }
+    },
+    {
+      "check": "focused_verification_present",
+      "status": "pass",
+      "evidence": [
+        "/usr/bin/python3 -m py_compile payments/api.py payments/client.py",
+        "python -m unittest tests.test_api_evolution",
+        "python -m py_compile payments/api.py payments/client.py"
+      ]
+    },
+    {
+      "check": "broad_verification_present",
+      "status": "pass",
+      "evidence": [
+        "python -m unittest discover -s tests"
+      ]
+    },
+    {
+      "check": "public_surface_review",
+      "status": "pass",
+      "evidence": {
+        "status": "covered",
+        "required": true,
+        "checks": [
+          {
+            "check": "public_surface_review_required",
+            "status": "pass",
+            "evidence": {
+              "patch_source": "test_inferred_api_deprecation"
+            }
+          },
+          {
+            "check": "docs_surface_updated",
+            "status": "pass",
+            "evidence": {
+              "docs_path": "docs/payments_api.md",
+              "changed": true
+            }
+          },
+          {
+            "check": "caller_surface_updated_or_not_required",
+            "status": "pass",
+            "evidence": {
+              "caller_path": "payments/client.py",
+              "changed": true
+            }
+          },
+          {
+            "check": "public_surface_broad_verification",
+            "status": "pass",
+            "evidence": {
+              "broad_commands": [
+                "python -m unittest discover -s tests"
+              ]
+            }
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "check": "review_discipline_findings",
+      "status": "pass",
+      "evidence": []
+    }
+  ],
+  "review_repair_loop": {
+    "required": false,
+    "trigger": "",
+    "blocked_checks": [],
+    "rerun_steps": [],
+    "focused_context": {},
+    "completion_gate": "rerun implementation and verification, then rerun code_review and finalize"
+  },
+  "blockers": [],
+  "next_safe_action": "inspect_final_package",
+  "summary": "Ceraxia code task package finalized.",
+  "revision_plan": {
+    "required": false,
+    "focused_context": {},
+    "steps": []
+  }
+}
