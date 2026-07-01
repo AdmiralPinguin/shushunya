@@ -482,10 +482,22 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         findings.append({"severity": "blocker", "finding": f"run_summary.json is unreadable: {exc}"})
         summary = {}
+    try:
+        worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        findings.append({"severity": "blocker", "finding": f"worker_report.json is unreadable: {exc}"})
+        worker_report = {}
     if summary.get("execution_readiness") != readiness.get("decision"):
         findings.append({"severity": "blocker", "finding": "run_summary execution_readiness disagrees with execution_readiness.json"})
     if summary.get("ready_for_execution") != (readiness.get("decision") == "ready_for_real_execution"):
         findings.append({"severity": "blocker", "finding": "run_summary ready_for_execution disagrees with execution_readiness.json"})
+    if summary.get("worker_status") != worker_report.get("status"):
+        findings.append({"severity": "blocker", "finding": "run_summary worker_status disagrees with worker_report.json"})
+    if summary.get("code_brigade_execution_policy_status") != worker_report.get("execution_policy_status"):
+        findings.append({"severity": "blocker", "finding": "run_summary code_brigade_execution_policy_status disagrees with worker_report.json"})
+    execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
+    if summary.get("code_brigade_execution_result_status", "") != execution_result.get("status", ""):
+        findings.append({"severity": "blocker", "finding": "run_summary code_brigade_execution_result_status disagrees with worker_report.json"})
     try:
         evidence_matrix = json.loads((run_dir / "evidence_matrix.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
