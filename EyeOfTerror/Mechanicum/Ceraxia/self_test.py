@@ -34,6 +34,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             (repo / "app.py").write_text("from util import enabled\n\ndef app():\n    return enabled()\n", encoding="utf-8")
             (repo / "util.py").write_text("def enabled():\n    return True\n", encoding="utf-8")
             (repo / "client.ts").write_text("import { api } from './api';\nexport function client() { return api(); }\n", encoding="utf-8")
+            (repo / "client.spec.ts").write_text("import { client } from './client';\ntest('client', () => client());\n", encoding="utf-8")
             (repo / "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
             runs = Path(tmp) / "runs"
             result = run_ceraxia(
@@ -124,6 +125,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(survey["status"], "surveyed")
             self.assertIn("app.py", survey["candidate_files"])
             self.assertIn("test_app.py", survey["test_files"])
+            self.assertIn("client.spec.ts", survey["test_files"])
             self.assertEqual(survey["existing_path_hints"], ["app.py", "test_app.py"])
             self.assertFalse(survey["truncated"])
             self.assertFalse(survey["python_symbols_truncated"])

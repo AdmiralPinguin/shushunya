@@ -50,9 +50,20 @@ def score_candidate(path: Path) -> int:
         score += 1
     if name in {"main.py", "app.py", "server.py", "cli.py", "__init__.py"}:
         score += 4
-    if "test" in name or path.parent.name.lower() in {"test", "tests"}:
+    if is_test_file(path):
         score -= 2
     return score
+
+
+def is_test_file(path: Path) -> bool:
+    name = path.name.lower()
+    parent_names = {part.lower() for part in path.parts}
+    return (
+        "test" in name
+        or name.endswith((".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx"))
+        or name.endswith((".test.ts", ".test.tsx", ".test.js", ".test.jsx"))
+        or bool(parent_names & {"test", "tests", "__tests__"})
+    )
 
 
 def safe_relative_hint(value: str) -> bool:
@@ -246,12 +257,12 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     hinted_candidates = [
         hint
         for hint in existing_path_hints
-        if score_candidate(rel_to_path[hint]) > 0 and "test" not in rel_to_path[hint].name.lower()
+        if score_candidate(rel_to_path[hint]) > 0 and not is_test_file(rel_to_path[hint])
     ]
     hinted_tests = [
         hint
         for hint in existing_path_hints
-        if "test" in rel_to_path[hint].name.lower() or rel_to_path[hint].parent.name.lower() in {"test", "tests"}
+        if is_test_file(rel_to_path[hint])
     ]
     scored = sorted(
         ((score_candidate(path), str(path.relative_to(root))) for path in files),
@@ -261,7 +272,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     tests = unique(hinted_tests + [
         str(path.relative_to(root))
         for path in files
-        if "test" in path.name.lower() or path.parent.name.lower() in {"test", "tests"}
+        if is_test_file(path)
     ])[:30]
     entrypoints = [
         str(path.relative_to(root))
