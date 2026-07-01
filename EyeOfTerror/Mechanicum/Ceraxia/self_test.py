@@ -478,9 +478,13 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "passed")
             self.assertTrue(verification["commands_executed"])
+            self.assertTrue(verification["output_summary"])
+            self.assertTrue(all(row.get("output_signal") for row in verification["output_summary"]))
             review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
             self.assertEqual(review["surface_verification_sufficiency"]["status"], "partial")
             self.assertGreaterEqual(review["verification_sufficiency"]["meaningful_commands_executed_count"], 1)
+            self.assertGreaterEqual(review["verification_sufficiency"]["output_summary_count"], 1)
+            self.assertTrue(review["verification_sufficiency"]["output_signal_counts"])
             surface_evidence = review["surface_verification_sufficiency"]["surface_evidence"]
             self.assertTrue(any(row["surface"] == "source_behavior" and row["status"] == "executed" for row in surface_evidence))
             self.assertTrue(any(row["surface"] == "source_behavior" and row["matched_commands"] for row in surface_evidence))
@@ -821,9 +825,20 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             "commands_planned": ["python -m pytest"],
             "commands_executable": ["python -m pytest"],
             "commands_executed": [{"command": "python -m pytest", "status": "failed"}],
+            "output_summary": [
+                {
+                    "command": "python -m pytest",
+                    "status": "failed",
+                    "returncode": 1,
+                    "stdout_nonempty": True,
+                    "stderr_nonempty": False,
+                    "output_signal": "failure_text",
+                }
+            ],
         }
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertEqual(review["surface_verification_sufficiency"]["status"], "failed")
+        self.assertEqual(review["verification_sufficiency"]["output_signal_counts"]["failure_text"], 1)
 
     def test_review_gate_blocks_high_risk_partial_surface_execution(self) -> None:
         packet = build_planning_packet(
@@ -865,9 +880,20 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             "commands_planned": ["python -m py_compile app.py", "python -m pytest test_app.py"],
             "commands_executable": ["python -m py_compile app.py", "python -m pytest test_app.py"],
             "commands_executed": [{"command": "python -m py_compile app.py", "status": "passed"}],
+            "output_summary": [
+                {
+                    "command": "python -m py_compile app.py",
+                    "status": "passed",
+                    "returncode": 0,
+                    "stdout_nonempty": False,
+                    "stderr_nonempty": False,
+                    "output_signal": "output_empty",
+                }
+            ],
         }
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertEqual(review["surface_verification_sufficiency"]["status"], "partial")
+        self.assertEqual(review["verification_sufficiency"]["output_signal_counts"]["output_empty"], 1)
         surface_evidence = review["surface_verification_sufficiency"]["surface_evidence"]
         self.assertTrue(any(row["surface"] == "source_behavior" and row["matched_commands"] == ["python -m py_compile app.py"] for row in surface_evidence))
         self.assertTrue(any(row["surface"] == "security_boundary" and row["status"] == "partial" and not row["matched_commands"] for row in surface_evidence))

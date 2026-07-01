@@ -304,12 +304,14 @@ def build_verification_report(brief: dict[str, Any], worker_report: dict[str, An
         status = execution["status"] if executable_commands else "requires_execution"
     else:
         status = "planned_only" if dry_run else "requires_execution"
+    commands_executed = [item for item in execution.get("results", []) if item.get("status") != "planned"]
     return {
         "kind": "ceraxia_verification_report",
         "status": status,
         "commands_planned": commands,
         "commands_executable": executable_commands,
-        "commands_executed": [item for item in execution.get("results", []) if item.get("status") != "planned"],
+        "commands_executed": commands_executed,
+        "output_summary": summarize_verification_output(commands_executed),
         "verification_execution": execution,
         "negative_tests_required": strategy.get("negative_tests", []),
         "broad_verification_required": bool(strategy.get("broad_verification_required")),
@@ -317,6 +319,51 @@ def build_verification_report(brief: dict[str, Any], worker_report: dict[str, An
         "dry_run": dry_run,
         "execute_verification": execute_verification,
     }
+
+
+def output_signal_for_result(result: dict[str, Any]) -> str:
+    stdout = str(result.get("stdout") or "")
+    stderr = str(result.get("stderr") or "")
+    combined = f"{stdout}\n{stderr}".lower()
+    if "traceback" in combined:
+        return "traceback"
+    if result.get("status") == "failed" or "failed" in combined or " error" in combined or "errors" in combined:
+        return "failure_text"
+    if "passed" in combined or combined.strip().endswith("ok"):
+        return "pass_text"
+    if stdout or stderr:
+        return "output_present"
+    return "output_empty"
+
+
+def summarize_verification_output(commands: list[Any]) -> list[dict[str, Any]]:
+    summary: list[dict[str, Any]] = []
+    for item in commands:
+        if not isinstance(item, dict):
+            continue
+        stdout = str(item.get("stdout") or "")
+        stderr = str(item.get("stderr") or "")
+        summary.append(
+            {
+                "command": str(item.get("command") or ""),
+                "status": str(item.get("status") or ""),
+                "returncode": item.get("returncode"),
+                "stdout_nonempty": bool(stdout),
+                "stderr_nonempty": bool(stderr),
+                "output_signal": output_signal_for_result(item),
+            }
+        )
+    return summary
+
+
+def output_signal_counts_from_summary(output_summary: list[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in output_summary:
+        if not isinstance(item, dict):
+            continue
+        signal = str(item.get("output_signal") or "unknown")
+        counts[signal] = counts.get(signal, 0) + 1
+    return counts
 
 
 def meaningful_executed_commands(verification_report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -591,6 +638,8 @@ def review_gate(
     commands_planned = verification_report.get("commands_planned") if isinstance(verification_report.get("commands_planned"), list) else []
     commands_executed = verification_report.get("commands_executed") if isinstance(verification_report.get("commands_executed"), list) else []
     meaningful_commands_executed = meaningful_executed_commands(verification_report)
+    output_summary = verification_report.get("output_summary") if isinstance(verification_report.get("output_summary"), list) else []
+    output_signal_counts = output_signal_counts_from_summary(output_summary)
     negative_tests = verification_report.get("negative_tests_required", [])
     verification_sufficiency = {
         "risk_level": brief.get("risk_level", "high"),
@@ -598,6 +647,8 @@ def review_gate(
         "commands_planned_count": len(commands_planned),
         "commands_executed_count": len(commands_executed),
         "meaningful_commands_executed_count": len(meaningful_commands_executed),
+        "output_summary_count": len(output_summary),
+        "output_signal_counts": output_signal_counts,
         "negative_tests_required_count": len(negative_tests) if isinstance(negative_tests, list) else 0,
         "broad_verification_required": bool(verification_report.get("broad_verification_required")),
     }
@@ -787,6 +838,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     warnings = review.get("warnings", [])
     commands_executed = verification.get("commands_executed", [])
     commands_planned = verification.get("commands_planned", [])
+    output_summary = verification.get("output_summary", []) if isinstance(verification.get("output_summary"), list) else []
+    output_signal_counts = output_signal_counts_from_summary(output_summary)
     repo_evidence = brief.get("repo_survey_evidence", {}) if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     work_packages = brief.get("implementation_work_packages", {}) if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
@@ -838,6 +891,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Surface verification status: {review.get('surface_verification_sufficiency', {}).get('status', '')}",
         f"Verification commands planned: {len(commands_planned)}",
         f"Verification commands executed: {len(commands_executed)}",
+        f"Verification output summary rows: {len(output_summary)}",
+        f"Verification output signals: {json.dumps(output_signal_counts, ensure_ascii=False, sort_keys=True)}",
         f"Worker status: {worker_report.get('status', '')}",
         f"Execution policy status: {worker_report.get('execution_policy_status', '')}",
         f"Execution result status: {execution_result.get('status', '')}",
