@@ -7,6 +7,11 @@
       "authority": "classify task intent and risk before repository mutation",
       "inputs": ["task", "constraints"],
       "outputs": ["problem_statement", "task_triage"],
+      "quality_gates": [
+        "task kinds are non-empty",
+        "risk level is low, medium, or high",
+        "definition of done is explicit before handoff"
+      ],
       "may_mutate_source": false,
       "handoff_to": "RepoSurveyor"
     },
@@ -15,6 +20,11 @@
       "authority": "request and consume read-only repository evidence",
       "inputs": ["problem_statement", "task_triage"],
       "outputs": ["repo_survey_request", "dependency_map"],
+      "quality_gates": [
+        "repository survey request is read-only",
+        "explicit path hints are preserved",
+        "critical path includes repo evidence before design"
+      ],
       "may_mutate_source": false,
       "handoff_to": "DesignStrategos"
     },
@@ -23,6 +33,11 @@
       "authority": "select the smallest coherent design and impacted surfaces",
       "inputs": ["problem_statement", "repo_survey_request", "dependency_map"],
       "outputs": ["work_breakdown", "impact_analysis", "design_options", "execution_forecast"],
+      "quality_gates": [
+        "hardcode and broad rewrite shortcuts are rejected",
+        "highest-risk surface is named",
+        "work breakdown reaches review before finalization"
+      ],
       "may_mutate_source": false,
       "handoff_to": "VerificationArchitect"
     },
@@ -31,6 +46,11 @@
       "authority": "map impacted surfaces to verification evidence",
       "inputs": ["impact_analysis", "design_options"],
       "outputs": ["verification_strategy", "surface_verification_matrix"],
+      "quality_gates": [
+        "targeted commands are planned",
+        "negative tests are named for boundary risks",
+        "every impacted surface has planned evidence or a blocker"
+      ],
       "may_mutate_source": false,
       "handoff_to": "RiskScribe"
     },
@@ -39,6 +59,11 @@
       "authority": "record risks, acceptance gates, and CodeBrigade handoff constraints",
       "inputs": ["verification_strategy", "surface_verification_matrix", "quality_bar"],
       "outputs": ["risk_register", "acceptance_contract", "implementation_brief_blueprint", "planning_review_gate", "code_brigade_handoff"],
+      "quality_gates": [
+        "acceptance evidence is concrete",
+        "CodeBrigade mutation preconditions are explicit",
+        "authority returns to Ceraxia"
+      ],
       "may_mutate_source": false,
       "handoff_to": "Ceraxia"
     }

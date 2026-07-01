@@ -9,4 +9,10 @@ Responsibilities:
 - keep Ceraxia responsible for final approval
 - define acceptance gates before implementation starts
 
+Quality gates:
+
+- acceptance evidence is concrete
+- CodeBrigade mutation preconditions are explicit
+- authority returns to Ceraxia
+
 Authority: risk disclosure only.

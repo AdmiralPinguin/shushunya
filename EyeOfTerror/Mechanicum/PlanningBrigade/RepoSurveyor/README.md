@@ -13,4 +13,10 @@ Responsibilities:
 - report `python_symbols_truncated=true` when symbol/import evidence hits its
   separate Python file limit
 
+Quality gates:
+
+- repository survey request is read-only
+- explicit path hints are preserved
+- critical path includes repo evidence before design
+
 Authority: read-only repository mapping.

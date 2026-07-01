@@ -14,9 +14,9 @@ Members:
 - `VerificationArchitect`
 - `RiskScribe`
 
-`role_contracts.json` fixes each role's authority, inputs, outputs, handoff,
-and read-only boundary. The roles remain in-process until field trials prove
-the contracts are stable enough to split into services.
+`role_contracts.json` fixes each role's authority, inputs, outputs, quality
+gates, handoff, and read-only boundary. The roles remain in-process until field
+trials prove the contracts are stable enough to split into services.
 `planning_packet_contract.py` owns strict packet validation so Ceraxia can
 import the contract gate without coupling review logic to packet generation.
 

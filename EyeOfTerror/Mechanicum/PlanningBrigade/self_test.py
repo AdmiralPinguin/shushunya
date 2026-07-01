@@ -39,6 +39,8 @@ def assert_role_contracts() -> None:
             raise AssertionError(f"PlanningBrigade roles must be read-only: {role}")
         if not role.get("authority") or not role.get("outputs"):
             raise AssertionError(f"role contract must expose authority and outputs: {role}")
+        if not isinstance(role.get("quality_gates"), list) or len(role.get("quality_gates", [])) < 3:
+            raise AssertionError(f"role contract must expose at least three quality gates: {role}")
     sample_packet = planning_brigade.build_planning_packet(
         {
             "task": "почини security API migration pytest",
