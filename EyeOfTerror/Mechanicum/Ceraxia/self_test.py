@@ -98,6 +98,12 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertFalse(summary["ready_for_execution"])
             self.assertEqual(summary["review_decision"], "dry_run_ready")
             self.assertIn("security", summary["task_kinds"])
+            final_report = (run_dir / "final_report.md").read_text(encoding="utf-8")
+            self.assertIn("Execution readiness: blocked", final_report)
+            self.assertIn("BLOCKER: real CodeBrigade execution is not wired in this controller yet", final_report)
+            self.assertIn("Verification commands planned:", final_report)
+            self.assertIn("Verification commands executed: 0", final_report)
+            self.assertIn("WARNING: broad verification is planned but not executed", final_report)
 
     def test_missing_repo_blocks_before_claiming_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

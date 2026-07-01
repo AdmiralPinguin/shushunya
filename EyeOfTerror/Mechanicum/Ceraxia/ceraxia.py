@@ -328,15 +328,49 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     packet = artifacts["planning_packet"]
     brief = artifacts["implementation_brief"]
     review = artifacts["review_gate"]
+    verification = artifacts["verification_report"]
+    readiness = artifacts["execution_readiness"]
+    blockers = readiness.get("blockers", [])
+    warnings = review.get("warnings", [])
+    commands_executed = verification.get("commands_executed", [])
+    commands_planned = verification.get("commands_planned", [])
     lines = [
         f"# Ceraxia Run {run_id}",
         "",
         f"Task: {packet['task']}",
         f"Lifecycle status: {artifacts['status']['state']}",
+        f"Package status: {'complete' if artifacts['status']['state'] == 'finalized' else 'incomplete'}",
+        f"Execution readiness: {readiness['decision']}",
         f"Risk: {brief['risk_level']}",
         f"Strategy: {brief['selected_strategy']}",
         f"Review decision: {review['decision']}",
+        f"Verification status: {verification['status']}",
+        f"Verification commands planned: {len(commands_planned)}",
+        f"Verification commands executed: {len(commands_executed)}",
         "",
+        "## Readiness",
+        "",
+    ]
+    if blockers:
+        lines.extend(f"- BLOCKER: {item}" for item in blockers)
+    else:
+        lines.append("- ready for real execution")
+    if warnings:
+        lines.extend(f"- WARNING: {item['finding']}" for item in warnings)
+    lines.extend(
+        [
+            "",
+            "## Evidence",
+            "",
+            f"- candidate files: {len(brief.get('repo_survey_evidence', {}).get('candidate_files', []))}",
+            f"- test files: {len(brief.get('repo_survey_evidence', {}).get('test_files', []))}",
+            f"- python symbol reports: {len(brief.get('repo_survey_evidence', {}).get('python_symbols', []))}",
+            f"- code brigade handoff steps: {len(brief.get('code_brigade_handoff', {}).get('steps', []))}",
+            "",
+        ]
+    )
+    lines.extend(
+        [
         "## Artifacts",
         "",
         "- task.json",
@@ -351,7 +385,8 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         "",
         artifacts["status"]["next_action"],
         "",
-    ]
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -535,11 +570,13 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "status": status,
         "planning_packet": packet,
         "implementation_brief": brief,
+        "verification_report": verification_report,
         "review_gate": review,
     }
     write_json(run_dir / "status.json", status)
-    write_text(run_dir / "final_report.md", final_report_markdown(run_id, artifacts))
     readiness = build_execution_readiness(status, brief, verification_report, review, task_input.dry_run)
+    artifacts["execution_readiness"] = readiness
+    write_text(run_dir / "final_report.md", final_report_markdown(run_id, artifacts))
     write_json(run_dir / "execution_readiness.json", readiness)
     summary = build_run_summary(run_id, run_dir, status, brief, review, readiness)
     write_json(run_dir / "run_summary.json", summary)
