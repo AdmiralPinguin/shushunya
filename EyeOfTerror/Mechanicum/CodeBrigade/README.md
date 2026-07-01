@@ -59,6 +59,10 @@ protected invariants, rollback triggers, post-change proofs, handoff steps,
 verification commands, acceptance trace rows, assumption rows, acceptance
 gates, package-level blocking policies, and refusal conditions for the future
 real executor.
+When broad autonomous source editing is required, `autonomous_execution_request`
+also carries a diagnostic input contract and repair-loop stop conditions, so the
+future adapter is expected to consume verification diagnostics rather than edit
+blindly.
 It also includes `execution_policy_status`; this remains
 `blocked_until_adapter_is_wired` for dry-run handoffs and blocked execution
 requests, and switches to `real_execution_adapter_active` only when the explicit

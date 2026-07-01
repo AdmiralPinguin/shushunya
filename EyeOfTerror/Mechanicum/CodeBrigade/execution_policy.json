@@ -15,6 +15,7 @@
     "test-inferred function execution requires a single source candidate, test import, and safe zero-argument literal expectation",
     "test-inferred constant execution requires a single source candidate, test import, and safe module-level literal expectation",
     "verification strategy names focused checks before source mutation",
+    "future autonomous repair loops must consume verification diagnostics and stop on repeated failures",
     "dirty worktree or unknown ownership requires explicit blocker instead of overwrite"
   ],
   "forbidden_execution_shortcuts": [

@@ -157,6 +157,29 @@ def build_autonomous_execution_request(brief: dict[str, Any], implementation_pla
         "verification_commands": implementation_plan.get("verification_commands", []),
         "acceptance_evidence_required": implementation_plan.get("acceptance_evidence_required", []),
         "refusal_conditions": implementation_plan.get("refusal_conditions", []),
+        "diagnostic_inputs_required": [
+            "latest verification_execution.results[].diagnostics",
+            "traceback_files mapped to repo-relative paths",
+            "missing_imports from failed verification output",
+            "assertion, syntax, and zero-test signals",
+            "changed-file verification commands after every mutation",
+        ],
+        "repair_loop_contract": {
+            "max_attempts": 3,
+            "must_read_before_edit": ["target_files_to_inspect", "traceback_files", "test_files_to_preserve"],
+            "must_stop_when": [
+                "diagnostics do not identify a repo-local source or test surface",
+                "next patch would exceed scope_budget",
+                "verification has zero-test or missing-import diagnostics without a safe source edit",
+                "the same verification failure repeats after a mutation",
+            ],
+            "required_outputs": [
+                "diagnostic_summary",
+                "attempted_patch_summary",
+                "verification_commands_executed",
+                "residual_blockers",
+            ],
+        },
         "return_contract": [
             "patch_manifest.json with changed files and rationale",
             "verification_report.json with executed, failed, skipped, or blocked commands",

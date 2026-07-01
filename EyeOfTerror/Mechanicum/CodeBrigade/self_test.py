@@ -528,6 +528,13 @@ def main() -> int:
         raise AssertionError(f"dry-run unshaped worker report should prepare autonomous execution request: {dry_report}")
     if dry_report["autonomous_execution_request"]["scope_budget"]["max_test_files_to_edit_without_explicit_user_request"] != 0:
         raise AssertionError(f"autonomous request should preserve scope budget: {dry_report}")
+    autonomous_request = dry_report["autonomous_execution_request"]
+    if "latest verification_execution.results[].diagnostics" not in autonomous_request["diagnostic_inputs_required"]:
+        raise AssertionError(f"autonomous request should declare diagnostic inputs: {dry_report}")
+    if "traceback_files" not in autonomous_request["repair_loop_contract"]["must_read_before_edit"]:
+        raise AssertionError(f"autonomous repair loop should require traceback reads before edits: {dry_report}")
+    if not any("same verification failure repeats" in item for item in autonomous_request["repair_loop_contract"]["must_stop_when"]):
+        raise AssertionError(f"autonomous repair loop should declare repeat-failure stop condition: {dry_report}")
     if not dry_report["work_package_statuses"] or any(item["status"] != "planned" for item in dry_report["work_package_statuses"]):
         raise AssertionError(f"dry-run worker report should mark work packages planned: {dry_report}")
     minimal_status = next(item for item in dry_report["work_package_statuses"] if item["package_id"] == "minimal_patch_package")
