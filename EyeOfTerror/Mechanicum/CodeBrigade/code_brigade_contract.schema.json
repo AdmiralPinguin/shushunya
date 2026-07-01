@@ -440,7 +440,10 @@
           "owner",
           "impact_surfaces",
           "status",
-          "evidence_source"
+          "evidence_source",
+          "depends_on",
+          "dependency_reason",
+          "blocked_by_dependencies"
         ],
         "properties": {
           "package_id": {
@@ -460,6 +463,21 @@
           },
           "evidence_source": {
             "type": "string"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dependency_reason": {
+            "type": "string"
+          },
+          "blocked_by_dependencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       }

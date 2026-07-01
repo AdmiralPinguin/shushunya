@@ -530,6 +530,12 @@ def main() -> int:
         raise AssertionError(f"autonomous request should preserve scope budget: {dry_report}")
     if not dry_report["work_package_statuses"] or any(item["status"] != "planned" for item in dry_report["work_package_statuses"]):
         raise AssertionError(f"dry-run worker report should mark work packages planned: {dry_report}")
+    minimal_status = next(item for item in dry_report["work_package_statuses"] if item["package_id"] == "minimal_patch_package")
+    verification_status = next(item for item in dry_report["work_package_statuses"] if item["package_id"] == "verification_evidence_package")
+    if minimal_status["depends_on"] != ["evidence_survey_package"] or minimal_status["blocked_by_dependencies"]:
+        raise AssertionError(f"dry-run worker report should expose package dependencies without blocking planned packages: {dry_report}")
+    if "minimal_patch_package" not in verification_status["depends_on"] or verification_status["blocked_by_dependencies"]:
+        raise AssertionError(f"verification package should depend on mutation package without blocking dry-run plan: {dry_report}")
     plan = dry_report["implementation_plan"]
     report_schema = json.loads((Path(__file__).resolve().parent / "code_brigade_contract.schema.json").read_text(encoding="utf-8"))
     required_plan_fields = report_schema["properties"]["implementation_plan"]["required"]
@@ -692,6 +698,8 @@ def main() -> int:
             raise AssertionError(f"explicit patch execution should explain why autonomous adapter is not required: {patch_report}")
         if not patch_report["work_package_statuses"] or any(item["status"] != "implemented" for item in patch_report["work_package_statuses"]):
             raise AssertionError(f"implemented patch should mark work packages implemented: {patch_report}")
+        if any(item["blocked_by_dependencies"] for item in patch_report["work_package_statuses"]):
+            raise AssertionError(f"implemented patch should not mark package dependencies blocked: {patch_report}")
         if patch_report["execution_result"]["status"] != "implemented":
             raise AssertionError(f"explicit patch execution result should be implemented: {patch_report}")
         if "return True" not in Path(tmp, "app.py").read_text(encoding="utf-8"):

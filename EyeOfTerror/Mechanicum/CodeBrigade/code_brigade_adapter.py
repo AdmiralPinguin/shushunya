@@ -197,6 +197,15 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         blockers = execution_intent.get("blockers") if isinstance(execution_intent.get("blockers"), list) else []
         execution_intent["blockers"] = [*blockers, "dry run requested; source mutation is intentionally skipped"]
     work_packages = implementation_plan.get("implementation_work_packages") if isinstance(implementation_plan.get("implementation_work_packages"), list) else []
+    package_graph = implementation_plan.get("work_package_dependency_graph") if isinstance(implementation_plan.get("work_package_dependency_graph"), dict) else {}
+    package_dependencies = {
+        str(row.get("package_id") or ""): {
+            "depends_on": row.get("depends_on", []) if isinstance(row.get("depends_on"), list) else [],
+            "dependency_reason": str(row.get("dependency_reason") or ""),
+        }
+        for row in package_graph.get("rows", [])
+        if isinstance(row, dict) and row.get("package_id")
+    }
     changed_files: list[str] = []
     notes: list[str] = []
     if validation_problems:
@@ -229,14 +238,18 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         package_evidence = "validation_problems" if validation_problems else "blockers"
     package_statuses = [
         {
-            "package_id": str(package.get("id") or ""),
+            "package_id": package_id,
             "owner": str(package.get("owner") or "CodeBrigade"),
             "impact_surfaces": package.get("impact_surfaces", []) if isinstance(package.get("impact_surfaces"), list) else [],
             "status": package_status,
             "evidence_source": package_evidence,
+            "depends_on": package_dependencies.get(package_id, {}).get("depends_on", []),
+            "dependency_reason": package_dependencies.get(package_id, {}).get("dependency_reason", ""),
+            "blocked_by_dependencies": package_dependencies.get(package_id, {}).get("depends_on", []) if package_status == "blocked" else [],
         }
         for package in work_packages
         if isinstance(package, dict)
+        for package_id in [str(package.get("id") or "")]
     ]
     report = {
         "kind": "ceraxia_code_brigade_worker_report",
