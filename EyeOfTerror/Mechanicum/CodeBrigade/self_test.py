@@ -90,17 +90,26 @@ def main() -> int:
     if direct_execution["preflight"]["candidate_file_count"] != 1:
         raise AssertionError(f"execution preflight should summarize survey evidence: {direct_execution}")
     with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
         preflight_brief = valid_brief()
         preflight_brief["repo_path"] = tmp
         preflight = build_execution_preflight(preflight_brief)
         if not preflight["ok"] or not preflight["repo_exists"] or not preflight["repo_is_dir"]:
             raise AssertionError(f"valid preflight should pass before execution adapter policy blocks mutation: {preflight}")
+        if preflight["existing_candidate_file_count"] != 1 or preflight["missing_candidate_files"]:
+            raise AssertionError(f"valid preflight should prove candidate files exist: {preflight}")
         empty_survey_brief = valid_brief()
         empty_survey_brief["repo_path"] = tmp
         empty_survey_brief["repo_survey_evidence"]["candidate_files"] = []
         blocked_preflight = build_execution_preflight(empty_survey_brief)
         if blocked_preflight["ok"] or not any("candidate files" in item for item in blocked_preflight["blockers"]):
             raise AssertionError(f"preflight should block source mutation without survey candidates: {blocked_preflight}")
+        stale_survey_brief = valid_brief()
+        stale_survey_brief["repo_path"] = tmp
+        stale_survey_brief["repo_survey_evidence"]["candidate_files"] = ["missing.py"]
+        stale_preflight = build_execution_preflight(stale_survey_brief)
+        if stale_preflight["ok"] or stale_preflight["missing_candidate_files"] != ["missing.py"]:
+            raise AssertionError(f"preflight should block stale survey candidate files: {stale_preflight}")
     invalid = valid_brief()
     invalid.pop("allowed_scope")
     invalid_report = code_brigade_adapter.build_worker_report(invalid, dry_run=True)

@@ -15,6 +15,12 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
     suggested_commands = brief.get("suggested_verification_commands")
     if not isinstance(suggested_commands, list):
         suggested_commands = []
+    existing_candidate_files = [
+        path for path in candidate_files if isinstance(path, str) and (repo_path / path).is_file()
+    ]
+    missing_candidate_files = [
+        path for path in candidate_files if isinstance(path, str) and not (repo_path / path).is_file()
+    ]
     blockers: list[str] = []
     if not str(brief.get("repo_path") or ""):
         blockers.append("repo_path is missing")
@@ -26,6 +32,8 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
         blockers.append("allowed_scope is missing")
     if not candidate_files:
         blockers.append("repository survey has no candidate files")
+    elif missing_candidate_files:
+        blockers.append("repository survey candidate files are missing")
     if not targeted_commands and not suggested_commands:
         blockers.append("verification strategy has no executable or suggested commands")
     return {
@@ -35,6 +43,8 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
         "repo_is_dir": repo_path.is_dir(),
         "allowed_scope_count": len(brief.get("allowed_scope", [])) if isinstance(brief.get("allowed_scope"), list) else 0,
         "candidate_file_count": len(candidate_files),
+        "existing_candidate_file_count": len(existing_candidate_files),
+        "missing_candidate_files": missing_candidate_files[:20],
         "test_file_count": len(test_files),
         "targeted_command_count": len(targeted_commands),
         "suggested_command_count": len(suggested_commands),
