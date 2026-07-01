@@ -688,6 +688,79 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertEqual(review["change_control_sufficiency"]["status"], "blocked")
         self.assertTrue(any("change control plan is incomplete" in item["finding"] for item in review["findings"]))
 
+    def test_review_gate_blocks_missing_constraint_trace(self) -> None:
+        packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
+        survey = {
+            "repo_exists": True,
+            "repo_path": ".",
+            "candidate_files": ["app.py"],
+            "test_files": ["test_app.py"],
+            "entrypoint_candidates": [],
+            "python_symbols": [],
+            "source_summaries": [],
+            "local_import_edges": [],
+            "generic_import_edges": [],
+            "recommended_read_order": [{"path": "app.py", "reason": "ranked source/config candidate"}],
+            "suggested_verification_commands": [],
+            "truncated": False,
+            "python_symbols_truncated": False,
+            "source_summaries_truncated": False,
+            "max_files_scanned": 1,
+            "max_python_symbol_files": 1,
+            "max_source_summary_files": 1,
+        }
+        brief = build_implementation_brief(packet, survey)
+        packages = brief["implementation_work_packages"]["packages"]
+        playbook = brief["investigation_playbook"]
+        change = brief["change_control_plan"]
+        assumptions = brief["assumption_register"]
+        acceptance_trace = brief["acceptance_trace_matrix"]
+        worker_report = {
+            "status": "dry_run_handoff_ready",
+            "dry_run": True,
+            "changed_files": [],
+            "implementation_brief_acknowledged": True,
+            "implementation_plan": {
+                "investigation_read_stages": playbook["read_stages"],
+                "investigation_evidence_questions": playbook["evidence_questions"],
+                "investigation_mutation_blockers": playbook["mutation_blockers"],
+                "investigation_replan_triggers": playbook["replan_triggers"],
+                "change_allowed_intents": change["allowed_change_intents"],
+                "change_protected_invariants": change["protected_invariants"],
+                "change_mutation_requires": change["mutation_requires"],
+                "change_diff_review_questions": change["diff_review_questions"],
+                "change_rollback_triggers": change["rollback_triggers"],
+                "change_post_change_proofs": change["post_change_proofs"],
+                "acceptance_trace_rows": acceptance_trace["rows"],
+                "acceptance_trace_complete": True,
+                "constraint_trace_rows": [],
+                "constraint_trace_complete": False,
+                "assumption_rows": assumptions["assumptions"],
+                "assumption_replan_triggers": assumptions["replan_when_false"],
+            },
+            "work_package_statuses": [
+                {
+                    "package_id": package["id"],
+                    "owner": "CodeBrigade",
+                    "impact_surfaces": package["impact_surfaces"],
+                    "status": "planned",
+                    "evidence_source": "implementation_plan",
+                }
+                for package in packages
+            ],
+        }
+        verification_report = {
+            "status": "planned_only",
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "commands_planned": ["python -m py_compile app.py"],
+            "commands_executed": [],
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        self.assertEqual(review["decision"], "blocked")
+        self.assertEqual(review["constraint_trace_sufficiency"]["status"], "blocked")
+        self.assertTrue(any("constraint trace matrix is incomplete" in item["finding"] for item in review["findings"]))
+
     def test_review_gate_marks_failed_surface_verification(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
         survey = {
