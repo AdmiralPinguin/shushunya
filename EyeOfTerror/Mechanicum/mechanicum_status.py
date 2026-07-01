@@ -23,7 +23,7 @@ COMPONENTS = {
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
         ],
-        "maturity": "dry_run_controller_with_planning_quality_survey_gate_multilanguage_summaries_and_verification",
+        "maturity": "dry_run_controller_with_planning_quality_survey_gate_read_order_generic_edges_and_per_surface_verification",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -43,7 +43,7 @@ COMPONENTS = {
             "VerificationArchitect/README.md",
             "RiskScribe/README.md",
         ],
-        "maturity": "contracted_planning_department_with_impact_surface_and_quality_gates",
+        "maturity": "contracted_planning_department_with_role_quality_gates_and_field_trial_coverage",
     },
     "CodeBrigade": {
         "kind": "implementation_brigade_contract",
@@ -65,7 +65,7 @@ COMPONENTS = {
             "verification_execution.schema.json",
             "self_test.py",
         ],
-        "maturity": "dry_run_handoff_with_blocked_execution_adapter_preflight_and_allowlisted_verification",
+        "maturity": "dry_run_handoff_with_read_order_preflight_blocked_execution_adapter_and_allowlisted_verification",
     },
 }
 
@@ -79,14 +79,14 @@ ROADMAP = [
     },
     {
         "priority": 2,
-        "item": "deepen repository survey into multi-language dependency graphs",
-        "reason": "Ceraxia now uses path hints, survey quality gates, Python symbols/imports, and generic multi-language source summaries; non-Python call/dependency graph evidence is still shallow.",
+        "item": "deepen repository survey beyond shallow generic import edges",
+        "reason": "Ceraxia now records path hints, read order, Python import edges, source summaries, and local JS/TS relative import edges; cross-language call graphs and package-level dependency evidence are still shallow.",
         "owner": "Ceraxia",
     },
     {
         "priority": 3,
-        "item": "promote verification execution evidence into review-specific gates",
-        "reason": "PlanningBrigade maps impacted surfaces to planned evidence; review should next judge whether executed command output is sufficient for each surface.",
+        "item": "make per-surface verification strict enough to block high-risk partial evidence",
+        "reason": "Review now reports per-surface executed, partial, planned, failed, or blocked evidence; high-risk surfaces still warn on partial evidence instead of always blocking.",
         "owner": "Ceraxia",
     },
     {

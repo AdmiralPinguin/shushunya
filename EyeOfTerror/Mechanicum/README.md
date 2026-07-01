@@ -4,7 +4,8 @@ This folder is the EyeOfTerror-side home for code-governance structure.
 
 - `Ceraxia/` contains the code-brigade governor evaluation protocol, field
   trials, ledger, dry-run lifecycle controller, run package audit, summary
-  schema, and review material.
+  schema, per-surface verification review, repository read-order evidence, and
+  review material.
 - `CodeBrigade/` contains code-worker grouping and implementation brigade
   contracts. It can accept dry-run handoffs, run allowlisted verification, and
   perform read-only execution preflight checks, but real source mutation is
@@ -12,7 +13,8 @@ This folder is the EyeOfTerror-side home for code-governance structure.
 - `PlanningBrigade/` contains Ceraxia's advisory planning department: task
   triage, problem framing, path-hint extraction, repository survey request,
   dependency mapping, work breakdown, impact analysis, surface verification
-  mapping, acceptance contracts, self-review, and risk register.
+  mapping, acceptance contracts, self-review, risk register, role quality
+  gates, and field-trial coverage gates.
 
 Runtime worker implementations can stay in the top-level `Mechanicum/` service
 tree until each brigade boundary is stable.
