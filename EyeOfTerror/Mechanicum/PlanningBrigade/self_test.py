@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import planning_brigade
+from planning_packet_contract import REQUIRED_PACKET_OBJECTS
 
 
 ROOT = Path(__file__).resolve().parent
@@ -34,6 +35,8 @@ def assert_role_contracts() -> None:
     names = [role.get("name") for role in roles if isinstance(role, dict)]
     if names != planning_brigade.ROLE_ORDER:
         raise AssertionError(f"role contracts must follow PlanningBrigade role order: {contracts}")
+    externally_available = {"task", "constraints"}
+    produced: set[str] = set(externally_available)
     for role in roles:
         if role.get("may_mutate_source") is not False:
             raise AssertionError(f"PlanningBrigade roles must be read-only: {role}")
@@ -41,6 +44,13 @@ def assert_role_contracts() -> None:
             raise AssertionError(f"role contract must expose authority and outputs: {role}")
         if not isinstance(role.get("quality_gates"), list) or len(role.get("quality_gates", [])) < 3:
             raise AssertionError(f"role contract must expose at least three quality gates: {role}")
+        missing_inputs = [item for item in role.get("inputs", []) if item not in produced]
+        if missing_inputs:
+            raise AssertionError(f"role contract inputs must be produced by earlier roles or external input: role={role['name']} missing={missing_inputs}")
+        produced.update(str(item) for item in role.get("outputs", []))
+    missing_packet_owners = [key for key in REQUIRED_PACKET_OBJECTS if key not in produced]
+    if missing_packet_owners:
+        raise AssertionError(f"required planning packet objects must be owned by role outputs: {missing_packet_owners}")
     sample_packet = planning_brigade.build_planning_packet(
         {
             "task": "почини security API migration pytest",
