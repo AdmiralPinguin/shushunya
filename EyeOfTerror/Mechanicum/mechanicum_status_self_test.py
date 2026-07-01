@@ -15,7 +15,7 @@ def main() -> int:
     if "ast_patch_adapter" not in code_maturity or "preflight" not in code_maturity or "allowlisted_verification" not in code_maturity:
         raise AssertionError(f"CodeBrigade should honestly report preflight and verification-adapter maturity: {by_name['CodeBrigade']}")
     ceraxia_maturity = by_name["Ceraxia"]["maturity"]
-    if not all(part in ceraxia_maturity for part in ["dry_run_controller", "planning_quality", "survey_gate", "verification"]):
+    if not all(part in ceraxia_maturity for part in ["controller", "planning_quality", "survey_gate", "verification", "work_package_review"]):
         raise AssertionError(f"Ceraxia should honestly report dry-run planning, survey, and verification maturity: {by_name['Ceraxia']}")
     if "expand CodeBrigade execution beyond explicit CERAXIA_PATCH" not in status["next_architecture_step"]:
         raise AssertionError(f"status should point to the next architecture gap: {status}")

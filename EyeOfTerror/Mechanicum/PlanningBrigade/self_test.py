@@ -164,6 +164,8 @@ def main() -> int:
     unclear_packet = planning_brigade.build_planning_packet({"task": "почини", "repo_path": "/repo"})
     if unclear_packet["planning_review_gate"]["decision"] != "blocked" or not unclear_packet["planning_review_gate"]["blockers"]:
         raise AssertionError(f"unclear task must be blocked by planning review: {unclear_packet}")
+    if unclear_packet["planning_review_gate"]["score"] > 40:
+        raise AssertionError(f"unclear blocked plan should not keep a near-ready score: {unclear_packet}")
 
     blocked_review = planning_brigade.planning_review_gate(
         triage={"needs_clarification": False, "risk_level": "medium"},
@@ -185,6 +187,8 @@ def main() -> int:
     )
     if blocked_review["decision"] != "blocked" or "public_api_contract" not in " ".join(blocked_review["blockers"]):
         raise AssertionError(f"surface matrix blockers must block planning review: {blocked_review}")
+    if blocked_review["score"] > 60:
+        raise AssertionError(f"blocked planning review should have capped score: {blocked_review}")
 
     cli = subprocess.run(
         [

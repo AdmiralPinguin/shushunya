@@ -978,6 +978,10 @@ def planning_review_gate(
         score -= 5
     score = max(0, min(100, score))
     if blockers:
+        score = min(score, 60)
+    if triage["needs_clarification"]:
+        score = min(score, 40)
+    if blockers:
         decision = "blocked"
     elif score < 80:
         decision = "revise"
