@@ -89,6 +89,29 @@ def task_triage(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def problem_statement(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str, Any]:
+    task = task_text(payload)
+    explicit_paths = re.findall(r"`([^`]+)`", task)
+    return {
+        "role": "TaskTriage",
+        "intent": task[:500],
+        "task_kinds": triage["task_kinds"],
+        "risk_level": triage["risk_level"],
+        "known_constraints": [
+            "preserve public behavior unless the task explicitly asks to change it",
+            "prefer repository evidence over guessing candidate files",
+            "do not mutate source before survey, design, verification, and risk gates exist",
+        ],
+        "explicit_path_hints": explicit_paths,
+        "unknowns": triage["clarifying_questions"] if triage["needs_clarification"] else [],
+        "definition_of_done": [
+            "the original user-visible request is satisfied",
+            "the changed behavior is covered by targeted verification",
+            "the final report names evidence, blockers, and any residual risk",
+        ],
+    }
+
+
 def repo_survey_request(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str, Any]:
     repo_path = normalize_repo_path(payload)
     focus = [
@@ -120,6 +143,75 @@ def repo_survey_request(payload: dict[str, Any], triage: dict[str, Any]) -> dict
         ],
         "expected_output": "repo_survey.json",
         "handoff_to": "DesignStrategos",
+    }
+
+
+def dependency_map(triage: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
+    nodes = [
+        {
+            "id": "task_contract",
+            "kind": "requirement",
+            "description": "User request restated as behavior and constraints.",
+        },
+        {
+            "id": "repo_evidence",
+            "kind": "read_only_evidence",
+            "description": "Repository entrypoints, tests, candidate files, and dependency edges.",
+            "depends_on": ["task_contract"],
+        },
+        {
+            "id": "design_decision",
+            "kind": "engineering_decision",
+            "description": "Smallest coherent design selected from alternatives.",
+            "depends_on": ["repo_evidence"],
+        },
+        {
+            "id": "verification_contract",
+            "kind": "quality_gate",
+            "description": "Commands, negative tests, and broad verification requirements.",
+            "depends_on": ["design_decision"],
+        },
+        {
+            "id": "implementation_brief",
+            "kind": "handoff",
+            "description": "CodeBrigade receives scoped work only after planning gates exist.",
+            "depends_on": ["verification_contract"],
+        },
+    ]
+    if "security" in triage["task_kinds"]:
+        nodes.append(
+            {
+                "id": "security_boundary",
+                "kind": "quality_gate",
+                "description": "Untrusted input boundary must be proven with negative evidence.",
+                "depends_on": ["repo_evidence", "verification_contract"],
+            }
+        )
+    if any(kind in triage["task_kinds"] for kind in ("api_compatibility", "migration")):
+        nodes.append(
+            {
+                "id": "compatibility_boundary",
+                "kind": "quality_gate",
+                "description": "Old and new caller/data shapes must remain intentionally compatible or explicitly migrated.",
+                "depends_on": ["repo_evidence", "design_decision"],
+            }
+        )
+    return {
+        "role": "RepoSurveyor",
+        "nodes": nodes,
+        "critical_path": [
+            "task_contract",
+            "repo_evidence",
+            "design_decision",
+            "verification_contract",
+            "implementation_brief",
+        ],
+        "blocked_without": [
+            "repo survey candidate files",
+            "test surface or explicit no-test blocker",
+            "verification commands or explicit execution blocker",
+        ],
+        "survey_reference": survey["expected_output"],
     }
 
 
@@ -265,6 +357,77 @@ def quality_bar(triage: dict[str, Any], verification: dict[str, Any]) -> dict[st
     }
 
 
+def acceptance_contract(
+    problem: dict[str, Any],
+    triage: dict[str, Any],
+    verification: dict[str, Any],
+    quality: dict[str, Any],
+) -> dict[str, Any]:
+    must_prove = list(problem["definition_of_done"])
+    must_prove.extend(quality["must_have_evidence"])
+    if verification["negative_tests"]:
+        must_prove.append("required negative tests are present, executed, or explicitly blocked")
+    return {
+        "role": "PlanningBrigade",
+        "risk_level": triage["risk_level"],
+        "must_prove": must_prove,
+        "must_not_do": [
+            "start source mutation before implementation brief validation",
+            "treat green syntax checks as sufficient behavior verification",
+            "hide skipped, blocked, or planned-only verification",
+        ],
+        "review_questions": [
+            "Does the selected design satisfy the original request rather than a convenient subset?",
+            "Are changed files justified by repository evidence?",
+            "Would a reasonable maintainer accept the verification evidence?",
+        ],
+    }
+
+
+def implementation_brief_blueprint(
+    triage: dict[str, Any],
+    design: dict[str, Any],
+    verification: dict[str, Any],
+    risks: dict[str, Any],
+    quality: dict[str, Any],
+    dependency: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "role": "PlanningBrigade",
+        "target": "CodeBrigade",
+        "required_inputs": [
+            "planning_packet.json",
+            "repo_survey.json",
+            "implementation_brief.json",
+        ],
+        "required_sections": [
+            "task",
+            "repo_path",
+            "task_kinds",
+            "risk_level",
+            "selected_strategy",
+            "allowed_scope",
+            "forbidden_approaches",
+            "required_verification",
+            "acceptance_gates",
+            "quality_bar",
+            "repo_survey_evidence",
+        ],
+        "strategy": design["selected_strategy"],
+        "risk_level": triage["risk_level"],
+        "acceptance_gates": risks["acceptance_gates"],
+        "required_verification": verification,
+        "required_quality_evidence": quality["must_have_evidence"],
+        "dependency_critical_path": dependency["critical_path"],
+        "mutation_preconditions": [
+            "implementation brief validates",
+            "execution preflight passes",
+            "candidate files are repo-relative existing non-symlink paths",
+            "verification plan is attached to the worker report",
+        ],
+    }
+
+
 def code_brigade_handoff(triage: dict[str, Any], verification: dict[str, Any], quality: dict[str, Any]) -> dict[str, Any]:
     steps = [
         {
@@ -326,11 +489,15 @@ def code_brigade_handoff(triage: dict[str, Any], verification: dict[str, Any], q
 def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
     triage = task_triage(payload)
+    problem = problem_statement(payload, triage)
     survey = repo_survey_request(payload, triage)
+    dependency = dependency_map(triage, survey)
     design = design_options(payload, triage)
     verification = verification_strategy(triage)
     risks = risk_register(triage, survey, design, verification)
     quality = quality_bar(triage, verification)
+    acceptance = acceptance_contract(problem, triage, verification, quality)
+    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
         "ok": bool(task),
@@ -339,12 +506,16 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "kind": "ceraxia_planning_packet",
         "task": task,
         "roles_completed": ROLE_ORDER,
+        "problem_statement": problem,
         "task_triage": triage,
         "repo_survey_request": survey,
+        "dependency_map": dependency,
         "design_options": design,
         "verification_strategy": verification,
         "risk_register": risks,
         "quality_bar": quality,
+        "acceptance_contract": acceptance,
+        "implementation_brief_blueprint": blueprint,
         "code_brigade_handoff": handoff,
         "next_action": {
             "owner": "Ceraxia",

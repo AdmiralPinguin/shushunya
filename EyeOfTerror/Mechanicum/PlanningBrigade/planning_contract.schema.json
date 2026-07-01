@@ -9,12 +9,16 @@
     "kind",
     "task",
     "roles_completed",
+    "problem_statement",
     "task_triage",
     "repo_survey_request",
+    "dependency_map",
     "design_options",
     "verification_strategy",
     "risk_register",
     "quality_bar",
+    "acceptance_contract",
+    "implementation_brief_blueprint",
     "code_brigade_handoff",
     "next_action"
   ],
@@ -29,12 +33,16 @@
       "items": {"type": "string"},
       "minItems": 5
     },
+    "problem_statement": {"type": "object"},
     "task_triage": {"type": "object"},
     "repo_survey_request": {"type": "object"},
+    "dependency_map": {"type": "object"},
     "design_options": {"type": "object"},
     "verification_strategy": {"type": "object"},
     "risk_register": {"type": "object"},
     "quality_bar": {"type": "object"},
+    "acceptance_contract": {"type": "object"},
+    "implementation_brief_blueprint": {"type": "object"},
     "code_brigade_handoff": {"type": "object"},
     "next_action": {"type": "object"}
   }

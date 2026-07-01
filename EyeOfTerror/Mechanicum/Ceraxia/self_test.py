@@ -289,18 +289,26 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         packet = build_planning_packet({"task": "repo-grade migration API compatibility", "repo_path": "."})
         packet["contract_version"] = "old"
         packet["repo_survey_request"]["read_only"] = False
+        packet["problem_statement"]["definition_of_done"] = []
+        packet["dependency_map"]["critical_path"] = ["task_contract", "implementation_brief"]
         packet["design_options"]["options"] = []
         packet["verification_strategy"]["targeted_commands"] = []
         packet["risk_register"]["acceptance_gates"] = []
         packet["quality_bar"]["must_have_evidence"] = []
+        packet["acceptance_contract"]["must_prove"] = []
+        packet["implementation_brief_blueprint"]["mutation_preconditions"] = []
         packet["code_brigade_handoff"]["steps"] = []
         problems = validate_planning_packet(packet)
         self.assertTrue(any("contract_version" in problem for problem in problems), problems)
         self.assertTrue(any("read-only" in problem for problem in problems), problems)
+        self.assertTrue(any("definition_of_done" in problem for problem in problems), problems)
+        self.assertTrue(any("critical path" in problem for problem in problems), problems)
         self.assertTrue(any("reject hardcode" in problem for problem in problems), problems)
         self.assertTrue(any("targeted_commands" in problem for problem in problems), problems)
         self.assertTrue(any("acceptance_gates" in problem for problem in problems), problems)
         self.assertTrue(any("quality bar" in problem for problem in problems), problems)
+        self.assertTrue(any("acceptance contract" in problem for problem in problems), problems)
+        self.assertTrue(any("mutation preconditions" in problem for problem in problems), problems)
         self.assertTrue(any("code brigade handoff" in problem for problem in problems), problems)
         survey = build_repo_survey(packet)
         brief = build_implementation_brief(packet, survey)

@@ -17,6 +17,11 @@
     "expected_artifacts",
     "required_verification",
     "acceptance_gates",
+    "quality_bar",
+    "acceptance_contract",
+    "implementation_brief_blueprint",
+    "planning_dependency_map",
+    "code_brigade_handoff",
     "blocked",
     "blockers"
   ],
@@ -85,6 +90,21 @@
         "type": "string"
       },
       "minItems": 1
+    },
+    "quality_bar": {
+      "type": "object"
+    },
+    "acceptance_contract": {
+      "type": "object"
+    },
+    "implementation_brief_blueprint": {
+      "type": "object"
+    },
+    "planning_dependency_map": {
+      "type": "object"
+    },
+    "code_brigade_handoff": {
+      "type": "object"
     },
     "blocked": {
       "type": "boolean"

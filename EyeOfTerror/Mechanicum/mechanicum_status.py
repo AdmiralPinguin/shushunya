@@ -38,7 +38,7 @@ COMPONENTS = {
             "VerificationArchitect/README.md",
             "RiskScribe/README.md",
         ],
-        "maturity": "contracted_advisory_layer",
+        "maturity": "contracted_planning_department_with_acceptance_and_dependency_handoff",
     },
     "CodeBrigade": {
         "kind": "implementation_brigade_contract",
@@ -86,8 +86,8 @@ ROADMAP = [
     },
     {
         "priority": 4,
-        "item": "split PlanningBrigade roles into callable services only after packet stability",
-        "reason": "The advisory packet is now useful; process splitting should wait until contracts stop moving.",
+        "item": "split PlanningBrigade roles into callable services after more field trials",
+        "reason": "PlanningBrigade now emits problem framing, dependency maps, acceptance contracts, and CodeBrigade brief blueprints; role services should wait until these contracts survive more real tasks.",
         "owner": "PlanningBrigade",
     },
 ]

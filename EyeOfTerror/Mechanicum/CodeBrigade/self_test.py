@@ -26,6 +26,35 @@ def valid_brief() -> dict:
         "expected_artifacts": ["worker_report.json", "verification_report.json", "final_report.md"],
         "required_verification": {"targeted_commands": ["rerun failing test command"]},
         "acceptance_gates": ["planning packet includes all five planning roles"],
+        "quality_bar": {
+            "must_have_evidence": [
+                "task intent is restated in implementable terms",
+                "candidate files are chosen from repository evidence",
+            ],
+        },
+        "acceptance_contract": {
+            "must_prove": [
+                "the original user-visible request is satisfied",
+                "the changed behavior is covered by targeted verification",
+            ],
+        },
+        "implementation_brief_blueprint": {
+            "target": "CodeBrigade",
+            "mutation_preconditions": [
+                "implementation brief validates",
+                "execution preflight passes",
+                "candidate files are repo-relative existing non-symlink paths",
+            ],
+        },
+        "planning_dependency_map": {
+            "critical_path": [
+                "task_contract",
+                "repo_evidence",
+                "design_decision",
+                "verification_contract",
+                "implementation_brief",
+            ],
+        },
         "repo_survey_evidence": {
             "candidate_files": ["app.py"],
             "test_files": ["test_app.py"],
@@ -71,6 +100,12 @@ def main() -> int:
         raise AssertionError(f"implementation plan should include suggested verification: {plan}")
     if plan["dependency_edges_to_check"] != [{"source": "app.py", "import": "util.enabled", "target": "util.py"}]:
         raise AssertionError(f"implementation plan should preserve local dependency edges: {plan}")
+    if plan["planning_critical_path"][-1] != "implementation_brief":
+        raise AssertionError(f"implementation plan should preserve planning critical path: {plan}")
+    if "execution preflight passes" not in plan["mutation_preconditions"]:
+        raise AssertionError(f"implementation plan should preserve mutation preconditions: {plan}")
+    if "the original user-visible request is satisfied" not in plan["acceptance_evidence_required"]:
+        raise AssertionError(f"implementation plan should preserve acceptance evidence: {plan}")
     if plan["survey_truncated"]:
         raise AssertionError(f"small survey fixture should not be marked truncated: {plan}")
     if plan["python_symbols_truncated"]:
@@ -150,6 +185,11 @@ def main() -> int:
     invalid_report = code_brigade_adapter.build_worker_report(invalid, dry_run=True)
     if invalid_report["status"] != "blocked" or invalid_report["implementation_brief_acknowledged"]:
         raise AssertionError(f"invalid brief should be blocked: {invalid_report}")
+    weak_planning = valid_brief()
+    weak_planning["acceptance_contract"] = {"must_prove": []}
+    weak_planning_report = code_brigade_adapter.build_worker_report(weak_planning, dry_run=True)
+    if weak_planning_report["status"] != "blocked" or not any("acceptance_contract" in item for item in weak_planning_report["validation_problems"]):
+        raise AssertionError(f"weak planning evidence should be blocked: {weak_planning_report}")
     missing_handoff = valid_brief()
     missing_handoff["code_brigade_handoff"] = {"target": "CodeBrigade", "steps": []}
     missing_handoff_report = code_brigade_adapter.build_worker_report(missing_handoff, dry_run=True)

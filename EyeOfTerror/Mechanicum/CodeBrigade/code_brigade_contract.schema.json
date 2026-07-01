@@ -51,6 +51,9 @@
         "survey_truncated",
         "python_symbols_truncated",
         "handoff_steps",
+        "planning_critical_path",
+        "mutation_preconditions",
+        "acceptance_evidence_required",
         "verification_commands",
         "acceptance_gates",
         "refusal_conditions"
@@ -61,6 +64,24 @@
         },
         "python_symbols_truncated": {
           "type": "boolean"
+        },
+        "planning_critical_path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mutation_preconditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "acceptance_evidence_required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

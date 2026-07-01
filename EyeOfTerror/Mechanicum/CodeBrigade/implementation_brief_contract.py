@@ -24,6 +24,20 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief required_verification is required")
     if not isinstance(brief.get("acceptance_gates"), list) or not brief.get("acceptance_gates"):
         problems.append("brief acceptance_gates are required")
+    quality = brief.get("quality_bar") if isinstance(brief.get("quality_bar"), dict) else {}
+    if not isinstance(quality.get("must_have_evidence"), list) or not quality.get("must_have_evidence"):
+        problems.append("brief quality_bar.must_have_evidence is required")
+    acceptance = brief.get("acceptance_contract") if isinstance(brief.get("acceptance_contract"), dict) else {}
+    if not isinstance(acceptance.get("must_prove"), list) or not acceptance.get("must_prove"):
+        problems.append("brief acceptance_contract.must_prove is required")
+    blueprint = brief.get("implementation_brief_blueprint") if isinstance(brief.get("implementation_brief_blueprint"), dict) else {}
+    if blueprint.get("target") != "CodeBrigade":
+        problems.append("brief implementation_brief_blueprint must target CodeBrigade")
+    if not isinstance(blueprint.get("mutation_preconditions"), list) or not blueprint.get("mutation_preconditions"):
+        problems.append("brief implementation_brief_blueprint mutation_preconditions are required")
+    dependency = brief.get("planning_dependency_map") if isinstance(brief.get("planning_dependency_map"), dict) else {}
+    if not isinstance(dependency.get("critical_path"), list) or not dependency.get("critical_path"):
+        problems.append("brief planning_dependency_map.critical_path is required")
     handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
     if handoff.get("target") != "CodeBrigade":
         problems.append("brief code_brigade_handoff must target CodeBrigade")

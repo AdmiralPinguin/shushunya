@@ -95,12 +95,16 @@ def write_text(path: Path, content: str) -> None:
 def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     required = [
+        "problem_statement",
         "task_triage",
         "repo_survey_request",
+        "dependency_map",
         "design_options",
         "verification_strategy",
         "risk_register",
         "quality_bar",
+        "acceptance_contract",
+        "implementation_brief_blueprint",
         "code_brigade_handoff",
     ]
     if packet.get("roles_completed") != ROLE_ORDER:
@@ -128,6 +132,21 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("repo survey request must include focus areas")
     if survey.get("handoff_to") != "DesignStrategos":
         problems.append("repo survey request must hand off to DesignStrategos")
+    problem = packet.get("problem_statement") if isinstance(packet.get("problem_statement"), dict) else {}
+    if not isinstance(problem.get("definition_of_done"), list) or len(problem.get("definition_of_done", [])) < 3:
+        problems.append("problem statement must include definition_of_done")
+    dependency = packet.get("dependency_map") if isinstance(packet.get("dependency_map"), dict) else {}
+    critical_path = dependency.get("critical_path") if isinstance(dependency.get("critical_path"), list) else []
+    if critical_path != [
+        "task_contract",
+        "repo_evidence",
+        "design_decision",
+        "verification_contract",
+        "implementation_brief",
+    ]:
+        problems.append("dependency map must preserve the planning critical path")
+    if not isinstance(dependency.get("nodes"), list) or len(dependency.get("nodes", [])) < 5:
+        problems.append("dependency map must include planning dependency nodes")
     design = packet.get("design_options") if isinstance(packet.get("design_options"), dict) else {}
     if not isinstance(design.get("selected_strategy"), str) or not design.get("selected_strategy"):
         problems.append("design options must include selected_strategy")
@@ -163,6 +182,16 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("quality bar must include forbidden_shortcuts")
     if not isinstance(quality.get("success_definition"), str) or not quality.get("success_definition"):
         problems.append("quality bar must include success_definition")
+    acceptance = packet.get("acceptance_contract") if isinstance(packet.get("acceptance_contract"), dict) else {}
+    if not isinstance(acceptance.get("must_prove"), list) or len(acceptance.get("must_prove", [])) < 4:
+        problems.append("acceptance contract must include must_prove evidence")
+    if not isinstance(acceptance.get("review_questions"), list) or len(acceptance.get("review_questions", [])) < 3:
+        problems.append("acceptance contract must include review questions")
+    blueprint = packet.get("implementation_brief_blueprint") if isinstance(packet.get("implementation_brief_blueprint"), dict) else {}
+    if blueprint.get("target") != "CodeBrigade":
+        problems.append("implementation brief blueprint must target CodeBrigade")
+    if not isinstance(blueprint.get("mutation_preconditions"), list) or len(blueprint.get("mutation_preconditions", [])) < 3:
+        problems.append("implementation brief blueprint must include mutation preconditions")
     handoff = packet.get("code_brigade_handoff") if isinstance(packet.get("code_brigade_handoff"), dict) else {}
     if handoff.get("target") != "CodeBrigade":
         problems.append("code brigade handoff must target CodeBrigade")
@@ -222,6 +251,9 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "required_verification": verification,
         "acceptance_gates": risks.get("acceptance_gates") if isinstance(risks.get("acceptance_gates"), list) else [],
         "quality_bar": quality,
+        "acceptance_contract": packet.get("acceptance_contract", {}),
+        "implementation_brief_blueprint": packet.get("implementation_brief_blueprint", {}),
+        "planning_dependency_map": packet.get("dependency_map", {}),
         "code_brigade_handoff": handoff,
         "repo_survey_evidence": {
             "candidate_files": survey.get("candidate_files", []),
