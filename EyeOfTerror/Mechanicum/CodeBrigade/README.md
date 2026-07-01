@@ -52,7 +52,9 @@ It also includes `execution_policy_status`; this remains
 requests, and switches to `real_execution_adapter_active` only when the explicit
 patch adapter reports implemented changes. Adapter results must satisfy
 `execution_result.schema.json`: status, changed files, patch summary, executed
-verification commands, blockers, and rollback notes.
+verification commands, blockers, rollback notes, and per-operation patch
+results. Failed patch batches are rolled back and must preserve rollback
+evidence in the execution result.
 
 `verification_policy.json` records the runtime allowlist and path-token guards
 for verification. `verification_adapter.py` can run that narrow allowlist

@@ -149,8 +149,8 @@ def valid_brief() -> dict:
 
 def main() -> int:
     policy = json.loads((Path(__file__).resolve().parent / "execution_policy.json").read_text(encoding="utf-8"))
-    if policy["real_execution_status"] != "blocked_until_adapter_is_wired":
-        raise AssertionError(f"execution policy must stay honest until real adapter exists: {policy}")
+    if policy["real_execution_status"] != "explicit_patch_adapter_only":
+        raise AssertionError(f"execution policy must stay honest about narrow explicit patch execution: {policy}")
     if "implementation_brief validates against the CodeBrigade contract" not in policy["mutation_preconditions"]:
         raise AssertionError(f"execution policy must require brief validation before mutation: {policy}")
     if "execution preflight passes before source mutation" not in policy["mutation_preconditions"]:
@@ -266,6 +266,27 @@ def main() -> int:
             raise AssertionError(f"AST return patch should report implemented changed files: {ast_patch_report}")
         if "return left + right" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("AST return patch did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
+        rollback_brief = valid_brief()
+        rollback_brief["repo_path"] = tmp
+        rollback_brief["task"] += "\nCERAXIA_PATCH:\n" + json.dumps(
+            {
+                "operations": [
+                    {"type": "replace", "path": "app.py", "old": "return False", "new": "return True"},
+                    {"type": "replace", "path": "app.py", "old": "not present", "new": "broken"},
+                ]
+            }
+        )
+        rollback_report = code_brigade_adapter.build_worker_report(rollback_brief, dry_run=False)
+        result = rollback_report["execution_result"]
+        if rollback_report["status"] != "blocked" or result["status"] != "blocked":
+            raise AssertionError(f"failed patch batch should block execution: {rollback_report}")
+        if "rolled back" not in result["rollback_notes"] or not result["operation_results"]:
+            raise AssertionError(f"failed patch batch should expose rollback evidence: {rollback_report}")
+        if "return False" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("failed patch batch did not roll app.py back")
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")

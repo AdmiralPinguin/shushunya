@@ -10,7 +10,8 @@
     "patch_summary",
     "verification_commands_executed",
     "blockers",
-    "rollback_notes"
+    "rollback_notes",
+    "operation_results"
   ],
   "properties": {
     "kind": {
@@ -45,6 +46,12 @@
     },
     "rollback_notes": {
       "type": "string"
+    },
+    "operation_results": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
     },
     "preflight": {
       "type": "object",

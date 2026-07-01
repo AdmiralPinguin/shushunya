@@ -12,6 +12,13 @@ from execution_preflight import build_execution_preflight, is_repo_relative_path
 from implementation_brief_contract import validate_implementation_brief
 
 
+class PatchApplicationError(ValueError):
+    def __init__(self, message: str, operation_results: list[dict[str, Any]], rollback_notes: str) -> None:
+        super().__init__(message)
+        self.operation_results = operation_results
+        self.rollback_notes = rollback_notes
+
+
 def extract_explicit_patch(task: str) -> dict[str, Any]:
     marker = "CERAXIA_PATCH:"
     if marker not in task:
@@ -91,10 +98,11 @@ def replace_return_expression_in_file(source_path: Path, function_name: str, old
     source_path.write_text("".join(lines), encoding="utf-8")
 
 
-def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, Any]) -> tuple[list[str], str]:
+def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, Any]) -> tuple[list[str], str, list[dict[str, Any]], str]:
     allowed_paths = surveyed_paths(brief)
     originals: dict[Path, str | None] = {}
     changed: list[str] = []
+    operation_results: list[dict[str, Any]] = []
     operations = patch["operations"]
     try:
         for index, operation in enumerate(operations):
@@ -143,14 +151,24 @@ def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, A
                 raise ValueError(f"unsupported patch operation type: {op_type}")
             if rel_path not in changed:
                 changed.append(rel_path)
-    except Exception:
+            operation_results.append({"index": index, "operation": op_type, "path": rel_path, "status": "applied"})
+    except Exception as exc:
         for path, original in originals.items():
             if original is None:
                 path.unlink(missing_ok=True)
             else:
                 path.write_text(original, encoding="utf-8")
-        raise
-    return changed, f"applied {len(operations)} explicit CERAXIA_PATCH operations"
+        operation_results.append(
+            {
+                "index": len(operation_results),
+                "operation": str(operation.get("type") or "") if isinstance(operation, dict) else "",
+                "path": str(operation.get("path") or "") if isinstance(operation, dict) else "",
+                "status": "failed_rolled_back",
+            }
+        )
+        rollback_notes = f"rolled back {len(originals)} touched files after patch failure"
+        raise PatchApplicationError(str(exc), operation_results, rollback_notes) from exc
+    return changed, f"applied {len(operations)} explicit CERAXIA_PATCH operations", operation_results, ""
 
 
 def execute_implementation_brief(brief: dict[str, Any]) -> dict[str, Any]:
@@ -162,7 +180,9 @@ def execute_implementation_brief(brief: dict[str, Any]) -> dict[str, Any]:
         return build_blocked_execution_result(preflight["blockers"], preflight)
     try:
         patch = extract_explicit_patch(str(brief.get("task") or ""))
-        changed_files, patch_summary = apply_patch_operations(Path(str(brief.get("repo_path") or "")), brief, patch)
+        changed_files, patch_summary, operation_results, rollback_notes = apply_patch_operations(Path(str(brief.get("repo_path") or "")), brief, patch)
+    except PatchApplicationError as exc:
+        return build_blocked_execution_result([str(exc)], preflight, exc.rollback_notes, exc.operation_results)
     except (json.JSONDecodeError, OSError, UnicodeDecodeError, ValueError) as exc:
         return build_blocked_execution_result([str(exc)], preflight)
-    return build_implemented_execution_result(changed_files, patch_summary, preflight)
+    return build_implemented_execution_result(changed_files, patch_summary, preflight, operation_results)
