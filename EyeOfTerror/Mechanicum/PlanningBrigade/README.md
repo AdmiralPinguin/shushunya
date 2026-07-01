@@ -24,6 +24,9 @@ yet. Self-tests and field trials compare those reservations with
 future split cannot silently collide with active workers.
 `planning_packet_contract.py` owns strict packet validation so Ceraxia can
 import the contract gate without coupling review logic to packet generation.
+`planning_feedback_contract.py` owns the reverse intake from Ceraxia: it
+validates `planning_feedback_request.json` and turns review findings into a
+PlanningBrigade replan checklist that must hand authority back to Ceraxia.
 
 Current contract:
 
@@ -66,6 +69,9 @@ Current contract:
 - `worker_output_contract` tells CodeBrigade which reports, package statuses,
   evidence sources, and blocker fields must return for Ceraxia to accept the
   work.
+- `planning_feedback_contract.py` validates Ceraxia feedback when review
+  findings point back at the planning packet or handoff contracts, then creates
+  a replan intake with required return artifacts.
 - `surface_package_matrix` traces every impacted surface to planned
   verification evidence and concrete implementation package ids.
 - `planning_review_gate` scores the planning packet and blocks unclear or
@@ -79,6 +85,7 @@ Current contract:
 ```bash
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "почини failing unittest без изменения тестов" --repo-path /repo
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "почини failing unittest без изменения тестов" --repo-path /repo --validate
+python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_feedback_contract.py path/to/planning_feedback_request.json
 ```
 
 The brigade writes one `ceraxia_planning_packet` containing all five planning

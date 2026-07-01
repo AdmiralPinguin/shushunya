@@ -33,6 +33,7 @@ COMPONENTS = {
             "README.md",
             "STATUS.md",
             "planning_brigade.py",
+            "planning_feedback_contract.py",
             "planning_packet_contract.py",
             "planning_contract.schema.json",
             "role_contracts.json",
@@ -46,7 +47,7 @@ COMPONENTS = {
             "VerificationArchitect/README.md",
             "RiskScribe/README.md",
         ],
-        "maturity": "contracted_planning_department_with_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_field_trial_coverage_code_work_packages_and_worker_output_contracts",
+        "maturity": "contracted_planning_department_with_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_field_trial_coverage_code_work_packages_worker_output_contracts_and_ceraxia_feedback_intake",
     },
     "CodeBrigade": {
         "kind": "implementation_brigade_contract",

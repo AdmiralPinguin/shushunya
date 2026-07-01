@@ -45,6 +45,9 @@ Current capabilities:
 - PlanningBrigade now emits an explicit `diagnostic_repair_plan` that caps
   repair attempts, names required diagnostic inputs, read-before-edit evidence,
   stop conditions, and repair evidence for CodeBrigade
+- PlanningBrigade now validates Ceraxia `planning_feedback_request.json`
+  artifacts and turns planning/handoff review findings into a replan intake
+  checklist
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
 - planned read-only service interface contracts for future role split on

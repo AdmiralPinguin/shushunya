@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import planning_brigade
+from planning_feedback_contract import build_planning_feedback_intake, validate_planning_feedback_request
 from planning_packet_contract import REQUIRED_PACKET_OBJECTS
 
 
@@ -113,8 +114,71 @@ def assert_role_contracts() -> None:
                 raise AssertionError(f"service output is absent from planning packet: service={service['name']} output={output}")
 
 
+def assert_planning_feedback_intake() -> None:
+    feedback_request = {
+        "kind": "ceraxia_planning_feedback_request",
+        "contract_version": "eye-mechanicum.v1",
+        "run_id": "run-feedback",
+        "status": "required",
+        "target": "PlanningBrigade",
+        "source": "Ceraxia.review_gate",
+        "repo_path": "/repo",
+        "task": "почини API compatibility pytest",
+        "review_decision": "blocked",
+        "worker_status": "blocked",
+        "verification_status": "planned_only",
+        "planning_review_decision": "ready_for_ceraxia_review",
+        "feedback_findings": [
+            {
+                "severity": "blocker",
+                "finding": "worker output contract is incomplete: missing package status",
+            }
+        ],
+        "worker_output_contract_sufficiency": {
+            "status": "blocked",
+            "blockers": ["missing package status"],
+        },
+        "replan_focus": [
+            "tighten worker-output contract when package statuses or evidence sources are missing",
+            "return a new planning_packet.json and implementation_brief.json candidate",
+        ],
+        "required_return_artifacts": [
+            "planning_packet.json",
+            "implementation_brief.json",
+            "worker_output_contract",
+            "planning_review_gate",
+        ],
+        "suggested_planning_command": [
+            "python3",
+            "EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py",
+            "--validate",
+            "--input-json",
+            "task.json",
+        ],
+    }
+    problems = validate_planning_feedback_request(feedback_request)
+    if problems:
+        raise AssertionError(f"valid planning feedback request should pass validation: {problems}")
+    intake = build_planning_feedback_intake(feedback_request)
+    if intake["status"] != "replan_required":
+        raise AssertionError(f"feedback findings must require a replan: {intake}")
+    if intake["handoff_back_to"] != "Ceraxia":
+        raise AssertionError(f"feedback intake must return authority to Ceraxia: {intake}")
+    if intake["feedback_finding_count"] != 1:
+        raise AssertionError(f"feedback intake must count findings: {intake}")
+    if "planning_packet.json" not in intake["required_return_artifacts"]:
+        raise AssertionError(f"feedback intake must preserve required return artifacts: {intake}")
+
+    invalid_request = dict(feedback_request)
+    invalid_request["status"] = "not_required"
+    invalid_intake = build_planning_feedback_intake(invalid_request)
+    if invalid_intake["status"] != "blocked_invalid_request":
+        raise AssertionError(f"invalid feedback status must block intake: {invalid_intake}")
+
+
 def main() -> int:
     assert_role_contracts()
+    assert_planning_feedback_intake()
     security_packet = planning_brigade.build_planning_packet(
         {
             "task": "почини security bug: API token можно обойти через path traversal, добавь pytest negative tests",
