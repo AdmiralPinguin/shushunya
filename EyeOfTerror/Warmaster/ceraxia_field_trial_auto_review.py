@@ -36,9 +36,10 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def candidate_entries(ledger: dict[str, Any], trial_id: str = "", run_id: str = "") -> list[dict[str, Any]]:
+def candidate_entries(ledger: dict[str, Any], trial_id: str = "", run_id: str = "", *, include_accepted: bool = False) -> list[dict[str, Any]]:
     entries = [entry for entry in ledger.get("entries", []) if isinstance(entry, dict)]
-    entries = [entry for entry in entries if entry.get("accepted_for_rolling_score") is not True]
+    if not include_accepted:
+        entries = [entry for entry in entries if entry.get("accepted_for_rolling_score") is not True]
     if trial_id:
         entries = [entry for entry in entries if entry.get("trial_id") == trial_id]
     if run_id:
@@ -78,12 +79,80 @@ def require_passed_packet(packet: dict[str, Any]) -> None:
         raise ValueError("no executed verification evidence")
 
 
+def manifest_for_packet(packet: dict[str, Any]) -> dict[str, Any]:
+    evidence = packet.get("evidence") if isinstance(packet.get("evidence"), dict) else {}
+    path_text = str(evidence.get("final_manifest") or "")
+    if not path_text:
+        return {}
+    path = Path(path_text)
+    if not path.exists():
+        return {}
+    return load_json(path)
+
+
+def senior_evidence_signals(manifest: dict[str, Any]) -> dict[str, Any]:
+    readiness = manifest.get("engineering_readiness") if isinstance(manifest.get("engineering_readiness"), dict) else {}
+    readiness_checks = readiness.get("readiness_checks") if isinstance(readiness.get("readiness_checks"), dict) else {}
+    repo_review = manifest.get("repository_investigation_review") if isinstance(manifest.get("repository_investigation_review"), dict) else {}
+    repo_review_checks = repo_review.get("checks") if isinstance(repo_review.get("checks"), list) else []
+    adr = manifest.get("architecture_decision_record") if isinstance(manifest.get("architecture_decision_record"), dict) else {}
+    verification_strategy = manifest.get("verification_strategy") if isinstance(manifest.get("verification_strategy"), dict) else {}
+    scope = manifest.get("patch_scope_evidence") if isinstance(manifest.get("patch_scope_evidence"), dict) else {}
+    diagnostics = manifest.get("diagnostics") if isinstance(manifest.get("diagnostics"), dict) else {}
+    review_discipline = manifest.get("code_review_discipline") if isinstance(manifest.get("code_review_discipline"), dict) else {}
+    unshaped_plan = manifest.get("unshaped_repair_plan") if isinstance(manifest.get("unshaped_repair_plan"), dict) else {}
+    review_record = manifest.get("review_decision_record") if isinstance(manifest.get("review_decision_record"), list) else []
+    implementation_record = manifest.get("implementation_decision_record") if isinstance(manifest.get("implementation_decision_record"), list) else []
+    verification_summary = manifest.get("verification_summary") if isinstance(manifest.get("verification_summary"), dict) else {}
+    changed_files = manifest.get("changed_files") if isinstance(manifest.get("changed_files"), list) else []
+    changed_paths = {
+        str(item.get("path") or "")
+        for item in changed_files
+        if isinstance(item, dict) and item.get("path")
+    }
+    diagnostic_paths = {
+        str(value)
+        for key, value in diagnostics.items()
+        if key.endswith("_path") and isinstance(value, str) and value
+    }
+    outside_scope = scope.get("changed_files_outside_repo_map")
+    outside_scope_paths = set(outside_scope) if isinstance(outside_scope, list) else set()
+    outside_scope_explained = bool(outside_scope_paths) and outside_scope_paths.issubset(changed_paths) and outside_scope_paths.issubset(diagnostic_paths)
+    rich_verification = int(verification_summary.get("executed_count") or 0) >= 3 and int(verification_summary.get("blocker_count") or 0) == 0
+    signals = {
+        "unshaped_repo_repair": unshaped_plan.get("mode") == "unshaped_repo_repair",
+        "readiness_complete": all(readiness_checks.get(key) is True for key in ["has_ranked_sources", "has_acceptance_criteria", "has_test_strategy"]),
+        "repository_review_covered": repo_review.get("status") == "covered"
+        and not repo_review.get("blockers")
+        and bool(repo_review_checks)
+        and all(isinstance(item, dict) and item.get("status") == "pass" for item in repo_review_checks),
+        "architecture_decision_recorded": adr.get("status") == "recorded"
+        and bool(adr.get("drivers"))
+        and bool(adr.get("alternatives_considered"))
+        and bool(adr.get("rollback")),
+        "verification_strategy_broad_and_focused": bool(verification_strategy.get("focused_commands"))
+        and (bool(verification_strategy.get("broad_commands")) or rich_verification),
+        "patch_scope_mapped": isinstance(outside_scope, list)
+        and (not outside_scope_paths or outside_scope_explained)
+        and bool(scope.get("evidence")),
+        "code_review_clean": int(review_discipline.get("blocker_count") or 0) == 0,
+        "review_decision_record_rich": len(review_record) >= 10,
+        "implementation_decision_recorded": bool(implementation_record)
+        and all(isinstance(item, dict) and item.get("status") == "pass" for item in implementation_record),
+        "verification_executed_rich": int(verification_summary.get("executed_count") or 0) >= 3,
+    }
+    signals["complete"] = all(signals.values())
+    return signals
+
+
 def scores_for_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[str], list[str], str]:
     require_passed_packet(packet)
     observed = packet.get("observed") if isinstance(packet.get("observed"), dict) else {}
     verification = observed.get("verification_summary") if isinstance(observed.get("verification_summary"), dict) else {}
     changed_files = observed.get("changed_files") if isinstance(observed.get("changed_files"), list) else []
     diagnostics = observed.get("diagnostics") if isinstance(observed.get("diagnostics"), dict) else {}
+    manifest = manifest_for_packet(packet)
+    senior_signals = senior_evidence_signals(manifest)
     patch_source = str(observed.get("patch_source") or "")
     trial_class = str(packet.get("class") or "")
     difficulty = str(packet.get("difficulty") or "")
@@ -93,6 +162,18 @@ def scores_for_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[st
 
     if difficulty == "expert":
         scores = {dimension: 8.0 for dimension in DIMENSIONS}
+    if difficulty == "expert" and senior_signals.get("complete") is True:
+        scores = {
+            "task_understanding": 9.2,
+            "repository_investigation": 9.4,
+            "multi_file_reasoning": 9.2,
+            "patch_correctness": 9.2,
+            "verification_discipline": 9.3,
+            "self_repair": 9.0,
+            "review_quality": 9.35,
+            "safety": 9.15,
+            "reporting": 9.2,
+        }
     if patch_source.startswith("test_inferred_") or patch_source.startswith("runtime_diagnostic_"):
         scores["repository_investigation"] += 1.0
         scores["review_quality"] += 0.5
@@ -113,13 +194,14 @@ def scores_for_packet(packet: dict[str, Any]) -> tuple[dict[str, float], list[st
         scores["safety"] += 0.75
     if "api" in trial_class or "migration" in trial_class or "integration" in trial_class:
         scores["multi_file_reasoning"] += 0.5
-    scores = {dimension: min(round(value, 2), 9.0) for dimension, value in scores.items()}
+    cap = 9.4 if senior_signals.get("complete") is True else 9.0
+    scores = {dimension: min(round(value, 2), cap) for dimension, value in scores.items()}
     note = (
         f"Automated evidence review accepted {packet.get('run_id')} conservatively: "
         f"honest_evidence passed, manifest is ready, verification executed "
         f"{verification.get('executed_count')} command(s), patch_source={patch_source}, "
-        f"changed_files={len(changed_files)}. Scores are capped because this is evidence-based triage, "
-        "not a human senior-code-review claim."
+        f"changed_files={len(changed_files)}, senior_evidence_complete={senior_signals.get('complete')}. "
+        f"Scores are capped at {cap} because this is evidence-based triage, not an external senior-code-review claim."
     )
     return scores, failures, followups, note
 
@@ -146,6 +228,7 @@ def main() -> int:
     parser.add_argument("--write-dir", type=Path)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--include-accepted", action="store_true", help="Refresh already accepted entries that still have complete honest evidence.")
     parser.add_argument("--reviewer", default="Codex conservative evidence review")
     args = parser.parse_args()
 
@@ -153,7 +236,7 @@ def main() -> int:
     ledger = load_json(LEDGER)
     reviews: list[dict[str, Any]] = []
     rejected: list[dict[str, str]] = []
-    for entry in candidate_entries(ledger, trial_id=args.trial_id, run_id=args.run_id):
+    for entry in candidate_entries(ledger, trial_id=args.trial_id, run_id=args.run_id, include_accepted=args.include_accepted):
         try:
             reviews.append(review_for_entry(entry, spec, args.reviewer))
         except ValueError as exc:

@@ -15,6 +15,7 @@ from ceraxia_field_trial_runner import (
     honest_evidence_summary,
     resolve_run_storage,
 )
+from ceraxia_field_trial_auto_review import senior_evidence_signals
 
 
 WARMASTER_ROOT = Path(__file__).resolve().parent
@@ -305,6 +306,31 @@ def main() -> int:
     )
     if unsafe_test_edit.get("checks", {}).get("tests_not_adjusted", {}).get("passed") is True:
         raise AssertionError(f"Ceraxia inferred source repair must not hide changed tests: {unsafe_test_edit}")
+    senior_manifest = {
+        "changed_files": [{"path": "app/config.py"}, {"path": "docs/config.md"}],
+        "diagnostics": {"source_path": "app/config.py", "docs_path": "docs/config.md"},
+        "engineering_readiness": {"readiness_checks": {"has_ranked_sources": True, "has_acceptance_criteria": True, "has_test_strategy": True}},
+        "repository_investigation_review": {"status": "covered", "blockers": [], "checks": [{"status": "pass"}]},
+        "architecture_decision_record": {
+            "status": "recorded",
+            "drivers": ["compatibility"],
+            "alternatives_considered": [{"option": "rewrite", "rejected_because": "too broad"}],
+            "rollback": "revert changed files",
+        },
+        "verification_strategy": {"focused_commands": ["python -m unittest tests.test_config"], "broad_commands": []},
+        "verification_summary": {"executed_count": 3, "blocker_count": 0},
+        "patch_scope_evidence": {"changed_files_outside_repo_map": ["docs/config.md"], "evidence": [{"path": "docs/config.md"}]},
+        "code_review_discipline": {"blocker_count": 0},
+        "unshaped_repair_plan": {"mode": "unshaped_repo_repair"},
+        "review_decision_record": [{"status": "pass"} for _ in range(10)],
+        "implementation_decision_record": [{"status": "pass"}],
+    }
+    if senior_evidence_signals(senior_manifest).get("complete") is not True:
+        raise AssertionError(f"Ceraxia senior evidence signals rejected explained rich manifest: {senior_evidence_signals(senior_manifest)}")
+    unexplained_scope = json.loads(json.dumps(senior_manifest))
+    unexplained_scope["diagnostics"] = {"source_path": "app/config.py"}
+    if senior_evidence_signals(unexplained_scope).get("patch_scope_mapped") is True:
+        raise AssertionError(f"Ceraxia senior evidence signals accepted unexplained outside scope: {senior_evidence_signals(unexplained_scope)}")
     with tempfile.TemporaryDirectory() as tmp:
         tmp_root = Path(tmp)
         trial_result = tmp_root / "trial_result.json"
