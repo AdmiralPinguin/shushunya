@@ -199,6 +199,8 @@ def run_step(
     workspace_root: Path,
     timeout_sec: int,
     revision_context: dict[str, Any] | None = None,
+    timeout_retries: int = 1,
+    retry_timeout_multiplier: int = 2,
 ) -> StepResult:
     try:
         packet = load_json(dispatch_path)
@@ -233,21 +235,30 @@ def run_step(
         temp_dispatch_path = write_revision_dispatch(dispatch_path, packet, revision_context)
         execution_dispatch_path = temp_dispatch_path
     timed_out: subprocess.TimeoutExpired | None = None
-    try:
-        completed = subprocess.run(
-            [sys.executable, str(repo_root / script), str(execution_dispatch_path), "--workspace-root", str(workspace_root)],
-            cwd=repo_root,
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=timeout_sec,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        timed_out = exc
-    finally:
-        if temp_dispatch_path is not None:
-            temp_dispatch_path.unlink(missing_ok=True)
+    completed: subprocess.CompletedProcess[str] | None = None
+    attempts = 0
+    max_attempts = 1 + max(0, timeout_retries if timeout_sec > 0 else 0)
+    while attempts < max_attempts:
+        attempts += 1
+        attempt_timeout = timeout_sec * (retry_timeout_multiplier ** (attempts - 1))
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(repo_root / script), str(execution_dispatch_path), "--workspace-root", str(workspace_root)],
+                cwd=repo_root,
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=attempt_timeout,
+                check=False,
+            )
+            timed_out = None
+            break
+        except subprocess.TimeoutExpired as exc:
+            timed_out = exc
+            if attempts >= max_attempts:
+                break
+    if temp_dispatch_path is not None:
+        temp_dispatch_path.unlink(missing_ok=True)
     if timed_out is not None:
         stdout = timed_out.stdout.decode("utf-8", errors="replace") if isinstance(timed_out.stdout, bytes) else str(timed_out.stdout or "")
         stderr = timed_out.stderr.decode("utf-8", errors="replace") if isinstance(timed_out.stderr, bytes) else str(timed_out.stderr or "")
@@ -259,6 +270,8 @@ def run_step(
             "error_code": "worker_timeout",
             "error": f"worker timed out after {timeout_sec} seconds",
             "summary": f"{worker} timed out after {timeout_sec} seconds.",
+            "attempt_count": attempts,
+            "timeout_retries": max_attempts - 1,
             "revision_plan": {
                 "required": True,
                 "steps": [
@@ -273,6 +286,9 @@ def run_step(
             },
         }
         return StepResult(step_id, worker, 124, False, payload, stdout[-4000:], stderr[-4000:])
+    if completed is None:
+        payload = {"ok": False, "worker": worker, "task_id": str(request.get("task_id") or ""), "status": "failed", "error": "worker process did not start"}
+        return StepResult(step_id, worker, 2, False, payload, "", payload["error"])
     payload = parse_worker_stdout(completed.stdout)
     ok = completed.returncode == 0 and bool(payload.get("ok"))
     return StepResult(step_id, worker, completed.returncode, ok, payload, completed.stdout, completed.stderr)
@@ -316,6 +332,7 @@ def execute_run(
     timeout_sec: int = 1800,
     step_ids: list[str] | None = None,
     execution_mode: str = "full",
+    timeout_retries: int = 1,
 ) -> dict[str, Any]:
     contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
     ledger_path = run_dir / "task_ledger.json"
@@ -342,7 +359,7 @@ def execute_run(
         ledger = TaskLedger.load(ledger_path)
         if ledger.cancel_requested():
             break
-        result = run_step(repo_root, dispatch_path, workspace_root, timeout_sec, revision_context=revision_contexts.get(dispatch_path.stem))
+        result = run_step(repo_root, dispatch_path, workspace_root, timeout_sec, revision_context=revision_contexts.get(dispatch_path.stem), timeout_retries=timeout_retries)
         results.append(result)
         ledger.record_step(
             result.step_id,
@@ -399,9 +416,10 @@ def main() -> int:
     parser.add_argument("--workspace-root", default="runtime/eye-local-work")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--timeout-sec", type=int, default=1800)
+    parser.add_argument("--timeout-retries", type=int, default=1)
     parser.add_argument("--step-id", action="append", default=[], help="Restrict execution to one or more dispatch step ids")
     args = parser.parse_args()
-    summary = execute_run(Path(args.repo_root).resolve(), Path(args.run_dir), Path(args.workspace_root), args.timeout_sec, step_ids=args.step_id or None, execution_mode="restricted" if args.step_id else "full")
+    summary = execute_run(Path(args.repo_root).resolve(), Path(args.run_dir), Path(args.workspace_root), args.timeout_sec, step_ids=args.step_id or None, execution_mode="restricted" if args.step_id else "full", timeout_retries=args.timeout_retries)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary.get("ok") else 1
 

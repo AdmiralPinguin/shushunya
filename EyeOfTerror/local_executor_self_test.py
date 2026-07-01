@@ -5,6 +5,7 @@ import json
 import tempfile
 from pathlib import Path
 
+from eye_of_terror import local_executor
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
 from eye_of_terror.local_executor import execute_run, revision_contexts_from_result, terminal_payload_allows_completion
 from eye_of_terror.pipeline import write_pipeline_run
@@ -213,9 +214,71 @@ def main() -> int:
         timeout_payload = timeout_summary.get("steps", [{}])[0].get("payload", {})
         if timeout_summary.get("ok") or timeout_payload.get("error_code") != "worker_timeout":
             raise AssertionError(f"local executor did not record worker timeout: {timeout_summary}")
+        if timeout_payload.get("attempt_count") != 1 or timeout_payload.get("timeout_retries") != 0:
+            raise AssertionError(f"zero-second timeout should not be retried: {timeout_summary}")
         timeout_ledger = json.loads((timeout_run / "task_ledger.json").read_text(encoding="utf-8"))
         if timeout_ledger.get("status") != "failed" or timeout_ledger.get("steps", [{}])[0].get("status") != "failed":
             raise AssertionError(f"worker timeout was not recorded durably: {timeout_ledger}")
+        flaky_repo = root / "flaky-repo"
+        flaky_worker_dir = flaky_repo / "workers"
+        flaky_worker_dir.mkdir(parents=True)
+        (flaky_worker_dir / "flaky_worker.py").write_text(
+            """#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("dispatch")
+parser.add_argument("--workspace-root", required=True)
+args = parser.parse_args()
+workspace = Path(args.workspace_root)
+workspace.mkdir(parents=True, exist_ok=True)
+marker = workspace / "first_attempt_marker"
+if not marker.exists():
+    marker.write_text("seen", encoding="utf-8")
+    time.sleep(2)
+print(json.dumps({"ok": True, "status": "completed", "summary": "flaky worker recovered", "artifacts": []}))
+""",
+            encoding="utf-8",
+        )
+        old_command = local_executor.WORKER_COMMANDS.get("FlakyWorker")
+        local_executor.WORKER_COMMANDS["FlakyWorker"] = (".", "workers/flaky_worker.py")
+        try:
+            flaky_run = root / "flaky-run"
+            flaky_dispatch = flaky_run / "dispatch"
+            write_json(
+                flaky_run / "contract.json",
+                {"task_id": "flaky-local", "goal": "test timeout retry", "assigned_governor": "IskandarKhayon"},
+            )
+            write_json(
+                flaky_run / "status.json",
+                {
+                    "task_id": "flaky-local",
+                    "governor": "IskandarKhayon",
+                    "steps": [{"step_id": "flaky_step", "worker": "FlakyWorker"}],
+                    "dispatch_dir": str(flaky_dispatch),
+                },
+            )
+            write_json(
+                flaky_dispatch / "flaky_step.json",
+                {
+                    "step_id": "flaky_step",
+                    "worker": "FlakyWorker",
+                    "request": {"task_id": "flaky-local:flaky_step"},
+                },
+            )
+            flaky_summary = execute_run(flaky_repo, flaky_run, root / "flaky-work", timeout_sec=1, timeout_retries=1)
+            if not flaky_summary.get("ok") or flaky_summary.get("steps", [{}])[0].get("returncode") != 0:
+                raise AssertionError(f"local executor should retry one flaky timeout: {flaky_summary}")
+        finally:
+            if old_command is None:
+                local_executor.WORKER_COMMANDS.pop("FlakyWorker", None)
+            else:
+                local_executor.WORKER_COMMANDS["FlakyWorker"] = old_command
         run_dir = root / "run"
         work_dir = root / "work"
         plan = plan_lore_reconstruction("Собери все известное о событиях Скалатракса.", task_id="executor-test")
