@@ -1045,6 +1045,11 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     surface_sufficiency = review.get("surface_verification_sufficiency") if isinstance(review.get("surface_verification_sufficiency"), dict) else {}
     if summary.get("surface_verification_status", "") != surface_sufficiency.get("status", ""):
         findings.append({"severity": "blocker", "finding": "run_summary surface_verification_status disagrees with review_gate.json"})
+    verification_sufficiency = review.get("verification_sufficiency") if isinstance(review.get("verification_sufficiency"), dict) else {}
+    if summary.get("verification_output_summary_count", 0) != verification_sufficiency.get("output_summary_count", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary verification_output_summary_count disagrees with review_gate.json"})
+    if summary.get("verification_output_signal_counts", {}) != verification_sufficiency.get("output_signal_counts", {}):
+        findings.append({"severity": "blocker", "finding": "run_summary verification_output_signal_counts disagrees with review_gate.json"})
     investigation_sufficiency = review.get("investigation_sufficiency") if isinstance(review.get("investigation_sufficiency"), dict) else {}
     if summary.get("investigation_playbook_status", "") != investigation_sufficiency.get("status", ""):
         findings.append({"severity": "blocker", "finding": "run_summary investigation_playbook_status disagrees with review_gate.json"})
@@ -1295,6 +1300,7 @@ def build_run_summary(
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
+    verification_sufficiency = review.get("verification_sufficiency") if isinstance(review.get("verification_sufficiency"), dict) else {}
     surface_sufficiency = review.get("surface_verification_sufficiency") if isinstance(review.get("surface_verification_sufficiency"), dict) else {}
     investigation_sufficiency = review.get("investigation_sufficiency") if isinstance(review.get("investigation_sufficiency"), dict) else {}
     change_control_sufficiency = review.get("change_control_sufficiency") if isinstance(review.get("change_control_sufficiency"), dict) else {}
@@ -1346,6 +1352,8 @@ def build_run_summary(
         "survey_quality_warning_count": len(survey_quality.get("warnings", [])) if isinstance(survey_quality.get("warnings"), list) else 0,
         "surface_verification_status": surface_sufficiency.get("status", ""),
         "surface_verification_surface_count": surface_sufficiency.get("surface_count", 0),
+        "verification_output_summary_count": verification_sufficiency.get("output_summary_count", 0),
+        "verification_output_signal_counts": verification_sufficiency.get("output_signal_counts", {}),
         "investigation_playbook_status": investigation_sufficiency.get("status", ""),
         "investigation_read_stage_count": investigation_sufficiency.get("read_stage_count", 0),
         "investigation_evidence_question_count": investigation_sufficiency.get("evidence_question_count", 0),

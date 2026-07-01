@@ -491,6 +491,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any(row["status"] == "partial" for row in surface_evidence))
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["surface_verification_status"], "partial")
+            self.assertGreaterEqual(summary["verification_output_summary_count"], 1)
+            self.assertEqual(summary["verification_output_signal_counts"], review["verification_sufficiency"]["output_signal_counts"])
 
     def test_real_explicit_patch_pipeline_reaches_execution_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -28,6 +28,8 @@
     "survey_quality_warning_count",
     "surface_verification_status",
     "surface_verification_surface_count",
+    "verification_output_summary_count",
+    "verification_output_signal_counts",
     "investigation_playbook_status",
     "investigation_read_stage_count",
     "investigation_evidence_question_count",
@@ -156,6 +158,15 @@
     },
     "surface_verification_surface_count": {
       "type": "integer"
+    },
+    "verification_output_summary_count": {
+      "type": "integer"
+    },
+    "verification_output_signal_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
     },
     "investigation_playbook_status": {
       "type": "string"
