@@ -483,6 +483,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(review["verification_sufficiency"]["meaningful_commands_executed_count"], 1)
             surface_evidence = review["surface_verification_sufficiency"]["surface_evidence"]
             self.assertTrue(any(row["surface"] == "source_behavior" and row["status"] == "executed" for row in surface_evidence))
+            self.assertTrue(any(row["surface"] == "source_behavior" and row["matched_commands"] for row in surface_evidence))
             self.assertTrue(any(row["status"] == "partial" for row in surface_evidence))
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["surface_verification_status"], "partial")
@@ -867,6 +868,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         }
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertEqual(review["surface_verification_sufficiency"]["status"], "partial")
+        surface_evidence = review["surface_verification_sufficiency"]["surface_evidence"]
+        self.assertTrue(any(row["surface"] == "source_behavior" and row["matched_commands"] == ["python -m py_compile app.py"] for row in surface_evidence))
+        self.assertTrue(any(row["surface"] == "security_boundary" and row["status"] == "partial" and not row["matched_commands"] for row in surface_evidence))
         self.assertEqual(review["decision"], "blocked")
         self.assertTrue(any("partial executed surface evidence" in item["finding"] for item in review["findings"]))
 

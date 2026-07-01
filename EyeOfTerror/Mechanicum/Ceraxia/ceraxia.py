@@ -328,6 +328,17 @@ def command_texts(commands: list[dict[str, Any]]) -> list[str]:
     return [str(item.get("command", "")) for item in commands if isinstance(item, dict)]
 
 
+def commands_matching_surface(surface: str, commands: list[dict[str, Any]], negative_tests: list[Any]) -> list[str]:
+    texts = command_texts(commands)
+    if surface == "source_behavior":
+        return [command for command in texts if "py_compile" in command or "pytest" in command or "test" in command or "unittest" in command]
+    if surface == "test_surface":
+        return [command for command in texts if "pytest" in command or "test" in command or "unittest" in command]
+    if surface in {"public_api_contract", "security_boundary", "data_compatibility", "concurrency_runtime", "runtime_configuration"} and negative_tests:
+        return [command for command in texts if "pytest" in command or "test" in command or "unittest" in command]
+    return []
+
+
 def has_test_command(commands: list[dict[str, Any]]) -> bool:
     return any("pytest" in command or "test" in command or "unittest" in command for command in command_texts(commands))
 
@@ -350,39 +361,50 @@ def surface_evidence_rows(surface_rows: list[Any], verification_report: dict[str
         if blockers:
             status = "blocked"
             reason = "surface planning row has blockers"
+            matched_commands: list[str] = []
         elif verification_status in {"failed", "blocked"}:
             status = verification_status
             reason = f"verification report status is {verification_status}"
+            matched_commands = commands_matching_surface(surface, executed_commands, negative_tests)
         elif not planned_commands:
             status = "missing"
             reason = "no verification command is planned"
+            matched_commands = []
         elif not executed_commands:
             status = "planned_only"
             reason = "verification is planned but not executed"
+            matched_commands = []
         elif surface == "source_behavior" and has_source_command(executed_commands):
             status = "executed"
             reason = "source command executed"
+            matched_commands = commands_matching_surface(surface, executed_commands, negative_tests)
         elif surface == "test_surface" and has_test_command(executed_commands):
             status = "executed"
             reason = "test command executed"
+            matched_commands = commands_matching_surface(surface, executed_commands, negative_tests)
         elif surface in {"public_api_contract", "security_boundary", "data_compatibility", "concurrency_runtime", "runtime_configuration"}:
             if negative_tests and has_test_command(executed_commands):
                 status = "executed"
                 reason = "negative or compatibility test command executed"
+                matched_commands = commands_matching_surface(surface, executed_commands, negative_tests)
             else:
                 status = "partial"
                 reason = "executed commands do not directly prove this high-risk surface"
+                matched_commands = []
         elif executed_commands:
             status = "partial"
             reason = "some verification executed, but this surface has no direct evidence"
+            matched_commands = []
         else:
             status = "planned_only"
             reason = "verification is planned but not executed"
+            matched_commands = []
         rows.append(
             {
                 "surface": surface,
                 "status": status,
                 "reason": reason,
+                "matched_commands": matched_commands,
                 "covered_by": surface_row.get("covered_by", []) if isinstance(surface_row.get("covered_by"), list) else [],
                 "evidence_needed": surface_row.get("evidence_needed", []) if isinstance(surface_row.get("evidence_needed"), list) else [],
             }
