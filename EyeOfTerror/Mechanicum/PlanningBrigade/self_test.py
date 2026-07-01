@@ -153,6 +153,19 @@ def main() -> int:
         raise AssertionError(f"planning packet should extract explicit path hints: {path_hint_packet}")
     if path_hint_packet["repo_survey_request"]["path_hints"] != ["src/app.py", "tests/test_app.py"]:
         raise AssertionError(f"survey request should preserve path hints: {path_hint_packet}")
+
+    structured_packet = planning_brigade.build_planning_packet(
+        {
+            "task": "добавь feature",
+            "repo_path": "/repo",
+            "constraints": ["preserve CLI output"],
+            "verification_commands": ["python -m pytest tests/test_cli.py"],
+        }
+    )
+    if "preserve CLI output" not in structured_packet["problem_statement"]["known_constraints"]:
+        raise AssertionError(f"structured constraints should be preserved: {structured_packet}")
+    if "python -m pytest tests/test_cli.py" not in structured_packet["verification_strategy"]["targeted_commands"]:
+        raise AssertionError(f"structured verification commands should be preserved: {structured_packet}")
     print("[ok] Ceraxia PlanningBrigade")
     return 0
 

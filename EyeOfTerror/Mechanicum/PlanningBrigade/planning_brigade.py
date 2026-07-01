@@ -32,6 +32,23 @@ def extract_path_hints(task: str) -> list[str]:
     return hints
 
 
+def string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def payload_constraints(payload: dict[str, Any]) -> list[str]:
+    constraints: list[str] = []
+    for key in ("constraints", "requirements", "preserve"):
+        for item in string_list(payload.get(key)):
+            if item not in constraints:
+                constraints.append(item)
+    return constraints
+
+
 def task_text(payload: dict[str, Any]) -> str:
     return str(payload.get("task") or payload.get("goal") or payload.get("message") or "").strip()
 
@@ -105,6 +122,7 @@ def task_triage(payload: dict[str, Any]) -> dict[str, Any]:
 def problem_statement(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
     explicit_paths = extract_path_hints(task)
+    structured_constraints = payload_constraints(payload)
     return {
         "role": "TaskTriage",
         "intent": task[:500],
@@ -114,7 +132,7 @@ def problem_statement(payload: dict[str, Any], triage: dict[str, Any]) -> dict[s
             "preserve public behavior unless the task explicitly asks to change it",
             "prefer repository evidence over guessing candidate files",
             "do not mutate source before survey, design, verification, and risk gates exist",
-        ],
+        ] + structured_constraints,
         "explicit_path_hints": explicit_paths,
         "unknowns": triage["clarifying_questions"] if triage["needs_clarification"] else [],
         "definition_of_done": [
@@ -486,7 +504,8 @@ def design_options(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str,
     }
 
 
-def verification_strategy(triage: dict[str, Any]) -> dict[str, Any]:
+def verification_strategy(triage: dict[str, Any], payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = payload or {}
     commands = ["python -m py_compile <changed .py files>", "git diff --check"]
     checks = ["targeted behavior verification", "changed-file syntax verification"]
     negative_tests: list[str] = []
@@ -503,6 +522,9 @@ def verification_strategy(triage: dict[str, Any]) -> dict[str, Any]:
         negative_tests.append("missing/invalid config fails safely")
     if "migration" in triage["task_kinds"]:
         negative_tests.append("old, new, and mixed records round-trip correctly")
+    for command in string_list(payload.get("verification_commands")) + string_list(payload.get("required_verification_commands")):
+        if command not in commands:
+            commands.append(command)
     broad_required = triage["risk_level"] == "high"
     return {
         "role": "VerificationArchitect",
@@ -842,7 +864,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     impact = impact_analysis(triage, problem, survey)
     forecast = execution_forecast(triage, breakdown, impact)
     design = design_options(payload, triage)
-    verification = verification_strategy(triage)
+    verification = verification_strategy(triage, payload)
     surface_matrix = surface_verification_matrix(impact, verification)
     risks = risk_register(triage, survey, design, verification)
     quality = quality_bar(triage, verification)
