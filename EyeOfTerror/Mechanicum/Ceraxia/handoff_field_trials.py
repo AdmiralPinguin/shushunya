@@ -129,7 +129,17 @@ def run_guarded_inferred_patch_trial(root: Path) -> dict[str, Any]:
 
 def run_guarded_inferred_create_file_trial(root: Path) -> dict[str, Any]:
     repo = root / "guarded-inferred-create-file-repo"
-    write_repo(repo, {"app.py": "def app():\n    return True\n"})
+    write_repo(
+        repo,
+        {
+            "test_helpers.py": (
+                "import unittest\nfrom helpers import helper\n\n"
+                "class HelperTest(unittest.TestCase):\n"
+                "    def test_helper(self):\n"
+                "        self.assertTrue(helper())\n"
+            )
+        },
+    )
     result = run_ceraxia(
         CeraxiaInput(
             task="Создай файл `helpers.py` с содержимым `def helper():\n    return True\n`.",
@@ -137,13 +147,14 @@ def run_guarded_inferred_create_file_trial(root: Path) -> dict[str, Any]:
             runs_root=root / "runs",
             dry_run=False,
             execute_verification=True,
-            verification_commands=("python -m py_compile helpers.py",),
+            verification_commands=("python -m py_compile helpers.py", "python -m unittest test_helpers.py"),
         )
     )
     artifacts = load_run_artifacts(Path(result["run_dir"]))
     require(result["ok"], "guarded inferred create-file handoff should complete", result)
     require(result["ready_for_execution"], "guarded inferred create-file handoff should be ready after real adapter execution", result)
     require("def helper" in (repo / "helpers.py").read_text(encoding="utf-8"), "guarded inferred create-file should create helpers.py")
+    require(artifacts["brief"]["repo_survey_evidence"]["candidate_files"] == [], "create-file trial should prove candidate-less source creation is supported", artifacts["brief"])
     require(artifacts["brief"]["survey_quality_gate"]["allowed_missing_create_path_hints"] == ["helpers.py"], "create-file path should be an allowed missing hint", artifacts["brief"])
     require(artifacts["worker"]["execution_intent"]["mode"] == "guarded_inferred_patch_execution", "worker must expose guarded inferred intent", artifacts["worker"])
     require("natural_language_create_file" in artifacts["worker"]["execution_result"]["patch_summary"], "worker result should expose inferred create-file source", artifacts["worker"])
