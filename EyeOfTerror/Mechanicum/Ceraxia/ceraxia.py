@@ -419,6 +419,9 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     worker_report = artifacts.get("worker_report", {}) if isinstance(artifacts.get("worker_report"), dict) else {}
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
+    planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
+    work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
+    work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     blockers = readiness.get("blockers", [])
     warnings = review.get("warnings", [])
     commands_executed = verification.get("commands_executed", [])
@@ -434,6 +437,9 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Risk: {brief['risk_level']}",
         f"Strategy: {brief['selected_strategy']}",
         f"Review decision: {review['decision']}",
+        f"Planning review decision: {planning_review.get('decision', '')}",
+        f"Planning review score: {planning_review.get('score', '')}",
+        f"Planning work phases: {len(work_phases)}",
         f"Verification status: {verification['status']}",
         f"Verification commands planned: {len(commands_planned)}",
         f"Verification commands executed: {len(commands_executed)}",
@@ -556,6 +562,11 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         findings.append({"severity": "blocker", "finding": f"worker_report.json is unreadable: {exc}"})
         worker_report = {}
+    try:
+        brief = json.loads((run_dir / "implementation_brief.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        findings.append({"severity": "blocker", "finding": f"implementation_brief.json is unreadable: {exc}"})
+        brief = {}
     if summary.get("execution_readiness") != readiness.get("decision"):
         findings.append({"severity": "blocker", "finding": "run_summary execution_readiness disagrees with execution_readiness.json"})
     if summary.get("ready_for_execution") != (readiness.get("decision") == "ready_for_real_execution"):
@@ -567,6 +578,15 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     if summary.get("code_brigade_execution_result_status", "") != execution_result.get("status", ""):
         findings.append({"severity": "blocker", "finding": "run_summary code_brigade_execution_result_status disagrees with worker_report.json"})
+    planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
+    if summary.get("planning_review_decision", "") != planning_review.get("decision", ""):
+        findings.append({"severity": "blocker", "finding": "run_summary planning_review_decision disagrees with implementation_brief.json"})
+    if summary.get("planning_review_score", 0) != planning_review.get("score", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary planning_review_score disagrees with implementation_brief.json"})
+    work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
+    phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
+    if summary.get("planning_work_phase_count", 0) != len(phases):
+        findings.append({"severity": "blocker", "finding": "run_summary planning_work_phase_count disagrees with implementation_brief.json"})
     try:
         evidence_matrix = json.loads((run_dir / "evidence_matrix.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -639,6 +659,9 @@ def build_run_summary(
 ) -> dict[str, Any]:
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
+    planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
+    work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
+    work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     return {
         "kind": "ceraxia_run_summary",
         "contract_version": CONTRACT_VERSION,
@@ -650,6 +673,9 @@ def build_run_summary(
         "package_audit_decision": "pending_until_run_audit",
         "ready_for_execution": readiness.get("decision") == "ready_for_real_execution",
         "review_decision": review.get("decision"),
+        "planning_review_decision": planning_review.get("decision", ""),
+        "planning_review_score": planning_review.get("score", 0),
+        "planning_work_phase_count": len(work_phases),
         "execution_readiness": readiness.get("decision"),
         "worker_status": worker_report.get("status"),
         "code_brigade_execution_policy_status": worker_report.get("execution_policy_status"),

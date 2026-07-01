@@ -74,6 +74,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("negative boundary test or explicit blocker is present", brief["quality_bar"]["must_have_evidence"])
             self.assertEqual(brief["code_brigade_handoff"]["target"], "CodeBrigade")
             self.assertIn("prove_negative_boundary", [step["step"] for step in brief["code_brigade_handoff"]["steps"]])
+            self.assertEqual(brief["planning_review_gate"]["decision"], "ready_for_ceraxia_review")
+            self.assertGreaterEqual(brief["planning_review_gate"]["score"], 80)
+            self.assertGreaterEqual(len(brief["work_breakdown"]["phases"]), 6)
             self.assertIn("app.py", brief["repo_survey_evidence"]["candidate_files"])
             self.assertFalse(brief["repo_survey_evidence"]["survey_truncated"])
             self.assertFalse(brief["repo_survey_evidence"]["python_symbols_truncated"])
@@ -119,6 +122,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["package_audit_decision"], "pending_until_run_audit")
             self.assertFalse(summary["ready_for_execution"])
             self.assertEqual(summary["review_decision"], "dry_run_ready")
+            self.assertEqual(summary["planning_review_decision"], "ready_for_ceraxia_review")
+            self.assertGreaterEqual(summary["planning_review_score"], 80)
+            self.assertGreaterEqual(summary["planning_work_phase_count"], 6)
             self.assertEqual(summary["worker_status"], "dry_run_handoff_ready")
             self.assertEqual(summary["code_brigade_execution_policy_status"], "blocked_until_adapter_is_wired")
             self.assertEqual(summary["code_brigade_execution_result_status"], "")
@@ -137,6 +143,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("BLOCKER: real CodeBrigade execution is not wired in this controller yet", final_report)
             self.assertIn("Verification commands planned:", final_report)
             self.assertIn("Verification commands executed: 0", final_report)
+            self.assertIn("Planning review decision: ready_for_ceraxia_review", final_report)
+            self.assertIn("Planning review score:", final_report)
+            self.assertIn("Planning work phases:", final_report)
             self.assertIn("Worker status: dry_run_handoff_ready", final_report)
             self.assertIn("Execution policy status: blocked_until_adapter_is_wired", final_report)
             self.assertIn("Execution preflight ok: n/a", final_report)
@@ -375,6 +384,28 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             audit = audit_run_package(run_dir)
             self.assertEqual(audit["decision"], "blocked")
             self.assertTrue(any("worker_status disagrees" in item["finding"] for item in audit["findings"]))
+
+    def test_run_audit_blocks_planning_summary_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="почини pytest для public API schema",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            run_dir = Path(result["run_dir"])
+            summary_path = run_dir / "run_summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["planning_review_decision"] = "blocked"
+            summary["planning_review_score"] = 0
+            summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            audit = audit_run_package(run_dir)
+            self.assertEqual(audit["decision"], "blocked")
+            self.assertTrue(any("planning_review_decision disagrees" in item["finding"] for item in audit["findings"]))
+            self.assertTrue(any("planning_review_score disagrees" in item["finding"] for item in audit["findings"]))
 
 
 if __name__ == "__main__":
