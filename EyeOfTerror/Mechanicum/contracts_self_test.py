@@ -37,6 +37,42 @@ def load_schema(path: Path) -> dict:
     return payload
 
 
+def matches_type(value: object, schema_type: str) -> bool:
+    if schema_type == "object":
+        return isinstance(value, dict)
+    if schema_type == "array":
+        return isinstance(value, list)
+    if schema_type == "string":
+        return isinstance(value, str)
+    if schema_type == "boolean":
+        return isinstance(value, bool)
+    if schema_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    return True
+
+
+def assert_schema_subset(schema: dict, payload: object, label: str) -> None:
+    if "type" in schema and not matches_type(payload, str(schema["type"])):
+        raise AssertionError(f"{label} expected type {schema['type']}: {payload}")
+    if "const" in schema and payload != schema["const"]:
+        raise AssertionError(f"{label} expected const {schema['const']}: {payload}")
+    if "enum" in schema and payload not in schema["enum"]:
+        raise AssertionError(f"{label} expected one of {schema['enum']}: {payload}")
+    if not isinstance(payload, dict):
+        if isinstance(payload, list) and "items" in schema:
+            for index, item in enumerate(payload):
+                assert_schema_subset(schema["items"], item, f"{label}[{index}]")
+        return
+    missing = [field for field in schema.get("required", []) if field not in payload]
+    if missing:
+        raise AssertionError(f"{label} missing schema required fields {missing}: {payload}")
+    properties = schema.get("properties", {})
+    if isinstance(properties, dict):
+        for field, field_schema in properties.items():
+            if field in payload and isinstance(field_schema, dict):
+                assert_schema_subset(field_schema, payload[field], f"{label}.{field}")
+
+
 def assert_required(schema_path: Path, payload: dict, label: str) -> None:
     schema = load_schema(schema_path)
     missing = [field for field in schema.get("required", []) if field not in payload]
@@ -76,13 +112,13 @@ def main() -> int:
             "repo_path": str(ROOT),
         }
     )
-    assert_required(ROOT / "PlanningBrigade" / "planning_contract.schema.json", packet, "planning packet")
+    assert_schema_subset(load_schema(ROOT / "PlanningBrigade" / "planning_contract.schema.json"), packet, "planning packet")
     survey = build_repo_survey(packet)
     brief = build_implementation_brief(packet, survey)
-    assert_required(ROOT / "Ceraxia" / "contracts" / "implementation_brief.schema.json", brief, "implementation brief")
+    assert_schema_subset(load_schema(ROOT / "Ceraxia" / "contracts" / "implementation_brief.schema.json"), brief, "implementation brief")
     worker_report = build_worker_report(brief, dry_run=True)
     code_schema = ROOT / "CodeBrigade" / "code_brigade_contract.schema.json"
-    assert_required(code_schema, worker_report, "worker report")
+    assert_schema_subset(load_schema(code_schema), worker_report, "worker report")
     assert_nested_required(code_schema, worker_report, "implementation_plan", "worker report")
     verification = build_verification_report(brief, worker_report)
     review = review_gate(packet, brief, worker_report, verification)
@@ -90,7 +126,7 @@ def main() -> int:
     readiness = build_execution_readiness(status, brief, verification, review, dry_run=True)
     evidence_matrix = build_evidence_matrix(brief, worker_report, verification, readiness)
     evidence_schema = ROOT / "Ceraxia" / "contracts" / "evidence_matrix.schema.json"
-    assert_required(evidence_schema, evidence_matrix, "evidence matrix")
+    assert_schema_subset(load_schema(evidence_schema), evidence_matrix, "evidence matrix")
     assert_nested_required(evidence_schema, evidence_matrix, "implementation_plan_sources", "evidence matrix")
     assert_array_item_required(evidence_schema, evidence_matrix, "rows", "evidence matrix")
 
