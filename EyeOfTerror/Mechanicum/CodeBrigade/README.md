@@ -35,6 +35,9 @@ The worker report must include `implementation_plan`, which preserves survey
 candidate files, test files, local dependency edges, handoff steps,
 verification commands, acceptance gates, and refusal conditions for the future
 real executor.
+It also includes `execution_policy_status`; this must remain
+`blocked_until_adapter_is_wired` until a real source-mutation adapter is
+implemented and covered by the local gate.
 
 `verification_adapter.py` can run a narrow allowlist of verification commands
 without a shell. It is safe enough for explicit verification wiring, but source
