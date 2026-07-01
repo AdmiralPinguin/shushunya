@@ -145,7 +145,7 @@ def run_test_inferred_missing_function_trial(root: Path) -> dict[str, Any]:
             runs_root=root / "runs",
             dry_run=False,
             execute_verification=True,
-            verification_commands=("python -m py_compile app.py",),
+            verification_commands=("python -m unittest test_app.py", "python -m py_compile app.py"),
         )
     )
     artifacts = load_run_artifacts(Path(result["run_dir"]))
@@ -154,6 +154,7 @@ def run_test_inferred_missing_function_trial(root: Path) -> dict[str, Any]:
     require("def value():\n    return 42\n" in (repo / "app.py").read_text(encoding="utf-8"), "test-inferred patch should mutate app.py")
     require(artifacts["worker"]["execution_intent"]["mode"] == "guarded_inferred_patch_execution", "worker must expose guarded inferred intent", artifacts["worker"])
     require("test_inferred_missing_function" in artifacts["worker"]["execution_result"]["patch_summary"], "worker result should expose test-inferred patch source", artifacts["worker"])
+    require(artifacts["summary"]["surface_verification_status"] == "executed", "missing-function trial should execute source and test verification", artifacts["summary"])
     return {"id": "test-inferred-missing-function-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
 
 
@@ -188,6 +189,7 @@ def run_test_inferred_return_mismatch_trial(root: Path) -> dict[str, Any]:
     require(result["ready_for_execution"], "test-inferred return-mismatch handoff should be ready after real adapter execution", result)
     require("return 42" in (repo / "app.py").read_text(encoding="utf-8"), "test-inferred return mismatch should mutate app.py")
     require("test_inferred_return_mismatch" in artifacts["worker"]["execution_result"]["patch_summary"], "worker result should expose return-mismatch patch source", artifacts["worker"])
+    require(artifacts["summary"]["surface_verification_status"] == "executed", "return-mismatch trial should execute source and test verification", artifacts["summary"])
     return {"id": "test-inferred-return-mismatch-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
 
 
