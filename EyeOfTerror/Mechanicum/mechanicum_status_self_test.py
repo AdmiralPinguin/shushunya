@@ -11,11 +11,11 @@ def main() -> int:
     if status["architecture_contract"]["governance_root"] != "EyeOfTerror/Mechanicum":
         raise AssertionError(f"status should expose the architecture contract: {status}")
     by_name = {item["name"]: item for item in status["components"]}
-    if by_name["CodeBrigade"]["maturity"] != "dry_run_handoff_with_implementation_plan_and_allowlisted_verification":
+    if by_name["CodeBrigade"]["maturity"] != "dry_run_handoff_with_blocked_execution_adapter_and_allowlisted_verification":
         raise AssertionError(f"CodeBrigade should honestly report verification-adapter maturity: {by_name['CodeBrigade']}")
     if by_name["Ceraxia"]["maturity"] != "dry_run_controller_with_import_edges_evidence_matrix_and_verification":
         raise AssertionError(f"Ceraxia should honestly report dry-run survey and verification maturity: {by_name['Ceraxia']}")
-    if "wire CodeBrigade real execution adapter" not in status["next_architecture_step"]:
+    if "replace blocked CodeBrigade execution adapter" not in status["next_architecture_step"]:
         raise AssertionError(f"status should point to the next architecture gap: {status}")
     if status["roadmap"][0]["owner"] != "CodeBrigade":
         raise AssertionError(f"first roadmap item should target CodeBrigade: {status}")
