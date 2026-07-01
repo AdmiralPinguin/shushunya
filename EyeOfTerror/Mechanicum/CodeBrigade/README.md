@@ -53,5 +53,9 @@ When that adapter is added, its result must satisfy
 verification commands, blockers, and rollback notes.
 
 `verification_adapter.py` can run a narrow allowlist of verification commands
-without a shell. It is safe enough for explicit verification wiring, but source
+without a shell. It blocks non-allowlisted commands, absolute/traversal path
+tokens, and option values that point outside the repository. Its output is
+versioned by `verification_execution.schema.json`; planned verification reports
+`status: planned`, while executed checks report `passed`, `failed`, or
+`blocked`. It is safe enough for explicit verification wiring, but source
 mutation remains outside this adapter.
