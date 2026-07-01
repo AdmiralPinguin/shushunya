@@ -28,6 +28,7 @@ if CODE_BRIGADE_PATH not in sys.path:
 
 from planning_brigade import ROLE_ORDER, build_planning_packet  # noqa: E402
 from code_brigade_adapter import build_worker_report  # noqa: E402
+from repo_survey import survey_repository  # noqa: E402
 
 
 CONTRACT_VERSION = "eye-mechanicum.v1"
@@ -169,20 +170,13 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
     return problems
 
 
-def build_repo_survey_stub(packet: dict[str, Any]) -> dict[str, Any]:
+def build_repo_survey(packet: dict[str, Any]) -> dict[str, Any]:
     survey_request = packet["repo_survey_request"]
-    repo_path = Path(survey_request.get("repo_path") or PROJECT_ROOT)
-    exists = repo_path.exists()
-    return {
-        "kind": "ceraxia_repo_survey_stub",
-        "repo_path": str(repo_path),
-        "repo_exists": exists,
-        "read_only": True,
-        "focus": survey_request.get("focus", []),
-        "exclude_patterns": survey_request.get("exclude_patterns", []),
-        "candidate_files_required": True,
-        "status": "ready_for_real_survey" if exists else "blocked_missing_repo",
-    }
+    return survey_repository(
+        str(survey_request.get("repo_path") or PROJECT_ROOT),
+        survey_request.get("focus", []) if isinstance(survey_request.get("focus"), list) else [],
+        survey_request.get("exclude_patterns", []) if isinstance(survey_request.get("exclude_patterns"), list) else [],
+    )
 
 
 def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
@@ -464,7 +458,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     status["next_action"] = "survey repository" if not planning_problems else "repair planning packet"
     write_json(run_dir / "planning_packet.json", packet)
 
-    survey = build_repo_survey_stub(packet)
+    survey = build_repo_survey(packet)
     status["state"] = "surveyed" if survey["repo_exists"] else "failed"
     status["lifecycle"].append(status["state"])
     status["next_action"] = "build implementation brief" if survey["repo_exists"] else "provide existing repo path"

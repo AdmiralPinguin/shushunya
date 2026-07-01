@@ -10,7 +10,7 @@ from ceraxia import (
     CeraxiaInput,
     LIFECYCLE,
     build_implementation_brief,
-    build_repo_survey_stub,
+    build_repo_survey,
     audit_run_package,
     review_gate,
     run_ceraxia,
@@ -31,6 +31,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            (repo / "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
             runs = Path(tmp) / "runs"
             result = run_ceraxia(
                 CeraxiaInput(
@@ -72,6 +74,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("prove_negative_boundary", [step["step"] for step in brief["code_brigade_handoff"]["steps"]])
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertIn("untrusted input is rejected", verification["negative_tests_required"])
+            survey = json.loads((run_dir / "repo_survey.json").read_text(encoding="utf-8"))
+            self.assertEqual(survey["status"], "surveyed")
+            self.assertIn("app.py", survey["candidate_files"])
+            self.assertIn("test_app.py", survey["test_files"])
             audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
             self.assertEqual(audit["decision"], "passed")
             self.assertTrue(audit["manifest_complete"])
@@ -113,7 +119,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         problems = validate_planning_packet(packet)
         self.assertTrue(any("verification_strategy" in problem for problem in problems))
         packet["verification_strategy"] = {}
-        survey = build_repo_survey_stub(packet)
+        survey = build_repo_survey(packet)
         brief = build_implementation_brief(packet, survey)
         worker_report = {
             "status": "dry_run_handoff_ready",
@@ -148,7 +154,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertTrue(any("acceptance_gates" in problem for problem in problems), problems)
         self.assertTrue(any("quality bar" in problem for problem in problems), problems)
         self.assertTrue(any("code brigade handoff" in problem for problem in problems), problems)
-        survey = build_repo_survey_stub(packet)
+        survey = build_repo_survey(packet)
         brief = build_implementation_brief(packet, survey)
         self.assertTrue(brief["blocked"])
         self.assertTrue(any("planning validation failed" in item for item in brief["blockers"]))

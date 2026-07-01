@@ -16,7 +16,7 @@ for path in [CERAXIA_PATH, PLANNING_PATH, CODE_BRIGADE_PATH]:
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from ceraxia import CeraxiaInput, build_implementation_brief, build_repo_survey_stub, run_ceraxia  # noqa: E402
+from ceraxia import CeraxiaInput, build_implementation_brief, build_repo_survey, run_ceraxia  # noqa: E402
 from code_brigade_adapter import build_worker_report  # noqa: E402
 from planning_brigade import build_planning_packet  # noqa: E402
 
@@ -43,7 +43,7 @@ def main() -> int:
         }
     )
     assert_required(ROOT / "PlanningBrigade" / "planning_contract.schema.json", packet, "planning packet")
-    survey = build_repo_survey_stub(packet)
+    survey = build_repo_survey(packet)
     brief = build_implementation_brief(packet, survey)
     assert_required(ROOT / "Ceraxia" / "contracts" / "implementation_brief.schema.json", brief, "implementation brief")
     worker_report = build_worker_report(brief, dry_run=True)

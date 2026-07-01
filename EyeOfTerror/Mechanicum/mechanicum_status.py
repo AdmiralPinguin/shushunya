@@ -16,11 +16,12 @@ COMPONENTS = {
         "required_files": [
             "README.md",
             "ceraxia.py",
+            "repo_survey.py",
             "self_test.py",
             "contracts/implementation_brief.schema.json",
             "contracts/run_artifacts.schema.json",
         ],
-        "maturity": "dry_run_controller",
+        "maturity": "dry_run_controller_with_readonly_survey",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -59,8 +60,8 @@ ROADMAP = [
     },
     {
         "priority": 2,
-        "item": "replace repo_survey_stub with read-only repository survey adapter",
-        "reason": "Ceraxia currently proves survey intent but does not inspect candidate files itself.",
+        "item": "deepen read-only repository survey adapter",
+        "reason": "Ceraxia now has basic read-only file evidence; deeper symbol/import analysis still belongs in a stronger adapter.",
         "owner": "Ceraxia",
     },
     {

@@ -11,8 +11,8 @@ def main() -> int:
     by_name = {item["name"]: item for item in status["components"]}
     if by_name["CodeBrigade"]["maturity"] != "dry_run_handoff_adapter":
         raise AssertionError(f"CodeBrigade should honestly report dry-run adapter maturity: {by_name['CodeBrigade']}")
-    if by_name["Ceraxia"]["maturity"] != "dry_run_controller":
-        raise AssertionError(f"Ceraxia should honestly report dry-run maturity: {by_name['Ceraxia']}")
+    if by_name["Ceraxia"]["maturity"] != "dry_run_controller_with_readonly_survey":
+        raise AssertionError(f"Ceraxia should honestly report dry-run survey maturity: {by_name['Ceraxia']}")
     if "wire CodeBrigade real execution adapter" not in status["next_architecture_step"]:
         raise AssertionError(f"status should point to the next architecture gap: {status}")
     if status["roadmap"][0]["owner"] != "CodeBrigade":
