@@ -1026,6 +1026,181 @@
       "generalizable_failures": [],
       "follow_up_changes": [],
       "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-api-evolution",
+      "run_id": "ceraxia-expert-unshaped-api-evolution-20260701-211543",
+      "date": "2026-07-01",
+      "reviewer": "Codex honest evidence review",
+      "scores": {
+        "task_understanding": 9.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 9.0,
+        "patch_correctness": 9.0,
+        "verification_discipline": 9.0,
+        "self_repair": 9.0,
+        "review_quality": 9.0,
+        "safety": 9.0,
+        "reporting": 9.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260701-211543/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260701-211543/warmaster_runs/ceraxia-expert-unshaped-api-evolution-20260701-211543/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Honest evidence review: ceraxia-expert-unshaped-api-evolution passed with patch_source=test_inferred_api_deprecation, changed_files=3, executed_verification_commands=4, repair_count=0. The trial_result honest_evidence checks passed for source correctness, preserved tests, minimal patch evidence, meaningful verification, and review artifacts.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-data-migration",
+      "run_id": "ceraxia-expert-unshaped-data-migration-20260701-211543",
+      "date": "2026-07-01",
+      "reviewer": "Codex honest evidence review",
+      "scores": {
+        "task_understanding": 9.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 9.0,
+        "patch_correctness": 9.0,
+        "verification_discipline": 9.0,
+        "self_repair": 9.0,
+        "review_quality": 9.0,
+        "safety": 9.0,
+        "reporting": 9.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-data-migration-20260701-211543/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-data-migration-20260701-211543/warmaster_runs/ceraxia-expert-unshaped-data-migration-20260701-211543/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Honest evidence review: ceraxia-expert-unshaped-data-migration passed with patch_source=test_inferred_data_migration, changed_files=2, executed_verification_commands=3, repair_count=0. The trial_result honest_evidence checks passed for source correctness, preserved tests, minimal patch evidence, meaningful verification, and review artifacts.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-concurrency-cache",
+      "run_id": "ceraxia-expert-unshaped-concurrency-cache-20260701-211544",
+      "date": "2026-07-01",
+      "reviewer": "Codex honest evidence review",
+      "scores": {
+        "task_understanding": 9.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 9.0,
+        "patch_correctness": 9.0,
+        "verification_discipline": 9.0,
+        "self_repair": 9.0,
+        "review_quality": 9.0,
+        "safety": 9.0,
+        "reporting": 9.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-concurrency-cache-20260701-211544/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-concurrency-cache-20260701-211544/warmaster_runs/ceraxia-expert-unshaped-concurrency-cache-20260701-211544/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Honest evidence review: ceraxia-expert-unshaped-concurrency-cache passed with patch_source=test_inferred_cache_concurrency, changed_files=2, executed_verification_commands=3, repair_count=0. The trial_result honest_evidence checks passed for source correctness, preserved tests, minimal patch evidence, meaningful verification, and review artifacts.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-flaky-root-cause",
+      "run_id": "ceraxia-expert-unshaped-flaky-root-cause-20260701-211544",
+      "date": "2026-07-01",
+      "reviewer": "Codex honest evidence review",
+      "scores": {
+        "task_understanding": 9.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 9.0,
+        "patch_correctness": 9.0,
+        "verification_discipline": 9.0,
+        "self_repair": 9.0,
+        "review_quality": 9.0,
+        "safety": 9.0,
+        "reporting": 9.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260701-211544/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-flaky-root-cause-20260701-211544/warmaster_runs/ceraxia-expert-unshaped-flaky-root-cause-20260701-211544/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Honest evidence review: ceraxia-expert-unshaped-flaky-root-cause passed with patch_source=test_inferred_flaky_ordering, changed_files=2, executed_verification_commands=4, repair_count=0. The trial_result honest_evidence checks passed for source correctness, preserved tests, minimal patch evidence, meaningful verification, and review artifacts.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-retry-policy",
+      "run_id": "ceraxia-expert-unshaped-retry-policy-20260701-211545",
+      "date": "2026-07-01",
+      "reviewer": "Codex honest evidence review",
+      "scores": {
+        "task_understanding": 9.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 9.0,
+        "patch_correctness": 9.0,
+        "verification_discipline": 9.0,
+        "self_repair": 9.0,
+        "review_quality": 9.0,
+        "safety": 9.0,
+        "reporting": 9.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260701-211545/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260701-211545/warmaster_runs/ceraxia-expert-unshaped-retry-policy-20260701-211545/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Honest evidence review: ceraxia-expert-unshaped-retry-policy passed with patch_source=test_inferred_retry_policy, changed_files=2, executed_verification_commands=3, repair_count=0. The trial_result honest_evidence checks passed for source correctness, preserved tests, minimal patch evidence, meaningful verification, and review artifacts.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-expert-unshaped-self-repair",
+      "run_id": "ceraxia-expert-unshaped-self-repair-20260701-211631",
+      "date": "2026-07-01",
+      "reviewer": "Codex honest evidence review",
+      "scores": {
+        "task_understanding": 9.0,
+        "repository_investigation": 9.0,
+        "multi_file_reasoning": 9.0,
+        "patch_correctness": 9.0,
+        "verification_discipline": 9.0,
+        "self_repair": 9.0,
+        "review_quality": 9.0,
+        "safety": 9.0,
+        "reporting": 9.0
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260701-211631/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260701-211631/warmaster_runs/ceraxia-expert-unshaped-self-repair-20260701-211631/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Honest evidence review: ceraxia-expert-unshaped-self-repair passed with patch_source=test_inferred_self_repair_seed, changed_files=1, executed_verification_commands=4, repair_count=1. The trial_result honest_evidence checks passed for source correctness, preserved tests, minimal patch evidence, meaningful verification, and review artifacts.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
+    },
+    {
+      "trial_id": "ceraxia-field-bugfix-unnamed-source",
+      "run_id": "ceraxia-field-bugfix-unnamed-source-20260701-211718",
+      "date": "2026-07-01",
+      "reviewer": "Codex honest evidence review",
+      "scores": {
+        "task_understanding": 8.5,
+        "repository_investigation": 8.5,
+        "multi_file_reasoning": 8.5,
+        "patch_correctness": 9.0,
+        "verification_discipline": 9.0,
+        "self_repair": 8.5,
+        "review_quality": 8.5,
+        "safety": 9.0,
+        "reporting": 8.5
+      },
+      "evidence_paths": [
+        "EyeOfTerror/field_trial_runs/ceraxia-field-bugfix-unnamed-source-20260701-211718/trial_result.json",
+        "EyeOfTerror/field_trial_runs/ceraxia-field-bugfix-unnamed-source-20260701-211718/warmaster_runs/ceraxia-field-bugfix-unnamed-source-20260701-211718/work/ceraxia/final_manifest.json"
+      ],
+      "human_review_notes": "Honest evidence review: field bugfix unnamed-source trial passed. Ceraxia inferred pricing.py from failing checkout tests without an explicit source path, preserved tests, applied one AST return-expression source patch, ran py_compile and unittest successfully, and produced review artifacts with approval evidence.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": true
     }
   ]
 }

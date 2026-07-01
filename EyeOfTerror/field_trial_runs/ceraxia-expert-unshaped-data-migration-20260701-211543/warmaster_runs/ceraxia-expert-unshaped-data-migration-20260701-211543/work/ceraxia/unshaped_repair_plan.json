@@ -1,0 +1,161 @@
+{
+  "status": "recorded",
+  "mode": "unshaped_repo_repair",
+  "task_id": "ceraxia-expert-unshaped-data-migration-20260701-211543:implementation",
+  "goal_excerpt": "кодовая expert-задача без structured data migration marker: records API переходит с поля amount на total_amount. Выведи контракт из существующего reader, docs и tests: reader должен принимать старую и новую форму, writer должен отдавать только новую форму. Не редактируй tests как способ сделать их зелеными.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-data-migration-20260701-211543/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_records_migration\nCERAXIA_VERIFY: python -m py_compile service/records.py",
+  "selected_source": "test_inferred_data_migration",
+  "selected_candidate": {
+    "source": "test_inferred_data_migration",
+    "status": "selected",
+    "operation_count": 2,
+    "verification_command_count": 2,
+    "diagnostics": {
+      "kind": "test_inferred_data_migration",
+      "test_path": "tests/test_records_migration.py",
+      "source_path": "service/records.py",
+      "read_function": "normalize_record",
+      "write_function": "serialize_record",
+      "id_field": "id",
+      "old_field": "amount",
+      "new_field": "total_amount",
+      "docs_path": "docs/records.md"
+    }
+  },
+  "files_to_read": [
+    "service/records.py",
+    "docs/records.md",
+    "tests/test_records_migration.py"
+  ],
+  "test_symbol_links": [
+    {
+      "test_path": "tests/test_records_migration.py",
+      "test_class": "RecordsMigrationTest",
+      "test_function": "test_reads_old_shape",
+      "assertion": "assertEqual",
+      "actual_expression": "normalize_record({'id': 'a1', 'amount': 12})",
+      "expected_expression": "{'id': 'a1', 'total_amount': 12}",
+      "imported_symbol": "normalize_record",
+      "local_symbol": "normalize_record",
+      "source_module": "service.records",
+      "source_path": "service/records.py",
+      "source_exists": true
+    },
+    {
+      "test_path": "tests/test_records_migration.py",
+      "test_class": "RecordsMigrationTest",
+      "test_function": "test_reads_new_shape",
+      "assertion": "assertEqual",
+      "actual_expression": "normalize_record({'id': 'b2', 'total_amount': 20})",
+      "expected_expression": "{'id': 'b2', 'total_amount': 20}",
+      "imported_symbol": "normalize_record",
+      "local_symbol": "normalize_record",
+      "source_module": "service.records",
+      "source_path": "service/records.py",
+      "source_exists": true
+    },
+    {
+      "test_path": "tests/test_records_migration.py",
+      "test_class": "RecordsMigrationTest",
+      "test_function": "test_writer_emits_new_shape_only",
+      "assertion": "assertEqual",
+      "actual_expression": "serialize_record({'id': 'c3', 'amount': 7})",
+      "expected_expression": "{'id': 'c3', 'total_amount': 7}",
+      "imported_symbol": "serialize_record",
+      "local_symbol": "serialize_record",
+      "source_module": "service.records",
+      "source_path": "service/records.py",
+      "source_exists": true
+    }
+  ],
+  "patch_operations": [
+    {
+      "type": "write_file",
+      "path": "service/records.py"
+    },
+    {
+      "type": "write_file",
+      "path": "docs/records.md"
+    }
+  ],
+  "runtime_evidence": {},
+  "commands_to_run": [
+    "python -m unittest tests.test_records_migration",
+    "python -m py_compile service/records.py"
+  ],
+  "defect_hypotheses": [
+    {
+      "source": "test_inferred_data_migration",
+      "kind": "test_inferred_data_migration",
+      "test_path": "tests/test_records_migration.py",
+      "module_path": "",
+      "function_name": "",
+      "delegated_from": {},
+      "expected": "",
+      "actual": "",
+      "evidence": {
+        "kind": "test_inferred_data_migration",
+        "test_path": "tests/test_records_migration.py",
+        "source_path": "service/records.py",
+        "read_function": "normalize_record",
+        "write_function": "serialize_record",
+        "id_field": "id",
+        "old_field": "amount",
+        "new_field": "total_amount",
+        "docs_path": "docs/records.md"
+      }
+    }
+  ],
+  "minimal_patch_candidates": [
+    {
+      "source": "test_inferred_data_migration",
+      "status": "selected",
+      "operation_count": 2,
+      "verification_command_count": 2,
+      "diagnostics": {
+        "kind": "test_inferred_data_migration",
+        "test_path": "tests/test_records_migration.py",
+        "source_path": "service/records.py",
+        "read_function": "normalize_record",
+        "write_function": "serialize_record",
+        "id_field": "id",
+        "old_field": "amount",
+        "new_field": "total_amount",
+        "docs_path": "docs/records.md"
+      },
+      "operations": [
+        {
+          "type": "write_file",
+          "path": "service/records.py"
+        },
+        {
+          "type": "write_file",
+          "path": "docs/records.md"
+        }
+      ],
+      "runtime_evidence": {}
+    }
+  ],
+  "proof_plan": {
+    "focused_verification": [
+      "python -m unittest tests.test_records_migration",
+      "python -m py_compile service/records.py"
+    ],
+    "source_must_change": true,
+    "tests_must_not_be_edited_for_test_inferred_repairs": true,
+    "test_to_source_linkage_required": true,
+    "runtime_diagnostic_required": false,
+    "ast_patch_plan_required": false,
+    "review_gates": [
+      "diagnostic_linkage",
+      "test_symbol_linkage",
+      "patch_scope_review",
+      "verification_passed",
+      "review_discipline_findings"
+    ]
+  },
+  "safety_constraints": [
+    "prefer the smallest source patch that satisfies test and contract evidence",
+    "do not edit tests to make an inferred repair pass",
+    "block instead of mutating when source mapping is ambiguous"
+  ]
+}

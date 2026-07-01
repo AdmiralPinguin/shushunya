@@ -1,0 +1,178 @@
+{
+  "status": "recorded",
+  "mode": "unshaped_repo_repair",
+  "task_id": "ceraxia-expert-unshaped-api-evolution-20260701-211543:implementation",
+  "goal_excerpt": "кодовая expert-задача без structured patch marker: публичный API payments должен перейти с positional fee на preferred keyword-only service_fee, но старые positional callers должны продолжить работать с DeprecationWarning. Найди и обнови implementation, caller, docs и tests по evidence из репозитория, не угадывай и не переписывай unrelated files.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-api-evolution-20260701-211543/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_api_evolution\nCERAXIA_VERIFY: python -m py_compile payments/api.py payments/client.py",
+  "selected_source": "test_inferred_api_deprecation",
+  "selected_candidate": {
+    "source": "test_inferred_api_deprecation",
+    "status": "selected",
+    "operation_count": 3,
+    "verification_command_count": 3,
+    "diagnostics": {
+      "kind": "test_inferred_api_deprecation",
+      "test_path": "tests/test_api_evolution.py",
+      "source_path": "payments/api.py",
+      "function_name": "calculate_total",
+      "old_param": "fee",
+      "new_param": "service_fee",
+      "caller": {
+        "caller_name": "client_total",
+        "caller_path": "payments/client.py"
+      },
+      "docs_path": "docs/payments_api.md"
+    }
+  },
+  "files_to_read": [
+    "payments/api.py",
+    "payments/client.py",
+    "docs/payments_api.md",
+    "tests/test_api_evolution.py"
+  ],
+  "test_symbol_links": [
+    {
+      "test_path": "tests/test_api_evolution.py",
+      "test_class": "ApiEvolutionTest",
+      "test_function": "test_old_positional_fee_still_works_with_warning",
+      "assertion": "assertEqual",
+      "actual_expression": "calculate_total(100, 15)",
+      "expected_expression": "85",
+      "imported_symbol": "calculate_total",
+      "local_symbol": "calculate_total",
+      "source_module": "payments.api",
+      "source_path": "payments/api.py",
+      "source_exists": true
+    },
+    {
+      "test_path": "tests/test_api_evolution.py",
+      "test_class": "ApiEvolutionTest",
+      "test_function": "test_new_keyword_service_fee_path",
+      "assertion": "assertEqual",
+      "actual_expression": "calculate_total(80, service_fee=5)",
+      "expected_expression": "75",
+      "imported_symbol": "calculate_total",
+      "local_symbol": "calculate_total",
+      "source_module": "payments.api",
+      "source_path": "payments/api.py",
+      "source_exists": true
+    },
+    {
+      "test_path": "tests/test_api_evolution.py",
+      "test_class": "ApiEvolutionTest",
+      "test_function": "test_new_keyword_service_fee_path",
+      "assertion": "assertEqual",
+      "actual_expression": "client_total(80, service_fee=5)",
+      "expected_expression": "75",
+      "imported_symbol": "client_total",
+      "local_symbol": "client_total",
+      "source_module": "payments.client",
+      "source_path": "payments/client.py",
+      "source_exists": true
+    }
+  ],
+  "patch_operations": [
+    {
+      "type": "write_file",
+      "path": "payments/api.py"
+    },
+    {
+      "type": "write_file",
+      "path": "payments/client.py"
+    },
+    {
+      "type": "write_file",
+      "path": "docs/payments_api.md"
+    }
+  ],
+  "runtime_evidence": {},
+  "commands_to_run": [
+    "python -m unittest tests.test_api_evolution",
+    "python -m py_compile payments/api.py payments/client.py",
+    "python -m unittest discover -s tests"
+  ],
+  "defect_hypotheses": [
+    {
+      "source": "test_inferred_api_deprecation",
+      "kind": "test_inferred_api_deprecation",
+      "test_path": "tests/test_api_evolution.py",
+      "module_path": "",
+      "function_name": "calculate_total",
+      "delegated_from": {},
+      "expected": "",
+      "actual": "",
+      "evidence": {
+        "kind": "test_inferred_api_deprecation",
+        "test_path": "tests/test_api_evolution.py",
+        "source_path": "payments/api.py",
+        "function_name": "calculate_total",
+        "old_param": "fee",
+        "new_param": "service_fee",
+        "caller": {
+          "caller_name": "client_total",
+          "caller_path": "payments/client.py"
+        },
+        "docs_path": "docs/payments_api.md"
+      }
+    }
+  ],
+  "minimal_patch_candidates": [
+    {
+      "source": "test_inferred_api_deprecation",
+      "status": "selected",
+      "operation_count": 3,
+      "verification_command_count": 3,
+      "diagnostics": {
+        "kind": "test_inferred_api_deprecation",
+        "test_path": "tests/test_api_evolution.py",
+        "source_path": "payments/api.py",
+        "function_name": "calculate_total",
+        "old_param": "fee",
+        "new_param": "service_fee",
+        "caller": {
+          "caller_name": "client_total",
+          "caller_path": "payments/client.py"
+        },
+        "docs_path": "docs/payments_api.md"
+      },
+      "operations": [
+        {
+          "type": "write_file",
+          "path": "payments/api.py"
+        },
+        {
+          "type": "write_file",
+          "path": "payments/client.py"
+        },
+        {
+          "type": "write_file",
+          "path": "docs/payments_api.md"
+        }
+      ],
+      "runtime_evidence": {}
+    }
+  ],
+  "proof_plan": {
+    "focused_verification": [
+      "python -m unittest tests.test_api_evolution",
+      "python -m py_compile payments/api.py payments/client.py",
+      "python -m unittest discover -s tests"
+    ],
+    "source_must_change": true,
+    "tests_must_not_be_edited_for_test_inferred_repairs": true,
+    "test_to_source_linkage_required": true,
+    "runtime_diagnostic_required": false,
+    "ast_patch_plan_required": false,
+    "review_gates": [
+      "diagnostic_linkage",
+      "test_symbol_linkage",
+      "patch_scope_review",
+      "verification_passed",
+      "review_discipline_findings"
+    ]
+  },
+  "safety_constraints": [
+    "prefer the smallest source patch that satisfies test and contract evidence",
+    "do not edit tests to make an inferred repair pass",
+    "block instead of mutating when source mapping is ambiguous"
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "status": "recorded",
+  "mode": "unshaped_repo_repair",
+  "patch_source": "test_inferred_arithmetic_return",
+  "runtime_failures": [],
+  "assertions": [],
+  "traceback_frames": [],
+  "runtime_test_failures": [],
+  "traceback_source_candidates": [],
+  "runtime_source_candidates": [],
+  "runtime_minimal_patch_candidates": [],
+  "static_test_expectations": [
+    {
+      "source": "test_inferred_arithmetic_return",
+      "kind": "test_inferred_arithmetic_return",
+      "test_path": "test_checkout.py",
+      "module_path": "pricing.py",
+      "function_name": "discounted_price",
+      "delegated_from": {
+        "module_path": "checkout.py",
+        "function_name": "total_after_discount"
+      },
+      "expected": "price - (price * percent / 100)",
+      "actual": "price - percent",
+      "evidence": {
+        "kind": "test_inferred_arithmetic_return",
+        "test_path": "test_checkout.py",
+        "module_path": "pricing.py",
+        "function_name": "discounted_price",
+        "actual_expression": "price - percent",
+        "replacement_expression": "price - (price * percent / 100)",
+        "example": {
+          "left": 200,
+          "right": 25,
+          "expected": 150
+        },
+        "delegated_from": {
+          "module_path": "checkout.py",
+          "function_name": "total_after_discount"
+        }
+      }
+    }
+  ],
+  "selected_diagnostics": {
+    "kind": "test_inferred_arithmetic_return",
+    "test_path": "test_checkout.py",
+    "module_path": "pricing.py",
+    "function_name": "discounted_price",
+    "actual_expression": "price - percent",
+    "replacement_expression": "price - (price * percent / 100)",
+    "example": {
+      "left": 200,
+      "right": 25,
+      "expected": 150
+    },
+    "delegated_from": {
+      "module_path": "checkout.py",
+      "function_name": "total_after_discount"
+    }
+  },
+  "parser_coverage": {
+    "unittest_assertions": 0,
+    "traceback_frames": 0,
+    "runtime_test_failures": 0,
+    "runtime_minimal_patch_candidates": 0,
+    "traceback_source_candidates": 0,
+    "static_test_expectations": 1
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "status": "recorded",
+  "mode": "unshaped_repo_repair",
+  "task_id": "ceraxia-expert-unshaped-retry-policy-20260701-211545:implementation",
+  "goal_excerpt": "кодовая expert-задача без structured retry marker: исправь integration client retry policy. Выведи контракт из tests и docs: ConnectionError transient failures retry до bounded max attempts, ValueError validation failures не retry, sleep/ослабление тестов запрещены.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-retry-policy-20260701-211545/fixture/repo\nCERAXIA_VERIFY: python -m unittest tests.test_client\nCERAXIA_VERIFY: python -m py_compile client.py",
+  "selected_source": "test_inferred_retry_policy",
+  "selected_candidate": {
+    "source": "test_inferred_retry_policy",
+    "status": "selected",
+    "operation_count": 2,
+    "verification_command_count": 2,
+    "diagnostics": {
+      "kind": "test_inferred_retry_policy",
+      "test_path": "tests/test_client.py",
+      "source_path": "client.py",
+      "function_name": "publish_event",
+      "retry_exception": "ConnectionError",
+      "non_retry_exception": "ValueError",
+      "max_attempts": 3,
+      "docs_path": "docs/client.md"
+    }
+  },
+  "files_to_read": [
+    "client.py",
+    "docs/client.md",
+    "tests/test_client.py"
+  ],
+  "test_symbol_links": [
+    {
+      "test_path": "tests/test_client.py",
+      "test_class": "ClientTest",
+      "test_function": "test_retries_transient_connection_errors",
+      "assertion": "assertEqual",
+      "actual_expression": "publish_event(transport, {'id': 'evt-1'})",
+      "expected_expression": "{'ok': True, 'event': {'id': 'evt-1'}}",
+      "imported_symbol": "publish_event",
+      "local_symbol": "publish_event",
+      "source_module": "client",
+      "source_path": "client.py",
+      "source_exists": true
+    }
+  ],
+  "patch_operations": [
+    {
+      "type": "write_file",
+      "path": "client.py"
+    },
+    {
+      "type": "write_file",
+      "path": "docs/client.md"
+    }
+  ],
+  "runtime_evidence": {},
+  "commands_to_run": [
+    "python -m unittest tests.test_client",
+    "python -m py_compile client.py"
+  ],
+  "defect_hypotheses": [
+    {
+      "source": "test_inferred_retry_policy",
+      "kind": "test_inferred_retry_policy",
+      "test_path": "tests/test_client.py",
+      "module_path": "",
+      "function_name": "publish_event",
+      "delegated_from": {},
+      "expected": "",
+      "actual": "",
+      "evidence": {
+        "kind": "test_inferred_retry_policy",
+        "test_path": "tests/test_client.py",
+        "source_path": "client.py",
+        "function_name": "publish_event",
+        "retry_exception": "ConnectionError",
+        "non_retry_exception": "ValueError",
+        "max_attempts": 3,
+        "docs_path": "docs/client.md"
+      }
+    }
+  ],
+  "minimal_patch_candidates": [
+    {
+      "source": "test_inferred_retry_policy",
+      "status": "selected",
+      "operation_count": 2,
+      "verification_command_count": 2,
+      "diagnostics": {
+        "kind": "test_inferred_retry_policy",
+        "test_path": "tests/test_client.py",
+        "source_path": "client.py",
+        "function_name": "publish_event",
+        "retry_exception": "ConnectionError",
+        "non_retry_exception": "ValueError",
+        "max_attempts": 3,
+        "docs_path": "docs/client.md"
+      },
+      "operations": [
+        {
+          "type": "write_file",
+          "path": "client.py"
+        },
+        {
+          "type": "write_file",
+          "path": "docs/client.md"
+        }
+      ],
+      "runtime_evidence": {}
+    }
+  ],
+  "proof_plan": {
+    "focused_verification": [
+      "python -m unittest tests.test_client",
+      "python -m py_compile client.py"
+    ],
+    "source_must_change": true,
+    "tests_must_not_be_edited_for_test_inferred_repairs": true,
+    "test_to_source_linkage_required": true,
+    "runtime_diagnostic_required": false,
+    "ast_patch_plan_required": false,
+    "review_gates": [
+      "diagnostic_linkage",
+      "test_symbol_linkage",
+      "patch_scope_review",
+      "verification_passed",
+      "review_discipline_findings"
+    ]
+  },
+  "safety_constraints": [
+    "prefer the smallest source patch that satisfies test and contract evidence",
+    "do not edit tests to make an inferred repair pass",
+    "block instead of mutating when source mapping is ambiguous"
+  ]
+}

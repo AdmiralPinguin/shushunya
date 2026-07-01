@@ -1,0 +1,181 @@
+{
+  "status": "passed",
+  "task_id": "ceraxia-expert-unshaped-api-evolution-20260701-211543:verification",
+  "role_policy": {
+    "role": "verifier",
+    "authority": "allowlisted_verification_and_narrow_repairs",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "verification_executed",
+      "verification_blockers",
+      "verification_repairs"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unallowlisted_command",
+      "broad_unscoped_rewrite"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "test_repair",
+      "api_contract",
+      "multi_file",
+      "new_feature",
+      "bugfix"
+    ],
+    "complexity": "high",
+    "complexity_score": 5,
+    "workflow_mode": "repo_grade",
+    "repo_grade_required_evidence": [
+      "architecture decision record with alternatives and tradeoffs",
+      "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+      "focused verification for the changed behavior",
+      "broad verification for repo-level regressions or an explicit blocker",
+      "self-review decision record before final packaging",
+      "PR-style final summary with changed files, verification, risks, and rollback notes"
+    ],
+    "risk_flags": [
+      "multi_file_scope_drift",
+      "test_diagnostic_required",
+      "public_contract_regression",
+      "repo_grade_evidence_required",
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action",
+      "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+      "multi-file tasks must keep changed-file scope evidence for every mutated file",
+      "API/contract tasks must preserve public response shape and schema compatibility evidence",
+      "architecture decision record with alternatives and tradeoffs",
+      "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+      "focused verification for the changed behavior",
+      "broad verification for repo-level regressions or an explicit blocker",
+      "self-review decision record before final packaging",
+      "PR-style final summary with changed files, verification, risks, and rollback notes"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "verification",
+    "worker": "OrdinatusVerifier",
+    "purpose": "Define and record the verification commands or blockers for the implementation.",
+    "brief": "Run allowlisted checks and perform only narrow repair loops.",
+    "task_profile": {
+      "kinds": [
+        "test_repair",
+        "api_contract",
+        "multi_file",
+        "new_feature",
+        "bugfix"
+      ],
+      "complexity": "high",
+      "complexity_score": 5,
+      "workflow_mode": "repo_grade",
+      "repo_grade_required_evidence": [
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ],
+      "risk_flags": [
+        "multi_file_scope_drift",
+        "test_diagnostic_required",
+        "public_contract_regression",
+        "repo_grade_evidence_required",
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action",
+        "test repair tasks must preserve failing-test diagnostics and rerun the relevant command after repair",
+        "multi-file tasks must keep changed-file scope evidence for every mutated file",
+        "API/contract tasks must preserve public response shape and schema compatibility evidence",
+        "architecture decision record with alternatives and tradeoffs",
+        "impact matrix covering source, tests, docs, config, and compatibility surfaces where relevant",
+        "focused verification for the changed behavior",
+        "broad verification for repo-level regressions or an explicit blocker",
+        "self-review decision record before final packaging",
+        "PR-style final summary with changed files, verification, risks, and rollback notes"
+      ]
+    },
+    "must_produce": [
+      "executed commands",
+      "focused verification",
+      "broad verification or blocker",
+      "repair_loop_state",
+      "failed_commands",
+      "candidate_source_paths"
+    ],
+    "handoff_question": "Did checks pass after repair, or what blocks review?",
+    "authority_boundary": "allowlisted_verification_and_narrow_repairs"
+  },
+  "repo_grade_workflow": {
+    "mode": "focused_fix",
+    "required_passes": [
+      "survey",
+      "implementation",
+      "verification",
+      "self_review",
+      "final_package"
+    ],
+    "requires_architecture_decision_record": false,
+    "requires_focused_and_broad_verification": false,
+    "requires_compatibility_and_rollback_notes": true,
+    "requires_pr_summary": true
+  },
+  "verification_strategy": {
+    "focused_commands": [
+      "/usr/bin/python3 -m py_compile payments/api.py payments/client.py",
+      "python -m unittest tests.test_api_evolution",
+      "python -m py_compile payments/api.py payments/client.py"
+    ],
+    "broad_commands": [
+      "python -m unittest discover -s tests"
+    ]
+  },
+  "commands": [
+    "python -m py_compile <changed .py files>",
+    "git diff --check"
+  ],
+  "executed": [
+    {
+      "command": "/usr/bin/python3 -m py_compile payments/api.py payments/client.py",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": "python -m unittest tests.test_api_evolution",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n"
+    },
+    {
+      "command": "python -m py_compile payments/api.py payments/client.py",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": "python -m unittest discover -s tests",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n"
+    }
+  ],
+  "repairs": [],
+  "blockers": [],
+  "warnings": [
+    "Patch was selected from Ceraxia's guarded patch contracts or safe inference modes; broad synthesis still requires explicit evidence."
+  ],
+  "summary": "Verification passed for applied changes."
+}

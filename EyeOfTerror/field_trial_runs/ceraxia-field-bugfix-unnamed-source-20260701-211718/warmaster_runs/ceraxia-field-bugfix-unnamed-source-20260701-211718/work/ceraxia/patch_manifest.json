@@ -1,0 +1,717 @@
+{
+  "status": "applied",
+  "mode": "explicit_patch_apply",
+  "task_id": "ceraxia-field-bugfix-unnamed-source-20260701-211718:implementation",
+  "summary": "Ceraxia applied scoped patch operations.",
+  "intended_actions": [
+    "read concrete target files before editing",
+    "apply minimal scoped patch",
+    "run verification commands from verification_report.json",
+    "return focused revision steps on failure"
+  ],
+  "plan_excerpt": "# Ceraxia Change Plan\n\nGoal: кодовая задача: почини python приложение. Тесты падают, источник ошибки специально не указан. Найди причину, исправь реализацию, проверь focused и broad тесты.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-field-bugfix-unnamed-source-20260701-211718/fixture/repo\n\n## Scope\n- Inspect the named task and constrain edits to the smallest coherent module set.\n- Preserve user changes and expose blockers instead of guessing.\n\n## Candidate Files\n\n## Ranked Repo Map\n- checkout.py: score=9 reasons=[imported_by:test_checkout.py, python_source]\n- test_checkout.py: score=5 reasons=[test_surface, linked_test]\n- pricing.py: score=1 reasons=[python_source]\n\n## Test Source Links\n- test_checkout.py -> checkout.py\n\n## Recommended Read Order\n- inspect_source: checkout.py (imported_by:test_checkout.py, python_source)\n- inspect_test: test_checkout.py (test_surface, linked_test)\n- inspect_source: pricing.py (python_source)\n\n## Targeted Reading Plan\n- checkout.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=1\n- test_checkout.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=0\n- pricing.py: What contract does this file expose, and what tests or dependents would break if it changes? dependents=1\n\n## Hypothesis Log\n- [high] checkout.py is likely relevant to the requested code change. evidence=[imported_by:test_checkout.py, python_source] risk=public behavior may affect dependents\n- [medium] test_checkout.py is likely relevant to the requested code change. evidence=[test_surface, linked_test] risk=local change risk appears limited\n- [medium] pricing.py is likely relevant to the requested code change. evidence=[python_source] risk=public behavior may affect dependents\n\n## Problem Statement\n- status: recorded\n- observed_problem: Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.\n- success_criteria: changed files directly address the requested behavior\n- success_criteria: source scope is justified by repo survey or explicit patch contract\n- success_criteria: verification evidence is preserved after the final mutation\n- success_criteria: review either approves with evidence or blocks with focused revision steps\n- ambiguity_policy: If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation.\n\n## Design Decision Seed\n- Prefer the smallest patch that satisfies the failing test or explicit user contract.\n- Inspect dependents before changing public functions or modules with reverse dependencies.\n- If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation.\n\n## Architecture Options\n- minimal_targeted_patch: recommended=True summary=Patch the narrowest source surface that satisfies the observed behavior gap.\n- compatibility_wrapper: recommended=False summa",
+  "problem_statement": {
+    "status": "recorded",
+    "goal": "кодовая задача: почини python приложение. Тесты падают, источник ошибки специально не указан. Найди причину, исправь реализацию, проверь focused и broad тесты.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-field-bugfix-unnamed-source-20260701-211718/fixture/repo",
+    "observed_problem": "Infer the concrete behavior gap from the task text, repository survey, tests, docs, and diagnostics before mutation.",
+    "success_criteria": [
+      "changed files directly address the requested behavior",
+      "source scope is justified by repo survey or explicit patch contract",
+      "verification evidence is preserved after the final mutation",
+      "review either approves with evidence or blocks with focused revision steps"
+    ],
+    "evidence_to_inspect": [
+      "checkout.py",
+      "test_checkout.py",
+      "pricing.py"
+    ],
+    "working_hypotheses": [
+      "checkout.py is likely relevant to the requested code change.",
+      "test_checkout.py is likely relevant to the requested code change.",
+      "pricing.py is likely relevant to the requested code change."
+    ],
+    "verification_candidates": [
+      "python -m unittest discover",
+      "python -m unittest test_checkout",
+      "test_checkout.py",
+      "python -m py_compile <changed .py files>",
+      "git diff --check"
+    ],
+    "ambiguity_policy": "If multiple incompatible interpretations remain after survey, block with a focused clarification instead of broad mutation."
+  },
+  "architecture_options": {
+    "status": "recorded",
+    "problem_status": "recorded",
+    "options": [
+      {
+        "id": "minimal_targeted_patch",
+        "summary": "Patch the narrowest source surface that satisfies the observed behavior gap.",
+        "recommended": true,
+        "tradeoffs": [
+          "lowest churn",
+          "requires focused verification to prove behavior"
+        ],
+        "applies_to": [
+          "checkout.py",
+          "pricing.py"
+        ]
+      },
+      {
+        "id": "compatibility_wrapper",
+        "summary": "Preserve old callers while adding the new behavior behind a compatible boundary.",
+        "recommended": false,
+        "tradeoffs": [
+          "safer public API evolution",
+          "may require deprecation docs and caller tests"
+        ],
+        "applies_to": [
+          "checkout.py",
+          "pricing.py"
+        ]
+      },
+      {
+        "id": "broad_rewrite",
+        "summary": "Rewrite the surrounding module or subsystem.",
+        "recommended": false,
+        "tradeoffs": [
+          "higher regression risk",
+          "harder review",
+          "should be rejected unless the task explicitly demands it"
+        ],
+        "applies_to": [
+          "checkout.py",
+          "pricing.py"
+        ]
+      }
+    ],
+    "selection_rule": "Choose the first option that satisfies the task with the least public-surface churn and adequate verification."
+  },
+  "role_policy": {
+    "role": "patchwright",
+    "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+    "may_mutate_source": true,
+    "required_evidence": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "forbidden_actions": [
+      "shell_execution",
+      "unsafe_overwrite",
+      "duplicate_function_append"
+    ]
+  },
+  "task_profile": {
+    "kinds": [
+      "bugfix"
+    ],
+    "complexity": "low",
+    "complexity_score": 1,
+    "workflow_mode": "focused_fix",
+    "repo_grade_required_evidence": [],
+    "risk_flags": [
+      "natural_language_patch_inference"
+    ],
+    "required_governor_checks": [
+      "repository survey must identify candidate source and test files before mutation",
+      "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+      "verification must run allowlisted commands or record explicit blockers",
+      "review must approve or produce a focused revision_plan",
+      "final manifest must preserve execution evidence, blockers, and next_safe_action"
+    ]
+  },
+  "worker_brief": {
+    "step_id": "implementation",
+    "worker": "FerrumPatchwright",
+    "purpose": "Prepare an auditable patch manifest and implementation handoff for code changes.",
+    "brief": "Apply only explicit or safely inferred scoped patch operations.",
+    "task_profile": {
+      "kinds": [
+        "bugfix"
+      ],
+      "complexity": "low",
+      "complexity_score": 1,
+      "workflow_mode": "focused_fix",
+      "repo_grade_required_evidence": [],
+      "risk_flags": [
+        "natural_language_patch_inference"
+      ],
+      "required_governor_checks": [
+        "repository survey must identify candidate source and test files before mutation",
+        "implementation must expose patch_source, operation_count, changed_files, and rollback evidence",
+        "verification must run allowlisted commands or record explicit blockers",
+        "review must approve or produce a focused revision_plan",
+        "final manifest must preserve execution evidence, blockers, and next_safe_action"
+      ]
+    },
+    "must_produce": [
+      "patch_source",
+      "operation_count",
+      "changed_files",
+      "rollback"
+    ],
+    "handoff_question": "What exactly changed, and what should verification run?",
+    "authority_boundary": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+  },
+  "dirty_worktree": {
+    "git_repo": false,
+    "dirty_targets": []
+  },
+  "ambiguity_analysis": {},
+  "patch_spec_present": true,
+  "patch_source": "test_inferred_arithmetic_return",
+  "patch_candidates": [
+    {
+      "source": "explicit_json_patch",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "marker_synthesis",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_api_deprecation",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_data_migration",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_config_runtime",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_security_boundary",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_design_choice_tax",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_cache_concurrency",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_flaky_ordering",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_retry_policy",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_self_repair_seed",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "natural_language_simple_replace",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "natural_language_add_function",
+      "status": "unavailable",
+      "diagnostic": "no matching evidence found"
+    },
+    {
+      "source": "test_inferred_arithmetic_return",
+      "status": "selected",
+      "operation_count": 1,
+      "verification_command_count": 1,
+      "diagnostics": {
+        "kind": "test_inferred_arithmetic_return",
+        "test_path": "test_checkout.py",
+        "module_path": "pricing.py",
+        "function_name": "discounted_price",
+        "actual_expression": "price - percent",
+        "replacement_expression": "price - (price * percent / 100)",
+        "example": {
+          "left": 200,
+          "right": 25,
+          "expected": 150
+        },
+        "delegated_from": {
+          "module_path": "checkout.py",
+          "function_name": "total_after_discount"
+        }
+      }
+    }
+  ],
+  "selected_patch_candidate": {
+    "source": "test_inferred_arithmetic_return",
+    "status": "selected",
+    "operation_count": 1,
+    "verification_command_count": 1,
+    "diagnostics": {
+      "kind": "test_inferred_arithmetic_return",
+      "test_path": "test_checkout.py",
+      "module_path": "pricing.py",
+      "function_name": "discounted_price",
+      "actual_expression": "price - percent",
+      "replacement_expression": "price - (price * percent / 100)",
+      "example": {
+        "left": 200,
+        "right": 25,
+        "expected": 150
+      },
+      "delegated_from": {
+        "module_path": "checkout.py",
+        "function_name": "total_after_discount"
+      }
+    }
+  },
+  "source_excerpt_pack": [
+    {
+      "path": "checkout.py",
+      "phase": "inspect_source",
+      "reason": "imported_by:test_checkout.py, python_source",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 1,
+      "bytes": 124,
+      "status": "read",
+      "excerpt": "from pricing import discounted_price\n\ndef total_after_discount(price, percent):\n    return discounted_price(price, percent)\n",
+      "truncated": false
+    },
+    {
+      "path": "test_checkout.py",
+      "phase": "inspect_test",
+      "reason": "test_surface, linked_test",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 0,
+      "bytes": 247,
+      "status": "read",
+      "excerpt": "import unittest\nfrom checkout import total_after_discount\n\nclass CheckoutTest(unittest.TestCase):\n    def test_percentage_discount(self):\n        self.assertEqual(total_after_discount(200, 25), 150)\n\nif __name__ == '__main__':\n    unittest.main()\n",
+      "truncated": false
+    },
+    {
+      "path": "pricing.py",
+      "phase": "inspect_source",
+      "reason": "python_source",
+      "question": "What contract does this file expose, and what tests or dependents would break if it changes?",
+      "dependent_count": 1,
+      "bytes": 65,
+      "status": "read",
+      "excerpt": "def discounted_price(price, percent):\n    return price - percent\n",
+      "truncated": false
+    }
+  ],
+  "source_excerpt_summary": [
+    {
+      "path": "checkout.py",
+      "status": "read",
+      "bytes": 124,
+      "truncated": false
+    },
+    {
+      "path": "test_checkout.py",
+      "status": "read",
+      "bytes": 247,
+      "truncated": false
+    },
+    {
+      "path": "pricing.py",
+      "status": "read",
+      "bytes": 65,
+      "truncated": false
+    }
+  ],
+  "implementation_decision_record": [
+    {
+      "check": "source_evidence_loaded",
+      "status": "pass",
+      "detail": "3 targeted files read"
+    },
+    {
+      "check": "patch_candidate_selected",
+      "status": "pass",
+      "detail": "test_inferred_arithmetic_return"
+    },
+    {
+      "check": "mutation_authority",
+      "status": "pass",
+      "detail": "scoped_source_mutation_from_patch_contract_or_safe_inference"
+    }
+  ],
+  "architecture_decision_record": {
+    "status": "recorded",
+    "decision": "Apply the smallest coherent repo-grade patch across the impacted source, tests, docs, config, and compatibility surfaces.",
+    "drivers": [
+      "preserve existing public behavior unless the task explicitly changes it",
+      "prefer source changes backed by focused tests and broad regression checks",
+      "keep rollback evidence and changed-file scope review in the final package"
+    ],
+    "alternatives_considered": [
+      {
+        "option": "single-file shortcut",
+        "rejected_because": "repo-grade tasks need caller, tests, docs, and compatibility evidence, not only a local source edit"
+      },
+      {
+        "option": "broad rewrite",
+        "rejected_because": "larger rewrites increase regression risk and hide the task-specific diff"
+      }
+    ],
+    "seed_rules": [
+      "Prefer the smallest patch that satisfies the failing test or explicit user contract.",
+      "Inspect dependents before changing public functions or modules with reverse dependencies.",
+      "If no high-confidence source candidate exists, block with a focused clarification instead of broad mutation."
+    ],
+    "impacted_files": [
+      "pricing.py"
+    ],
+    "rollback": "Revert the changed files listed in patch_package.changed_files; no hidden state mutation is allowed."
+  },
+  "repo_grade_workflow": {
+    "mode": "focused_fix",
+    "required_passes": [
+      "survey",
+      "implementation",
+      "verification",
+      "self_review",
+      "final_package"
+    ],
+    "requires_architecture_decision_record": false,
+    "requires_focused_and_broad_verification": false,
+    "requires_compatibility_and_rollback_notes": false,
+    "requires_pr_summary": true
+  },
+  "unshaped_repair_plan": {
+    "status": "recorded",
+    "mode": "unshaped_repo_repair",
+    "task_id": "ceraxia-field-bugfix-unnamed-source-20260701-211718:implementation",
+    "goal_excerpt": "кодовая задача: почини python приложение. Тесты падают, источник ошибки специально не указан. Найди причину, исправь реализацию, проверь focused и broad тесты.\nCERAXIA_TARGET_REPO: EyeOfTerror/field_trial_runs/ceraxia-field-bugfix-unnamed-source-20260701-211718/fixture/repo",
+    "selected_source": "test_inferred_arithmetic_return",
+    "selected_candidate": {
+      "source": "test_inferred_arithmetic_return",
+      "status": "selected",
+      "operation_count": 1,
+      "verification_command_count": 1,
+      "diagnostics": {
+        "kind": "test_inferred_arithmetic_return",
+        "test_path": "test_checkout.py",
+        "module_path": "pricing.py",
+        "function_name": "discounted_price",
+        "actual_expression": "price - percent",
+        "replacement_expression": "price - (price * percent / 100)",
+        "example": {
+          "left": 200,
+          "right": 25,
+          "expected": 150
+        },
+        "delegated_from": {
+          "module_path": "checkout.py",
+          "function_name": "total_after_discount"
+        }
+      }
+    },
+    "files_to_read": [
+      "pricing.py",
+      "checkout.py",
+      "test_checkout.py"
+    ],
+    "test_symbol_links": [
+      {
+        "test_path": "test_checkout.py",
+        "test_class": "CheckoutTest",
+        "test_function": "test_percentage_discount",
+        "assertion": "assertEqual",
+        "actual_expression": "total_after_discount(200, 25)",
+        "expected_expression": "150",
+        "imported_symbol": "total_after_discount",
+        "local_symbol": "total_after_discount",
+        "source_module": "checkout",
+        "source_path": "checkout.py",
+        "source_exists": true
+      }
+    ],
+    "patch_operations": [
+      {
+        "type": "replace",
+        "path": "pricing.py",
+        "old": "return price - percent",
+        "new": "return price - (price * percent / 100)"
+      }
+    ],
+    "runtime_evidence": {},
+    "commands_to_run": [
+      "python -m unittest test_checkout"
+    ],
+    "defect_hypotheses": [
+      {
+        "source": "test_inferred_arithmetic_return",
+        "kind": "test_inferred_arithmetic_return",
+        "test_path": "test_checkout.py",
+        "module_path": "pricing.py",
+        "function_name": "discounted_price",
+        "delegated_from": {
+          "module_path": "checkout.py",
+          "function_name": "total_after_discount"
+        },
+        "expected": "price - (price * percent / 100)",
+        "actual": "price - percent",
+        "evidence": {
+          "kind": "test_inferred_arithmetic_return",
+          "test_path": "test_checkout.py",
+          "module_path": "pricing.py",
+          "function_name": "discounted_price",
+          "actual_expression": "price - percent",
+          "replacement_expression": "price - (price * percent / 100)",
+          "example": {
+            "left": 200,
+            "right": 25,
+            "expected": 150
+          },
+          "delegated_from": {
+            "module_path": "checkout.py",
+            "function_name": "total_after_discount"
+          }
+        }
+      }
+    ],
+    "minimal_patch_candidates": [
+      {
+        "source": "test_inferred_arithmetic_return",
+        "status": "selected",
+        "operation_count": 1,
+        "verification_command_count": 1,
+        "diagnostics": {
+          "kind": "test_inferred_arithmetic_return",
+          "test_path": "test_checkout.py",
+          "module_path": "pricing.py",
+          "function_name": "discounted_price",
+          "actual_expression": "price - percent",
+          "replacement_expression": "price - (price * percent / 100)",
+          "example": {
+            "left": 200,
+            "right": 25,
+            "expected": 150
+          },
+          "delegated_from": {
+            "module_path": "checkout.py",
+            "function_name": "total_after_discount"
+          }
+        },
+        "operations": [
+          {
+            "type": "replace",
+            "path": "pricing.py",
+            "old": "return price - percent",
+            "new": "return price - (price * percent / 100)"
+          }
+        ],
+        "runtime_evidence": {}
+      }
+    ],
+    "proof_plan": {
+      "focused_verification": [
+        "python -m unittest test_checkout"
+      ],
+      "source_must_change": true,
+      "tests_must_not_be_edited_for_test_inferred_repairs": true,
+      "test_to_source_linkage_required": true,
+      "runtime_diagnostic_required": false,
+      "ast_patch_plan_required": true,
+      "review_gates": [
+        "diagnostic_linkage",
+        "test_symbol_linkage",
+        "patch_scope_review",
+        "verification_passed",
+        "review_discipline_findings"
+      ]
+    },
+    "safety_constraints": [
+      "prefer the smallest source patch that satisfies test and contract evidence",
+      "do not edit tests to make an inferred repair pass",
+      "block instead of mutating when source mapping is ambiguous"
+    ]
+  },
+  "ast_patch_plan": {
+    "status": "recorded",
+    "patch_source": "test_inferred_arithmetic_return",
+    "planned_operations": [
+      {
+        "kind": "replace_return_expression",
+        "path": "pricing.py",
+        "function_name": "discounted_price",
+        "line": 2,
+        "old_expression": "price - percent",
+        "new_expression": "price - (price * percent / 100)",
+        "minimality": "single_return_expression"
+      }
+    ],
+    "operation_count": 1,
+    "blockers": [],
+    "strategy": "ast_guided_minimal_patch"
+  },
+  "diagnostics": {
+    "kind": "test_inferred_arithmetic_return",
+    "test_path": "test_checkout.py",
+    "module_path": "pricing.py",
+    "function_name": "discounted_price",
+    "actual_expression": "price - percent",
+    "replacement_expression": "price - (price * percent / 100)",
+    "example": {
+      "left": 200,
+      "right": 25,
+      "expected": 150
+    },
+    "delegated_from": {
+      "module_path": "checkout.py",
+      "function_name": "total_after_discount"
+    }
+  },
+  "operation_count": 1,
+  "changed_files": [
+    {
+      "path": "pricing.py",
+      "operation": "replace",
+      "created": false,
+      "before_sha256": "5061a7a938825be321d039a6e451921a7289de9b14247bc03bd52e28e70a4059",
+      "after_sha256": "edd8954951b585b42c9e1760bdb17e8c762a8f8be5246c7155ab29bdd4f1a6fc",
+      "changed": true
+    }
+  ],
+  "recommended_read_order": [
+    {
+      "path": "checkout.py",
+      "phase": "inspect_source",
+      "reason": "imported_by:test_checkout.py, python_source"
+    },
+    {
+      "path": "test_checkout.py",
+      "phase": "inspect_test",
+      "reason": "test_surface, linked_test"
+    },
+    {
+      "path": "pricing.py",
+      "phase": "inspect_source",
+      "reason": "python_source"
+    }
+  ],
+  "engineering_readiness": {
+    "impact_matrix": [
+      {
+        "path": "checkout.py",
+        "impact_level": "medium",
+        "rank_score": 9,
+        "dependent_count": 1,
+        "linked_tests": [
+          "test_checkout.py"
+        ],
+        "reason": "public dependency surface"
+      },
+      {
+        "path": "test_checkout.py",
+        "impact_level": "low",
+        "rank_score": 5,
+        "dependent_count": 0,
+        "linked_tests": [],
+        "reason": "ranked task relevance"
+      },
+      {
+        "path": "pricing.py",
+        "impact_level": "high",
+        "rank_score": 1,
+        "dependent_count": 1,
+        "linked_tests": [],
+        "reason": "public dependency surface"
+      }
+    ],
+    "risk_register": [
+      {
+        "risk": "public_surface_without_static_test_link",
+        "severity": "medium",
+        "affected_paths": [
+          "pricing.py"
+        ],
+        "mitigation": "run broader verification or require manual coverage review before approval"
+      }
+    ],
+    "acceptance_criteria": [
+      {
+        "criterion": "requested_behavior_addressed",
+        "verification": "patch candidate selected from explicit contract, task text, or test evidence"
+      },
+      {
+        "criterion": "source_scope_is_explained",
+        "verification": "changed files map back to repo survey or review warns about drift"
+      },
+      {
+        "criterion": "changed_python_compiles",
+        "verification": "py_compile runs for changed Python files"
+      },
+      {
+        "criterion": "task_verification_passes",
+        "verification": "requested or inferred verification commands return zero"
+      },
+      {
+        "criterion": "review_has_no_blockers",
+        "verification": "code_review decision record approves final package"
+      }
+    ],
+    "test_strategy": {
+      "primary_commands": [
+        "python -m unittest discover",
+        "python -m unittest test_checkout"
+      ],
+      "linked_test_targets": [
+        "test_checkout.py"
+      ],
+      "fallback_checks": [
+        "python -m py_compile <changed .py files>",
+        "git diff --check"
+      ],
+      "coverage_note": "Prefer linked tests for changed sources; use broader discovery when public dependents are present."
+    },
+    "readiness_checks": {
+      "has_ranked_sources": true,
+      "has_acceptance_criteria": true,
+      "has_test_strategy": true,
+      "high_risk_count": 0
+    }
+  },
+  "patch_scope_evidence": {
+    "changed_files_in_repo_map": [
+      "pricing.py"
+    ],
+    "changed_files_outside_repo_map": [],
+    "changed_sources_with_linked_tests": [],
+    "changed_tests_with_linked_sources": [],
+    "evidence": [
+      {
+        "path": "pricing.py",
+        "in_repo_map": true,
+        "score": 1,
+        "reasons": [
+          "python_source"
+        ],
+        "linked_tests": [],
+        "linked_sources": []
+      }
+    ]
+  },
+  "rollback": {
+    "applied": false,
+    "files": []
+  },
+  "verification_commands": [
+    "python -m unittest test_checkout"
+  ],
+  "blockers": [],
+  "warnings": [
+    "Patch was selected from Ceraxia's guarded patch contracts or safe inference modes; broad synthesis still requires explicit evidence."
+  ]
+}

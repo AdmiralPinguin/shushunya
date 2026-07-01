@@ -1,0 +1,50 @@
+{
+  "status": "recorded",
+  "mode": "unshaped_repo_repair",
+  "patch_source": "test_inferred_flaky_ordering",
+  "runtime_failures": [],
+  "assertions": [],
+  "traceback_frames": [],
+  "runtime_test_failures": [],
+  "traceback_source_candidates": [],
+  "runtime_source_candidates": [],
+  "runtime_minimal_patch_candidates": [],
+  "static_test_expectations": [
+    {
+      "source": "test_inferred_flaky_ordering",
+      "kind": "test_inferred_flaky_ordering",
+      "test_path": "tests/test_scheduler.py",
+      "module_path": "",
+      "function_name": "schedule_order",
+      "delegated_from": {},
+      "expected": "",
+      "actual": "",
+      "evidence": {
+        "kind": "test_inferred_flaky_ordering",
+        "test_path": "tests/test_scheduler.py",
+        "source_path": "scheduler.py",
+        "function_name": "schedule_order",
+        "argument": "items",
+        "tie_breaker": "id",
+        "docs_path": "docs/scheduler.md"
+      }
+    }
+  ],
+  "selected_diagnostics": {
+    "kind": "test_inferred_flaky_ordering",
+    "test_path": "tests/test_scheduler.py",
+    "source_path": "scheduler.py",
+    "function_name": "schedule_order",
+    "argument": "items",
+    "tie_breaker": "id",
+    "docs_path": "docs/scheduler.md"
+  },
+  "parser_coverage": {
+    "unittest_assertions": 0,
+    "traceback_frames": 0,
+    "runtime_test_failures": 0,
+    "runtime_minimal_patch_candidates": 0,
+    "traceback_source_candidates": 0,
+    "static_test_expectations": 1
+  }
+}

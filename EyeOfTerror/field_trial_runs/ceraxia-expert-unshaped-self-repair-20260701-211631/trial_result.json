@@ -1,0 +1,136 @@
+{
+  "trial_id": "ceraxia-expert-unshaped-self-repair",
+  "run_id": "ceraxia-expert-unshaped-self-repair-20260701-211631",
+  "trial_root": "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260701-211631",
+  "prepared_governor": "Ceraxia",
+  "result": {
+    "ok": true,
+    "phase": "completed"
+  },
+  "trial_outcome": {
+    "status": "passed",
+    "expected": true,
+    "reason": "task completed with ready final manifest"
+  },
+  "trial_checks": {
+    "expert_unshaped_self_repair": {
+      "patch_source": "test_inferred_self_repair_seed",
+      "repair_count": 1,
+      "single_repair": true,
+      "repair_kind": "assertion_return_mismatch",
+      "failed_evidence_preserved": true,
+      "runtime_traceback_parsed": true,
+      "source_repaired": true,
+      "tests_preserved": true,
+      "only_source_changed": true,
+      "not_marker_synthesized": true,
+      "passed": true
+    }
+  },
+  "honest_evidence": {
+    "status": "passed",
+    "checks": {
+      "source_correct": {
+        "passed": true,
+        "evidence": {
+          "manifest_status": "ready",
+          "trial_check_groups": [
+            "expert_unshaped_self_repair"
+          ]
+        }
+      },
+      "tests_not_adjusted": {
+        "passed": true,
+        "evidence": {
+          "changed_tests": [],
+          "changed_paths": [
+            "quota.py"
+          ]
+        }
+      },
+      "patch_minimal": {
+        "passed": true,
+        "evidence": {
+          "changed_file_count": 1,
+          "patch_source": "test_inferred_self_repair_seed",
+          "ast_required": false,
+          "ast_plan_status": "recorded",
+          "ast_operation_count": 1
+        }
+      },
+      "verification_meaningful": {
+        "passed": true,
+        "evidence": {
+          "executed_count": 4,
+          "returncodes": [
+            0,
+            1,
+            0,
+            0
+          ],
+          "repair_count": 1,
+          "after_repair_returncodes": [
+            0
+          ],
+          "commands": [
+            "/usr/bin/python3 -m py_compile quota.py",
+            "python -m unittest tests.test_quota",
+            "python -m unittest tests.test_quota",
+            "python -m py_compile quota.py"
+          ]
+        }
+      },
+      "review_artifacts_present": {
+        "passed": true,
+        "evidence": {
+          "approved": true,
+          "review_decision_count": 17,
+          "unshaped_repair_plan_mode": "unshaped_repo_repair"
+        }
+      }
+    }
+  },
+  "final_manifest": "EyeOfTerror/field_trial_runs/ceraxia-expert-unshaped-self-repair-20260701-211631/warmaster_runs/ceraxia-expert-unshaped-self-repair-20260701-211631/work/ceraxia/final_manifest.json",
+  "manifest_summary": {
+    "status": "ready",
+    "patch_source": "test_inferred_self_repair_seed",
+    "changed_files": [
+      {
+        "path": "quota.py",
+        "operation": "replace",
+        "created": false,
+        "before_sha256": "1c542b3b0474aaebfff880ff7e5a6aa19dca00650405ed919058f5d9b06e7fbf",
+        "after_sha256": "77aed42b2489eabe26380ca0f2c7499f02fd1ccc8b482252638ae4dcffa24192",
+        "changed": true
+      }
+    ],
+    "diagnostics": {
+      "kind": "test_inferred_self_repair_seed",
+      "test_path": "tests/test_quota.py",
+      "module_path": "quota.py",
+      "function_name": "max_daily_exports",
+      "initial_actual": "0",
+      "seed": "1",
+      "expected_after_repair": "7",
+      "repair_expected": true
+    },
+    "dirty_worktree": {
+      "git_repo": false,
+      "dirty_targets": []
+    },
+    "ambiguity_analysis": {},
+    "verification_summary": {
+      "executed_count": 4,
+      "repair_count": 1,
+      "blocker_count": 0
+    },
+    "blockers": []
+  },
+  "pricing_py": "",
+  "settings_py": "",
+  "fixture_files": [
+    "quota.py",
+    "tests/test_quota.py"
+  ],
+  "kept": true
+}

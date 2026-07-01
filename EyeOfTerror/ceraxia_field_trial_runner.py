@@ -2188,6 +2188,21 @@ def honest_evidence_summary(manifest: dict[str, Any], checks: dict[str, Any]) ->
         for item in verification_executed
         if isinstance(item, dict)
     ]
+    after_repair_returncodes = [
+        int(item.get("returncode") or 0)
+        for item in verification_executed
+        if isinstance(item, dict) and item.get("after_repair") is True
+    ]
+    repair_count = int(manifest.get("verification_summary", {}).get("repair_count") or 0) if isinstance(manifest.get("verification_summary"), dict) else 0
+    blocker_count = int(manifest.get("verification_summary", {}).get("blocker_count") or 0) if isinstance(manifest.get("verification_summary"), dict) else 0
+    verification_meaningful = bool(returncodes) and all(code == 0 for code in returncodes)
+    if not verification_meaningful and repair_count > 0:
+        verification_meaningful = (
+            manifest.get("status") == "ready"
+            and blocker_count == 0
+            and bool(after_repair_returncodes)
+            and all(code == 0 for code in after_repair_returncodes)
+        )
     patch_source = str(manifest.get("patch_source") or "")
     ast_required = patch_source in {"test_inferred_arithmetic_return", "runtime_diagnostic_return_mismatch"}
     ast_recorded = ast_plan.get("status") == "recorded" and int(ast_plan.get("operation_count") or 0) >= 1
@@ -2211,10 +2226,12 @@ def honest_evidence_summary(manifest: dict[str, Any], checks: dict[str, Any]) ->
             },
         },
         "verification_meaningful": {
-            "passed": bool(returncodes) and all(code == 0 for code in returncodes),
+            "passed": verification_meaningful,
             "evidence": {
                 "executed_count": len(returncodes),
                 "returncodes": returncodes,
+                "repair_count": repair_count,
+                "after_repair_returncodes": after_repair_returncodes,
                 "commands": [str(item.get("command") or "") for item in verification_executed if isinstance(item, dict)],
             },
         },

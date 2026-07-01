@@ -1,0 +1,139 @@
+{
+  "trial_id": "ceraxia-field-bugfix-unnamed-source",
+  "run_id": "ceraxia-field-bugfix-unnamed-source-20260701-211718",
+  "trial_root": "EyeOfTerror/field_trial_runs/ceraxia-field-bugfix-unnamed-source-20260701-211718",
+  "prepared_governor": "Ceraxia",
+  "result": {
+    "ok": true,
+    "phase": "completed"
+  },
+  "trial_outcome": {
+    "status": "passed",
+    "expected": true,
+    "reason": "task completed with ready final manifest"
+  },
+  "trial_checks": {
+    "bugfix_unnamed_source": {
+      "patch_source": "test_inferred_arithmetic_return",
+      "delegated_from_caller": true,
+      "only_source_changed": true,
+      "percentage_formula": true,
+      "caller_preserved": true,
+      "test_preserved": true,
+      "architect_evidence": true,
+      "unshaped_repair_plan": true,
+      "test_symbol_linkage": true,
+      "diagnostic_extraction": true,
+      "ast_patch_plan": true,
+      "passed": true
+    }
+  },
+  "honest_evidence": {
+    "status": "passed",
+    "checks": {
+      "source_correct": {
+        "passed": true,
+        "evidence": {
+          "manifest_status": "ready",
+          "trial_check_groups": [
+            "bugfix_unnamed_source"
+          ]
+        }
+      },
+      "tests_not_adjusted": {
+        "passed": true,
+        "evidence": {
+          "changed_tests": [],
+          "changed_paths": [
+            "pricing.py"
+          ]
+        }
+      },
+      "patch_minimal": {
+        "passed": true,
+        "evidence": {
+          "changed_file_count": 1,
+          "patch_source": "test_inferred_arithmetic_return",
+          "ast_required": true,
+          "ast_plan_status": "recorded",
+          "ast_operation_count": 1
+        }
+      },
+      "verification_meaningful": {
+        "passed": true,
+        "evidence": {
+          "executed_count": 2,
+          "returncodes": [
+            0,
+            0
+          ],
+          "repair_count": 0,
+          "after_repair_returncodes": [],
+          "commands": [
+            "/usr/bin/python3 -m py_compile pricing.py",
+            "python -m unittest test_checkout"
+          ]
+        }
+      },
+      "review_artifacts_present": {
+        "passed": true,
+        "evidence": {
+          "approved": true,
+          "review_decision_count": 17,
+          "unshaped_repair_plan_mode": "unshaped_repo_repair"
+        }
+      }
+    }
+  },
+  "final_manifest": "EyeOfTerror/field_trial_runs/ceraxia-field-bugfix-unnamed-source-20260701-211718/warmaster_runs/ceraxia-field-bugfix-unnamed-source-20260701-211718/work/ceraxia/final_manifest.json",
+  "manifest_summary": {
+    "status": "ready",
+    "patch_source": "test_inferred_arithmetic_return",
+    "changed_files": [
+      {
+        "path": "pricing.py",
+        "operation": "replace",
+        "created": false,
+        "before_sha256": "5061a7a938825be321d039a6e451921a7289de9b14247bc03bd52e28e70a4059",
+        "after_sha256": "edd8954951b585b42c9e1760bdb17e8c762a8f8be5246c7155ab29bdd4f1a6fc",
+        "changed": true
+      }
+    ],
+    "diagnostics": {
+      "kind": "test_inferred_arithmetic_return",
+      "test_path": "test_checkout.py",
+      "module_path": "pricing.py",
+      "function_name": "discounted_price",
+      "actual_expression": "price - percent",
+      "replacement_expression": "price - (price * percent / 100)",
+      "example": {
+        "left": 200,
+        "right": 25,
+        "expected": 150
+      },
+      "delegated_from": {
+        "module_path": "checkout.py",
+        "function_name": "total_after_discount"
+      }
+    },
+    "dirty_worktree": {
+      "git_repo": false,
+      "dirty_targets": []
+    },
+    "ambiguity_analysis": {},
+    "verification_summary": {
+      "executed_count": 2,
+      "repair_count": 0,
+      "blocker_count": 0
+    },
+    "blockers": []
+  },
+  "pricing_py": "def discounted_price(price, percent):\n    return price - (price * percent / 100)\n",
+  "settings_py": "",
+  "fixture_files": [
+    "checkout.py",
+    "pricing.py",
+    "test_checkout.py"
+  ],
+  "kept": true
+}
