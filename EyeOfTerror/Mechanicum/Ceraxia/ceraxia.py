@@ -1042,6 +1042,67 @@ def pre_mutation_read_sufficiency_from_worker(worker_report: dict[str, Any]) -> 
     }
 
 
+def source_mutation_scope_sufficiency_from_worker(worker_report: dict[str, Any]) -> dict[str, Any]:
+    edit_plan = worker_report.get("edit_plan") if isinstance(worker_report.get("edit_plan"), dict) else {}
+    implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
+    changed_files_raw = worker_report.get("changed_files") if isinstance(worker_report.get("changed_files"), list) else []
+    changed_files: list[str] = []
+    blockers: list[str] = []
+    for item in changed_files_raw:
+        if isinstance(item, str):
+            path = item
+        elif isinstance(item, dict) and isinstance(item.get("path"), str):
+            path = item["path"]
+        else:
+            blockers.append("changed_files contains a non-path entry")
+            continue
+        if path:
+            changed_files.append(path)
+    allowed_files: set[str] = set()
+    for key in ("target_files", "allowed_new_files"):
+        values = edit_plan.get(key)
+        if isinstance(values, list):
+            allowed_files.update(str(item) for item in values if isinstance(item, str) and item)
+    for key in ("target_files_to_inspect", "missing_path_hints"):
+        values = implementation_plan.get(key)
+        if isinstance(values, list):
+            allowed_files.update(str(item) for item in values if isinstance(item, str) and item)
+    scope_budget = implementation_plan.get("scope_budget") if isinstance(implementation_plan.get("scope_budget"), dict) else {}
+    test_edit_budget = int(scope_budget.get("max_test_files_to_edit_without_explicit_user_request") or 0)
+    if test_edit_budget > 0:
+        values = edit_plan.get("test_files")
+        if isinstance(values, list):
+            allowed_files.update(str(item) for item in values if isinstance(item, str) and item)
+        values = implementation_plan.get("test_files_to_preserve")
+        if isinstance(values, list):
+            allowed_files.update(str(item) for item in values if isinstance(item, str) and item)
+    escaping_files = [
+        path for path in changed_files
+        if path.startswith("/") or path == ".." or path.startswith("../") or "/../" in path
+    ]
+    unexpected_files = sorted({path for path in changed_files if path not in allowed_files})
+    if worker_report.get("status") == "implemented":
+        if not changed_files:
+            blockers.append("implemented worker report has no changed_files")
+        if not allowed_files:
+            blockers.append("implemented worker report has no planned mutation scope")
+        if escaping_files:
+            blockers.append("changed_files contains paths outside the repository: " + ", ".join(escaping_files[:8]))
+        if unexpected_files:
+            blockers.append("changed_files includes paths outside edit_plan scope: " + ", ".join(unexpected_files[:8]))
+    return {
+        "status": "complete" if not blockers else "blocked",
+        "changed_file_count": len(changed_files),
+        "allowed_file_count": len(allowed_files),
+        "changed_files": changed_files,
+        "allowed_files": sorted(allowed_files),
+        "unexpected_files": unexpected_files,
+        "escaping_files": escaping_files,
+        "test_edit_budget": test_edit_budget,
+        "blockers": blockers,
+    }
+
+
 def review_gate(
     packet: dict[str, Any],
     brief: dict[str, Any],
@@ -1141,6 +1202,7 @@ def review_gate(
     assumption_sufficiency = assumption_sufficiency_from_worker(worker_report)
     worker_output_contract_sufficiency = worker_output_contract_sufficiency_from_worker(worker_report)
     pre_mutation_read_sufficiency = pre_mutation_read_sufficiency_from_worker(worker_report)
+    source_mutation_scope_sufficiency = source_mutation_scope_sufficiency_from_worker(worker_report)
     diagnostic_repair_queue = build_diagnostic_repair_queue(brief, verification_report, worker_report)
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
@@ -1168,6 +1230,8 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "worker output contract is incomplete: " + "; ".join(worker_output_contract_sufficiency["blockers"])})
     if pre_mutation_read_sufficiency["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "pre-mutation read evidence is incomplete: " + "; ".join(pre_mutation_read_sufficiency["blockers"])})
+    if source_mutation_scope_sufficiency["status"] == "blocked":
+        findings.append({"severity": "blocker", "finding": "source mutation scope is incomplete: " + "; ".join(source_mutation_scope_sufficiency["blockers"])})
     if worker_report["dry_run"] and package_status_counts["planned"]:
         warnings.append({"severity": "warning", "finding": "work packages are planned but not implemented"})
     if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution", "passed"}:
@@ -1225,6 +1289,7 @@ def review_gate(
         "assumption_sufficiency": assumption_sufficiency,
         "worker_output_contract_sufficiency": worker_output_contract_sufficiency,
         "pre_mutation_read_sufficiency": pre_mutation_read_sufficiency,
+        "source_mutation_scope_sufficiency": source_mutation_scope_sufficiency,
         "diagnostic_repair_queue": diagnostic_repair_queue,
         "checked_against": [
             "planning packet completeness",
@@ -1241,6 +1306,7 @@ def review_gate(
             "assumption register coverage",
             "worker output contract coverage",
             "pre-mutation read evidence",
+            "source mutation scope",
             "worker report honesty",
         ],
     }
