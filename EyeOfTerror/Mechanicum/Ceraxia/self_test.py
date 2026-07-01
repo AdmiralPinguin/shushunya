@@ -124,6 +124,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             survey = json.loads((run_dir / "repo_survey.json").read_text(encoding="utf-8"))
             self.assertEqual(survey["status"], "surveyed")
             self.assertIn("app.py", survey["candidate_files"])
+            self.assertNotIn("test_app.py", survey["candidate_files"])
+            self.assertNotIn("client.spec.ts", survey["candidate_files"])
             self.assertIn("test_app.py", survey["test_files"])
             self.assertIn("client.spec.ts", survey["test_files"])
             self.assertEqual(survey["existing_path_hints"], ["app.py", "test_app.py"])

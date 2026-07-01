@@ -268,7 +268,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         ((score_candidate(path), str(path.relative_to(root))) for path in files),
         key=lambda item: (-item[0], item[1]),
     )
-    candidates = unique(hinted_candidates + [path for score, path in scored if score > 0])[:30]
+    candidates = unique(hinted_candidates + [path for score, path in scored if score > 0 and not is_test_file(rel_to_path[path])])[:30]
     tests = unique(hinted_tests + [
         str(path.relative_to(root))
         for path in files
