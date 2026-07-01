@@ -11,6 +11,7 @@ from planning_packet_contract import validate_planning_packet
 
 
 ROOT = Path(__file__).resolve().parent
+SERVICE_CONTRACTS = json.loads((ROOT / "service_contracts.json").read_text(encoding="utf-8"))
 
 
 def require_subset(expected: list[str], actual: list[str], label: str, trial_id: str) -> None:
@@ -19,10 +20,53 @@ def require_subset(expected: list[str], actual: list[str], label: str, trial_id:
         raise AssertionError(f"{trial_id}: missing {label}: {missing}; actual={actual}")
 
 
+def validate_service_contracts_against_packet(packet: dict[str, Any], trial_id: str) -> dict[str, Any]:
+    if SERVICE_CONTRACTS.get("contract_version") != CONTRACT_VERSION:
+        raise AssertionError(f"{trial_id}: service contract version drifted: {SERVICE_CONTRACTS}")
+    port_policy = SERVICE_CONTRACTS.get("port_policy") if isinstance(SERVICE_CONTRACTS.get("port_policy"), dict) else {}
+    if port_policy.get("active") is not False:
+        raise AssertionError(f"{trial_id}: planning services must stay inactive until split gates pass: {SERVICE_CONTRACTS}")
+    services = SERVICE_CONTRACTS.get("services") if isinstance(SERVICE_CONTRACTS.get("services"), list) else []
+    ports = [int(service.get("port") or 0) for service in services if isinstance(service, dict)]
+    if ports != list(range(7111, 7116)):
+        raise AssertionError(f"{trial_id}: planning service ports must remain reserved 7111-7115: {SERVICE_CONTRACTS}")
+    if len(set(ports)) != len(ports):
+        raise AssertionError(f"{trial_id}: planning service ports must be unique: {SERVICE_CONTRACTS}")
+    missing_outputs: dict[str, list[str]] = {}
+    mutating_services: list[str] = []
+    for service in services:
+        if not isinstance(service, dict):
+            raise AssertionError(f"{trial_id}: invalid planning service contract entry: {SERVICE_CONTRACTS}")
+        service_name = str(service.get("name") or "")
+        if service.get("may_mutate_source") is not False:
+            mutating_services.append(service_name)
+        missing = [
+            output
+            for output in service.get("output_artifacts", [])
+            if isinstance(output, str) and output not in packet
+        ]
+        if missing:
+            missing_outputs[service_name] = missing
+    if mutating_services:
+        raise AssertionError(f"{trial_id}: planning service contracts must stay read-only: {mutating_services}")
+    if missing_outputs:
+        raise AssertionError(f"{trial_id}: service outputs are absent from packet: {missing_outputs}; packet={packet}")
+    split_gates = SERVICE_CONTRACTS.get("split_gates") if isinstance(SERVICE_CONTRACTS.get("split_gates"), list) else []
+    if len(split_gates) < 5:
+        raise AssertionError(f"{trial_id}: service split gates are too weak: {SERVICE_CONTRACTS}")
+    return {
+        "service_names": [str(service.get("name") or "") for service in services if isinstance(service, dict)],
+        "service_ports": ports,
+        "service_split_gate_count": len(split_gates),
+        "service_contract_active": port_policy.get("active"),
+    }
+
+
 def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
     packet = build_planning_packet({"task": trial["task"], "repo_path": trial.get("repo_path", "")})
     trial_id = str(trial["id"])
     validation_problems = validate_planning_packet(packet)
+    service_contract_status = validate_service_contracts_against_packet(packet, trial_id)
     expected_decision = trial.get("expected_decision", "ready_for_ceraxia_review")
     if expected_decision != "blocked" and validation_problems:
         raise AssertionError(f"{trial_id}: generated packet failed contract validation: {validation_problems}; packet={packet}")
@@ -130,6 +174,10 @@ def run_trial(trial: dict[str, Any]) -> dict[str, Any]:
         "assumption_ids": [row["id"] for row in assumption_rows if isinstance(row, dict) and row.get("id")],
         "assumption_replan_triggers": assumptions.get("replan_when_false", []) if isinstance(assumptions.get("replan_when_false"), list) else [],
         "assumption_count": len(assumption_rows),
+        "planning_service_names": service_contract_status["service_names"],
+        "planning_service_ports": service_contract_status["service_ports"],
+        "planning_service_split_gate_count": service_contract_status["service_split_gate_count"],
+        "planning_service_contract_active": service_contract_status["service_contract_active"],
         "change_control_counts": {
             "allowed_change_intents": len(change_control["allowed_change_intents"]),
             "protected_invariants": len(change_control["protected_invariants"]),
@@ -159,6 +207,10 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     assumption_ids: Counter[str] = Counter()
     assumption_replan_triggers: Counter[str] = Counter()
     assumption_counts: list[int] = []
+    planning_service_names: Counter[str] = Counter()
+    planning_service_ports: Counter[str] = Counter()
+    planning_service_split_gate_counts: list[int] = []
+    planning_service_active_values: Counter[str] = Counter()
     minimum_change_control_counts: dict[str, int] = {}
     scores: list[int] = []
     for result in results:
@@ -181,6 +233,11 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         assumption_replan_triggers.update(str(item) for item in result.get("assumption_replan_triggers", []))
         if isinstance(result.get("assumption_count"), int):
             assumption_counts.append(result["assumption_count"])
+        planning_service_names.update(str(item) for item in result.get("planning_service_names", []))
+        planning_service_ports.update(str(item) for item in result.get("planning_service_ports", []))
+        if isinstance(result.get("planning_service_split_gate_count"), int):
+            planning_service_split_gate_counts.append(result["planning_service_split_gate_count"])
+        planning_service_active_values.update([str(result.get("planning_service_contract_active"))])
         counts = result.get("change_control_counts") if isinstance(result.get("change_control_counts"), dict) else {}
         for key, value in counts.items():
             if isinstance(value, int):
@@ -205,6 +262,10 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "assumption_id_counts": dict(sorted(assumption_ids.items())),
         "assumption_replan_trigger_counts": dict(sorted(assumption_replan_triggers.items())),
         "minimum_assumption_count": min(assumption_counts) if assumption_counts else 0,
+        "planning_service_name_counts": dict(sorted(planning_service_names.items())),
+        "planning_service_port_counts": dict(sorted(planning_service_ports.items())),
+        "minimum_planning_service_split_gate_count": min(planning_service_split_gate_counts) if planning_service_split_gate_counts else 0,
+        "planning_service_active_value_counts": dict(sorted(planning_service_active_values.items())),
         "minimum_change_control_counts": dict(sorted(minimum_change_control_counts.items())),
         "minimum_score": min(scores) if scores else 0,
         "average_score": round(sum(scores) / len(scores), 2) if scores else 0,
@@ -250,6 +311,9 @@ def assert_coverage(summary: dict[str, Any]) -> None:
     rollback_counts = summary.get("change_rollback_trigger_counts") if isinstance(summary.get("change_rollback_trigger_counts"), dict) else {}
     acceptance_trace_package_counts = summary.get("acceptance_trace_package_counts") if isinstance(summary.get("acceptance_trace_package_counts"), dict) else {}
     assumption_id_counts = summary.get("assumption_id_counts") if isinstance(summary.get("assumption_id_counts"), dict) else {}
+    planning_service_name_counts = summary.get("planning_service_name_counts") if isinstance(summary.get("planning_service_name_counts"), dict) else {}
+    planning_service_port_counts = summary.get("planning_service_port_counts") if isinstance(summary.get("planning_service_port_counts"), dict) else {}
+    planning_service_active_values = summary.get("planning_service_active_value_counts") if isinstance(summary.get("planning_service_active_value_counts"), dict) else {}
     minimum_change_counts = summary.get("minimum_change_control_counts") if isinstance(summary.get("minimum_change_control_counts"), dict) else {}
     missing_kinds = sorted(kind for kind in required_kinds if kind not in kind_counts)
     missing_surfaces = sorted(surface for surface in required_surfaces if surface not in surface_counts)
@@ -319,6 +383,18 @@ def assert_coverage(summary: dict[str, Any]) -> None:
         raise AssertionError(f"field trials are missing assumption coverage: {missing_assumptions}")
     if int(summary.get("minimum_assumption_count") or 0) < 3:
         raise AssertionError(f"field trials have too few assumptions: {summary}")
+    required_service_names = {"TaskTriage", "RepoSurveyor", "DesignStrategos", "VerificationArchitect", "RiskScribe"}
+    required_service_ports = {"7111", "7112", "7113", "7114", "7115"}
+    missing_service_names = sorted(name for name in required_service_names if name not in planning_service_name_counts)
+    missing_service_ports = sorted(port for port in required_service_ports if port not in planning_service_port_counts)
+    if missing_service_names:
+        raise AssertionError(f"field trials are missing planning service contract coverage: {missing_service_names}")
+    if missing_service_ports:
+        raise AssertionError(f"field trials are missing planning service port coverage: {missing_service_ports}")
+    if planning_service_active_values != {"False": summary["trial_count"]}:
+        raise AssertionError(f"field trials must prove planning service contracts stay inactive: {summary}")
+    if int(summary.get("minimum_planning_service_split_gate_count") or 0) < 5:
+        raise AssertionError(f"field trials have too few planning service split gates: {summary}")
 
 
 def main() -> int:
