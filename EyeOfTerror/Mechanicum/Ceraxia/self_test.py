@@ -227,6 +227,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(readiness["decision"], "blocked")
             self.assertIn("dry run requested; real CodeBrigade execution was intentionally skipped", readiness["blockers"])
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+            summary_schema = json.loads((Path(__file__).resolve().parent / "contracts" / "run_summary.schema.json").read_text(encoding="utf-8"))
+            missing_summary_fields = [field for field in summary_schema["required"] if field not in summary]
+            self.assertEqual(missing_summary_fields, [])
             self.assertEqual(summary["contract_version"], "eye-mechanicum.v1")
             self.assertEqual(summary["execution_readiness"], "blocked")
             self.assertTrue(summary["package_ok"])
@@ -279,6 +282,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(summary["evidence"]["required_count"], 1)
             self.assertGreaterEqual(summary["evidence"]["planned_count"], 1)
             evidence_matrix = json.loads((run_dir / "evidence_matrix.json").read_text(encoding="utf-8"))
+            evidence_schema = json.loads((Path(__file__).resolve().parent / "contracts" / "evidence_matrix.schema.json").read_text(encoding="utf-8"))
+            missing_evidence_fields = [field for field in evidence_schema["required"] if field not in evidence_matrix]
+            self.assertEqual(missing_evidence_fields, [])
             self.assertEqual(evidence_matrix["kind"], "ceraxia_evidence_matrix")
             self.assertGreaterEqual(evidence_matrix["required_evidence_count"], 1)
             self.assertTrue(any(row["requirement"] == "candidate files are chosen from repository evidence" for row in evidence_matrix["rows"]))
