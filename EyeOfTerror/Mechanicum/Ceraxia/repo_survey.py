@@ -81,6 +81,18 @@ def unique(values: list[str]) -> list[str]:
     return result
 
 
+def unique_edges(edges: list[dict[str, str]]) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for edge in edges:
+        key = (str(edge.get("source", "")), str(edge.get("import", "")), str(edge.get("target", "")))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(edge)
+    return result
+
+
 def python_summary(path: Path, root: Path) -> dict[str, Any]:
     rel = str(path.relative_to(root))
     try:
@@ -205,6 +217,70 @@ def build_local_import_edges(python_summaries: list[dict[str, Any]], python_file
     return edges[:80]
 
 
+def relative_import_target(line: str) -> str:
+    patterns = [
+        r"\bfrom\s+['\"](\.[^'\"]+)['\"]",
+        r"\bimport\s+[^'\"]+\s+from\s+['\"](\.[^'\"]+)['\"]",
+        r"\bimport\s*\(\s*['\"](\.[^'\"]+)['\"]\s*\)",
+        r"\brequire\s*\(\s*['\"](\.[^'\"]+)['\"]\s*\)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, line)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def resolve_relative_source_import(source_rel: str, import_target: str, rel_to_path: dict[str, Path], root: Path) -> str:
+    source_path = root / source_rel
+    raw_target = (source_path.parent / import_target).resolve()
+    try:
+        normalized = raw_target.relative_to(root.resolve())
+    except ValueError:
+        return ""
+    candidates: list[Path] = []
+    if normalized.suffix:
+        candidates.append(normalized)
+    else:
+        candidates.extend(
+            [
+                normalized.with_suffix(suffix)
+                for suffix in [".ts", ".tsx", ".js", ".jsx", ".py", ".kt", ".java", ".go", ".rs"]
+            ]
+        )
+        candidates.extend(
+            normalized / f"index{suffix}"
+            for suffix in [".ts", ".tsx", ".js", ".jsx"]
+        )
+    for candidate in candidates:
+        rel = str(candidate)
+        if rel in rel_to_path:
+            return rel
+    return ""
+
+
+def build_generic_import_edges(source_summaries: list[dict[str, Any]], rel_to_path: dict[str, Path], root: Path) -> list[dict[str, str]]:
+    edges: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for summary in source_summaries:
+        source = str(summary.get("path", ""))
+        language = str(summary.get("language", ""))
+        import_like = summary.get("import_like") if isinstance(summary.get("import_like"), list) else []
+        for line in import_like:
+            target_import = relative_import_target(str(line))
+            if not target_import:
+                continue
+            target = resolve_relative_source_import(source, target_import, rel_to_path, root)
+            if not target or target == source:
+                continue
+            key = (source, target_import, target)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append({"source": source, "import": target_import, "target": target, "language": language})
+    return edges[:80]
+
+
 def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[str], path_hints: list[str] | None = None) -> dict[str, Any]:
     root = Path(repo_path)
     path_hints = path_hints or []
@@ -231,6 +307,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "python_symbols": [],
             "source_summaries": [],
             "local_import_edges": [],
+            "generic_import_edges": [],
             "suggested_verification_commands": [],
             "max_files_scanned": MAX_SURVEY_FILES,
             "truncated": False,
@@ -286,6 +363,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     all_source_files = [path for path in files if path.suffix.lower() in SOURCE_SUFFIXES]
     source_summaries_truncated = len(all_source_files) > MAX_SOURCE_SUMMARY_FILES
     source_summaries = [generic_source_summary(path, root) for path in all_source_files[:MAX_SOURCE_SUMMARY_FILES]]
+    python_edges = build_local_import_edges(python_symbols, python_files, root)
+    generic_edges = build_generic_import_edges(source_summaries, rel_to_path, root)
     suggested_commands: list[str] = []
     if tests:
         suggested_commands.append("python -m pytest " + " ".join(tests[:3]))
@@ -311,7 +390,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "entrypoint_candidates": entrypoints,
         "python_symbols": python_symbols,
         "source_summaries": source_summaries,
-        "local_import_edges": build_local_import_edges(python_symbols, python_files, root),
+        "local_import_edges": unique_edges([*python_edges, *generic_edges])[:120],
+        "generic_import_edges": generic_edges,
         "suggested_verification_commands": suggested_commands,
         "max_files_scanned": MAX_SURVEY_FILES,
         "truncated": truncated,

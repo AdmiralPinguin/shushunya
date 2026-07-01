@@ -126,6 +126,7 @@ def valid_brief() -> dict:
             "entrypoint_candidates": ["main.py"],
             "source_summaries": [{"path": "app.ts", "language": "typescript", "symbols": ["app"], "import_like": []}],
             "local_import_edges": [{"source": "app.py", "import": "util.enabled", "target": "util.py"}],
+            "generic_import_edges": [{"source": "client.ts", "import": "./api", "target": "api.ts", "language": "typescript"}],
             "survey_truncated": False,
             "python_symbols_truncated": False,
         },
@@ -170,6 +171,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should include suggested verification: {plan}")
     if plan["dependency_edges_to_check"] != [{"source": "app.py", "import": "util.enabled", "target": "util.py"}]:
         raise AssertionError(f"implementation plan should preserve local dependency edges: {plan}")
+    if plan["generic_dependency_edges_to_check"] != [{"source": "client.ts", "import": "./api", "target": "api.ts", "language": "typescript"}]:
+        raise AssertionError(f"implementation plan should preserve generic dependency edges: {plan}")
     if plan["planning_critical_path"][-1] != "implementation_brief":
         raise AssertionError(f"implementation plan should preserve planning critical path: {plan}")
     if plan["planning_review_decision"] != "ready_for_ceraxia_review" or plan["planning_review_score"] < 80:

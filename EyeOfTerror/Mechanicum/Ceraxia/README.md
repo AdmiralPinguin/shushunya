@@ -78,6 +78,8 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
 - `repo_survey.json.source_summaries` gives shallow multi-language symbol and
   import-like evidence for common source files; Python still has the deeper
   AST symbol/import path used for local dependency edges.
+- `repo_survey.json.generic_import_edges` resolves local relative JS/TS/TSX/JSX
+  imports to repository files and passes them through the CodeBrigade handoff.
 
 Smoke command:
 

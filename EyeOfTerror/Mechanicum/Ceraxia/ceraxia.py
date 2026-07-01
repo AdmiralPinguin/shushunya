@@ -215,6 +215,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "python_symbols": survey.get("python_symbols", []),
             "source_summaries": survey.get("source_summaries", []),
             "local_import_edges": survey.get("local_import_edges", []),
+            "generic_import_edges": survey.get("generic_import_edges", []),
             "survey_truncated": bool(survey.get("truncated")),
             "max_files_scanned": survey.get("max_files_scanned", 0),
             "python_symbols_truncated": bool(survey.get("python_symbols_truncated")),
