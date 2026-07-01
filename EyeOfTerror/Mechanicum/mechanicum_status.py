@@ -29,6 +29,7 @@ COMPONENTS = {
         "kind": "advisory_planning_brigade",
         "required_files": [
             "README.md",
+            "STATUS.md",
             "planning_brigade.py",
             "planning_contract.schema.json",
             "role_contracts.json",
