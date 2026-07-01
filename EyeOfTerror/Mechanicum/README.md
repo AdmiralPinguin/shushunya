@@ -12,3 +12,7 @@ This folder is the EyeOfTerror-side home for code-governance structure.
 
 Runtime worker implementations can stay in the top-level `Mechanicum/` service
 tree until each brigade boundary is stable.
+
+`boundary_self_test.py` protects this split: brigade governance and contracts
+live here, while root-level `Mechanicum/` remains the legacy/shared worker
+runtime until a worker is intentionally migrated.
