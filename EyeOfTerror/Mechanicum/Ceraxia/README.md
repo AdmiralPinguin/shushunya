@@ -31,6 +31,7 @@ task
   -> verification_report.json
   -> review_gate.json
   -> execution_readiness.json
+  -> run_summary.json
   -> artifact_manifest.json
   -> run_audit.json
   -> final_report.md

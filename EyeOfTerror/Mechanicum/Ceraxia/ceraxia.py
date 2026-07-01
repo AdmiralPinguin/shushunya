@@ -52,6 +52,7 @@ REQUIRED_RUN_ARTIFACTS = [
     "status.json",
     "final_report.md",
     "execution_readiness.json",
+    "run_summary.json",
 ]
 
 
@@ -404,6 +405,30 @@ def build_execution_readiness(
     }
 
 
+def build_run_summary(
+    run_id: str,
+    run_dir: Path,
+    status: dict[str, Any],
+    brief: dict[str, Any],
+    review: dict[str, Any],
+    readiness: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "kind": "ceraxia_run_summary",
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "state": status.get("state"),
+        "review_decision": review.get("decision"),
+        "execution_readiness": readiness.get("decision"),
+        "risk_level": brief.get("risk_level"),
+        "task_kinds": brief.get("task_kinds", []),
+        "selected_strategy": brief.get("selected_strategy"),
+        "blockers": readiness.get("blockers", []),
+        "next_action": status.get("next_action"),
+        "maturity": "dry_run_controller_with_code_brigade_handoff_adapter",
+    }
+
+
 def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     run_id = f"ceraxia-{utc_stamp()}-{task_slug(task_input.task)}"
     run_dir = task_input.runs_root / run_id
@@ -471,6 +496,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_text(run_dir / "final_report.md", final_report_markdown(run_id, artifacts))
     readiness = build_execution_readiness(status, brief, verification_report, review, task_input.dry_run)
     write_json(run_dir / "execution_readiness.json", readiness)
+    summary = build_run_summary(run_id, run_dir, status, brief, review, readiness)
+    write_json(run_dir / "run_summary.json", summary)
     manifest = build_artifact_manifest(run_dir)
     write_json(run_dir / "artifact_manifest.json", manifest)
     audit = audit_run_package(run_dir)
@@ -482,6 +509,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "state": status["state"],
         "audit_decision": audit["decision"],
         "execution_readiness": readiness["decision"],
+        "summary": summary,
         "lifecycle": status["lifecycle"],
         "review_decision": review["decision"],
         "next_action": status["next_action"],
