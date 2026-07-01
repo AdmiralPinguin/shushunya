@@ -745,6 +745,7 @@ def implementation_brief_blueprint(
             "work_breakdown",
             "impact_analysis",
             "execution_forecast",
+            "implementation_work_packages",
             "planning_review_gate",
         ],
         "strategy": design["selected_strategy"],
