@@ -75,6 +75,7 @@
         "mutation_preconditions",
         "implementation_work_packages",
         "work_package_review_order",
+        "work_package_dependency_graph",
         "work_package_blocking_policies",
         "work_package_handoff_criteria",
         "acceptance_evidence_required",
@@ -234,6 +235,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "work_package_dependency_graph": {
+          "type": "object",
+          "required": ["rows", "root_packages", "terminal_packages", "parallelizable_after_survey", "complete", "blockers"]
         },
         "work_package_blocking_policies": {
           "type": "object",

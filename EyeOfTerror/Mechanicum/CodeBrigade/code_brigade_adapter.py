@@ -90,6 +90,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "mutation_preconditions": blueprint.get("mutation_preconditions", []) if isinstance(blueprint.get("mutation_preconditions"), list) else [],
         "implementation_work_packages": packages,
         "work_package_review_order": work_packages.get("review_order", []) if isinstance(work_packages.get("review_order"), list) else [],
+        "work_package_dependency_graph": work_packages.get("package_dependency_graph", {}) if isinstance(work_packages.get("package_dependency_graph"), dict) else {},
         "work_package_blocking_policies": package_blocking_policies,
         "work_package_handoff_criteria": work_packages.get("global_handoff_criteria", []) if isinstance(work_packages.get("global_handoff_criteria"), list) else [],
         "acceptance_evidence_required": acceptance.get("must_prove", []) if isinstance(acceptance.get("must_prove"), list) else [],

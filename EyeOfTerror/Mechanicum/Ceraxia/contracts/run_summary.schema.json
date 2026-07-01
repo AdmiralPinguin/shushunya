@@ -19,6 +19,10 @@
     "implementation_work_package_count",
     "implementation_work_package_surface_count",
     "implementation_work_package_review_order",
+    "implementation_work_package_dependency_graph_complete",
+    "implementation_work_package_dependency_row_count",
+    "implementation_work_package_dependency_root_count",
+    "implementation_work_package_dependency_terminal_count",
     "work_package_status_counts",
     "survey_quality_decision",
     "survey_quality_warning_count",
@@ -120,6 +124,18 @@
       "items": {
         "type": "string"
       }
+    },
+    "implementation_work_package_dependency_graph_complete": {
+      "type": "boolean"
+    },
+    "implementation_work_package_dependency_row_count": {
+      "type": "integer"
+    },
+    "implementation_work_package_dependency_root_count": {
+      "type": "integer"
+    },
+    "implementation_work_package_dependency_terminal_count": {
+      "type": "integer"
     },
     "work_package_status_counts": {
       "type": "object",

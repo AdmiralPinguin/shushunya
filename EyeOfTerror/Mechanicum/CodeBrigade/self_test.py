@@ -345,6 +345,30 @@ def valid_brief() -> dict:
                 "package blockers are reflected in review_gate.json",
                 "final report answers the original task rather than only package-local success",
             ],
+            "package_dependency_graph": {
+                "rows": [
+                    {
+                        "package_id": "evidence_survey_package",
+                        "depends_on": [],
+                        "dependency_reason": "root package; establishes repository evidence before mutation",
+                    },
+                    {
+                        "package_id": "minimal_patch_package",
+                        "depends_on": ["evidence_survey_package"],
+                        "dependency_reason": "source mutation waits for repository evidence",
+                    },
+                    {
+                        "package_id": "verification_evidence_package",
+                        "depends_on": ["evidence_survey_package", "minimal_patch_package"],
+                        "dependency_reason": "final verification waits for evidence and mutation packages",
+                    },
+                ],
+                "root_packages": ["evidence_survey_package"],
+                "terminal_packages": ["verification_evidence_package"],
+                "parallelizable_after_survey": ["minimal_patch_package"],
+                "complete": True,
+                "blockers": [],
+            },
         },
         "planning_review_gate": {
             "decision": "ready_for_ceraxia_review",
@@ -447,6 +471,30 @@ def valid_brief() -> dict:
                 {"step": "inspect_repo_evidence", "owner": "CodeBrigade"},
                 {"step": "return_for_ceraxia_review", "owner": "Ceraxia"},
             ],
+            "package_dependency_graph": {
+                "rows": [
+                    {
+                        "package_id": "evidence_survey_package",
+                        "depends_on": [],
+                        "dependency_reason": "root package; establishes repository evidence before mutation",
+                    },
+                    {
+                        "package_id": "minimal_patch_package",
+                        "depends_on": ["evidence_survey_package"],
+                        "dependency_reason": "source mutation waits for repository evidence",
+                    },
+                    {
+                        "package_id": "verification_evidence_package",
+                        "depends_on": ["evidence_survey_package", "minimal_patch_package"],
+                        "dependency_reason": "final verification waits for evidence and mutation packages",
+                    },
+                ],
+                "root_packages": ["evidence_survey_package"],
+                "terminal_packages": ["verification_evidence_package"],
+                "parallelizable_after_survey": ["minimal_patch_package"],
+                "complete": True,
+                "blockers": [],
+            },
         },
         "blocked": False,
         "blockers": [],
@@ -540,6 +588,13 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve work packages: {plan}")
     if plan["work_package_review_order"][0] != "evidence_survey_package":
         raise AssertionError(f"implementation plan should preserve work package review order: {plan}")
+    if (
+        plan["work_package_dependency_graph"]["root_packages"] != ["evidence_survey_package"]
+        or plan["work_package_dependency_graph"]["terminal_packages"] != ["verification_evidence_package"]
+        or plan["work_package_dependency_graph"]["rows"][-1]["package_id"] != "verification_evidence_package"
+        or "minimal_patch_package" not in plan["work_package_dependency_graph"]["rows"][-1]["depends_on"]
+    ):
+        raise AssertionError(f"implementation plan should preserve work package dependency graph: {plan}")
     if plan["work_package_blocking_policies"].get("minimal_patch_package") != ["block when patch preflight fails"]:
         raise AssertionError(f"implementation plan should expose work package blocking policies: {plan}")
     if "final report answers the original task rather than only package-local success" not in plan["work_package_handoff_criteria"]:
@@ -1033,6 +1088,16 @@ def main() -> int:
     missing_blocking_policy_report = code_brigade_adapter.build_worker_report(missing_blocking_policy, dry_run=True)
     if missing_blocking_policy_report["status"] != "blocked" or not any("blocking_policy" in item for item in missing_blocking_policy_report["validation_problems"]):
         raise AssertionError(f"missing package blocking policy should be blocked: {missing_blocking_policy_report}")
+    missing_package_graph = valid_brief()
+    missing_package_graph["implementation_work_packages"].pop("package_dependency_graph")
+    missing_package_graph_report = code_brigade_adapter.build_worker_report(missing_package_graph, dry_run=True)
+    if missing_package_graph_report["status"] != "blocked" or not any("package_dependency_graph" in item for item in missing_package_graph_report["validation_problems"]):
+        raise AssertionError(f"missing package dependency graph should be blocked: {missing_package_graph_report}")
+    mismatched_handoff_graph = valid_brief()
+    mismatched_handoff_graph["code_brigade_handoff"]["package_dependency_graph"] = {"rows": [], "complete": False}
+    mismatched_handoff_graph_report = code_brigade_adapter.build_worker_report(mismatched_handoff_graph, dry_run=True)
+    if mismatched_handoff_graph_report["status"] != "blocked" or not any("code_brigade_handoff package_dependency_graph" in item for item in mismatched_handoff_graph_report["validation_problems"]):
+        raise AssertionError(f"mismatched handoff package dependency graph should be blocked: {mismatched_handoff_graph_report}")
     uncovered_surface = valid_brief()
     uncovered_surface["implementation_work_packages"]["packages"][0]["impact_surfaces"] = ["source_behavior"]
     uncovered_surface["implementation_work_packages"]["packages"][2]["impact_surfaces"] = ["source_behavior"]

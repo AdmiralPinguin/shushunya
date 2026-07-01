@@ -1013,6 +1013,8 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
+    package_graph = work_packages.get("package_dependency_graph") if isinstance(work_packages.get("package_dependency_graph"), dict) else {}
+    package_graph_rows = package_graph.get("rows") if isinstance(package_graph.get("rows"), list) else []
     package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
     package_status_counts = {
         status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
@@ -1034,6 +1036,14 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": "run_summary implementation_work_package_surface_count disagrees with implementation_brief.json"})
     if summary.get("implementation_work_package_review_order", []) != package_review_order:
         findings.append({"severity": "blocker", "finding": "run_summary implementation_work_package_review_order disagrees with implementation_brief.json"})
+    if summary.get("implementation_work_package_dependency_graph_complete") != (package_graph.get("complete") is True):
+        findings.append({"severity": "blocker", "finding": "run_summary implementation_work_package_dependency_graph_complete disagrees with implementation_brief.json"})
+    if summary.get("implementation_work_package_dependency_row_count", 0) != len(package_graph_rows):
+        findings.append({"severity": "blocker", "finding": "run_summary implementation_work_package_dependency_row_count disagrees with implementation_brief.json"})
+    if summary.get("implementation_work_package_dependency_root_count", 0) != len(package_graph.get("root_packages", []) if isinstance(package_graph.get("root_packages"), list) else []):
+        findings.append({"severity": "blocker", "finding": "run_summary implementation_work_package_dependency_root_count disagrees with implementation_brief.json"})
+    if summary.get("implementation_work_package_dependency_terminal_count", 0) != len(package_graph.get("terminal_packages", []) if isinstance(package_graph.get("terminal_packages"), list) else []):
+        findings.append({"severity": "blocker", "finding": "run_summary implementation_work_package_dependency_terminal_count disagrees with implementation_brief.json"})
     package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
     package_status_counts = {
         status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
@@ -1211,6 +1221,8 @@ def build_run_summary(
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
+    package_graph = work_packages.get("package_dependency_graph") if isinstance(work_packages.get("package_dependency_graph"), dict) else {}
+    package_graph_rows = package_graph.get("rows") if isinstance(package_graph.get("rows"), list) else []
     package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
     package_status_counts = {
         status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
@@ -1242,6 +1254,10 @@ def build_run_summary(
         "implementation_work_package_count": len(packages),
         "implementation_work_package_surface_count": len(package_surfaces),
         "implementation_work_package_review_order": work_packages.get("review_order", []) if isinstance(work_packages.get("review_order"), list) else [],
+        "implementation_work_package_dependency_graph_complete": package_graph.get("complete") is True,
+        "implementation_work_package_dependency_row_count": len(package_graph_rows),
+        "implementation_work_package_dependency_root_count": len(package_graph.get("root_packages", [])) if isinstance(package_graph.get("root_packages"), list) else 0,
+        "implementation_work_package_dependency_terminal_count": len(package_graph.get("terminal_packages", [])) if isinstance(package_graph.get("terminal_packages"), list) else 0,
         "work_package_status_counts": package_status_counts,
         "survey_quality_decision": survey_quality.get("decision", ""),
         "survey_quality_warning_count": len(survey_quality.get("warnings", [])) if isinstance(survey_quality.get("warnings"), list) else 0,
@@ -1313,6 +1329,7 @@ def build_evidence_matrix(
     autonomous_request = worker_report.get("autonomous_execution_request") if isinstance(worker_report.get("autonomous_execution_request"), dict) else {}
     work_packages = implementation_plan.get("implementation_work_packages") if isinstance(implementation_plan.get("implementation_work_packages"), list) else []
     work_package_review_order = implementation_plan.get("work_package_review_order") if isinstance(implementation_plan.get("work_package_review_order"), list) else []
+    work_package_dependency_graph = implementation_plan.get("work_package_dependency_graph") if isinstance(implementation_plan.get("work_package_dependency_graph"), dict) else {}
     surface_package_rows = implementation_plan.get("surface_package_matrix_rows") if isinstance(implementation_plan.get("surface_package_matrix_rows"), list) else []
     package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
     package_status_counts = {
@@ -1401,6 +1418,7 @@ def build_evidence_matrix(
         "implementation_work_package_summary": {
             "package_count": len(work_packages),
             "review_order": work_package_review_order,
+            "dependency_graph": work_package_dependency_graph,
             "covered_surfaces": package_surfaces,
             "covered_surface_count": len(package_surfaces),
             "status_counts": package_status_counts,

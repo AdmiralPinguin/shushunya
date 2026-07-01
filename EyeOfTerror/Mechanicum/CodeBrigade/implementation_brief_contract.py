@@ -170,6 +170,40 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
     review_order = work_packages.get("review_order") if isinstance(work_packages.get("review_order"), list) else []
     if len(review_order) != len(packages):
         problems.append("brief implementation_work_packages review_order must cover every package")
+    package_ids = [
+        package.get("id")
+        for package in packages
+        if isinstance(package, dict) and isinstance(package.get("id"), str) and package.get("id")
+    ]
+    package_graph = work_packages.get("package_dependency_graph") if isinstance(work_packages.get("package_dependency_graph"), dict) else {}
+    graph_rows = package_graph.get("rows") if isinstance(package_graph.get("rows"), list) else []
+    graph_package_ids = [
+        row.get("package_id")
+        for row in graph_rows
+        if isinstance(row, dict) and isinstance(row.get("package_id"), str) and row.get("package_id")
+    ]
+    if sorted(graph_package_ids) != sorted(package_ids):
+        problems.append("brief implementation_work_packages package_dependency_graph must cover every package")
+    if package_graph.get("complete") is not True:
+        problems.append("brief implementation_work_packages package_dependency_graph must be complete")
+    if "evidence_survey_package" not in (package_graph.get("root_packages") if isinstance(package_graph.get("root_packages"), list) else []):
+        problems.append("brief implementation_work_packages package_dependency_graph must root at evidence_survey_package")
+    if "verification_evidence_package" not in (package_graph.get("terminal_packages") if isinstance(package_graph.get("terminal_packages"), list) else []):
+        problems.append("brief implementation_work_packages package_dependency_graph must terminate at verification_evidence_package")
+    package_id_set = set(package_ids)
+    for row in graph_rows:
+        if not isinstance(row, dict):
+            problems.append("brief implementation_work_packages package_dependency_graph row must be an object")
+            continue
+        if not row.get("package_id") or not isinstance(row.get("depends_on"), list) or not row.get("dependency_reason"):
+            problems.append("brief implementation_work_packages package_dependency_graph rows require package_id, depends_on, and dependency_reason")
+        for dependency_id in row.get("depends_on", []):
+            if dependency_id not in package_id_set:
+                problems.append(f"brief implementation_work_packages package_dependency_graph references unknown package: {dependency_id}")
+        if row.get("package_id") == "verification_evidence_package":
+            missing_dependencies = sorted(package_id for package_id in package_ids if package_id != "verification_evidence_package" and package_id not in row.get("depends_on", []))
+            if missing_dependencies:
+                problems.append("brief implementation_work_packages verification package must depend on every earlier package: " + ", ".join(missing_dependencies))
     planned_surfaces = {
         row.get("surface")
         for row in surface_matrix.get("rows", [])
@@ -257,4 +291,6 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief code_brigade_handoff steps are required")
     elif not all(isinstance(step, dict) and step.get("step") and step.get("owner") for step in steps):
         problems.append("brief code_brigade_handoff steps must include step and owner")
+    if (handoff.get("package_dependency_graph") if isinstance(handoff.get("package_dependency_graph"), dict) else {}) != package_graph:
+        problems.append("brief code_brigade_handoff package_dependency_graph must match implementation_work_packages")
     return problems
