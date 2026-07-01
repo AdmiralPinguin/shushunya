@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
+import json
+from pathlib import Path
 from typing import Any
 
 from execution_contract import CONTRACT_VERSION
@@ -116,3 +119,20 @@ def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
         "test_files_to_preserve": request.get("test_files_to_preserve", []) if isinstance(request.get("test_files_to_preserve"), list) else [],
         "blockers": problems,
     }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate a Ceraxia diagnostic repair request for CodeBrigade.")
+    parser.add_argument("request", help="Path to diagnostic_repair_request.json")
+    args = parser.parse_args()
+    payload = json.loads(Path(args.request).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        print(json.dumps({"status": "blocked", "blockers": ["request payload must be an object"]}, ensure_ascii=False, indent=2))
+        return 2
+    intake = build_diagnostic_repair_intake(payload)
+    print(json.dumps(intake, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if intake["status"] in {"ready", "not_required"} else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

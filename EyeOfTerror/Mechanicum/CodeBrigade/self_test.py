@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -759,6 +760,26 @@ def main() -> int:
     unsafe_intake = build_diagnostic_repair_intake(unsafe_repair_request)
     if unsafe_intake["status"] != "blocked" or not any("safe repo-relative path" in blocker for blocker in unsafe_intake["blockers"]):
         raise AssertionError(f"diagnostic repair intake should block unsafe paths: {unsafe_intake}")
+    with tempfile.TemporaryDirectory() as tmp:
+        request_path = Path(tmp) / "diagnostic_repair_request.json"
+        request_path.write_text(json.dumps(repair_request), encoding="utf-8")
+        cli = subprocess.run(
+            ["python3", str(Path(__file__).resolve().parent / "diagnostic_repair_contract.py"), str(request_path)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if cli.returncode != 0 or '"status": "ready"' not in cli.stdout:
+            raise AssertionError(f"diagnostic repair CLI should accept valid requests: rc={cli.returncode} out={cli.stdout} err={cli.stderr}")
+        request_path.write_text(json.dumps(broken_repair_request), encoding="utf-8")
+        cli = subprocess.run(
+            ["python3", str(Path(__file__).resolve().parent / "diagnostic_repair_contract.py"), str(request_path)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if cli.returncode != 2 or "item_count must match" not in cli.stdout:
+            raise AssertionError(f"diagnostic repair CLI should reject invalid requests: rc={cli.returncode} out={cli.stdout} err={cli.stderr}")
     if plan["work_package_blocking_policies"].get("minimal_patch_package") != ["block when patch preflight fails"]:
         raise AssertionError(f"implementation plan should expose work package blocking policies: {plan}")
     if "final report answers the original task rather than only package-local success" not in plan["work_package_handoff_criteria"]:
