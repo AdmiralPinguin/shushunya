@@ -32,17 +32,19 @@ local adapter: it validates the implementation brief and can acknowledge a
 dry-run handoff. Real source execution is intentionally narrow: only explicit
 `CERAXIA_PATCH` operations and guarded natural-language single-file operations
 against surveyed repo-relative files may pass. A second guarded diagnostic path
-can append one missing Python function when existing tests provide a single
-imported zero-argument function and simple literal expectation, or replace a
-single literal return expression when that same evidence proves a mismatch.
+can append one missing Python function or module-level constant when existing
+tests provide a single imported symbol and simple literal expectation, or
+replace a single literal return expression / module-level constant assignment
+when that same evidence proves a mismatch.
 `implementation_brief_contract.py` owns brief validation shared by the report
 adapter and execution adapter.
 `execution_adapter.py` is that boundary today. It applies explicit
 `CERAXIA_PATCH` `replace`, `replace_return_expression`, `write_file`, and
 `create_file` operations, plus guarded natural-language simple replace and
 Python add-function operations, and a test-inferred missing-function operation,
-or literal return-mismatch operation, only after brief validation and read-only
-preflight. Ambiguous tasks still return a formal
+literal return-mismatch operation, missing-constant operation, or constant
+mismatch operation, only after brief validation and read-only preflight.
+Ambiguous tasks still return a formal
 `code_brigade_execution_result` blocker.
 `execution_contract.py` owns the formal execution result builders so the
 execution boundary does not depend on the full worker-report adapter.

@@ -130,6 +130,50 @@ def infer_test_return_mismatch_patch(repo: Path, brief: dict[str, Any]) -> dict[
     }
 
 
+def infer_test_missing_constant_patch(repo: Path, brief: dict[str, Any]) -> dict[str, Any]:
+    candidate = infer_single_test_constant_literal_candidate(repo, brief)
+    if not candidate:
+        return {}
+    source_rel, source_path, symbol_name, literal = candidate
+    if python_module_constant_exists(source_path, symbol_name):
+        return {}
+    return {
+        "source": "test_inferred_missing_constant",
+        "operations": [
+            {
+                "type": "append_python_constant",
+                "path": source_rel,
+                "symbol_name": symbol_name,
+                "literal": literal,
+            }
+        ],
+    }
+
+
+def infer_test_constant_mismatch_patch(repo: Path, brief: dict[str, Any]) -> dict[str, Any]:
+    candidate = infer_single_test_constant_literal_candidate(repo, brief)
+    if not candidate:
+        return {}
+    source_rel, source_path, symbol_name, literal = candidate
+    current_literal = simple_module_constant_segment(source_path, symbol_name).get("literal", "")
+    if not isinstance(current_literal, str) or not current_literal or current_literal == literal:
+        return {}
+    validate_safe_return_literal(current_literal)
+    validate_safe_return_literal(literal)
+    return {
+        "source": "test_inferred_constant_mismatch",
+        "operations": [
+            {
+                "type": "replace_python_constant",
+                "path": source_rel,
+                "symbol_name": symbol_name,
+                "old_literal": current_literal,
+                "new_literal": literal,
+            }
+        ],
+    }
+
+
 def infer_single_test_literal_candidate(repo: Path, brief: dict[str, Any]) -> tuple[str, Path, str, str] | None:
     candidate_files = sorted(
         path
@@ -162,6 +206,38 @@ def infer_single_test_literal_candidate(repo: Path, brief: dict[str, Any]) -> tu
     return source_rel, source_path, function_name, literal
 
 
+def infer_single_test_constant_literal_candidate(repo: Path, brief: dict[str, Any]) -> tuple[str, Path, str, str] | None:
+    candidate_files = sorted(
+        path
+        for path in surveyed_paths(brief)
+        if path.endswith(".py") and not is_test_path(path) and not is_docs_path(path)
+    )
+    test_files = sorted(path for path in surveyed_paths(brief) if path.endswith(".py") and is_test_path(path))
+    if len(candidate_files) != 1 or not test_files:
+        return {}
+    source_rel = candidate_files[0]
+    source_path = safe_operation_path(repo, source_rel)
+    module_name = source_path.stem
+    candidates: list[tuple[str, str]] = []
+    import_pattern = re.compile(rf"(?m)^from\s+{re.escape(module_name)}\s+import\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+    for test_rel in test_files:
+        test_path = safe_operation_path(repo, test_rel)
+        if not test_path.exists() or not test_path.is_file():
+            continue
+        text = test_path.read_text(encoding="utf-8")
+        imported_names = import_pattern.findall(text)
+        for symbol_name in imported_names:
+            literal = infer_simple_imported_symbol_expected_literal(text, symbol_name)
+            if literal:
+                candidates.append((symbol_name, literal))
+    unique_candidates = sorted(set(candidates))
+    if len(unique_candidates) != 1:
+        return None
+    symbol_name, literal = unique_candidates[0]
+    validate_safe_return_literal(literal)
+    return source_rel, source_path, symbol_name, literal
+
+
 def can_infer_guarded_execution(brief: dict[str, Any]) -> bool:
     task = str(brief.get("task") or "")
     if can_infer_guarded_natural_language_patch(task):
@@ -171,7 +247,12 @@ def can_infer_guarded_execution(brief: dict[str, Any]) -> bool:
         return False
     try:
         repo = Path(repo_path)
-        return bool(infer_test_missing_function_patch(repo, brief) or infer_test_return_mismatch_patch(repo, brief))
+        return bool(
+            infer_test_missing_function_patch(repo, brief)
+            or infer_test_return_mismatch_patch(repo, brief)
+            or infer_test_missing_constant_patch(repo, brief)
+            or infer_test_constant_mismatch_patch(repo, brief)
+        )
     except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
         return False
 
@@ -195,11 +276,34 @@ def infer_simple_zero_arg_expected_literal(test_text: str, function_name: str) -
     return literals[0] if len(literals) == 1 else ""
 
 
+def infer_simple_imported_symbol_expected_literal(test_text: str, symbol_name: str) -> str:
+    escaped = re.escape(symbol_name)
+    patterns = [
+        rf"\bassert\s+{escaped}\s*==\s*(?P<literal>[^\n#]+)",
+        rf"\bself\.assertEqual\(\s*{escaped}\s*,\s*(?P<literal>[^,\n\)]+)\s*\)",
+    ]
+    literals: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, test_text):
+            literal = match.group("literal").strip()
+            try:
+                validate_safe_return_literal(literal)
+            except ValueError:
+                continue
+            if literal not in literals:
+                literals.append(literal)
+    return literals[0] if len(literals) == 1 else ""
+
+
 def python_function_exists(source_path: Path, function_name: str) -> bool:
     if not source_path.exists() or source_path.suffix != ".py":
         return False
     tree = ast.parse(source_path.read_text(encoding="utf-8"))
     return any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name for node in ast.walk(tree))
+
+
+def python_module_constant_exists(source_path: Path, symbol_name: str) -> bool:
+    return bool(simple_module_constant_segment(source_path, symbol_name))
 
 
 def validate_safe_return_literal(literal: str) -> None:
@@ -305,6 +409,27 @@ def simple_function_return_segment(source_path: Path, function_name: str) -> dic
     return {}
 
 
+def simple_module_constant_segment(source_path: Path, symbol_name: str) -> dict[str, Any]:
+    if not source_path.exists() or source_path.suffix != ".py":
+        return {}
+    text = source_path.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    matches: list[ast.Assign | ast.AnnAssign] = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = [target.id for target in node.targets if isinstance(target, ast.Name)]
+            if targets == [symbol_name] and isinstance(node.value, ast.Constant):
+                matches.append(node)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == symbol_name and isinstance(node.value, ast.Constant):
+            matches.append(node)
+    if len(matches) != 1:
+        return {}
+    node = matches[0]
+    value = node.value
+    literal = ast.get_source_segment(text, value) or repr(value.value)
+    return {"line": node.lineno, "literal": literal.strip()}
+
+
 def replace_return_expression_in_file(source_path: Path, function_name: str, old_expression: str, new_expression: str) -> None:
     text = source_path.read_text(encoding="utf-8")
     function = simple_function_return_segment(source_path, function_name)
@@ -329,6 +454,30 @@ def replace_return_expression_in_file(source_path: Path, function_name: str, old
     source_path.write_text("".join(lines), encoding="utf-8")
 
 
+def replace_module_constant_in_file(source_path: Path, symbol_name: str, old_literal: str, new_literal: str) -> None:
+    text = source_path.read_text(encoding="utf-8")
+    constant = simple_module_constant_segment(source_path, symbol_name)
+    if constant.get("literal") != old_literal:
+        raise ValueError(f"current literal for {symbol_name} does not match expected literal")
+    try:
+        ast.parse(new_literal, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"new literal is not valid Python: {exc.msg}") from exc
+    line_number = int(constant.get("line") or 0)
+    lines = text.splitlines(keepends=True)
+    if line_number < 1 or line_number > len(lines):
+        raise ValueError(f"assignment line for {symbol_name} is out of range")
+    line = lines[line_number - 1]
+    match = re.match(rf"^(\s*{re.escape(symbol_name)}(?:\s*:\s*[^=]+)?\s*=\s*)(.+?)(\r?\n)?$", line)
+    if not match:
+        raise ValueError(f"assignment line for {symbol_name} is not a simple single-line assignment")
+    if match.group(2).strip() != old_literal:
+        raise ValueError(f"assignment line for {symbol_name} does not match expected literal")
+    newline = match.group(3) or ""
+    lines[line_number - 1] = f"{match.group(1)}{new_literal}{newline}"
+    source_path.write_text("".join(lines), encoding="utf-8")
+
+
 def append_python_function_to_file(source_path: Path, function_name: str, return_literal: str) -> None:
     if source_path.suffix != ".py":
         raise ValueError("append_python_function only supports Python files")
@@ -343,6 +492,17 @@ def append_python_function_to_file(source_path: Path, function_name: str, return
     if text.strip():
         separator += "\n"
     source_path.write_text(f"{text}{separator}def {function_name}():\n    return {return_literal}\n", encoding="utf-8")
+
+
+def append_python_constant_to_file(source_path: Path, symbol_name: str, literal: str) -> None:
+    if source_path.suffix != ".py":
+        raise ValueError("append_python_constant only supports Python files")
+    validate_safe_return_literal(literal)
+    text = source_path.read_text(encoding="utf-8")
+    if text.strip() and python_module_constant_exists(source_path, symbol_name):
+        raise ValueError(f"constant already exists: {symbol_name}")
+    separator = "" if not text or text.endswith("\n") else "\n"
+    source_path.write_text(f"{text}{separator}{symbol_name} = {literal}\n", encoding="utf-8")
 
 
 def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, Any]) -> tuple[list[str], str, list[dict[str, Any]], str]:
@@ -419,6 +579,25 @@ def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, A
                 if not isinstance(return_literal, str):
                     raise ValueError(f"append_python_function requires return_literal: {rel_path}")
                 append_python_function_to_file(path, function_name, return_literal)
+            elif op_type == "append_python_constant":
+                symbol_name = operation.get("symbol_name")
+                literal = operation.get("literal")
+                if not isinstance(symbol_name, str) or not symbol_name:
+                    raise ValueError(f"append_python_constant requires symbol_name: {rel_path}")
+                if not isinstance(literal, str):
+                    raise ValueError(f"append_python_constant requires literal: {rel_path}")
+                append_python_constant_to_file(path, symbol_name, literal)
+            elif op_type == "replace_python_constant":
+                symbol_name = operation.get("symbol_name")
+                old_literal = operation.get("old_literal")
+                new_literal = operation.get("new_literal")
+                if not isinstance(symbol_name, str) or not symbol_name:
+                    raise ValueError(f"replace_python_constant requires symbol_name: {rel_path}")
+                if not isinstance(old_literal, str) or not isinstance(new_literal, str):
+                    raise ValueError(f"replace_python_constant requires old_literal and new_literal: {rel_path}")
+                if path.suffix != ".py":
+                    raise ValueError(f"replace_python_constant only supports Python files: {rel_path}")
+                replace_module_constant_in_file(path, symbol_name, old_literal, new_literal)
             else:
                 raise ValueError(f"unsupported patch operation type: {op_type}")
             if rel_path not in changed:
@@ -458,7 +637,12 @@ def execute_implementation_brief(brief: dict[str, Any]) -> dict[str, Any]:
             if "future CodeBrigade autonomous execution adapter" not in str(exc):
                 raise
             repo = Path(str(brief.get("repo_path") or ""))
-            patch = infer_test_missing_function_patch(repo, brief) or infer_test_return_mismatch_patch(repo, brief)
+            patch = (
+                infer_test_missing_function_patch(repo, brief)
+                or infer_test_return_mismatch_patch(repo, brief)
+                or infer_test_missing_constant_patch(repo, brief)
+                or infer_test_constant_mismatch_patch(repo, brief)
+            )
             if not patch:
                 raise
         changed_files, patch_summary, operation_results, rollback_notes = apply_patch_operations(Path(str(brief.get("repo_path") or "")), brief, patch)

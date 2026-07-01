@@ -198,6 +198,42 @@ def run_test_inferred_return_mismatch_trial(root: Path) -> dict[str, Any]:
     return {"id": "test-inferred-return-mismatch-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
 
 
+def run_test_inferred_constant_trial(root: Path) -> dict[str, Any]:
+    repo = root / "test-inferred-constant-repo"
+    write_repo(
+        repo,
+        {
+            "app.py": "",
+            "test_app.py": (
+                "import unittest\nfrom app import ANSWER\n\n"
+                "class AnswerTest(unittest.TestCase):\n"
+                "    def test_answer(self):\n"
+                "        self.assertEqual(ANSWER, 42)\n\n"
+                "if __name__ == '__main__':\n"
+                "    unittest.main()\n"
+            ),
+        },
+    )
+    result = run_ceraxia(
+        CeraxiaInput(
+            task="почини app.py чтобы тест проходил",
+            repo_path=str(repo),
+            runs_root=root / "runs",
+            dry_run=False,
+            execute_verification=True,
+            verification_commands=("python -m unittest test_app.py", "python -m py_compile app.py"),
+        )
+    )
+    artifacts = load_run_artifacts(Path(result["run_dir"]))
+    require(result["ok"], "test-inferred constant handoff should complete", result)
+    require(result["ready_for_execution"], "test-inferred constant handoff should be ready after real adapter execution", result)
+    require("ANSWER = 42\n" in (repo / "app.py").read_text(encoding="utf-8"), "test-inferred constant patch should mutate app.py")
+    require(artifacts["worker"]["execution_intent"]["mode"] == "guarded_inferred_patch_execution", "worker must expose guarded inferred intent", artifacts["worker"])
+    require("test_inferred_missing_constant" in artifacts["worker"]["execution_result"]["patch_summary"], "worker result should expose constant patch source", artifacts["worker"])
+    require(artifacts["summary"]["surface_verification_status"] == "executed", "constant trial should execute source and test verification", artifacts["summary"])
+    return {"id": "test-inferred-constant-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
+
+
 def run_missing_path_trial(root: Path) -> dict[str, Any]:
     repo = root / "missing-path-repo"
     write_repo(repo, {"app.py": "def app():\n    return True\n"})
@@ -245,6 +281,7 @@ def main() -> int:
             run_guarded_inferred_patch_trial(root),
             run_test_inferred_missing_function_trial(root),
             run_test_inferred_return_mismatch_trial(root),
+            run_test_inferred_constant_trial(root),
             run_missing_path_trial(root),
             run_unshaped_real_execution_trial(root),
         ]

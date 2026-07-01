@@ -711,6 +711,32 @@ def main() -> int:
         if "return 42" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("test-inferred return mismatch did not update app.py")
     with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import ANSWER\n\ndef test_answer():\n    assert ANSWER == 42\n", encoding="utf-8")
+        missing_constant_brief = valid_brief()
+        missing_constant_brief["repo_path"] = tmp
+        missing_constant_brief["task"] = "почини app.py чтобы тест проходил"
+        missing_constant_report = code_brigade_adapter.build_worker_report(missing_constant_brief, dry_run=False)
+        if missing_constant_report["status"] != "implemented" or missing_constant_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"test-inferred missing constant should report implemented changed files: {missing_constant_report}")
+        if "test_inferred_missing_constant" not in missing_constant_report["execution_result"]["patch_summary"]:
+            raise AssertionError(f"test-inferred missing constant should expose patch source: {missing_constant_report}")
+        if "ANSWER = 42\n" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("test-inferred missing constant did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("ANSWER = 1\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import ANSWER\n\ndef test_answer():\n    assert ANSWER == 42\n", encoding="utf-8")
+        constant_mismatch_brief = valid_brief()
+        constant_mismatch_brief["repo_path"] = tmp
+        constant_mismatch_brief["task"] = "почини app.py чтобы тест проходил"
+        constant_mismatch_report = code_brigade_adapter.build_worker_report(constant_mismatch_brief, dry_run=False)
+        if constant_mismatch_report["status"] != "implemented" or constant_mismatch_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"test-inferred constant mismatch should report implemented changed files: {constant_mismatch_report}")
+        if "test_inferred_constant_mismatch" not in constant_mismatch_report["execution_result"]["patch_summary"]:
+            raise AssertionError(f"test-inferred constant mismatch should expose patch source: {constant_mismatch_report}")
+        if "ANSWER = 42\n" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("test-inferred constant mismatch did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def value():\n    return 42\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import value\n\ndef test_value():\n    assert value() == 42\n", encoding="utf-8")
         matching_return_brief = valid_brief()
