@@ -163,6 +163,28 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(verification["status"], "passed")
             self.assertTrue(verification["commands_executed"])
 
+    def test_non_dry_run_blocks_until_real_code_brigade_execution_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="добавь API helper",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                    dry_run=False,
+                )
+            )
+            self.assertFalse(result["ok"], result)
+            self.assertFalse(result["package_ok"], result)
+            self.assertFalse(result["ready_for_execution"], result)
+            self.assertEqual(result["state"], "failed")
+            run_dir = Path(result["run_dir"])
+            worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(worker_report["status"], "blocked")
+            self.assertTrue(any("real CodeBrigade execution adapter is not configured" in note for note in worker_report["notes"]))
+
     def test_review_gate_rejects_incomplete_planning_packet(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
         packet.pop("verification_strategy")
