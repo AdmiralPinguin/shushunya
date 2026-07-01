@@ -65,7 +65,7 @@ COMPONENTS = {
             "verification_execution.schema.json",
             "self_test.py",
         ],
-        "maturity": "dry_run_handoff_with_read_order_preflight_blocked_execution_adapter_and_allowlisted_verification",
+        "maturity": "dry_run_handoff_with_read_order_preflight_explicit_patch_adapter_and_allowlisted_verification",
     },
 }
 
@@ -73,8 +73,8 @@ COMPONENTS = {
 ROADMAP = [
     {
         "priority": 1,
-        "item": "replace blocked CodeBrigade execution adapter with safe source mutation",
-        "reason": "Ceraxia can produce a validated handoff and CodeBrigade now has a read-only execution preflight, but source mutation is still intentionally blocked.",
+        "item": "expand CodeBrigade execution beyond explicit CERAXIA_PATCH",
+        "reason": "CodeBrigade can now apply explicit patch operations after preflight, but natural-language patch planning and broader safe mutation are still blocked.",
         "owner": "CodeBrigade",
     },
     {

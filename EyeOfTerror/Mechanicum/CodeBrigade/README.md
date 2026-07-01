@@ -29,13 +29,14 @@ source. The brief must state:
 Workers return `worker_report.json` using
 `code_brigade_contract.schema.json`. `code_brigade_adapter.py` is the current
 local adapter: it validates the implementation brief and can acknowledge a
-dry-run handoff, but real source execution remains blocked until an execution
-adapter is intentionally wired.
+dry-run handoff. Real source execution is intentionally narrow: only explicit
+`CERAXIA_PATCH` operations against surveyed repo-relative files may pass.
 `implementation_brief_contract.py` owns brief validation shared by the report
 adapter and execution adapter.
-`execution_adapter.py` is that boundary today, but it is still a blocked stub:
-it returns a formal `code_brigade_execution_result` blocker rather than
-mutating source.
+`execution_adapter.py` is that boundary today. It applies explicit
+`CERAXIA_PATCH` `replace` and guarded `write_file` operations only after brief
+validation and read-only preflight; tasks without that marker still return a
+formal `code_brigade_execution_result` blocker.
 `execution_contract.py` owns the formal execution result builders so the
 execution boundary does not depend on the full worker-report adapter.
 `execution_preflight.py` performs read-only mutation preflight checks for the
@@ -45,10 +46,10 @@ The worker report must include `implementation_plan`, which preserves survey
 candidate files, test files, local dependency edges, handoff steps,
 verification commands, acceptance gates, and refusal conditions for the future
 real executor.
-It also includes `execution_policy_status`; this must remain
-`blocked_until_adapter_is_wired` until a real source-mutation adapter is
-implemented and covered by the local gate.
-When that adapter is added, its result must satisfy
+It also includes `execution_policy_status`; this remains
+`blocked_until_adapter_is_wired` for dry-run handoffs and blocked execution
+requests, and switches to `real_execution_adapter_active` only when the explicit
+patch adapter reports implemented changes. Adapter results must satisfy
 `execution_result.schema.json`: status, changed files, patch summary, executed
 verification commands, blockers, and rollback notes.
 

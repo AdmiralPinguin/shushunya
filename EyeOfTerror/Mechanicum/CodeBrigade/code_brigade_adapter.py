@@ -102,8 +102,11 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         from execution_adapter import execute_implementation_brief
 
         execution_result = execute_implementation_brief(brief)
-        status = "blocked"
+        status = "implemented" if execution_result.get("status") == "implemented" else "blocked"
         notes.extend(str(item) for item in execution_result.get("blockers", []))
+        if status == "implemented":
+            changed_files = execution_result.get("changed_files", []) if isinstance(execution_result.get("changed_files"), list) else []
+            notes.append("CodeBrigade explicit patch adapter applied the requested changes")
     report = {
         "kind": "ceraxia_code_brigade_worker_report",
         "contract_version": CONTRACT_VERSION,
@@ -118,8 +121,10 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "validation_problems": validation_problems,
         "adapter": "EyeOfTerror/Mechanicum/CodeBrigade/code_brigade_adapter.py",
     }
-    if status == "blocked":
-        report["execution_result"] = execution_result if "execution_result" in locals() else build_blocked_execution_result(notes)
+    if "execution_result" in locals():
+        report["execution_result"] = execution_result
+    elif status == "blocked":
+        report["execution_result"] = build_blocked_execution_result(notes)
     return report
 
 

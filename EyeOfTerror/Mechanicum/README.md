@@ -34,9 +34,10 @@ execution policy, execution result, evidence matrix, and run summary contracts.
 It is intentionally small and stdlib-only; detailed schema validation can come
 later.
 
-Current source mutation status: blocked by policy. The next hard architecture
-step is replacing the blocked `CodeBrigade/execution_adapter.py` stub with a
-safe source mutation adapter that uses the existing brief validation, preflight,
+Current source mutation status: narrow explicit-patch only. `CodeBrigade` can
+apply `CERAXIA_PATCH` operations against surveyed repo-relative files after
+brief validation and preflight. The next hard architecture step is expanding
+that adapter beyond explicit patches while preserving validation, preflight,
 execution result, verification, rollback, and audit contracts.
 
 For fast local iteration inside this folder, run:

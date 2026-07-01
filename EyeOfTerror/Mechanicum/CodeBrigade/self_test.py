@@ -208,7 +208,7 @@ def main() -> int:
     if not plan["refusal_conditions"]:
         raise AssertionError(f"implementation plan should include refusal conditions: {plan}")
     execute_report = code_brigade_adapter.build_worker_report(valid_brief(), dry_run=False)
-    if execute_report["status"] != "blocked" or "not configured" not in " ".join(execute_report["notes"]):
+    if execute_report["status"] != "blocked" or not execute_report["notes"]:
         raise AssertionError(f"real execution should be honestly blocked until adapter is wired: {execute_report}")
     if execute_report["execution_result"]["status"] != "blocked":
         raise AssertionError(f"blocked execution should expose a formal execution_result: {execute_report}")
@@ -219,6 +219,30 @@ def main() -> int:
         raise AssertionError(f"execution adapter stub should return a formal blocker: {direct_execution}")
     if direct_execution["preflight"]["candidate_file_count"] != 1:
         raise AssertionError(f"execution preflight should summarize survey evidence: {direct_execution}")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app() is True\n", encoding="utf-8")
+        patch_brief = valid_brief()
+        patch_brief["repo_path"] = tmp
+        patch_brief["task"] += "\nCERAXIA_PATCH:\n" + json.dumps(
+            {
+                "operations": [
+                    {
+                        "type": "replace",
+                        "path": "app.py",
+                        "old": "return False",
+                        "new": "return True",
+                    }
+                ]
+            }
+        )
+        patch_report = code_brigade_adapter.build_worker_report(patch_brief, dry_run=False)
+        if patch_report["status"] != "implemented" or patch_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"explicit patch execution should report implemented changed files: {patch_report}")
+        if patch_report["execution_result"]["status"] != "implemented":
+            raise AssertionError(f"explicit patch execution result should be implemented: {patch_report}")
+        if "return True" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("explicit patch execution did not update app.py")
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")

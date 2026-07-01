@@ -12,12 +12,12 @@ def main() -> int:
         raise AssertionError(f"status should expose the architecture contract: {status}")
     by_name = {item["name"]: item for item in status["components"]}
     code_maturity = by_name["CodeBrigade"]["maturity"]
-    if "blocked_execution_adapter" not in code_maturity or "preflight" not in code_maturity or "allowlisted_verification" not in code_maturity:
+    if "explicit_patch_adapter" not in code_maturity or "preflight" not in code_maturity or "allowlisted_verification" not in code_maturity:
         raise AssertionError(f"CodeBrigade should honestly report preflight and verification-adapter maturity: {by_name['CodeBrigade']}")
     ceraxia_maturity = by_name["Ceraxia"]["maturity"]
     if not all(part in ceraxia_maturity for part in ["dry_run_controller", "planning_quality", "survey_gate", "verification"]):
         raise AssertionError(f"Ceraxia should honestly report dry-run planning, survey, and verification maturity: {by_name['Ceraxia']}")
-    if "replace blocked CodeBrigade execution adapter" not in status["next_architecture_step"]:
+    if "expand CodeBrigade execution beyond explicit CERAXIA_PATCH" not in status["next_architecture_step"]:
         raise AssertionError(f"status should point to the next architecture gap: {status}")
     if status["roadmap"][0]["owner"] != "CodeBrigade":
         raise AssertionError(f"first roadmap item should target CodeBrigade: {status}")
