@@ -164,6 +164,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(review["verification_sufficiency"]["status"], "planned_only")
             self.assertEqual(review["surface_verification_sufficiency"]["status"], "planned_only")
             self.assertGreaterEqual(review["package_status_sufficiency"]["status_counts"]["planned"], 1)
+            self.assertGreaterEqual(review["surface_package_sufficiency"]["surface_count"], 1)
+            self.assertFalse(review["surface_package_sufficiency"]["missing_status_package_ids"])
             self.assertGreaterEqual(review["surface_verification_sufficiency"]["surface_count"], 1)
             self.assertGreaterEqual(review["verification_sufficiency"]["commands_planned_count"], 1)
             readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
@@ -208,6 +210,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["implementation_work_package_surface_count"], evidence_matrix["implementation_work_package_summary"]["covered_surface_count"])
             self.assertEqual(summary["work_package_status_counts"], evidence_matrix["implementation_work_package_summary"]["status_counts"])
             self.assertTrue(all(item["status"] == "planned" for item in evidence_matrix["implementation_work_package_summary"]["statuses"]))
+            self.assertTrue(any(row["surface"] == "security_boundary" and "security_boundary_package" in row["package_ids"] for row in evidence_matrix["surface_package_summary"]["rows"]))
             final_report = (run_dir / "final_report.md").read_text(encoding="utf-8")
             self.assertIn("Execution readiness: blocked", final_report)
             self.assertIn("- evidence_matrix.json", final_report)
@@ -430,7 +433,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertEqual(review["decision"], "blocked")
         self.assertEqual(review["package_status_sufficiency"]["blocked_package_ids"], ["minimal_patch_package"])
+        self.assertIn("evidence_survey_package", review["surface_package_sufficiency"]["missing_status_package_ids"])
         self.assertTrue(any("work packages are blocked" in item["finding"] for item in review["findings"]))
+        self.assertTrue(any("surface package matrix references packages without worker status" in item["finding"] for item in review["findings"]))
 
     def test_review_gate_marks_failed_surface_verification(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})

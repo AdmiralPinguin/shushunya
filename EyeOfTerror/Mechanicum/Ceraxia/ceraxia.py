@@ -411,6 +411,35 @@ def review_gate(
             if isinstance(item, dict) and item.get("status") == "blocked"
         ],
     }
+    surface_package_matrix = brief.get("surface_package_matrix") if isinstance(brief.get("surface_package_matrix"), dict) else {}
+    surface_package_rows = surface_package_matrix.get("rows") if isinstance(surface_package_matrix.get("rows"), list) else []
+    package_status_ids = {
+        str(item.get("package_id") or "")
+        for item in package_statuses
+        if isinstance(item, dict) and item.get("package_id")
+    }
+    surface_package_sufficiency_rows: list[dict[str, Any]] = []
+    missing_surface_package_statuses: list[str] = []
+    for row in surface_package_rows:
+        if not isinstance(row, dict):
+            continue
+        package_ids = [str(item) for item in row.get("package_ids", []) if isinstance(item, str)]
+        missing_ids = [package_id for package_id in package_ids if package_id not in package_status_ids]
+        missing_surface_package_statuses.extend(missing_ids)
+        surface_package_sufficiency_rows.append(
+            {
+                "surface": str(row.get("surface") or ""),
+                "package_ids": package_ids,
+                "missing_status_package_ids": missing_ids,
+                "blockers": row.get("blockers", []) if isinstance(row.get("blockers"), list) else [],
+            }
+        )
+    surface_package_sufficiency = {
+        "planned_complete": surface_package_matrix.get("complete") is True,
+        "surface_count": len(surface_package_rows),
+        "rows": surface_package_sufficiency_rows,
+        "missing_status_package_ids": sorted(set(missing_surface_package_statuses)),
+    }
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
     if not worker_report.get("implementation_brief_acknowledged", False):
@@ -419,6 +448,10 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "worker report is blocked"})
     if package_status_sufficiency["blocked_package_ids"]:
         findings.append({"severity": "blocker", "finding": "work packages are blocked: " + ", ".join(package_status_sufficiency["blocked_package_ids"])})
+    if surface_package_matrix.get("complete") is False:
+        findings.append({"severity": "blocker", "finding": "surface package matrix has blockers"})
+    if surface_package_sufficiency["missing_status_package_ids"]:
+        findings.append({"severity": "blocker", "finding": "surface package matrix references packages without worker status: " + ", ".join(surface_package_sufficiency["missing_status_package_ids"])})
     if worker_report["dry_run"] and package_status_counts["planned"]:
         warnings.append({"severity": "warning", "finding": "work packages are planned but not implemented"})
     if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution", "passed"}:
@@ -466,12 +499,14 @@ def review_gate(
         "verification_sufficiency": verification_sufficiency,
         "surface_verification_sufficiency": surface_verification_sufficiency,
         "package_status_sufficiency": package_status_sufficiency,
+        "surface_package_sufficiency": surface_package_sufficiency,
         "checked_against": [
             "planning packet completeness",
             "strategy approval",
             "scope control",
             "verification strategy",
             "surface verification coverage",
+            "surface package ownership",
             "work package status coverage",
             "worker report honesty",
         ],
@@ -885,6 +920,7 @@ def build_evidence_matrix(
     implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
     work_packages = implementation_plan.get("implementation_work_packages") if isinstance(implementation_plan.get("implementation_work_packages"), list) else []
     work_package_review_order = implementation_plan.get("work_package_review_order") if isinstance(implementation_plan.get("work_package_review_order"), list) else []
+    surface_package_rows = implementation_plan.get("surface_package_matrix_rows") if isinstance(implementation_plan.get("surface_package_matrix_rows"), list) else []
     package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
     package_status_counts = {
         status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
@@ -954,6 +990,10 @@ def build_evidence_matrix(
             "covered_surface_count": len(package_surfaces),
             "status_counts": package_status_counts,
             "statuses": package_statuses,
+        },
+        "surface_package_summary": {
+            "surface_count": len(surface_package_rows),
+            "rows": surface_package_rows,
         },
     }
 

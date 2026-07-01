@@ -12,7 +12,8 @@
     "blocked_count",
     "rows",
     "implementation_plan_sources",
-    "implementation_work_package_summary"
+    "implementation_work_package_summary",
+    "surface_package_summary"
   ],
   "properties": {
     "kind": {
@@ -84,6 +85,24 @@
         "status_counts",
         "statuses"
       ]
+    },
+    "surface_package_summary": {
+      "type": "object",
+      "required": [
+        "surface_count",
+        "rows"
+      ],
+      "properties": {
+        "surface_count": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
     }
   },
   "additionalProperties": true
