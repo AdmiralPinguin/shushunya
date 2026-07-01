@@ -61,6 +61,8 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "source_summaries_to_consider": evidence.get("source_summaries", []) if isinstance(evidence.get("source_summaries"), list) else [],
         "dependency_edges_to_check": evidence.get("local_import_edges", []) if isinstance(evidence.get("local_import_edges"), list) else [],
         "generic_dependency_edges_to_check": evidence.get("generic_import_edges", []) if isinstance(evidence.get("generic_import_edges"), list) else [],
+        "reverse_dependency_index": evidence.get("reverse_dependency_index", {}) if isinstance(evidence.get("reverse_dependency_index"), dict) else {},
+        "test_coverage_links": evidence.get("test_coverage_links", []) if isinstance(evidence.get("test_coverage_links"), list) else [],
         "survey_truncated": bool(evidence.get("survey_truncated")),
         "python_symbols_truncated": bool(evidence.get("python_symbols_truncated")),
         "handoff_steps": handoff.get("steps", []) if isinstance(handoff.get("steps"), list) else [],

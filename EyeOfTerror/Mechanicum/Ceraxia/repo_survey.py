@@ -311,6 +311,35 @@ def build_recommended_read_order(
     return ordered[:80]
 
 
+def build_reverse_dependency_index(edges: list[dict[str, str]]) -> dict[str, list[str]]:
+    reverse: dict[str, list[str]] = {}
+    for edge in edges:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if not source or not target:
+            continue
+        reverse.setdefault(target, [])
+        if source not in reverse[target]:
+            reverse[target].append(source)
+    return {target: sorted(sources) for target, sources in sorted(reverse.items())}
+
+
+def build_test_coverage_links(edges: list[dict[str, str]]) -> list[dict[str, str]]:
+    links: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for edge in edges:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if not source or not target or not is_test_file(Path(source)):
+            continue
+        key = (source, target)
+        if key in seen:
+            continue
+        seen.add(key)
+        links.append({"test": source, "target": target})
+    return links[:80]
+
+
 def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[str], path_hints: list[str] | None = None) -> dict[str, Any]:
     root = Path(repo_path)
     path_hints = path_hints or []
@@ -338,6 +367,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "source_summaries": [],
             "local_import_edges": [],
             "generic_import_edges": [],
+            "reverse_dependency_index": {},
+            "test_coverage_links": [],
             "recommended_read_order": [],
             "suggested_verification_commands": [],
             "max_files_scanned": MAX_SURVEY_FILES,
@@ -397,6 +428,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     python_edges = build_local_import_edges(python_symbols, python_files, root)
     generic_edges = build_generic_import_edges(source_summaries, rel_to_path, root)
     dependency_edges = unique_edges([*python_edges, *generic_edges])[:120]
+    reverse_dependency_index = build_reverse_dependency_index(dependency_edges)
+    test_coverage_links = build_test_coverage_links(dependency_edges)
     recommended_read_order = build_recommended_read_order(existing_path_hints, entrypoints, candidates, tests, dependency_edges)
     suggested_commands: list[str] = []
     if tests:
@@ -425,6 +458,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "source_summaries": source_summaries,
         "local_import_edges": dependency_edges,
         "generic_import_edges": generic_edges,
+        "reverse_dependency_index": reverse_dependency_index,
+        "test_coverage_links": test_coverage_links,
         "recommended_read_order": recommended_read_order,
         "suggested_verification_commands": suggested_commands,
         "max_files_scanned": MAX_SURVEY_FILES,
