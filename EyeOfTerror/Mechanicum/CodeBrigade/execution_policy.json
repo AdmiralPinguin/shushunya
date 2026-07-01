@@ -6,6 +6,7 @@
   "mutation_preconditions": [
     "implementation_brief validates against the CodeBrigade contract",
     "implementation_plan lists target files, test files, dependency edges, and refusal conditions",
+    "execution preflight passes before source mutation",
     "repository survey evidence exists for candidate files before source mutation",
     "verification strategy names focused checks before source mutation",
     "dirty worktree or unknown ownership requires explicit blocker instead of overwrite"
