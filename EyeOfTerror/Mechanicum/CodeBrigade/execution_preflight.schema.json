@@ -12,6 +12,8 @@
     "existing_candidate_file_count",
     "missing_candidate_files",
     "test_file_count",
+    "existing_test_file_count",
+    "missing_test_files",
     "targeted_command_count",
     "suggested_command_count",
     "blockers",
@@ -47,6 +49,15 @@
     },
     "test_file_count": {
       "type": "integer"
+    },
+    "existing_test_file_count": {
+      "type": "integer"
+    },
+    "missing_test_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "targeted_command_count": {
       "type": "integer"

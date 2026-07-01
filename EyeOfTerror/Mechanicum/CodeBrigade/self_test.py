@@ -91,6 +91,7 @@ def main() -> int:
         raise AssertionError(f"execution preflight should summarize survey evidence: {direct_execution}")
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
         preflight_brief = valid_brief()
         preflight_brief["repo_path"] = tmp
         preflight = build_execution_preflight(preflight_brief)
@@ -98,6 +99,8 @@ def main() -> int:
             raise AssertionError(f"valid preflight should pass before execution adapter policy blocks mutation: {preflight}")
         if preflight["existing_candidate_file_count"] != 1 or preflight["missing_candidate_files"]:
             raise AssertionError(f"valid preflight should prove candidate files exist: {preflight}")
+        if preflight["existing_test_file_count"] != 1 or preflight["missing_test_files"]:
+            raise AssertionError(f"valid preflight should prove listed test files exist: {preflight}")
         empty_survey_brief = valid_brief()
         empty_survey_brief["repo_path"] = tmp
         empty_survey_brief["repo_survey_evidence"]["candidate_files"] = []
@@ -110,6 +113,12 @@ def main() -> int:
         stale_preflight = build_execution_preflight(stale_survey_brief)
         if stale_preflight["ok"] or stale_preflight["missing_candidate_files"] != ["missing.py"]:
             raise AssertionError(f"preflight should block stale survey candidate files: {stale_preflight}")
+        stale_tests_brief = valid_brief()
+        stale_tests_brief["repo_path"] = tmp
+        stale_tests_brief["repo_survey_evidence"]["test_files"] = ["missing_test.py"]
+        stale_tests_preflight = build_execution_preflight(stale_tests_brief)
+        if stale_tests_preflight["ok"] or stale_tests_preflight["missing_test_files"] != ["missing_test.py"]:
+            raise AssertionError(f"preflight should block stale survey test files: {stale_tests_preflight}")
     invalid = valid_brief()
     invalid.pop("allowed_scope")
     invalid_report = code_brigade_adapter.build_worker_report(invalid, dry_run=True)
