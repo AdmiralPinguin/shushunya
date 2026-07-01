@@ -10,6 +10,7 @@ from ceraxia import (
     CeraxiaInput,
     LIFECYCLE,
     allocate_run_dir,
+    build_execution_readiness,
     build_implementation_brief,
     build_repo_survey,
     build_survey_quality_gate,
@@ -875,6 +876,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertIn("minimal_patch_package", repair_item["package_ids"])
         self.assertEqual(repair_item["max_repair_attempts"], brief["diagnostic_repair_plan"]["max_repair_attempts"])
         self.assertEqual(repair_item["stop_conditions"], brief["diagnostic_repair_plan"]["stop_conditions"])
+        readiness = build_execution_readiness({"state": "failed"}, brief, worker_report, verification_report, review, dry_run=False)
+        self.assertIn("diagnostic repair request must be handled before execution readiness", readiness["blockers"])
+        self.assertEqual(readiness["next_capability_to_wire"], "CodeBrigade diagnostic repair adapter")
 
     def test_review_gate_blocks_passed_report_with_failure_output(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})

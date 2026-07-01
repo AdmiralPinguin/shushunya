@@ -1448,6 +1448,9 @@ def build_execution_readiness(
         blockers.extend(str(item) for item in verification_report.get("blockers", []))
     if review.get("decision") not in {"ready", "dry_run_ready"}:
         blockers.append("review gate did not approve the handoff")
+    repair_queue = review.get("diagnostic_repair_queue") if isinstance(review.get("diagnostic_repair_queue"), dict) else {}
+    if repair_queue.get("item_count", 0):
+        blockers.append("diagnostic repair request must be handled before execution readiness")
     if dry_run:
         blockers.append("dry run requested; real CodeBrigade execution was intentionally skipped")
     intent = worker_report.get("execution_intent") if isinstance(worker_report.get("execution_intent"), dict) else {}
@@ -1460,7 +1463,7 @@ def build_execution_readiness(
         "dry_run": dry_run,
         "ready_conditions": ready_conditions,
         "blockers": blockers,
-        "next_capability_to_wire": "CodeBrigade real execution adapter" if dry_run else "",
+        "next_capability_to_wire": "CodeBrigade diagnostic repair adapter" if repair_queue.get("item_count", 0) else ("CodeBrigade real execution adapter" if dry_run else ""),
     }
 
 
