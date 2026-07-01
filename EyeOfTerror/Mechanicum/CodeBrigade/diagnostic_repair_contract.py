@@ -90,12 +90,27 @@ def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
     problems = validate_diagnostic_repair_request(request)
     queue = request.get("diagnostic_repair_queue") if isinstance(request.get("diagnostic_repair_queue"), dict) else {}
     items = queue.get("items") if isinstance(queue.get("items"), list) else []
+    attempt_plan = [
+        {
+            "attempt_id": f"repair-{index + 1}",
+            "command": str(item.get("command") or ""),
+            "priority": str(item.get("priority") or "normal"),
+            "diagnostic_signals": item.get("diagnostic_signals", []) if isinstance(item.get("diagnostic_signals"), list) else [],
+            "read_order": item.get("concrete_read_targets", []) if isinstance(item.get("concrete_read_targets"), list) else [],
+            "package_ids": item.get("package_ids", []) if isinstance(item.get("package_ids"), list) else [],
+            "stop_conditions": item.get("stop_conditions", []) if isinstance(item.get("stop_conditions"), list) else [],
+            "required_evidence": item.get("repair_evidence_required", []) if isinstance(item.get("repair_evidence_required"), list) else [],
+        }
+        for index, item in enumerate(items)
+        if isinstance(item, dict)
+    ]
     return {
         "kind": "code_brigade_diagnostic_repair_intake",
         "contract_version": CONTRACT_VERSION,
         "status": "blocked" if problems else ("ready" if request.get("status") == "required" else "not_required"),
         "request_status": request.get("status", ""),
         "item_count": len(items),
+        "attempt_plan": attempt_plan,
         "high_priority_count": sum(1 for item in items if isinstance(item, dict) and item.get("priority") == "high"),
         "impacted_surfaces": sorted(
             {
@@ -117,6 +132,13 @@ def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
         ),
         "target_files_to_inspect": request.get("target_files_to_inspect", []) if isinstance(request.get("target_files_to_inspect"), list) else [],
         "test_files_to_preserve": request.get("test_files_to_preserve", []) if isinstance(request.get("test_files_to_preserve"), list) else [],
+        "refusal_conditions": [
+            "repair request validation fails",
+            "repair item has no safe concrete read target",
+            "repair would require editing tests without explicit authorization",
+            "same verification failure repeats through max_repair_attempts",
+            "requested edit would exceed scope_budget",
+        ],
         "blockers": problems,
     }
 

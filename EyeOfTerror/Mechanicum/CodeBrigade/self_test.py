@@ -746,6 +746,10 @@ def main() -> int:
         raise AssertionError(f"diagnostic repair intake should be ready for a valid request: {repair_intake}")
     if repair_intake["package_ids"] != ["minimal_patch_package", "verification_evidence_package"]:
         raise AssertionError(f"diagnostic repair intake should preserve package ids: {repair_intake}")
+    if repair_intake["attempt_plan"][0]["read_order"] != ["app.py"]:
+        raise AssertionError(f"diagnostic repair intake should build attempt read order: {repair_intake}")
+    if "repair item has no safe concrete read target" not in repair_intake["refusal_conditions"]:
+        raise AssertionError(f"diagnostic repair intake should expose refusal conditions: {repair_intake}")
     broken_repair_request = dict(repair_request)
     broken_repair_request["diagnostic_repair_queue"] = dict(repair_request["diagnostic_repair_queue"], item_count=2)
     broken_intake = build_diagnostic_repair_intake(broken_repair_request)
