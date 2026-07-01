@@ -319,6 +319,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("Protected invariants:", final_report)
             self.assertIn("Acceptance trace status: complete", final_report)
             self.assertIn("Acceptance trace rows:", final_report)
+            self.assertIn("Constraint trace status: complete", final_report)
+            self.assertIn("Constraint trace rows:", final_report)
             self.assertIn("Assumption register status: complete", final_report)
             self.assertIn("Assumptions tracked:", final_report)
             self.assertIn("- evidence_matrix.json", final_report)
