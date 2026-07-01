@@ -343,6 +343,70 @@ def work_breakdown(triage: dict[str, Any], dependency: dict[str, Any]) -> dict[s
     }
 
 
+def impact_analysis(triage: dict[str, Any], problem: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
+    kinds = set(triage["task_kinds"])
+    surfaces: list[dict[str, Any]] = [
+        {
+            "surface": "source_behavior",
+            "risk": triage["risk_level"],
+            "evidence_needed": ["candidate source files", "targeted behavior verification"],
+        },
+        {
+            "surface": "test_surface",
+            "risk": "medium" if "test_repair" in kinds else "low",
+            "evidence_needed": ["existing tests", "test edits avoided unless explicitly requested"],
+        },
+    ]
+    if "api_compatibility" in kinds:
+        surfaces.append(
+            {
+                "surface": "public_api_contract",
+                "risk": "high",
+                "evidence_needed": ["request/response compatibility", "caller-facing verification"],
+            }
+        )
+    if "security" in kinds:
+        surfaces.append(
+            {
+                "surface": "security_boundary",
+                "risk": "high",
+                "evidence_needed": ["negative boundary tests", "untrusted input rejection evidence"],
+            }
+        )
+    if "config_runtime" in kinds:
+        surfaces.append(
+            {
+                "surface": "runtime_configuration",
+                "risk": "medium",
+                "evidence_needed": ["missing/invalid config behavior", "startup/runtime compatibility"],
+            }
+        )
+    if "migration" in kinds:
+        surfaces.append(
+            {
+                "surface": "data_compatibility",
+                "risk": "high",
+                "evidence_needed": ["old/new/mixed data shape round trip", "rollback or compatibility note"],
+            }
+        )
+    if "refactor" in kinds:
+        surfaces.append(
+            {
+                "surface": "internal_architecture",
+                "risk": "medium",
+                "evidence_needed": ["behavior-preserving tests", "dependency edge review"],
+            }
+        )
+    return {
+        "role": "DesignStrategos",
+        "path_hints": problem.get("explicit_path_hints", []),
+        "repo_focus": survey.get("focus", []),
+        "surfaces": surfaces,
+        "highest_risk_surface": "security_boundary" if "security" in kinds else "data_compatibility" if "migration" in kinds else surfaces[0]["surface"],
+        "requires_cross_surface_review": len(surfaces) >= 4 or triage["risk_level"] == "high",
+    }
+
+
 def design_options(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
     selected = "minimal_design"
@@ -520,6 +584,7 @@ def implementation_brief_blueprint(
     quality: dict[str, Any],
     dependency: dict[str, Any],
     breakdown: dict[str, Any],
+    impact: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "role": "PlanningBrigade",
@@ -541,6 +606,7 @@ def implementation_brief_blueprint(
             "acceptance_gates",
             "quality_bar",
             "repo_survey_evidence",
+            "impact_analysis",
         ],
         "strategy": design["selected_strategy"],
         "risk_level": triage["risk_level"],
@@ -549,6 +615,7 @@ def implementation_brief_blueprint(
         "required_quality_evidence": quality["must_have_evidence"],
         "dependency_critical_path": dependency["critical_path"],
         "work_phases": [phase["id"] for phase in breakdown["phases"]],
+        "impact_surfaces": [surface["surface"] for surface in impact["surfaces"]],
         "mutation_preconditions": [
             "implementation brief validates",
             "execution preflight passes",
@@ -680,12 +747,13 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     survey = repo_survey_request(payload, triage)
     dependency = dependency_map(triage, survey)
     breakdown = work_breakdown(triage, dependency)
+    impact = impact_analysis(triage, problem, survey)
     design = design_options(payload, triage)
     verification = verification_strategy(triage)
     risks = risk_register(triage, survey, design, verification)
     quality = quality_bar(triage, verification)
     acceptance = acceptance_contract(problem, triage, verification, quality)
-    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown)
+    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact)
     review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, acceptance)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
@@ -700,6 +768,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "repo_survey_request": survey,
         "dependency_map": dependency,
         "work_breakdown": breakdown,
+        "impact_analysis": impact,
         "design_options": design,
         "verification_strategy": verification,
         "risk_register": risks,

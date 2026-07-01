@@ -100,6 +100,7 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         "repo_survey_request",
         "dependency_map",
         "work_breakdown",
+        "impact_analysis",
         "design_options",
         "verification_strategy",
         "risk_register",
@@ -166,6 +167,12 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         review_phase = next((phase for phase in phases if isinstance(phase, dict) and phase.get("id") == "review_result"), {})
         if not isinstance(review_phase.get("depends_on"), list) or not review_phase.get("depends_on"):
             problems.append("work breakdown review_result must depend on evidence phases")
+    impact = packet.get("impact_analysis") if isinstance(packet.get("impact_analysis"), dict) else {}
+    surfaces = impact.get("surfaces") if isinstance(impact.get("surfaces"), list) else []
+    if not surfaces:
+        problems.append("impact analysis must include impacted surfaces")
+    if not isinstance(impact.get("highest_risk_surface"), str) or not impact.get("highest_risk_surface"):
+        problems.append("impact analysis must include highest_risk_surface")
     design = packet.get("design_options") if isinstance(packet.get("design_options"), dict) else {}
     if not isinstance(design.get("selected_strategy"), str) or not design.get("selected_strategy"):
         problems.append("design options must include selected_strategy")
@@ -284,6 +291,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "planning_review_gate": planning_review,
         "planning_dependency_map": packet.get("dependency_map", {}),
         "work_breakdown": packet.get("work_breakdown", {}),
+        "impact_analysis": packet.get("impact_analysis", {}),
         "code_brigade_handoff": handoff,
         "repo_survey_evidence": {
             "candidate_files": survey.get("candidate_files", []),

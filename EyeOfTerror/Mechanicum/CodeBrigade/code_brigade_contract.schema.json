@@ -60,6 +60,9 @@
         "planning_review_score",
         "work_phases",
         "stop_conditions",
+        "impact_surfaces",
+        "highest_risk_surface",
+        "requires_cross_surface_review",
         "mutation_preconditions",
         "acceptance_evidence_required",
         "verification_commands",
@@ -120,6 +123,18 @@
           "items": {
             "type": "string"
           }
+        },
+        "impact_surfaces": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "highest_risk_surface": {
+          "type": "string"
+        },
+        "requires_cross_surface_review": {
+          "type": "boolean"
         },
         "mutation_preconditions": {
           "type": "array",

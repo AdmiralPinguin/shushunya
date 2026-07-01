@@ -49,6 +49,11 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief work_breakdown phases are required")
     elif not all(isinstance(phase, dict) and phase.get("id") and phase.get("owner") and phase.get("exit_gate") for phase in phases):
         problems.append("brief work_breakdown phases must include id, owner, and exit_gate")
+    impact = brief.get("impact_analysis") if isinstance(brief.get("impact_analysis"), dict) else {}
+    if not isinstance(impact.get("surfaces"), list) or not impact.get("surfaces"):
+        problems.append("brief impact_analysis.surfaces is required")
+    if not isinstance(impact.get("highest_risk_surface"), str) or not impact.get("highest_risk_surface"):
+        problems.append("brief impact_analysis.highest_risk_surface is required")
     handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
     if handoff.get("target") != "CodeBrigade":
         problems.append("brief code_brigade_handoff must target CodeBrigade")

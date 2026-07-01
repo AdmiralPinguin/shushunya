@@ -23,6 +23,7 @@
     "planning_review_gate",
     "planning_dependency_map",
     "work_breakdown",
+    "impact_analysis",
     "code_brigade_handoff",
     "blocked",
     "blockers"
@@ -109,6 +110,9 @@
       "type": "object"
     },
     "work_breakdown": {
+      "type": "object"
+    },
+    "impact_analysis": {
       "type": "object"
     },
     "code_brigade_handoff": {

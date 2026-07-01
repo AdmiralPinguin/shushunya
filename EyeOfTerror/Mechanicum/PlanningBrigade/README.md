@@ -22,6 +22,9 @@ Current contract:
   implementation brief.
 - `work_breakdown` orders the work phases, owners, dependencies, outputs, exit
   gates, parallel work opportunities, and stop conditions.
+- `impact_analysis` records affected engineering surfaces such as source
+  behavior, tests, public API contracts, security boundaries, runtime config,
+  data compatibility, and internal architecture.
 - `acceptance_contract` records what the final package must prove and what
   shortcuts are forbidden.
 - `implementation_brief_blueprint` defines the CodeBrigade handoff sections and
