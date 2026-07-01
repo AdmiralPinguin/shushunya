@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import planning_brigade
@@ -174,6 +175,25 @@ def assert_planning_feedback_intake() -> None:
     invalid_intake = build_planning_feedback_intake(invalid_request)
     if invalid_intake["status"] != "blocked_invalid_request":
         raise AssertionError(f"invalid feedback status must block intake: {invalid_intake}")
+    with tempfile.TemporaryDirectory() as tmp:
+        feedback_path = Path(tmp) / "planning_feedback_request.json"
+        feedback_path.write_text(json.dumps(feedback_request, ensure_ascii=False), encoding="utf-8")
+        cli_feedback = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "planning_brigade.py"),
+                "--feedback-request",
+                str(feedback_path),
+            ],
+            cwd=str(REPO_ROOT),
+            text=True,
+            capture_output=True,
+        )
+        if cli_feedback.returncode != 0:
+            raise AssertionError(f"valid feedback request should pass CLI intake: {cli_feedback.stdout} {cli_feedback.stderr}")
+        cli_intake = json.loads(cli_feedback.stdout)
+        if cli_intake["status"] != "replan_required":
+            raise AssertionError(f"CLI feedback intake must require replan: {cli_intake}")
 
 
 def main() -> int:
