@@ -29,6 +29,9 @@ def main() -> int:
         absolute_path = verification_adapter.run_verification_commands(["pytest /tmp/test_api.py"], str(repo), execute=False)
         if absolute_path["status"] != "blocked" or "unsafe path token" not in absolute_path["results"][0]["stderr"]:
             raise AssertionError(f"allowlisted command with absolute path should be blocked: {absolute_path}")
+        option_path = verification_adapter.run_verification_commands(["pytest --rootdir=/tmp"], str(repo), execute=False)
+        if option_path["status"] != "blocked" or "unsafe path token" not in option_path["results"][0]["stderr"]:
+            raise AssertionError(f"allowlisted command with absolute option path should be blocked: {option_path}")
     print("[ok] Ceraxia CodeBrigade verification adapter")
     return 0
 

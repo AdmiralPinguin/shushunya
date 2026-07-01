@@ -37,14 +37,14 @@ def command_allowed(tokens: list[str]) -> bool:
 
 def command_has_unsafe_path_tokens(tokens: list[str]) -> bool:
     for token in tokens:
-        if token.startswith("-"):
-            continue
-        if token.startswith("/") or token == ".." or token.startswith("../") or "/../" in token:
-            return True
         if "=" in token:
             _, value = token.split("=", 1)
             if value.startswith("/") or value == ".." or value.startswith("../") or "/../" in value:
                 return True
+        if token.startswith("-"):
+            continue
+        if token.startswith("/") or token == ".." or token.startswith("../") or "/../" in token:
+            return True
     return False
 
 
