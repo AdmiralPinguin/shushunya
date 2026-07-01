@@ -187,6 +187,8 @@ def main() -> int:
         missing_artifacts = [name for name in artifact_schema.get("required", []) if not (run_dir / name).exists()]
         if missing_artifacts:
             raise AssertionError(f"run artifact schema drifted from generated files: {missing_artifacts}")
+        summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+        assert_schema_subset(load_schema(ROOT / "Ceraxia" / "contracts" / "run_summary.schema.json"), summary, "run summary")
     print("[ok] EyeOfTerror Mechanicum contracts")
     return 0
 

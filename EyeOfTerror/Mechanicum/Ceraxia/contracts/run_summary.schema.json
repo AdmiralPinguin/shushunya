@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ceraxia Run Summary",
+  "type": "object",
+  "required": [
+    "kind",
+    "contract_version",
+    "run_id",
+    "run_dir",
+    "state",
+    "package_ok",
+    "package_lifecycle_finalized",
+    "package_audit_decision",
+    "ready_for_execution",
+    "review_decision",
+    "execution_readiness",
+    "worker_status",
+    "code_brigade_execution_policy_status",
+    "code_brigade_execution_result_status",
+    "code_brigade_execution_preflight_ok",
+    "code_brigade_execution_preflight_blocker_count",
+    "risk_level",
+    "task_kinds",
+    "selected_strategy",
+    "evidence",
+    "blockers",
+    "next_action",
+    "maturity"
+  ],
+  "properties": {
+    "kind": {
+      "const": "ceraxia_run_summary"
+    },
+    "contract_version": {
+      "const": "eye-mechanicum.v1"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "run_dir": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string"
+    },
+    "package_ok": {
+      "type": "boolean"
+    },
+    "package_lifecycle_finalized": {
+      "type": "boolean"
+    },
+    "package_audit_decision": {
+      "type": "string"
+    },
+    "ready_for_execution": {
+      "type": "boolean"
+    },
+    "review_decision": {
+      "type": "string"
+    },
+    "execution_readiness": {
+      "type": "string"
+    },
+    "worker_status": {
+      "type": "string"
+    },
+    "code_brigade_execution_policy_status": {
+      "type": "string"
+    },
+    "code_brigade_execution_result_status": {
+      "type": "string"
+    },
+    "code_brigade_execution_preflight_blocker_count": {
+      "type": "integer"
+    },
+    "risk_level": {
+      "type": "string"
+    },
+    "task_kinds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "selected_strategy": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "required_count",
+        "present_count",
+        "planned_count",
+        "blocked_count"
+      ],
+      "properties": {
+        "required_count": {
+          "type": "integer"
+        },
+        "present_count": {
+          "type": "integer"
+        },
+        "planned_count": {
+          "type": "integer"
+        },
+        "blocked_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_action": {
+      "type": "string"
+    },
+    "maturity": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

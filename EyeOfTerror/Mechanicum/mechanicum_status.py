@@ -21,6 +21,7 @@ COMPONENTS = {
             "contracts/implementation_brief.schema.json",
             "contracts/evidence_matrix.schema.json",
             "contracts/run_artifacts.schema.json",
+            "contracts/run_summary.schema.json",
         ],
         "maturity": "dry_run_controller_with_import_edges_evidence_matrix_and_verification",
     },
