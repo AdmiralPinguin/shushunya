@@ -76,6 +76,22 @@ def infer_guarded_natural_language_patch(task: str) -> dict[str, Any]:
                 }
             ],
         }
+    create_file_match = re.search(
+        r"создай\s+файл\s+`(?P<path>[^`]+)`\s+с\s+содержимым\s+`(?P<content>[^`]+)`",
+        task,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if create_file_match:
+        return {
+            "source": "natural_language_create_file",
+            "operations": [
+                {
+                    "type": "create_file",
+                    "path": create_file_match.group("path").strip(),
+                    "content": create_file_match.group("content"),
+                }
+            ],
+        }
     return {}
 
 

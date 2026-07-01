@@ -911,6 +911,31 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
+        inferred_create_brief = valid_brief()
+        inferred_create_brief["repo_path"] = tmp
+        inferred_create_brief["repo_survey_evidence"]["missing_path_hints"] = ["helpers.py"]
+        inferred_create_brief["task"] = "Создай файл `helpers.py` с содержимым `def helper():\n    return True\n`."
+        inferred_create_report = code_brigade_adapter.build_worker_report(inferred_create_brief, dry_run=False)
+        if inferred_create_report["status"] != "implemented" or inferred_create_report["changed_files"] != ["helpers.py"]:
+            raise AssertionError(f"guarded inferred create_file should report implemented changed file: {inferred_create_report}")
+        if "natural_language_create_file" not in inferred_create_report["execution_result"]["patch_summary"]:
+            raise AssertionError(f"guarded inferred create_file should expose patch source: {inferred_create_report}")
+        if "def helper" not in Path(tmp, "helpers.py").read_text(encoding="utf-8"):
+            raise AssertionError("guarded inferred create_file did not create helpers.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
+        forbidden_inferred_create_brief = valid_brief()
+        forbidden_inferred_create_brief["repo_path"] = tmp
+        forbidden_inferred_create_brief["task"] = "Создай файл `helpers.py` с содержимым `def helper():\n    return True\n`."
+        forbidden_inferred_create_report = code_brigade_adapter.build_worker_report(forbidden_inferred_create_brief, dry_run=False)
+        if forbidden_inferred_create_report["status"] != "blocked" or "explicit missing path hint" not in " ".join(forbidden_inferred_create_report["execution_result"]["blockers"]):
+            raise AssertionError(f"guarded inferred create_file without missing path hint should block: {forbidden_inferred_create_report}")
+        if Path(tmp, "helpers.py").exists():
+            raise AssertionError("blocked guarded inferred create_file should not leave helpers.py behind")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
         forbidden_create_brief = valid_brief()
         forbidden_create_brief["repo_path"] = tmp
         forbidden_create_brief["task"] += "\nCERAXIA_PATCH:\n" + json.dumps(
