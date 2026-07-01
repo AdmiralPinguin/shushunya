@@ -18,6 +18,14 @@ def assert_packet_shape(packet: dict) -> None:
     missing = [field for field in schema["required"] if field not in packet]
     if missing:
         raise AssertionError(f"planning packet missing required fields: {missing}")
+    schema_required = set(schema["required"])
+    schema_properties = schema.get("properties", {}) if isinstance(schema.get("properties"), dict) else {}
+    missing_schema_required = [field for field in REQUIRED_PACKET_OBJECTS if field not in schema_required]
+    missing_schema_properties = [field for field in REQUIRED_PACKET_OBJECTS if field not in schema_properties]
+    if missing_schema_required:
+        raise AssertionError(f"planning schema must require validator packet objects: {missing_schema_required}")
+    if missing_schema_properties:
+        raise AssertionError(f"planning schema must describe validator packet objects: {missing_schema_properties}")
     expected_roles = ["TaskTriage", "RepoSurveyor", "DesignStrategos", "VerificationArchitect", "RiskScribe"]
     if packet.get("roles_completed") != expected_roles:
         raise AssertionError(f"planning packet role order drifted: {packet}")
