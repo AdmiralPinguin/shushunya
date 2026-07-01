@@ -25,7 +25,7 @@ COMPONENTS = {
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
         ],
-        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_caller_contract_evidence_generic_edges_per_surface_verification_work_package_review_worker_output_contract_audit_diagnostic_repair_requests_planning_feedback_requests_and_optional_guarded_repair_execution",
+        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_caller_contract_evidence_generic_edges_per_surface_verification_counts_work_package_review_worker_output_contract_audit_diagnostic_repair_requests_planning_feedback_requests_and_optional_guarded_repair_execution",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",

@@ -58,6 +58,10 @@ keeping source mutation in dry-run mode.
 `evidence_matrix.json` maps the PlanningBrigade quality bar to concrete or
 planned evidence sources, and `run_summary.json` carries the same coverage
 counters for fast orchestration checks.
+`run_summary.json` also mirrors per-surface verification status counts from
+`review_gate.json`, so orchestration can distinguish executed, partial,
+planned-only, missing, failed, and blocked evidence instead of reading only one
+aggregate surface status.
 `repo_survey.json.truncated=true` means the survey hit its file limit; Ceraxia
 keeps the package usable, but `review_gate.json` records a partial-coverage
 warning.
@@ -107,7 +111,8 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
   unsafe plans.
 - `run_summary.json` and `final_report.md` expose planning review, survey
   quality, implementation package dependency, worker-output sufficiency, and
-  execution evidence decisions for orchestration history.
+  execution evidence decisions for orchestration history, including per-surface
+  verification status counts.
 - `repo_survey.json.source_summaries` gives shallow multi-language symbol and
   import-like evidence for common source files; Python still has the deeper
   AST symbol/import path used for local dependency edges.
