@@ -90,6 +90,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
 def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     validation_problems = validate_implementation_brief(brief)
     implementation_plan = build_implementation_plan(brief)
+    work_packages = implementation_plan.get("implementation_work_packages") if isinstance(implementation_plan.get("implementation_work_packages"), list) else []
     changed_files: list[str] = []
     notes: list[str] = []
     if validation_problems:
@@ -111,6 +112,26 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         if status == "implemented":
             changed_files = execution_result.get("changed_files", []) if isinstance(execution_result.get("changed_files"), list) else []
             notes.append("CodeBrigade explicit patch adapter applied the requested changes")
+    if status == "implemented":
+        package_status = "implemented"
+        package_evidence = "execution_result"
+    elif status == "dry_run_handoff_ready":
+        package_status = "planned"
+        package_evidence = "implementation_plan"
+    else:
+        package_status = "blocked"
+        package_evidence = "validation_problems" if validation_problems else "blockers"
+    package_statuses = [
+        {
+            "package_id": str(package.get("id") or ""),
+            "owner": str(package.get("owner") or "CodeBrigade"),
+            "impact_surfaces": package.get("impact_surfaces", []) if isinstance(package.get("impact_surfaces"), list) else [],
+            "status": package_status,
+            "evidence_source": package_evidence,
+        }
+        for package in work_packages
+        if isinstance(package, dict)
+    ]
     report = {
         "kind": "ceraxia_code_brigade_worker_report",
         "contract_version": CONTRACT_VERSION,
@@ -119,6 +140,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "dry_run": dry_run,
         "changed_files": changed_files,
         "implementation_plan": implementation_plan,
+        "work_package_statuses": package_statuses,
         "execution_policy_status": REAL_EXECUTION_STATUS if dry_run or status == "blocked" else "real_execution_adapter_active",
         "notes": notes,
         "implementation_brief_acknowledged": not validation_problems,

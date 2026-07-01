@@ -80,7 +80,9 @@
         "package_count",
         "review_order",
         "covered_surfaces",
-        "covered_surface_count"
+        "covered_surface_count",
+        "status_counts",
+        "statuses"
       ]
     }
   },

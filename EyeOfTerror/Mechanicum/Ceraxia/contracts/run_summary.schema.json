@@ -19,6 +19,7 @@
     "implementation_work_package_count",
     "implementation_work_package_surface_count",
     "implementation_work_package_review_order",
+    "work_package_status_counts",
     "survey_quality_decision",
     "survey_quality_warning_count",
     "surface_verification_status",
@@ -88,6 +89,14 @@
       "items": {
         "type": "string"
       }
+    },
+    "work_package_status_counts": {
+      "type": "object",
+      "required": [
+        "planned",
+        "implemented",
+        "blocked"
+      ]
     },
     "survey_quality_decision": {
       "type": "string"

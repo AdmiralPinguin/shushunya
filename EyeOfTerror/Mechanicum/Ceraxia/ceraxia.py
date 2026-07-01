@@ -466,6 +466,11 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     worker_report = artifacts.get("worker_report", {}) if isinstance(artifacts.get("worker_report"), dict) else {}
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
+    package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
+    package_status_counts = {
+        status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
+        for status in ("planned", "implemented", "blocked")
+    }
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
@@ -501,6 +506,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Planning work phases: {len(work_phases)}",
         f"Implementation work packages: {len(packages)}",
         f"Work package covered surfaces: {len(covered_package_surfaces)}",
+        f"Work package statuses: planned={package_status_counts['planned']} implemented={package_status_counts['implemented']} blocked={package_status_counts['blocked']}",
         f"Survey quality decision: {survey_quality.get('decision', '')}",
         f"Verification status: {verification['status']}",
         f"Surface verification status: {review.get('surface_verification_sufficiency', {}).get('status', '')}",
@@ -666,6 +672,11 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": "run_summary planning_work_phase_count disagrees with implementation_brief.json"})
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
+    package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
+    package_status_counts = {
+        status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
+        for status in ("planned", "implemented", "blocked")
+    }
     package_review_order = work_packages.get("review_order") if isinstance(work_packages.get("review_order"), list) else []
     package_surfaces = sorted(
         {
@@ -682,6 +693,13 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         findings.append({"severity": "blocker", "finding": "run_summary implementation_work_package_surface_count disagrees with implementation_brief.json"})
     if summary.get("implementation_work_package_review_order", []) != package_review_order:
         findings.append({"severity": "blocker", "finding": "run_summary implementation_work_package_review_order disagrees with implementation_brief.json"})
+    package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
+    package_status_counts = {
+        status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
+        for status in ("planned", "implemented", "blocked")
+    }
+    if summary.get("work_package_status_counts", {}) != package_status_counts:
+        findings.append({"severity": "blocker", "finding": "run_summary work_package_status_counts disagrees with worker_report.json"})
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     if summary.get("survey_quality_decision", "") != survey_quality.get("decision", ""):
         findings.append({"severity": "blocker", "finding": "run_summary survey_quality_decision disagrees with implementation_brief.json"})
@@ -711,6 +729,8 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
             findings.append({"severity": "blocker", "finding": "evidence_matrix covered_surface_count disagrees with run_summary"})
         if package_summary.get("review_order") != summary.get("implementation_work_package_review_order"):
             findings.append({"severity": "blocker", "finding": "evidence_matrix review_order disagrees with run_summary"})
+        if package_summary.get("status_counts") != summary.get("work_package_status_counts"):
+            findings.append({"severity": "blocker", "finding": "evidence_matrix work package status_counts disagrees with run_summary"})
     decision = "passed" if not findings else "blocked"
     return {
         "kind": "ceraxia_run_package_audit",
@@ -775,6 +795,11 @@ def build_run_summary(
     surface_sufficiency = review.get("surface_verification_sufficiency") if isinstance(review.get("surface_verification_sufficiency"), dict) else {}
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     packages = work_packages.get("packages") if isinstance(work_packages.get("packages"), list) else []
+    package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
+    package_status_counts = {
+        status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
+        for status in ("planned", "implemented", "blocked")
+    }
     package_surfaces = sorted(
         {
             surface
@@ -801,6 +826,7 @@ def build_run_summary(
         "implementation_work_package_count": len(packages),
         "implementation_work_package_surface_count": len(package_surfaces),
         "implementation_work_package_review_order": work_packages.get("review_order", []) if isinstance(work_packages.get("review_order"), list) else [],
+        "work_package_status_counts": package_status_counts,
         "survey_quality_decision": survey_quality.get("decision", ""),
         "survey_quality_warning_count": len(survey_quality.get("warnings", [])) if isinstance(survey_quality.get("warnings"), list) else 0,
         "surface_verification_status": surface_sufficiency.get("status", ""),
@@ -838,6 +864,11 @@ def build_evidence_matrix(
     implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
     work_packages = implementation_plan.get("implementation_work_packages") if isinstance(implementation_plan.get("implementation_work_packages"), list) else []
     work_package_review_order = implementation_plan.get("work_package_review_order") if isinstance(implementation_plan.get("work_package_review_order"), list) else []
+    package_statuses = worker_report.get("work_package_statuses") if isinstance(worker_report.get("work_package_statuses"), list) else []
+    package_status_counts = {
+        status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
+        for status in ("planned", "implemented", "blocked")
+    }
     package_surfaces = sorted(
         {
             surface
@@ -900,6 +931,8 @@ def build_evidence_matrix(
             "review_order": work_package_review_order,
             "covered_surfaces": package_surfaces,
             "covered_surface_count": len(package_surfaces),
+            "status_counts": package_status_counts,
+            "statuses": package_statuses,
         },
     }
 

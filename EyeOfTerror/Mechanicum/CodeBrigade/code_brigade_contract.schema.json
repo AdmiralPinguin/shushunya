@@ -10,6 +10,7 @@
     "dry_run",
     "changed_files",
     "implementation_plan",
+    "work_package_statuses",
     "execution_policy_status",
     "notes",
     "implementation_brief_acknowledged",
@@ -221,6 +222,39 @@
         "survey_quality_warnings": {
           "type": "array",
           "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "work_package_statuses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "package_id",
+          "owner",
+          "impact_surfaces",
+          "status",
+          "evidence_source"
+        ],
+        "properties": {
+          "package_id": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "impact_surfaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "enum": ["planned", "implemented", "blocked"]
+          },
+          "evidence_source": {
             "type": "string"
           }
         }

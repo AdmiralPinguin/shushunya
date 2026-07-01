@@ -216,6 +216,8 @@ def main() -> int:
         raise AssertionError(f"worker report contract version drifted: {dry_report}")
     if dry_report["execution_policy_status"] != "blocked_until_adapter_is_wired":
         raise AssertionError(f"dry-run worker report must expose blocked execution policy: {dry_report}")
+    if not dry_report["work_package_statuses"] or any(item["status"] != "planned" for item in dry_report["work_package_statuses"]):
+        raise AssertionError(f"dry-run worker report should mark work packages planned: {dry_report}")
     plan = dry_report["implementation_plan"]
     if plan["target_files_to_inspect"] != ["app.py"]:
         raise AssertionError(f"implementation plan should preserve survey candidates: {plan}")
@@ -303,6 +305,8 @@ def main() -> int:
         patch_report = code_brigade_adapter.build_worker_report(patch_brief, dry_run=False)
         if patch_report["status"] != "implemented" or patch_report["changed_files"] != ["app.py"]:
             raise AssertionError(f"explicit patch execution should report implemented changed files: {patch_report}")
+        if not patch_report["work_package_statuses"] or any(item["status"] != "implemented" for item in patch_report["work_package_statuses"]):
+            raise AssertionError(f"implemented patch should mark work packages implemented: {patch_report}")
         if patch_report["execution_result"]["status"] != "implemented":
             raise AssertionError(f"explicit patch execution result should be implemented: {patch_report}")
         if "return True" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
@@ -412,6 +416,8 @@ def main() -> int:
     invalid_report = code_brigade_adapter.build_worker_report(invalid, dry_run=True)
     if invalid_report["status"] != "blocked" or invalid_report["implementation_brief_acknowledged"]:
         raise AssertionError(f"invalid brief should be blocked: {invalid_report}")
+    if not invalid_report["work_package_statuses"] or any(item["status"] != "blocked" for item in invalid_report["work_package_statuses"]):
+        raise AssertionError(f"invalid brief should mark work packages blocked: {invalid_report}")
     weak_planning = valid_brief()
     weak_planning["acceptance_contract"] = {"must_prove": []}
     weak_planning_report = code_brigade_adapter.build_worker_report(weak_planning, dry_run=True)
