@@ -75,7 +75,7 @@ ROADMAP = [
     {
         "priority": 1,
         "item": "expand CodeBrigade from guarded inference to diagnostic autonomous source edits",
-        "reason": "CodeBrigade can now apply explicit patch operations, two guarded natural-language single-file operations, and narrow test-inferred literal patches after preflight, but broader mutation still needs diagnostics, source evidence, verification feedback, and refusal controls before execution.",
+        "reason": "CodeBrigade can now apply explicit patch operations, guarded natural-language single-file operations, and narrow test-inferred safe-literal patches after preflight, but broader mutation still needs diagnostics, source evidence, verification feedback, and refusal controls before execution.",
         "owner": "CodeBrigade",
     },
     {
