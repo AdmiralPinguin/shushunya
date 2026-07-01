@@ -24,6 +24,7 @@ DEFAULT_EXCLUDE_DIRS = {
 SOURCE_SUFFIXES = {".py", ".js", ".ts", ".tsx", ".jsx", ".kt", ".java", ".go", ".rs", ".sh"}
 CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml", ".ini", ".env"}
 DOC_SUFFIXES = {".md", ".rst", ".txt"}
+MAX_SURVEY_FILES = 2000
 
 
 def excluded(path: Path, root: Path, exclude_patterns: list[str]) -> bool:
@@ -130,15 +131,19 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "python_symbols": [],
             "local_import_edges": [],
             "suggested_verification_commands": [],
+            "max_files_scanned": MAX_SURVEY_FILES,
+            "truncated": False,
         }
     files: list[Path] = []
+    truncated = False
     for path in root.rglob("*"):
         if not path.is_file():
             continue
         if excluded(path, root, exclude_patterns):
             continue
         files.append(path)
-        if len(files) >= 2000:
+        if len(files) >= MAX_SURVEY_FILES:
+            truncated = True
             break
     suffix_counts = Counter(path.suffix.lower() or "<none>" for path in files)
     scored = sorted(
@@ -180,4 +185,6 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "python_symbols": python_symbols,
         "local_import_edges": build_local_import_edges(python_symbols, python_files, root),
         "suggested_verification_commands": suggested_commands,
+        "max_files_scanned": MAX_SURVEY_FILES,
+        "truncated": truncated,
     }

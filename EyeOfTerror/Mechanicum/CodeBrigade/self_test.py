@@ -28,6 +28,7 @@ def valid_brief() -> dict:
             "test_files": ["test_app.py"],
             "entrypoint_candidates": ["main.py"],
             "local_import_edges": [{"source": "app.py", "import": "util.enabled", "target": "util.py"}],
+            "survey_truncated": False,
         },
         "suggested_verification_commands": ["python -m pytest test_app.py"],
         "code_brigade_handoff": {
@@ -64,6 +65,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should include suggested verification: {plan}")
     if plan["dependency_edges_to_check"] != [{"source": "app.py", "import": "util.enabled", "target": "util.py"}]:
         raise AssertionError(f"implementation plan should preserve local dependency edges: {plan}")
+    if plan["survey_truncated"]:
+        raise AssertionError(f"small survey fixture should not be marked truncated: {plan}")
     if not plan["refusal_conditions"]:
         raise AssertionError(f"implementation plan should include refusal conditions: {plan}")
     execute_report = code_brigade_adapter.build_worker_report(valid_brief(), dry_run=False)
