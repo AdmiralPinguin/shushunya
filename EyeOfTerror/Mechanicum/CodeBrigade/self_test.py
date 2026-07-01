@@ -750,6 +750,15 @@ def main() -> int:
     broken_intake = build_diagnostic_repair_intake(broken_repair_request)
     if broken_intake["status"] != "blocked" or not broken_intake["blockers"]:
         raise AssertionError(f"diagnostic repair intake should block inconsistent queue counts: {broken_intake}")
+    unsafe_repair_request = dict(repair_request)
+    unsafe_queue = dict(repair_request["diagnostic_repair_queue"])
+    unsafe_item = dict(unsafe_queue["items"][0])
+    unsafe_item["concrete_read_targets"] = ["/etc/passwd"]
+    unsafe_queue["items"] = [unsafe_item]
+    unsafe_repair_request["diagnostic_repair_queue"] = unsafe_queue
+    unsafe_intake = build_diagnostic_repair_intake(unsafe_repair_request)
+    if unsafe_intake["status"] != "blocked" or not any("safe repo-relative path" in blocker for blocker in unsafe_intake["blockers"]):
+        raise AssertionError(f"diagnostic repair intake should block unsafe paths: {unsafe_intake}")
     if plan["work_package_blocking_policies"].get("minimal_patch_package") != ["block when patch preflight fails"]:
         raise AssertionError(f"implementation plan should expose work package blocking policies: {plan}")
     if "final report answers the original task rather than only package-local success" not in plan["work_package_handoff_criteria"]:

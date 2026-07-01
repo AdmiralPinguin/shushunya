@@ -6,6 +6,21 @@ from typing import Any
 from execution_contract import CONTRACT_VERSION
 
 
+def is_safe_repo_relative_path(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    return bool(normalized) and not normalized.startswith(("/", "~")) and ".." not in normalized.split("/")
+
+
+def validate_path_list(paths: Any, label: str) -> list[str]:
+    problems: list[str] = []
+    if not isinstance(paths, list):
+        return [f"diagnostic repair request {label} must be a list"]
+    for index, path in enumerate(paths):
+        if not isinstance(path, str) or not is_safe_repo_relative_path(path):
+            problems.append(f"diagnostic repair request {label}[{index}] must be a safe repo-relative path")
+    return problems
+
+
 def validate_diagnostic_repair_request(request: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if request.get("kind") != "ceraxia_code_brigade_diagnostic_repair_request":
@@ -54,13 +69,17 @@ def validate_diagnostic_repair_request(request: dict[str, Any]) -> list[str]:
                 problems.append(f"diagnostic repair queue item {index} {key} must be a non-empty list")
         if not isinstance(item.get("max_repair_attempts"), int) or item.get("max_repair_attempts", 0) < 1:
             problems.append(f"diagnostic repair queue item {index} max_repair_attempts must be positive")
-    for key in ("target_files_to_inspect", "test_files_to_preserve", "return_contract"):
-        if not isinstance(request.get(key), list):
-            problems.append(f"diagnostic repair request {key} must be a list")
+    problems.extend(validate_path_list(request.get("target_files_to_inspect"), "target_files_to_inspect"))
+    problems.extend(validate_path_list(request.get("test_files_to_preserve"), "test_files_to_preserve"))
+    if not isinstance(request.get("return_contract"), list):
+        problems.append("diagnostic repair request return_contract must be a list")
     if not isinstance(request.get("reverse_dependency_index"), dict):
         problems.append("diagnostic repair request reverse_dependency_index must be an object")
     if not isinstance(request.get("scope_budget"), dict):
         problems.append("diagnostic repair request scope_budget must be an object")
+    for index, item in enumerate(items):
+        if isinstance(item, dict):
+            problems.extend(validate_path_list(item.get("concrete_read_targets"), f"diagnostic_repair_queue.items[{index}].concrete_read_targets"))
     return problems
 
 
