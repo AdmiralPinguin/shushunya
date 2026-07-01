@@ -28,6 +28,8 @@ if PLANNING_PATH not in sys.path:
     sys.path.insert(0, PLANNING_PATH)
 
 from planning_brigade import build_planning_packet  # noqa: E402
+from planning_feedback_contract import build_planning_feedback_intake  # noqa: E402
+from planning_packet_contract import validate_planning_packet  # noqa: E402
 
 
 class CeraxiaLifecycleTests(unittest.TestCase):
@@ -688,6 +690,12 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertTrue(any("worker output contract" in item["finding"] for item in feedback["feedback_findings"]))
         self.assertIn("worker-output contract", " ".join(feedback["replan_focus"]))
         self.assertIn("planning_packet.json", feedback["required_return_artifacts"])
+        feedback_intake = build_planning_feedback_intake(feedback)
+        self.assertEqual(feedback_intake["status"], "replan_required")
+        self.assertEqual(feedback_intake["handoff_back_to"], "Ceraxia")
+        replan_packet = build_planning_packet(feedback_intake["replan_payload"])
+        self.assertEqual(validate_planning_packet(replan_packet), [])
+        self.assertTrue(any("feedback finding:" in item for item in replan_packet["problem_statement"]["known_constraints"]))
 
     def test_review_gate_blocks_missing_investigation_playbook(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
