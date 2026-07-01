@@ -101,7 +101,12 @@ def run_verification_commands(commands: list[str], repo_path: str, execute: bool
                 "stderr": completed.stderr[-4000:],
             }
         )
-    status = "blocked" if blockers else ("passed" if all(item["status"] in {"planned", "passed", "skipped"} for item in results) else "failed")
+    if blockers:
+        status = "blocked"
+    elif not execute:
+        status = "planned"
+    else:
+        status = "passed" if all(item["status"] in {"passed", "skipped"} for item in results) else "failed"
     return {
         "kind": "code_brigade_verification_execution",
         "contract_version": CONTRACT_VERSION,

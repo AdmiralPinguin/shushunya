@@ -12,13 +12,13 @@ def main() -> int:
         repo = Path(tmp)
         (repo / "ok.py").write_text("VALUE = 1\n", encoding="utf-8")
         planned = verification_adapter.run_verification_commands(["python -m py_compile ok.py"], str(repo), execute=False)
-        if planned["status"] != "passed" or planned["results"][0]["status"] != "planned":
+        if planned["status"] != "planned" or planned["results"][0]["status"] != "planned":
             raise AssertionError(f"planned verification should pass as planned: {planned}")
         executed = verification_adapter.run_verification_commands(["python -m py_compile ok.py"], str(repo), execute=True)
         if executed["status"] != "passed" or executed["results"][0]["returncode"] != 0:
             raise AssertionError(f"py_compile should execute successfully: {executed}")
         git_diff = verification_adapter.run_verification_commands(["git diff --check"], str(repo), execute=False)
-        if git_diff["status"] != "passed" or git_diff["results"][0]["status"] != "planned":
+        if git_diff["status"] != "planned" or git_diff["results"][0]["status"] != "planned":
             raise AssertionError(f"git diff --check should be allowlisted as planned: {git_diff}")
         blocked = verification_adapter.run_verification_commands(["rm -rf ."], str(repo), execute=True)
         if blocked["status"] != "blocked" or not blocked["blockers"]:
