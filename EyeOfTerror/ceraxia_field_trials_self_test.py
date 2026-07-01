@@ -80,8 +80,12 @@ def main() -> int:
     report_payload = json.loads(report.stdout)
     if "accepted_honest_evidence_count" not in report_payload:
         raise AssertionError(f"Ceraxia report must expose honest accepted evidence count: {report_payload}")
+    if "legacy_score_target_met" not in report_payload:
+        raise AssertionError(f"Ceraxia report must expose legacy score target separately from honest target: {report_payload}")
     if not isinstance(report_payload.get("accepted_legacy_without_honest_evidence"), list):
         raise AssertionError(f"Ceraxia report must expose accepted legacy honest-evidence gaps: {report_payload}")
+    if report_payload.get("target_met") is True and report_payload.get("accepted_honest_evidence_count", 0) < target.get("minimum_representative_trials", 0):
+        raise AssertionError(f"Ceraxia target cannot pass without enough honest evidence: {report_payload}")
     if report_payload.get("target_met") is True and not ledger.get("entries"):
         raise AssertionError(f"empty Ceraxia ledger must not prove target completion: {report_payload}")
     if report_payload.get("expert_target_met") is True:
@@ -99,6 +103,8 @@ def main() -> int:
         low_entries = report_payload.get("gaps", {}).get("low_score_entries", {})
         if not isinstance(low_entries, dict):
             raise AssertionError(f"Ceraxia report must expose low score entries after accepted reviews: {report_payload}")
+        if "needs_more_honest_evidence" not in report_payload.get("gaps", {}):
+            raise AssertionError(f"Ceraxia report must expose honest-evidence target gap: {report_payload}")
     sample_counts = report_payload.get("dimension_sample_counts", {})
     if set(sample_counts) != set(dimensions):
         raise AssertionError(f"Ceraxia report must expose sample counts for every dimension: {report_payload}")
@@ -125,8 +131,10 @@ def main() -> int:
         capture_output=True,
         check=False,
     )
-    if not ledger.get("entries") and strict_report.returncode == 0:
-        raise AssertionError("strict Ceraxia field trial report must fail while no accepted trials exist")
+    if report_payload.get("target_met") is True and strict_report.returncode != 0:
+        raise AssertionError(f"strict Ceraxia field trial report rejected proven 7/10 target: {strict_report.stdout}")
+    if report_payload.get("target_met") is not True and strict_report.returncode == 0:
+        raise AssertionError("strict Ceraxia field trial report must fail until honest evidence proves 7/10")
     expert_strict_report = subprocess.run(
         [sys.executable, str(REPORTER), "--require-expert-target"],
         cwd=str(ROOT.parent),

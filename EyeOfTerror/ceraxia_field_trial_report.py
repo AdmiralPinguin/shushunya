@@ -126,6 +126,7 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     unshaped_expert_entries: list[dict[str, Any]] = []
     honest_evidence_by_run: dict[str, dict[str, Any]] = {}
     accepted_legacy_without_honest_evidence: list[dict[str, str]] = []
+    honest_entries: list[dict[str, Any]] = []
     honest_expert_entries: list[dict[str, Any]] = []
     honest_unshaped_expert_entries: list[dict[str, Any]] = []
     dimension_min = float(target.get("dimension_average_min") or 0)
@@ -143,6 +144,8 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
                     "reason": str(honest_status.get("reason") or "honest evidence missing or incomplete"),
                 }
             )
+        else:
+            honest_entries.append(entry)
         if trial.get("class"):
             classes.add(str(trial.get("class")))
             if trial.get("difficulty") == "expert":
@@ -203,7 +206,9 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     enough_dimensions = all(value >= dimension_min for value in dimension_averages.values())
     enough_dimension_samples = all(count >= dimension_sample_min for count in dimension_sample_counts.values())
     enough_overall = overall >= float(target.get("rolling_average_min") or 0)
-    target_met = bool(enough_trials and enough_dimensions and enough_dimension_samples and enough_overall)
+    enough_honest_trials = len(honest_entries) >= int(target.get("minimum_representative_trials") or 0)
+    legacy_score_target_met = bool(enough_trials and enough_dimensions and enough_dimension_samples and enough_overall)
+    target_met = bool(legacy_score_target_met and enough_honest_trials)
     expert_dimension_min = float(expert_target.get("dimension_average_min") or 0)
     expert_sample_min = int(expert_target.get("dimension_sample_min") or 0)
     expert_entry_min = float(expert_target.get("minimum_entry_score") or 0)
@@ -255,6 +260,7 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     )
     return {
         "target_met": target_met,
+        "legacy_score_target_met": legacy_score_target_met,
         "expert_target_met": expert_target_met,
         "overall_score": overall,
         "expert_overall_score": expert_overall,
@@ -274,6 +280,8 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
         "expert_target": expert_target,
         "gaps": {
             "needs_more_accepted_trials": not enough_trials,
+            "honest_trial_count": len(honest_entries),
+            "needs_more_honest_evidence": not enough_honest_trials,
             "needs_higher_overall": not enough_overall,
             "needs_more_dimension_evidence": [
                 dimension
