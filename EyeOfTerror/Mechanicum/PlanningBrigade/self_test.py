@@ -20,6 +20,8 @@ def assert_packet_shape(packet: dict) -> None:
     expected_roles = ["TaskTriage", "RepoSurveyor", "DesignStrategos", "VerificationArchitect", "RiskScribe"]
     if packet.get("roles_completed") != expected_roles:
         raise AssertionError(f"planning packet role order drifted: {packet}")
+    if packet.get("contract_version") != "eye-mechanicum.v1":
+        raise AssertionError(f"planning packet contract version drifted: {packet}")
     if packet.get("next_action", {}).get("owner") != "Ceraxia":
         raise AssertionError(f"PlanningBrigade must hand authority back to Ceraxia: {packet}")
 

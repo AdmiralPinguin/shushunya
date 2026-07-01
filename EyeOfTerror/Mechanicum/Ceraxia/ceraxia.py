@@ -30,6 +30,9 @@ from planning_brigade import ROLE_ORDER, build_planning_packet  # noqa: E402
 from code_brigade_adapter import build_worker_report  # noqa: E402
 
 
+CONTRACT_VERSION = "eye-mechanicum.v1"
+
+
 LIFECYCLE = [
     "received",
     "planned",
@@ -98,6 +101,8 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
     ]
     if packet.get("roles_completed") != ROLE_ORDER:
         problems.append("planning packet must include all five planning roles in order")
+    if packet.get("contract_version") != CONTRACT_VERSION:
+        problems.append("planning packet contract_version is unsupported")
     for key in required:
         if not isinstance(packet.get(key), dict):
             problems.append(f"planning packet missing object: {key}")
@@ -193,6 +198,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         blockers.append("repo survey or planning validation is incomplete")
     return {
         "kind": "ceraxia_code_brigade_implementation_brief",
+        "contract_version": CONTRACT_VERSION,
         "owner": "Ceraxia",
         "target": "CodeBrigade",
         "task": str(packet.get("task") or ""),
@@ -397,6 +403,7 @@ def build_execution_readiness(
         blockers.append("real CodeBrigade execution is not wired in this controller yet")
     return {
         "kind": "ceraxia_execution_readiness",
+        "contract_version": CONTRACT_VERSION,
         "decision": "blocked" if blockers else "ready_for_real_execution",
         "dry_run": dry_run,
         "ready_conditions": ready_conditions,
@@ -415,6 +422,7 @@ def build_run_summary(
 ) -> dict[str, Any]:
     return {
         "kind": "ceraxia_run_summary",
+        "contract_version": CONTRACT_VERSION,
         "run_id": run_id,
         "run_dir": str(run_dir),
         "state": status.get("state"),
@@ -442,6 +450,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     }
     task_payload = {
         "kind": "ceraxia_task",
+        "contract_version": CONTRACT_VERSION,
         "task": task_input.task,
         "repo_path": task_input.repo_path,
         "dry_run": task_input.dry_run,

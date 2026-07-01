@@ -7,6 +7,7 @@ import code_brigade_adapter
 def valid_brief() -> dict:
     return {
         "kind": "ceraxia_code_brigade_implementation_brief",
+        "contract_version": "eye-mechanicum.v1",
         "owner": "Ceraxia",
         "target": "CodeBrigade",
         "task": "почини pytest",
@@ -28,6 +29,8 @@ def main() -> int:
     dry_report = code_brigade_adapter.build_worker_report(valid_brief(), dry_run=True)
     if dry_report["status"] != "dry_run_handoff_ready" or not dry_report["implementation_brief_acknowledged"]:
         raise AssertionError(f"valid dry-run brief should be accepted: {dry_report}")
+    if dry_report["contract_version"] != "eye-mechanicum.v1":
+        raise AssertionError(f"worker report contract version drifted: {dry_report}")
     execute_report = code_brigade_adapter.build_worker_report(valid_brief(), dry_run=False)
     if execute_report["status"] != "blocked" or "not configured" not in " ".join(execute_report["notes"]):
         raise AssertionError(f"real execution should be honestly blocked until adapter is wired: {execute_report}")

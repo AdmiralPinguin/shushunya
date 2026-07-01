@@ -63,6 +63,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             for name in expected:
                 self.assertTrue((run_dir / name).exists(), name)
             brief = json.loads((run_dir / "implementation_brief.json").read_text(encoding="utf-8"))
+            self.assertEqual(brief["contract_version"], "eye-mechanicum.v1")
             self.assertEqual(brief["target"], "CodeBrigade")
             self.assertEqual(brief["risk_level"], "high")
             self.assertIn("hardcoded one-off behavior", brief["forbidden_approaches"])
@@ -78,6 +79,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(readiness["decision"], "blocked")
             self.assertIn("real CodeBrigade execution is not wired in this controller yet", readiness["blockers"])
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["contract_version"], "eye-mechanicum.v1")
             self.assertEqual(summary["execution_readiness"], "blocked")
             self.assertTrue(summary["package_ok"])
             self.assertFalse(summary["ready_for_execution"])
@@ -131,6 +133,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
 
     def test_planning_validation_blocks_weak_contract_fields(self) -> None:
         packet = build_planning_packet({"task": "repo-grade migration API compatibility", "repo_path": "."})
+        packet["contract_version"] = "old"
         packet["repo_survey_request"]["read_only"] = False
         packet["design_options"]["options"] = []
         packet["verification_strategy"]["targeted_commands"] = []
@@ -138,6 +141,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         packet["quality_bar"]["must_have_evidence"] = []
         packet["code_brigade_handoff"]["steps"] = []
         problems = validate_planning_packet(packet)
+        self.assertTrue(any("contract_version" in problem for problem in problems), problems)
         self.assertTrue(any("read-only" in problem for problem in problems), problems)
         self.assertTrue(any("reject hardcode" in problem for problem in problems), problems)
         self.assertTrue(any("targeted_commands" in problem for problem in problems), problems)

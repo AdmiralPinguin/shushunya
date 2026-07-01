@@ -4,6 +4,7 @@
   "type": "object",
   "required": [
     "kind",
+    "contract_version",
     "owner",
     "target",
     "task",
@@ -22,6 +23,9 @@
   "properties": {
     "kind": {
       "const": "ceraxia_code_brigade_implementation_brief"
+    },
+    "contract_version": {
+      "const": "eye-mechanicum.v1"
     },
     "owner": {
       "const": "Ceraxia"

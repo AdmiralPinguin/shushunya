@@ -16,6 +16,8 @@ ROLE_ORDER = [
     "RiskScribe",
 ]
 
+CONTRACT_VERSION = "eye-mechanicum.v1"
+
 
 def task_text(payload: dict[str, Any]) -> str:
     return str(payload.get("task") or payload.get("goal") or payload.get("message") or "").strip()
@@ -332,6 +334,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
         "ok": bool(task),
+        "contract_version": CONTRACT_VERSION,
         "worker": "PlanningBrigade",
         "kind": "ceraxia_planning_packet",
         "task": task,

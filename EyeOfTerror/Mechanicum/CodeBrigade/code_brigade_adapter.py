@@ -7,10 +7,15 @@ from pathlib import Path
 from typing import Any
 
 
+CONTRACT_VERSION = "eye-mechanicum.v1"
+
+
 def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if brief.get("kind") != "ceraxia_code_brigade_implementation_brief":
         problems.append("brief kind must be ceraxia_code_brigade_implementation_brief")
+    if brief.get("contract_version") != CONTRACT_VERSION:
+        problems.append("brief contract_version is unsupported")
     if brief.get("target") != "CodeBrigade":
         problems.append("brief target must be CodeBrigade")
     if not isinstance(brief.get("task"), str) or not brief.get("task"):
@@ -45,6 +50,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         notes.append("real CodeBrigade execution adapter is not configured")
     return {
         "kind": "ceraxia_code_brigade_worker_report",
+        "contract_version": CONTRACT_VERSION,
         "target": "CodeBrigade",
         "status": status,
         "dry_run": dry_run,

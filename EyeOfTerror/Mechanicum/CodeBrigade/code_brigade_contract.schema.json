@@ -4,6 +4,7 @@
   "type": "object",
   "required": [
     "kind",
+    "contract_version",
     "target",
     "status",
     "dry_run",
@@ -14,6 +15,9 @@
   "properties": {
     "kind": {
       "const": "ceraxia_code_brigade_worker_report"
+    },
+    "contract_version": {
+      "const": "eye-mechanicum.v1"
     },
     "target": {
       "const": "CodeBrigade"
