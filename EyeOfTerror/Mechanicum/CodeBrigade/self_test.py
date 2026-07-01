@@ -46,6 +46,12 @@ def valid_brief() -> dict:
                 "candidate files are repo-relative existing non-symlink paths",
             ],
         },
+        "planning_review_gate": {
+            "decision": "ready_for_ceraxia_review",
+            "score": 95,
+            "blockers": [],
+            "warnings": [],
+        },
         "planning_dependency_map": {
             "critical_path": [
                 "task_contract",
@@ -117,6 +123,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve local dependency edges: {plan}")
     if plan["planning_critical_path"][-1] != "implementation_brief":
         raise AssertionError(f"implementation plan should preserve planning critical path: {plan}")
+    if plan["planning_review_decision"] != "ready_for_ceraxia_review" or plan["planning_review_score"] < 80:
+        raise AssertionError(f"implementation plan should preserve planning review gate: {plan}")
     if not any(phase["id"] == "capture_failing_test" for phase in plan["work_phases"]):
         raise AssertionError(f"implementation plan should preserve work phases: {plan}")
     if "verification cannot prove the requested behavior" not in plan["stop_conditions"]:
@@ -214,6 +222,11 @@ def main() -> int:
     missing_breakdown_report = code_brigade_adapter.build_worker_report(missing_breakdown, dry_run=True)
     if missing_breakdown_report["status"] != "blocked" or not any("work_breakdown" in item for item in missing_breakdown_report["validation_problems"]):
         raise AssertionError(f"missing work breakdown should be blocked: {missing_breakdown_report}")
+    blocked_review = valid_brief()
+    blocked_review["planning_review_gate"] = {"decision": "blocked", "score": 20, "blockers": ["unclear task"]}
+    blocked_review_report = code_brigade_adapter.build_worker_report(blocked_review, dry_run=True)
+    if blocked_review_report["status"] != "blocked" or not any("planning_review_gate" in item for item in blocked_review_report["validation_problems"]):
+        raise AssertionError(f"blocked planning review should block CodeBrigade: {blocked_review_report}")
     missing_handoff = valid_brief()
     missing_handoff["code_brigade_handoff"] = {"target": "CodeBrigade", "steps": []}
     missing_handoff_report = code_brigade_adapter.build_worker_report(missing_handoff, dry_run=True)

@@ -35,6 +35,11 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief implementation_brief_blueprint must target CodeBrigade")
     if not isinstance(blueprint.get("mutation_preconditions"), list) or not blueprint.get("mutation_preconditions"):
         problems.append("brief implementation_brief_blueprint mutation_preconditions are required")
+    planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
+    if planning_review.get("decision") == "blocked":
+        problems.append("brief planning_review_gate is blocked")
+    elif planning_review.get("decision") not in {"ready_for_ceraxia_review", "revise"}:
+        problems.append("brief planning_review_gate decision is required")
     dependency = brief.get("planning_dependency_map") if isinstance(brief.get("planning_dependency_map"), dict) else {}
     if not isinstance(dependency.get("critical_path"), list) or not dependency.get("critical_path"):
         problems.append("brief planning_dependency_map.critical_path is required")

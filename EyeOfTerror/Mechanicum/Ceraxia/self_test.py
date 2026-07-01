@@ -298,6 +298,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         packet["quality_bar"]["must_have_evidence"] = []
         packet["acceptance_contract"]["must_prove"] = []
         packet["implementation_brief_blueprint"]["mutation_preconditions"] = []
+        packet["planning_review_gate"] = {"decision": "broken", "score": -1}
         packet["code_brigade_handoff"]["steps"] = []
         problems = validate_planning_packet(packet)
         self.assertTrue(any("contract_version" in problem for problem in problems), problems)
@@ -311,6 +312,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertTrue(any("quality bar" in problem for problem in problems), problems)
         self.assertTrue(any("acceptance contract" in problem for problem in problems), problems)
         self.assertTrue(any("mutation preconditions" in problem for problem in problems), problems)
+        self.assertTrue(any("planning review gate" in problem for problem in problems), problems)
         self.assertTrue(any("code brigade handoff" in problem for problem in problems), problems)
         survey = build_repo_survey(packet)
         brief = build_implementation_brief(packet, survey)

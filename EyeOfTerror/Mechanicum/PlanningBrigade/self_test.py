@@ -48,6 +48,8 @@ def main() -> int:
         or "required negative tests are present, executed, or explicitly blocked" not in security_packet["acceptance_contract"]["must_prove"]
         or security_packet["implementation_brief_blueprint"]["target"] != "CodeBrigade"
         or "execution preflight passes" not in security_packet["implementation_brief_blueprint"]["mutation_preconditions"]
+        or security_packet["planning_review_gate"]["decision"] != "ready_for_ceraxia_review"
+        or security_packet["planning_review_gate"]["score"] < 80
         or "prove_negative_boundary" not in [step["step"] for step in security_packet["code_brigade_handoff"]["steps"]]
     ):
         raise AssertionError(f"security planning packet is too weak: {security_packet}")
@@ -84,6 +86,10 @@ def main() -> int:
     review_depends_on = next(phase for phase in combined_packet["work_breakdown"]["phases"] if phase["id"] == "review_result")["depends_on"]
     if sorted(review_depends_on) != ["prove_boundary", "prove_compatibility"]:
         raise AssertionError(f"combined high-risk plan must wait for both proof phases: {combined_packet}")
+
+    unclear_packet = planning_brigade.build_planning_packet({"task": "почини", "repo_path": "/repo"})
+    if unclear_packet["planning_review_gate"]["decision"] != "blocked" or not unclear_packet["planning_review_gate"]["blockers"]:
+        raise AssertionError(f"unclear task must be blocked by planning review: {unclear_packet}")
 
     cli = subprocess.run(
         [

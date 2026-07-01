@@ -52,6 +52,8 @@
         "python_symbols_truncated",
         "handoff_steps",
         "planning_critical_path",
+        "planning_review_decision",
+        "planning_review_score",
         "work_phases",
         "stop_conditions",
         "mutation_preconditions",
@@ -72,6 +74,12 @@
           "items": {
             "type": "string"
           }
+        },
+        "planning_review_decision": {
+          "type": "string"
+        },
+        "planning_review_score": {
+          "type": "integer"
         },
         "work_phases": {
           "type": "array",

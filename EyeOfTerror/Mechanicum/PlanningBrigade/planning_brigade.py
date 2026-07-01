@@ -543,6 +543,63 @@ def implementation_brief_blueprint(
     }
 
 
+def planning_review_gate(
+    triage: dict[str, Any],
+    problem: dict[str, Any],
+    survey: dict[str, Any],
+    dependency: dict[str, Any],
+    breakdown: dict[str, Any],
+    verification: dict[str, Any],
+    acceptance: dict[str, Any],
+) -> dict[str, Any]:
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if triage["needs_clarification"]:
+        blockers.append("task requires clarification before reliable implementation planning")
+    if not survey.get("repo_path"):
+        warnings.append("repo_path is absent; Ceraxia may fall back to the project root")
+    if len(problem.get("definition_of_done", [])) < 3:
+        blockers.append("definition_of_done is incomplete")
+    if dependency.get("critical_path", [])[-1:] != ["implementation_brief"]:
+        blockers.append("dependency critical path does not end at implementation brief")
+    if len(breakdown.get("phases", [])) < 6:
+        blockers.append("work breakdown is incomplete")
+    if not verification.get("targeted_commands"):
+        blockers.append("verification strategy has no targeted commands")
+    if triage["risk_level"] == "high" and not verification.get("broad_verification_required"):
+        blockers.append("high-risk task lacks broad verification requirement")
+    if verification.get("negative_tests") and not any("negative" in item for item in acceptance.get("must_prove", [])):
+        blockers.append("negative test requirement is not reflected in acceptance contract")
+    score = 100
+    score -= 25 * len(blockers)
+    score -= 5 * len(warnings)
+    if triage["risk_level"] == "high":
+        score -= 5
+    score = max(0, min(100, score))
+    if blockers:
+        decision = "blocked"
+    elif score < 80:
+        decision = "revise"
+    else:
+        decision = "ready_for_ceraxia_review"
+    return {
+        "role": "PlanningBrigade",
+        "decision": decision,
+        "score": score,
+        "blockers": blockers,
+        "warnings": warnings,
+        "checks": [
+            "task clarity",
+            "repository target",
+            "definition of done",
+            "dependency critical path",
+            "work phase completeness",
+            "verification coverage",
+            "acceptance evidence alignment",
+        ],
+    }
+
+
 def code_brigade_handoff(triage: dict[str, Any], verification: dict[str, Any], quality: dict[str, Any]) -> dict[str, Any]:
     steps = [
         {
@@ -614,6 +671,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     quality = quality_bar(triage, verification)
     acceptance = acceptance_contract(problem, triage, verification, quality)
     blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown)
+    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, acceptance)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
         "ok": bool(task),
@@ -633,6 +691,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "quality_bar": quality,
         "acceptance_contract": acceptance,
         "implementation_brief_blueprint": blueprint,
+        "planning_review_gate": review,
         "code_brigade_handoff": handoff,
         "next_action": {
             "owner": "Ceraxia",

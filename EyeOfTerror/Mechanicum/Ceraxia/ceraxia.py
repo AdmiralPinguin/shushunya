@@ -106,6 +106,7 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         "quality_bar",
         "acceptance_contract",
         "implementation_brief_blueprint",
+        "planning_review_gate",
         "code_brigade_handoff",
     ]
     if packet.get("roles_completed") != ROLE_ORDER:
@@ -210,6 +211,13 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("implementation brief blueprint must target CodeBrigade")
     if not isinstance(blueprint.get("mutation_preconditions"), list) or len(blueprint.get("mutation_preconditions", [])) < 3:
         problems.append("implementation brief blueprint must include mutation preconditions")
+    planning_review = packet.get("planning_review_gate") if isinstance(packet.get("planning_review_gate"), dict) else {}
+    if planning_review.get("decision") not in {"ready_for_ceraxia_review", "revise", "blocked"}:
+        problems.append("planning review gate must include a valid decision")
+    if not isinstance(planning_review.get("score"), int) or planning_review.get("score", -1) < 0:
+        problems.append("planning review gate must include a non-negative score")
+    if planning_review.get("decision") == "blocked":
+        problems.extend(f"planning review blocked: {item}" for item in planning_review.get("blockers", []))
     handoff = packet.get("code_brigade_handoff") if isinstance(packet.get("code_brigade_handoff"), dict) else {}
     if handoff.get("target") != "CodeBrigade":
         problems.append("code brigade handoff must target CodeBrigade")
@@ -236,7 +244,8 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
     quality = packet.get("quality_bar") if isinstance(packet.get("quality_bar"), dict) else {}
     handoff = packet.get("code_brigade_handoff") if isinstance(packet.get("code_brigade_handoff"), dict) else {}
     planning_problems = validate_planning_packet(packet)
-    blocked = bool(planning_problems) or not survey["repo_exists"]
+    planning_review = packet.get("planning_review_gate") if isinstance(packet.get("planning_review_gate"), dict) else {}
+    blocked = bool(planning_problems) or not survey["repo_exists"] or planning_review.get("decision") == "blocked"
     blockers = [f"planning validation failed: {problem}" for problem in planning_problems]
     if not survey["repo_exists"]:
         blockers.append("repo survey or planning validation is incomplete")
@@ -271,6 +280,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "quality_bar": quality,
         "acceptance_contract": packet.get("acceptance_contract", {}),
         "implementation_brief_blueprint": packet.get("implementation_brief_blueprint", {}),
+        "planning_review_gate": planning_review,
         "planning_dependency_map": packet.get("dependency_map", {}),
         "work_breakdown": packet.get("work_breakdown", {}),
         "code_brigade_handoff": handoff,
