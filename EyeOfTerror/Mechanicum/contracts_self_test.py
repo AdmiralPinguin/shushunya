@@ -28,6 +28,7 @@ from ceraxia import (  # noqa: E402
 )
 from code_brigade_adapter import build_worker_report  # noqa: E402
 from code_brigade_adapter import build_blocked_execution_result  # noqa: E402
+from execution_adapter import execute_implementation_brief  # noqa: E402
 from planning_brigade import build_planning_packet  # noqa: E402
 
 
@@ -150,6 +151,14 @@ def main() -> int:
         blocked_execution_result,
         "execution result",
     )
+    preflight_execution_result = execute_implementation_brief(brief)
+    assert_schema_subset(
+        load_schema(ROOT / "CodeBrigade" / "execution_result.schema.json"),
+        preflight_execution_result,
+        "execution result with preflight",
+    )
+    if "preflight" not in preflight_execution_result:
+        raise AssertionError(f"execution adapter should expose preflight evidence: {preflight_execution_result}")
     assert_execution_policy_matches_result_schema()
     verification = build_verification_report(brief, worker_report)
     review = review_gate(packet, brief, worker_report, verification)
