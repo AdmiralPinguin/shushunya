@@ -119,6 +119,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["package_audit_decision"], "pending_until_run_audit")
             self.assertFalse(summary["ready_for_execution"])
             self.assertEqual(summary["review_decision"], "dry_run_ready")
+            self.assertEqual(summary["worker_status"], "dry_run_handoff_ready")
+            self.assertEqual(summary["code_brigade_execution_policy_status"], "blocked_until_adapter_is_wired")
+            self.assertEqual(summary["code_brigade_execution_result_status"], "")
+            self.assertIsNone(summary["code_brigade_execution_preflight_ok"])
             self.assertIn("security", summary["task_kinds"])
             self.assertGreaterEqual(summary["evidence"]["required_count"], 1)
             self.assertGreaterEqual(summary["evidence"]["planned_count"], 1)
@@ -202,6 +206,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any("real CodeBrigade execution adapter is not configured" in note for note in worker_report["notes"]))
             self.assertEqual(worker_report["execution_result"]["status"], "blocked")
             self.assertTrue(worker_report["execution_result"]["blockers"])
+            summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["worker_status"], "blocked")
+            self.assertEqual(summary["code_brigade_execution_result_status"], "blocked")
+            self.assertTrue(summary["code_brigade_execution_preflight_ok"])
 
     def test_review_gate_rejects_incomplete_planning_packet(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})

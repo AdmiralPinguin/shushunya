@@ -551,10 +551,13 @@ def build_run_summary(
     run_dir: Path,
     status: dict[str, Any],
     brief: dict[str, Any],
+    worker_report: dict[str, Any],
     review: dict[str, Any],
     readiness: dict[str, Any],
     evidence_matrix: dict[str, Any],
 ) -> dict[str, Any]:
+    execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
+    preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
     return {
         "kind": "ceraxia_run_summary",
         "contract_version": CONTRACT_VERSION,
@@ -567,6 +570,11 @@ def build_run_summary(
         "ready_for_execution": readiness.get("decision") == "ready_for_real_execution",
         "review_decision": review.get("decision"),
         "execution_readiness": readiness.get("decision"),
+        "worker_status": worker_report.get("status"),
+        "code_brigade_execution_policy_status": worker_report.get("execution_policy_status"),
+        "code_brigade_execution_result_status": execution_result.get("status", ""),
+        "code_brigade_execution_preflight_ok": preflight.get("ok") if preflight else None,
+        "code_brigade_execution_preflight_blocker_count": len(preflight.get("blockers", [])) if preflight else 0,
         "risk_level": brief.get("risk_level"),
         "task_kinds": brief.get("task_kinds", []),
         "selected_strategy": brief.get("selected_strategy"),
@@ -714,7 +722,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_json(run_dir / "execution_readiness.json", readiness)
     evidence_matrix = build_evidence_matrix(brief, worker_report, verification_report, readiness)
     write_json(run_dir / "evidence_matrix.json", evidence_matrix)
-    summary = build_run_summary(run_id, run_dir, status, brief, review, readiness, evidence_matrix)
+    summary = build_run_summary(run_id, run_dir, status, brief, worker_report, review, readiness, evidence_matrix)
     write_json(run_dir / "run_summary.json", summary)
     manifest = build_artifact_manifest(run_dir)
     write_json(run_dir / "artifact_manifest.json", manifest)
