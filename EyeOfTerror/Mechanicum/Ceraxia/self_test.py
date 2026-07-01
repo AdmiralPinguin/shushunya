@@ -1491,6 +1491,13 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             audit = audit_run_package(run_dir)
             self.assertEqual(audit["decision"], "blocked")
             self.assertTrue(any("worker_output_contract_status disagrees" in item["finding"] for item in audit["findings"]))
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["worker_output_contract_status"] = "complete"
+            summary["worker_output_acceptance_requirement_row_count"] = 0
+            summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            audit = audit_run_package(run_dir)
+            self.assertEqual(audit["decision"], "blocked")
+            self.assertTrue(any("worker_output_acceptance_requirement_row_count disagrees" in item["finding"] for item in audit["findings"]))
 
     def test_run_audit_blocks_surface_status_count_summary_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
