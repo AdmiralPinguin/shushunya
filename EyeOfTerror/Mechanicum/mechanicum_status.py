@@ -34,6 +34,7 @@ COMPONENTS = {
             "planning_packet_contract.py",
             "planning_contract.schema.json",
             "role_contracts.json",
+            "service_contracts.json",
             "field_trials.json",
             "field_trial_runner.py",
             "self_test.py",

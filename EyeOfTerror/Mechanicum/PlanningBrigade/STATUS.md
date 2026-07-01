@@ -34,6 +34,8 @@ Current capabilities:
   covered by at least one implementation work package
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
+- planned read-only service interface contracts for future role split on
+  reserved ports 7111-7115
 - field trials for multiple task shapes with coverage gates for task kinds,
   impacted surfaces, implementation work packages, and change-control
   invariant/proof, acceptance-trace package coverage, and assumption coverage

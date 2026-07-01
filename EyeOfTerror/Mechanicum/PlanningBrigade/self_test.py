@@ -29,12 +29,24 @@ def assert_packet_shape(packet: dict) -> None:
 
 def assert_role_contracts() -> None:
     contracts = json.loads((ROOT / "role_contracts.json").read_text(encoding="utf-8"))
+    service_contracts = json.loads((ROOT / "service_contracts.json").read_text(encoding="utf-8"))
     if contracts.get("contract_version") != "eye-mechanicum.v1":
         raise AssertionError(f"role contract version drifted: {contracts}")
+    if service_contracts.get("contract_version") != "eye-mechanicum.v1":
+        raise AssertionError(f"service contract version drifted: {service_contracts}")
     roles = contracts.get("roles") if isinstance(contracts.get("roles"), list) else []
     names = [role.get("name") for role in roles if isinstance(role, dict)]
     if names != planning_brigade.ROLE_ORDER:
         raise AssertionError(f"role contracts must follow PlanningBrigade role order: {contracts}")
+    services = service_contracts.get("services") if isinstance(service_contracts.get("services"), list) else []
+    service_names = [service.get("name") for service in services if isinstance(service, dict)]
+    if service_names != names:
+        raise AssertionError(f"service contracts must follow role contract order: {service_contracts}")
+    service_ports = [int(service.get("port") or 0) for service in services if isinstance(service, dict)]
+    if service_ports != list(range(7111, 7116)):
+        raise AssertionError(f"planning service ports must be stable reserved 7111-7115: {service_contracts}")
+    if service_contracts.get("port_policy", {}).get("active") is not False:
+        raise AssertionError(f"planning service contracts should stay planned until split: {service_contracts}")
     externally_available = {"task", "constraints"}
     produced: set[str] = set(externally_available)
     for role in roles:
@@ -61,6 +73,15 @@ def assert_role_contracts() -> None:
         for output in role["outputs"]:
             if output not in sample_packet:
                 raise AssertionError(f"role contract output is absent from planning packet: role={role['name']} output={output}")
+    for service in services:
+        if service.get("may_mutate_source") is not False:
+            raise AssertionError(f"planning service interface must be read-only: {service}")
+        matching_role = next(role for role in roles if role["name"] == service["name"])
+        if service.get("output_artifacts") != matching_role.get("outputs"):
+            raise AssertionError(f"service outputs must match role outputs: service={service} role={matching_role}")
+        for output in service.get("output_artifacts", []):
+            if output not in sample_packet:
+                raise AssertionError(f"service output is absent from planning packet: service={service['name']} output={output}")
 
 
 def main() -> int:
