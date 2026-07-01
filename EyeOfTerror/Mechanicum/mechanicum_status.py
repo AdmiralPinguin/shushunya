@@ -24,7 +24,7 @@ COMPONENTS = {
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
         ],
-        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_caller_contract_evidence_generic_edges_per_surface_verification_work_package_review_diagnostic_repair_requests_and_optional_guarded_repair_execution",
+        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_caller_contract_evidence_generic_edges_per_surface_verification_work_package_review_worker_output_contract_audit_diagnostic_repair_requests_and_optional_guarded_repair_execution",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -45,7 +45,7 @@ COMPONENTS = {
             "VerificationArchitect/README.md",
             "RiskScribe/README.md",
         ],
-        "maturity": "contracted_planning_department_with_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_field_trial_coverage_and_code_work_packages",
+        "maturity": "contracted_planning_department_with_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_field_trial_coverage_code_work_packages_and_worker_output_contracts",
     },
     "CodeBrigade": {
         "kind": "implementation_brigade_contract",
@@ -68,7 +68,7 @@ COMPONENTS = {
             "verification_execution.schema.json",
             "self_test.py",
         ],
-        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_preflight_explicit_text_ast_guarded_natural_language_test_inferred_literal_patch_adapter_package_statuses_allowlisted_verification_diagnostic_repair_intake_and_guarded_assertion_repair_executor",
+        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_worker_output_contract_preflight_explicit_text_ast_guarded_natural_language_test_inferred_literal_patch_adapter_package_statuses_allowlisted_verification_diagnostic_repair_intake_and_guarded_assertion_repair_executor",
     },
 }
 
@@ -77,7 +77,7 @@ ROADMAP = [
     {
         "priority": 1,
         "item": "expand CodeBrigade from guarded inference to diagnostic autonomous source edits",
-        "reason": "PlanningBrigade now emits a diagnostic repair plan, Ceraxia writes diagnostic repair request artifacts and can optionally invoke the guarded repair adapter, and CodeBrigade validates repair intake plus executes narrow assertion-failure guarded repairs, but the broader source-edit adapter still needs to handle more diagnostic classes against repo evidence, verification feedback, scope budgets, and refusal controls.",
+        "reason": "PlanningBrigade now emits diagnostic repair and worker-output contracts, Ceraxia writes diagnostic repair request artifacts and audits worker-output sufficiency, and CodeBrigade validates repair intake plus executes narrow assertion-failure guarded repairs, but the broader source-edit adapter still needs to handle more diagnostic classes against repo evidence, verification feedback, scope budgets, and refusal controls.",
         "owner": "CodeBrigade",
     },
     {
@@ -89,13 +89,13 @@ ROADMAP = [
     {
         "priority": 3,
         "item": "match per-surface verification to command output and artifact evidence",
-        "reason": "Review now reports per-surface executed, partial, planned, failed, or blocked evidence, tracks work-package statuses, and blocks high-risk partial execution; it still does not deeply inspect command stdout/stderr or generated artifacts for surface-specific assertions.",
+        "reason": "Review now reports per-surface executed, partial, planned, failed, or blocked evidence, tracks work-package statuses, audits worker-output contract sufficiency, and blocks high-risk partial execution; it still does not deeply inspect command stdout/stderr or generated artifacts for surface-specific assertions.",
         "owner": "Ceraxia",
     },
     {
         "priority": 4,
         "item": "split PlanningBrigade roles into callable services after more field trials",
-        "reason": "PlanningBrigade now emits problem framing, path hints, assumption registers, investigation playbooks, change-control plans, diagnostic repair plans, acceptance trace matrices, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, CodeBrigade brief blueprints, and implementation work packages; role services should wait until these contracts survive more real tasks.",
+        "reason": "PlanningBrigade now emits problem framing, path hints, assumption registers, investigation playbooks, change-control plans, diagnostic repair plans, acceptance trace matrices, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, CodeBrigade brief blueprints, implementation work packages, and worker-output contracts; role services should wait until these contracts survive more real tasks.",
         "owner": "PlanningBrigade",
     },
 ]

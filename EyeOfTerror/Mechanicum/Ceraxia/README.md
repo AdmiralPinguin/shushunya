@@ -92,11 +92,14 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
 - `assumption_register` is also preserved through worker reports, so task,
   repository, verification, and specialized risk assumptions remain visible to
   review and orchestration.
+- `worker_output_contract` is preserved through the CodeBrigade implementation
+  plan. The review gate blocks missing package statuses, missing evidence
+  sources, or contract rows that no longer match the planned work packages.
 - `planning_review_gate` scores the packet and blocks unclear or structurally
   unsafe plans.
 - `run_summary.json` and `final_report.md` expose planning review, survey
-  quality, implementation package dependency, and execution evidence decisions
-  for orchestration history.
+  quality, implementation package dependency, worker-output sufficiency, and
+  execution evidence decisions for orchestration history.
 - `repo_survey.json.source_summaries` gives shallow multi-language symbol and
   import-like evidence for common source files; Python still has the deeper
   AST symbol/import path used for local dependency edges.

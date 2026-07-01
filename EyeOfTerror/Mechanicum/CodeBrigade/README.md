@@ -57,8 +57,11 @@ candidate files, test files, local dependency edges, investigation playbook
 read stages, caller candidates, contract surface candidates, change-control
 protected invariants, rollback triggers, post-change proofs, handoff steps,
 verification commands, acceptance trace rows, assumption rows, acceptance
-gates, package-level blocking policies, and refusal conditions for the future
-real executor.
+gates, package-level blocking policies, the PlanningBrigade
+`worker_output_contract`, and refusal conditions for the future real executor.
+The worker-output contract is the runtime checklist for reports, package
+statuses, evidence sources, and blockers that Ceraxia will audit before
+accepting a result.
 When broad autonomous source editing is required, `autonomous_execution_request`
 derives its diagnostic input contract, repair-loop read requirements, stop
 conditions, and max attempts from the PlanningBrigade `diagnostic_repair_plan`,
@@ -69,7 +72,9 @@ than edit blindly.
 summary with impacted surfaces, package ids, target files, preserved tests, and
 blockers. Its first executor path is intentionally narrow: assertion-failure
 repair requests may reuse the existing guarded test-inferred source patch
-adapter, while unsupported diagnostics return blocked execution results.
+adapter, while unsupported diagnostics return blocked execution results. The
+repair execution brief includes the same worker-output contract shape as normal
+Ceraxia handoff, so diagnostic repair cannot bypass package-status auditing.
 Use it directly when inspecting a run package:
 
 ```bash

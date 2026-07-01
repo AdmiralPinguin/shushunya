@@ -63,6 +63,9 @@ Current contract:
 - `implementation_work_packages` turns the plan into reviewable CodeBrigade
   work packages with read scope, edit scope, verification scope, risk controls,
   blocking policy, handoff criteria, and a package dependency graph.
+- `worker_output_contract` tells CodeBrigade which reports, package statuses,
+  evidence sources, and blocker fields must return for Ceraxia to accept the
+  work.
 - `surface_package_matrix` traces every impacted surface to planned
   verification evidence and concrete implementation package ids.
 - `planning_review_gate` scores the planning packet and blocks unclear or
@@ -70,7 +73,8 @@ Current contract:
 - `code_brigade_handoff` lists the ordered execution/review steps, package
   review order, package dependency graph, global handoff criteria, and
   acceptance trace requirement, including the diagnostic repair plan that
-  CodeBrigade must preserve.
+  CodeBrigade must preserve. It also carries the worker-output contract that
+  the worker report and review gate must satisfy.
 
 ```bash
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "почини failing unittest без изменения тестов" --repo-path /repo
