@@ -28,6 +28,9 @@
     "survey_quality_warning_count",
     "surface_verification_status",
     "surface_verification_surface_count",
+    "surface_verification_status_counts",
+    "surface_verification_executed_count",
+    "surface_verification_partial_count",
     "verification_output_summary_count",
     "verification_output_signal_counts",
     "verification_output_diagnostic_counts",
@@ -166,6 +169,19 @@
       "type": "string"
     },
     "surface_verification_surface_count": {
+      "type": "integer"
+    },
+    "surface_verification_status_counts": {
+      "type": "object",
+      "required": ["executed", "partial", "planned_only", "missing", "failed", "blocked"],
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "surface_verification_executed_count": {
+      "type": "integer"
+    },
+    "surface_verification_partial_count": {
       "type": "integer"
     },
     "verification_output_summary_count": {

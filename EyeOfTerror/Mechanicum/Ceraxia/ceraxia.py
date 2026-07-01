@@ -968,11 +968,20 @@ def review_gate(
     surface_rows = surface_matrix.get("rows") if isinstance(surface_matrix.get("rows"), list) else []
     surface_blockers = surface_matrix.get("blockers") if isinstance(surface_matrix.get("blockers"), list) else []
     surface_evidence = surface_evidence_rows(surface_rows, verification_report)
+    surface_evidence_status_counts = {
+        status: sum(1 for row in surface_evidence if row.get("status") == status)
+        for status in ("executed", "partial", "planned_only", "missing", "failed", "blocked")
+    }
     surface_status = "blocked" if surface_blockers else surface_status_from_rows(surface_evidence)
     surface_verification_sufficiency = {
         "planned_complete": surface_matrix.get("complete") is True,
         "status": surface_status,
         "surface_count": len(surface_rows),
+        "status_counts": surface_evidence_status_counts,
+        "executed_surface_count": surface_evidence_status_counts["executed"],
+        "partial_surface_count": surface_evidence_status_counts["partial"],
+        "missing_surface_count": surface_evidence_status_counts["missing"],
+        "blocked_surface_count": surface_evidence_status_counts["blocked"],
         "blocker_count": len(surface_blockers),
         "executed_evidence": bool(meaningful_commands_executed),
         "surface_evidence": surface_evidence,
@@ -1378,6 +1387,12 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
     surface_sufficiency = review.get("surface_verification_sufficiency") if isinstance(review.get("surface_verification_sufficiency"), dict) else {}
     if summary.get("surface_verification_status", "") != surface_sufficiency.get("status", ""):
         findings.append({"severity": "blocker", "finding": "run_summary surface_verification_status disagrees with review_gate.json"})
+    if summary.get("surface_verification_status_counts", {}) != surface_sufficiency.get("status_counts", {}):
+        findings.append({"severity": "blocker", "finding": "run_summary surface_verification_status_counts disagrees with review_gate.json"})
+    if summary.get("surface_verification_executed_count", 0) != surface_sufficiency.get("executed_surface_count", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary surface_verification_executed_count disagrees with review_gate.json"})
+    if summary.get("surface_verification_partial_count", 0) != surface_sufficiency.get("partial_surface_count", 0):
+        findings.append({"severity": "blocker", "finding": "run_summary surface_verification_partial_count disagrees with review_gate.json"})
     verification_sufficiency = review.get("verification_sufficiency") if isinstance(review.get("verification_sufficiency"), dict) else {}
     if summary.get("verification_output_summary_count", 0) != verification_sufficiency.get("output_summary_count", 0):
         findings.append({"severity": "blocker", "finding": "run_summary verification_output_summary_count disagrees with review_gate.json"})
@@ -1723,6 +1738,9 @@ def build_run_summary(
         "survey_quality_warning_count": len(survey_quality.get("warnings", [])) if isinstance(survey_quality.get("warnings"), list) else 0,
         "surface_verification_status": surface_sufficiency.get("status", ""),
         "surface_verification_surface_count": surface_sufficiency.get("surface_count", 0),
+        "surface_verification_status_counts": surface_sufficiency.get("status_counts", {}),
+        "surface_verification_executed_count": surface_sufficiency.get("executed_surface_count", 0),
+        "surface_verification_partial_count": surface_sufficiency.get("partial_surface_count", 0),
         "verification_output_summary_count": verification_sufficiency.get("output_summary_count", 0),
         "verification_output_signal_counts": verification_sufficiency.get("output_signal_counts", {}),
         "verification_output_diagnostic_counts": verification_sufficiency.get("output_diagnostic_counts", {}),

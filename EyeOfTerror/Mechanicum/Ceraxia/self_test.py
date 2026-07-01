@@ -303,6 +303,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["survey_quality_warning_count"], 0)
             self.assertEqual(summary["surface_verification_status"], "planned_only")
             self.assertGreaterEqual(summary["surface_verification_surface_count"], 1)
+            self.assertEqual(summary["surface_verification_status_counts"], review["surface_verification_sufficiency"]["status_counts"])
+            self.assertEqual(summary["surface_verification_executed_count"], 0)
+            self.assertEqual(summary["surface_verification_partial_count"], 0)
             self.assertEqual(summary["investigation_playbook_status"], "complete")
             self.assertGreaterEqual(summary["investigation_read_stage_count"], 5)
             self.assertGreaterEqual(summary["investigation_evidence_question_count"], 4)
@@ -549,6 +552,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(summary["verification_output_summary_count"], 1)
             self.assertEqual(summary["verification_output_signal_counts"], review["verification_sufficiency"]["output_signal_counts"])
             self.assertEqual(summary["verification_output_diagnostic_counts"], review["verification_sufficiency"]["output_diagnostic_counts"])
+            self.assertEqual(summary["surface_verification_status_counts"], review["surface_verification_sufficiency"]["status_counts"])
+            self.assertGreaterEqual(summary["surface_verification_executed_count"] + summary["surface_verification_partial_count"], 1)
 
     def test_execute_diagnostic_repair_writes_execution_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1459,6 +1464,27 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             audit = audit_run_package(run_dir)
             self.assertEqual(audit["decision"], "blocked")
             self.assertTrue(any("worker_output_contract_status disagrees" in item["finding"] for item in audit["findings"]))
+
+    def test_run_audit_blocks_surface_status_count_summary_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="добавь helper в `app.py`",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            run_dir = Path(result["run_dir"])
+            summary_path = run_dir / "run_summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["surface_verification_status_counts"] = {"executed": 99}
+            summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            audit = audit_run_package(run_dir)
+            self.assertEqual(audit["decision"], "blocked")
+            self.assertTrue(any("surface_verification_status_counts disagrees" in item["finding"] for item in audit["findings"]))
 
     def test_run_audit_blocks_planning_feedback_summary_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
