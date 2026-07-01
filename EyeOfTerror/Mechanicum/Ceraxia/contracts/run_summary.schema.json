@@ -18,6 +18,8 @@
     "planning_work_phase_count",
     "survey_quality_decision",
     "survey_quality_warning_count",
+    "surface_verification_status",
+    "surface_verification_surface_count",
     "execution_readiness",
     "worker_status",
     "code_brigade_execution_policy_status",
@@ -76,6 +78,12 @@
       "type": "string"
     },
     "survey_quality_warning_count": {
+      "type": "integer"
+    },
+    "surface_verification_status": {
+      "type": "string"
+    },
+    "surface_verification_surface_count": {
       "type": "integer"
     },
     "execution_readiness": {

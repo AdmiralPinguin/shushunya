@@ -438,6 +438,16 @@ def review_gate(
         "negative_tests_required_count": len(negative_tests) if isinstance(negative_tests, list) else 0,
         "broad_verification_required": bool(verification_report.get("broad_verification_required")),
     }
+    surface_matrix = brief.get("surface_verification_matrix") if isinstance(brief.get("surface_verification_matrix"), dict) else {}
+    surface_rows = surface_matrix.get("rows") if isinstance(surface_matrix.get("rows"), list) else []
+    surface_blockers = surface_matrix.get("blockers") if isinstance(surface_matrix.get("blockers"), list) else []
+    surface_verification_sufficiency = {
+        "planned_complete": surface_matrix.get("complete") is True,
+        "status": "blocked" if surface_blockers else ("executed" if commands_executed else "planned_only"),
+        "surface_count": len(surface_rows),
+        "blocker_count": len(surface_blockers),
+        "executed_evidence": bool(commands_executed),
+    }
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
     if not worker_report.get("implementation_brief_acknowledged", False):
@@ -450,6 +460,10 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "broad verification is required but no commands are planned"})
     if verification_report.get("broad_verification_required") and verification_report.get("status") == "planned_only":
         warnings.append({"severity": "warning", "finding": "broad verification is planned but not executed"})
+    if surface_blockers:
+        findings.append({"severity": "blocker", "finding": "surface verification matrix has blockers"})
+    if surface_rows and not commands_executed:
+        warnings.append({"severity": "warning", "finding": "surface verification coverage is planned but not executed"})
     if verification_report.get("commands_executable") and not verification_report.get("commands_executed"):
         warnings.append({"severity": "warning", "finding": "executable verification commands exist but were not run"})
     if brief.get("risk_level") == "high" and not commands_executed:
@@ -477,11 +491,13 @@ def review_gate(
         "findings": findings,
         "warnings": warnings,
         "verification_sufficiency": verification_sufficiency,
+        "surface_verification_sufficiency": surface_verification_sufficiency,
         "checked_against": [
             "planning packet completeness",
             "strategy approval",
             "scope control",
             "verification strategy",
+            "surface verification coverage",
             "worker report honesty",
         ],
     }
@@ -520,6 +536,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Planning work phases: {len(work_phases)}",
         f"Survey quality decision: {survey_quality.get('decision', '')}",
         f"Verification status: {verification['status']}",
+        f"Surface verification status: {review.get('surface_verification_sufficiency', {}).get('status', '')}",
         f"Verification commands planned: {len(commands_planned)}",
         f"Verification commands executed: {len(commands_executed)}",
         f"Worker status: {worker_report.get('status', '')}",
@@ -651,6 +668,9 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         brief = {}
     if summary.get("execution_readiness") != readiness.get("decision"):
         findings.append({"severity": "blocker", "finding": "run_summary execution_readiness disagrees with execution_readiness.json"})
+    surface_sufficiency = review.get("surface_verification_sufficiency") if isinstance(review.get("surface_verification_sufficiency"), dict) else {}
+    if summary.get("surface_verification_status", "") != surface_sufficiency.get("status", ""):
+        findings.append({"severity": "blocker", "finding": "run_summary surface_verification_status disagrees with review_gate.json"})
     if summary.get("ready_for_execution") != (readiness.get("decision") == "ready_for_real_execution"):
         findings.append({"severity": "blocker", "finding": "run_summary ready_for_execution disagrees with execution_readiness.json"})
     if summary.get("worker_status") != worker_report.get("status"):
@@ -751,6 +771,7 @@ def build_run_summary(
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
+    surface_sufficiency = review.get("surface_verification_sufficiency") if isinstance(review.get("surface_verification_sufficiency"), dict) else {}
     return {
         "kind": "ceraxia_run_summary",
         "contract_version": CONTRACT_VERSION,
@@ -767,6 +788,8 @@ def build_run_summary(
         "planning_work_phase_count": len(work_phases),
         "survey_quality_decision": survey_quality.get("decision", ""),
         "survey_quality_warning_count": len(survey_quality.get("warnings", [])) if isinstance(survey_quality.get("warnings"), list) else 0,
+        "surface_verification_status": surface_sufficiency.get("status", ""),
+        "surface_verification_surface_count": surface_sufficiency.get("surface_count", 0),
         "execution_readiness": readiness.get("decision"),
         "worker_status": worker_report.get("status"),
         "code_brigade_execution_policy_status": worker_report.get("execution_policy_status"),

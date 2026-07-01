@@ -135,6 +135,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any("broad verification is planned" in item["finding"] for item in review["warnings"]))
             self.assertTrue(any("high-risk task has no executed verification evidence yet" in item["finding"] for item in review["warnings"]))
             self.assertEqual(review["verification_sufficiency"]["status"], "planned_only")
+            self.assertEqual(review["surface_verification_sufficiency"]["status"], "planned_only")
+            self.assertGreaterEqual(review["surface_verification_sufficiency"]["surface_count"], 1)
             self.assertGreaterEqual(review["verification_sufficiency"]["commands_planned_count"], 1)
             readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
             self.assertEqual(readiness["decision"], "blocked")
@@ -152,6 +154,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(summary["planning_work_phase_count"], 6)
             self.assertEqual(summary["survey_quality_decision"], "passed")
             self.assertEqual(summary["survey_quality_warning_count"], 0)
+            self.assertEqual(summary["surface_verification_status"], "planned_only")
+            self.assertGreaterEqual(summary["surface_verification_surface_count"], 1)
             self.assertEqual(summary["worker_status"], "dry_run_handoff_ready")
             self.assertEqual(summary["code_brigade_execution_policy_status"], "blocked_until_adapter_is_wired")
             self.assertEqual(summary["code_brigade_execution_result_status"], "")
@@ -174,6 +178,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("Planning review score:", final_report)
             self.assertIn("Planning work phases:", final_report)
             self.assertIn("Survey quality decision: passed", final_report)
+            self.assertIn("Surface verification status: planned_only", final_report)
             self.assertIn("Worker status: dry_run_handoff_ready", final_report)
             self.assertIn("Execution policy status: blocked_until_adapter_is_wired", final_report)
             self.assertIn("Execution preflight ok: n/a", final_report)
@@ -243,6 +248,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "passed")
             self.assertTrue(verification["commands_executed"])
+            review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
+            self.assertEqual(review["surface_verification_sufficiency"]["status"], "executed")
+            summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["surface_verification_status"], "executed")
 
     def test_non_dry_run_blocks_until_real_code_brigade_execution_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -482,6 +491,27 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             audit = audit_run_package(run_dir)
             self.assertEqual(audit["decision"], "blocked")
             self.assertTrue(any("survey_quality_decision disagrees" in item["finding"] for item in audit["findings"]))
+
+    def test_run_audit_blocks_surface_verification_summary_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="добавь helper в `app.py`",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            run_dir = Path(result["run_dir"])
+            summary_path = run_dir / "run_summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["surface_verification_status"] = "executed"
+            summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            audit = audit_run_package(run_dir)
+            self.assertEqual(audit["decision"], "blocked")
+            self.assertTrue(any("surface_verification_status disagrees" in item["finding"] for item in audit["findings"]))
 
 
 if __name__ == "__main__":
