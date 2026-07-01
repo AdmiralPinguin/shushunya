@@ -106,6 +106,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["contract_version"], "eye-mechanicum.v1")
             self.assertEqual(summary["execution_readiness"], "blocked")
             self.assertTrue(summary["package_ok"])
+            self.assertTrue(summary["package_lifecycle_finalized"])
+            self.assertEqual(summary["package_audit_decision"], "pending_until_run_audit")
             self.assertFalse(summary["ready_for_execution"])
             self.assertEqual(summary["review_decision"], "dry_run_ready")
             self.assertIn("security", summary["task_kinds"])

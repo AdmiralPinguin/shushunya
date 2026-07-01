@@ -535,6 +535,8 @@ def build_run_summary(
         "run_dir": str(run_dir),
         "state": status.get("state"),
         "package_ok": status.get("state") == "finalized",
+        "package_lifecycle_finalized": status.get("state") == "finalized",
+        "package_audit_decision": "pending_until_run_audit",
         "ready_for_execution": readiness.get("decision") == "ready_for_real_execution",
         "review_decision": review.get("decision"),
         "execution_readiness": readiness.get("decision"),
