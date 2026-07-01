@@ -119,6 +119,18 @@ def main() -> int:
         stale_tests_preflight = build_execution_preflight(stale_tests_brief)
         if stale_tests_preflight["ok"] or stale_tests_preflight["missing_test_files"] != ["missing_test.py"]:
             raise AssertionError(f"preflight should block stale survey test files: {stale_tests_preflight}")
+        unsafe_candidate_brief = valid_brief()
+        unsafe_candidate_brief["repo_path"] = tmp
+        unsafe_candidate_brief["repo_survey_evidence"]["candidate_files"] = ["../outside.py"]
+        unsafe_candidate_preflight = build_execution_preflight(unsafe_candidate_brief)
+        if unsafe_candidate_preflight["ok"] or unsafe_candidate_preflight["unsafe_candidate_files"] != ["../outside.py"]:
+            raise AssertionError(f"preflight should block unsafe candidate paths: {unsafe_candidate_preflight}")
+        unsafe_test_brief = valid_brief()
+        unsafe_test_brief["repo_path"] = tmp
+        unsafe_test_brief["repo_survey_evidence"]["test_files"] = ["/tmp/test_app.py"]
+        unsafe_test_preflight = build_execution_preflight(unsafe_test_brief)
+        if unsafe_test_preflight["ok"] or unsafe_test_preflight["unsafe_test_files"] != ["/tmp/test_app.py"]:
+            raise AssertionError(f"preflight should block unsafe test paths: {unsafe_test_preflight}")
     invalid = valid_brief()
     invalid.pop("allowed_scope")
     invalid_report = code_brigade_adapter.build_worker_report(invalid, dry_run=True)

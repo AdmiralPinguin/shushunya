@@ -11,9 +11,11 @@
     "candidate_file_count",
     "existing_candidate_file_count",
     "missing_candidate_files",
+    "unsafe_candidate_files",
     "test_file_count",
     "existing_test_file_count",
     "missing_test_files",
+    "unsafe_test_files",
     "targeted_command_count",
     "suggested_command_count",
     "blockers",
@@ -47,6 +49,12 @@
         "type": "string"
       }
     },
+    "unsafe_candidate_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "test_file_count": {
       "type": "integer"
     },
@@ -54,6 +62,12 @@
       "type": "integer"
     },
     "missing_test_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unsafe_test_files": {
       "type": "array",
       "items": {
         "type": "string"
