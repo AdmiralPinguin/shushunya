@@ -407,6 +407,44 @@ def impact_analysis(triage: dict[str, Any], problem: dict[str, Any], survey: dic
     }
 
 
+def execution_forecast(triage: dict[str, Any], breakdown: dict[str, Any], impact: dict[str, Any]) -> dict[str, Any]:
+    phase_count = len(breakdown.get("phases", []))
+    surface_count = len(impact.get("surfaces", []))
+    complexity_score = triage["risk_score"] + phase_count + surface_count
+    if impact.get("requires_cross_surface_review"):
+        complexity_score += 2
+    if complexity_score >= 15:
+        complexity = "high"
+        expected_iterations = 4
+        recommended_timeout_minutes = 60
+    elif complexity_score >= 10:
+        complexity = "medium"
+        expected_iterations = 2
+        recommended_timeout_minutes = 30
+    else:
+        complexity = "low"
+        expected_iterations = 1
+        recommended_timeout_minutes = 15
+    return {
+        "role": "PlanningBrigade",
+        "complexity": complexity,
+        "complexity_score": complexity_score,
+        "expected_code_brigade_iterations": expected_iterations,
+        "recommended_timeout_minutes": recommended_timeout_minutes,
+        "orchestration_notes": [
+            "run repository survey before source mutation",
+            "preserve planning packet and implementation brief in the final package",
+            "repeat review after every worker report with source changes",
+        ],
+        "escalation_triggers": [
+            "survey quality gate blocks",
+            "surface verification matrix is incomplete",
+            "verification fails twice on the same behavior",
+            "CodeBrigade requests scope outside allowed_scope",
+        ],
+    }
+
+
 def design_options(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
     selected = "minimal_design"
@@ -633,6 +671,7 @@ def implementation_brief_blueprint(
     breakdown: dict[str, Any],
     impact: dict[str, Any],
     surface_matrix: dict[str, Any],
+    forecast: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "role": "PlanningBrigade",
@@ -665,6 +704,7 @@ def implementation_brief_blueprint(
         "work_phases": [phase["id"] for phase in breakdown["phases"]],
         "impact_surfaces": [surface["surface"] for surface in impact["surfaces"]],
         "surface_verification_complete": surface_matrix["complete"],
+        "expected_code_brigade_iterations": forecast["expected_code_brigade_iterations"],
         "mutation_preconditions": [
             "implementation brief validates",
             "execution preflight passes",
@@ -800,13 +840,14 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     dependency = dependency_map(triage, survey)
     breakdown = work_breakdown(triage, dependency)
     impact = impact_analysis(triage, problem, survey)
+    forecast = execution_forecast(triage, breakdown, impact)
     design = design_options(payload, triage)
     verification = verification_strategy(triage)
     surface_matrix = surface_verification_matrix(impact, verification)
     risks = risk_register(triage, survey, design, verification)
     quality = quality_bar(triage, verification)
     acceptance = acceptance_contract(problem, triage, verification, quality, surface_matrix)
-    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix)
+    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix, forecast)
     review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance)
     handoff = code_brigade_handoff(triage, verification, quality)
     return {
@@ -822,6 +863,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "dependency_map": dependency,
         "work_breakdown": breakdown,
         "impact_analysis": impact,
+        "execution_forecast": forecast,
         "design_options": design,
         "verification_strategy": verification,
         "surface_verification_matrix": surface_matrix,

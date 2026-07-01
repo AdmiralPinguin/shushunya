@@ -24,6 +24,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     dependency = brief.get("planning_dependency_map") if isinstance(brief.get("planning_dependency_map"), dict) else {}
     breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     impact = brief.get("impact_analysis") if isinstance(brief.get("impact_analysis"), dict) else {}
+    forecast = brief.get("execution_forecast") if isinstance(brief.get("execution_forecast"), dict) else {}
     suggested_commands = brief.get("suggested_verification_commands")
     if not isinstance(suggested_commands, list):
         suggested_commands = []
@@ -58,6 +59,10 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "impact_surfaces": impact.get("surfaces", []) if isinstance(impact.get("surfaces"), list) else [],
         "highest_risk_surface": impact.get("highest_risk_surface", ""),
         "requires_cross_surface_review": bool(impact.get("requires_cross_surface_review")),
+        "execution_complexity": forecast.get("complexity", ""),
+        "expected_code_brigade_iterations": forecast.get("expected_code_brigade_iterations", 0),
+        "recommended_timeout_minutes": forecast.get("recommended_timeout_minutes", 0),
+        "escalation_triggers": forecast.get("escalation_triggers", []) if isinstance(forecast.get("escalation_triggers"), list) else [],
         "mutation_preconditions": blueprint.get("mutation_preconditions", []) if isinstance(blueprint.get("mutation_preconditions"), list) else [],
         "acceptance_evidence_required": acceptance.get("must_prove", []) if isinstance(acceptance.get("must_prove"), list) else [],
         "verification_commands": commands,

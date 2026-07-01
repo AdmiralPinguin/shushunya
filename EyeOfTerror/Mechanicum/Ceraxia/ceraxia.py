@@ -101,6 +101,7 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         "dependency_map",
         "work_breakdown",
         "impact_analysis",
+        "execution_forecast",
         "design_options",
         "verification_strategy",
         "surface_verification_matrix",
@@ -174,6 +175,11 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("impact analysis must include impacted surfaces")
     if not isinstance(impact.get("highest_risk_surface"), str) or not impact.get("highest_risk_surface"):
         problems.append("impact analysis must include highest_risk_surface")
+    forecast = packet.get("execution_forecast") if isinstance(packet.get("execution_forecast"), dict) else {}
+    if forecast.get("complexity") not in {"low", "medium", "high"}:
+        problems.append("execution forecast must include complexity")
+    if not isinstance(forecast.get("expected_code_brigade_iterations"), int) or forecast.get("expected_code_brigade_iterations", 0) < 1:
+        problems.append("execution forecast must include expected_code_brigade_iterations")
     design = packet.get("design_options") if isinstance(packet.get("design_options"), dict) else {}
     if not isinstance(design.get("selected_strategy"), str) or not design.get("selected_strategy"):
         problems.append("design options must include selected_strategy")
@@ -344,6 +350,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "planning_dependency_map": packet.get("dependency_map", {}),
         "work_breakdown": packet.get("work_breakdown", {}),
         "impact_analysis": packet.get("impact_analysis", {}),
+        "execution_forecast": packet.get("execution_forecast", {}),
         "code_brigade_handoff": handoff,
         "repo_survey_evidence": {
             "candidate_files": survey.get("candidate_files", []),

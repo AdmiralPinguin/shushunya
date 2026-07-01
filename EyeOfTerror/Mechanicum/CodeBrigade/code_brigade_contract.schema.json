@@ -63,6 +63,10 @@
         "impact_surfaces",
         "highest_risk_surface",
         "requires_cross_surface_review",
+        "execution_complexity",
+        "expected_code_brigade_iterations",
+        "recommended_timeout_minutes",
+        "escalation_triggers",
         "mutation_preconditions",
         "acceptance_evidence_required",
         "verification_commands",
@@ -139,6 +143,21 @@
         },
         "requires_cross_surface_review": {
           "type": "boolean"
+        },
+        "execution_complexity": {
+          "type": "string"
+        },
+        "expected_code_brigade_iterations": {
+          "type": "integer"
+        },
+        "recommended_timeout_minutes": {
+          "type": "integer"
+        },
+        "escalation_triggers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "mutation_preconditions": {
           "type": "array",

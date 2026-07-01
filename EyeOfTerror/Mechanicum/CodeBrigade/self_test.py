@@ -110,6 +110,12 @@ def valid_brief() -> dict:
             "highest_risk_surface": "source_behavior",
             "requires_cross_surface_review": False,
         },
+        "execution_forecast": {
+            "complexity": "medium",
+            "expected_code_brigade_iterations": 2,
+            "recommended_timeout_minutes": 30,
+            "escalation_triggers": ["verification fails twice on the same behavior"],
+        },
         "repo_survey_evidence": {
             "candidate_files": ["app.py"],
             "test_files": ["test_app.py"],
@@ -173,6 +179,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve impact analysis: {plan}")
     if not any(surface["surface"] == "test_surface" for surface in plan["impact_surfaces"]):
         raise AssertionError(f"implementation plan should preserve impacted surfaces: {plan}")
+    if plan["execution_complexity"] != "medium" or plan["expected_code_brigade_iterations"] != 2:
+        raise AssertionError(f"implementation plan should preserve execution forecast: {plan}")
     if "execution preflight passes" not in plan["mutation_preconditions"]:
         raise AssertionError(f"implementation plan should preserve mutation preconditions: {plan}")
     if "the original user-visible request is satisfied" not in plan["acceptance_evidence_required"]:
@@ -275,6 +283,11 @@ def main() -> int:
     missing_impact_report = code_brigade_adapter.build_worker_report(missing_impact, dry_run=True)
     if missing_impact_report["status"] != "blocked" or not any("impact_analysis" in item for item in missing_impact_report["validation_problems"]):
         raise AssertionError(f"missing impact analysis should be blocked: {missing_impact_report}")
+    missing_forecast = valid_brief()
+    missing_forecast["execution_forecast"] = {"complexity": "broken"}
+    missing_forecast_report = code_brigade_adapter.build_worker_report(missing_forecast, dry_run=True)
+    if missing_forecast_report["status"] != "blocked" or not any("execution_forecast" in item for item in missing_forecast_report["validation_problems"]):
+        raise AssertionError(f"missing execution forecast should be blocked: {missing_forecast_report}")
     incomplete_surface_matrix = valid_brief()
     incomplete_surface_matrix["surface_verification_matrix"] = {"rows": [{"surface": "source_behavior"}], "complete": False}
     incomplete_surface_matrix_report = code_brigade_adapter.build_worker_report(incomplete_surface_matrix, dry_run=True)

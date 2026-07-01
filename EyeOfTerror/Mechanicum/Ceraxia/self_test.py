@@ -79,6 +79,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(len(brief["work_breakdown"]["phases"]), 6)
             self.assertEqual(brief["impact_analysis"]["highest_risk_surface"], "security_boundary")
             self.assertTrue(brief["impact_analysis"]["requires_cross_surface_review"])
+            self.assertEqual(brief["execution_forecast"]["complexity"], "high")
+            self.assertGreaterEqual(brief["execution_forecast"]["expected_code_brigade_iterations"], 4)
             self.assertTrue(brief["surface_verification_matrix"]["complete"])
             self.assertTrue(any(row["surface"] == "security_boundary" for row in brief["surface_verification_matrix"]["rows"]))
             self.assertEqual(brief["survey_quality_gate"]["decision"], "passed")
@@ -101,6 +103,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(implementation_plan["existing_path_hints"], ["app.py", "test_app.py"])
             self.assertEqual(implementation_plan["highest_risk_surface"], "security_boundary")
             self.assertTrue(implementation_plan["requires_cross_surface_review"])
+            self.assertEqual(implementation_plan["execution_complexity"], "high")
+            self.assertGreaterEqual(implementation_plan["expected_code_brigade_iterations"], 4)
             self.assertTrue(implementation_plan["surface_verification_complete"])
             self.assertTrue(any(row["surface"] == "security_boundary" for row in implementation_plan["surface_verification_rows"]))
             self.assertEqual(implementation_plan["survey_quality_decision"], "passed")
@@ -339,6 +343,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         packet["dependency_map"]["critical_path"] = ["task_contract", "implementation_brief"]
         packet["work_breakdown"]["phases"] = []
         packet["impact_analysis"]["surfaces"] = []
+        packet["execution_forecast"] = {"complexity": "broken", "expected_code_brigade_iterations": 0}
         packet["design_options"]["options"] = []
         packet["verification_strategy"]["targeted_commands"] = []
         packet["surface_verification_matrix"] = {"rows": [], "complete": "no"}
@@ -355,6 +360,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertTrue(any("critical path" in problem for problem in problems), problems)
         self.assertTrue(any("work breakdown missing phase" in problem for problem in problems), problems)
         self.assertTrue(any("impact analysis" in problem for problem in problems), problems)
+        self.assertTrue(any("execution forecast" in problem for problem in problems), problems)
         self.assertTrue(any("reject hardcode" in problem for problem in problems), problems)
         self.assertTrue(any("targeted_commands" in problem for problem in problems), problems)
         self.assertTrue(any("surface verification matrix" in problem for problem in problems), problems)

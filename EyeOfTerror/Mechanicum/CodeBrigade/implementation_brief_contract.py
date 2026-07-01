@@ -64,6 +64,11 @@ def validate_implementation_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("brief impact_analysis.surfaces is required")
     if not isinstance(impact.get("highest_risk_surface"), str) or not impact.get("highest_risk_surface"):
         problems.append("brief impact_analysis.highest_risk_surface is required")
+    forecast = brief.get("execution_forecast") if isinstance(brief.get("execution_forecast"), dict) else {}
+    if forecast.get("complexity") not in {"low", "medium", "high"}:
+        problems.append("brief execution_forecast.complexity is required")
+    if not isinstance(forecast.get("expected_code_brigade_iterations"), int) or forecast.get("expected_code_brigade_iterations", 0) < 1:
+        problems.append("brief execution_forecast.expected_code_brigade_iterations is required")
     handoff = brief.get("code_brigade_handoff") if isinstance(brief.get("code_brigade_handoff"), dict) else {}
     if handoff.get("target") != "CodeBrigade":
         problems.append("brief code_brigade_handoff must target CodeBrigade")
