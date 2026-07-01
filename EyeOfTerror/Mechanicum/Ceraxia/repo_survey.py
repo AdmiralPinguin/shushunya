@@ -110,8 +110,7 @@ def python_summary(path: Path, root: Path) -> dict[str, Any]:
         elif isinstance(node, ast.Import):
             imports.extend(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            imports.extend(f"{module}.{alias.name}".strip(".") for alias in node.names)
+            imports.extend(relative_python_imports(path, root, node))
     return {
         "path": rel,
         "parse_error": "",
@@ -119,6 +118,21 @@ def python_summary(path: Path, root: Path) -> dict[str, Any]:
         "classes": sorted(classes)[:30],
         "imports": sorted(set(imports))[:30],
     }
+
+
+def relative_python_imports(path: Path, root: Path, node: ast.ImportFrom) -> list[str]:
+    module = node.module or ""
+    if node.level <= 0:
+        return [f"{module}.{alias.name}".strip(".") for alias in node.names]
+    package_parts = list(path.relative_to(root).parent.parts)
+    keep_count = max(0, len(package_parts) - (node.level - 1))
+    base_parts = package_parts[:keep_count]
+    module_parts = module.split(".") if module else []
+    imports: list[str] = []
+    for alias in node.names:
+        alias_parts = [] if alias.name == "*" else alias.name.split(".")
+        imports.append(".".join([*base_parts, *module_parts, *alias_parts]).strip("."))
+    return [item for item in imports if item]
 
 
 def source_language(path: Path) -> str:
