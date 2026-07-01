@@ -445,6 +445,35 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         review = {}
     if status.get("state") == "finalized" and review.get("decision") not in {"ready", "dry_run_ready"}:
         findings.append({"severity": "blocker", "finding": "finalized run lacks passing review gate"})
+    try:
+        readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        findings.append({"severity": "blocker", "finding": f"execution_readiness.json is unreadable: {exc}"})
+        readiness = {}
+    try:
+        summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        findings.append({"severity": "blocker", "finding": f"run_summary.json is unreadable: {exc}"})
+        summary = {}
+    if summary.get("execution_readiness") != readiness.get("decision"):
+        findings.append({"severity": "blocker", "finding": "run_summary execution_readiness disagrees with execution_readiness.json"})
+    if summary.get("ready_for_execution") != (readiness.get("decision") == "ready_for_real_execution"):
+        findings.append({"severity": "blocker", "finding": "run_summary ready_for_execution disagrees with execution_readiness.json"})
+    try:
+        evidence_matrix = json.loads((run_dir / "evidence_matrix.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        findings.append({"severity": "blocker", "finding": f"evidence_matrix.json is unreadable: {exc}"})
+        evidence_matrix = {}
+    evidence_summary = summary.get("evidence") if isinstance(summary.get("evidence"), dict) else {}
+    if evidence_summary:
+        for summary_key, matrix_key in [
+            ("required_count", "required_evidence_count"),
+            ("present_count", "present_count"),
+            ("planned_count", "planned_count"),
+            ("blocked_count", "blocked_count"),
+        ]:
+            if evidence_summary.get(summary_key) != evidence_matrix.get(matrix_key):
+                findings.append({"severity": "blocker", "finding": f"run_summary evidence.{summary_key} disagrees with evidence_matrix.json"})
     decision = "passed" if not findings else "blocked"
     return {
         "kind": "ceraxia_run_package_audit",

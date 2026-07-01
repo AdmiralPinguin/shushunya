@@ -226,6 +226,26 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(audit["decision"], "blocked")
             self.assertFalse(audit["manifest_complete"])
 
+    def test_run_audit_blocks_summary_readiness_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="почини pytest для public API schema",
+                    repo_path=str(repo),
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            run_dir = Path(result["run_dir"])
+            summary_path = run_dir / "run_summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["ready_for_execution"] = True
+            summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            audit = audit_run_package(run_dir)
+            self.assertEqual(audit["decision"], "blocked")
+            self.assertTrue(any("ready_for_execution disagrees" in item["finding"] for item in audit["findings"]))
+
 
 if __name__ == "__main__":
     unittest.main()
