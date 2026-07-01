@@ -658,6 +658,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("app.py", worker_report["edit_plan"]["target_files"])
             self.assertIn("python -m py_compile app.py", worker_report["edit_plan"]["verification_commands"])
             self.assertTrue(worker_report["edit_plan"]["acceptance_criteria"])
+            read_evidence = worker_report["pre_mutation_read_evidence"]
+            self.assertEqual(read_evidence["status"], "complete")
+            self.assertTrue(any(row["path"] == "app.py" and row["status"] == "read" for row in read_evidence["rows"]))
             self.assertTrue(worker_report["execution_intent"]["real_execution_supported"])
             self.assertEqual(worker_report["autonomous_execution_request"]["status"], "not_required")
             self.assertTrue(all(item["status"] == "implemented" for item in worker_report["work_package_statuses"]))
@@ -1208,6 +1211,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(worker_report["status"], "implemented")
             self.assertIn("natural_language_create_file", worker_report["execution_result"]["patch_summary"])
             self.assertEqual(worker_report["changed_files"], ["helpers.py"])
+            read_evidence = worker_report["pre_mutation_read_evidence"]
+            self.assertEqual(read_evidence["status"], "complete")
+            self.assertTrue(any(row["path"] == "helpers.py" and row["status"] == "planned_new_file" for row in read_evidence["rows"]))
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["maturity"], "guarded_inferred_patch_execution_controller")
             self.assertEqual(summary["code_brigade_execution_result_status"], "implemented")

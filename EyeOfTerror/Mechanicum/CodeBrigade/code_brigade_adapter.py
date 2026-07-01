@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,22 @@ from execution_contract import CONTRACT_VERSION, build_blocked_execution_result
 from implementation_brief_contract import validate_implementation_brief
 
 REAL_EXECUTION_STATUS = "blocked_until_adapter_is_wired"
+
+
+def repo_path_from_brief(brief: dict[str, Any]) -> Path:
+    return Path(str(brief.get("repo_path") or ""))
+
+
+def path_stays_in_repo(repo: Path, rel_path: str) -> bool:
+    try:
+        (repo / rel_path).resolve().relative_to(repo.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def build_edit_plan(brief: dict[str, Any], implementation_plan: dict[str, Any], execution_intent: dict[str, Any]) -> dict[str, Any]:
@@ -47,6 +64,66 @@ def mutation_preflight_blockers(implementation_plan: dict[str, Any], edit_plan: 
     if not edit_plan.get("acceptance_criteria"):
         blockers.append("mutation preflight requires acceptance criteria")
     return blockers
+
+
+def collect_pre_mutation_read_evidence(brief: dict[str, Any], edit_plan: dict[str, Any]) -> dict[str, Any]:
+    repo = repo_path_from_brief(brief)
+    raw_paths: dict[str, set[str]] = {}
+    for key in ("read_before_edit", "target_files", "test_files"):
+        values = edit_plan.get(key)
+        if isinstance(values, list):
+            for item in values:
+                if isinstance(item, str) and item:
+                    raw_paths.setdefault(item, set()).add(key)
+                elif isinstance(item, dict) and isinstance(item.get("path"), str):
+                    raw_paths.setdefault(item["path"], set()).add(key)
+    allowed_new = {
+        str(item)
+        for item in edit_plan.get("allowed_new_files", [])
+        if isinstance(item, str)
+    }
+    for item in allowed_new:
+        raw_paths.setdefault(item, set()).add("allowed_new_files")
+    rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    for rel_path, roles in list(raw_paths.items())[:24]:
+        role_list = sorted(roles)
+        row: dict[str, Any] = {"path": rel_path, "roles": role_list}
+        if not path_stays_in_repo(repo, rel_path):
+            row.update({"status": "blocked", "reason": "path escapes repo"})
+            blockers.append(f"read target escapes repo: {rel_path}")
+        else:
+            path = repo / rel_path
+            if rel_path in allowed_new and not path.exists():
+                row.update({"status": "planned_new_file", "reason": "explicitly allowed missing create path"})
+            elif not path.exists() or not path.is_file() or path.is_symlink():
+                if roles.intersection({"target_files", "test_files"}):
+                    row.update({"status": "blocked", "reason": "required target/test read is missing, not a file, or a symlink"})
+                    blockers.append(f"read target is unavailable before mutation: {rel_path}")
+                else:
+                    row.update({"status": "unavailable_recommended_read", "reason": "recommended read target is unavailable but not a mutation target"})
+            else:
+                text = path.read_text(encoding="utf-8")
+                row.update(
+                    {
+                        "status": "read",
+                        "sha256": sha256_file(path),
+                        "byte_count": path.stat().st_size,
+                        "line_count": len(text.splitlines()),
+                        "excerpt": "\n".join(text.splitlines()[:8]),
+                    }
+                )
+        rows.append(row)
+    return {
+        "kind": "code_brigade_pre_mutation_read_evidence",
+        "repo_path": str(repo),
+        "required_read_count": len(raw_paths),
+        "recorded_read_count": sum(1 for row in rows if row.get("status") == "read"),
+        "planned_new_file_count": sum(1 for row in rows if row.get("status") == "planned_new_file"),
+        "rows": rows,
+        "blockers": blockers,
+        "status": "blocked" if blockers else "complete",
+    }
 
 
 def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
@@ -287,7 +364,10 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     }
     changed_files: list[str] = []
     notes: list[str] = []
+    read_evidence = collect_pre_mutation_read_evidence(brief, edit_plan)
     preflight_blockers = [] if dry_run else mutation_preflight_blockers(implementation_plan, edit_plan)
+    if not dry_run and read_evidence["blockers"]:
+        preflight_blockers.extend(read_evidence["blockers"])
     if validation_problems:
         status = "blocked"
         notes.extend(f"invalid implementation brief: {problem}" for problem in validation_problems)
@@ -343,6 +423,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "changed_files": changed_files,
         "execution_intent": execution_intent,
         "edit_plan": edit_plan,
+        "pre_mutation_read_evidence": read_evidence,
         "autonomous_execution_request": build_autonomous_execution_request(brief, implementation_plan, execution_intent),
         "implementation_plan": implementation_plan,
         "work_package_statuses": package_statuses,
