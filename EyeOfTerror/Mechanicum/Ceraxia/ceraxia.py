@@ -228,6 +228,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "test_files": survey.get("test_files", []),
             "entrypoint_candidates": survey.get("entrypoint_candidates", []),
             "python_symbols": survey.get("python_symbols", []),
+            "local_import_edges": survey.get("local_import_edges", []),
         },
         "suggested_verification_commands": survey.get("suggested_verification_commands", []),
         "blocked": blocked,

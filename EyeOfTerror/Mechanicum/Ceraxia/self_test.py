@@ -31,7 +31,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             repo.mkdir()
-            (repo / "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+            (repo / "app.py").write_text("from util import enabled\n\ndef app():\n    return enabled()\n", encoding="utf-8")
+            (repo / "util.py").write_text("def enabled():\n    return True\n", encoding="utf-8")
             (repo / "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
             runs = Path(tmp) / "runs"
             result = run_ceraxia(
@@ -74,6 +75,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(brief["code_brigade_handoff"]["target"], "CodeBrigade")
             self.assertIn("prove_negative_boundary", [step["step"] for step in brief["code_brigade_handoff"]["steps"]])
             self.assertIn("app.py", brief["repo_survey_evidence"]["candidate_files"])
+            self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in brief["repo_survey_evidence"]["local_import_edges"]))
             self.assertTrue(any(command.startswith("python -m pytest test_app.py") for command in brief["suggested_verification_commands"]))
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertIn("untrusted input is rejected", verification["negative_tests_required"])
@@ -82,11 +84,13 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             implementation_plan = worker_report["implementation_plan"]
             self.assertIn("app.py", implementation_plan["target_files_to_inspect"])
             self.assertIn("test_app.py", implementation_plan["test_files_to_preserve"])
+            self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in implementation_plan["dependency_edges_to_check"]))
             self.assertTrue(any(command.startswith("python -m pytest test_app.py") for command in implementation_plan["verification_commands"]))
             survey = json.loads((run_dir / "repo_survey.json").read_text(encoding="utf-8"))
             self.assertEqual(survey["status"], "surveyed")
             self.assertIn("app.py", survey["candidate_files"])
             self.assertIn("test_app.py", survey["test_files"])
+            self.assertTrue(any(edge["source"] == "app.py" and edge["target"] == "util.py" for edge in survey["local_import_edges"]))
             app_symbols = next(item for item in survey["python_symbols"] if item["path"] == "app.py")
             self.assertIn("app", app_symbols["functions"])
             audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))

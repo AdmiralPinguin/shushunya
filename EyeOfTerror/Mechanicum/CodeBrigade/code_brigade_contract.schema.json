@@ -46,6 +46,7 @@
         "risk_level",
         "target_files_to_inspect",
         "test_files_to_preserve",
+        "dependency_edges_to_check",
         "handoff_steps",
         "verification_commands",
         "acceptance_gates",

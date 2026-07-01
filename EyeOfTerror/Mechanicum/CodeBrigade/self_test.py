@@ -24,6 +24,7 @@ def valid_brief() -> dict:
             "candidate_files": ["app.py"],
             "test_files": ["test_app.py"],
             "entrypoint_candidates": ["main.py"],
+            "local_import_edges": [{"source": "app.py", "import": "util.enabled", "target": "util.py"}],
         },
         "suggested_verification_commands": ["python -m pytest test_app.py"],
         "code_brigade_handoff": {
@@ -51,6 +52,8 @@ def main() -> int:
         raise AssertionError(f"implementation plan should preserve test evidence: {plan}")
     if "python -m pytest test_app.py" not in plan["verification_commands"]:
         raise AssertionError(f"implementation plan should include suggested verification: {plan}")
+    if plan["dependency_edges_to_check"] != [{"source": "app.py", "import": "util.enabled", "target": "util.py"}]:
+        raise AssertionError(f"implementation plan should preserve local dependency edges: {plan}")
     if not plan["refusal_conditions"]:
         raise AssertionError(f"implementation plan should include refusal conditions: {plan}")
     execute_report = code_brigade_adapter.build_worker_report(valid_brief(), dry_run=False)

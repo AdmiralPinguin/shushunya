@@ -79,6 +79,38 @@ def python_summary(path: Path, root: Path) -> dict[str, Any]:
     }
 
 
+def module_name_for(path: Path, root: Path) -> str:
+    rel = path.relative_to(root).with_suffix("")
+    parts = list(rel.parts)
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
+def build_local_import_edges(python_summaries: list[dict[str, Any]], python_files: list[Path], root: Path) -> list[dict[str, str]]:
+    module_to_path = {module_name_for(path, root): str(path.relative_to(root)) for path in python_files}
+    edges: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for summary in python_summaries:
+        source = summary.get("path", "")
+        imports = summary.get("imports") if isinstance(summary.get("imports"), list) else []
+        for imported in imports:
+            imported_text = str(imported)
+            matched_path = ""
+            for module, rel_path in sorted(module_to_path.items(), key=lambda item: len(item[0]), reverse=True):
+                if imported_text == module or imported_text.startswith(module + "."):
+                    matched_path = rel_path
+                    break
+            if not matched_path or matched_path == source:
+                continue
+            key = (str(source), imported_text, matched_path)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append({"source": str(source), "import": imported_text, "target": matched_path})
+    return edges[:80]
+
+
 def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[str]) -> dict[str, Any]:
     root = Path(repo_path)
     if not root.exists() or not root.is_dir():
@@ -95,6 +127,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "candidate_files": [],
             "test_files": [],
             "entrypoint_candidates": [],
+            "python_symbols": [],
+            "local_import_edges": [],
             "suggested_verification_commands": [],
         }
     files: list[Path] = []
@@ -123,6 +157,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         if path.name.lower() in {"main.py", "app.py", "server.py", "cli.py"}
     ][:20]
     python_files = [path for path in files if path.suffix.lower() == ".py"][:40]
+    python_symbols = [python_summary(path, root) for path in python_files]
     suggested_commands: list[str] = []
     if tests:
         suggested_commands.append("python -m pytest " + " ".join(tests[:3]))
@@ -142,6 +177,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "candidate_files": candidates,
         "test_files": tests,
         "entrypoint_candidates": entrypoints,
-        "python_symbols": [python_summary(path, root) for path in python_files],
+        "python_symbols": python_symbols,
+        "local_import_edges": build_local_import_edges(python_symbols, python_files, root),
         "suggested_verification_commands": suggested_commands,
     }
