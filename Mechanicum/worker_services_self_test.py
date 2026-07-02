@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import json
+import unittest
 from pathlib import Path
 
-from start_worker import load_services
+from start_worker import load_services, load_worker_aliases, resolve_worker_name
 
 
 REQUIRED_METADATA_KEYS = {"name", "port", "role", "status", "capabilities", "api_contract"}
@@ -16,6 +17,27 @@ CERAXIA_ROLE_CONTRACTS = {
     "JudicatorCodicis": ("code_review", "SealwrightFinalis"),
     "SealwrightFinalis": ("finalize", ""),
 }
+
+
+class WorkerAliasResolutionTests(unittest.TestCase):
+    def test_runtime_aliases_resolve_without_shadowing_workers(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        services = load_services(repo_root)
+        aliases = load_worker_aliases(repo_root)
+        self.assertTrue(aliases)
+        for alias, worker in aliases.items():
+            self.assertNotIn(alias, services)
+            self.assertIn(worker, services)
+            self.assertEqual(resolve_worker_name(alias, services, aliases), worker)
+
+    def test_concrete_worker_names_still_work_and_unknown_alias_fails_closed(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        services = load_services(repo_root)
+        aliases = load_worker_aliases(repo_root)
+        self.assertEqual(resolve_worker_name("JudicatorCodicis", services, aliases), "JudicatorCodicis")
+        self.assertEqual(resolve_worker_name("code.reviewer", services, aliases), "JudicatorCodicis")
+        with self.assertRaises(SystemExit):
+            resolve_worker_name("missing.alias", services, aliases)
 
 
 def load_worker_metadata(path: Path) -> dict:
@@ -76,7 +98,27 @@ def load_port_registry(repo_root: Path) -> dict[str, dict]:
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     services = load_services(repo_root)
+    aliases = load_worker_aliases(repo_root)
     port_registry = load_port_registry(repo_root)
+    if not aliases:
+        raise AssertionError("worker_aliases.json must define runtime aliases")
+    for alias, worker in aliases.items():
+        if alias in services:
+            raise AssertionError(f"worker alias must not shadow a concrete service name: {alias}")
+        if worker not in services:
+            raise AssertionError(f"worker alias points at unknown service: {alias} -> {worker}")
+        if resolve_worker_name(alias, services, aliases) != worker:
+            raise AssertionError(f"worker alias does not resolve to target: {alias} -> {worker}")
+    if resolve_worker_name("code.reviewer", services, aliases) != "JudicatorCodicis":
+        raise AssertionError(f"code.reviewer alias drifted: {aliases}")
+    if resolve_worker_name("JudicatorCodicis", services, aliases) != "JudicatorCodicis":
+        raise AssertionError("concrete worker names must remain valid alongside aliases")
+    try:
+        resolve_worker_name("missing.alias", services, aliases)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("unknown aliases must fail closed")
     metadata_paths = {
         path
         for path in (repo_root / "Mechanicum").glob("*/worker.json")

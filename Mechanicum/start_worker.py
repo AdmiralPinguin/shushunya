@@ -16,6 +16,32 @@ def load_services(repo_root: Path) -> dict:
     return payload
 
 
+def load_worker_aliases(repo_root: Path) -> dict[str, str]:
+    path = repo_root / "Mechanicum" / "worker_aliases.json"
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("worker_aliases.json must contain an object")
+    aliases: dict[str, str] = {}
+    for alias, worker in payload.items():
+        if not isinstance(alias, str) or not alias:
+            raise ValueError("worker alias names must be non-empty strings")
+        if not isinstance(worker, str) or not worker:
+            raise ValueError(f"worker alias target must be a non-empty string: {alias}")
+        aliases[alias] = worker
+    return aliases
+
+
+def resolve_worker_name(requested: str, services: dict, aliases: dict[str, str]) -> str:
+    if requested in services:
+        return requested
+    resolved = aliases.get(requested, requested)
+    if resolved not in services:
+        raise SystemExit(f"unknown worker: {requested}")
+    return resolved
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Start one Mechanicum worker service by registry name.")
     parser.add_argument("worker")
@@ -26,12 +52,11 @@ def main() -> int:
     args = parser.parse_args()
     repo_root = Path(args.repo_root).resolve()
     services = load_services(repo_root)
-    if args.worker not in services:
-        raise SystemExit(f"unknown worker: {args.worker}")
-    service = services[args.worker]
+    worker_name = resolve_worker_name(args.worker, services, load_worker_aliases(repo_root))
+    service = services[worker_name]
     port = args.port or int(service["port"])
     serve(
-        worker_name=args.worker,
+        worker_name=worker_name,
         module_path=repo_root / str(service["module_path"]),
         module_name=str(service["module"]),
         host=args.host,

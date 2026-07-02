@@ -1,0 +1,15 @@
+{
+  "code.repository": "LogisRepository",
+  "code.planner": "MagosStrategos",
+  "code.implementer": "FerrumPatchwright",
+  "code.verifier": "OrdinatusVerifier",
+  "code.reviewer": "JudicatorCodicis",
+  "code.finalizer": "SealwrightFinalis",
+  "browser.render": "OcularisRenderium",
+  "lore.researcher": "Lexmechanic",
+  "lore.extractor": "NoosphericExtractor",
+  "lore.timeline": "Chronologis",
+  "lore.writer": "ScriptoriumDaemon",
+  "lore.critic": "ReductorVerifier",
+  "lore.finalizer": "FabricatorFinalis"
+}
