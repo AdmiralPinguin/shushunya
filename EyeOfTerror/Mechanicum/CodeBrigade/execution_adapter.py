@@ -425,8 +425,8 @@ def scope_budget(brief: dict[str, Any]) -> dict[str, Any]:
 def requested_test_edit_paths(brief: dict[str, Any]) -> set[str]:
     task = str(brief.get("task") or "").lower()
     explicit_test_edit_requested = bool(
-        re.search(r"\b(update|change|edit|add|repair|tighten)\b.{0,80}\b(test|self-test|self test)\b", task)
-        or re.search(r"\b(test|self-test|self test)\b.{0,80}\b(update|change|edit|add|repair|tighten)\b", task)
+        re.search(r"\b(update|change|edit|add|repair|tighten)\b.{0,80}\b(test|tests|self-test|self-tests|self test|self tests)\b", task)
+        or re.search(r"\b(test|tests|self-test|self-tests|self test|self tests)\b.{0,80}\b(update|change|edit|add|repair|tighten)\b", task)
         or re.search(r"\b(drift|prove)\b", task)
         or re.search(r"(обнов|измени|добав|исправ).{0,80}тест", task)
         or re.search(r"тест.{0,80}(обнов|измени|добав|исправ|доказ)", task)

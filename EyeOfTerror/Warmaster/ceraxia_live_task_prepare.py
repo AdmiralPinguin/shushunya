@@ -27,6 +27,14 @@ def find_live_task(spec: dict[str, Any], task_id: str) -> dict[str, Any]:
     raise ValueError(f"unknown live task id: {task_id}")
 
 
+def live_task_class_summary(spec: dict[str, Any]) -> dict[str, int]:
+    summary: dict[str, int] = {}
+    for task in live_tasks(spec):
+        task_class = str(task.get("class") or "unknown")
+        summary[task_class] = summary.get(task_class, 0) + 1
+    return dict(sorted(summary.items()))
+
+
 def build_task_packet(task: dict[str, Any], run_id: str, repo_root: Path) -> dict[str, Any]:
     return {
         "kind": "ceraxia_live_task_packet",
@@ -69,6 +77,7 @@ def build_task_packet(task: dict[str, Any], run_id: str, repo_root: Path) -> dic
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare a Ceraxia live task packet from the live task catalog.")
     parser.add_argument("--list", action="store_true", help="List available live task ids.")
+    parser.add_argument("--class-summary", action="store_true", help="Print live task counts grouped by task class.")
     parser.add_argument("--task-id", help="Live task id from field_trials.json.")
     parser.add_argument("--run-id", default="", help="Optional stable run id.")
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT, help="Repository root for the live task.")
@@ -77,6 +86,9 @@ def main() -> int:
     spec = load_json(SPEC)
     if args.list:
         print(json.dumps({"live_tasks": [task["id"] for task in live_tasks(spec)]}, ensure_ascii=False, indent=2))
+        return 0
+    if args.class_summary:
+        print(json.dumps({"class_summary": live_task_class_summary(spec)}, ensure_ascii=False, indent=2))
         return 0
     if not args.task_id:
         parser.error("--task-id is required unless --list is used")

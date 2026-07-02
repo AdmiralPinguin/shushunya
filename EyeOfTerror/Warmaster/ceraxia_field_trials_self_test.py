@@ -121,6 +121,27 @@ def main() -> int:
     live_prepare_payload = json.loads(live_prepare_list.stdout)
     if set(live_prepare_payload.get("live_tasks", [])) != live_task_ids:
         raise AssertionError(f"Ceraxia live task prepare list drifted from catalog: {live_prepare_payload}")
+    live_prepare_help = subprocess.run(
+        [sys.executable, str(LIVE_TASK_PREPARE), "--help"],
+        cwd=str(EYE_ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if live_prepare_help.returncode != 0 or "--class-summary" not in live_prepare_help.stdout:
+        raise AssertionError(f"Ceraxia live task prepare help must expose class summary flag: {live_prepare_help.stdout} {live_prepare_help.stderr}")
+    live_prepare_classes = subprocess.run(
+        [sys.executable, str(LIVE_TASK_PREPARE), "--class-summary"],
+        cwd=str(EYE_ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if live_prepare_classes.returncode != 0:
+        raise AssertionError(f"Ceraxia live task prepare class summary failed: {live_prepare_classes.stdout} {live_prepare_classes.stderr}")
+    live_class_summary = json.loads(live_prepare_classes.stdout).get("class_summary", {})
+    if sum(live_class_summary.values()) != len(live_tasks) or len(live_class_summary) != len(live_classes):
+        raise AssertionError(f"Ceraxia live task class summary drifted from catalog: {live_class_summary}")
     live_prepare_packet = subprocess.run(
         [
             sys.executable,

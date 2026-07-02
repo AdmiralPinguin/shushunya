@@ -3974,6 +3974,45 @@
         "postmortem": "",
         "evidence_package": "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023047-live-ceraxia-engineering-task-task-id-df715872/next_stage_evidence_package.json"
       }
+    },
+    {
+      "trial_id": "ceraxia-live-cli-contract-flag",
+      "run_id": "ceraxia-20260702-023733-live-ceraxia-engineering-task-task-id-5d6f8e07",
+      "date": "2026-07-02",
+      "reviewer": "Codex live harness review",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023733-live-ceraxia-engineering-task-task-id-5d6f8e07/next_stage_evidence_package.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023733-live-ceraxia-engineering-task-task-id-5d6f8e07/planning_department.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023733-live-ceraxia-engineering-task-task-id-5d6f8e07/repo_survey.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023733-live-ceraxia-engineering-task-task-id-5d6f8e07/review_gate.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023733-live-ceraxia-engineering-task-task-id-5d6f8e07/verification_report.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023733-live-ceraxia-engineering-task-task-id-5d6f8e07/worker_report.json"
+      ],
+      "human_review_notes": "Accepted as a live cli-contract attempt: Ceraxia added a real --class-summary CLI flag, updated the field trial self-test contract, executed allowlisted verification, and review_gate accepted the patch.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false,
+      "accepted_for_next_stage": true,
+      "next_stage": {
+        "status": "fully_successful",
+        "attempt_count": 1,
+        "class": "cli_contract",
+        "multi_file_nonfixture": true,
+        "false_success": false,
+        "postmortem": "",
+        "evidence_package": "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023733-live-ceraxia-engineering-task-task-id-5d6f8e07/next_stage_evidence_package.json"
+      }
     }
   ]
 }
