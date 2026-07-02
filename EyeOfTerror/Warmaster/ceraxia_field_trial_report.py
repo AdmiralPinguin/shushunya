@@ -56,6 +56,7 @@ def validate_ledger(spec: dict[str, Any], ledger: dict[str, Any]) -> list[str]:
         trial_id = str(entry.get("trial_id") or "")
         run_id = str(entry.get("run_id") or "")
         accepted = entry.get("accepted_for_rolling_score") is True
+        accepted_next_stage = entry.get("accepted_for_next_stage") is True
         if trial_id not in trial_ids:
             errors.append(f"entry {index} references unknown trial_id: {trial_id}")
         if run_id:
@@ -77,15 +78,29 @@ def validate_ledger(spec: dict[str, Any], ledger: dict[str, Any]) -> list[str]:
                 value = scores.get(dimension)
                 if not isinstance(value, (int, float)) or value < 0 or value > 10:
                     errors.append(f"accepted entry {index} has invalid score for {dimension}: {value}")
+        if accepted_next_stage:
+            if not run_id:
+                errors.append(f"accepted next-stage entry {index} must include run_id")
+            if not isinstance(entry.get("next_stage"), dict):
+                errors.append(f"accepted next-stage entry {index} must include next_stage")
+            if not entry.get("reviewer"):
+                errors.append(f"accepted next-stage entry {index} must include reviewer")
+            if not entry.get("human_review_notes"):
+                errors.append(f"accepted next-stage entry {index} must include human_review_notes")
     return errors
 
 
 def build_next_stage_metrics(spec: dict[str, Any], entries: list[dict[str, Any]], trial_by_id: dict[str, Any]) -> dict[str, Any]:
     target = spec.get("next_stage_target") if isinstance(spec.get("next_stage_target"), dict) else {}
-    live_entries = [
+    draft_entries = [
         entry
         for entry in entries
         if isinstance(entry.get("next_stage"), dict)
+    ]
+    live_entries = [
+        entry
+        for entry in draft_entries
+        if entry.get("accepted_for_next_stage") is True
     ]
     class_names: set[str] = set()
     successful = 0
@@ -163,6 +178,8 @@ def build_next_stage_metrics(spec: dict[str, Any], entries: list[dict[str, Any]]
     return {
         "target_met": target_met,
         "target": target,
+        "draft_next_stage_count": len(draft_entries),
+        "accepted_for_next_stage_count": live_count,
         "live_task_count": live_count,
         "task_class_count": len(class_names),
         "task_classes": sorted(class_names),

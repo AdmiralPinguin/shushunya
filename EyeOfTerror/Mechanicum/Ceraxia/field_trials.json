@@ -1204,6 +1204,7 @@
     "human_review_notes": "",
     "generalizable_failures": [],
     "follow_up_changes": [],
-    "accepted_for_rolling_score": false
+    "accepted_for_rolling_score": false,
+    "accepted_for_next_stage": false
   }
 }

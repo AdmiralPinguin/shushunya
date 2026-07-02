@@ -24,8 +24,9 @@ tasks. Live tasks are cataloged in `field_trials.json` under `live_tasks`.
 Use `EyeOfTerror/Warmaster/ceraxia_live_task_prepare.py` to create a task
 packet, `ceraxia_next_stage_package.py` to build the evidence package, and
 `ceraxia_live_task_register.py` to register only validated live evidence in the
-ledger. Fixture runs deliberately set `fixture_only=true` and cannot satisfy
-the live target.
+ledger. Draft live entries do not count until `accepted_for_next_stage=true`.
+Fixture runs deliberately set `fixture_only=true` and cannot satisfy the live
+target.
 
 She owns code-task decomposition, repository survey, scoped implementation
 planning, patch manifest handoff, verification planning, code review, and final

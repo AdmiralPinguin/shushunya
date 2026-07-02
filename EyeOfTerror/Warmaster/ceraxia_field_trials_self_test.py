@@ -193,6 +193,8 @@ def main() -> int:
         raise AssertionError(f"Ceraxia report must expose next-stage target metrics: {report_payload}")
     next_stage_metrics = report_payload.get("next_stage_metrics", {})
     for key in {
+        "draft_next_stage_count",
+        "accepted_for_next_stage_count",
         "live_task_count",
         "task_class_count",
         "fully_successful_count",
@@ -282,6 +284,7 @@ def main() -> int:
                 "trial_id": trial["id"],
                 "run_id": f"next-stage-{index}",
                 "accepted_for_rolling_score": False,
+                "accepted_for_next_stage": True,
                 "human_review_notes": "postmortem/evidence recorded",
                 "next_stage": {
                     "status": status,
@@ -319,6 +322,16 @@ def main() -> int:
     synthetic_next_stage = synthetic_report["next_stage_metrics"]
     if synthetic_report["next_stage_target_met"] is not True:
         raise AssertionError(f"synthetic next-stage target should pass when all requirements are met: {synthetic_next_stage}")
+    draft_next_stage_entries = json.loads(json.dumps(synthetic_entries))
+    for entry in draft_next_stage_entries:
+        entry["accepted_for_next_stage"] = False
+    draft_next_stage_report = build_report(data, {"entries": draft_next_stage_entries})
+    if (
+        draft_next_stage_report["next_stage_target_met"] is True
+        or draft_next_stage_report["next_stage_metrics"].get("live_task_count") != 0
+        or draft_next_stage_report["next_stage_metrics"].get("draft_next_stage_count") != len(draft_next_stage_entries)
+    ):
+        raise AssertionError(f"draft next-stage entries must not count toward target: {draft_next_stage_report['next_stage_metrics']}")
     false_success_entries = json.loads(json.dumps(synthetic_entries))
     false_success_entries[0]["next_stage"]["false_success"] = True
     false_success_report = build_report(data, {"entries": false_success_entries})
@@ -753,7 +766,8 @@ def main() -> int:
                 "--reviewer",
                 "self-test",
                 "--notes",
-                "validated live package registration dry run",
+                "validated live package registration dry run with reviewer acceptance",
+                "--accept-for-next-stage",
                 "--dry-run",
             ],
             cwd=str(EYE_ROOT.parent),
@@ -764,7 +778,11 @@ def main() -> int:
         if live_register.returncode != 0:
             raise AssertionError(f"Ceraxia live task registrar rejected valid package: {live_register.stdout} {live_register.stderr}")
         live_register_payload = json.loads(live_register.stdout)
-        if live_register_payload.get("entry", {}).get("trial_id") != "ceraxia-live-cli-contract-flag":
+        if (
+            live_register_payload.get("entry", {}).get("trial_id") != "ceraxia-live-cli-contract-flag"
+            or live_register_payload.get("entry", {}).get("accepted_for_next_stage") is not True
+            or live_register_payload.get("next_stage_metrics", {}).get("live_task_count") != 1
+        ):
             raise AssertionError(f"Ceraxia live task registrar returned malformed entry: {live_register_payload}")
         weak_builder = subprocess.run(
             [

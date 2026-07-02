@@ -161,9 +161,11 @@ The live target is separate from fixture and expert targets. A live entry must
 come from `live_tasks`, carry a valid
 `ceraxia_next_stage_evidence_package`, set `real_repo_task=true`, set
 `fixture_only=false`, and pass registration through
-`ceraxia_live_task_register.py`. The strict live command must fail until the
-ledger proves 20 live tasks, 10 classes, at least 70% success, zero false
-successes, required postmortems, and the required multi-file nonfixture count.
+`ceraxia_live_task_register.py`. Draft live entries are visible for audit but
+do not count until `accepted_for_next_stage=true`. The strict live command must
+fail until the ledger proves 20 accepted live tasks, 10 classes, at least 70%
+success, zero false successes, required postmortems, and the required
+multi-file nonfixture count.
 
 The strict command must fail until the ledger proves the target. This is
 intentional; an empty or draft-only ledger is not evidence of engineering

@@ -72,6 +72,7 @@ def build_audit() -> dict[str, Any]:
     evidence_contract = read(WARM / "ceraxia_evidence_contract.py")
     field_trials = read(CERAXIA / "field_trials.json")
     field_trial_tests = read(WARM / "ceraxia_field_trials_self_test.py")
+    field_trial_report = read(WARM / "ceraxia_field_trial_report.py")
     live_prepare = read(WARM / "ceraxia_live_task_prepare.py")
     live_register = read(WARM / "ceraxia_live_task_register.py")
     next_stage_package = read(WARM / "ceraxia_next_stage_package.py")
@@ -138,6 +139,7 @@ def build_audit() -> dict[str, Any]:
                 check('"live_tasks"' in field_trials and '"minimum_live_tasks": 20' in field_trials, "field_trials.json defines next-stage live catalog and target", "live task catalog/target missing"),
                 check("ceraxia_live_task_packet" in live_prepare and "artifact_contract" in live_prepare, "live task prepare emits task packets with artifact contracts", "live task prepare contract missing"),
                 check("next_stage_evidence_status" in live_register and "validate_live_task_fit" in live_register, "live task register validates packages and task fit", "live task registrar validation missing"),
+                check("accepted_for_next_stage" in live_register and "accepted_for_next_stage" in field_trial_report, "live benchmark requires explicit accepted_for_next_stage", "live benchmark acceptance gate missing"),
                 check("NEXT_STAGE_PACKAGE_KIND" in next_stage_package and "fixture_only" in next_stage_package, "next-stage package builder writes live package contract fields", "next-stage package builder missing"),
                 check(int(report.get("fresh_honest_class_count") or 0) >= 8, "report fresh_honest_class_count", "not enough fresh classes"),
                 check(int(report.get("fresh_honest_trial_count") or 0) >= 12, "report fresh_honest_trial_count", "not enough fresh trials"),

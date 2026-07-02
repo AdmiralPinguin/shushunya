@@ -72,6 +72,7 @@ def build_ledger_entry(
     package: dict[str, Any],
     reviewer: str,
     notes: str,
+    accepted_for_next_stage: bool,
 ) -> dict[str, Any]:
     run_id = str(package.get("run_id") or "")
     task_id = str(task.get("id") or "")
@@ -92,6 +93,7 @@ def build_ledger_entry(
         "generalizable_failures": [],
         "follow_up_changes": [],
         "accepted_for_rolling_score": False,
+        "accepted_for_next_stage": accepted_for_next_stage,
         "next_stage": next_stage,
     }
 
@@ -103,10 +105,13 @@ def register_live_task(
     package_path: Path,
     reviewer: str,
     notes: str,
+    accepted_for_next_stage: bool = False,
 ) -> dict[str, Any]:
     task = live_task_by_id(spec, task_id)
     package = load_json_object(package_path)
-    entry = build_ledger_entry(spec, task, package_path, package, reviewer, notes)
+    if accepted_for_next_stage and (not reviewer.strip() or len(notes.strip()) < 40):
+        raise ValueError("accepted next-stage entries require reviewer and notes of at least 40 characters")
+    entry = build_ledger_entry(spec, task, package_path, package, reviewer, notes, accepted_for_next_stage)
     entries = ledger.setdefault("entries", [])
     run_id = str(entry.get("run_id") or "")
     if not run_id:
@@ -133,6 +138,7 @@ def main() -> int:
     parser.add_argument("--package", required=True, type=Path, help="Path to ceraxia_next_stage_evidence_package JSON.")
     parser.add_argument("--reviewer", default="", help="Optional reviewer name for draft traceability.")
     parser.add_argument("--notes", default="", help="Optional human notes/postmortem for draft traceability.")
+    parser.add_argument("--accept-for-next-stage", action="store_true", help="Count this validated entry toward the live next-stage benchmark.")
     parser.add_argument("--ledger", type=Path, default=LEDGER, help="Ledger path. Defaults to Ceraxia field_trial_ledger.json.")
     parser.add_argument("--dry-run", action="store_true", help="Validate and print the entry/report without writing.")
     args = parser.parse_args()
@@ -146,6 +152,7 @@ def main() -> int:
         args.package.resolve(),
         reviewer=args.reviewer,
         notes=args.notes,
+        accepted_for_next_stage=args.accept_for_next_stage,
     )
     report = build_report(spec, ledger)
     payload = {

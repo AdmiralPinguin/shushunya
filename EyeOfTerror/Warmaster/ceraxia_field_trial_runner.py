@@ -2490,6 +2490,7 @@ def append_draft_ledger_entry(
         "generalizable_failures": [],
         "follow_up_changes": [],
         "accepted_for_rolling_score": False,
+        "accepted_for_next_stage": False,
     }
     if next_stage:
         entry["next_stage"] = next_stage
