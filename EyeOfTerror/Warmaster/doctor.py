@@ -104,7 +104,7 @@ def check_worker_manifests(errors: list[str]) -> int:
     seen_ports: dict[int, str] = {}
     metadata_paths = {
         path
-        for path in (REPO_ROOT / "Mechanicum").glob("*/worker.json")
+        for path in (REPO_ROOT / "LegacyMechanicum").glob("*/worker.json")
     }
     if isinstance(port_registry, dict):
         for item in port_registry.values():
@@ -113,7 +113,7 @@ def check_worker_manifests(errors: list[str]) -> int:
             registry_manifest = REPO_ROOT / str(item["path"]) / "worker.json"
             if registry_manifest.exists():
                 metadata_paths.add(registry_manifest)
-    services = load_json(REPO_ROOT / "Mechanicum" / "worker_services.json")
+    services = load_json(REPO_ROOT / "LegacyMechanicum" / "worker_services.json")
     if isinstance(services, dict):
         for service in services.values():
             if isinstance(service, dict) and service.get("module_path"):
@@ -148,7 +148,7 @@ def check_worker_manifests(errors: list[str]) -> int:
 
 
 def check_worker_services(errors: list[str]) -> int:
-    services = load_json(REPO_ROOT / "Mechanicum" / "worker_services.json")
+    services = load_json(REPO_ROOT / "LegacyMechanicum" / "worker_services.json")
     for name, service in services.items():
         require(isinstance(service, dict), f"worker service entry is not an object: {name}", errors)
         if not isinstance(service, dict):

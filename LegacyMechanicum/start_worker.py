@@ -9,7 +9,7 @@ from worker_runtime import serve
 
 
 def load_services(repo_root: Path) -> dict:
-    path = repo_root / "Mechanicum" / "worker_services.json"
+    path = repo_root / "LegacyMechanicum" / "worker_services.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("worker_services.json must contain an object")
@@ -17,7 +17,7 @@ def load_services(repo_root: Path) -> dict:
 
 
 def load_worker_aliases(repo_root: Path) -> dict[str, str]:
-    path = repo_root / "Mechanicum" / "worker_aliases.json"
+    path = repo_root / "LegacyMechanicum" / "worker_aliases.json"
     if not path.exists():
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))

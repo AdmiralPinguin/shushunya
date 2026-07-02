@@ -14,7 +14,7 @@ from eye_of_terror.pipeline import write_pipeline_run
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MECHANICUM_ROOT = REPO_ROOT / "Mechanicum"
+MECHANICUM_ROOT = REPO_ROOT / "LegacyMechanicum"
 if str(MECHANICUM_ROOT) not in sys.path:
     sys.path.insert(0, str(MECHANICUM_ROOT))
 

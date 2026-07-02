@@ -34,7 +34,7 @@ def default_workers(repo_root: Path) -> list[str]:
 def build_command(repo_root: Path, worker: str, workspace_root: Path, host: str) -> list[str]:
     return [
         sys.executable,
-        str(repo_root / "Mechanicum" / "start_worker.py"),
+        str(repo_root / "LegacyMechanicum" / "start_worker.py"),
         worker,
         "--host",
         host,

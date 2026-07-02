@@ -23,16 +23,16 @@ This repository contains the orchestration code. The heavy tools are external:
 The virtual environment already exists at:
 
 ```bash
-/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/RoxDub
+/media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/RoxDub
 ```
 
 `pip` has been bootstrapped into this environment. The Python dependencies are installed.
 If the environment is recreated, install them with:
 
 ```bash
-source /media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/RoxDub/bin/activate
+source /media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/RoxDub/bin/activate
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-pip install -r /media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/requirements.txt
+pip install -r /media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/requirements.txt
 ```
 
 The pipeline can use either system `ffmpeg` or the bundled binary from `imageio-ffmpeg`.
@@ -45,17 +45,17 @@ http://127.0.0.1:8080/v1
 Preload Whisper before running the pipeline:
 
 ```bash
-source /media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/RoxDub/bin/activate
+source /media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/RoxDub/bin/activate
 python -m roxdub.preload_models
 ```
 
 The default local model path is:
 
 ```bash
-/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/models/faster-whisper-large-v3
+/media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/models/faster-whisper-large-v3
 ```
 
-If a Hugging Face token is available, put it in `/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/.env`:
+If a Hugging Face token is available, put it in `/media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/.env`:
 
 ```bash
 HF_TOKEN=hf_...
@@ -64,7 +64,7 @@ HF_TOKEN=hf_...
 ## Usage
 
 ```bash
-source /media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/RoxDub/bin/activate
+source /media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/RoxDub/bin/activate
 python -m roxdub.pipeline /path/to/video.mkv --source-lang auto --target-lang ru
 ```
 
@@ -111,7 +111,7 @@ The Android app is named `RoxDub`.
 APK:
 
 ```bash
-/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/RoxDub-debug.apk
+/media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/RoxDub-debug.apk
 ```
 
 Current temporary internet endpoint:
@@ -127,7 +127,7 @@ rebuilt or the new URL must be entered in the app manually.
 Videos shown in the Android app come from:
 
 ```bash
-/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/videos
+/media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/videos
 ```
 
 The app uses tabs:
@@ -144,18 +144,18 @@ notification with stage, percent, and a progress bar while the app is in the bac
 Current test video:
 
 ```bash
-/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/videos/Construction Cancellation.mkv
+/media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/videos/Construction Cancellation.mkv
 ```
 
 Manual server start:
 
 ```bash
-source /media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/RoxDub/bin/activate
+source /media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/RoxDub/bin/activate
 python -m roxdub.server
 ```
 
 Manual tunnel start:
 
 ```bash
-/media/shushunya/SHUSHUNYA/shushunya/Mechanicum/RoxDub/cloudflared tunnel --url http://127.0.0.1:8765
+/media/shushunya/SHUSHUNYA/shushunya/LegacyMechanicum/RoxDub/cloudflared tunnel --url http://127.0.0.1:8765
 ```

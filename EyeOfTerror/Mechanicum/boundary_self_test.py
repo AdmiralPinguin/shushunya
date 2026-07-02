@@ -41,8 +41,8 @@ def assert_architecture_contract() -> None:
         raise AssertionError("architecture_contract.json contract_version drifted")
     if payload.get("governance_root") != "EyeOfTerror/Mechanicum":
         raise AssertionError("EyeOfTerror/Mechanicum must remain the governance root")
-    if payload.get("legacy_runtime_root") != "Mechanicum":
-        raise AssertionError("top-level Mechanicum must remain marked as legacy/shared runtime")
+    if payload.get("legacy_runtime_root") != "LegacyMechanicum":
+        raise AssertionError("LegacyMechanicum must remain marked as legacy/shared runtime")
     expected_ownership = {
         "EyeOfTerror/Mechanicum/Ceraxia",
         "EyeOfTerror/Mechanicum/PlanningBrigade",
@@ -63,8 +63,8 @@ def assert_architecture_contract() -> None:
     if missing_owned_paths:
         raise AssertionError(f"architecture_contract.json points at missing owned paths: {missing_owned_paths}")
     rules = payload.get("rules")
-    if not isinstance(rules, list) or not any("must not import top-level Mechanicum" in str(rule) for rule in rules):
-        raise AssertionError("architecture_contract.json must document the root Mechanicum import boundary")
+    if not isinstance(rules, list) or not any("must not import LegacyMechanicum" in str(rule) for rule in rules):
+        raise AssertionError("architecture_contract.json must document the LegacyMechanicum import boundary")
 
 
 def assert_no_reverse_runtime_dependency() -> None:
@@ -75,10 +75,10 @@ def assert_no_reverse_runtime_dependency() -> None:
         text = path.read_text(encoding="utf-8")
         for line in text.splitlines():
             stripped = line.strip()
-            if stripped.startswith("import Mechanicum") or stripped.startswith("from Mechanicum"):
+            if stripped.startswith("import LegacyMechanicum") or stripped.startswith("from LegacyMechanicum"):
                 offenders.append(f"{path.relative_to(PROJECT_ROOT)}: {stripped}")
     if offenders:
-        raise AssertionError("EyeOfTerror/Mechanicum must not import root Mechanicum runtime directly: " + "; ".join(offenders))
+        raise AssertionError("EyeOfTerror/Mechanicum must not import LegacyMechanicum runtime directly: " + "; ".join(offenders))
 
 
 def assert_runtime_artifacts_ignored() -> None:

@@ -32,10 +32,10 @@ PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/Chronologis python3 EyeOfTerror/Scrip
 PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon python3 EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon/self_test.py
 PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/ReductorVerifier python3 EyeOfTerror/Scriptorium/Brigade/ReductorVerifier/self_test.py
 PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis python3 EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis/self_test.py
-PYTHONPATH=Mechanicum python3 Mechanicum/worker_runtime_self_test.py
-PYTHONPATH=Mechanicum python3 Mechanicum/worker_api_contract_self_test.py
-PYTHONPATH=Mechanicum python3 Mechanicum/worker_services_self_test.py
-PYTHONPATH=Mechanicum python3 Mechanicum/start_all_workers_self_test.py
+PYTHONPATH=LegacyMechanicum python3 LegacyMechanicum/worker_runtime_self_test.py
+PYTHONPATH=LegacyMechanicum python3 LegacyMechanicum/worker_api_contract_self_test.py
+PYTHONPATH=LegacyMechanicum python3 LegacyMechanicum/worker_services_self_test.py
+PYTHONPATH=LegacyMechanicum python3 LegacyMechanicum/start_all_workers_self_test.py
 EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent/scripts/check-agent-offline.sh
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/iskandar_service_self_test.py
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/warmaster_gateway_self_test.py

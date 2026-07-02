@@ -71,13 +71,13 @@
     "7010": {
       "name": "ForgeRelay",
       "role": "DemonsForge adapter",
-      "path": "Mechanicum/ForgeRelay",
+      "path": "LegacyMechanicum/ForgeRelay",
       "backend": "http://127.0.0.1:8110"
     },
     "7011": {
       "name": "MnemosyneRelay",
       "role": "ArchiveOfHeresy adapter",
-      "path": "Mechanicum/MnemosyneRelay",
+      "path": "LegacyMechanicum/MnemosyneRelay",
       "backend": "http://127.0.0.1:8090"
     },
     "7012": {

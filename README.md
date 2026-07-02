@@ -9,7 +9,7 @@ Project code, runtime tools, virtual environments, generated assets, Android too
 - `ArchiveOfHeresy/` is the server gateway, memory/archive layer, OpenAI-compatible LLM proxy, and mobile backend facade.
 - `Shushunya_M/` is the Android client.
 - `EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent/` is the server-side agent API used by the mobile app and console.
-- `Mechanicum/_temporary/RoxDub/` contains the parked dubbing/voice workflow.
+- `LegacyMechanicum/_temporary/RoxDub/` contains the parked dubbing/voice workflow.
 - `PalatineConsole/` is the local service control GUI.
 - `WarpWails/`, `DemonsForge/`, and `ShushunyaSite/` contain additional local tools and web surfaces.
 - `android-tools/` and `.gradle-home/` hold Android build tooling inside the project root.

@@ -37,8 +37,9 @@ user chat surface.
 
 - `EyeOfTerror/Warmaster/registry/ports.json` is the stable topology source for ports.
 - `EyeOfTerror/Warmaster/registry/governors.json` declares active and planned governors.
-- `Mechanicum/*/worker.json` declares worker metadata and capabilities.
-- `Mechanicum/worker_services.json` declares runnable worker services.
+- Worker `worker.json` manifests live under their owning active department
+  paths; legacy relay/runtime manifests can live under `LegacyMechanicum/`.
+- `LegacyMechanicum/worker_services.json` declares runnable worker services.
 
 Rules:
 
@@ -85,7 +86,7 @@ Mechanicum worker supervisor, `IskandarKhayon` on `7101`, and Warmaster Gateway
 on `7000` with default HTTP governor transport. It is a lightweight launcher,
 not a durable service manager. `--json` exposes the startup plan for diagnostics
 and future admin clients, including the individual Mechanicum worker services
-from `Mechanicum/worker_services.json`, top-level service dependencies, and
+from `LegacyMechanicum/worker_services.json`, top-level service dependencies, and
 readiness URLs. `--wait-ready` turns Warmaster, governor, and worker health URLs
 into a startup readiness gate.
 The launcher fails fast if any managed top-level process exits and terminates

@@ -65,7 +65,7 @@ def main() -> int:
         "eye_of_terror.inner_circle.iskandar_service",
         "eye_of_terror.inner_circle.ceraxia_service",
         "eye_of_terror.warmaster_gateway",
-        "Mechanicum/start_all_workers.py",
+        "LegacyMechanicum/start_all_workers.py",
     ]
     missing = [item for item in required if item not in rendered]
     if missing:
@@ -162,9 +162,9 @@ def main() -> int:
         raise AssertionError(f"worker readiness URL missing from plan: {plan}")
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
-        services_path = temp_root / "Mechanicum" / "worker_services.json"
+        services_path = temp_root / "LegacyMechanicum" / "worker_services.json"
         services_path.parent.mkdir(parents=True, exist_ok=True)
-        services_path.write_text(json.dumps({"BrokenWorker": {"port": 7002, "module_path": "Mechanicum/BrokenWorker"}}), encoding="utf-8")
+        services_path.write_text(json.dumps({"BrokenWorker": {"port": 7002, "module_path": "LegacyMechanicum/BrokenWorker"}}), encoding="utf-8")
         try:
             worker_service_plan(temp_root, "127.0.0.1")
         except ValueError as exc:

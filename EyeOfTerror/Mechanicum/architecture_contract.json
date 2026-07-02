@@ -2,7 +2,7 @@
   "kind": "eye_mechanicum_architecture_contract",
   "contract_version": "eye-mechanicum.v1",
   "governance_root": "EyeOfTerror/Mechanicum",
-  "legacy_runtime_root": "Mechanicum",
+  "legacy_runtime_root": "LegacyMechanicum",
   "ownership": {
     "EyeOfTerror/Mechanicum/Ceraxia": "code-governance brigadier",
     "EyeOfTerror/Mechanicum/PlanningBrigade": "planning department for Ceraxia",
@@ -10,8 +10,8 @@
   },
   "rules": [
     "new brigade governance and contracts live under EyeOfTerror/Mechanicum",
-    "top-level Mechanicum remains legacy/shared runtime until a worker is intentionally migrated",
-    "EyeOfTerror/Mechanicum must not import top-level Mechanicum runtime directly",
+    "LegacyMechanicum remains compatibility/shared runtime until a legacy worker or relay is intentionally migrated",
+    "EyeOfTerror/Mechanicum must not import LegacyMechanicum runtime directly",
     "worker migration requires an explicit adapter contract and local boundary test"
   ]
 }

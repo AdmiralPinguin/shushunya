@@ -25,10 +25,10 @@ def collect_active_ports() -> dict[int, str]:
             name = metadata.get("name", "unknown") if isinstance(metadata, dict) else "unknown"
             active_ports[int(port)] = f"EyeOfTerror/Warmaster/registry/ports.json:{section_name}:{name}"
 
-    worker_services = json.loads((REPO_ROOT / "Mechanicum" / "worker_services.json").read_text(encoding="utf-8"))
+    worker_services = json.loads((REPO_ROOT / "LegacyMechanicum" / "worker_services.json").read_text(encoding="utf-8"))
     for name, metadata in worker_services.items():
         if isinstance(metadata, dict) and isinstance(metadata.get("port"), int):
-            active_ports[int(metadata["port"])] = f"Mechanicum/worker_services.json:{name}"
+            active_ports[int(metadata["port"])] = f"LegacyMechanicum/worker_services.json:{name}"
     return active_ports
 
 

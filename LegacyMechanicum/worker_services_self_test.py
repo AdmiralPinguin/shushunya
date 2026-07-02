@@ -121,7 +121,7 @@ def main() -> int:
         raise AssertionError("unknown aliases must fail closed")
     metadata_paths = {
         path
-        for path in (repo_root / "Mechanicum").glob("*/worker.json")
+        for path in (repo_root / "LegacyMechanicum").glob("*/worker.json")
     }
     for service in services.values():
         if isinstance(service, dict) and service.get("module_path"):

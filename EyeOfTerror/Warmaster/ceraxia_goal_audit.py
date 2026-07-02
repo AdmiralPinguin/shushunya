@@ -14,7 +14,7 @@ EYE_ROOT = ROOT / "EyeOfTerror"
 WARM = EYE_ROOT / "Warmaster"
 CERAXIA = EYE_ROOT / "Mechanicum" / "Ceraxia"
 CODE_BRIGADE = EYE_ROOT / "Mechanicum" / "CodeBrigade"
-AGENT_ARENA = ROOT / "Mechanicum" / "_temporary" / "AgentArena"
+AGENT_ARENA = ROOT / "LegacyMechanicum" / "_temporary" / "AgentArena"
 
 
 def read(path: Path) -> str:
@@ -177,7 +177,7 @@ def build_audit() -> dict[str, Any]:
             [
                 check("Comparative stress bench" in arena_readme, "AgentArena comparative bench README", "external agent arena missing"),
                 check("OpenHands" in arena_runner or "openhands" in arena_runner, "AgentArena has external agent adapter placeholder", "external agent adapter evidence missing"),
-                check("agent competition and benchmark work" in read(ROOT / "Mechanicum" / "_temporary" / "README.md"), "external agent work parked as reusable arena", "arena status missing"),
+                check("agent competition and benchmark work" in read(ROOT / "LegacyMechanicum" / "_temporary" / "README.md"), "external agent work parked as reusable arena", "arena status missing"),
                 check("review_gate_rich" in auto_review and "principal_evidence_signals" in auto_review, "external-style evidence patterns captured in reviewer", "reusable reviewer patterns missing"),
             ],
         ),

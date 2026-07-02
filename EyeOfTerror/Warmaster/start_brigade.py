@@ -44,11 +44,11 @@ class CommandSpec:
 
 
 def pythonpath(repo_root: Path) -> str:
-    return os.pathsep.join([str(repo_root / "EyeOfTerror" / "Warmaster"), str(repo_root / "Mechanicum")])
+    return os.pathsep.join([str(repo_root / "EyeOfTerror" / "Warmaster"), str(repo_root / "LegacyMechanicum")])
 
 
 def worker_service_plan(repo_root: Path, host: str) -> list[dict[str, object]]:
-    path = repo_root / "Mechanicum" / "worker_services.json"
+    path = repo_root / "LegacyMechanicum" / "worker_services.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("worker_services.json must contain an object")
@@ -118,7 +118,7 @@ def brigade_commands(
             "",
             [
                 sys.executable,
-                str(repo_root / "Mechanicum" / "start_all_workers.py"),
+                str(repo_root / "LegacyMechanicum" / "start_all_workers.py"),
                 "--repo-root",
                 str(repo_root),
                 "--workspace-root",
