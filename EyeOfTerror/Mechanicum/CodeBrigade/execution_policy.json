@@ -30,6 +30,7 @@
     "verification_commands_executed",
     "blockers",
     "rollback_notes",
-    "operation_results"
+    "operation_results",
+    "patch_manifest"
   ]
 }

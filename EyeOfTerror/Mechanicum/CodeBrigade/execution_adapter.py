@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from execution_contract import build_blocked_execution_result, build_implemented_execution_result
+from execution_contract import build_blocked_execution_result, build_implemented_execution_result, build_patch_manifest
 from execution_preflight import build_execution_preflight, is_repo_relative_path
 from implementation_brief_contract import validate_implementation_brief
 
@@ -717,7 +717,19 @@ def execute_implementation_brief(brief: dict[str, Any]) -> dict[str, Any]:
                 raise
         changed_files, patch_summary, operation_results, rollback_notes = apply_patch_operations(Path(str(brief.get("repo_path") or "")), brief, patch)
     except PatchApplicationError as exc:
-        return build_blocked_execution_result([str(exc)], preflight, exc.rollback_notes, exc.operation_results)
+        return build_blocked_execution_result(
+            [str(exc)],
+            preflight,
+            exc.rollback_notes,
+            exc.operation_results,
+            build_patch_manifest([], exc.operation_results, exc.rollback_notes),
+        )
     except (json.JSONDecodeError, OSError, UnicodeDecodeError, ValueError) as exc:
         return build_blocked_execution_result([str(exc)], preflight)
-    return build_implemented_execution_result(changed_files, patch_summary, preflight, operation_results)
+    return build_implemented_execution_result(
+        changed_files,
+        patch_summary,
+        preflight,
+        operation_results,
+        build_patch_manifest(changed_files, operation_results, rollback_notes),
+    )

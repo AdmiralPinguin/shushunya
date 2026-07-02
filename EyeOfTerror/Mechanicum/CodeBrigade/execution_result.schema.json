@@ -11,7 +11,8 @@
     "verification_commands_executed",
     "blockers",
     "rollback_notes",
-    "operation_results"
+    "operation_results",
+    "patch_manifest"
   ],
   "properties": {
     "kind": {
@@ -51,6 +52,59 @@
       "type": "array",
       "items": {
         "type": "object"
+      }
+    },
+    "patch_manifest": {
+      "type": "object",
+      "required": [
+        "kind",
+        "contract_version",
+        "changed_files",
+        "changed_file_count",
+        "multi_file",
+        "operation_count",
+        "operation_counts",
+        "failed_operation_count",
+        "rollback_performed",
+        "rollback_notes"
+      ],
+      "properties": {
+        "kind": {
+          "const": "code_brigade_patch_manifest"
+        },
+        "contract_version": {
+          "const": "eye-mechanicum.v1"
+        },
+        "changed_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "changed_file_count": {
+          "type": "integer"
+        },
+        "multi_file": {
+          "type": "boolean"
+        },
+        "operation_count": {
+          "type": "integer"
+        },
+        "operation_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "failed_operation_count": {
+          "type": "integer"
+        },
+        "rollback_performed": {
+          "type": "boolean"
+        },
+        "rollback_notes": {
+          "type": "string"
+        }
       }
     },
     "preflight": {

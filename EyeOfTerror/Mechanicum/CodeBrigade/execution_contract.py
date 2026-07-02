@@ -12,7 +12,9 @@ def build_blocked_execution_result(
     preflight: dict[str, Any] | None = None,
     rollback_notes: str = "",
     operation_results: list[dict[str, Any]] | None = None,
+    patch_manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    operations = operation_results or []
     result: dict[str, Any] = {
         "kind": "code_brigade_execution_result",
         "contract_version": CONTRACT_VERSION,
@@ -22,7 +24,8 @@ def build_blocked_execution_result(
         "verification_commands_executed": [],
         "blockers": blockers,
         "rollback_notes": rollback_notes,
-        "operation_results": operation_results or [],
+        "operation_results": operations,
+        "patch_manifest": patch_manifest or build_patch_manifest([], operations, rollback_notes),
     }
     if preflight is not None:
         result["preflight"] = preflight
@@ -34,7 +37,9 @@ def build_implemented_execution_result(
     patch_summary: str,
     preflight: dict[str, Any],
     operation_results: list[dict[str, Any]] | None = None,
+    patch_manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    operations = operation_results or []
     return {
         "kind": "code_brigade_execution_result",
         "contract_version": CONTRACT_VERSION,
@@ -44,6 +49,31 @@ def build_implemented_execution_result(
         "verification_commands_executed": [],
         "blockers": [],
         "rollback_notes": "",
-        "operation_results": operation_results or [],
+        "operation_results": operations,
+        "patch_manifest": patch_manifest or build_patch_manifest(changed_files, operations, ""),
         "preflight": preflight,
+    }
+
+
+def build_patch_manifest(changed_files: list[str], operation_results: list[dict[str, Any]], rollback_notes: str) -> dict[str, Any]:
+    operation_counts: dict[str, int] = {}
+    failed_operations = 0
+    for row in operation_results:
+        if not isinstance(row, dict):
+            continue
+        operation = str(row.get("operation") or "unknown")
+        operation_counts[operation] = operation_counts.get(operation, 0) + 1
+        if str(row.get("status") or "").startswith("failed"):
+            failed_operations += 1
+    return {
+        "kind": "code_brigade_patch_manifest",
+        "contract_version": CONTRACT_VERSION,
+        "changed_files": changed_files,
+        "changed_file_count": len(changed_files),
+        "multi_file": len(set(changed_files)) > 1,
+        "operation_count": len(operation_results),
+        "operation_counts": operation_counts,
+        "failed_operation_count": failed_operations,
+        "rollback_performed": bool(rollback_notes),
+        "rollback_notes": rollback_notes,
     }

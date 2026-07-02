@@ -1122,8 +1122,38 @@ def main() -> int:
             raise AssertionError(f"implemented patch should not mark package dependencies blocked: {patch_report}")
         if patch_report["execution_result"]["status"] != "implemented":
             raise AssertionError(f"explicit patch execution result should be implemented: {patch_report}")
+        patch_manifest = patch_report["execution_result"]["patch_manifest"]
+        if patch_manifest["operation_count"] != 1 or patch_manifest["changed_file_count"] != 1 or patch_manifest["multi_file"]:
+            raise AssertionError(f"single-file explicit patch should expose patch manifest: {patch_report}")
         if "return True" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("explicit patch execution did not update app.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+        Path(tmp, "config.py").write_text("ENABLED = False\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app() is True\n", encoding="utf-8")
+        multi_file_brief = valid_brief()
+        multi_file_brief["repo_path"] = tmp
+        multi_file_brief["repo_survey_evidence"]["candidate_files"] = ["app.py", "config.py"]
+        multi_file_brief["execution_forecast"]["scope_budget"]["max_source_files_to_edit"] = 2
+        multi_file_brief["task"] += "\nCERAXIA_PATCH:\n" + json.dumps(
+            {
+                "operations": [
+                    {"type": "replace", "path": "app.py", "old": "return False", "new": "return True"},
+                    {"type": "replace_python_constant", "path": "config.py", "symbol_name": "ENABLED", "old_literal": "False", "new_literal": "True"},
+                ]
+            }
+        )
+        multi_file_report = code_brigade_adapter.build_worker_report(multi_file_brief, dry_run=False)
+        result = multi_file_report["execution_result"]
+        manifest = result["patch_manifest"]
+        if multi_file_report["status"] != "implemented" or sorted(multi_file_report["changed_files"]) != ["app.py", "config.py"]:
+            raise AssertionError(f"multi-file patch should report both changed files: {multi_file_report}")
+        if manifest["multi_file"] is not True or manifest["changed_file_count"] != 2 or manifest["operation_count"] != 2:
+            raise AssertionError(f"multi-file patch manifest should expose operation/file counts: {multi_file_report}")
+        if manifest["operation_counts"].get("replace") != 1 or manifest["operation_counts"].get("replace_python_constant") != 1:
+            raise AssertionError(f"multi-file patch manifest should count operation types: {multi_file_report}")
+        if "return True" not in Path(tmp, "app.py").read_text(encoding="utf-8") or "ENABLED = True" not in Path(tmp, "config.py").read_text(encoding="utf-8"):
+            raise AssertionError("multi-file patch did not apply both files")
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app() is True\n", encoding="utf-8")
@@ -1482,6 +1512,8 @@ def main() -> int:
             raise AssertionError(f"failed patch batch should block execution: {rollback_report}")
         if "rolled back" not in result["rollback_notes"] or not result["operation_results"]:
             raise AssertionError(f"failed patch batch should expose rollback evidence: {rollback_report}")
+        if result["patch_manifest"]["rollback_performed"] is not True or result["patch_manifest"]["failed_operation_count"] < 1:
+            raise AssertionError(f"failed patch batch should expose rollback patch manifest: {rollback_report}")
         if "return False" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("failed patch batch did not roll app.py back")
     with tempfile.TemporaryDirectory() as tmp:
