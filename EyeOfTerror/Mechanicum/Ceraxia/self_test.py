@@ -769,6 +769,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(worker_report["execution_intent"]["real_execution_supported"])
             self.assertEqual(worker_report["autonomous_execution_request"]["status"], "not_required")
             self.assertTrue(all(item["status"] == "implemented" for item in worker_report["work_package_statuses"]))
+            self.assertTrue(all(item["evidence_source"] == "execution_result" for item in worker_report["work_package_statuses"]))
             self.assertEqual(worker_report["execution_policy_status"], "real_execution_adapter_active")
             self.assertEqual(worker_report["execution_result"]["status"], "implemented")
             self.assertEqual(worker_report["execution_result"]["operation_results"][0]["status"], "applied")
@@ -1004,6 +1005,55 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertEqual(review["decision"], "blocked")
         self.assertEqual(review["pre_mutation_read_sufficiency"]["status"], "blocked")
         self.assertTrue(any("pre-mutation read evidence" in item["finding"] for item in review["findings"]))
+
+    def test_review_gate_blocks_package_status_without_evidence_source(self) -> None:
+        packet = build_planning_packet({"task": "В файле `app.py` замени `return False` на `return True`.", "repo_path": "."})
+        survey = {
+            "repo_exists": True,
+            "repo_path": ".",
+            "candidate_files": ["app.py"],
+            "test_files": ["test_app.py"],
+            "entrypoint_candidates": [],
+            "python_symbols": [],
+            "source_summaries": [],
+            "local_import_edges": [],
+            "generic_import_edges": [],
+            "recommended_read_order": [{"path": "app.py", "reason": "ranked source/config candidate"}],
+            "suggested_verification_commands": ["python -m py_compile app.py"],
+            "truncated": False,
+            "python_symbols_truncated": False,
+            "source_summaries_truncated": False,
+            "max_files_scanned": 1,
+            "max_python_symbol_files": 1,
+            "max_source_summary_files": 1,
+        }
+        brief = build_implementation_brief(packet, survey)
+        worker_report = {
+            "status": "dry_run_handoff_ready",
+            "dry_run": True,
+            "implementation_brief_acknowledged": True,
+            "implementation_plan": code_brigade_adapter.build_implementation_plan(brief),
+            "work_package_statuses": [
+                {
+                    "package_id": "minimal_patch_package",
+                    "owner": "CodeBrigade",
+                    "impact_surfaces": ["source_behavior"],
+                    "status": "planned",
+                }
+            ],
+        }
+        verification_report = {
+            "status": "planned_only",
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "commands_planned": ["python -m py_compile app.py"],
+            "commands_executed": [],
+            "output_summary": [],
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        self.assertEqual(review["decision"], "blocked")
+        self.assertEqual(review["package_status_sufficiency"]["missing_evidence_source_package_ids"], ["minimal_patch_package"])
+        self.assertTrue(any("work packages lack evidence_source" in item["finding"] for item in review["findings"]))
 
     def test_review_gate_blocks_implemented_worker_with_unplanned_changed_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

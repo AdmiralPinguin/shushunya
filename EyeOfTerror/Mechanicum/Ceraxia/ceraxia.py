@@ -1456,6 +1456,11 @@ def review_gate(
         status: sum(1 for item in package_statuses if isinstance(item, dict) and item.get("status") == status)
         for status in ("planned", "implemented", "blocked")
     }
+    package_status_missing_evidence = [
+        str(item.get("package_id") or "<unknown>")
+        for item in package_statuses
+        if isinstance(item, dict) and not item.get("evidence_source")
+    ]
     package_status_sufficiency = {
         "package_count": len(package_statuses),
         "status_counts": package_status_counts,
@@ -1464,6 +1469,7 @@ def review_gate(
             for item in package_statuses
             if isinstance(item, dict) and item.get("status") == "blocked"
         ],
+        "missing_evidence_source_package_ids": package_status_missing_evidence,
     }
     surface_package_matrix = brief.get("surface_package_matrix") if isinstance(brief.get("surface_package_matrix"), dict) else {}
     surface_package_rows = surface_package_matrix.get("rows") if isinstance(surface_package_matrix.get("rows"), list) else []
@@ -1513,6 +1519,8 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "worker report is blocked"})
     if package_status_sufficiency["blocked_package_ids"]:
         findings.append({"severity": "blocker", "finding": "work packages are blocked: " + ", ".join(package_status_sufficiency["blocked_package_ids"])})
+    if package_status_sufficiency["missing_evidence_source_package_ids"]:
+        findings.append({"severity": "blocker", "finding": "work packages lack evidence_source: " + ", ".join(package_status_sufficiency["missing_evidence_source_package_ids"])})
     if surface_package_matrix.get("complete") is False:
         findings.append({"severity": "blocker", "finding": "surface package matrix has blockers"})
     if surface_package_sufficiency["missing_status_package_ids"]:
