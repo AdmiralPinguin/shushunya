@@ -25,6 +25,9 @@ This directory is intended to run a local language model server on Linux over SS
 - `llm-host/scripts/` - helper scripts for starting, checking, and stopping the LLM host.
 - `telegram-bot/` - Telegram bot for chatting with the local model through ArchiveOfHeresy.
 - `litert-lm/` - optional LiteRT-LM runtime and model registry for Gemma 4 12B.
+- `vllm-host/` - experimental vLLM runtime for
+  `google/gemma-4-12B-it-qat-w4a16-ct`; on RTX 2060 12GB it can load with
+  CPU offload but generation currently crashes in the Gemma4 attention kernel.
 
 ## Target Model
 
@@ -112,6 +115,13 @@ For a higher-quality but heavier KV cache profile, override the cache types:
 ```bash
 CTX_SIZE=8192 CACHE_TYPE_K=q8_0 CACHE_TYPE_V=q8_0 ./llm-host/scripts/start-host.sh
 ```
+
+## Experimental vLLM Backend
+
+`vllm-host/` contains scripts and notes for the downloaded
+`google/gemma-4-12B-it-qat-w4a16-ct` compressed-tensors model. Current RTX 2060
+12GB testing keeps `llama.cpp` as the working backend; see
+`vllm-host/README.md` before retesting vLLM.
 
 ## Telegram Bot
 

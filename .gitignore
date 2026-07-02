@@ -2,12 +2,15 @@
 CoreOfMadness/*.gguf
 CoreOfMadness/*.safetensors
 CoreOfMadness/*.bin
+CoreOfMadness/models/
 CoreOfMadness/vision/
 
 # Downloaded llama.cpp runtime binaries and archives
 CoreOfMadness/llm-host/llama.cpp/
 CoreOfMadness/llm-host/runtime/
 CoreOfMadness/llm-host/scripts/*.bak-*
+CoreOfMadness/vllm-host/runtime/
+CoreOfMadness/vllm-host/venv/
 
 # Telegram bot runtime
 CoreOfMadness/telegram-bot/runtime/
