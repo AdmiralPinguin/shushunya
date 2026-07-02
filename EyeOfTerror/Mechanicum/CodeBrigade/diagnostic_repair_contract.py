@@ -80,37 +80,88 @@ def validate_diagnostic_repair_request(request: dict[str, Any]) -> list[str]:
         problems.append("diagnostic repair request reverse_dependency_index must be an object")
     if not isinstance(request.get("scope_budget"), dict):
         problems.append("diagnostic repair request scope_budget must be an object")
+    if "attempt_history" in request and not isinstance(request.get("attempt_history"), list):
+        problems.append("diagnostic repair request attempt_history must be a list when present")
     for index, item in enumerate(items):
         if isinstance(item, dict):
             problems.extend(validate_path_list(item.get("concrete_read_targets"), f"diagnostic_repair_queue.items[{index}].concrete_read_targets"))
     return problems
 
 
+def repair_signature_for_item(item: dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            "command": str(item.get("command") or ""),
+            "signals": sorted(str(signal) for signal in item.get("diagnostic_signals", []) if isinstance(signal, str)),
+            "read_targets": sorted(str(path) for path in item.get("concrete_read_targets", []) if isinstance(path, str)),
+            "packages": sorted(str(package_id) for package_id in item.get("package_ids", []) if isinstance(package_id, str)),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
 def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
     problems = validate_diagnostic_repair_request(request)
     queue = request.get("diagnostic_repair_queue") if isinstance(request.get("diagnostic_repair_queue"), dict) else {}
     items = queue.get("items") if isinstance(queue.get("items"), list) else []
+    attempt_history = request.get("attempt_history") if isinstance(request.get("attempt_history"), list) else []
+    previous_by_signature: dict[str, list[dict[str, Any]]] = {}
+    for history_item in attempt_history:
+        if not isinstance(history_item, dict):
+            continue
+        signature = str(history_item.get("repair_signature") or "")
+        if signature:
+            previous_by_signature.setdefault(signature, []).append(history_item)
     executor_supported_signals = {"assertion_failure", "failed_command", "traceback", "missing_import"}
-    attempt_plan = [
-        {
-            "attempt_id": f"repair-{index + 1}",
-            "command": str(item.get("command") or ""),
-            "priority": str(item.get("priority") or "normal"),
-            "diagnostic_signals": item.get("diagnostic_signals", []) if isinstance(item.get("diagnostic_signals"), list) else [],
-            "executor_supported": bool(
-                executor_supported_signals.intersection(item.get("diagnostic_signals") if isinstance(item.get("diagnostic_signals"), list) else [])
-            ),
-            "unsupported_reason": ""
-            if executor_supported_signals.intersection(item.get("diagnostic_signals") if isinstance(item.get("diagnostic_signals"), list) else [])
-            else "current guarded executor supports assertion_failure, failed_command, traceback, or missing_import only",
-            "read_order": item.get("concrete_read_targets", []) if isinstance(item.get("concrete_read_targets"), list) else [],
-            "package_ids": item.get("package_ids", []) if isinstance(item.get("package_ids"), list) else [],
-            "stop_conditions": item.get("stop_conditions", []) if isinstance(item.get("stop_conditions"), list) else [],
-            "required_evidence": item.get("repair_evidence_required", []) if isinstance(item.get("repair_evidence_required"), list) else [],
-        }
-        for index, item in enumerate(items)
-        if isinstance(item, dict)
+    attempt_plan = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        signals = item.get("diagnostic_signals") if isinstance(item.get("diagnostic_signals"), list) else []
+        supported = bool(executor_supported_signals.intersection(signals))
+        signature = repair_signature_for_item(item)
+        previous_attempts = previous_by_signature.get(signature, [])
+        previous_count = len(previous_attempts)
+        max_attempts = int(item.get("max_repair_attempts") or 1)
+        attempt_plan.append(
+            {
+                "attempt_id": f"repair-{index + 1}",
+                "command": str(item.get("command") or ""),
+                "priority": str(item.get("priority") or "normal"),
+                "diagnostic_signals": signals,
+                "executor_supported": supported,
+                "unsupported_reason": ""
+                if supported
+                else "current guarded executor supports assertion_failure, failed_command, traceback, or missing_import only",
+                "read_order": item.get("concrete_read_targets", []) if isinstance(item.get("concrete_read_targets"), list) else [],
+                "package_ids": item.get("package_ids", []) if isinstance(item.get("package_ids"), list) else [],
+                "stop_conditions": item.get("stop_conditions", []) if isinstance(item.get("stop_conditions"), list) else [],
+                "required_evidence": item.get("repair_evidence_required", []) if isinstance(item.get("repair_evidence_required"), list) else [],
+                "repair_signature": signature,
+                "previous_attempt_count": previous_count,
+                "max_repair_attempts": max_attempts,
+                "repeated_fix_guard": {
+                    "status": "blocked" if previous_attempts else "clear",
+                    "matching_attempt_ids": [
+                        str(previous.get("attempt_id") or "")
+                        for previous in previous_attempts
+                        if isinstance(previous, dict)
+                    ],
+                },
+                "replan_required": bool(previous_attempts) or previous_count >= max_attempts,
+            }
+        )
+    repeated_attempts = [
+        item
+        for item in attempt_plan
+        if item.get("repeated_fix_guard", {}).get("status") == "blocked"
     ]
+    maxed_attempts = [item for item in attempt_plan if int(item.get("previous_attempt_count") or 0) >= int(item.get("max_repair_attempts") or 1)]
+    if repeated_attempts:
+        problems.append("diagnostic repair request repeats a previous repair signature; replan required")
+    if maxed_attempts:
+        problems.append("diagnostic repair request reached max attempts for a repair signature; replan required")
     return {
         "kind": "code_brigade_diagnostic_repair_intake",
         "contract_version": CONTRACT_VERSION,
@@ -118,6 +169,10 @@ def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
         "request_status": request.get("status", ""),
         "item_count": len(items),
         "attempt_plan": attempt_plan,
+        "attempt_history": attempt_history,
+        "attempt_history_count": len(attempt_history),
+        "repeated_fix_count": len(repeated_attempts),
+        "replan_required": bool(repeated_attempts or maxed_attempts),
         "high_priority_count": sum(1 for item in items if isinstance(item, dict) and item.get("priority") == "high"),
         "impacted_surfaces": sorted(
             {

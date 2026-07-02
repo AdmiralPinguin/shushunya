@@ -9,6 +9,10 @@
     "request_status",
     "item_count",
     "attempt_plan",
+    "attempt_history",
+    "attempt_history_count",
+    "repeated_fix_count",
+    "replan_required",
     "high_priority_count",
     "impacted_surfaces",
     "package_ids",
@@ -48,7 +52,12 @@
           "read_order",
           "package_ids",
           "stop_conditions",
-          "required_evidence"
+          "required_evidence",
+          "repair_signature",
+          "previous_attempt_count",
+          "max_repair_attempts",
+          "repeated_fix_guard",
+          "replan_required"
         ],
         "properties": {
           "attempt_id": {
@@ -95,9 +104,53 @@
             "items": {
               "type": "string"
             }
+          },
+          "repair_signature": {
+            "type": "string"
+          },
+          "previous_attempt_count": {
+            "type": "integer"
+          },
+          "max_repair_attempts": {
+            "type": "integer"
+          },
+          "repeated_fix_guard": {
+            "type": "object",
+            "required": ["status", "matching_attempt_ids"],
+            "properties": {
+              "status": {
+                "enum": ["clear", "blocked"]
+              },
+              "matching_attempt_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "replan_required": {
+            "type": "boolean"
           }
         }
       }
+    },
+    "attempt_history": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "attempt_history_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "repeated_fix_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "replan_required": {
+      "type": "boolean"
     },
     "high_priority_count": {
       "type": "integer",

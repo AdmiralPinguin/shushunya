@@ -931,8 +931,28 @@ def main() -> int:
         raise AssertionError(f"diagnostic repair intake should build attempt read order: {repair_intake}")
     if repair_intake["attempt_plan"][0]["executor_supported"] is not True or repair_intake["attempt_plan"][0]["unsupported_reason"]:
         raise AssertionError(f"diagnostic repair intake should mark assertion repair as executor-supported: {repair_intake}")
+    if not repair_intake["attempt_plan"][0]["repair_signature"] or repair_intake["attempt_plan"][0]["repeated_fix_guard"]["status"] != "clear":
+        raise AssertionError(f"diagnostic repair intake should expose clean repair signature guard: {repair_intake}")
+    if repair_intake["attempt_history_count"] != 0 or repair_intake["repeated_fix_count"] != 0 or repair_intake["replan_required"]:
+        raise AssertionError(f"fresh diagnostic repair intake should not require replan: {repair_intake}")
     if "repair item has no safe concrete read target" not in repair_intake["refusal_conditions"]:
         raise AssertionError(f"diagnostic repair intake should expose refusal conditions: {repair_intake}")
+    repeated_repair_request = json.loads(json.dumps(repair_request))
+    repeated_repair_request["attempt_history"] = [
+        {
+            "attempt_id": "repair-old",
+            "repair_signature": repair_intake["attempt_plan"][0]["repair_signature"],
+            "status": "failed",
+        }
+    ]
+    repeated_intake = build_diagnostic_repair_intake(repeated_repair_request)
+    if repeated_intake["status"] != "blocked" or repeated_intake["repeated_fix_count"] != 1 or not repeated_intake["replan_required"]:
+        raise AssertionError(f"repeated diagnostic repair should require replan: {repeated_intake}")
+    if repeated_intake["attempt_plan"][0]["repeated_fix_guard"]["matching_attempt_ids"] != ["repair-old"]:
+        raise AssertionError(f"repeated diagnostic repair should identify matching prior attempt: {repeated_intake}")
+    repeated_execution = execute_diagnostic_repair_request(repeated_repair_request)
+    if repeated_execution["status"] != "blocked" or not any("replan required" in blocker for blocker in repeated_execution["blockers"]):
+        raise AssertionError(f"repeated diagnostic repair execution should block before mutation: {repeated_execution}")
     syntax_error_request = json.loads(json.dumps(repair_request))
     syntax_error_request["diagnostic_repair_queue"]["items"][0]["diagnostic_signals"] = ["syntax_error"]
     syntax_error_intake = build_diagnostic_repair_intake(syntax_error_request)
