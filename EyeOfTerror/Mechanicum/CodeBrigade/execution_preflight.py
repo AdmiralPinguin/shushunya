@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,30 @@ def is_repo_relative_path(value: object) -> bool:
         return False
     path = Path(value)
     return not path.is_absolute() and ".." not in path.parts
+
+
+def dirty_worktree_paths(repo_path: Path) -> dict[str, Any]:
+    if not (repo_path / ".git").exists():
+        return {"available": False, "paths": [], "error": ""}
+    completed = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=repo_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return {"available": False, "paths": [], "error": completed.stderr.strip() or completed.stdout.strip()}
+    paths: list[str] = []
+    for line in completed.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        raw_path = line[3:].strip()
+        if " -> " in raw_path:
+            raw_path = raw_path.split(" -> ", 1)[1].strip()
+        if raw_path:
+            paths.append(raw_path)
+    return {"available": True, "paths": sorted(set(paths)), "error": ""}
 
 
 def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
@@ -47,6 +72,9 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
     missing_test_files = [
         path for path in safe_test_files if not (repo_path / path).is_file() and not (repo_path / path).is_symlink()
     ]
+    dirty_worktree = dirty_worktree_paths(repo_path) if repo_path.exists() and repo_path.is_dir() else {"available": False, "paths": [], "error": ""}
+    mutation_targets = set(safe_candidate_files) | set(safe_test_files) | set(safe_missing_path_hints)
+    dirty_target_conflicts = sorted(path for path in dirty_worktree["paths"] if path in mutation_targets)
     blockers: list[str] = []
     if not str(brief.get("repo_path") or ""):
         blockers.append("repo_path is missing")
@@ -72,6 +100,8 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
         blockers.append("repository survey test files must not be symlinks")
     if missing_test_files:
         blockers.append("repository survey test files are missing")
+    if dirty_target_conflicts:
+        blockers.append("dirty worktree overlaps mutation targets")
     if not targeted_commands and not suggested_commands:
         blockers.append("verification strategy has no executable or suggested commands")
     return {
@@ -92,6 +122,13 @@ def build_execution_preflight(brief: dict[str, Any]) -> dict[str, Any]:
         "symlink_test_files": symlink_test_files[:20],
         "allowed_new_files": safe_missing_path_hints[:20],
         "unsafe_missing_path_hints": unsafe_missing_path_hints[:20],
+        "dirty_worktree": {
+            "available": dirty_worktree["available"],
+            "dirty_path_count": len(dirty_worktree["paths"]),
+            "paths": dirty_worktree["paths"][:40],
+            "target_conflicts": dirty_target_conflicts[:20],
+            "error": dirty_worktree["error"],
+        },
         "targeted_command_count": len(targeted_commands),
         "suggested_command_count": len(suggested_commands),
         "blockers": blockers,

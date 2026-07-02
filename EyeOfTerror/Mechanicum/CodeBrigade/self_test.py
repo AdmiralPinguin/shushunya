@@ -1611,6 +1611,28 @@ def main() -> int:
         symlink_test_preflight = build_execution_preflight(symlink_test_brief)
         if symlink_test_preflight["ok"] or symlink_test_preflight["symlink_test_files"] != ["linked_test_app.py"]:
             raise AssertionError(f"preflight should block symlink test paths: {symlink_test_preflight}")
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(["git", "init"], cwd=tmp, text=True, capture_output=True, check=True)
+        Path(tmp, "app.py").write_text("def app():\n    return True\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
+        subprocess.run(["git", "add", "app.py", "test_app.py"], cwd=tmp, text=True, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "baseline"],
+            cwd=tmp,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        Path(tmp, "notes.md").write_text("user draft\n", encoding="utf-8")
+        dirty_brief = valid_brief()
+        dirty_brief["repo_path"] = tmp
+        dirty_preflight = build_execution_preflight(dirty_brief)
+        if not dirty_preflight["ok"] or dirty_preflight["dirty_worktree"]["paths"] != ["notes.md"]:
+            raise AssertionError(f"preflight should record unrelated dirty files without blocking: {dirty_preflight}")
+        Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+        dirty_target_preflight = build_execution_preflight(dirty_brief)
+        if dirty_target_preflight["ok"] or dirty_target_preflight["dirty_worktree"]["target_conflicts"] != ["app.py"]:
+            raise AssertionError(f"preflight should block dirty mutation targets: {dirty_target_preflight}")
     invalid = valid_brief()
     invalid.pop("allowed_scope")
     invalid_report = code_brigade_adapter.build_worker_report(invalid, dry_run=True)
