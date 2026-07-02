@@ -443,6 +443,21 @@ def main() -> int:
             raise AssertionError(f"Ceraxia evidence contract must reject incomplete packages: {incomplete_status}")
         manifest = tmp_root / "final_manifest.json"
         manifest.write_text(json.dumps({"status": "ready"}), encoding="utf-8")
+        weak_status = evidence_package_status(tmp_root, {"evidence_paths": [str(trial_result), str(manifest)]})
+        if weak_status.get("passed") is True or "approved" not in str(weak_status.get("reason", "")):
+            raise AssertionError(f"Ceraxia evidence contract must reject weak ready-only manifest: {weak_status}")
+        manifest.write_text(
+            json.dumps(
+                {
+                    "status": "ready",
+                    "approved": True,
+                    "changed_files": [{"path": "app.py"}],
+                    "verification_summary": {"executed_count": 1, "blocker_count": 0},
+                    "review_decision_record": [{"status": "pass"}],
+                }
+            ),
+            encoding="utf-8",
+        )
         complete_status = evidence_package_status(tmp_root, {"evidence_paths": [str(trial_result), str(manifest)]})
         if complete_status.get("passed") is not True:
             raise AssertionError(f"Ceraxia evidence contract rejected complete package: {complete_status}")
