@@ -34,6 +34,7 @@ AUTO_REVIEWER = WARMASTER_ROOT / "ceraxia_field_trial_auto_review.py"
 NEXT_STAGE_BUILDER = WARMASTER_ROOT / "ceraxia_next_stage_package.py"
 LIVE_TASK_REGISTER = WARMASTER_ROOT / "ceraxia_live_task_register.py"
 LIVE_TASK_PREPARE = WARMASTER_ROOT / "ceraxia_live_task_prepare.py"
+LIVE_TASK_RUN = WARMASTER_ROOT / "ceraxia_live_task_run.py"
 
 
 def main() -> int:
@@ -149,6 +150,33 @@ def main() -> int:
     )
     if missing_live_prepare.returncode == 0:
         raise AssertionError(f"Ceraxia live task prepare accepted unknown task: {missing_live_prepare.stdout}")
+    with tempfile.TemporaryDirectory() as live_run_tmp:
+        live_run = subprocess.run(
+            [
+                sys.executable,
+                str(LIVE_TASK_RUN),
+                "--task-id",
+                "ceraxia-live-ambiguous-blocker",
+                "--run-id",
+                "live-harness-self-test",
+                "--runs-root",
+                str(Path(live_run_tmp) / "runs"),
+            ],
+            cwd=str(EYE_ROOT.parent),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if live_run.returncode != 0:
+            raise AssertionError(f"Ceraxia live task harness failed: {live_run.stdout} {live_run.stderr}")
+        live_run_payload = json.loads(live_run.stdout)
+        if (
+            live_run_payload.get("ok") is not True
+            or not live_run_payload.get("package_path")
+            or live_run_payload.get("registered_entry") is not None
+            or live_run_payload.get("evidence_status", {}).get("passed") is not True
+        ):
+            raise AssertionError(f"Ceraxia live task harness returned weak payload: {live_run_payload}")
     if len(set(dimensions)) != len(dimensions) or len(dimensions) < 8:
         raise AssertionError(f"Ceraxia dimensions are missing or duplicated: {dimensions}")
     seen: set[str] = set()

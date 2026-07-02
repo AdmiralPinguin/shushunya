@@ -27,6 +27,9 @@ packet, `ceraxia_next_stage_package.py` to build the evidence package, and
 ledger. Draft live entries do not count until `accepted_for_next_stage=true`.
 Fixture runs deliberately set `fixture_only=true` and cannot satisfy the live
 target.
+`EyeOfTerror/Warmaster/ceraxia_live_task_run.py` ties those steps together for
+a real Ceraxia run: it prepares the packet, runs Ceraxia, writes
+`next_stage_evidence_package.json`, and optionally registers the package.
 
 She owns code-task decomposition, repository survey, scoped implementation
 planning, patch manifest handoff, verification planning, code review, and final
