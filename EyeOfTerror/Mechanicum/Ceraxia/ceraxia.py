@@ -429,7 +429,18 @@ def build_verification_report(brief: dict[str, Any], worker_report: dict[str, An
     ]
     dry_run = worker_report["dry_run"]
     blocked = brief["blocked"] or worker_report["status"] == "blocked"
-    execution = run_verification_commands(executable_commands, brief.get("repo_path", ""), execute=execute_verification) if executable_commands and not blocked else {
+    worker_output_contract = brief.get("worker_output_contract") if isinstance(brief.get("worker_output_contract"), dict) else {}
+    package_rows = worker_output_contract.get("package_result_contract") if isinstance(worker_output_contract.get("package_result_contract"), list) else []
+    acceptance_requirements = sorted(
+        {
+            str(requirement)
+            for row in package_rows
+            if isinstance(row, dict)
+            for requirement in (row.get("acceptance_requirements") if isinstance(row.get("acceptance_requirements"), list) else [])
+            if str(requirement)
+        }
+    )
+    execution = run_verification_commands(executable_commands, brief.get("repo_path", ""), execute=execute_verification, acceptance_requirements=acceptance_requirements) if executable_commands and not blocked else {
         "kind": "code_brigade_verification_execution",
         "contract_version": CONTRACT_VERSION,
         "status": "blocked" if blocked else "passed",
@@ -437,6 +448,18 @@ def build_verification_report(brief: dict[str, Any], worker_report: dict[str, An
         "repo_path": brief.get("repo_path", ""),
         "results": [],
         "blockers": brief.get("blockers", []) if blocked else [],
+        "contract_trace": {
+            "kind": "code_brigade_verification_contract_trace",
+            "contract_version": CONTRACT_VERSION,
+            "requirement_count": len(acceptance_requirements),
+            "status": "incomplete" if acceptance_requirements else "proven",
+            "status_counts": {},
+            "focused_evidence_count": 0,
+            "behavior_evidence_count": 0,
+            "broad_evidence_count": 0,
+            "blocking_requirement_count": len(acceptance_requirements),
+            "rows": [],
+        },
     }
     if blocked:
         status = "blocked"
@@ -455,6 +478,7 @@ def build_verification_report(brief: dict[str, Any], worker_report: dict[str, An
         "output_summary": summarize_verification_output(commands_executed),
         "verification_after_mutation_evidence": after_mutation_evidence,
         "verification_execution": execution,
+        "contract_trace": execution.get("contract_trace", {}),
         "negative_tests_required": strategy.get("negative_tests", []),
         "broad_verification_required": bool(strategy.get("broad_verification_required")),
         "blockers": execution.get("blockers", []) if execution.get("blockers") else (brief.get("blockers", []) if blocked else []),
@@ -1468,6 +1492,7 @@ def review_gate(
     output_signal_counts = output_signal_counts_from_summary(output_summary)
     output_diagnostic_counts = output_diagnostic_counts_from_summary(output_summary)
     negative_tests = verification_report.get("negative_tests_required", [])
+    contract_trace = verification_report.get("contract_trace") if isinstance(verification_report.get("contract_trace"), dict) else {}
     verification_sufficiency = {
         "risk_level": brief.get("risk_level", "high"),
         "status": "executed" if meaningful_commands_executed else ("planned_only" if commands_planned else "missing"),
@@ -1620,6 +1645,15 @@ def review_gate(
         warnings.append({"severity": "warning", "finding": "executable verification commands exist but were not run"})
     if brief.get("risk_level") == "high" and not commands_executed:
         warnings.append({"severity": "warning", "finding": "high-risk task has no executed verification evidence yet"})
+    if (
+        contract_trace.get("requirement_count")
+        and int(contract_trace.get("blocking_requirement_count") or 0) > 0
+        and verification_report.get("status") == "passed"
+        and (brief.get("risk_level") == "high" or verification_report.get("broad_verification_required"))
+    ):
+        findings.append({"severity": "blocker", "finding": "verification contract trace has unproven acceptance requirements"})
+    elif contract_trace.get("requirement_count") and int(contract_trace.get("blocking_requirement_count") or 0) > 0:
+        warnings.append({"severity": "warning", "finding": "verification contract trace has unproven acceptance requirements"})
     repo_evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     if repo_evidence.get("survey_truncated"):
         warnings.append({"severity": "warning", "finding": "repository survey reached file limit; coverage is partial"})

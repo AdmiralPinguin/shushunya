@@ -1550,6 +1550,25 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     "output_signal": "output_empty",
                 }
             ],
+            "contract_trace": {
+                "kind": "code_brigade_verification_contract_trace",
+                "contract_version": "eye-mechanicum.v1",
+                "requirement_count": 1,
+                "status": "incomplete",
+                "status_counts": {"syntax_only": 1},
+                "focused_evidence_count": 0,
+                "behavior_evidence_count": 0,
+                "broad_evidence_count": 0,
+                "blocking_requirement_count": 1,
+                "rows": [
+                    {
+                        "requirement": "changed behavior is covered by targeted verification",
+                        "status": "syntax_only",
+                        "matched_commands": ["python -m py_compile app.py"],
+                        "command_kinds": ["syntax_or_diff"],
+                    }
+                ],
+            },
         }
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertEqual(review["surface_verification_sufficiency"]["status"], "partial")
@@ -1559,6 +1578,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertTrue(any(row["surface"] == "security_boundary" and row["status"] == "partial" and not row["matched_commands"] for row in surface_evidence))
         self.assertEqual(review["decision"], "blocked")
         self.assertTrue(any("partial executed surface evidence" in item["finding"] for item in review["findings"]))
+        self.assertTrue(any("verification contract trace has unproven acceptance requirements" in item["finding"] for item in review["findings"]))
 
     def test_non_dry_run_blocks_until_real_code_brigade_execution_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

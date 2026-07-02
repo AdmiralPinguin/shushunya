@@ -14,6 +14,11 @@ def main() -> int:
         raise AssertionError(f"verification policy allowlist drifted from runtime: {policy}")
     if "block absolute path tokens" not in policy["path_token_guards"]:
         raise AssertionError(f"verification policy should document path token guards: {policy}")
+    if "py_compile" not in policy.get("acceptance_trace_policy", ""):
+        raise AssertionError(f"verification policy should document syntax-only acceptance trace limits: {policy}")
+    schema = json.loads((Path(__file__).resolve().parent / "verification_execution.schema.json").read_text(encoding="utf-8"))
+    if "contract_trace" not in schema.get("required", []):
+        raise AssertionError(f"verification schema must require contract_trace: {schema}")
     with tempfile.TemporaryDirectory() as tmp:
         repo = Path(tmp)
         (repo / "ok.py").write_text("VALUE = 1\n", encoding="utf-8")
@@ -23,6 +28,14 @@ def main() -> int:
         executed = verification_adapter.run_verification_commands(["python -m py_compile ok.py"], str(repo), execute=True)
         if executed["status"] != "passed" or executed["results"][0]["returncode"] != 0:
             raise AssertionError(f"py_compile should execute successfully: {executed}")
+        syntax_trace = verification_adapter.run_verification_commands(
+            ["python -m py_compile ok.py"],
+            str(repo),
+            execute=True,
+            acceptance_requirements=["changed behavior is covered by targeted verification"],
+        )
+        if syntax_trace["contract_trace"]["rows"][0]["status"] != "syntax_only":
+            raise AssertionError(f"syntax-only verification must not prove behavior acceptance: {syntax_trace}")
         (repo / "test_ok.py").write_text(
             "import unittest\n\nclass OkTest(unittest.TestCase):\n    def test_ok(self):\n        self.assertEqual(1, 1)\n",
             encoding="utf-8",
@@ -30,6 +43,14 @@ def main() -> int:
         unittest_executed = verification_adapter.run_verification_commands(["python -m unittest test_ok.py"], str(repo), execute=True)
         if unittest_executed["status"] != "passed" or unittest_executed["results"][0]["returncode"] != 0:
             raise AssertionError(f"unittest should execute successfully: {unittest_executed}")
+        behavior_trace = verification_adapter.run_verification_commands(
+            ["python -m unittest test_ok.py", "python -m py_compile ok.py"],
+            str(repo),
+            execute=True,
+            acceptance_requirements=["changed behavior is covered by targeted verification"],
+        )
+        if behavior_trace["contract_trace"]["status"] != "proven" or behavior_trace["contract_trace"]["behavior_evidence_count"] < 1:
+            raise AssertionError(f"behavior command should prove behavior acceptance: {behavior_trace}")
         (repo / "test_fail.py").write_text(
             "import unittest\n\nclass FailTest(unittest.TestCase):\n    def test_fail(self):\n        self.assertEqual(1, 2)\n",
             encoding="utf-8",
@@ -50,6 +71,14 @@ def main() -> int:
         blocked = verification_adapter.run_verification_commands(["rm -rf ."], str(repo), execute=True)
         if blocked["status"] != "blocked" or not blocked["blockers"]:
             raise AssertionError(f"unsafe command should be blocked: {blocked}")
+        blocked_trace = verification_adapter.run_verification_commands(
+            ["rm -rf ."],
+            str(repo),
+            execute=True,
+            acceptance_requirements=["changed behavior is covered by targeted verification"],
+        )
+        if blocked_trace["contract_trace"]["rows"][0]["status"] != "blocked":
+            raise AssertionError(f"blocked verification should block acceptance trace: {blocked_trace}")
         outside_path = verification_adapter.run_verification_commands(["python -m py_compile ../outside.py"], str(repo), execute=True)
         if outside_path["status"] != "blocked" or "unsafe path token" not in outside_path["results"][0]["stderr"]:
             raise AssertionError(f"allowlisted command with traversal path should be blocked: {outside_path}")
@@ -75,6 +104,14 @@ def main() -> int:
             raise AssertionError(f"pytest availability fallback should produce a clear status: {pytest_unavailable}")
         if pytest_result["status"] == "skipped" and pytest_unavailable["status"] != "passed":
             raise AssertionError(f"skipped unavailable pytest should not fail when another verification passed: {pytest_unavailable}")
+        skipped_trace = verification_adapter.run_verification_commands(
+            ["python -m pytest test_missing.py"],
+            str(repo),
+            execute=True,
+            acceptance_requirements=["pytest behavior evidence is required"],
+        )
+        if skipped_trace["contract_trace"]["rows"][0]["status"] not in {"skipped", "failed"}:
+            raise AssertionError(f"skipped or failed pytest should not prove acceptance: {skipped_trace}")
     print("[ok] Ceraxia CodeBrigade verification adapter")
     return 0
 

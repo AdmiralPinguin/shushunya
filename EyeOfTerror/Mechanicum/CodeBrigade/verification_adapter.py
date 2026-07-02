@@ -72,6 +72,100 @@ def is_pytest_command(tokens: list[str]) -> bool:
     return bool(tokens and (tokens[0] == "pytest" or (len(tokens) >= 3 and tokens[1:3] == ["-m", "pytest"])))
 
 
+def command_kind(command: str) -> str:
+    lowered = command.lower()
+    if "py_compile" in lowered or "git diff --check" in lowered:
+        return "syntax_or_diff"
+    if "pytest" in lowered or "unittest" in lowered or "test" in lowered:
+        return "behavior"
+    return "focused"
+
+
+def requirement_keywords(requirement: str) -> set[str]:
+    words = {
+        word
+        for word in re.findall(r"[a-zA-Z0-9_]+", requirement.lower())
+        if len(word) >= 4 and word not in {"must", "have", "with", "this", "that", "from", "only", "true"}
+    }
+    synonyms = {
+        "api": {"api", "schema", "request", "response", "caller", "compatibility"},
+        "compatibility": {"compatibility", "legacy", "migration", "mixed", "shape", "round"},
+        "security": {"security", "boundary", "auth", "token", "path", "input", "rejected"},
+        "runtime": {"runtime", "config", "startup", "environment"},
+        "concurrency": {"concurrency", "parallel", "retry", "cache", "state", "race"},
+        "test": {"test", "pytest", "unittest", "behavior", "oracle"},
+        "behavior": {"behavior", "visible", "request", "contract"},
+    }
+    expanded = set(words)
+    for word in list(words):
+        expanded.update(synonyms.get(word, set()))
+    return expanded
+
+
+def command_matches_requirement(command: str, requirement: str) -> bool:
+    command_words = set(re.findall(r"[a-zA-Z0-9_]+", command.lower()))
+    keywords = requirement_keywords(requirement)
+    return bool(command_words & keywords)
+
+
+def build_verification_contract_trace(results: list[dict[str, Any]], acceptance_requirements: list[str]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for requirement in acceptance_requirements:
+        matched = [
+            result
+            for result in results
+            if isinstance(result, dict) and command_matches_requirement(str(result.get("command") or ""), requirement)
+        ]
+        if not matched:
+            matched = [result for result in results if isinstance(result, dict) and command_kind(str(result.get("command") or "")) == "behavior"]
+        if not matched:
+            matched = [result for result in results if isinstance(result, dict) and result.get("status") in {"blocked", "failed", "skipped"}]
+        if not matched:
+            matched = [result for result in results if isinstance(result, dict) and command_kind(str(result.get("command") or "")) == "syntax_or_diff" and result.get("status") == "passed"]
+        statuses = [str(result.get("status") or "") for result in matched]
+        kinds = [command_kind(str(result.get("command") or "")) for result in matched]
+        if not matched:
+            status = "missing"
+        elif any(item == "blocked" for item in statuses):
+            status = "blocked"
+        elif any(item == "failed" for item in statuses):
+            status = "failed"
+        elif all(item == "skipped" for item in statuses):
+            status = "skipped"
+        elif all(item == "planned" for item in statuses):
+            status = "planned_only"
+        elif any(item == "passed" and kind == "behavior" for item, kind in zip(statuses, kinds)):
+            status = "proven"
+        elif any(item == "passed" for item in statuses):
+            status = "syntax_only"
+        else:
+            status = "missing"
+        rows.append(
+            {
+                "requirement": requirement,
+                "status": status,
+                "matched_commands": [str(result.get("command") or "") for result in matched],
+                "command_kinds": kinds,
+            }
+        )
+    status_counts: dict[str, int] = {}
+    for row in rows:
+        status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
+    blocking_statuses = {"missing", "blocked", "failed", "skipped", "planned_only", "syntax_only"}
+    return {
+        "kind": "code_brigade_verification_contract_trace",
+        "contract_version": CONTRACT_VERSION,
+        "requirement_count": len(rows),
+        "status": "proven" if rows and all(row["status"] == "proven" for row in rows) else "incomplete",
+        "status_counts": status_counts,
+        "focused_evidence_count": sum(1 for result in results if command_kind(str(result.get("command") or "")) == "focused"),
+        "behavior_evidence_count": sum(1 for result in results if command_kind(str(result.get("command") or "")) == "behavior"),
+        "broad_evidence_count": sum(1 for result in results if "pytest" in str(result.get("command") or "").lower() or "unittest" in str(result.get("command") or "").lower()),
+        "blocking_requirement_count": sum(1 for row in rows if row["status"] in blocking_statuses),
+        "rows": rows,
+    }
+
+
 def verification_diagnostics(stdout: str, stderr: str, repo: Path) -> dict[str, Any]:
     combined = f"{stdout}\n{stderr}"
     traceback_files: list[str] = []
@@ -95,7 +189,7 @@ def verification_diagnostics(stdout: str, stderr: str, repo: Path) -> dict[str, 
     }
 
 
-def run_verification_commands(commands: list[str], repo_path: str, execute: bool = False, timeout_sec: int = 30) -> dict[str, Any]:
+def run_verification_commands(commands: list[str], repo_path: str, execute: bool = False, timeout_sec: int = 30, acceptance_requirements: list[str] | None = None) -> dict[str, Any]:
     repo = Path(repo_path)
     results: list[dict[str, Any]] = []
     blockers: list[str] = []
@@ -179,6 +273,7 @@ def run_verification_commands(commands: list[str], repo_path: str, execute: bool
         "repo_path": str(repo),
         "results": results,
         "blockers": blockers,
+        "contract_trace": build_verification_contract_trace(results, acceptance_requirements or []),
     }
 
 
@@ -186,9 +281,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run allowlisted CodeBrigade verification commands.")
     parser.add_argument("--repo-path", required=True)
     parser.add_argument("--command", action="append", default=[])
+    parser.add_argument("--acceptance-requirement", action="append", default=[])
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
-    report = run_verification_commands(args.command, args.repo_path, execute=args.execute)
+    report = run_verification_commands(args.command, args.repo_path, execute=args.execute, acceptance_requirements=args.acceptance_requirement)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["status"] in {"planned", "passed"} else 2
 

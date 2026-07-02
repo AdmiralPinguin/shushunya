@@ -110,7 +110,9 @@ without a shell, including `py_compile`, `pytest`, `unittest`, and
 tokens, and option values that point outside the repository. Its output is
 versioned by `verification_execution.schema.json`; each result also preserves
 diagnostic hints for tracebacks, assertion failures, syntax errors, and missing
-imports. Planned verification reports
-`status: planned`, while executed checks report `passed`, `failed`, or
-`blocked`. It is safe enough for explicit verification wiring, but source
-mutation remains outside this adapter.
+imports. Verification execution also emits `contract_trace`, which maps
+acceptance requirements to matched verification commands and distinguishes
+behavior proof from syntax-only, skipped, blocked, failed, planned-only, or
+missing evidence. Planned verification reports `status: planned`, while
+executed checks report `passed`, `failed`, or `blocked`. It is safe enough for
+explicit verification wiring, but source mutation remains outside this adapter.

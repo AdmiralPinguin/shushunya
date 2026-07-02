@@ -1285,8 +1285,12 @@ def implementation_work_packages(
         "blocking_policy": [
             "block when planned verification cannot run and no explicit blocker is recorded",
             "block when high-risk surfaces have only partial executed evidence",
+            "block when verification_contract_trace marks acceptance requirements as syntax_only, skipped, blocked, failed, planned_only, or missing",
         ],
-        "handoff_criteria": ["verification_report.json names executed, skipped, failed, or blocked checks"],
+        "handoff_criteria": [
+            "verification_report.json names executed, skipped, failed, or blocked checks",
+            "verification_contract_trace links acceptance requirements to behavior evidence or explicit blockers",
+        ],
     }
     packages: list[dict[str, Any]] = [evidence_package]
     if task_kinds & {"api_compatibility", "migration"}:
@@ -1927,6 +1931,8 @@ def worker_output_contract(
         )
         if not acceptance_evidence:
             acceptance_evidence = ["worker_report.json", "verification_report.json"]
+        if package_id == "verification_evidence_package" and "verification_report.contract_trace" not in acceptance_evidence:
+            acceptance_evidence.append("verification_report.contract_trace")
         if not acceptance_requirements:
             acceptance_requirements = ["package must explain why no acceptance requirement maps directly to it"]
         package_rows.append(
@@ -1951,6 +1957,7 @@ def worker_output_contract(
         "required_reports": [
             "worker_report.json",
             "verification_report.json",
+            "verification_contract_trace",
             "review_gate.json",
             "final_report.md",
         ],
@@ -1960,6 +1967,7 @@ def worker_output_contract(
             "worker_report.work_package_statuses",
             "worker_report.changed_files",
             "verification_report.commands_executed",
+            "verification_report.contract_trace",
             "review_gate.findings",
             "diagnostic_repair_request.json when verification fails",
         ],

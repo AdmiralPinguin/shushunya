@@ -9,7 +9,8 @@
     "execute",
     "repo_path",
     "results",
-    "blockers"
+    "blockers",
+    "contract_trace"
   ],
   "properties": {
     "kind": {
@@ -92,6 +93,82 @@
       "items": {
         "type": "string"
       }
+    },
+    "contract_trace": {
+      "type": "object",
+      "required": [
+        "kind",
+        "contract_version",
+        "requirement_count",
+        "status",
+        "status_counts",
+        "focused_evidence_count",
+        "behavior_evidence_count",
+        "broad_evidence_count",
+        "blocking_requirement_count",
+        "rows"
+      ],
+      "properties": {
+        "kind": {
+          "const": "code_brigade_verification_contract_trace"
+        },
+        "contract_version": {
+          "const": "eye-mechanicum.v1"
+        },
+        "requirement_count": {
+          "type": "integer"
+        },
+        "status": {
+          "enum": ["proven", "incomplete"]
+        },
+        "status_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "focused_evidence_count": {
+          "type": "integer"
+        },
+        "behavior_evidence_count": {
+          "type": "integer"
+        },
+        "broad_evidence_count": {
+          "type": "integer"
+        },
+        "blocking_requirement_count": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["requirement", "status", "matched_commands", "command_kinds"],
+            "properties": {
+              "requirement": {
+                "type": "string"
+              },
+              "status": {
+                "enum": ["proven", "syntax_only", "planned_only", "blocked", "skipped", "failed", "missing"]
+              },
+              "matched_commands": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "command_kinds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
     }
   },
   "additionalProperties": true

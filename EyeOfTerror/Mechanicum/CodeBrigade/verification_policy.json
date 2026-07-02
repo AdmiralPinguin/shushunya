@@ -17,5 +17,6 @@
     "block parent traversal tokens",
     "block option values that point outside the repository"
   ],
-  "output_contract": "verification_execution.schema.json"
+  "output_contract": "verification_execution.schema.json",
+  "acceptance_trace_policy": "contract_trace must not treat py_compile or git diff --check as behavior proof"
 }

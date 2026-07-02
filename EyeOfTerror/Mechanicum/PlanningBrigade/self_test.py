@@ -274,8 +274,11 @@ def main() -> int:
         or not security_packet["diagnostic_repair_plan"]["requires_ceraxia_review_after_each_attempt"]
         or security_packet["worker_output_contract"]["target"] != "CodeBrigade"
         or "worker_report.json" not in security_packet["worker_output_contract"]["required_reports"]
+        or "verification_contract_trace" not in security_packet["worker_output_contract"]["required_reports"]
+        or "verification_report.contract_trace" not in security_packet["worker_output_contract"]["final_review_inputs"]
         or sorted(security_packet["worker_output_contract"]["required_package_statuses"]) != sorted(security_packet["implementation_work_packages"]["review_order"])
         or not any(row["package_id"] == "security_boundary_package" and row["acceptance_evidence"] for row in security_packet["worker_output_contract"]["package_result_contract"])
+        or not any(row["package_id"] == "verification_evidence_package" and any("contract_trace" in item for item in row["acceptance_evidence"]) for row in security_packet["worker_output_contract"]["package_result_contract"])
         or not security_packet["verification_strategy"]["broad_verification_required"]
         or "negative boundary test or explicit blocker is present" not in security_packet["quality_bar"]["must_have_evidence"]
         or "required negative tests are present, executed, or explicitly blocked" not in security_packet["acceptance_contract"]["must_prove"]
