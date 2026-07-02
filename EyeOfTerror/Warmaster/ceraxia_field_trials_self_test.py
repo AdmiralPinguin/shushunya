@@ -31,6 +31,7 @@ REVIEWER = WARMASTER_ROOT / "ceraxia_field_trial_review.py"
 EXPERT_REVIEWER = WARMASTER_ROOT / "ceraxia_expert_review.py"
 ACCEPTER = WARMASTER_ROOT / "ceraxia_field_trial_accept.py"
 AUTO_REVIEWER = WARMASTER_ROOT / "ceraxia_field_trial_auto_review.py"
+NEXT_STAGE_BUILDER = WARMASTER_ROOT / "ceraxia_next_stage_package.py"
 
 
 def main() -> int:
@@ -597,6 +598,85 @@ def main() -> int:
         weak_next_stage_status = next_stage_evidence_status(tmp_root, weak_next_stage_entry, synthetic_trials[0])
         if weak_next_stage_status.get("passed") is True or "artifacts" not in str(weak_next_stage_status.get("reason", "")):
             raise AssertionError(f"Ceraxia next-stage evidence contract accepted incomplete package: {weak_next_stage_status}")
+        live_package_path = tmp_root / "live_next_stage_package.json"
+        live_builder = subprocess.run(
+            [
+                sys.executable,
+                str(NEXT_STAGE_BUILDER),
+                "--trial-id",
+                "live-code-task",
+                "--run-id",
+                "live-code-task-001",
+                "--task-class",
+                "live_multi_file_feature",
+                "--status",
+                "fully_successful",
+                "--attempt-count",
+                "1",
+                "--changed-file",
+                "app/service.py",
+                "--changed-file",
+                "tests/test_service.py",
+                "--artifact",
+                "repo_investigation=evidence/repo_investigation.json",
+                "--artifact",
+                "planning=evidence/planning_department.json",
+                "--artifact",
+                "execution=evidence/execution_result.json",
+                "--artifact",
+                "verification=evidence/verification_report.json",
+                "--artifact",
+                "review=evidence/review_gate.json",
+                "--multi-file-nonfixture",
+                "--verification-passed",
+                "--review-accepted",
+                "--output",
+                str(live_package_path),
+            ],
+            cwd=str(EYE_ROOT.parent),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if live_builder.returncode != 0:
+            raise AssertionError(f"Ceraxia live next-stage builder rejected valid package: {live_builder.stdout} {live_builder.stderr}")
+        live_builder_payload = json.loads(live_builder.stdout)
+        if live_builder_payload.get("status", {}).get("passed") is not True or not live_package_path.exists():
+            raise AssertionError(f"Ceraxia live next-stage builder did not write a valid package: {live_builder_payload}")
+        weak_builder = subprocess.run(
+            [
+                sys.executable,
+                str(NEXT_STAGE_BUILDER),
+                "--trial-id",
+                "live-code-task",
+                "--run-id",
+                "live-code-task-002",
+                "--task-class",
+                "live_multi_file_feature",
+                "--status",
+                "fully_successful",
+                "--attempt-count",
+                "1",
+                "--changed-file",
+                "app/service.py",
+                "--artifact",
+                "repo_investigation=evidence/repo_investigation.json",
+                "--artifact",
+                "planning=evidence/planning_department.json",
+                "--artifact",
+                "execution=evidence/execution_result.json",
+                "--artifact",
+                "verification=evidence/verification_report.json",
+                "--verification-passed",
+                "--review-accepted",
+            ],
+            cwd=str(EYE_ROOT.parent),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if weak_builder.returncode == 0:
+            raise AssertionError(f"Ceraxia live next-stage builder accepted incomplete package: {weak_builder.stdout}")
     expert_suite = subprocess.run(
         [sys.executable, str(EXPERT_SUITE), "--require-all"],
         cwd=str(EYE_ROOT.parent),
