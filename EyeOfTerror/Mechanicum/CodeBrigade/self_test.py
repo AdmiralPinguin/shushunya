@@ -1491,6 +1491,25 @@ def main() -> int:
             raise AssertionError(f"explicit patch should reject unbudgeted test edits: {test_edit_report}")
         if "assert app() is False" not in Path(tmp, "test_app.py").read_text(encoding="utf-8"):
             raise AssertionError("blocked test edit should leave test_app.py unchanged")
+        requested_test_edit_brief = valid_brief()
+        requested_test_edit_brief["repo_path"] = tmp
+        requested_test_edit_brief["task"] = "Update `test_app.py` self-test to prove docs contract drift is caught.\nCERAXIA_PATCH:\n" + json.dumps(
+            {
+                "operations": [
+                    {
+                        "type": "replace",
+                        "path": "test_app.py",
+                        "old": "assert app() is False",
+                        "new": "assert app() is True",
+                    }
+                ]
+            }
+        )
+        requested_test_edit_report = code_brigade_adapter.build_worker_report(requested_test_edit_brief, dry_run=False)
+        if requested_test_edit_report["status"] != "implemented" or requested_test_edit_report["changed_files"] != ["test_app.py"]:
+            raise AssertionError(f"explicit requested test edit should be allowed: {requested_test_edit_report}")
+        if "assert app() is True" not in Path(tmp, "test_app.py").read_text(encoding="utf-8"):
+            raise AssertionError("requested test edit did not update test_app.py")
     with tempfile.TemporaryDirectory() as tmp:
         for name in ["a.py", "b.py", "c.py"]:
             Path(tmp, name).write_text("def value():\n    return 0\n", encoding="utf-8")

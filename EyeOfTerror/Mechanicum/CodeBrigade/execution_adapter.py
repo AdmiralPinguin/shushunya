@@ -422,6 +422,29 @@ def scope_budget(brief: dict[str, Any]) -> dict[str, Any]:
     return budget
 
 
+def requested_test_edit_paths(brief: dict[str, Any]) -> set[str]:
+    task = str(brief.get("task") or "").lower()
+    explicit_test_edit_requested = bool(
+        re.search(r"\b(update|change|edit|add|repair|tighten)\b.{0,80}\b(test|self-test|self test)\b", task)
+        or re.search(r"\b(test|self-test|self test)\b.{0,80}\b(update|change|edit|add|repair|tighten)\b", task)
+        or re.search(r"\b(drift|prove)\b.{0,80}\b(test|self-test|self test)\b", task)
+        or re.search(r"\b(test|self-test|self test)\b.{0,80}\b(drift|prove)\b", task)
+        or re.search(r"(обнов|измени|добав|исправ).{0,80}тест", task)
+        or re.search(r"тест.{0,80}(обнов|измени|добав|исправ|доказ)", task)
+    )
+    if not explicit_test_edit_requested:
+        return set()
+    evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
+    existing_hints = evidence.get("existing_path_hints") if isinstance(evidence.get("existing_path_hints"), list) else []
+    test_files = evidence.get("test_files") if isinstance(evidence.get("test_files"), list) else []
+    explicit_existing = {str(path) for path in existing_hints if isinstance(path, str)}
+    return {
+        str(path)
+        for path in test_files
+        if isinstance(path, str) and is_test_path(str(path)) and str(path) in explicit_existing
+    }
+
+
 def is_test_path(rel_path: str) -> bool:
     parts = Path(rel_path).parts
     name = Path(rel_path).name.lower()
@@ -439,6 +462,7 @@ def validate_patch_scope_budget(brief: dict[str, Any], operations: list[Any]) ->
     max_source_files = int(budget.get("max_source_files_to_edit") or 0)
     max_test_files = int(budget.get("max_test_files_to_edit_without_explicit_user_request") or 0)
     max_docs_files = int(budget.get("max_docs_files_to_edit") or 0)
+    requested_test_paths = requested_test_edit_paths(brief)
     source_files: set[str] = set()
     test_files: set[str] = set()
     docs_files: set[str] = set()
@@ -448,7 +472,7 @@ def validate_patch_scope_budget(brief: dict[str, Any], operations: list[Any]) ->
         rel_path = str(operation.get("path") or "")
         if not rel_path:
             continue
-        if is_test_path(rel_path):
+        if is_test_path(rel_path) and rel_path not in requested_test_paths:
             test_files.add(rel_path)
         elif is_docs_path(rel_path):
             docs_files.add(rel_path)
