@@ -225,6 +225,25 @@ def main() -> int:
         )
         if ready_package["status"] != "fully_successful" or ready_package["review_accepted"] is not True:
             raise AssertionError(f"Ceraxia live package builder should accept ready review decisions: {ready_package}")
+        if ready_package["changed_file_count"] != len(ready_package["changed_files"]):
+            raise AssertionError(f"Ceraxia live package should expose a matching changed_file_count: {ready_package}")
+        drifted_package = json.loads(json.dumps(ready_package))
+        drifted_package["changed_file_count"] = 99
+        drifted_entry = {
+            "trial_id": drifted_package["trial_id"],
+            "run_id": drifted_package["run_id"],
+            "next_stage": {
+                "status": drifted_package["status"],
+                "attempt_count": drifted_package["attempt_count"],
+                "class": drifted_package["task_class"],
+                "multi_file_nonfixture": drifted_package["multi_file_nonfixture"],
+                "false_success": False,
+                "evidence_package": drifted_package,
+            },
+        }
+        drifted_status = next_stage_evidence_status(EYE_ROOT.parent, drifted_entry, {"class": "docs_contract_sync"})
+        if drifted_status.get("passed") is True or "changed_file_count" not in str(drifted_status.get("reason", "")):
+            raise AssertionError(f"Ceraxia evidence contract should reject changed_file_count drift: {drifted_status}")
     with tempfile.TemporaryDirectory() as live_run_tmp:
         live_run = subprocess.run(
             [
@@ -454,6 +473,7 @@ def main() -> int:
                         "false_success": False,
                         "multi_file_nonfixture": index < 5,
                         "changed_files": changed_files,
+                        "changed_file_count": len(changed_files),
                         "verification_passed": True,
                         "review_accepted": True,
                         "artifacts": {

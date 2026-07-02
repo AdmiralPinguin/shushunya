@@ -134,6 +134,7 @@ def validate_next_stage_evidence_payload(
     artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
     missing_artifacts = sorted(REQUIRED_NEXT_STAGE_ARTIFACTS - set(artifacts))
     changed_files = payload.get("changed_files")
+    changed_file_count = payload.get("changed_file_count")
     package_multi_file = payload.get("multi_file_nonfixture")
 
     if payload.get("kind") != NEXT_STAGE_PACKAGE_KIND:
@@ -166,6 +167,8 @@ def validate_next_stage_evidence_payload(
         errors.append(f"evidence_package missing artifacts: {', '.join(missing_artifacts)}")
     if not isinstance(changed_files, list):
         errors.append("evidence_package.changed_files must be a list")
+    elif changed_file_count is not None and changed_file_count != len(changed_files):
+        errors.append("evidence_package.changed_file_count must match changed_files length")
     if status in NEXT_STAGE_SUCCESS_STATUSES:
         if not changed_files:
             errors.append("successful next_stage evidence requires changed_files")

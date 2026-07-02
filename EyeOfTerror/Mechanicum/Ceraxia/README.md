@@ -25,6 +25,8 @@ Use `EyeOfTerror/Warmaster/ceraxia_live_task_prepare.py` to create a task
 packet, `ceraxia_next_stage_package.py` to build the evidence package, and
 `ceraxia_live_task_register.py` to register only validated live evidence in the
 ledger. Draft live entries do not count until `accepted_for_next_stage=true`.
+Next-stage evidence packages must keep `changed_files` and `changed_file_count`
+in sync so reporting surfaces do not silently drift from the execution record.
 Fixture runs deliberately set `fixture_only=true` and cannot satisfy the live
 target.
 `EyeOfTerror/Warmaster/ceraxia_live_task_run.py` ties those steps together for

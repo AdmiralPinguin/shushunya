@@ -157,6 +157,7 @@ def build_package(task: dict[str, Any], result: dict[str, Any], run_dir: Path) -
         "false_success": False,
         "multi_file_nonfixture": len(set(changed_files)) > 1,
         "changed_files": changed_files,
+        "changed_file_count": len(changed_files),
         "verification_passed": verification.get("status") == "passed",
         "review_accepted": review_decision_accepted(review),
         "postmortem": postmortem,

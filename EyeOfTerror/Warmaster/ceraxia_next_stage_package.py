@@ -32,6 +32,7 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def build_package(args: argparse.Namespace) -> dict[str, Any]:
     artifacts = dict(args.artifact or [])
+    changed_files = args.changed_file or []
     return {
         "kind": NEXT_STAGE_PACKAGE_KIND,
         "contract_version": 1,
@@ -44,7 +45,8 @@ def build_package(args: argparse.Namespace) -> dict[str, Any]:
         "fixture_only": False,
         "false_success": args.false_success,
         "multi_file_nonfixture": args.multi_file_nonfixture,
-        "changed_files": args.changed_file or [],
+        "changed_files": changed_files,
+        "changed_file_count": len(changed_files),
         "verification_passed": args.verification_passed,
         "review_accepted": args.review_accepted,
         "postmortem": args.postmortem,
