@@ -151,6 +151,20 @@ To enforce the 10/10 expert target:
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/ceraxia_field_trial_report.py --require-expert-target
 ```
 
+To enforce the live next-stage target:
+
+```bash
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/ceraxia_field_trial_report.py --require-next-stage-target
+```
+
+The live target is separate from fixture and expert targets. A live entry must
+come from `live_tasks`, carry a valid
+`ceraxia_next_stage_evidence_package`, set `real_repo_task=true`, set
+`fixture_only=false`, and pass registration through
+`ceraxia_live_task_register.py`. The strict live command must fail until the
+ledger proves 20 live tasks, 10 classes, at least 70% success, zero false
+successes, required postmortems, and the required multi-file nonfixture count.
+
 The strict command must fail until the ledger proves the target. This is
 intentional; an empty or draft-only ledger is not evidence of engineering
 ability.

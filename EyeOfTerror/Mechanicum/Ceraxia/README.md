@@ -17,6 +17,16 @@ ledger score. At minimum the accepted evidence must include a readable
 `trial_result.json`, a readable `final_manifest.json`, and passed
 `honest_evidence` checks from `ceraxia_evidence_contract.py`.
 
+The next-stage live-task target is stricter than the fixture arena: 20 real
+repository tasks, at least 10 task classes, at least 70% success, zero false
+successes, failed/blocked postmortems, and at least 5 multi-file nonfixture
+tasks. Live tasks are cataloged in `field_trials.json` under `live_tasks`.
+Use `EyeOfTerror/Warmaster/ceraxia_live_task_prepare.py` to create a task
+packet, `ceraxia_next_stage_package.py` to build the evidence package, and
+`ceraxia_live_task_register.py` to register only validated live evidence in the
+ledger. Fixture runs deliberately set `fixture_only=true` and cannot satisfy
+the live target.
+
 She owns code-task decomposition, repository survey, scoped implementation
 planning, patch manifest handoff, verification planning, code review, and final
 handoff packaging.
