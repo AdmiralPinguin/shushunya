@@ -316,6 +316,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "contract_surface_candidates": survey.get("contract_surface_candidates", []),
             "package_manifest_candidates": survey.get("package_manifest_candidates", []),
             "recommended_read_order": survey.get("recommended_read_order", []),
+            "repository_cartography": survey.get("repository_cartography", {}),
             "survey_truncated": bool(survey.get("truncated")),
             "max_files_scanned": survey.get("max_files_scanned", 0),
             "python_symbols_truncated": bool(survey.get("python_symbols_truncated")),
@@ -2472,6 +2473,7 @@ def build_evidence_matrix(
             "caller_candidates": implementation_plan.get("caller_candidates", []),
             "contract_surface_candidates": implementation_plan.get("contract_surface_candidates", []),
             "package_manifest_candidates": implementation_plan.get("package_manifest_candidates", []),
+            "repository_cartography": implementation_plan.get("repository_cartography", {}),
         },
         "autonomous_execution_request": autonomous_request,
         "implementation_work_package_summary": {

@@ -534,6 +534,48 @@ def build_package_manifest_candidates(files: list[Path], root: Path) -> list[dic
     return [package_manifest_row(path, root) for path in manifests[:40]]
 
 
+def build_repository_cartography(
+    entrypoints: list[str],
+    tests: list[str],
+    contract_surface_candidates: list[dict[str, Any]],
+    package_manifest_candidates: list[dict[str, Any]],
+    caller_candidates: list[dict[str, Any]],
+    recommended_read_order: list[dict[str, str]],
+) -> dict[str, Any]:
+    risky_by_path: dict[str, set[str]] = {}
+    for row in contract_surface_candidates[:20]:
+        path = str(row.get("path") or "")
+        if path:
+            risky_by_path.setdefault(path, set()).add("contract_surface")
+    for row in caller_candidates[:20]:
+        path = str(row.get("target") or "")
+        caller_count = int(row.get("caller_count") or 0)
+        if path and caller_count > 0:
+            risky_by_path.setdefault(path, set()).add(f"caller_count:{caller_count}")
+    for path in entrypoints[:20]:
+        risky_by_path.setdefault(path, set()).add("entrypoint")
+    risky_modules = [
+        {"path": path, "reasons": sorted(reasons)}
+        for path, reasons in sorted(risky_by_path.items())
+    ][:40]
+    return {
+        "kind": "ceraxia_repository_cartography",
+        "entrypoints": entrypoints[:40],
+        "test_inventory": tests[:60],
+        "contract_surfaces": contract_surface_candidates[:40],
+        "package_manifests": package_manifest_candidates[:40],
+        "risky_modules": risky_modules,
+        "recommended_read_order": recommended_read_order[:80],
+        "summary": {
+            "entrypoint_count": len(entrypoints),
+            "test_count": len(tests),
+            "contract_surface_count": len(contract_surface_candidates),
+            "package_manifest_count": len(package_manifest_candidates),
+            "risky_module_count": len(risky_modules),
+        },
+    }
+
+
 def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[str], path_hints: list[str] | None = None) -> dict[str, Any]:
     root = Path(repo_path)
     path_hints = path_hints or []
@@ -567,6 +609,22 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "contract_surface_candidates": [],
             "package_manifest_candidates": [],
             "recommended_read_order": [],
+            "repository_cartography": {
+                "kind": "ceraxia_repository_cartography",
+                "entrypoints": [],
+                "test_inventory": [],
+                "contract_surfaces": [],
+                "package_manifests": [],
+                "risky_modules": [],
+                "recommended_read_order": [],
+                "summary": {
+                    "entrypoint_count": 0,
+                    "test_count": 0,
+                    "contract_surface_count": 0,
+                    "package_manifest_count": 0,
+                    "risky_module_count": 0,
+                },
+            },
             "suggested_verification_commands": [],
             "max_files_scanned": MAX_SURVEY_FILES,
             "truncated": False,
@@ -637,6 +695,14 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     contract_surface_candidates = build_contract_surface_candidates(files, root)
     package_manifest_candidates = build_package_manifest_candidates(files, root)
     recommended_read_order = build_recommended_read_order(existing_path_hints, entrypoints, candidates, tests, dependency_edges)
+    repository_cartography = build_repository_cartography(
+        entrypoints,
+        tests,
+        contract_surface_candidates,
+        package_manifest_candidates,
+        caller_candidates,
+        recommended_read_order,
+    )
     suggested_commands: list[str] = []
     if tests:
         suggested_commands.append("python -m pytest " + " ".join(tests[:3]))
@@ -670,6 +736,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "contract_surface_candidates": contract_surface_candidates,
         "package_manifest_candidates": package_manifest_candidates,
         "recommended_read_order": recommended_read_order,
+        "repository_cartography": repository_cartography,
         "suggested_verification_commands": suggested_commands,
         "max_files_scanned": MAX_SURVEY_FILES,
         "truncated": truncated,
