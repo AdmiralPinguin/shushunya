@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Final packaging role implementation."""
 
-from codewright_core import *  # noqa: F403 - role modules share the extracted Codewright helper surface.
+from common.codewright_core import *  # noqa: F403 - role modules use the shared Codewright helper surface.
 
 
 def principal_evidence_summary(

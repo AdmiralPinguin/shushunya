@@ -22,25 +22,32 @@ from cogitator_codewright import (
 
 def assert_role_module_split() -> None:
     worker_root = Path(__file__).resolve().parent
+    workers_root = worker_root.parent
     entrypoint = worker_root / "cogitator_codewright.py"
-    core = worker_root / "codewright_core.py"
+    core = workers_root / "common" / "codewright_core.py"
     roles = {
-        "repository_survey": "run_repository_survey",
-        "change_planning": "run_change_planning",
-        "implementation": "run_implementation",
-        "verification": "run_verification",
-        "code_review": "run_code_review",
-        "finalize": "run_finalize",
+        "LogisRepository/repository_survey.py": ("repository_survey", "run_repository_survey"),
+        "MagosStrategos/change_planning.py": ("change_planning", "run_change_planning"),
+        "FerrumPatchwright/implementation.py": ("implementation", "run_implementation"),
+        "OrdinatusVerifier/verification.py": ("verification", "run_verification"),
+        "JudicatorCodicis/code_review.py": ("code_review", "run_code_review"),
+        "SealwrightFinalis/finalize.py": ("finalize", "run_finalize"),
     }
     if sum(1 for _ in entrypoint.open(encoding="utf-8")) > 120:
         raise AssertionError("CogitatorCodewright entrypoint must stay a small dispatcher")
     if not core.is_file() or sum(1 for _ in core.open(encoding="utf-8")) < 1000:
         raise AssertionError("shared Codewright helper core is missing or unexpectedly small")
-    for module_name, function_name in roles.items():
-        role_path = worker_root / "roles" / f"{module_name}.py"
+    old_roles_dir = worker_root / "roles"
+    if old_roles_dir.exists() and any(old_roles_dir.glob("*.py")):
+        raise AssertionError("CogitatorCodewright must not own role implementations")
+    for relative_path, (module_name, function_name) in roles.items():
+        role_path = workers_root / relative_path
         if not role_path.is_file():
             raise AssertionError(f"role module is missing: {role_path}")
-        role_module = importlib.import_module(f"roles.{module_name}")
+        role_dir = role_path.parent
+        if str(role_dir) not in sys.path:
+            sys.path.insert(0, str(role_dir))
+        role_module = importlib.import_module(module_name)
         if not callable(getattr(role_module, function_name, None)):
             raise AssertionError(f"role module has no callable {function_name}: {module_name}")
     shim_modules = {

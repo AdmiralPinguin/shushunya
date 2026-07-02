@@ -209,9 +209,11 @@ LogisRepository(repository_survey)
 
 ## Current Boundary
 
-The named workers share a common helper core, but their stage execution is now
-physically split into `CogitatorCodewright/roles/` modules for repository
-survey, planning, implementation, verification, review, and finalization.
+The named workers share a common helper core, but their stage execution is
+physically owned by the active worker directories: `LogisRepository`,
+`MagosStrategos`, `FerrumPatchwright`, `OrdinatusVerifier`,
+`JudicatorCodicis`, and `SealwrightFinalis`. `CogitatorCodewright` remains a
+compatibility dispatcher, not the owner of the role implementations.
 
 Each worker's `worker.json` exposes a `role_contract` with its owned step,
 authority boundary, expected artifact names, and next handoff. The registry

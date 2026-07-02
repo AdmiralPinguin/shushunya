@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Change planning role implementation."""
 
-from codewright_core import *  # noqa: F403 - role modules share the extracted Codewright helper surface.
+from common.codewright_core import *  # noqa: F403 - role modules use the shared Codewright helper surface.
 
 
 def run_change_planning(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:

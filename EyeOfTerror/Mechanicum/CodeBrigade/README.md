@@ -14,11 +14,19 @@ Likely members:
 
 The current folder owns the handoff contract from Ceraxia to code workers.
 `CogitatorCodewright/cogitator_codewright.py` is the compatibility entrypoint
-and step dispatcher. Stage execution lives in `CogitatorCodewright/roles/`,
-while `CogitatorCodewright/codewright_core.py` holds shared filesystem, patch,
-verification, and analysis helpers used by those roles. The named worker service
-modules set their worker identity and delegate through the same entrypoint
-without hiding all role execution in one file.
+and multi-step dispatcher. The active worker services own their stage modules
+inside their own directories:
+
+- `LogisRepository/repository_survey.py`
+- `MagosStrategos/change_planning.py`
+- `FerrumPatchwright/implementation.py`
+- `OrdinatusVerifier/verification.py`
+- `JudicatorCodicis/code_review.py`
+- `SealwrightFinalis/finalize.py`
+
+`Workers/common/codewright_core.py` holds shared filesystem, patch,
+verification, and analysis helpers used by those workers. Each named worker
+module validates its owned `step_id` before calling its local implementation.
 
 ## Current Contract
 

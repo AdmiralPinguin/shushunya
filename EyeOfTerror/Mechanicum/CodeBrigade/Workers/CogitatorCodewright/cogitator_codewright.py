@@ -5,20 +5,29 @@ import sys
 from pathlib import Path
 from typing import Any
 
-MECHANICUM_ROOT = Path(__file__).resolve().parents[1]
-if str(MECHANICUM_ROOT) not in sys.path:
-    sys.path.insert(0, str(MECHANICUM_ROOT))
+WORKERS_ROOT = Path(__file__).resolve().parents[1]
+if str(WORKERS_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKERS_ROOT))
+for worker_dir in [
+    "LogisRepository",
+    "MagosStrategos",
+    "FerrumPatchwright",
+    "OrdinatusVerifier",
+    "JudicatorCodicis",
+    "SealwrightFinalis",
+]:
+    worker_path = WORKERS_ROOT / worker_dir
+    if str(worker_path) not in sys.path:
+        sys.path.insert(0, str(worker_path))
 
-from codewright_core import *  # noqa: F403,E402 - compatibility surface for existing worker tests/imports.
-from codewright_core import output_path_from_request, worker_name  # noqa: E402
-from roles import (  # noqa: E402
-    run_change_planning,
-    run_code_review,
-    run_finalize,
-    run_implementation,
-    run_repository_survey,
-    run_verification,
-)
+from common.codewright_core import *  # noqa: F403,E402 - compatibility surface for existing worker tests/imports.
+from common.codewright_core import output_path_from_request, worker_name  # noqa: E402
+from change_planning import run_change_planning  # noqa: E402
+from code_review import run_code_review  # noqa: E402
+from finalize import run_finalize  # noqa: E402
+from implementation import run_implementation  # noqa: E402
+from repository_survey import run_repository_survey  # noqa: E402
+from verification import run_verification  # noqa: E402
 
 
 STEP_HANDLERS = {

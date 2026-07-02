@@ -560,10 +560,10 @@ PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/Lexmechanic LEXMECHANIC_LIVE_DISCOVER
   legacy `CogitatorCodewrightGovernor`.
 - The Ceraxia code brigade uses `LogisRepository`, `MagosStrategos`,
   `FerrumPatchwright`, `OrdinatusVerifier`, `JudicatorCodicis`, and
-  `SealwrightFinalis` on ports 7015-7020. They share the `CogitatorCodewright`
-  helper core but execute through separate role modules under
-  `CogitatorCodewright/roles/`, preserving separate worker identities,
-  contracts, ports, and review handoffs.
+  `SealwrightFinalis` on ports 7015-7020. They share
+  `Workers/common/codewright_core.py` helpers but own their stage
+  implementation modules inside their worker directories, preserving separate
+  worker identities, contracts, ports, and review handoffs.
 - Ceraxia's six active code workers expose machine-readable `role_contract`
   metadata with owned step, authority boundary, expected artifacts, and next
   handoff; the worker registry self-test enforces those contracts.
@@ -690,5 +690,5 @@ PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/Lexmechanic LEXMECHANIC_LIVE_DISCOVER
 - Add durable background execution recovery and stronger interruption for
   already-running worker calls where the underlying worker supports it.
 - Continue shrinking Ceraxia's shared code-worker helper core by moving more
-  role-specific analysis helpers into the individual role modules.
+  role-specific analysis helpers into the owning worker modules.
 - Add an image governor instead of routing unsupported image tasks to Iskandar.
