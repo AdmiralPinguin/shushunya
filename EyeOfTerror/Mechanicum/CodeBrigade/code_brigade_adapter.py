@@ -198,6 +198,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "planning_review_score": planning_review.get("score", 0),
         "planning_department_status": planning_department.get("status", ""),
         "planning_department_roles": planning_department.get("roles", []) if isinstance(planning_department.get("roles"), list) else [],
+        "brigade_handoff_contract": planning_department.get("brigade_handoff_contract", {}) if isinstance(planning_department.get("brigade_handoff_contract"), dict) else {},
         "engineering_rfc_status": planning_department.get("engineering_rfc", {}).get("status", "") if isinstance(planning_department.get("engineering_rfc"), dict) else "",
         "multi_pass_investigation_status": planning_department.get("multi_pass_repo_investigation", {}).get("status", "") if isinstance(planning_department.get("multi_pass_repo_investigation"), dict) else "",
         "multi_pass_investigation_phases": planning_department.get("multi_pass_repo_investigation", {}).get("phases", []) if isinstance(planning_department.get("multi_pass_repo_investigation"), dict) and isinstance(planning_department.get("multi_pass_repo_investigation", {}).get("phases"), list) else [],

@@ -148,6 +148,17 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(all(phase["required_before_mutation"] for phase in planning_department["multi_pass_repo_investigation"]["phases"]))
             self.assertEqual(planning_department["code_brigade_work_package_handoff"]["status"], "ready")
             self.assertIn("security_boundary_package", [package["id"] for package in planning_department["code_brigade_work_package_handoff"]["packages"]])
+            brigade_handoff = planning_department["brigade_handoff_contract"]
+            self.assertEqual(brigade_handoff["status"], "ready")
+            self.assertEqual(
+                brigade_handoff["role_order"],
+                ["Ceraxia", "PlanningBrigade", "RepoSurveyor", "CodeBrigade", "Verifier", "Reviewer", "RepairStrategist"],
+            )
+            verifier_role = next(role for role in brigade_handoff["roles"] if role["name"] == "Verifier")
+            self.assertFalse(verifier_role["may_mutate_source"])
+            self.assertIn("verification_contract_trace", verifier_role["outputs"])
+            repair_role = next(role for role in brigade_handoff["roles"] if role["name"] == "RepairStrategist")
+            self.assertIn("replan_packet", repair_role["outputs"])
             planning_execution_batches = planning_department["code_brigade_work_package_handoff"]["execution_batches"]
             self.assertTrue(planning_execution_batches["complete"])
             self.assertEqual(planning_execution_batches["batches"][0], ["evidence_survey_package"])
@@ -155,6 +166,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(planning_execution_batches["unresolved_packages"], [])
             self.assertEqual(brief["planning_department"]["status"], "ready_for_code_brigade")
             self.assertEqual(brief["planning_department_handoff"]["target"], "CodeBrigade")
+            self.assertEqual(brief["code_brigade_handoff"]["planning_department_package"]["brigade_handoff_contract_status"], "ready")
             self.assertEqual(brief["code_brigade_handoff"]["planning_department_package"]["artifact"], "planning_department.json")
             self.assertEqual(brief["risk_level"], "high")
             self.assertIn("hardcoded one-off behavior", brief["forbidden_approaches"])
@@ -234,6 +246,8 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(implementation_plan["diagnostic_repair_plan"], brief["diagnostic_repair_plan"])
             self.assertEqual(implementation_plan["worker_output_contract"], brief["worker_output_contract"])
             self.assertEqual(implementation_plan["planning_department_status"], "ready_for_code_brigade")
+            self.assertEqual(implementation_plan["brigade_handoff_contract"]["status"], "ready")
+            self.assertIn("RepairStrategist", implementation_plan["brigade_handoff_contract"]["role_order"])
             self.assertEqual(implementation_plan["engineering_rfc_status"], "accepted_for_code_brigade_handoff")
             self.assertEqual(implementation_plan["multi_pass_investigation_status"], "complete")
 
@@ -941,6 +955,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             plan["multi_pass_investigation_status"] = ""
             plan["multi_pass_investigation_phases"] = []
             plan["planning_department_work_package_handoff"] = {}
+            plan["brigade_handoff_contract"] = {}
             verification_report = {
                 "status": "planned_only",
                 "negative_tests_required": ["untrusted input is rejected"],
@@ -953,6 +968,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(review["decision"], "blocked")
             self.assertEqual(review["planning_department_sufficiency"]["status"], "blocked")
             self.assertTrue(any("planning department handoff is incomplete" in item["finding"] for item in review["findings"]))
+            self.assertTrue(any("RepairStrategist" in blocker for blocker in review["planning_department_sufficiency"]["blockers"]))
             feedback = build_planning_feedback_request("run-1", packet, brief, worker_report, verification_report, review)
             self.assertEqual(feedback["status"], "required")
             self.assertEqual(feedback["planning_department_sufficiency"], review["planning_department_sufficiency"])

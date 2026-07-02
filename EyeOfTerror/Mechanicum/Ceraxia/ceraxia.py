@@ -341,6 +341,7 @@ def attach_planning_department_to_brief(brief: dict[str, Any], planning_departme
         "status": planning_department.get("status", ""),
         "required_before_code_brigade_execution": True,
         "work_package_handoff_status": planning_department.get("code_brigade_work_package_handoff", {}).get("status", ""),
+        "brigade_handoff_contract_status": planning_department.get("brigade_handoff_contract", {}).get("status", ""),
         "multi_pass_investigation_status": planning_department.get("multi_pass_repo_investigation", {}).get("status", ""),
     }
     enriched["code_brigade_handoff"] = handoff
@@ -1312,6 +1313,11 @@ def planning_department_sufficiency_from_worker(worker_report: dict[str, Any]) -
         if isinstance(implementation_plan.get("planning_department_work_package_handoff"), dict)
         else {}
     )
+    brigade_handoff = (
+        implementation_plan.get("brigade_handoff_contract")
+        if isinstance(implementation_plan.get("brigade_handoff_contract"), dict)
+        else {}
+    )
     required_phase_ids = {
         "project_map",
         "dependency_public_api_map",
@@ -1344,6 +1350,31 @@ def planning_department_sufficiency_from_worker(worker_report: dict[str, Any]) -
             blockers.append(f"multi-pass phase is not required before mutation: {phase.get('id')}")
     if handoff.get("status") != "ready":
         blockers.append("planning department CodeBrigade work package handoff is not ready")
+    expected_handoff_roles = {
+        "Ceraxia",
+        "PlanningBrigade",
+        "RepoSurveyor",
+        "CodeBrigade",
+        "Verifier",
+        "Reviewer",
+        "RepairStrategist",
+    }
+    handoff_role_names = {
+        str(role.get("name") or "")
+        for role in (brigade_handoff.get("roles") if isinstance(brigade_handoff.get("roles"), list) else [])
+        if isinstance(role, dict)
+    }
+    if brigade_handoff.get("status") != "ready":
+        blockers.append("planning department brigade handoff contract is not ready")
+    missing_handoff_roles = sorted(expected_handoff_roles - handoff_role_names)
+    if missing_handoff_roles:
+        blockers.append("planning department brigade handoff contract is missing roles: " + ", ".join(missing_handoff_roles))
+    for role in brigade_handoff.get("roles", []) if isinstance(brigade_handoff.get("roles"), list) else []:
+        if not isinstance(role, dict):
+            blockers.append("planning department brigade handoff role is not an object")
+            continue
+        if not role.get("inputs") or not role.get("outputs") or not role.get("acceptance_gate"):
+            blockers.append(f"planning department brigade handoff role has incomplete contract: {role.get('name', '<unknown>')}")
     if not packages:
         blockers.append("planning department handoff has no work packages")
     for package in packages:
@@ -1358,9 +1389,11 @@ def planning_department_sufficiency_from_worker(worker_report: dict[str, Any]) -
     return {
         "status": "complete" if not blockers else "blocked",
         "role_count": len(roles),
+        "handoff_role_count": len(handoff_role_names),
         "phase_count": len(phases),
         "package_count": len(packages),
         "missing_phase_ids": missing_phases,
+        "missing_handoff_roles": missing_handoff_roles,
         "blockers": blockers,
     }
 

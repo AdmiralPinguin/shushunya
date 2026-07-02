@@ -216,13 +216,118 @@ def build_work_package_handoff(brief: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_brigade_handoff_contract(brief: dict[str, Any], handoff: dict[str, Any]) -> dict[str, Any]:
+    packages = _list(handoff.get("packages"))
+    package_ids = [str(package.get("id") or "") for package in packages if isinstance(package, dict) and package.get("id")]
+    roles = [
+        {
+            "name": "Ceraxia",
+            "authority": "own coding task strategy and decide whether execution evidence is acceptable",
+            "inputs": ["planning_packet.json", "repo_survey.json"],
+            "outputs": ["implementation_brief.json", "planning_department.json"],
+            "may_mutate_source": False,
+            "handoff_to": "PlanningBrigade",
+            "acceptance_gate": "implementation brief has RFC, work packages, verification, rollback, and acceptance trace",
+        },
+        {
+            "name": "PlanningBrigade",
+            "authority": "turn task intent into dependency-aware execution contract",
+            "inputs": ["task", "constraints", "repo_survey_request"],
+            "outputs": ["planning_packet.json", "worker_output_contract", "code_brigade_handoff"],
+            "may_mutate_source": False,
+            "handoff_to": "RepoSurveyor",
+            "acceptance_gate": "definition of done, risks, dependencies, and handoff contracts are complete",
+        },
+        {
+            "name": "RepoSurveyor",
+            "authority": "produce read-only repository evidence before any mutation",
+            "inputs": ["repo_survey_request", "path_hints"],
+            "outputs": ["repo_survey.json", "candidate files", "dependency map", "test coverage links"],
+            "may_mutate_source": False,
+            "handoff_to": "CodeBrigade",
+            "acceptance_gate": "candidate files, tests, dependencies, and blockers are explicit",
+        },
+        {
+            "name": "CodeBrigade",
+            "authority": "apply only the scoped implementation packages",
+            "inputs": ["implementation_brief.json", "planning_department.json", "repo_survey.json"],
+            "outputs": ["worker_report.json", "changed_files", "pre_mutation_read_evidence"],
+            "may_mutate_source": True,
+            "handoff_to": "Verifier",
+            "acceptance_gate": "changed files map to planned packages and pre-mutation reads are recorded",
+        },
+        {
+            "name": "Verifier",
+            "authority": "prove behavior with focused and broad verification evidence",
+            "inputs": ["worker_report.json", "worker_output_contract", "verification commands"],
+            "outputs": ["verification_report.json", "verification_contract_trace"],
+            "may_mutate_source": False,
+            "handoff_to": "Reviewer",
+            "acceptance_gate": "syntax-only checks cannot satisfy behavior acceptance requirements",
+        },
+        {
+            "name": "Reviewer",
+            "authority": "block completion unless task, contract, and evidence agree",
+            "inputs": ["worker_report.json", "verification_report.json", "review_gate.json"],
+            "outputs": ["review_gate.json", "run_audit.json"],
+            "may_mutate_source": False,
+            "handoff_to": "RepairStrategist",
+            "acceptance_gate": "no false success, missing evidence, or contract drift remains",
+        },
+        {
+            "name": "RepairStrategist",
+            "authority": "convert failed verification into a new hypothesis or PlanningBrigade replan",
+            "inputs": ["diagnostic_repair_queue", "attempt_history", "verification_report.json"],
+            "outputs": ["diagnostic_repair_request.json", "replan_packet"],
+            "may_mutate_source": False,
+            "handoff_to": "PlanningBrigade",
+            "acceptance_gate": "repeat fixes are blocked without new evidence and preserved attempt history",
+        },
+    ]
+    blockers: list[str] = []
+    if not package_ids:
+        blockers.append("handoff contract has no implementation package ids")
+    if handoff.get("status") != "ready":
+        blockers.append("handoff contract cannot activate because work package handoff is not ready")
+    if any(not role["outputs"] or not role["inputs"] for role in roles):
+        blockers.append("handoff role contract is missing inputs or outputs")
+    if [role["name"] for role in roles][-1] != "RepairStrategist":
+        blockers.append("repair strategist must close the role chain")
+    return {
+        "kind": "ceraxia_brigade_handoff_contract",
+        "contract_version": CONTRACT_VERSION,
+        "status": "ready" if not blockers else "blocked",
+        "package_ids": package_ids,
+        "roles": roles,
+        "role_order": [role["name"] for role in roles],
+        "required_execution_artifacts": [
+            "planning_packet.json",
+            "planning_department.json",
+            "implementation_brief.json",
+            "worker_report.json",
+            "verification_report.json",
+            "review_gate.json",
+            "run_audit.json",
+        ],
+        "loop_policy": {
+            "failure_route": "Reviewer -> RepairStrategist -> PlanningBrigade",
+            "must_preserve": ["attempt_history", "blocked repair signatures", "verification output"],
+            "must_change_before_retry": ["failure hypothesis", "source evidence", "acceptance proof"],
+        },
+        "blockers": blockers,
+    }
+
+
 def build_planning_department_package(packet: dict[str, Any], survey: dict[str, Any], brief: dict[str, Any]) -> dict[str, Any]:
     rfc = build_engineering_rfc(packet, survey, brief)
     investigation = build_multi_pass_investigation(packet, survey, brief)
     handoff = build_work_package_handoff(brief)
+    brigade_handoff = build_brigade_handoff_contract(brief, handoff)
     blockers = [*rfc.get("decision_blockers", []), *investigation.get("blockers", [])]
     if handoff.get("status") != "ready":
         blockers.append("CodeBrigade work package handoff is incomplete")
+    if brigade_handoff.get("status") != "ready":
+        blockers.extend(_strings(brigade_handoff.get("blockers")))
     return {
         "kind": "ceraxia_planning_department_package",
         "contract_version": CONTRACT_VERSION,
@@ -238,5 +343,6 @@ def build_planning_department_package(packet: dict[str, Any], survey: dict[str, 
         "engineering_rfc": rfc,
         "multi_pass_repo_investigation": investigation,
         "code_brigade_work_package_handoff": handoff,
+        "brigade_handoff_contract": brigade_handoff,
         "blockers": blockers,
     }
