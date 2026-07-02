@@ -300,6 +300,13 @@ def main() -> int:
     selected_security_option = next(option for option in security_packet["design_options"]["options"] if option["name"] == security_packet["design_options"]["selected_strategy"])
     if selected_security_option["decision"] != "prefer":
         raise AssertionError(f"selected security strategy must be preferred: {security_packet}")
+    if not selected_security_option.get("acceptance_impact") or not selected_security_option.get("rollback_impact") or not selected_security_option.get("replan_trigger"):
+        raise AssertionError(f"selected strategy must expose acceptance, rollback, and replan impacts: {security_packet}")
+    tradeoff_criteria = [row.get("criterion") for row in security_packet["design_options"].get("tradeoff_matrix", []) if isinstance(row, dict)]
+    if tradeoff_criteria != ["acceptance_proof", "blast_radius", "replan_safety"]:
+        raise AssertionError(f"design tradeoff matrix must cover acceptance, blast radius, and replan safety: {security_packet}")
+    if len(security_packet["design_options"].get("safe_block_when", [])) < 3:
+        raise AssertionError(f"design options must define safe-block conditions: {security_packet}")
     if not any(item["risk"] == "missing_negative_boundary_test" for item in security_packet["risk_register"]["risks"]):
         raise AssertionError(f"risk register must reject missing negative tests: {security_packet}")
     if "test edits are needed but were not explicitly requested by the user" not in security_packet["execution_forecast"]["scope_budget"]["requires_ceraxia_replan_when"]:

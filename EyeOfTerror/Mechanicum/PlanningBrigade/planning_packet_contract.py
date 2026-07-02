@@ -196,6 +196,19 @@ def validate_planning_packet(packet: dict[str, Any]) -> list[str]:
         problems.append("design options must reject broad_rewrite")
     if not any(item.get("name") == design.get("selected_strategy") and item.get("decision") == "prefer" for item in options if isinstance(item, dict)):
         problems.append("selected strategy must be marked prefer")
+    for item in options:
+        if not isinstance(item, dict):
+            continue
+        for key in ("acceptance_impact", "rollback_impact", "replan_trigger"):
+            if not item.get(key):
+                problems.append(f"design option missing {key}: {item.get('name', '<unknown>')}")
+    tradeoff_matrix = list_field(design.get("tradeoff_matrix"))
+    if len(tradeoff_matrix) < 3:
+        problems.append("design options must include acceptance/blast-radius/replan tradeoff matrix")
+    if not any(isinstance(item, dict) and item.get("criterion") == "acceptance_proof" for item in tradeoff_matrix):
+        problems.append("design tradeoff matrix must include acceptance_proof")
+    if not isinstance(design.get("safe_block_when"), list) or len(design.get("safe_block_when", [])) < 3:
+        problems.append("design options must include safe_block_when policy")
     if design.get("handoff_to") != "VerificationArchitect":
         problems.append("design options must hand off to VerificationArchitect")
 

@@ -838,25 +838,38 @@ def change_control_plan(
 def design_options(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
     selected = "minimal_design"
+    option_contract = {
+        "acceptance_impact": "must satisfy definition_of_done with focused behavior evidence",
+        "rollback_impact": "single scoped rollback is expected",
+        "replan_trigger": "repo evidence shows the option cannot satisfy the acceptance contract safely",
+    }
     options = [
         {
             "name": "hardcode",
             "decision": "reject",
             "reason": "May satisfy one visible case while hiding caller, boundary, or compatibility failures.",
+            "acceptance_impact": "fails general user-visible behavior beyond one case",
+            "rollback_impact": "low diff size but high false-success risk",
+            "replan_trigger": "only accepted behavior proof is a literal or fixture-only match",
         },
         {
             "name": "broad_rewrite",
             "decision": "reject",
             "reason": "Too much blast radius before repo evidence proves a wide rewrite is necessary.",
+            "acceptance_impact": "can satisfy many surfaces but risks unrequested behavior drift",
+            "rollback_impact": "large rollback surface and high review burden",
+            "replan_trigger": "only valid after dependency map proves narrow options cannot work",
         },
         {
             "name": selected,
             "decision": "prefer",
             "reason": "Smallest source change that satisfies the user contract, preserves public behavior, and leaves verification evidence.",
+            **option_contract,
         },
     ]
     if "refactor" in triage["task_kinds"]:
         options[2]["reason"] = "Narrow refactor with behavior-preservation checks before any broad architectural rewrite."
+        options[2]["rollback_impact"] = "must be reversible without public interface changes"
     if "security" in triage["task_kinds"]:
         options[2]["decision"] = "consider"
         options.append(
@@ -864,15 +877,41 @@ def design_options(payload: dict[str, Any], triage: dict[str, Any]) -> dict[str,
                 "name": "boundary_first_patch",
                 "decision": "prefer",
                 "reason": "Security work may need validation before feature behavior changes.",
+                "acceptance_impact": "negative boundary proof has priority over convenience behavior",
+                "rollback_impact": "rollback must restore boundary behavior and remove partial bypass fixes",
+                "replan_trigger": "negative boundary proof cannot be executed or remains ambiguous",
             }
         )
         selected = "boundary_first_patch"
+    tradeoff_matrix = [
+        {
+            "criterion": "acceptance_proof",
+            "selected_strategy_effect": next(option for option in options if option["name"] == selected)["acceptance_impact"],
+            "rejected_shortcut_risk": "hardcode can pass a fixture while missing real behavior",
+        },
+        {
+            "criterion": "blast_radius",
+            "selected_strategy_effect": next(option for option in options if option["name"] == selected)["rollback_impact"],
+            "rejected_shortcut_risk": "broad rewrite expands review and rollback without repo proof",
+        },
+        {
+            "criterion": "replan_safety",
+            "selected_strategy_effect": next(option for option in options if option["name"] == selected)["replan_trigger"],
+            "rejected_shortcut_risk": "continuing after missing evidence turns uncertainty into false success",
+        },
+    ]
     return {
         "role": "DesignStrategos",
         "task_excerpt": task[:300],
         "options": options,
+        "tradeoff_matrix": tradeoff_matrix,
         "selected_strategy": selected,
         "requires_ceraxia_approval": True,
+        "safe_block_when": [
+            "selected strategy lacks executable or explicitly blocked acceptance proof",
+            "repo evidence cannot identify candidate files, callers, tests, or compatibility surface",
+            "rollback impact cannot be bounded before mutation",
+        ],
         "handoff_to": "VerificationArchitect",
     }
 
