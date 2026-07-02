@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import importlib
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -16,6 +18,46 @@ from cogitator_codewright import (
     test_symbol_links_from_goal,
     traceback_frames_from_text,
 )
+
+
+def assert_role_module_split() -> None:
+    worker_root = Path(__file__).resolve().parent
+    entrypoint = worker_root / "cogitator_codewright.py"
+    core = worker_root / "codewright_core.py"
+    roles = {
+        "repository_survey": "run_repository_survey",
+        "change_planning": "run_change_planning",
+        "implementation": "run_implementation",
+        "verification": "run_verification",
+        "code_review": "run_code_review",
+        "finalize": "run_finalize",
+    }
+    if sum(1 for _ in entrypoint.open(encoding="utf-8")) > 120:
+        raise AssertionError("CogitatorCodewright entrypoint must stay a small dispatcher")
+    if not core.is_file() or sum(1 for _ in core.open(encoding="utf-8")) < 1000:
+        raise AssertionError("shared Codewright helper core is missing or unexpectedly small")
+    for module_name, function_name in roles.items():
+        role_path = worker_root / "roles" / f"{module_name}.py"
+        if not role_path.is_file():
+            raise AssertionError(f"role module is missing: {role_path}")
+        role_module = importlib.import_module(f"roles.{module_name}")
+        if not callable(getattr(role_module, function_name, None)):
+            raise AssertionError(f"role module has no callable {function_name}: {module_name}")
+    shim_modules = {
+        "LogisRepository": "logis_repository",
+        "MagosStrategos": "magos_strategos",
+        "FerrumPatchwright": "ferrum_patchwright",
+        "OrdinatusVerifier": "ordinatus_verifier",
+        "JudicatorCodicis": "judicator_codicis",
+        "SealwrightFinalis": "sealwright_finalis",
+    }
+    for dirname, module_name in shim_modules.items():
+        shim_dir = worker_root.parent / dirname
+        if str(shim_dir) not in sys.path:
+            sys.path.insert(0, str(shim_dir))
+        module = importlib.import_module(module_name)
+        if not callable(getattr(module, "run", None)):
+            raise AssertionError(f"worker shim does not expose callable run(): {module_name}")
 
 
 def role_policy(step_id: str) -> dict:
@@ -533,6 +575,7 @@ CERAXIA_VERIFY: python -m unittest test_sample.py
 
 
 def main() -> int:
+    assert_role_module_split()
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         final = run_pipeline(root)

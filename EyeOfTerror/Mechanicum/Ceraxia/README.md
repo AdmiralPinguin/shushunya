@@ -209,9 +209,9 @@ LogisRepository(repository_survey)
 
 ## Current Boundary
 
-The named workers currently share the same execution core, which keeps the
-protocol stable while their internals are split into stronger specialized
-implementations.
+The named workers share a common helper core, but their stage execution is now
+physically split into `CogitatorCodewright/roles/` modules for repository
+survey, planning, implementation, verification, review, and finalization.
 
 Each worker's `worker.json` exposes a `role_contract` with its owned step,
 authority boundary, expected artifact names, and next handoff. The registry
@@ -220,7 +220,7 @@ Ceraxia also writes a per-step `role_policy` into the oversight quality matrix
 and dispatch requests. Worker artifacts preserve that policy, so final packages
 can prove whether a step was read-only, allowed scoped source mutation, or
 limited to allowlisted verification and narrow repairs.
-The shared code-worker core enforces the mutation boundary: implementation will
+The code-worker helper core enforces the mutation boundary: implementation will
 not apply patches when `may_mutate_source=false`, and verifier repair loops will
 record a blocker instead of editing source under a read-only policy.
 `OrdinatusVerifier` writes both `verification_report.json` and

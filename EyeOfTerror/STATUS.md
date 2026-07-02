@@ -53,7 +53,7 @@
   - `ReductorVerifier`
   - `FabricatorFinalis`
 - Workers can run as local subprocesses through `eye_of_terror.local_executor`.
-- Workers can run as HTTP services through `Mechanicum/worker_runtime.py`.
+- Workers can run as HTTP services through `LegacyMechanicum/worker_runtime.py`.
 - Worker services expose `GET /health`, `GET /capabilities`, `POST /run`,
   `GET /tasks`, `GET /tasks/{task_id}`, and
   `POST /tasks/{task_id}/cancel` through the shared runtime.
@@ -560,9 +560,10 @@ PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/Lexmechanic LEXMECHANIC_LIVE_DISCOVER
   legacy `CogitatorCodewrightGovernor`.
 - The Ceraxia code brigade uses `LogisRepository`, `MagosStrategos`,
   `FerrumPatchwright`, `OrdinatusVerifier`, `JudicatorCodicis`, and
-  `SealwrightFinalis` on ports 7015-7020. They currently share the
-  `CogitatorCodewright` execution core while preserving separate worker
-  identities, contracts, ports, and review handoffs.
+  `SealwrightFinalis` on ports 7015-7020. They share the `CogitatorCodewright`
+  helper core but execute through separate role modules under
+  `CogitatorCodewright/roles/`, preserving separate worker identities,
+  contracts, ports, and review handoffs.
 - Ceraxia's six active code workers expose machine-readable `role_contract`
   metadata with owned step, authority boundary, expected artifacts, and next
   handoff; the worker registry self-test enforces those contracts.
@@ -688,6 +689,6 @@ PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/Lexmechanic LEXMECHANIC_LIVE_DISCOVER
 - Add more playbooks only when they are task-class patterns, not one-off hacks.
 - Add durable background execution recovery and stronger interruption for
   already-running worker calls where the underlying worker supports it.
-- Split Ceraxia's shared code-worker core into deeper implementations that can
-  apply patches, run task-specific tests, and feed failed-test repair loops.
+- Continue shrinking Ceraxia's shared code-worker helper core by moving more
+  role-specific analysis helpers into the individual role modules.
 - Add an image governor instead of routing unsupported image tasks to Iskandar.

@@ -5,14 +5,20 @@ Ceraxia's implementation-side Mechanicum brigade.
 Likely members:
 
 - `CogitatorCodewright`
+- `LogisRepository`
+- `MagosStrategos`
 - `FerrumPatchwright`
 - `OrdinatusVerifier`
 - `JudicatorCodicis`
 - `SealwrightFinalis`
 
-The current folder owns the handoff contract from Ceraxia to code workers. Real
-worker implementations still run from the top-level `Mechanicum/` service tree
-until the specialized brigade is split into separate services.
+The current folder owns the handoff contract from Ceraxia to code workers.
+`CogitatorCodewright/cogitator_codewright.py` is the compatibility entrypoint
+and step dispatcher. Stage execution lives in `CogitatorCodewright/roles/`,
+while `CogitatorCodewright/codewright_core.py` holds shared filesystem, patch,
+verification, and analysis helpers used by those roles. The named worker service
+modules set their worker identity and delegate through the same entrypoint
+without hiding all role execution in one file.
 
 ## Current Contract
 

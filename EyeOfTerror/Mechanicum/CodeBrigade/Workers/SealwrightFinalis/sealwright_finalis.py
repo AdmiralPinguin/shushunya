@@ -5,11 +5,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "CogitatorCodewright"))
 
-import cogitator_codewright as core  # noqa: E402
+import codewright_core  # noqa: E402
+import cogitator_codewright as entrypoint  # noqa: E402
 
 
-core.WORKER_NAME = "SealwrightFinalis"
+codewright_core.WORKER_NAME = "SealwrightFinalis"
+run = entrypoint.run
+main = entrypoint.main
 
 
 if __name__ == "__main__":
-    raise SystemExit(core.main())
+    raise SystemExit(main())
