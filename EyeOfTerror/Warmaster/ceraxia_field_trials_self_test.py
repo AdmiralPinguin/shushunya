@@ -161,6 +161,8 @@ def main() -> int:
                 "live-harness-self-test",
                 "--runs-root",
                 str(Path(live_run_tmp) / "runs"),
+                "--evidence-root",
+                str(Path(live_run_tmp) / "evidence"),
             ],
             cwd=str(EYE_ROOT.parent),
             text=True,
@@ -173,6 +175,7 @@ def main() -> int:
         if (
             live_run_payload.get("ok") is not True
             or not live_run_payload.get("package_path")
+            or str(Path(live_run_payload.get("package_path", "")).parent.parent) != str(Path(live_run_tmp) / "evidence")
             or live_run_payload.get("registered_entry") is not None
             or live_run_payload.get("evidence_status", {}).get("passed") is not True
         ):

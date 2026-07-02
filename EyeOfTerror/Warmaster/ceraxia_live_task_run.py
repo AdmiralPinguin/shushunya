@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -140,12 +141,37 @@ def build_package(task: dict[str, Any], result: dict[str, Any], run_dir: Path) -
     }
 
 
+def export_evidence_bundle(package: dict[str, Any], run_dir: Path, evidence_root: Path) -> tuple[dict[str, Any], Path]:
+    bundle_root = evidence_root / str(package["run_id"])
+    bundle_root.mkdir(parents=True, exist_ok=True)
+    exported = json.loads(json.dumps(package))
+    artifact_targets = {
+        "repo_investigation": "repo_survey.json",
+        "planning": "planning_department.json",
+        "execution": "worker_report.json",
+        "verification": "verification_report.json",
+        "review": "review_gate.json",
+    }
+    artifacts: dict[str, str] = {}
+    for artifact_name, file_name in artifact_targets.items():
+        source = run_dir / file_name
+        target = bundle_root / file_name
+        if source.exists():
+            shutil.copy2(source, target)
+        artifacts[artifact_name] = repo_path_text(target)
+    exported["artifacts"] = artifacts
+    package_path = bundle_root / "next_stage_evidence_package.json"
+    write_json(package_path, exported)
+    return exported, package_path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a Ceraxia live task and build a next-stage evidence package.")
     parser.add_argument("--task-id", required=True)
     parser.add_argument("--run-id", default="")
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     parser.add_argument("--runs-root", type=Path, default=WARMASTER_ROOT / "runs" / "live_task_runs")
+    parser.add_argument("--evidence-root", type=Path, default=None, help="Optional persistent root for copied live evidence bundles.")
     parser.add_argument("--mode", choices=["dry_run", "guarded_patch", "repo_engineer", "review_only"], default="dry_run")
     parser.add_argument("--ledger", type=Path, default=LEDGER)
     parser.add_argument("--register", action="store_true", help="Append a draft live entry to the ledger.")
@@ -162,6 +188,8 @@ def main() -> int:
     package = build_package(task, result, run_dir)
     package_path = run_dir / "next_stage_evidence_package.json"
     write_json(package_path, package)
+    if args.evidence_root:
+        package, package_path = export_evidence_bundle(package, run_dir, args.evidence_root.resolve())
     entry = {
         "trial_id": task["id"],
         "run_id": result["run_id"],
