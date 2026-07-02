@@ -19,6 +19,7 @@ from ceraxia import (
     audit_run_package,
     review_gate,
     run_ceraxia,
+    source_mutation_scope_sufficiency_from_worker,
     validate_planning_packet,
 )
 from planning_department import build_planning_department_package
@@ -1036,6 +1037,33 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(review["source_mutation_scope_sufficiency"]["status"], "blocked")
             self.assertEqual(review["source_mutation_scope_sufficiency"]["unexpected_files"], ["unexpected.py"])
             self.assertTrue(any("source mutation scope" in item["finding"] for item in review["findings"]))
+
+    def test_review_scope_accepts_explicit_requested_test_edit(self) -> None:
+        worker_report = {
+            "status": "implemented",
+            "changed_files": ["test_app.py"],
+            "edit_plan": {
+                "target_files": [],
+                "allowed_new_files": [],
+                "test_files": ["test_app.py"],
+            },
+            "implementation_plan": {
+                "target_files_to_inspect": [],
+                "missing_path_hints": [],
+                "existing_path_hints": ["test_app.py"],
+                "test_files_to_preserve": ["test_app.py"],
+                "scope_budget": {
+                    "max_test_files_to_edit_without_explicit_user_request": 0,
+                },
+            },
+            "autonomous_execution_request": {
+                "task": "Update `test_app.py` self-test to prove docs contract drift is caught.",
+            },
+        }
+        scope = source_mutation_scope_sufficiency_from_worker(worker_report)
+        self.assertEqual(scope["status"], "complete", scope)
+        self.assertEqual(scope["unexpected_files"], [])
+        self.assertIn("test_app.py", scope["allowed_files"])
 
     def test_review_gate_blocks_implemented_worker_without_after_mutation_verification_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

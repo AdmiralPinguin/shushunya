@@ -1326,6 +1326,26 @@ def source_mutation_scope_sufficiency_from_worker(worker_report: dict[str, Any])
         values = implementation_plan.get("test_files_to_preserve")
         if isinstance(values, list):
             allowed_files.update(str(item) for item in values if isinstance(item, str) and item)
+    task_text = str((worker_report.get("autonomous_execution_request") or {}).get("task") or "").lower()
+    explicit_test_edit_requested = bool(
+        re.search(r"\b(update|change|edit|add|repair|tighten)\b.{0,80}\b(test|self-test|self test)\b", task_text)
+        or re.search(r"\b(test|self-test|self test)\b.{0,80}\b(update|change|edit|add|repair|tighten)\b", task_text)
+        or re.search(r"\b(drift|prove)\b", task_text)
+        or re.search(r"(обнов|измени|добав|исправ).{0,80}тест", task_text)
+        or re.search(r"тест.{0,80}(обнов|измени|добав|исправ|доказ)", task_text)
+    )
+    if explicit_test_edit_requested:
+        explicit_existing = set()
+        values = implementation_plan.get("existing_path_hints")
+        if isinstance(values, list):
+            explicit_existing.update(str(item) for item in values if isinstance(item, str) and item)
+        for key in ("test_files",):
+            values = edit_plan.get(key)
+            if isinstance(values, list):
+                allowed_files.update(str(item) for item in values if isinstance(item, str) and item in explicit_existing)
+        values = implementation_plan.get("test_files_to_preserve")
+        if isinstance(values, list):
+            allowed_files.update(str(item) for item in values if isinstance(item, str) and item in explicit_existing)
     escaping_files = [
         path for path in changed_files
         if path.startswith("/") or path == ".." or path.startswith("../") or "/../" in path

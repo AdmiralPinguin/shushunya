@@ -38,6 +38,7 @@ LIVE_TASK_REGISTER = WARMASTER_ROOT / "ceraxia_live_task_register.py"
 LIVE_TASK_PREPARE = WARMASTER_ROOT / "ceraxia_live_task_prepare.py"
 LIVE_TASK_RUN = WARMASTER_ROOT / "ceraxia_live_task_run.py"
 LIVE_LEARNINGS = WARMASTER_ROOT / "ceraxia_live_benchmark_learnings.py"
+CERAXIA_README = EYE_ROOT / "Mechanicum" / "Ceraxia" / "README.md"
 
 
 def main() -> int:
@@ -171,6 +172,10 @@ def main() -> int:
     )
     if live_run_help.returncode != 0 or "--execute-verification" not in live_run_help.stdout or "--verification-command" not in live_run_help.stdout:
         raise AssertionError(f"Ceraxia live task harness must expose verification execution flag: {live_run_help.stdout} {live_run_help.stderr}")
+    readme_text = CERAXIA_README.read_text(encoding="utf-8")
+    for documented_flag in ("--execute-verification", "--verification-command"):
+        if documented_flag not in readme_text:
+            raise AssertionError(f"Ceraxia README drifted from live harness verification flag: {documented_flag}")
     missing_live_prepare = subprocess.run(
         [sys.executable, str(LIVE_TASK_PREPARE), "--task-id", "missing-live-task"],
         cwd=str(EYE_ROOT.parent),

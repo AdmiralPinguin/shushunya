@@ -178,7 +178,9 @@ python3 EyeOfTerror/Mechanicum/Ceraxia/ceraxia.py --task "почини security 
 
 Generated run artifacts live under `runs/` and are intentionally ignored by
 git. Curated live benchmark evidence bundles live under `live_evidence/` and
-are tracked when they support accepted next-stage ledger entries.
+are tracked when they support accepted next-stage ledger entries. Live task
+harness runs may opt into allowlisted verification with `--execute-verification`
+and may pass narrow oracles with repeated `--verification-command` flags.
 
 Repo-grade workflow requirements are documented in
 `repo_grade_workflow.md`. In short, high-risk architecture/refactor/migration
