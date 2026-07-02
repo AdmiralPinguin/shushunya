@@ -12,6 +12,7 @@ from ceraxia import (
     allocate_run_dir,
     attach_planning_department_to_brief,
     build_execution_readiness,
+    build_diagnostic_repair_request,
     build_implementation_brief,
     build_planning_feedback_request,
     build_repo_survey,
@@ -1428,6 +1429,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertTrue(review["diagnostic_repair_queue"]["requires_attempt_history"])
         self.assertEqual(review["diagnostic_repair_queue"]["max_attempts_per_item"], 3)
         self.assertGreaterEqual(review["diagnostic_repair_queue"]["replan_trigger_count"], 1)
+        self.assertEqual(review["diagnostic_repair_queue"]["replan_contract"]["target"], "PlanningBrigade")
+        self.assertIn("preserved attempt_history", review["diagnostic_repair_queue"]["replan_contract"]["required_output"])
+        self.assertTrue(any("same repair" in item for item in review["diagnostic_repair_queue"]["replan_contract"]["required_when"]))
         repair_item = review["diagnostic_repair_queue"]["items"][0]
         self.assertIn("assertion_failure", repair_item["diagnostic_signals"])
         self.assertEqual(repair_item["failure_classification"]["type"], "behavior_regression_or_unmet_acceptance")
@@ -1451,6 +1455,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         readiness = build_execution_readiness({"state": "failed"}, brief, worker_report, verification_report, review, dry_run=False)
         self.assertIn("diagnostic repair request must be handled before execution readiness", readiness["blockers"])
         self.assertEqual(readiness["next_capability_to_wire"], "CodeBrigade diagnostic repair adapter")
+        repair_request = build_diagnostic_repair_request("run-repair", brief, worker_report, verification_report, review)
+        self.assertEqual(repair_request["attempt_history"], [])
+        self.assertEqual(repair_request["diagnostic_repair_replan_contract"]["target"], "PlanningBrigade")
+        self.assertTrue(any("replan_packet" in item for item in repair_request["return_contract"]))
 
     def test_review_gate_blocks_passed_report_with_failure_output(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})

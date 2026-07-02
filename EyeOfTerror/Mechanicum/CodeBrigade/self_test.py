@@ -950,9 +950,20 @@ def main() -> int:
         raise AssertionError(f"repeated diagnostic repair should require replan: {repeated_intake}")
     if repeated_intake["attempt_plan"][0]["repeated_fix_guard"]["matching_attempt_ids"] != ["repair-old"]:
         raise AssertionError(f"repeated diagnostic repair should identify matching prior attempt: {repeated_intake}")
+    replan_packet = repeated_intake["replan_packet"]
+    if replan_packet["status"] != "required" or replan_packet["target"] != "PlanningBrigade":
+        raise AssertionError(f"repeated diagnostic repair should produce a PlanningBrigade replan packet: {replan_packet}")
+    if not replan_packet["new_hypothesis_required"] or not replan_packet["new_evidence_required"]:
+        raise AssertionError(f"replan packet should require new hypothesis and evidence: {replan_packet}")
+    if repair_intake["attempt_plan"][0]["repair_signature"] not in replan_packet["blocked_repair_signatures"]:
+        raise AssertionError(f"replan packet should preserve blocked repair signature: {replan_packet}")
+    if not any("same repair_signature" in item for item in replan_packet["forbidden_retries"]):
+        raise AssertionError(f"replan packet should forbid repeating the same repair signature: {replan_packet}")
     repeated_execution = execute_diagnostic_repair_request(repeated_repair_request)
     if repeated_execution["status"] != "blocked" or not any("replan required" in blocker for blocker in repeated_execution["blockers"]):
         raise AssertionError(f"repeated diagnostic repair execution should block before mutation: {repeated_execution}")
+    if repeated_execution["replan_packet"]["status"] != "required":
+        raise AssertionError(f"blocked repeated execution should return replan packet: {repeated_execution}")
     syntax_error_request = json.loads(json.dumps(repair_request))
     syntax_error_request["diagnostic_repair_queue"]["items"][0]["diagnostic_signals"] = ["syntax_error"]
     syntax_error_intake = build_diagnostic_repair_intake(syntax_error_request)

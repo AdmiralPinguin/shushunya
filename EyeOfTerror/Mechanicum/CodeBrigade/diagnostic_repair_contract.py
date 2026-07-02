@@ -101,6 +101,79 @@ def repair_signature_for_item(item: dict[str, Any]) -> str:
     )
 
 
+def build_replan_packet(
+    request: dict[str, Any],
+    attempt_plan: list[dict[str, Any]],
+    repeated_attempts: list[dict[str, Any]],
+    maxed_attempts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    blocked_attempt_ids = sorted(
+        {
+            str(item.get("attempt_id") or "")
+            for item in repeated_attempts + maxed_attempts
+            if isinstance(item, dict) and item.get("attempt_id")
+        }
+    )
+    blocked_signatures = sorted(
+        {
+            str(item.get("repair_signature") or "")
+            for item in repeated_attempts + maxed_attempts
+            if isinstance(item, dict) and item.get("repair_signature")
+        }
+    )
+    prior_history = request.get("attempt_history") if isinstance(request.get("attempt_history"), list) else []
+    new_evidence_required = [
+        "fresh source read evidence for every blocked repair signature",
+        "explicitly different repair hypothesis before another mutation",
+        "verification output that changed after the previous failed attempt",
+    ]
+    forbidden_retries = [
+        "do not rerun a repair with the same repair_signature unless new_evidence_required is satisfied",
+        "do not repeat the same hypothesis with only wording changes",
+        "do not edit tests to make the failed command pass",
+    ]
+    return {
+        "kind": "code_brigade_diagnostic_repair_replan_packet",
+        "contract_version": CONTRACT_VERSION,
+        "status": "required" if blocked_attempt_ids else "not_required",
+        "target": "PlanningBrigade",
+        "source": "CodeBrigade.diagnostic_repair_intake",
+        "task": str(request.get("task") or ""),
+        "repo_path": str(request.get("repo_path") or ""),
+        "blocked_attempt_ids": blocked_attempt_ids,
+        "blocked_repair_signatures": blocked_signatures,
+        "attempt_history_count": len(prior_history),
+        "repeated_fix_count": len(repeated_attempts),
+        "maxed_attempt_count": len(maxed_attempts),
+        "new_hypothesis_required": bool(blocked_attempt_ids),
+        "new_evidence_required": new_evidence_required if blocked_attempt_ids else [],
+        "forbidden_retries": forbidden_retries if blocked_attempt_ids else [],
+        "planning_actions": [
+            "re-read concrete repair targets and tests before forming a new patch",
+            "write a new failure hypothesis that differs from blocked attempts",
+            "update package dependencies, risks, rollback, and acceptance proof for the new attempt",
+            "return a fresh diagnostic_repair_request with attempt_history preserved",
+        ]
+        if blocked_attempt_ids
+        else [],
+        "attempts": [
+            {
+                "attempt_id": str(item.get("attempt_id") or ""),
+                "command": str(item.get("command") or ""),
+                "repair_signature": str(item.get("repair_signature") or ""),
+                "previous_attempt_count": int(item.get("previous_attempt_count") or 0),
+                "max_repair_attempts": int(item.get("max_repair_attempts") or 1),
+                "replan_required": bool(item.get("replan_required")),
+                "matching_attempt_ids": item.get("repeated_fix_guard", {}).get("matching_attempt_ids", [])
+                if isinstance(item.get("repeated_fix_guard"), dict)
+                else [],
+            }
+            for item in attempt_plan
+            if isinstance(item, dict)
+        ],
+    }
+
+
 def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
     problems = validate_diagnostic_repair_request(request)
     queue = request.get("diagnostic_repair_queue") if isinstance(request.get("diagnostic_repair_queue"), dict) else {}
@@ -162,6 +235,7 @@ def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
         problems.append("diagnostic repair request repeats a previous repair signature; replan required")
     if maxed_attempts:
         problems.append("diagnostic repair request reached max attempts for a repair signature; replan required")
+    replan_packet = build_replan_packet(request, attempt_plan, repeated_attempts, maxed_attempts)
     return {
         "kind": "code_brigade_diagnostic_repair_intake",
         "contract_version": CONTRACT_VERSION,
@@ -173,6 +247,7 @@ def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
         "attempt_history_count": len(attempt_history),
         "repeated_fix_count": len(repeated_attempts),
         "replan_required": bool(repeated_attempts or maxed_attempts),
+        "replan_packet": replan_packet,
         "high_priority_count": sum(1 for item in items if isinstance(item, dict) and item.get("priority") == "high"),
         "impacted_surfaces": sorted(
             {
@@ -500,7 +575,10 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
 def execute_diagnostic_repair_request(request: dict[str, Any]) -> dict[str, Any]:
     intake = build_diagnostic_repair_intake(request)
     if intake["status"] == "blocked":
-        return build_blocked_execution_result([f"invalid diagnostic repair request: {problem}" for problem in intake["blockers"]])
+        result = build_blocked_execution_result([f"invalid diagnostic repair request: {problem}" for problem in intake["blockers"]])
+        result["diagnostic_repair_intake"] = intake
+        result["replan_packet"] = intake.get("replan_packet", {})
+        return result
     if intake["status"] == "not_required":
         return build_blocked_execution_result(["diagnostic repair request is not required"])
     supported = any(

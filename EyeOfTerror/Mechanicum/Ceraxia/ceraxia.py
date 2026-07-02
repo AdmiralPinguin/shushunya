@@ -780,6 +780,27 @@ def build_diagnostic_repair_queue(
         "requires_attempt_history": bool(items),
         "max_attempts_per_item": max((int(item.get("max_repair_attempts", 0)) for item in items), default=0),
         "replan_trigger_count": sum(len(item.get("replan_required_when", [])) for item in items),
+        "replan_contract": {
+            "target": "PlanningBrigade",
+            "required_when": [
+                "same repair dedupe_key or repair_signature appears in attempt_history",
+                "max_repair_attempts is reached",
+                "next hypothesis lacks new source or verification evidence",
+            ],
+            "required_output": [
+                "new failure hypothesis",
+                "fresh source read evidence",
+                "updated package dependency and risk notes",
+                "preserved attempt_history",
+            ],
+            "forbidden_retry_policy": [
+                "do not repeat the same repair hypothesis without new evidence",
+                "do not drop attempt_history between repair cycles",
+                "do not convert a failed repair into success without rerun evidence",
+            ],
+        }
+        if items
+        else {},
     }
 
 
@@ -804,6 +825,8 @@ def build_diagnostic_repair_request(
         "review_decision": review.get("decision", ""),
         "diagnostic_repair_plan": brief.get("diagnostic_repair_plan", {}) if isinstance(brief.get("diagnostic_repair_plan"), dict) else {},
         "diagnostic_repair_queue": queue,
+        "attempt_history": [],
+        "diagnostic_repair_replan_contract": queue.get("replan_contract", {}) if isinstance(queue.get("replan_contract"), dict) else {},
         "suggested_code_brigade_command": [
             "python3",
             "EyeOfTerror/Mechanicum/CodeBrigade/diagnostic_repair_contract.py",
@@ -818,6 +841,7 @@ def build_diagnostic_repair_request(
             "worker_report.json with changed files, package statuses, and residual blockers",
             "verification_report.json after rerunning relevant failed commands",
             "diagnostic_summary mapped to repaired queue items",
+            "replan_packet when the same repair repeats or max attempts are reached",
         ],
     }
 
