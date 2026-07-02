@@ -58,6 +58,29 @@ class CaptureRunHandler(BaseHTTPRequestHandler):
         return
 
 
+class FailingRunHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        response = {"ok": True, "worker": "FailingWorker"}
+        encoded = json.dumps(response).encode("utf-8")
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def do_POST(self) -> None:
+        response = {"ok": False, "status": "failed", "error": "simulated worker failure"}
+        encoded = json.dumps(response).encode("utf-8")
+        self.send_response(500)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+
 def main() -> int:
     if terminal_payload_allows_completion({"ok": True, "status": "blocked"}):
         raise AssertionError("blocked terminal payload should not complete a run")
@@ -167,6 +190,40 @@ def main() -> int:
             corrupt_ledger = json.loads((corrupt_dispatch_run / "task_ledger.json").read_text(encoding="utf-8"))
             if corrupt_ledger.get("status") != "failed" or corrupt_ledger.get("result", {}).get("status") != "preflight_failed":
                 raise AssertionError(f"corrupt dispatch preflight failure was not recorded durably: {corrupt_ledger}")
+            if not any(item.get("type") == "http_preflight_failed" for item in corrupt_ledger.get("events", [])):
+                raise AssertionError(f"corrupt dispatch preflight failure should be recorded as an event: {corrupt_ledger}")
+            failing_run = root / "failing-step-run"
+            failing_dispatch_dir = failing_run / "dispatch"
+            failing_server = ThreadingHTTPServer(("127.0.0.1", 0), FailingRunHandler)
+            failing_thread = threading.Thread(target=failing_server.serve_forever, daemon=True)
+            failing_thread.start()
+            try:
+                write_json(
+                    failing_run / "status.json",
+                    {
+                        "steps": [{"step_id": "fail_step", "worker": "FailingWorker", "port": failing_server.server_port}],
+                        "dispatch_dir": str(failing_dispatch_dir),
+                    },
+                )
+                write_json(
+                    failing_dispatch_dir / "fail_step.json",
+                    {
+                        "step_id": "fail_step",
+                        "worker": "FailingWorker",
+                        "port": failing_server.server_port,
+                        "request": {"task_id": "failing-http-test"},
+                    },
+                )
+                failed_summary = execute_run(failing_run, timeout_sec=5)
+                if failed_summary.get("ok"):
+                    raise AssertionError(f"failing HTTP worker should fail the run: {failed_summary}")
+                failing_ledger = json.loads((failing_run / "task_ledger.json").read_text(encoding="utf-8"))
+                http_failure_event = next((item for item in failing_ledger.get("events", []) if item.get("type") == "http_step_failed"), {})
+                if http_failure_event.get("payload", {}).get("error") != "simulated worker failure":
+                    raise AssertionError(f"HTTP step failure should be recorded as a durable event: {failing_ledger}")
+            finally:
+                failing_server.shutdown()
+                failing_thread.join(timeout=5)
             capture_dispatch = root / "capture.json"
             capture_server = ThreadingHTTPServer(("127.0.0.1", 0), CaptureRunHandler)
             capture_thread = threading.Thread(target=capture_server.serve_forever, daemon=True)

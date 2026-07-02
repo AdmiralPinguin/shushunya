@@ -181,6 +181,14 @@ def execute_run(
             "preflight_failures": preflight_failures,
         }
         write_json_atomic(run_dir / "http_execution_report.json", summary)
+        ledger.record_event(
+            "http_preflight_failed",
+            {
+                "failure_count": len(preflight_failures),
+                "failures": preflight_failures,
+                "report": str(run_dir / "http_execution_report.json"),
+            },
+        )
         ledger.set_result({"ok": False, "final_step": "", "artifacts": [], "status": "preflight_failed", "summary": "Worker preflight failed."})
         ledger.set_status("failed")
         return summary
@@ -205,6 +213,16 @@ def execute_run(
             step_details,
         )
         if not result.ok:
+            ledger.record_event(
+                "http_step_failed",
+                {
+                    "step_id": result.step_id,
+                    "worker": result.worker,
+                    "port": result.port,
+                    "status": str(result.payload.get("status") or "failed"),
+                    "error": str(result.payload.get("error") or result.error),
+                },
+            )
             break
     cancelled = TaskLedger.load(ledger_path).cancel_requested()
     final_payload = results[-1].payload if results else {}

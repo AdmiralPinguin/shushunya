@@ -1,0 +1,247 @@
+{
+  "kind": "ceraxia_verification_report",
+  "status": "passed",
+  "commands_planned": [
+    "python -m py_compile <changed .py files>",
+    "git diff --check",
+    "python -m py_compile EyeOfTerror/Warmaster/eye_of_terror/http_executor.py EyeOfTerror/Warmaster/http_executor_self_test.py",
+    "python -m pytest EyeOfTerror/Warmaster/http_executor_self_test.py Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py",
+    "python -m py_compile EyeOfTerror/Warmaster/eye_of_terror/http_executor.py ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py"
+  ],
+  "commands_executable": [
+    "git diff --check",
+    "python -m py_compile EyeOfTerror/Warmaster/eye_of_terror/http_executor.py EyeOfTerror/Warmaster/http_executor_self_test.py",
+    "python -m pytest EyeOfTerror/Warmaster/http_executor_self_test.py Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py",
+    "python -m py_compile EyeOfTerror/Warmaster/eye_of_terror/http_executor.py ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py"
+  ],
+  "commands_executed": [
+    {
+      "command": "git diff --check",
+      "status": "passed",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "diagnostics": {
+        "has_traceback": false,
+        "traceback_files": [],
+        "missing_imports": [],
+        "has_assertion_failure": false,
+        "has_syntax_error": false,
+        "has_no_tests_ran": false
+      }
+    },
+    {
+      "command": "python -m py_compile EyeOfTerror/Warmaster/eye_of_terror/http_executor.py EyeOfTerror/Warmaster/http_executor_self_test.py",
+      "status": "passed",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "diagnostics": {
+        "has_traceback": false,
+        "traceback_files": [],
+        "missing_imports": [],
+        "has_assertion_failure": false,
+        "has_syntax_error": false,
+        "has_no_tests_ran": false
+      }
+    },
+    {
+      "command": "python -m pytest EyeOfTerror/Warmaster/http_executor_self_test.py Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py",
+      "status": "skipped",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "pytest unavailable",
+      "diagnostics": {
+        "has_traceback": false,
+        "traceback_files": [],
+        "missing_imports": [],
+        "has_assertion_failure": false,
+        "has_syntax_error": false,
+        "has_no_tests_ran": false
+      }
+    },
+    {
+      "command": "python -m py_compile EyeOfTerror/Warmaster/eye_of_terror/http_executor.py ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py",
+      "status": "passed",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "diagnostics": {
+        "has_traceback": false,
+        "traceback_files": [],
+        "missing_imports": [],
+        "has_assertion_failure": false,
+        "has_syntax_error": false,
+        "has_no_tests_ran": false
+      }
+    }
+  ],
+  "output_summary": [
+    {
+      "command": "git diff --check",
+      "status": "passed",
+      "returncode": 0,
+      "stdout_nonempty": false,
+      "stderr_nonempty": false,
+      "output_signal": "output_empty",
+      "has_traceback": false,
+      "has_assertion_failure": false,
+      "has_syntax_error": false,
+      "has_no_tests_ran": false,
+      "traceback_files": [],
+      "missing_imports": []
+    },
+    {
+      "command": "python -m py_compile EyeOfTerror/Warmaster/eye_of_terror/http_executor.py EyeOfTerror/Warmaster/http_executor_self_test.py",
+      "status": "passed",
+      "returncode": 0,
+      "stdout_nonempty": false,
+      "stderr_nonempty": false,
+      "output_signal": "output_empty",
+      "has_traceback": false,
+      "has_assertion_failure": false,
+      "has_syntax_error": false,
+      "has_no_tests_ran": false,
+      "traceback_files": [],
+      "missing_imports": []
+    },
+    {
+      "command": "python -m pytest EyeOfTerror/Warmaster/http_executor_self_test.py Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py",
+      "status": "skipped",
+      "returncode": 1,
+      "stdout_nonempty": false,
+      "stderr_nonempty": true,
+      "output_signal": "output_present",
+      "has_traceback": false,
+      "has_assertion_failure": false,
+      "has_syntax_error": false,
+      "has_no_tests_ran": false,
+      "traceback_files": [],
+      "missing_imports": []
+    },
+    {
+      "command": "python -m py_compile EyeOfTerror/Warmaster/eye_of_terror/http_executor.py ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py",
+      "status": "passed",
+      "returncode": 0,
+      "stdout_nonempty": false,
+      "stderr_nonempty": false,
+      "output_signal": "output_empty",
+      "has_traceback": false,
+      "has_assertion_failure": false,
+      "has_syntax_error": false,
+      "has_no_tests_ran": false,
+      "traceback_files": [],
+      "missing_imports": []
+    }
+  ],
+  "verification_after_mutation_evidence": {
+    "kind": "ceraxia_verification_after_mutation_evidence",
+    "status": "complete",
+    "repo_path": "/media/shushunya/SHUSHUNYA/shushunya",
+    "changed_files": [
+      {
+        "path": "EyeOfTerror/Warmaster/eye_of_terror/http_executor.py",
+        "status": "observed_after_worker",
+        "size_bytes": 12865,
+        "sha256": "0cfc9b99d934207ddf8edeafb3865a1eefc72bd99152e58326ee5d3d41c01d85",
+        "mtime_ns": 1782963748208416090
+      },
+      {
+        "path": "EyeOfTerror/Warmaster/http_executor_self_test.py",
+        "status": "observed_after_worker",
+        "size_bytes": 14024,
+        "sha256": "29e64de1c6f695cdade58687daf1022b48356a10dccb49337de9324d20d6f3db",
+        "mtime_ns": 1782963748208906968
+      },
+      {
+        "path": "EyeOfTerror/Warmaster/eye_of_terror/HTTP_EXECUTION.md",
+        "status": "observed_after_worker",
+        "size_bytes": 615,
+        "sha256": "2cfd17b38ede8ece16d1ca9b89da24f3bf02d4c31e877e60b943754f272453d0",
+        "mtime_ns": 1782963748209148652
+      }
+    ],
+    "changed_file_count": 3,
+    "commands_executed_count": 4,
+    "blockers": []
+  },
+  "verification_execution": {
+    "kind": "code_brigade_verification_execution",
+    "contract_version": "eye-mechanicum.v1",
+    "status": "passed",
+    "execute": true,
+    "repo_path": "/media/shushunya/SHUSHUNYA/shushunya",
+    "results": [
+      {
+        "command": "git diff --check",
+        "status": "passed",
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "diagnostics": {
+          "has_traceback": false,
+          "traceback_files": [],
+          "missing_imports": [],
+          "has_assertion_failure": false,
+          "has_syntax_error": false,
+          "has_no_tests_ran": false
+        }
+      },
+      {
+        "command": "python -m py_compile EyeOfTerror/Warmaster/eye_of_terror/http_executor.py EyeOfTerror/Warmaster/http_executor_self_test.py",
+        "status": "passed",
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "diagnostics": {
+          "has_traceback": false,
+          "traceback_files": [],
+          "missing_imports": [],
+          "has_assertion_failure": false,
+          "has_syntax_error": false,
+          "has_no_tests_ran": false
+        }
+      },
+      {
+        "command": "python -m pytest EyeOfTerror/Warmaster/http_executor_self_test.py Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py",
+        "status": "skipped",
+        "returncode": 1,
+        "stdout": "",
+        "stderr": "pytest unavailable",
+        "diagnostics": {
+          "has_traceback": false,
+          "traceback_files": [],
+          "missing_imports": [],
+          "has_assertion_failure": false,
+          "has_syntax_error": false,
+          "has_no_tests_ran": false
+        }
+      },
+      {
+        "command": "python -m py_compile EyeOfTerror/Warmaster/eye_of_terror/http_executor.py ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py",
+        "status": "passed",
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "diagnostics": {
+          "has_traceback": false,
+          "traceback_files": [],
+          "missing_imports": [],
+          "has_assertion_failure": false,
+          "has_syntax_error": false,
+          "has_no_tests_ran": false
+        }
+      }
+    ],
+    "blockers": []
+  },
+  "negative_tests_required": [
+    "old and new API shape compatibility",
+    "missing/invalid config fails safely",
+    "parallel/retry behavior preserves state"
+  ],
+  "broad_verification_required": true,
+  "blockers": [],
+  "dry_run": false,
+  "execute_verification": true
+}
