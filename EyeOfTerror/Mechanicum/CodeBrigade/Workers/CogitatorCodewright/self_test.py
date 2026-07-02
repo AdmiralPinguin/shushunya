@@ -35,8 +35,11 @@ def assert_role_module_split() -> None:
     }
     if sum(1 for _ in entrypoint.open(encoding="utf-8")) > 120:
         raise AssertionError("CogitatorCodewright entrypoint must stay a small dispatcher")
-    if not core.is_file() or sum(1 for _ in core.open(encoding="utf-8")) < 1000:
-        raise AssertionError("shared Codewright helper core is missing or unexpectedly small")
+    if not core.is_file():
+        raise AssertionError("shared Codewright helper core is missing")
+    core_line_count = sum(1 for _ in core.open(encoding="utf-8"))
+    if core_line_count > 1200:
+        raise AssertionError(f"shared Codewright helper core must stay bounded, got {core_line_count} lines")
     old_roles_dir = worker_root / "roles"
     if old_roles_dir.exists() and any(old_roles_dir.glob("*.py")):
         raise AssertionError("CogitatorCodewright must not own role implementations")
@@ -44,6 +47,8 @@ def assert_role_module_split() -> None:
         role_path = workers_root / relative_path
         if not role_path.is_file():
             raise AssertionError(f"role module is missing: {role_path}")
+        if sum(1 for _ in role_path.open(encoding="utf-8")) < 50:
+            raise AssertionError(f"role module is unexpectedly thin: {role_path}")
         role_dir = role_path.parent
         if str(role_dir) not in sys.path:
             sys.path.insert(0, str(role_dir))

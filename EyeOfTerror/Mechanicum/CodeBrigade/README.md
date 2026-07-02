@@ -24,8 +24,10 @@ inside their own directories:
 - `JudicatorCodicis/code_review.py`
 - `SealwrightFinalis/finalize.py`
 
-`Workers/common/codewright_core.py` holds shared filesystem, patch,
-verification, and analysis helpers used by those workers. Each named worker
+`Workers/common/codewright_core.py` is a bounded shared utility layer for
+cross-stage filesystem, evidence, and compatibility helpers. Repository survey,
+planning, patch inference/application, verification/repair, review, and final
+packaging logic live in the named worker directories above. Each named worker
 module validates its owned `step_id` before calling its local implementation.
 
 ## Current Contract

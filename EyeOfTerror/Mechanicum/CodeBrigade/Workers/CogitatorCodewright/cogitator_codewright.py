@@ -25,8 +25,10 @@ from common.codewright_core import output_path_from_request, worker_name  # noqa
 from change_planning import run_change_planning  # noqa: E402
 from code_review import run_code_review  # noqa: E402
 from finalize import run_finalize  # noqa: E402
+from implementation import *  # noqa: F403,E402 - compatibility surface for implementation helpers.
 from implementation import run_implementation  # noqa: E402
 from repository_survey import run_repository_survey  # noqa: E402
+from verification import *  # noqa: F403,E402 - compatibility surface for verifier helpers.
 from verification import run_verification  # noqa: E402
 
 
