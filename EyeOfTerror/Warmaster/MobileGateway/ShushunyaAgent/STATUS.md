@@ -150,7 +150,7 @@ Last verified: 2026-06-28 20:21 KST.
 Setup and run:
 
 ```bash
-cd /media/shushunya/SHUSHUNYA/shushunya/Mechanicum/SearXNG
+cd /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/Services/Search/SearXNG
 ./scripts/setup-searxng.sh
 ./scripts/start-searxng.sh
 ./scripts/check-searxng.sh

@@ -159,7 +159,7 @@ ArchiveOfHeresy/check-memory.sh agent 'memory gateway'
 ArchiveOfHeresy/check-namespace-smoke.py
 ArchiveOfHeresy/memory-report.sh agent
 ArchiveOfHeresy/memory-quality-report.sh
-cd Mechanicum/ShushunyaAgent && ./ShushunyaAgent/bin/python -m shushunya_agent.self_test
+cd EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent && ./ShushunyaAgent/bin/python -m shushunya_agent.self_test
 ```
 
 Services:

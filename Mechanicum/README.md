@@ -1,70 +1,22 @@
-# Mechanicum
+# Legacy Mechanicum
 
-Mechanicum contains internal workers. Workers should be callable services, not
-user-facing chat personalities.
+The active EyeOfTerror architecture no longer stores primary workers in this
+root directory.
 
-The public entrypoint remains EyeOfTerror. Mechanicum workers receive contracts
-from governors and return structured outputs.
+Current ownership:
 
-## Worker Ports
+- Warmaster/mobile API: `EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent`
+- Search service: `EyeOfTerror/Services/Search/SearXNG`
+- Scriptorium render worker: `EyeOfTerror/Scriptorium/Brigade/OcularisRenderium`
+- Ceraxia code workers: `EyeOfTerror/Mechanicum/CodeBrigade/Workers`
 
-| Port | Worker | Role |
-| --- | --- | --- |
-| 7001 | ShushunyaAgent | General worker |
-| 7002 | Lexmechanic | Source researcher, parked under Iskandar temporary holding |
-| 7003 | NoosphericExtractor | Fact extractor, parked under Iskandar temporary holding |
-| 7004 | Chronologis | Timeline builder, parked under Iskandar temporary holding |
-| 7005 | ScriptoriumDaemon | Writer, parked under Iskandar temporary holding |
-| 7006 | ReductorVerifier | Critic/verifier, parked under Iskandar temporary holding |
-| 7007 | FabricatorFinalis | Finalizer/packager/Telegram, parked under Iskandar temporary holding |
-| 7009 | AuspexBrowser | Browser worker, parked under Iskandar temporary holding |
-| 7010 | ForgeRelay | DemonsForge adapter |
-| 7011 | MnemosyneRelay | ArchiveOfHeresy adapter |
-| 7012 | OcularisRenderium | Planned JavaScript render/screenshot worker |
-| 7013 | CorpusIngestor | Local corpus indexer, parked under Iskandar temporary holding |
-| 7014 | CogitatorCodewright | Code worker |
-| 7015 | LogisRepository | Code repository surveyor |
-| 7016 | MagosStrategos | Code change planner |
-| 7017 | FerrumPatchwright | Code patch manifest builder |
-| 7018 | OrdinatusVerifier | Code verification planner |
-| 7019 | JudicatorCodicis | Code review critic |
-| 7020 | SealwrightFinalis | Code final handoff packager |
+This directory remains as a compatibility and runtime layer for:
 
-## Current Rule
+- shared Worker API runtime scripts (`start_worker.py`, `worker_runtime.py`)
+- Worker service registry compatibility (`worker_services.json`)
+- external relays that are not migrated yet (`ForgeRelay`, `MnemosyneRelay`)
+- explicit legacy wrappers for old ShushunyaAgent and SearXNG script paths
+- parked temporary work under `_temporary/`
 
-Do not split `ShushunyaAgent` internals immediately. Keep it as the general
-worker while new workers are introduced behind the common Worker API.
-
-Extract capabilities gradually only after the worker contract and governor
-state machine are stable.
-
-## Standard Worker Runtime
-
-Prototype workers can be served through the shared runtime:
-
-```bash
-python3 Mechanicum/start_worker.py Lexmechanic --workspace-root runtime/mechanicum-work
-```
-
-Start the current lore pipeline worker set:
-
-```bash
-python3 Mechanicum/start_all_workers.py --workspace-root runtime/mechanicum-work
-```
-
-The runtime exposes:
-
-- `GET /health`
-- `GET /capabilities`
-- `POST /run` with either a dispatch packet or raw worker request JSON
-
-## Local Corpus
-
-`CorpusIngestor` scans `Corpus/` by default, or `SHUSHUNYA_CORPUS_DIR` when the
-environment variable is set. It indexes user-provided primary texts before
-source discovery and writes `/work/<slug>/corpus_index.json`.
-
-Downstream workers treat matching local files like source candidates:
-`Lexmechanic` adds them to `source_map.json`, `AuspexBrowser` extracts their
-text into `source_snapshots.json`, and `NoosphericExtractor` can use their text
-as direct-event evidence.
+Do not add new primary workers here. Put new workers under the owning
+EyeOfTerror department and register them through Warmaster/worker manifests.

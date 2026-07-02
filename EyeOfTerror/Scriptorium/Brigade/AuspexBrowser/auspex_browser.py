@@ -8,8 +8,8 @@ from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
 
-REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "Mechanicum" / "ShushunyaAgent").exists())
-SHUSHUNYA_AGENT_DIR = REPO_ROOT / "Mechanicum" / "ShushunyaAgent"
+REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent").exists())
+SHUSHUNYA_AGENT_DIR = REPO_ROOT / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent"
 if str(SHUSHUNYA_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(SHUSHUNYA_AGENT_DIR))
 

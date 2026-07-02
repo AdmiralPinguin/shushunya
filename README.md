@@ -8,7 +8,7 @@ Project code, runtime tools, virtual environments, generated assets, Android too
 - `CoreOfMadness/` stores local model runtime pieces and the Telegram bot bridge.
 - `ArchiveOfHeresy/` is the server gateway, memory/archive layer, OpenAI-compatible LLM proxy, and mobile backend facade.
 - `Shushunya_M/` is the Android client.
-- `Mechanicum/ShushunyaAgent/` is the server-side agent API used by the mobile app and console.
+- `EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent/` is the server-side agent API used by the mobile app and console.
 - `Mechanicum/_temporary/RoxDub/` contains the parked dubbing/voice workflow.
 - `PalatineConsole/` is the local service control GUI.
 - `WarpWails/`, `DemonsForge/`, and `ShushunyaSite/` contain additional local tools and web surfaces.

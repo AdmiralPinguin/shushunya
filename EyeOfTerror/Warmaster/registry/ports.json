@@ -30,8 +30,8 @@
   "mechanicum": {
     "7001": {
       "name": "ShushunyaAgent",
-      "role": "general worker",
-      "path": "Mechanicum/ShushunyaAgent"
+      "role": "mobile and console API gateway",
+      "path": "EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent"
     },
     "7002": {
       "name": "Lexmechanic",
@@ -83,7 +83,7 @@
     "7012": {
       "name": "OcularisRenderium",
       "role": "JavaScript render and screenshot worker",
-      "path": "Mechanicum/OcularisRenderium"
+      "path": "EyeOfTerror/Scriptorium/Brigade/OcularisRenderium"
     },
     "7013": {
       "name": "CorpusIngestor",
@@ -93,37 +93,37 @@
     "7014": {
       "name": "CogitatorCodewright",
       "role": "code task worker",
-      "path": "Mechanicum/CogitatorCodewright"
+      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/CogitatorCodewright"
     },
     "7015": {
       "name": "LogisRepository",
       "role": "code repository surveyor",
-      "path": "Mechanicum/LogisRepository"
+      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/LogisRepository"
     },
     "7016": {
       "name": "MagosStrategos",
       "role": "code change planner",
-      "path": "Mechanicum/MagosStrategos"
+      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/MagosStrategos"
     },
     "7017": {
       "name": "FerrumPatchwright",
       "role": "code patch manifest builder",
-      "path": "Mechanicum/FerrumPatchwright"
+      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/FerrumPatchwright"
     },
     "7018": {
       "name": "OrdinatusVerifier",
       "role": "code verification planner",
-      "path": "Mechanicum/OrdinatusVerifier"
+      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/OrdinatusVerifier"
     },
     "7019": {
       "name": "JudicatorCodicis",
       "role": "code review critic",
-      "path": "Mechanicum/JudicatorCodicis"
+      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/JudicatorCodicis"
     },
     "7020": {
       "name": "SealwrightFinalis",
       "role": "code final handoff packager",
-      "path": "Mechanicum/SealwrightFinalis"
+      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/SealwrightFinalis"
     }
   }
 }

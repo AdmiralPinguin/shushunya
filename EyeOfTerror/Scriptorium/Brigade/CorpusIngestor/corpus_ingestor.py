@@ -12,16 +12,15 @@ from typing import Any
 from xml.etree import ElementTree
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CORPUS_ROOT = REPO_ROOT / "Corpus"
-LEXMECHANIC_PLAYBOOK_DIR = REPO_ROOT / "EyeOfTerror" / "_temporary" / "IskandarKhayon" / "brigade" / "Lexmechanic" / "playbooks"
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".html", ".htm", ".xhtml", ".fb2", ".epub"}
 MAX_SCAN_BYTES = 25_000_000
 MAX_TEXT_CHARS = 250_000
 METADATA_SUFFIXES = (".metadata.json", ".meta.json")
 
-REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "Mechanicum" / "ShushunyaAgent").exists())
-SHUSHUNYA_AGENT_DIR = REPO_ROOT / "Mechanicum" / "ShushunyaAgent"
+REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent").exists())
+DEFAULT_CORPUS_ROOT = REPO_ROOT / "Corpus"
+LEXMECHANIC_PLAYBOOK_DIR = REPO_ROOT / "EyeOfTerror" / "Scriptorium" / "Brigade" / "Lexmechanic" / "playbooks"
+SHUSHUNYA_AGENT_DIR = REPO_ROOT / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent"
 if str(SHUSHUNYA_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(SHUSHUNYA_AGENT_DIR))
 

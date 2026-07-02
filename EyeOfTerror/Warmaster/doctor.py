@@ -106,6 +106,13 @@ def check_worker_manifests(errors: list[str]) -> int:
         path
         for path in (REPO_ROOT / "Mechanicum").glob("*/worker.json")
     }
+    if isinstance(port_registry, dict):
+        for item in port_registry.values():
+            if not isinstance(item, dict) or not item.get("path"):
+                continue
+            registry_manifest = REPO_ROOT / str(item["path"]) / "worker.json"
+            if registry_manifest.exists():
+                metadata_paths.add(registry_manifest)
     services = load_json(REPO_ROOT / "Mechanicum" / "worker_services.json")
     if isinstance(services, dict):
         for service in services.values():
