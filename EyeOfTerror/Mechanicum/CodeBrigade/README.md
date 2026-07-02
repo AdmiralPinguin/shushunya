@@ -98,8 +98,10 @@ and edit literals for simple replacement or Python add-function operations.
 Adapter results must satisfy
 `execution_result.schema.json`: status, changed files, patch summary, executed
 verification commands, blockers, rollback notes, and per-operation patch
-results. Failed patch batches are rolled back and must preserve rollback
-evidence in the execution result.
+results. Patch manifests also include per-file rows with operations, applied and
+failed operation counts, and whether rollback touched that file. Failed patch
+batches are rolled back and must preserve rollback evidence in the execution
+result.
 
 `verification_policy.json` records the runtime allowlist and path-token guards
 for verification. `verification_adapter.py` can run that narrow allowlist

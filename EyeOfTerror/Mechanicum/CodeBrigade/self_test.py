@@ -1172,6 +1172,13 @@ def main() -> int:
             raise AssertionError(f"multi-file patch manifest should expose operation/file counts: {multi_file_report}")
         if manifest["operation_counts"].get("replace") != 1 or manifest["operation_counts"].get("replace_python_constant") != 1:
             raise AssertionError(f"multi-file patch manifest should count operation types: {multi_file_report}")
+        file_rows = {row["path"]: row for row in manifest["files"]}
+        if sorted(file_rows) != ["app.py", "config.py"]:
+            raise AssertionError(f"multi-file patch manifest should expose per-file rows: {multi_file_report}")
+        if file_rows["app.py"]["operations"] != ["replace"] or file_rows["config.py"]["operations"] != ["replace_python_constant"]:
+            raise AssertionError(f"multi-file patch manifest should map operations to files: {multi_file_report}")
+        if file_rows["app.py"]["applied_operation_count"] != 1 or file_rows["config.py"]["rollback_touched"]:
+            raise AssertionError(f"multi-file patch manifest should expose per-file application state: {multi_file_report}")
         if "return True" not in Path(tmp, "app.py").read_text(encoding="utf-8") or "ENABLED = True" not in Path(tmp, "config.py").read_text(encoding="utf-8"):
             raise AssertionError("multi-file patch did not apply both files")
     with tempfile.TemporaryDirectory() as tmp:
@@ -1590,6 +1597,9 @@ def main() -> int:
             raise AssertionError(f"failed patch batch should expose rollback evidence: {rollback_report}")
         if result["patch_manifest"]["rollback_performed"] is not True or result["patch_manifest"]["failed_operation_count"] < 1:
             raise AssertionError(f"failed patch batch should expose rollback patch manifest: {rollback_report}")
+        rollback_file_rows = {row["path"]: row for row in result["patch_manifest"]["files"]}
+        if rollback_file_rows["app.py"]["rollback_touched"] is not True or rollback_file_rows["app.py"]["failed_operation_count"] < 1:
+            raise AssertionError(f"failed patch batch should expose per-file rollback state: {rollback_report}")
         if "return False" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("failed patch batch did not roll app.py back")
     with tempfile.TemporaryDirectory() as tmp:

@@ -60,6 +60,7 @@
         "kind",
         "contract_version",
         "changed_files",
+        "files",
         "changed_file_count",
         "multi_file",
         "operation_count",
@@ -79,6 +80,33 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "operations", "applied_operation_count", "failed_operation_count", "rollback_touched"],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "operations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "applied_operation_count": {
+                "type": "integer"
+              },
+              "failed_operation_count": {
+                "type": "integer"
+              },
+              "rollback_touched": {
+                "type": "boolean"
+              }
+            }
           }
         },
         "changed_file_count": {
