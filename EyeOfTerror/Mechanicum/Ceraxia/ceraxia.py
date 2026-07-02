@@ -31,6 +31,7 @@ from planning_packet_contract import validate_planning_packet as validate_planni
 from code_brigade_adapter import build_worker_report  # noqa: E402
 from diagnostic_repair_contract import execute_diagnostic_repair_request  # noqa: E402
 from execution_adapter import can_infer_guarded_natural_language_patch  # noqa: E402
+from planning_department import build_planning_department_package  # noqa: E402
 from verification_adapter import run_verification_commands  # noqa: E402
 from repo_survey import survey_repository  # noqa: E402
 
@@ -54,6 +55,7 @@ REQUIRED_RUN_ARTIFACTS = [
     "task.json",
     "planning_packet.json",
     "repo_survey.json",
+    "planning_department.json",
     "implementation_brief.json",
     "worker_report.json",
     "verification_report.json",
@@ -323,6 +325,22 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "blocked": blocked,
         "blockers": blockers,
     }
+
+
+def attach_planning_department_to_brief(brief: dict[str, Any], planning_department: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(brief)
+    enriched["planning_department"] = planning_department
+    enriched["planning_department_handoff"] = planning_department.get("code_brigade_work_package_handoff", {})
+    handoff = dict(enriched.get("code_brigade_handoff", {}) if isinstance(enriched.get("code_brigade_handoff"), dict) else {})
+    handoff["planning_department_package"] = {
+        "artifact": "planning_department.json",
+        "status": planning_department.get("status", ""),
+        "required_before_code_brigade_execution": True,
+        "work_package_handoff_status": planning_department.get("code_brigade_work_package_handoff", {}).get("status", ""),
+        "multi_pass_investigation_status": planning_department.get("multi_pass_repo_investigation", {}).get("status", ""),
+    }
+    enriched["code_brigade_handoff"] = handoff
+    return enriched
 
 
 def changed_file_paths_from_worker(worker_report: dict[str, Any]) -> list[str]:
@@ -1516,6 +1534,10 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     verification = artifacts["verification_report"]
     readiness = artifacts["execution_readiness"]
     worker_report = artifacts.get("worker_report", {}) if isinstance(artifacts.get("worker_report"), dict) else {}
+    planning_department = artifacts.get("planning_department", {}) if isinstance(artifacts.get("planning_department"), dict) else {}
+    planning_department_rfc = planning_department.get("engineering_rfc") if isinstance(planning_department.get("engineering_rfc"), dict) else {}
+    planning_department_investigation = planning_department.get("multi_pass_repo_investigation") if isinstance(planning_department.get("multi_pass_repo_investigation"), dict) else {}
+    planning_department_handoff = planning_department.get("code_brigade_work_package_handoff") if isinstance(planning_department.get("code_brigade_work_package_handoff"), dict) else {}
     execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
     preflight = execution_result.get("preflight") if isinstance(execution_result.get("preflight"), dict) else {}
     autonomous_request = worker_report.get("autonomous_execution_request") if isinstance(worker_report.get("autonomous_execution_request"), dict) else {}
@@ -1574,6 +1596,11 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Review decision: {review['decision']}",
         f"Planning review decision: {planning_review.get('decision', '')}",
         f"Planning review score: {planning_review.get('score', '')}",
+        f"Planning department status: {planning_department.get('status', '')}",
+        f"Engineering RFC status: {planning_department_rfc.get('status', '')}",
+        f"Multi-pass investigation status: {planning_department_investigation.get('status', '')}",
+        f"Multi-pass investigation phases: {len(planning_department_investigation.get('phases', [])) if isinstance(planning_department_investigation.get('phases'), list) else 0}",
+        f"CodeBrigade package handoff: {planning_department_handoff.get('status', '')}",
         f"Planning work phases: {len(work_phases)}",
         f"Implementation work packages: {len(packages)}",
         f"Work package covered surfaces: {len(covered_package_surfaces)}",
@@ -1657,6 +1684,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
             "- task.json",
             "- planning_packet.json",
             "- repo_survey.json",
+            "- planning_department.json",
             "- implementation_brief.json",
             "- worker_report.json",
             "- verification_report.json",
@@ -2080,6 +2108,10 @@ def build_run_summary(
     forecast = brief.get("execution_forecast") if isinstance(brief.get("execution_forecast"), dict) else {}
     scope_budget = forecast.get("scope_budget") if isinstance(forecast.get("scope_budget"), dict) else {}
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
+    planning_department = brief.get("planning_department") if isinstance(brief.get("planning_department"), dict) else {}
+    planning_department_rfc = planning_department.get("engineering_rfc") if isinstance(planning_department.get("engineering_rfc"), dict) else {}
+    planning_department_investigation = planning_department.get("multi_pass_repo_investigation") if isinstance(planning_department.get("multi_pass_repo_investigation"), dict) else {}
+    planning_department_handoff = planning_department.get("code_brigade_work_package_handoff") if isinstance(planning_department.get("code_brigade_work_package_handoff"), dict) else {}
     survey_quality = brief.get("survey_quality_gate") if isinstance(brief.get("survey_quality_gate"), dict) else {}
     work_breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
@@ -2126,6 +2158,12 @@ def build_run_summary(
         "review_decision": review.get("decision"),
         "planning_review_decision": planning_review.get("decision", ""),
         "planning_review_score": planning_review.get("score", 0),
+        "planning_department_status": planning_department.get("status", ""),
+        "engineering_rfc_status": planning_department_rfc.get("status", ""),
+        "engineering_rfc_design_option_count": len(planning_department_rfc.get("design_options", [])) if isinstance(planning_department_rfc.get("design_options"), list) else 0,
+        "multi_pass_investigation_status": planning_department_investigation.get("status", ""),
+        "multi_pass_investigation_phase_count": len(planning_department_investigation.get("phases", [])) if isinstance(planning_department_investigation.get("phases"), list) else 0,
+        "code_brigade_work_package_handoff_status": planning_department_handoff.get("status", ""),
         "planning_work_phase_count": len(work_phases),
         "implementation_work_package_count": len(packages),
         "implementation_work_package_surface_count": len(package_surfaces),
@@ -2382,6 +2420,9 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_json(run_dir / "repo_survey.json", survey)
 
     brief = build_implementation_brief(packet, survey)
+    planning_department = build_planning_department_package(packet, survey, brief)
+    write_json(run_dir / "planning_department.json", planning_department)
+    brief = attach_planning_department_to_brief(brief, planning_department)
     status["state"] = "implementation_ready" if not brief["blocked"] else "failed"
     status["lifecycle"].append(status["state"])
     status["next_action"] = "handoff to CodeBrigade" if not brief["blocked"] else "fix blockers before implementation"
@@ -2429,6 +2470,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     artifacts = {
         "status": status,
         "planning_packet": packet,
+        "planning_department": planning_department,
         "implementation_brief": brief,
         "worker_report": worker_report,
         "verification_report": verification_report,

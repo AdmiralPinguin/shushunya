@@ -151,6 +151,8 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         if isinstance(package, dict) and package.get("id") and isinstance(package.get("blocking_policy"), list)
     }
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
+    planning_department = brief.get("planning_department") if isinstance(brief.get("planning_department"), dict) else {}
+    planning_department_handoff = brief.get("planning_department_handoff") if isinstance(brief.get("planning_department_handoff"), dict) else {}
     dependency = brief.get("planning_dependency_map") if isinstance(brief.get("planning_dependency_map"), dict) else {}
     breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     impact = brief.get("impact_analysis") if isinstance(brief.get("impact_analysis"), dict) else {}
@@ -193,6 +195,12 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "planning_critical_path": dependency.get("critical_path", []) if isinstance(dependency.get("critical_path"), list) else [],
         "planning_review_decision": planning_review.get("decision", ""),
         "planning_review_score": planning_review.get("score", 0),
+        "planning_department_status": planning_department.get("status", ""),
+        "planning_department_roles": planning_department.get("roles", []) if isinstance(planning_department.get("roles"), list) else [],
+        "engineering_rfc_status": planning_department.get("engineering_rfc", {}).get("status", "") if isinstance(planning_department.get("engineering_rfc"), dict) else "",
+        "multi_pass_investigation_status": planning_department.get("multi_pass_repo_investigation", {}).get("status", "") if isinstance(planning_department.get("multi_pass_repo_investigation"), dict) else "",
+        "multi_pass_investigation_phases": planning_department.get("multi_pass_repo_investigation", {}).get("phases", []) if isinstance(planning_department.get("multi_pass_repo_investigation"), dict) and isinstance(planning_department.get("multi_pass_repo_investigation", {}).get("phases"), list) else [],
+        "planning_department_work_package_handoff": planning_department_handoff,
         "work_phases": breakdown.get("phases", []) if isinstance(breakdown.get("phases"), list) else [],
         "stop_conditions": breakdown.get("stop_conditions", []) if isinstance(breakdown.get("stop_conditions"), list) else [],
         "impact_surfaces": impact.get("surfaces", []) if isinstance(impact.get("surfaces"), list) else [],

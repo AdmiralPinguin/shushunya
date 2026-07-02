@@ -98,6 +98,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                 "task.json",
                 "planning_packet.json",
                 "repo_survey.json",
+                "planning_department.json",
                 "implementation_brief.json",
                 "worker_report.json",
                 "verification_report.json",
@@ -120,6 +121,30 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             brief = json.loads((run_dir / "implementation_brief.json").read_text(encoding="utf-8"))
             self.assertEqual(brief["contract_version"], "eye-mechanicum.v1")
             self.assertEqual(brief["target"], "CodeBrigade")
+            planning_department = json.loads((run_dir / "planning_department.json").read_text(encoding="utf-8"))
+            self.assertEqual(planning_department["kind"], "ceraxia_planning_department_package")
+            self.assertEqual(planning_department["status"], "ready_for_code_brigade")
+            self.assertGreaterEqual(len(planning_department["roles"]), 5)
+            self.assertEqual(planning_department["engineering_rfc"]["status"], "accepted_for_code_brigade_handoff")
+            self.assertGreaterEqual(len(planning_department["engineering_rfc"]["design_options"]), 2)
+            self.assertTrue(planning_department["engineering_rfc"]["rollback_plan"]["rollback_strategy"])
+            self.assertTrue(planning_department["engineering_rfc"]["test_strategy"]["targeted_commands"])
+            self.assertEqual(planning_department["multi_pass_repo_investigation"]["status"], "complete")
+            self.assertEqual(
+                [phase["id"] for phase in planning_department["multi_pass_repo_investigation"]["phases"]],
+                [
+                    "project_map",
+                    "dependency_public_api_map",
+                    "test_ci_manifest_map",
+                    "targeted_pre_mutation_reads",
+                ],
+            )
+            self.assertTrue(all(phase["required_before_mutation"] for phase in planning_department["multi_pass_repo_investigation"]["phases"]))
+            self.assertEqual(planning_department["code_brigade_work_package_handoff"]["status"], "ready")
+            self.assertIn("security_boundary_package", [package["id"] for package in planning_department["code_brigade_work_package_handoff"]["packages"]])
+            self.assertEqual(brief["planning_department"]["status"], "ready_for_code_brigade")
+            self.assertEqual(brief["planning_department_handoff"]["target"], "CodeBrigade")
+            self.assertEqual(brief["code_brigade_handoff"]["planning_department_package"]["artifact"], "planning_department.json")
             self.assertEqual(brief["risk_level"], "high")
             self.assertIn("hardcoded one-off behavior", brief["forbidden_approaches"])
             self.assertIn("negative boundary test or explicit blocker is present", brief["quality_bar"]["must_have_evidence"])
@@ -197,6 +222,11 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(implementation_plan["expected_code_brigade_iterations"], 4)
             self.assertEqual(implementation_plan["diagnostic_repair_plan"], brief["diagnostic_repair_plan"])
             self.assertEqual(implementation_plan["worker_output_contract"], brief["worker_output_contract"])
+            self.assertEqual(implementation_plan["planning_department_status"], "ready_for_code_brigade")
+            self.assertEqual(implementation_plan["engineering_rfc_status"], "accepted_for_code_brigade_handoff")
+            self.assertEqual(implementation_plan["multi_pass_investigation_status"], "complete")
+            self.assertEqual(len(implementation_plan["multi_pass_investigation_phases"]), 4)
+            self.assertEqual(implementation_plan["planning_department_work_package_handoff"]["status"], "ready")
             self.assertEqual(implementation_plan["expert_quality_level"], "expert")
             self.assertTrue(implementation_plan["expert_quality_required"])
             self.assertTrue(any(item["decision"] == "boundary_patch_vs_feature_shortcut" for item in implementation_plan["expert_tradeoff_register"]))
@@ -322,6 +352,12 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["review_decision"], "dry_run_ready")
             self.assertEqual(summary["planning_review_decision"], "ready_for_ceraxia_review")
             self.assertGreaterEqual(summary["planning_review_score"], 80)
+            self.assertEqual(summary["planning_department_status"], "ready_for_code_brigade")
+            self.assertEqual(summary["engineering_rfc_status"], "accepted_for_code_brigade_handoff")
+            self.assertGreaterEqual(summary["engineering_rfc_design_option_count"], 2)
+            self.assertEqual(summary["multi_pass_investigation_status"], "complete")
+            self.assertEqual(summary["multi_pass_investigation_phase_count"], 4)
+            self.assertEqual(summary["code_brigade_work_package_handoff_status"], "ready")
             self.assertGreaterEqual(summary["planning_work_phase_count"], 6)
             self.assertEqual(summary["survey_quality_decision"], "passed")
             self.assertEqual(summary["survey_quality_warning_count"], 0)
@@ -441,12 +477,17 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("Constraint trace rows:", final_report)
             self.assertIn("Assumption register status: complete", final_report)
             self.assertIn("Assumptions tracked:", final_report)
+            self.assertIn("- planning_department.json", final_report)
             self.assertIn("- evidence_matrix.json", final_report)
             self.assertIn("BLOCKER: dry run requested; real CodeBrigade execution was intentionally skipped", final_report)
             self.assertIn("Verification commands planned:", final_report)
             self.assertIn("Verification commands executed: 0", final_report)
             self.assertIn("Planning review decision: ready_for_ceraxia_review", final_report)
             self.assertIn("Planning review score:", final_report)
+            self.assertIn("Planning department status: ready_for_code_brigade", final_report)
+            self.assertIn("Engineering RFC status: accepted_for_code_brigade_handoff", final_report)
+            self.assertIn("Multi-pass investigation status: complete", final_report)
+            self.assertIn("CodeBrigade package handoff: ready", final_report)
             self.assertIn("Expert quality level: expert", final_report)
             self.assertIn("Expert quality required: true", final_report)
             self.assertIn("Planning work phases:", final_report)

@@ -15,6 +15,12 @@
     "review_decision",
     "planning_review_decision",
     "planning_review_score",
+    "planning_department_status",
+    "engineering_rfc_status",
+    "engineering_rfc_design_option_count",
+    "multi_pass_investigation_status",
+    "multi_pass_investigation_phase_count",
+    "code_brigade_work_package_handoff_status",
     "planning_work_phase_count",
     "implementation_work_package_count",
     "implementation_work_package_surface_count",
@@ -128,6 +134,24 @@
     },
     "planning_review_score": {
       "type": "integer"
+    },
+    "planning_department_status": {
+      "type": "string"
+    },
+    "engineering_rfc_status": {
+      "type": "string"
+    },
+    "engineering_rfc_design_option_count": {
+      "type": "integer"
+    },
+    "multi_pass_investigation_status": {
+      "type": "string"
+    },
+    "multi_pass_investigation_phase_count": {
+      "type": "integer"
+    },
+    "code_brigade_work_package_handoff_status": {
+      "type": "string"
     },
     "planning_work_phase_count": {
       "type": "integer"
