@@ -10,6 +10,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import eye_of_terror.brigade as brigade
+import eye_of_terror.task_prepare as task_prepare
 import eye_of_terror.warmaster_gateway as warmaster_gateway
 from eye_of_terror.inner_circle.iskandar_service import make_handler as make_iskandar_handler
 from eye_of_terror.warmaster_gateway import brigade_readiness_summary, cancel_http_worker_tasks, compact_brigade_readiness, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, requested_step_ids_from_payload, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
@@ -182,7 +184,7 @@ def main() -> int:
             or invalid_transport_body.get("governor_transport") != "warp"
         ):
             raise AssertionError(f"invalid transport action did not preserve executable task body: {invalid_transport}")
-        original_planner = warmaster_gateway.plan_lore_reconstruction
+        original_planner = task_prepare.plan_lore_reconstruction
         try:
             class BadContract:
                 task_id = "bad-contract"
@@ -198,7 +200,7 @@ def main() -> int:
                         "worker_plan": [],
                     }
 
-            warmaster_gateway.plan_lore_reconstruction = lambda _message, task_id=None: type("BadPlan", (), {"contract": BadContract()})()
+            task_prepare.plan_lore_reconstruction = lambda _message, task_id=None: type("BadPlan", (), {"contract": BadContract()})()
             bad_contract = warmaster_gateway.prepare_task("Собери все известное о событиях Скалатракса.", "bad-contract", run_root)
             if (
                 bad_contract.get("error_code") != "invalid_task_contract"
@@ -207,7 +209,7 @@ def main() -> int:
             ):
                 raise AssertionError(f"Warmaster accepted an invalid task contract: {bad_contract}")
         finally:
-            warmaster_gateway.plan_lore_reconstruction = original_planner
+            task_prepare.plan_lore_reconstruction = original_planner
         try:
             class MissingWorkerContract:
                 task_id = "missing-worker-contract"
@@ -230,7 +232,7 @@ def main() -> int:
                         ],
                     }
 
-            warmaster_gateway.plan_lore_reconstruction = lambda _message, task_id=None: type("MissingWorkerPlan", (), {"contract": MissingWorkerContract()})()
+            task_prepare.plan_lore_reconstruction = lambda _message, task_id=None: type("MissingWorkerPlan", (), {"contract": MissingWorkerContract()})()
             missing_worker_contract = warmaster_gateway.prepare_task(
                 "Собери все известное о событиях Скалатракса.",
                 "missing-worker-contract",
@@ -243,7 +245,7 @@ def main() -> int:
             ):
                 raise AssertionError(f"Warmaster accepted a contract with a missing worker: {missing_worker_contract}")
         finally:
-            warmaster_gateway.plan_lore_reconstruction = original_planner
+            task_prepare.plan_lore_reconstruction = original_planner
         try:
             class PlannedWorkerContract:
                 task_id = "planned-worker-contract"
@@ -281,7 +283,7 @@ def main() -> int:
                         },
                     }
 
-            warmaster_gateway.plan_lore_reconstruction = lambda _message, task_id=None: PlannedWorkerPlan()
+            task_prepare.plan_lore_reconstruction = lambda _message, task_id=None: PlannedWorkerPlan()
             planned_worker_contract = warmaster_gateway.prepare_task(
                 "Собери все известное о событиях Скалатракса.",
                 "planned-worker-contract",
@@ -301,7 +303,7 @@ def main() -> int:
             if planned_worker_preflight.get("error_code") != "contract_workers_unavailable" or not planned_worker_preflight.get("worker_availability", {}).get("unavailable_workers"):
                 raise AssertionError(f"Warmaster preflight missed planned worker availability: {planned_worker_preflight}")
         finally:
-            warmaster_gateway.plan_lore_reconstruction = original_planner
+            task_prepare.plan_lore_reconstruction = original_planner
         try:
             good_plan = original_planner("Собери все известное о событиях Скалатракса.", task_id="missing-oversight-contract")
 
@@ -311,7 +313,7 @@ def main() -> int:
                 def to_dict(self) -> dict:
                     return {"ok": True, "contract": self.contract.to_dict(), "validation": {"ok": True, "errors": []}}
 
-            warmaster_gateway.plan_lore_reconstruction = lambda _message, task_id=None: MissingOversightPlan()
+            task_prepare.plan_lore_reconstruction = lambda _message, task_id=None: MissingOversightPlan()
             missing_oversight_contract = warmaster_gateway.prepare_task(
                 "Собери все известное о событиях Скалатракса.",
                 "missing-oversight-contract",
@@ -320,7 +322,7 @@ def main() -> int:
             if missing_oversight_contract.get("error_code") != "invalid_oversight" or (run_root / "missing-oversight-contract").exists():
                 raise AssertionError(f"Warmaster accepted a plan without oversight: {missing_oversight_contract}")
         finally:
-            warmaster_gateway.plan_lore_reconstruction = original_planner
+            task_prepare.plan_lore_reconstruction = original_planner
         bad_dispatch = Path(temp_dir) / "bad-dispatch" / "dispatch"
         bad_dispatch.mkdir(parents=True, exist_ok=True)
         (bad_dispatch / "broken.json").write_text("{", encoding="utf-8")
@@ -411,8 +413,8 @@ def main() -> int:
             finally:
                 bad_prepare_server.shutdown()
                 bad_prepare_thread.join(timeout=5)
-            original_worker_refs = warmaster_gateway.worker_refs
-            warmaster_gateway.worker_refs = lambda: []
+            original_worker_refs = brigade.worker_refs
+            brigade.worker_refs = lambda: []
             try:
                 missing_workers = warmaster_gateway.prepare_task_via_governor_service(
                     "Собери все известное о событиях Скалатракса.",
@@ -427,9 +429,9 @@ def main() -> int:
                 ):
                     raise AssertionError(f"missing governor workers were not rejected: {missing_workers}")
             finally:
-                warmaster_gateway.worker_refs = original_worker_refs
-            original_governor_by_name = warmaster_gateway.governor_by_name
-            warmaster_gateway.governor_by_name = lambda _name: ServiceGovernor()
+                brigade.worker_refs = original_worker_refs
+            original_governor_by_name = task_prepare.governor_by_name
+            task_prepare.governor_by_name = lambda _name: ServiceGovernor()
             gateway_server = ThreadingHTTPServer(
                 ("127.0.0.1", 0),
                 make_handler(run_root, default_governor_transport="http"),
@@ -461,9 +463,9 @@ def main() -> int:
             finally:
                 gateway_server.shutdown()
                 gateway_thread.join(timeout=5)
-                warmaster_gateway.governor_by_name = original_governor_by_name
-            original_governor_refs = warmaster_gateway.governor_refs
-            warmaster_gateway.governor_refs = lambda: [ServiceGovernor()]
+                task_prepare.governor_by_name = original_governor_by_name
+            original_governor_refs = brigade.governor_refs
+            brigade.governor_refs = lambda: [ServiceGovernor()]
             try:
                 governor_snapshot = warmaster_gateway.governor_registry_snapshot(include_health=True)
                 required_workers = governor_snapshot[0].get("runtime", {}).get("capabilities", {}).get("capabilities", {}).get("required_workers", [])
@@ -480,7 +482,7 @@ def main() -> int:
                 ):
                     raise AssertionError(f"governor pipeline summaries were not exposed: {pipelines}")
             finally:
-                warmaster_gateway.governor_refs = original_governor_refs
+                brigade.governor_refs = original_governor_refs
         finally:
             iskandar_server.shutdown()
             iskandar_thread.join(timeout=5)
