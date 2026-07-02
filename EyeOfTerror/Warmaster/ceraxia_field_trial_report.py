@@ -67,6 +67,102 @@ def validate_ledger(spec: dict[str, Any], ledger: dict[str, Any]) -> list[str]:
     return errors
 
 
+def build_next_stage_metrics(spec: dict[str, Any], entries: list[dict[str, Any]], trial_by_id: dict[str, Any]) -> dict[str, Any]:
+    target = spec.get("next_stage_target") if isinstance(spec.get("next_stage_target"), dict) else {}
+    live_entries = [
+        entry
+        for entry in entries
+        if isinstance(entry.get("next_stage"), dict)
+    ]
+    class_names: set[str] = set()
+    successful = 0
+    repaired_successes = 0
+    honest_blocks = 0
+    broken = 0
+    reviewer_rejected = 0
+    false_successes = 0
+    multi_file_nonfixture = 0
+    attempts: list[float] = []
+    postmortem_gaps: list[dict[str, str]] = []
+    for entry in live_entries:
+        next_stage = entry.get("next_stage") if isinstance(entry.get("next_stage"), dict) else {}
+        trial = trial_by_id.get(str(entry.get("trial_id") or ""), {})
+        class_name = str(next_stage.get("class") or trial.get("class") or "")
+        if class_name:
+            class_names.add(class_name)
+        status = str(next_stage.get("status") or "")
+        if status in {"fully_successful", "success", "passed"}:
+            successful += 1
+        if status in {"repaired_success", "success_after_repair"}:
+            successful += 1
+            repaired_successes += 1
+        if status in {"honest_blocked", "expected_blocked", "blocked"}:
+            honest_blocks += 1
+        if status in {"failed", "broken"}:
+            broken += 1
+        if next_stage.get("reviewer_rejected") is True or status == "reviewer_rejected":
+            reviewer_rejected += 1
+        if next_stage.get("false_success") is True:
+            false_successes += 1
+        if next_stage.get("multi_file_nonfixture") is True:
+            multi_file_nonfixture += 1
+        attempt_count = next_stage.get("attempt_count", next_stage.get("attempts"))
+        if isinstance(attempt_count, (int, float)):
+            attempts.append(float(attempt_count))
+        needs_postmortem = status in {"failed", "broken", "honest_blocked", "expected_blocked", "blocked", "reviewer_rejected"}
+        has_postmortem = bool(next_stage.get("postmortem")) or bool(entry.get("human_review_notes"))
+        if needs_postmortem and not has_postmortem:
+            postmortem_gaps.append(
+                {
+                    "trial_id": str(entry.get("trial_id") or ""),
+                    "run_id": str(entry.get("run_id") or ""),
+                    "status": status,
+                }
+            )
+    live_count = len(live_entries)
+    success_rate = round(successful / live_count, 3) if live_count else 0.0
+    minimum_live_tasks = int(target.get("minimum_live_tasks") or 0)
+    minimum_task_classes = int(target.get("minimum_task_classes") or target.get("minimum_task_class_variety") or 0)
+    minimum_success_rate = float(target.get("minimum_success_rate") or 0)
+    maximum_false_successes = int(target.get("maximum_false_successes", 0))
+    minimum_multifile = int(target.get("minimum_multifile_nonfixture_tasks") or 0)
+    target_met = bool(
+        target
+        and live_count >= minimum_live_tasks
+        and len(class_names) >= minimum_task_classes
+        and success_rate >= minimum_success_rate
+        and false_successes <= maximum_false_successes
+        and multi_file_nonfixture >= minimum_multifile
+        and not postmortem_gaps
+    )
+    return {
+        "target_met": target_met,
+        "target": target,
+        "live_task_count": live_count,
+        "task_class_count": len(class_names),
+        "task_classes": sorted(class_names),
+        "fully_successful_count": successful,
+        "repaired_success_count": repaired_successes,
+        "honest_blocked_count": honest_blocks,
+        "broken_count": broken,
+        "reviewer_rejected_count": reviewer_rejected,
+        "false_success_count": false_successes,
+        "success_rate": success_rate,
+        "average_attempt_count": average(attempts),
+        "multi_file_nonfixture_count": multi_file_nonfixture,
+        "postmortem_gap_count": len(postmortem_gaps),
+        "postmortem_gaps": postmortem_gaps,
+        "gaps": {
+            "needs_more_live_tasks": live_count < minimum_live_tasks,
+            "needs_more_task_classes": len(class_names) < minimum_task_classes,
+            "needs_higher_success_rate": success_rate < minimum_success_rate,
+            "has_false_successes": false_successes > maximum_false_successes,
+            "needs_more_multifile_nonfixture_tasks": multi_file_nonfixture < minimum_multifile,
+            "has_postmortem_gaps": bool(postmortem_gaps),
+        },
+    }
+
+
 def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]:
     dimensions = [str(item) for item in spec.get("dimensions", [])]
     target = spec.get("target") if isinstance(spec.get("target"), dict) else {}
@@ -78,6 +174,7 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     }
     entries = [item for item in ledger.get("entries", []) if isinstance(item, dict)]
     accepted = [item for item in entries if item.get("accepted_for_rolling_score") is True]
+    next_stage_metrics = build_next_stage_metrics(spec, entries, trial_by_id)
 
     def applicable_scores_for(entries_to_score: list[dict[str, Any]]) -> dict[str, list[float]]:
         collected: dict[str, list[float]] = {dimension: [] for dimension in dimensions}
@@ -391,6 +488,8 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     )
     return {
         "target_met": target_met,
+        "next_stage_target_met": next_stage_metrics.get("target_met", False),
+        "next_stage_metrics": next_stage_metrics,
         "legacy_score_target_met": legacy_score_target_met,
         "expert_target_met": expert_target_met,
         "overall_score": overall,

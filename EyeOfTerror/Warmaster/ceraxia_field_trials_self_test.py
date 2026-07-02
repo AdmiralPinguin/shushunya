@@ -15,6 +15,7 @@ from ceraxia_field_trial_runner import (
     honest_evidence_summary,
     resolve_run_storage,
 )
+from ceraxia_field_trial_report import build_report
 from ceraxia_field_trial_auto_review import principal_evidence_signals, repair_evidence_signals, senior_evidence_signals
 
 
@@ -116,6 +117,28 @@ def main() -> int:
     report_payload = json.loads(report.stdout)
     if "accepted_honest_evidence_count" not in report_payload:
         raise AssertionError(f"Ceraxia report must expose honest accepted evidence count: {report_payload}")
+    if "next_stage_target_met" not in report_payload or "next_stage_metrics" not in report_payload:
+        raise AssertionError(f"Ceraxia report must expose next-stage target metrics: {report_payload}")
+    next_stage_metrics = report_payload.get("next_stage_metrics", {})
+    for key in {
+        "live_task_count",
+        "task_class_count",
+        "fully_successful_count",
+        "repaired_success_count",
+        "honest_blocked_count",
+        "broken_count",
+        "reviewer_rejected_count",
+        "false_success_count",
+        "success_rate",
+        "average_attempt_count",
+        "multi_file_nonfixture_count",
+        "postmortem_gap_count",
+        "gaps",
+    }:
+        if key not in next_stage_metrics:
+            raise AssertionError(f"Ceraxia next-stage metrics missing {key}: {next_stage_metrics}")
+    if next_stage_metrics.get("live_task_count", 0) == 0 and report_payload.get("next_stage_target_met") is True:
+        raise AssertionError(f"Ceraxia next-stage target cannot pass from legacy reviews: {report_payload}")
     if "legacy_score_target_met" not in report_payload:
         raise AssertionError(f"Ceraxia report must expose legacy score target separately from honest target: {report_payload}")
     for key in {
@@ -175,6 +198,33 @@ def main() -> int:
             raise AssertionError(f"Ceraxia target cannot pass on stale dimension averages: {report_payload}")
     if report_payload.get("target_met") is True and not ledger.get("entries"):
         raise AssertionError(f"empty Ceraxia ledger must not prove target completion: {report_payload}")
+    synthetic_entries = []
+    synthetic_trials = data["trials"][:20]
+    for index, trial in enumerate(synthetic_trials):
+        synthetic_entries.append(
+            {
+                "trial_id": trial["id"],
+                "run_id": f"next-stage-{index}",
+                "accepted_for_rolling_score": False,
+                "human_review_notes": "postmortem/evidence recorded",
+                "next_stage": {
+                    "status": "repaired_success" if index in {2, 7} else "fully_successful",
+                    "attempt_count": 2 if index in {2, 7} else 1,
+                    "multi_file_nonfixture": index < 5,
+                    "false_success": False,
+                    "postmortem": "not required for successful run",
+                },
+            }
+        )
+    synthetic_report = build_report(data, {"entries": synthetic_entries})
+    synthetic_next_stage = synthetic_report["next_stage_metrics"]
+    if synthetic_report["next_stage_target_met"] is not True:
+        raise AssertionError(f"synthetic next-stage target should pass when all requirements are met: {synthetic_next_stage}")
+    false_success_entries = json.loads(json.dumps(synthetic_entries))
+    false_success_entries[0]["next_stage"]["false_success"] = True
+    false_success_report = build_report(data, {"entries": false_success_entries})
+    if false_success_report["next_stage_target_met"] is True:
+        raise AssertionError(f"next-stage target must fail on false success: {false_success_report['next_stage_metrics']}")
     if report_payload.get("expert_target_met") is True:
         expert_gaps = report_payload.get("expert_gaps", {})
         if (
