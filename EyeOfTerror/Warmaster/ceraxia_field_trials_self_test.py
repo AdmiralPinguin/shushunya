@@ -37,6 +37,7 @@ NEXT_STAGE_BUILDER = WARMASTER_ROOT / "ceraxia_next_stage_package.py"
 LIVE_TASK_REGISTER = WARMASTER_ROOT / "ceraxia_live_task_register.py"
 LIVE_TASK_PREPARE = WARMASTER_ROOT / "ceraxia_live_task_prepare.py"
 LIVE_TASK_RUN = WARMASTER_ROOT / "ceraxia_live_task_run.py"
+LIVE_LEARNINGS = WARMASTER_ROOT / "ceraxia_live_benchmark_learnings.py"
 
 
 def main() -> int:
@@ -259,6 +260,23 @@ def main() -> int:
             raise AssertionError(f"Ceraxia next-stage metrics missing {key}: {next_stage_metrics}")
     if next_stage_metrics.get("live_task_count", 0) == 0 and report_payload.get("next_stage_target_met") is True:
         raise AssertionError(f"Ceraxia next-stage target cannot pass from legacy reviews: {report_payload}")
+    with tempfile.TemporaryDirectory() as learnings_tmp:
+        learnings = subprocess.run(
+            [sys.executable, str(LIVE_LEARNINGS), "--output", str(Path(learnings_tmp) / "live_benchmark_learnings.json")],
+            cwd=str(EYE_ROOT.parent),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if learnings.returncode != 0:
+            raise AssertionError(f"Ceraxia live benchmark learnings failed: {learnings.stdout} {learnings.stderr}")
+        learnings_payload = json.loads(learnings.stdout)
+        if (
+            learnings_payload.get("kind") != "ceraxia_live_benchmark_learnings"
+            or "mandatory_next_actions" not in learnings_payload
+            or not isinstance(learnings_payload.get("pattern_counts"), dict)
+        ):
+            raise AssertionError(f"Ceraxia live benchmark learnings returned weak payload: {learnings_payload}")
     if "legacy_score_target_met" not in report_payload:
         raise AssertionError(f"Ceraxia report must expose legacy score target separately from honest target: {report_payload}")
     for key in {
