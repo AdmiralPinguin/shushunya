@@ -147,6 +147,11 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(all(phase["required_before_mutation"] for phase in planning_department["multi_pass_repo_investigation"]["phases"]))
             self.assertEqual(planning_department["code_brigade_work_package_handoff"]["status"], "ready")
             self.assertIn("security_boundary_package", [package["id"] for package in planning_department["code_brigade_work_package_handoff"]["packages"]])
+            planning_execution_batches = planning_department["code_brigade_work_package_handoff"]["execution_batches"]
+            self.assertTrue(planning_execution_batches["complete"])
+            self.assertEqual(planning_execution_batches["batches"][0], ["evidence_survey_package"])
+            self.assertEqual(planning_execution_batches["batches"][-1], ["verification_evidence_package"])
+            self.assertEqual(planning_execution_batches["unresolved_packages"], [])
             self.assertEqual(brief["planning_department"]["status"], "ready_for_code_brigade")
             self.assertEqual(brief["planning_department_handoff"]["target"], "CodeBrigade")
             self.assertEqual(brief["code_brigade_handoff"]["planning_department_package"]["artifact"], "planning_department.json")

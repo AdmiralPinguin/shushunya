@@ -69,6 +69,10 @@ shape the task, enforce the planning contract, inspect the target repository in
 read-only mode, build the CodeBrigade handoff, review honesty, and persist
 artifacts. Real CodeBrigade execution can replace the dry-run worker report
 without changing the surrounding artifact contract.
+`planning_department.json.code_brigade_work_package_handoff.execution_batches`
+normalizes the dependency graph into ordered CodeBrigade batches. This lets an
+orchestrator run independent packages together, preserve dependency order, and
+block cyclic or unresolved handoffs before source mutation.
 CLI `ok` and `package_ok` mean the dry-run package is internally consistent;
 `ready_for_execution` remains false until real CodeBrigade execution is wired.
 Use `--execute-verification` to run allowlisted verification commands while

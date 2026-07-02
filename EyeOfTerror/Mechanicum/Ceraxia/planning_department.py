@@ -135,6 +135,40 @@ def build_multi_pass_investigation(packet: dict[str, Any], survey: dict[str, Any
     }
 
 
+def build_execution_batches(rows: list[Any]) -> dict[str, Any]:
+    dependencies_by_package: dict[str, list[str]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        package_id = str(row.get("package_id") or "")
+        if not package_id:
+            continue
+        dependencies_by_package[package_id] = [
+            dependency
+            for dependency in _strings(row.get("depends_on"))
+            if dependency and dependency != package_id
+        ]
+    batches: list[list[str]] = []
+    emitted: set[str] = set()
+    remaining = set(dependencies_by_package)
+    while remaining:
+        ready = sorted(
+            package_id
+            for package_id in remaining
+            if all(dependency in emitted or dependency not in dependencies_by_package for dependency in dependencies_by_package[package_id])
+        )
+        if not ready:
+            break
+        batches.append(ready)
+        emitted.update(ready)
+        remaining.difference_update(ready)
+    return {
+        "complete": not remaining,
+        "batches": batches,
+        "unresolved_packages": sorted(remaining),
+    }
+
+
 def build_work_package_handoff(brief: dict[str, Any]) -> dict[str, Any]:
     work_packages = _dict(brief.get("implementation_work_packages"))
     output_contract = _dict(brief.get("worker_output_contract"))
@@ -151,6 +185,7 @@ def build_work_package_handoff(brief: dict[str, Any]) -> dict[str, Any]:
         for row in rows
         if isinstance(row, dict) and row.get("package_id")
     }
+    execution_batches = build_execution_batches(rows)
     package_rows = []
     for package in packages:
         if not isinstance(package, dict):
@@ -172,9 +207,10 @@ def build_work_package_handoff(brief: dict[str, Any]) -> dict[str, Any]:
         "kind": "ceraxia_code_brigade_work_package_handoff",
         "contract_version": CONTRACT_VERSION,
         "target": "CodeBrigade",
-        "status": "ready" if package_rows and graph.get("complete") is True else "blocked",
+        "status": "ready" if package_rows and graph.get("complete") is True and execution_batches["complete"] else "blocked",
         "review_order": _strings(work_packages.get("review_order")),
         "dependency_graph": graph,
+        "execution_batches": execution_batches,
         "packages": package_rows,
         "handoff_criteria": _strings(work_packages.get("global_handoff_criteria")),
     }
