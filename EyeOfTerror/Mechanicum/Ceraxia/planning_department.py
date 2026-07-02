@@ -76,7 +76,7 @@ def build_engineering_rfc(packet: dict[str, Any], survey: dict[str, Any], brief:
 def build_multi_pass_investigation(packet: dict[str, Any], survey: dict[str, Any], brief: dict[str, Any]) -> dict[str, Any]:
     triage = _dict(packet.get("task_triage"))
     risk_level = str(brief.get("risk_level") or triage.get("risk_level") or "high")
-    complex_task = risk_level in {"medium", "high"} or bool(_list(survey.get("local_import_edges"))) or bool(_list(survey.get("generic_import_edges")))
+    complex_task = risk_level == "high"
     phases = [
         {
             "id": "project_map",
@@ -137,9 +137,15 @@ def build_multi_pass_investigation(packet: dict[str, Any], survey: dict[str, Any
 
 def build_work_package_handoff(brief: dict[str, Any]) -> dict[str, Any]:
     work_packages = _dict(brief.get("implementation_work_packages"))
+    output_contract = _dict(brief.get("worker_output_contract"))
     packages = _list(work_packages.get("packages"))
     graph = _dict(work_packages.get("package_dependency_graph"))
     rows = _list(graph.get("rows"))
+    contract_rows = {
+        str(row.get("package_id") or ""): row
+        for row in _list(output_contract.get("package_result_contract"))
+        if isinstance(row, dict) and row.get("package_id")
+    }
     dependencies_by_package = {
         str(row.get("package_id") or ""): _strings(row.get("depends_on"))
         for row in rows
@@ -150,13 +156,15 @@ def build_work_package_handoff(brief: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(package, dict):
             continue
         package_id = str(package.get("id") or "")
+        contract_row = contract_rows.get(package_id, {})
         package_rows.append(
             {
                 "id": package_id,
                 "owner": "CodeBrigade",
                 "depends_on": dependencies_by_package.get(package_id, _strings(package.get("depends_on"))),
                 "impact_surfaces": _strings(package.get("impact_surfaces")),
-                "acceptance_requirements": _strings(package.get("acceptance_requirements")),
+                "acceptance_requirements": _first_strings(package.get("acceptance_requirements"), contract_row.get("acceptance_requirements")),
+                "acceptance_evidence": _strings(contract_row.get("acceptance_evidence")),
                 "blocking_policy": _strings(package.get("blocking_policy")),
             }
         )

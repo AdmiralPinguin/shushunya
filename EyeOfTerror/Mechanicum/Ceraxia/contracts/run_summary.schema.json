@@ -21,6 +21,10 @@
     "multi_pass_investigation_status",
     "multi_pass_investigation_phase_count",
     "code_brigade_work_package_handoff_status",
+    "planning_department_review_status",
+    "planning_department_review_role_count",
+    "planning_department_review_phase_count",
+    "planning_department_review_package_count",
     "planning_work_phase_count",
     "implementation_work_package_count",
     "implementation_work_package_surface_count",
@@ -152,6 +156,18 @@
     },
     "code_brigade_work_package_handoff_status": {
       "type": "string"
+    },
+    "planning_department_review_status": {
+      "type": "string"
+    },
+    "planning_department_review_role_count": {
+      "type": "integer"
+    },
+    "planning_department_review_phase_count": {
+      "type": "integer"
+    },
+    "planning_department_review_package_count": {
+      "type": "integer"
     },
     "planning_work_phase_count": {
       "type": "integer"

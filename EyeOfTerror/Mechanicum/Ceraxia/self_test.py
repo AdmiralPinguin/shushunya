@@ -10,6 +10,7 @@ from ceraxia import (
     CeraxiaInput,
     LIFECYCLE,
     allocate_run_dir,
+    attach_planning_department_to_brief,
     build_execution_readiness,
     build_implementation_brief,
     build_planning_feedback_request,
@@ -20,6 +21,7 @@ from ceraxia import (
     run_ceraxia,
     validate_planning_packet,
 )
+from planning_department import build_planning_department_package
 
 import sys
 
@@ -312,6 +314,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(review["verification_sufficiency"]["status"], "planned_only")
             self.assertEqual(review["surface_verification_sufficiency"]["status"], "planned_only")
             self.assertGreaterEqual(review["package_status_sufficiency"]["status_counts"]["planned"], 1)
+            self.assertEqual(review["planning_department_sufficiency"]["status"], "complete")
+            self.assertEqual(review["planning_department_sufficiency"]["phase_count"], 4)
+            self.assertGreaterEqual(review["planning_department_sufficiency"]["role_count"], 5)
             self.assertGreaterEqual(review["surface_package_sufficiency"]["surface_count"], 1)
             self.assertFalse(review["surface_package_sufficiency"]["missing_status_package_ids"])
             self.assertGreaterEqual(review["surface_verification_sufficiency"]["surface_count"], 1)
@@ -336,6 +341,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(planning_feedback["source"], "Ceraxia.review_gate")
             self.assertEqual(planning_feedback["feedback_findings"], [])
             self.assertIn("implementation_brief.json", planning_feedback["required_return_artifacts"])
+            self.assertIn("planning_department.json", planning_feedback["required_return_artifacts"])
             readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
             self.assertEqual(readiness["decision"], "blocked")
             self.assertIn("dry run requested; real CodeBrigade execution was intentionally skipped", readiness["blockers"])
@@ -358,6 +364,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["multi_pass_investigation_status"], "complete")
             self.assertEqual(summary["multi_pass_investigation_phase_count"], 4)
             self.assertEqual(summary["code_brigade_work_package_handoff_status"], "ready")
+            self.assertEqual(summary["planning_department_review_status"], "complete")
+            self.assertGreaterEqual(summary["planning_department_review_role_count"], 5)
+            self.assertEqual(summary["planning_department_review_phase_count"], 4)
+            self.assertGreaterEqual(summary["planning_department_review_package_count"], 1)
             self.assertGreaterEqual(summary["planning_work_phase_count"], 6)
             self.assertEqual(summary["survey_quality_decision"], "passed")
             self.assertEqual(summary["survey_quality_warning_count"], 0)
@@ -488,6 +498,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("Engineering RFC status: accepted_for_code_brigade_handoff", final_report)
             self.assertIn("Multi-pass investigation status: complete", final_report)
             self.assertIn("CodeBrigade package handoff: ready", final_report)
+            self.assertIn("Planning department review status: complete", final_report)
             self.assertIn("Expert quality level: expert", final_report)
             self.assertIn("Expert quality required: true", final_report)
             self.assertIn("Planning work phases:", final_report)
@@ -841,6 +852,45 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         replan_packet = build_planning_packet(feedback_intake["replan_payload"])
         self.assertEqual(validate_planning_packet(replan_packet), [])
         self.assertTrue(any("feedback finding:" in item for item in replan_packet["problem_statement"]["known_constraints"]))
+
+    def test_review_gate_blocks_missing_planning_department_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("from util import allowed\n\ndef app():\n    return allowed()\n", encoding="utf-8")
+            (repo / "util.py").write_text("def allowed():\n    return True\n", encoding="utf-8")
+            (repo / "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
+            (repo / "api.ts").write_text("export function api() { return true; }\n", encoding="utf-8")
+            (repo / "package.json").write_text(json.dumps({"scripts": {"test": "pytest"}}), encoding="utf-8")
+            packet = build_planning_packet({"task": "почини security bug в `app.py` и проверь тестами", "repo_path": str(repo)})
+            survey = build_repo_survey(packet)
+            brief = build_implementation_brief(packet, survey)
+            planning_department = build_planning_department_package(packet, survey, brief)
+            brief = attach_planning_department_to_brief(brief, planning_department)
+            worker_report = code_brigade_adapter.build_worker_report(brief, dry_run=True)
+            plan = worker_report["implementation_plan"]
+            plan["planning_department_status"] = ""
+            plan["engineering_rfc_status"] = ""
+            plan["multi_pass_investigation_status"] = ""
+            plan["multi_pass_investigation_phases"] = []
+            plan["planning_department_work_package_handoff"] = {}
+            verification_report = {
+                "status": "planned_only",
+                "negative_tests_required": ["untrusted input is rejected"],
+                "broad_verification_required": True,
+                "commands_planned": ["python -m pytest test_app.py"],
+                "commands_executed": [],
+                "output_summary": [],
+            }
+            review = review_gate(packet, brief, worker_report, verification_report)
+            self.assertEqual(review["decision"], "blocked")
+            self.assertEqual(review["planning_department_sufficiency"]["status"], "blocked")
+            self.assertTrue(any("planning department handoff is incomplete" in item["finding"] for item in review["findings"]))
+            feedback = build_planning_feedback_request("run-1", packet, brief, worker_report, verification_report, review)
+            self.assertEqual(feedback["status"], "required")
+            self.assertEqual(feedback["planning_department_sufficiency"], review["planning_department_sufficiency"])
+            self.assertTrue(any("planning department" in item["finding"] for item in feedback["feedback_findings"]))
+            self.assertIn("planning_department.json", feedback["required_return_artifacts"])
 
     def test_review_gate_blocks_implemented_worker_without_read_evidence(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})

@@ -770,10 +770,12 @@ def build_planning_feedback_request(
                 "constraint trace matrix",
                 "assumption register",
                 "worker output contract",
+                "planning department",
             ]
         )
     ]
     worker_output_sufficiency = review.get("worker_output_contract_sufficiency") if isinstance(review.get("worker_output_contract_sufficiency"), dict) else {}
+    planning_department_sufficiency = review.get("planning_department_sufficiency") if isinstance(review.get("planning_department_sufficiency"), dict) else {}
     return {
         "kind": "ceraxia_planning_feedback_request",
         "contract_version": CONTRACT_VERSION,
@@ -789,14 +791,17 @@ def build_planning_feedback_request(
         "planning_review_decision": brief.get("planning_review_gate", {}).get("decision", "") if isinstance(brief.get("planning_review_gate"), dict) else "",
         "feedback_findings": feedback_findings,
         "worker_output_contract_sufficiency": worker_output_sufficiency,
+        "planning_department_sufficiency": planning_department_sufficiency,
         "replan_focus": [
             "repair planning packet contract drift",
+            "repair planning department RFC, multi-pass investigation, and CodeBrigade handoff",
             "refresh implementation brief sections before CodeBrigade mutation",
             "tighten worker-output contract when package statuses or evidence sources are missing",
             "return a new planning_packet.json and implementation_brief.json candidate",
         ],
         "required_return_artifacts": [
             "planning_packet.json",
+            "planning_department.json",
             "implementation_brief.json",
             "worker_output_contract",
             "planning_review_gate",
@@ -1197,6 +1202,68 @@ def worker_output_contract_sufficiency_from_worker(worker_report: dict[str, Any]
     }
 
 
+def planning_department_sufficiency_from_worker(worker_report: dict[str, Any]) -> dict[str, Any]:
+    implementation_plan = worker_report.get("implementation_plan") if isinstance(worker_report.get("implementation_plan"), dict) else {}
+    roles = implementation_plan.get("planning_department_roles") if isinstance(implementation_plan.get("planning_department_roles"), list) else []
+    phases = implementation_plan.get("multi_pass_investigation_phases") if isinstance(implementation_plan.get("multi_pass_investigation_phases"), list) else []
+    handoff = (
+        implementation_plan.get("planning_department_work_package_handoff")
+        if isinstance(implementation_plan.get("planning_department_work_package_handoff"), dict)
+        else {}
+    )
+    required_phase_ids = {
+        "project_map",
+        "dependency_public_api_map",
+        "test_ci_manifest_map",
+        "targeted_pre_mutation_reads",
+    }
+    phase_ids = {
+        str(phase.get("id") or "")
+        for phase in phases
+        if isinstance(phase, dict)
+    }
+    packages = handoff.get("packages") if isinstance(handoff.get("packages"), list) else []
+    blockers: list[str] = []
+    if implementation_plan.get("planning_department_status") != "ready_for_code_brigade":
+        blockers.append("planning department is not ready for CodeBrigade")
+    if len(roles) < 5:
+        blockers.append("planning department has fewer than five specialist roles")
+    if implementation_plan.get("engineering_rfc_status") != "accepted_for_code_brigade_handoff":
+        blockers.append("engineering RFC/ADR is not accepted for CodeBrigade handoff")
+    missing_phases = sorted(required_phase_ids - phase_ids)
+    if implementation_plan.get("multi_pass_investigation_status") != "complete":
+        blockers.append("multi-pass repository investigation is not complete")
+    if missing_phases:
+        blockers.append("multi-pass repository investigation is missing phases: " + ", ".join(missing_phases))
+    for phase in phases:
+        if not isinstance(phase, dict):
+            blockers.append("multi-pass repository investigation phase is not an object")
+            continue
+        if not phase.get("required_before_mutation"):
+            blockers.append(f"multi-pass phase is not required before mutation: {phase.get('id')}")
+    if handoff.get("status") != "ready":
+        blockers.append("planning department CodeBrigade work package handoff is not ready")
+    if not packages:
+        blockers.append("planning department handoff has no work packages")
+    for package in packages:
+        if not isinstance(package, dict):
+            blockers.append("planning department handoff package is not an object")
+            continue
+        package_id = str(package.get("id") or "<unknown>")
+        if not package.get("acceptance_requirements"):
+            blockers.append(f"planning department package has no acceptance requirements: {package_id}")
+        if not isinstance(package.get("depends_on"), list):
+            blockers.append(f"planning department package has no dependency list: {package_id}")
+    return {
+        "status": "complete" if not blockers else "blocked",
+        "role_count": len(roles),
+        "phase_count": len(phases),
+        "package_count": len(packages),
+        "missing_phase_ids": missing_phases,
+        "blockers": blockers,
+    }
+
+
 def pre_mutation_read_sufficiency_from_worker(worker_report: dict[str, Any]) -> dict[str, Any]:
     evidence = worker_report.get("pre_mutation_read_evidence") if isinstance(worker_report.get("pre_mutation_read_evidence"), dict) else {}
     blockers: list[str] = []
@@ -1411,6 +1478,7 @@ def review_gate(
     constraint_trace_sufficiency = constraint_trace_sufficiency_from_worker(worker_report)
     assumption_sufficiency = assumption_sufficiency_from_worker(worker_report)
     worker_output_contract_sufficiency = worker_output_contract_sufficiency_from_worker(worker_report)
+    planning_department_sufficiency = planning_department_sufficiency_from_worker(worker_report)
     pre_mutation_read_sufficiency = pre_mutation_read_sufficiency_from_worker(worker_report)
     source_mutation_scope_sufficiency = source_mutation_scope_sufficiency_from_worker(worker_report)
     verification_after_mutation = verification_after_mutation_sufficiency(worker_report, verification_report)
@@ -1439,6 +1507,8 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "assumption register is incomplete: " + "; ".join(assumption_sufficiency["blockers"])})
     if worker_output_contract_sufficiency["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "worker output contract is incomplete: " + "; ".join(worker_output_contract_sufficiency["blockers"])})
+    if planning_department_sufficiency["status"] == "blocked":
+        findings.append({"severity": "blocker", "finding": "planning department handoff is incomplete: " + "; ".join(planning_department_sufficiency["blockers"])})
     if pre_mutation_read_sufficiency["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "pre-mutation read evidence is incomplete: " + "; ".join(pre_mutation_read_sufficiency["blockers"])})
     if source_mutation_scope_sufficiency["status"] == "blocked":
@@ -1501,6 +1571,7 @@ def review_gate(
         "constraint_trace_sufficiency": constraint_trace_sufficiency,
         "assumption_sufficiency": assumption_sufficiency,
         "worker_output_contract_sufficiency": worker_output_contract_sufficiency,
+        "planning_department_sufficiency": planning_department_sufficiency,
         "pre_mutation_read_sufficiency": pre_mutation_read_sufficiency,
         "source_mutation_scope_sufficiency": source_mutation_scope_sufficiency,
         "verification_after_mutation_sufficiency": verification_after_mutation,
@@ -1519,6 +1590,7 @@ def review_gate(
             "constraint traceability coverage",
             "assumption register coverage",
             "worker output contract coverage",
+            "planning department RFC and multi-pass handoff coverage",
             "pre-mutation read evidence",
             "source mutation scope",
             "verification after final mutation",
@@ -1559,6 +1631,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     constraint_trace_sufficiency = review.get("constraint_trace_sufficiency") if isinstance(review.get("constraint_trace_sufficiency"), dict) else {}
     assumption_sufficiency = review.get("assumption_sufficiency") if isinstance(review.get("assumption_sufficiency"), dict) else {}
     worker_output_contract_sufficiency = review.get("worker_output_contract_sufficiency") if isinstance(review.get("worker_output_contract_sufficiency"), dict) else {}
+    planning_department_sufficiency = review.get("planning_department_sufficiency") if isinstance(review.get("planning_department_sufficiency"), dict) else {}
     work_phases = work_breakdown.get("phases") if isinstance(work_breakdown.get("phases"), list) else []
     blockers = readiness.get("blockers", [])
     warnings = review.get("warnings", [])
@@ -1601,6 +1674,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Multi-pass investigation status: {planning_department_investigation.get('status', '')}",
         f"Multi-pass investigation phases: {len(planning_department_investigation.get('phases', [])) if isinstance(planning_department_investigation.get('phases'), list) else 0}",
         f"CodeBrigade package handoff: {planning_department_handoff.get('status', '')}",
+        f"Planning department review status: {planning_department_sufficiency.get('status', '')}",
         f"Planning work phases: {len(work_phases)}",
         f"Implementation work packages: {len(packages)}",
         f"Work package covered surfaces: {len(covered_package_surfaces)}",
@@ -2124,6 +2198,7 @@ def build_run_summary(
     constraint_trace_sufficiency = review.get("constraint_trace_sufficiency") if isinstance(review.get("constraint_trace_sufficiency"), dict) else {}
     assumption_sufficiency = review.get("assumption_sufficiency") if isinstance(review.get("assumption_sufficiency"), dict) else {}
     worker_output_contract_sufficiency = review.get("worker_output_contract_sufficiency") if isinstance(review.get("worker_output_contract_sufficiency"), dict) else {}
+    planning_department_sufficiency = review.get("planning_department_sufficiency") if isinstance(review.get("planning_department_sufficiency"), dict) else {}
     planning_feedback = planning_feedback_request if isinstance(planning_feedback_request, dict) else {}
     planning_feedback_findings = planning_feedback.get("feedback_findings") if isinstance(planning_feedback.get("feedback_findings"), list) else []
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
@@ -2164,6 +2239,10 @@ def build_run_summary(
         "multi_pass_investigation_status": planning_department_investigation.get("status", ""),
         "multi_pass_investigation_phase_count": len(planning_department_investigation.get("phases", [])) if isinstance(planning_department_investigation.get("phases"), list) else 0,
         "code_brigade_work_package_handoff_status": planning_department_handoff.get("status", ""),
+        "planning_department_review_status": planning_department_sufficiency.get("status", ""),
+        "planning_department_review_role_count": planning_department_sufficiency.get("role_count", 0),
+        "planning_department_review_phase_count": planning_department_sufficiency.get("phase_count", 0),
+        "planning_department_review_package_count": planning_department_sufficiency.get("package_count", 0),
         "planning_work_phase_count": len(work_phases),
         "implementation_work_package_count": len(packages),
         "implementation_work_package_surface_count": len(package_surfaces),
