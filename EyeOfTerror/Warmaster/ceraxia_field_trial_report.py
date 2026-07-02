@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ceraxia_evidence_contract import evidence_package_status
+from ceraxia_evidence_contract import evidence_package_status, next_stage_evidence_status
 
 
 WARMASTER_ROOT = Path(__file__).resolve().parent
@@ -28,6 +28,10 @@ def load_json(path: Path) -> dict[str, Any]:
 
 def honest_evidence_status(entry: dict[str, Any]) -> dict[str, Any]:
     return evidence_package_status(EYE_ROOT.parent, entry)
+
+
+def next_stage_package_status(entry: dict[str, Any], trial: dict[str, Any]) -> dict[str, Any]:
+    return next_stage_evidence_status(EYE_ROOT.parent, entry, trial)
 
 
 def validate_ledger(spec: dict[str, Any], ledger: dict[str, Any]) -> list[str]:
@@ -84,6 +88,7 @@ def build_next_stage_metrics(spec: dict[str, Any], entries: list[dict[str, Any]]
     multi_file_nonfixture = 0
     attempts: list[float] = []
     postmortem_gaps: list[dict[str, str]] = []
+    evidence_gaps: list[dict[str, str]] = []
     for entry in live_entries:
         next_stage = entry.get("next_stage") if isinstance(entry.get("next_stage"), dict) else {}
         trial = trial_by_id.get(str(entry.get("trial_id") or ""), {})
@@ -119,6 +124,15 @@ def build_next_stage_metrics(spec: dict[str, Any], entries: list[dict[str, Any]]
                     "status": status,
                 }
             )
+        evidence_status = next_stage_package_status(entry, trial)
+        if evidence_status.get("passed") is not True:
+            evidence_gaps.append(
+                {
+                    "trial_id": str(entry.get("trial_id") or ""),
+                    "run_id": str(entry.get("run_id") or ""),
+                    "reason": str(evidence_status.get("reason") or "next-stage evidence package missing or incomplete"),
+                }
+            )
     live_count = len(live_entries)
     success_rate = round(successful / live_count, 3) if live_count else 0.0
     minimum_live_tasks = int(target.get("minimum_live_tasks") or 0)
@@ -126,6 +140,7 @@ def build_next_stage_metrics(spec: dict[str, Any], entries: list[dict[str, Any]]
     minimum_success_rate = float(target.get("minimum_success_rate") or 0)
     maximum_false_successes = int(target.get("maximum_false_successes", 0))
     minimum_multifile = int(target.get("minimum_multifile_nonfixture_tasks") or 0)
+    require_evidence = target.get("require_next_stage_evidence_package") is True
     target_met = bool(
         target
         and live_count >= minimum_live_tasks
@@ -134,6 +149,7 @@ def build_next_stage_metrics(spec: dict[str, Any], entries: list[dict[str, Any]]
         and false_successes <= maximum_false_successes
         and multi_file_nonfixture >= minimum_multifile
         and not postmortem_gaps
+        and (not require_evidence or not evidence_gaps)
     )
     return {
         "target_met": target_met,
@@ -152,6 +168,8 @@ def build_next_stage_metrics(spec: dict[str, Any], entries: list[dict[str, Any]]
         "multi_file_nonfixture_count": multi_file_nonfixture,
         "postmortem_gap_count": len(postmortem_gaps),
         "postmortem_gaps": postmortem_gaps,
+        "evidence_gap_count": len(evidence_gaps),
+        "evidence_gaps": evidence_gaps,
         "gaps": {
             "needs_more_live_tasks": live_count < minimum_live_tasks,
             "needs_more_task_classes": len(class_names) < minimum_task_classes,
@@ -159,6 +177,7 @@ def build_next_stage_metrics(spec: dict[str, Any], entries: list[dict[str, Any]]
             "has_false_successes": false_successes > maximum_false_successes,
             "needs_more_multifile_nonfixture_tasks": multi_file_nonfixture < minimum_multifile,
             "has_postmortem_gaps": bool(postmortem_gaps),
+            "has_evidence_gaps": bool(evidence_gaps),
         },
     }
 
@@ -640,6 +659,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Report human-reviewed Ceraxia field trial progress.")
     parser.add_argument("--require-target", action="store_true", help="Exit non-zero unless the real 7/10 target is met.")
     parser.add_argument("--require-expert-target", action="store_true", help="Exit non-zero unless the real 10/10 expert target is met.")
+    parser.add_argument("--require-next-stage-target", action="store_true", help="Exit non-zero unless the live next-stage target is met.")
     args = parser.parse_args()
     spec = load_json(SPEC)
     ledger = load_json(LEDGER)
@@ -653,6 +673,8 @@ def main() -> int:
     if args.require_target and not report["target_met"]:
         return 1
     if args.require_expert_target and not report["expert_target_met"]:
+        return 1
+    if args.require_next_stage_target and not report["next_stage_target_met"]:
         return 1
     return 0
 

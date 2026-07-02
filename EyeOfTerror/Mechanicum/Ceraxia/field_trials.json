@@ -18,7 +18,8 @@
     "minimum_task_class_variety": 10,
     "failed_or_blocked_require_postmortem": true,
     "track_repaired_successes_separately": true,
-    "track_honest_blocks_separately": true
+    "track_honest_blocks_separately": true,
+    "require_next_stage_evidence_package": true
   },
   "expert_target": {
     "level": 10,

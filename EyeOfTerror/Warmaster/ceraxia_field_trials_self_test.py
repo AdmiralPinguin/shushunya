@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ceraxia_evidence_contract import REQUIRED_HONEST_CHECKS, evidence_package_status
+from ceraxia_evidence_contract import REQUIRED_HONEST_CHECKS, NEXT_STAGE_PACKAGE_KIND, evidence_package_status, next_stage_evidence_status
 from ceraxia_field_trial_runner import (
     DEFAULT_FIELD_TRIAL_RUN_ROOT,
     apply_trial_checks_to_outcome,
@@ -63,6 +63,8 @@ def main() -> int:
         raise AssertionError(f"Ceraxia next-stage target must require postmortems: {next_stage_target}")
     if next_stage_target.get("track_repaired_successes_separately") is not True or next_stage_target.get("track_honest_blocks_separately") is not True:
         raise AssertionError(f"Ceraxia next-stage target must classify repaired successes and honest blocks: {next_stage_target}")
+    if next_stage_target.get("require_next_stage_evidence_package") is not True:
+        raise AssertionError(f"Ceraxia next-stage target must require evidence packages: {next_stage_target}")
     if expert_target.get("level") != 10 or expert_target.get("rolling_average_min", 0) < 9.5:
         raise AssertionError(f"Ceraxia expert target must represent a real 10/10 gate: {expert_target}")
     if expert_target.get("minimum_expert_trials", 0) < 6:
@@ -133,6 +135,7 @@ def main() -> int:
         "average_attempt_count",
         "multi_file_nonfixture_count",
         "postmortem_gap_count",
+        "evidence_gap_count",
         "gaps",
     }:
         if key not in next_stage_metrics:
@@ -201,6 +204,9 @@ def main() -> int:
     synthetic_entries = []
     synthetic_trials = data["trials"][:20]
     for index, trial in enumerate(synthetic_trials):
+        status = "repaired_success" if index in {2, 7} else "fully_successful"
+        attempt_count = 2 if index in {2, 7} else 1
+        changed_files = [f"src/task_{index}.py", f"tests/test_task_{index}.py"] if index < 5 else [f"src/task_{index}.py"]
         synthetic_entries.append(
             {
                 "trial_id": trial["id"],
@@ -208,11 +214,34 @@ def main() -> int:
                 "accepted_for_rolling_score": False,
                 "human_review_notes": "postmortem/evidence recorded",
                 "next_stage": {
-                    "status": "repaired_success" if index in {2, 7} else "fully_successful",
-                    "attempt_count": 2 if index in {2, 7} else 1,
+                    "status": status,
+                    "attempt_count": attempt_count,
                     "multi_file_nonfixture": index < 5,
                     "false_success": False,
                     "postmortem": "not required for successful run",
+                    "evidence_package": {
+                        "kind": NEXT_STAGE_PACKAGE_KIND,
+                        "contract_version": 1,
+                        "trial_id": trial["id"],
+                        "run_id": f"next-stage-{index}",
+                        "task_class": trial["class"],
+                        "status": status,
+                        "attempt_count": attempt_count,
+                        "real_repo_task": True,
+                        "fixture_only": False,
+                        "false_success": False,
+                        "multi_file_nonfixture": index < 5,
+                        "changed_files": changed_files,
+                        "verification_passed": True,
+                        "review_accepted": True,
+                        "artifacts": {
+                            "repo_investigation": "evidence/repo_investigation.json",
+                            "planning": "evidence/planning_department.json",
+                            "execution": "evidence/execution_result.json",
+                            "verification": "evidence/verification_report.json",
+                            "review": "evidence/review_gate.json",
+                        },
+                    },
                 },
             }
         )
@@ -225,6 +254,20 @@ def main() -> int:
     false_success_report = build_report(data, {"entries": false_success_entries})
     if false_success_report["next_stage_target_met"] is True:
         raise AssertionError(f"next-stage target must fail on false success: {false_success_report['next_stage_metrics']}")
+    missing_evidence_entries = json.loads(json.dumps(synthetic_entries))
+    missing_evidence_entries[0]["next_stage"].pop("evidence_package")
+    missing_evidence_report = build_report(data, {"entries": missing_evidence_entries})
+    if missing_evidence_report["next_stage_target_met"] is True:
+        raise AssertionError(f"next-stage target must fail without evidence package: {missing_evidence_report['next_stage_metrics']}")
+    blocked_without_postmortem = json.loads(json.dumps(synthetic_entries))
+    blocked_without_postmortem[0]["human_review_notes"] = ""
+    blocked_without_postmortem[0]["next_stage"]["status"] = "honest_blocked"
+    blocked_without_postmortem[0]["next_stage"]["postmortem"] = ""
+    blocked_without_postmortem[0]["next_stage"]["evidence_package"]["status"] = "honest_blocked"
+    blocked_without_postmortem[0]["next_stage"]["evidence_package"]["postmortem"] = ""
+    blocked_report = build_report(data, {"entries": blocked_without_postmortem})
+    if blocked_report["next_stage_target_met"] is True:
+        raise AssertionError(f"next-stage target must fail without blocked postmortem: {blocked_report['next_stage_metrics']}")
     if report_payload.get("expert_target_met") is True:
         expert_gaps = report_payload.get("expert_gaps", {})
         if (
@@ -306,6 +349,17 @@ def main() -> int:
         raise AssertionError(f"strict Ceraxia expert report rejected proven expert target: {expert_strict_report.stdout}")
     if report_payload.get("expert_target_met") is not True and expert_strict_report.returncode == 0:
         raise AssertionError("strict Ceraxia expert report must fail until expert evidence proves 10/10")
+    next_stage_strict_report = subprocess.run(
+        [sys.executable, str(REPORTER), "--require-next-stage-target"],
+        cwd=str(EYE_ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if report_payload.get("next_stage_target_met") is True and next_stage_strict_report.returncode != 0:
+        raise AssertionError(f"strict Ceraxia next-stage report rejected proven live target: {next_stage_strict_report.stdout}")
+    if report_payload.get("next_stage_target_met") is not True and next_stage_strict_report.returncode == 0:
+        raise AssertionError("strict Ceraxia next-stage report must fail until live evidence packages prove the target")
     runner_list = subprocess.run(
         [sys.executable, str(RUNNER), "--list"],
         cwd=str(EYE_ROOT.parent),
@@ -526,6 +580,15 @@ def main() -> int:
         complete_status = evidence_package_status(tmp_root, {"evidence_paths": [str(trial_result), str(manifest)]})
         if complete_status.get("passed") is not True:
             raise AssertionError(f"Ceraxia evidence contract rejected complete package: {complete_status}")
+        next_stage_entry = synthetic_entries[0]
+        next_stage_status = next_stage_evidence_status(tmp_root, next_stage_entry, synthetic_trials[0])
+        if next_stage_status.get("passed") is not True:
+            raise AssertionError(f"Ceraxia next-stage evidence contract rejected complete inline package: {next_stage_status}")
+        weak_next_stage_entry = json.loads(json.dumps(next_stage_entry))
+        weak_next_stage_entry["next_stage"]["evidence_package"]["artifacts"].pop("review")
+        weak_next_stage_status = next_stage_evidence_status(tmp_root, weak_next_stage_entry, synthetic_trials[0])
+        if weak_next_stage_status.get("passed") is True or "artifacts" not in str(weak_next_stage_status.get("reason", "")):
+            raise AssertionError(f"Ceraxia next-stage evidence contract accepted incomplete package: {weak_next_stage_status}")
     expert_suite = subprocess.run(
         [sys.executable, str(EXPERT_SUITE), "--require-all"],
         cwd=str(EYE_ROOT.parent),
