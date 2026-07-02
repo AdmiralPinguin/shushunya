@@ -22,6 +22,7 @@ from ceraxia import (
     validate_planning_packet,
 )
 from planning_department import build_planning_department_package
+import repo_survey as repo_survey_module
 
 import sys
 
@@ -228,6 +229,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(implementation_plan["planning_department_status"], "ready_for_code_brigade")
             self.assertEqual(implementation_plan["engineering_rfc_status"], "accepted_for_code_brigade_handoff")
             self.assertEqual(implementation_plan["multi_pass_investigation_status"], "complete")
+
             self.assertEqual(len(implementation_plan["multi_pass_investigation_phases"]), 4)
             self.assertEqual(implementation_plan["planning_department_work_package_handoff"]["status"], "ready")
             self.assertEqual(implementation_plan["expert_quality_level"], "expert")
@@ -550,6 +552,30 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("- package manifest candidates:", final_report)
             self.assertIn("- expert tradeoffs:", final_report)
             self.assertIn("- expert review checklist items:", final_report)
+
+    def test_repo_survey_directly_checks_explicit_path_hints_past_scan_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "first.py").write_text("def first():\n    return True\n", encoding="utf-8")
+            nested = repo / "deep" / "target"
+            nested.mkdir(parents=True)
+            (nested / "README.md").write_text("# Target\n", encoding="utf-8")
+            old_limit = repo_survey_module.MAX_SURVEY_FILES
+            try:
+                repo_survey_module.MAX_SURVEY_FILES = 1
+                packet = build_planning_packet(
+                    {
+                        "task": "обнови `deep/target/README.md`",
+                        "repo_path": str(repo),
+                    }
+                )
+                survey = build_repo_survey(packet)
+            finally:
+                repo_survey_module.MAX_SURVEY_FILES = old_limit
+            self.assertIn("deep/target/README.md", survey["existing_path_hints"])
+            self.assertNotIn("deep/target/README.md", survey["missing_path_hints"])
+            self.assertIn("deep/target/README.md", [row["path"] for row in survey["recommended_read_order"]])
 
     def test_missing_repo_blocks_before_claiming_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

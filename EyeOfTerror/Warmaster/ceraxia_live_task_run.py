@@ -56,10 +56,10 @@ def status_from_run(task: dict[str, Any], result: dict[str, Any], run_dir: Path,
     return "failed"
 
 
-def build_live_task_prompt(packet: dict[str, Any]) -> str:
+def build_live_task_prompt(packet: dict[str, Any], patch_payload: dict[str, Any] | None = None) -> str:
     required_evidence = packet.get("required_evidence") if isinstance(packet.get("required_evidence"), list) else []
     rules = packet.get("operating_rules") if isinstance(packet.get("operating_rules"), list) else []
-    return (
+    prompt = (
         "Live Ceraxia engineering task.\n"
         f"Task id: {packet['task_id']}\n"
         f"Run id: {packet['run_id']}\n"
@@ -76,15 +76,26 @@ def build_live_task_prompt(packet: dict[str, Any]) -> str:
         + "\nDo not treat future evidence artifact filenames as repository paths to inspect. "
         "Do not claim benchmark success unless the final evidence package can be registered through the live task registrar."
     )
+    if patch_payload is not None:
+        prompt += "\nCERAXIA_PATCH:\n" + json.dumps(patch_payload, ensure_ascii=False, indent=2)
+    return prompt
 
 
-def run_ceraxia_for_task(task: dict[str, Any], run_id: str, repo_root: Path, runs_root: Path, mode: str) -> dict[str, Any]:
+def run_ceraxia_for_task(
+    task: dict[str, Any],
+    run_id: str,
+    repo_root: Path,
+    runs_root: Path,
+    mode: str,
+    patch_payload: dict[str, Any] | None = None,
+    execute_verification: bool = False,
+) -> dict[str, Any]:
     packet = build_task_packet(task, run_id, repo_root)
     command = [
         sys.executable,
         str(CERAXIA),
         "--task",
-        build_live_task_prompt(packet),
+        build_live_task_prompt(packet, patch_payload),
         "--repo-path",
         str(repo_root),
         "--runs-root",
@@ -92,6 +103,8 @@ def run_ceraxia_for_task(task: dict[str, Any], run_id: str, repo_root: Path, run
         "--mode",
         mode,
     ]
+    if execute_verification:
+        command.append("--execute-verification")
     completed = subprocess.run(
         command,
         cwd=str(REPO_ROOT),
@@ -186,6 +199,8 @@ def main() -> int:
     parser.add_argument("--runs-root", type=Path, default=WARMASTER_ROOT / "runs" / "live_task_runs")
     parser.add_argument("--evidence-root", type=Path, default=None, help="Optional persistent root for copied live evidence bundles.")
     parser.add_argument("--mode", choices=["dry_run", "guarded_patch", "repo_engineer", "review_only"], default="dry_run")
+    parser.add_argument("--patch-file", type=Path, default=None, help="Optional CERAXIA_PATCH JSON payload for controlled guarded_patch attempts.")
+    parser.add_argument("--execute-verification", action="store_true", help="Run Ceraxia allowlisted verification commands during the live task.")
     parser.add_argument("--ledger", type=Path, default=LEDGER)
     parser.add_argument("--register", action="store_true", help="Append a draft live entry to the ledger.")
     parser.add_argument("--accept-for-next-stage", action="store_true", help="Register and count the entry toward the live benchmark.")
@@ -196,7 +211,8 @@ def main() -> int:
     spec = load_json(SPEC)
     task = find_live_task(spec, args.task_id)
     run_id = args.run_id or args.task_id
-    result = run_ceraxia_for_task(task, run_id, args.repo_root.resolve(), args.runs_root, args.mode)
+    patch_payload = load_json(args.patch_file) if args.patch_file else None
+    result = run_ceraxia_for_task(task, run_id, args.repo_root.resolve(), args.runs_root, args.mode, patch_payload, args.execute_verification)
     run_dir = Path(str(result["run_dir"]))
     package = build_package(task, result, run_dir)
     package_path = run_dir / "next_stage_evidence_package.json"

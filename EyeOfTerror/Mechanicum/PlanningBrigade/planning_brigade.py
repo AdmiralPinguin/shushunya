@@ -22,16 +22,43 @@ def looks_like_path_hint(value: str) -> bool:
     return bool(PATH_HINT_PATTERN.fullmatch(cleaned) or "/" in cleaned)
 
 
-def extract_path_hints(task: str) -> list[str]:
+def patch_operation_path_hints(task: str) -> list[str]:
+    marker = "CERAXIA_PATCH:"
+    if marker not in task:
+        return []
+    raw = task.split(marker, 1)[1].strip()
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(raw)
+    except json.JSONDecodeError:
+        return []
+    operations = payload.get("operations") if isinstance(payload, dict) else []
+    if not isinstance(operations, list):
+        return []
     hints: list[str] = []
-    for value in re.findall(r"`([^`]+)`", task):
+    for operation in operations:
+        if not isinstance(operation, dict):
+            continue
+        for key in ("path", "old_path", "new_path"):
+            value = str(operation.get(key) or "").strip()
+            if looks_like_path_hint(value) and value not in hints:
+                hints.append(value)
+    return hints
+
+
+def extract_path_hints(task: str) -> list[str]:
+    task_without_patch = task.split("CERAXIA_PATCH:", 1)[0]
+    hints: list[str] = []
+    for value in re.findall(r"`([^`]+)`", task_without_patch):
         cleaned = value.strip()
         if looks_like_path_hint(cleaned) and cleaned not in hints:
             hints.append(cleaned)
-    for value in PATH_HINT_PATTERN.findall(task):
+    for value in PATH_HINT_PATTERN.findall(task_without_patch):
         cleaned = value.strip()
         if cleaned and cleaned not in hints:
             hints.append(cleaned)
+    for value in patch_operation_path_hints(task):
+        if value not in hints:
+            hints.append(value)
     return hints
 
 

@@ -89,6 +89,32 @@ def safe_relative_hint(value: str) -> bool:
     return ".." not in path.parts and value.strip() not in {"", "."}
 
 
+def normalized_hint(value: str) -> str:
+    return value.strip().replace("\\", "/").rstrip("/")
+
+
+def direct_existing_path_hints(root: Path, safe_path_hints: list[str], exclude_patterns: list[str]) -> tuple[list[str], dict[str, Path]]:
+    existing: list[str] = []
+    paths: dict[str, Path] = {}
+    resolved_root = root.resolve()
+    for hint in safe_path_hints:
+        normalized = normalized_hint(str(hint))
+        if not normalized:
+            continue
+        candidate = root / normalized
+        try:
+            resolved_candidate = candidate.resolve()
+            resolved_candidate.relative_to(resolved_root)
+        except (OSError, ValueError):
+            continue
+        if not candidate.exists():
+            continue
+        if candidate.is_file() and not excluded(candidate, root, exclude_patterns):
+            paths[hint] = candidate
+        existing.append(hint)
+    return existing, paths
+
+
 def unique(values: list[str]) -> list[str]:
     result: list[str] = []
     for value in values:
@@ -562,8 +588,14 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             break
     suffix_counts = Counter(path.suffix.lower() or "<none>" for path in files)
     rel_to_path = {str(path.relative_to(root)): path for path in files}
-    existing_path_hints = [hint for hint in safe_path_hints if hint in rel_to_path]
-    missing_path_hints = [hint for hint in safe_path_hints if hint not in rel_to_path]
+    direct_existing_hints, direct_hint_files = direct_existing_path_hints(root, safe_path_hints, exclude_patterns)
+    for hint, path in direct_hint_files.items():
+        rel_to_path.setdefault(normalized_hint(hint), path)
+        if path not in files:
+            files.append(path)
+            suffix_counts[path.suffix.lower() or "<none>"] += 1
+    existing_path_hints = unique([hint for hint in safe_path_hints if normalized_hint(hint) in rel_to_path] + direct_existing_hints)
+    missing_path_hints = [hint for hint in safe_path_hints if normalized_hint(hint) not in rel_to_path and hint not in direct_existing_hints]
     hinted_candidates = [
         hint
         for hint in existing_path_hints

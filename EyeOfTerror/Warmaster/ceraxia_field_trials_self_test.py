@@ -156,6 +156,21 @@ def main() -> int:
     leaked_hints = sorted(item for item in forbidden_prompt_hints if item in live_prompt)
     if leaked_hints:
         raise AssertionError(f"Ceraxia live task prompt leaks future artifact filenames as path hints: {leaked_hints}")
+    patched_live_prompt = build_live_task_prompt(
+        build_task_packet(live_tasks[0], "prompt-self-test", EYE_ROOT.parent),
+        {"operations": [{"type": "replace", "path": "README.md", "old": "old", "new": "new"}]},
+    )
+    if "CERAXIA_PATCH:" not in patched_live_prompt or '"operations"' not in patched_live_prompt:
+        raise AssertionError(f"Ceraxia live task prompt must preserve explicit controlled patch payload: {patched_live_prompt}")
+    live_run_help = subprocess.run(
+        [sys.executable, str(LIVE_TASK_RUN), "--help"],
+        cwd=str(EYE_ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if live_run_help.returncode != 0 or "--execute-verification" not in live_run_help.stdout:
+        raise AssertionError(f"Ceraxia live task harness must expose verification execution flag: {live_run_help.stdout} {live_run_help.stderr}")
     missing_live_prepare = subprocess.run(
         [sys.executable, str(LIVE_TASK_PREPARE), "--task-id", "missing-live-task"],
         cwd=str(EYE_ROOT.parent),

@@ -511,6 +511,30 @@ def main() -> int:
     )
     if code_literal_packet["problem_statement"]["explicit_path_hints"] != ["app.py"]:
         raise AssertionError(f"planning packet should not treat backtick code literals as paths: {code_literal_packet}")
+    patch_packet = planning_brigade.build_planning_packet(
+        {
+            "task": (
+                "Live task with explicit patch.\n"
+                "CERAXIA_PATCH:\n"
+                + json.dumps(
+                    {
+                        "operations": [
+                            {
+                                "type": "replace",
+                                "path": "EyeOfTerror/Mechanicum/Ceraxia/README.md",
+                                "old": "Generated artifacts live under `runs/`.",
+                                "new": "Curated bundles live under `live_evidence/`.",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+            ),
+            "repo_path": "/repo",
+        }
+    )
+    if patch_packet["problem_statement"]["explicit_path_hints"] != ["EyeOfTerror/Mechanicum/Ceraxia/README.md"]:
+        raise AssertionError(f"planning packet should extract patch operation paths without old/new literals: {patch_packet}")
 
     structured_packet = planning_brigade.build_planning_packet(
         {
