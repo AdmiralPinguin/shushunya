@@ -41,6 +41,10 @@ def main() -> int:
     expert_target = data.get("expert_target", {})
     if target.get("minimum_representative_trials", 0) < 12:
         raise AssertionError(f"Ceraxia field trials target is too small: {target}")
+    if target.get("fresh_window_size", 0) < target.get("minimum_representative_trials", 0):
+        raise AssertionError(f"Ceraxia fresh target window is too small: {target}")
+    if target.get("minimum_fresh_classes", 0) < 8:
+        raise AssertionError(f"Ceraxia fresh target must require at least 8 classes: {target}")
     if target.get("dimension_sample_min", 0) < 2:
         raise AssertionError(f"Ceraxia dimension sample target is too weak: {target}")
     if expert_target.get("level") != 10 or expert_target.get("rolling_average_min", 0) < 9.5:
@@ -101,8 +105,11 @@ def main() -> int:
         raise AssertionError(f"Ceraxia report must expose legacy score target separately from honest target: {report_payload}")
     for key in {
         "honest_overall_score",
+        "fresh_honest_overall_score",
         "honest_dimension_averages",
+        "fresh_honest_dimension_averages",
         "honest_dimension_sample_counts",
+        "fresh_honest_dimension_sample_counts",
         "honest_expert_overall_score",
         "honest_expert_dimension_averages",
         "honest_expert_dimension_sample_counts",
@@ -112,19 +119,45 @@ def main() -> int:
     }:
         if key not in report_payload:
             raise AssertionError(f"Ceraxia report must expose honest-only metric {key}: {report_payload}")
+    for key in {
+        "fresh_target_met",
+        "all_time_honest_target_met",
+        "fresh_honest_trial_count",
+        "fresh_honest_window_size",
+        "fresh_honest_class_count",
+        "fresh_honest_classes",
+    }:
+        if key not in report_payload:
+            raise AssertionError(f"Ceraxia report must expose fresh target metric {key}: {report_payload}")
+    if report_payload.get("target_met") is not report_payload.get("fresh_target_met"):
+        raise AssertionError(f"Ceraxia main target must be the fresh honest target, not stale all-time evidence: {report_payload}")
     if not isinstance(report_payload.get("accepted_legacy_without_honest_evidence"), list):
         raise AssertionError(f"Ceraxia report must expose accepted legacy honest-evidence gaps: {report_payload}")
     if report_payload.get("target_met") is True and report_payload.get("accepted_honest_evidence_count", 0) < target.get("minimum_representative_trials", 0):
         raise AssertionError(f"Ceraxia target cannot pass without enough honest evidence: {report_payload}")
     if report_payload.get("target_met") is True:
+        if report_payload.get("fresh_honest_trial_count", 0) < target.get("minimum_representative_trials", 0):
+            raise AssertionError(f"Ceraxia target cannot pass without enough fresh honest evidence: {report_payload}")
+        if report_payload.get("fresh_honest_class_count", 0) < target.get("minimum_fresh_classes", 0):
+            raise AssertionError(f"Ceraxia target cannot pass without enough fresh honest classes: {report_payload}")
+        if report_payload.get("fresh_honest_window_size", 0) < target.get("fresh_window_size", 0):
+            raise AssertionError(f"Ceraxia report fresh window drifted from target: {report_payload}")
+        if report_payload.get("fresh_honest_overall_score", 0) < target.get("rolling_average_min", 0):
+            raise AssertionError(f"Ceraxia target cannot pass on stale all-time score: {report_payload}")
         if report_payload.get("honest_overall_score", 0) < target.get("rolling_average_min", 0):
             raise AssertionError(f"Ceraxia target cannot pass on legacy-only overall score: {report_payload}")
         honest_counts = report_payload.get("honest_dimension_sample_counts", {})
         honest_averages = report_payload.get("honest_dimension_averages", {})
+        fresh_counts = report_payload.get("fresh_honest_dimension_sample_counts", {})
+        fresh_averages = report_payload.get("fresh_honest_dimension_averages", {})
         if any(honest_counts.get(dimension, 0) < target.get("dimension_sample_min", 0) for dimension in dimensions):
             raise AssertionError(f"Ceraxia target cannot pass on legacy-only dimension samples: {report_payload}")
         if any(honest_averages.get(dimension, 0) < target.get("dimension_average_min", 0) for dimension in dimensions):
             raise AssertionError(f"Ceraxia target cannot pass on legacy-only dimension averages: {report_payload}")
+        if any(fresh_counts.get(dimension, 0) < target.get("dimension_sample_min", 0) for dimension in dimensions):
+            raise AssertionError(f"Ceraxia target cannot pass on stale dimension samples: {report_payload}")
+        if any(fresh_averages.get(dimension, 0) < target.get("dimension_average_min", 0) for dimension in dimensions):
+            raise AssertionError(f"Ceraxia target cannot pass on stale dimension averages: {report_payload}")
     if report_payload.get("target_met") is True and not ledger.get("entries"):
         raise AssertionError(f"empty Ceraxia ledger must not prove target completion: {report_payload}")
     if report_payload.get("expert_target_met") is True:

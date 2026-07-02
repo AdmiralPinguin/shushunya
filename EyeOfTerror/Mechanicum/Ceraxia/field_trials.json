@@ -5,7 +5,9 @@
     "rolling_average_min": 7.0,
     "dimension_average_min": 6.0,
     "minimum_representative_trials": 12,
-    "dimension_sample_min": 2
+    "dimension_sample_min": 2,
+    "fresh_window_size": 12,
+    "minimum_fresh_classes": 8
   },
   "expert_target": {
     "level": 10,

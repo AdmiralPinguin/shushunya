@@ -245,13 +245,45 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     enough_honest_dimensions = all(value >= dimension_min for value in honest_dimension_averages.values())
     enough_honest_dimension_samples = all(count >= dimension_sample_min for count in honest_dimension_sample_counts.values())
     enough_honest_overall = honest_overall >= float(target.get("rolling_average_min") or 0)
+    fresh_window_size = int(target.get("fresh_window_size") or target.get("minimum_representative_trials") or 0)
+    minimum_fresh_classes = int(target.get("minimum_fresh_classes") or 0)
+    fresh_honest_entries = honest_entries[-fresh_window_size:] if fresh_window_size else list(honest_entries)
+    fresh_honest_scores_by_dimension = applicable_scores_for(fresh_honest_entries)
+    fresh_honest_dimension_averages = {
+        dimension: average(values)
+        for dimension, values in fresh_honest_scores_by_dimension.items()
+    }
+    fresh_honest_dimension_sample_counts = {
+        dimension: len(values)
+        for dimension, values in fresh_honest_scores_by_dimension.items()
+    }
+    fresh_honest_overall = average(list(fresh_honest_dimension_averages.values())) if fresh_honest_dimension_averages else 0.0
+    fresh_honest_classes = {
+        str(trial_by_id.get(str(entry.get("trial_id") or ""), {}).get("class") or "")
+        for entry in fresh_honest_entries
+        if trial_by_id.get(str(entry.get("trial_id") or ""), {}).get("class")
+    }
+    enough_fresh_honest_trials = len(fresh_honest_entries) >= int(target.get("minimum_representative_trials") or 0)
+    enough_fresh_honest_classes = len(fresh_honest_classes) >= minimum_fresh_classes
+    enough_fresh_honest_dimensions = all(value >= dimension_min for value in fresh_honest_dimension_averages.values())
+    enough_fresh_honest_dimension_samples = all(count >= dimension_sample_min for count in fresh_honest_dimension_sample_counts.values())
+    enough_fresh_honest_overall = fresh_honest_overall >= float(target.get("rolling_average_min") or 0)
     legacy_score_target_met = bool(enough_trials and enough_dimensions and enough_dimension_samples and enough_overall)
-    target_met = bool(
+    all_time_target_met = bool(
         enough_honest_trials
         and enough_honest_dimensions
         and enough_honest_dimension_samples
         and enough_honest_overall
     )
+    fresh_target_met = bool(
+        all_time_target_met
+        and enough_fresh_honest_trials
+        and enough_fresh_honest_classes
+        and enough_fresh_honest_dimensions
+        and enough_fresh_honest_dimension_samples
+        and enough_fresh_honest_overall
+    )
+    target_met = fresh_target_met
     expert_dimension_min = float(expert_target.get("dimension_average_min") or 0)
     expert_sample_min = int(expert_target.get("dimension_sample_min") or 0)
     expert_entry_min = float(expert_target.get("minimum_entry_score") or 0)
@@ -364,22 +396,31 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
         "overall_score": overall,
         "expert_overall_score": expert_overall,
         "honest_overall_score": honest_overall,
+        "fresh_honest_overall_score": fresh_honest_overall,
         "honest_expert_overall_score": honest_expert_overall,
         "rolling_honest_expert_overall_score": rolling_honest_expert_overall,
         "dimension_averages": dimension_averages,
         "expert_dimension_averages": expert_dimension_averages,
         "honest_dimension_averages": honest_dimension_averages,
+        "fresh_honest_dimension_averages": fresh_honest_dimension_averages,
         "honest_expert_dimension_averages": honest_expert_dimension_averages,
         "rolling_honest_expert_dimension_averages": rolling_honest_expert_dimension_averages,
         "dimension_sample_counts": dimension_sample_counts,
         "expert_dimension_sample_counts": expert_dimension_sample_counts,
         "honest_dimension_sample_counts": honest_dimension_sample_counts,
+        "fresh_honest_dimension_sample_counts": fresh_honest_dimension_sample_counts,
         "honest_expert_dimension_sample_counts": honest_expert_dimension_sample_counts,
         "rolling_honest_expert_dimension_sample_counts": rolling_honest_expert_dimension_sample_counts,
         "accepted_trial_count": len(accepted),
         "accepted_honest_evidence_count": sum(
             1 for status in honest_evidence_by_run.values() if status.get("passed")
         ),
+        "fresh_target_met": fresh_target_met,
+        "all_time_honest_target_met": all_time_target_met,
+        "fresh_honest_trial_count": len(fresh_honest_entries),
+        "fresh_honest_window_size": fresh_window_size,
+        "fresh_honest_class_count": len(fresh_honest_classes),
+        "fresh_honest_classes": sorted(fresh_honest_classes),
         "accepted_legacy_without_honest_evidence": accepted_legacy_without_honest_evidence,
         "draft_trial_count": len(entries) - len(accepted),
         "covered_classes": sorted(classes),
@@ -390,16 +431,29 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
             "needs_more_accepted_trials": not enough_trials,
             "honest_trial_count": len(honest_entries),
             "needs_more_honest_evidence": not enough_honest_trials,
+            "needs_more_fresh_honest_evidence": not enough_fresh_honest_trials,
+            "needs_more_fresh_honest_classes": not enough_fresh_honest_classes,
             "needs_higher_overall": not enough_honest_overall,
+            "fresh_needs_higher_overall": not enough_fresh_honest_overall,
             "legacy_needs_higher_overall": not enough_overall,
             "needs_more_dimension_evidence": [
                 dimension
                 for dimension, count in honest_dimension_sample_counts.items()
                 if count < dimension_sample_min
             ],
+            "fresh_needs_more_dimension_evidence": [
+                dimension
+                for dimension, count in fresh_honest_dimension_sample_counts.items()
+                if count < dimension_sample_min
+            ],
             "needs_higher_dimension_scores": [
                 dimension
                 for dimension, value in honest_dimension_averages.items()
+                if value < dimension_min
+            ],
+            "fresh_needs_higher_dimension_scores": [
+                dimension
+                for dimension, value in fresh_honest_dimension_averages.items()
                 if value < dimension_min
             ],
             "legacy_needs_more_dimension_evidence": [
