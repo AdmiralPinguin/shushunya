@@ -2357,6 +2357,7 @@ def build_run_summary(
         "engineering_memory_failure_pattern_count": len(memory.get("observed_failure_patterns", [])) if isinstance(memory.get("observed_failure_patterns"), list) else 0,
         "engineering_memory_reusable_pattern_count": len(memory.get("reusable_patterns", [])) if isinstance(memory.get("reusable_patterns"), list) else 0,
         "engineering_memory_false_success_guard_count": len(memory.get("false_success_guards", [])) if isinstance(memory.get("false_success_guards"), list) else 0,
+        "engineering_memory_reuse_plan_count": len(memory.get("reuse_plan", [])) if isinstance(memory.get("reuse_plan"), list) else 0,
         "engineering_memory_dangerous_module_count": len(memory.get("dangerous_modules", [])) if isinstance(memory.get("dangerous_modules"), list) else 0,
         "evidence": {
             "required_count": evidence_matrix.get("required_evidence_count", 0),

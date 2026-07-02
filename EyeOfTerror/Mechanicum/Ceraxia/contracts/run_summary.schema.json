@@ -101,6 +101,7 @@
     "engineering_memory_failure_pattern_count",
     "engineering_memory_reusable_pattern_count",
     "engineering_memory_false_success_guard_count",
+    "engineering_memory_reuse_plan_count",
     "engineering_memory_dangerous_module_count",
     "evidence",
     "blockers",
@@ -421,6 +422,9 @@
       "type": "integer"
     },
     "engineering_memory_false_success_guard_count": {
+      "type": "integer"
+    },
+    "engineering_memory_reuse_plan_count": {
       "type": "integer"
     },
     "engineering_memory_dangerous_module_count": {

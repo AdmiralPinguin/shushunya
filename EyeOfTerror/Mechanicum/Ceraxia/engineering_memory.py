@@ -80,6 +80,24 @@ def build_engineering_memory_update(
                 "required_next_check": "classify failing command output before attempting another patch",
             }
         )
+    mandatory_checks_by_task_kind = {
+        "security": ["negative boundary test or explicit blocker", "rollback trigger before mutation"],
+        "api_compatibility": ["caller and contract surface review", "backward compatibility verification"],
+        "bugfix": ["reproduce or explain why reproduction is blocked", "targeted verification after mutation"],
+        "feature": ["scope budget", "acceptance trace", "verification command"],
+        "general_code_change": ["repo survey", "pre-mutation read evidence", "review gate"],
+    }
+    reuse_plan = []
+    for task_kind in task_kinds or ["general_code_change"]:
+        checks = mandatory_checks_by_task_kind.get(task_kind, mandatory_checks_by_task_kind["general_code_change"])
+        reuse_plan.append(
+            {
+                "task_kind": task_kind,
+                "mandatory_checks": checks,
+                "reuse_trigger": f"before planning the next {task_kind} task",
+                "evidence_required": "planning_packet constraints, implementation_plan gates, and review_gate findings must show these checks were considered",
+            }
+        )
     return {
         "kind": "ceraxia_engineering_memory_update",
         "contract_version": CONTRACT_VERSION,
@@ -94,13 +112,8 @@ def build_engineering_memory_update(
             "bind CodeBrigade work packages to dependency graph and acceptance evidence before mutation",
             "treat review_gate.decision as the source of truth for completion claims",
         ],
-        "mandatory_checks_by_task_kind": {
-            "security": ["negative boundary test or explicit blocker", "rollback trigger before mutation"],
-            "api_compatibility": ["caller and contract surface review", "backward compatibility verification"],
-            "bugfix": ["reproduce or explain why reproduction is blocked", "targeted verification after mutation"],
-            "feature": ["scope budget", "acceptance trace", "verification command"],
-            "general_code_change": ["repo survey", "pre-mutation read evidence", "review gate"],
-        },
+        "mandatory_checks_by_task_kind": mandatory_checks_by_task_kind,
+        "reuse_plan": reuse_plan,
         "dangerous_modules": dangerous_modules,
         "false_success_guards": [
             "package_ok must be true before reporting done",
