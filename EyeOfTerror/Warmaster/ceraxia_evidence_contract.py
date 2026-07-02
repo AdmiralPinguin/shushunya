@@ -183,6 +183,21 @@ def validate_next_stage_evidence_payload(
     return errors
 
 
+def validate_next_stage_artifact_files(repo_root: Path, payload: dict[str, Any]) -> list[str]:
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    errors: list[str] = []
+    for name in sorted(REQUIRED_NEXT_STAGE_ARTIFACTS):
+        value = artifacts.get(name)
+        if not isinstance(value, str) or not value:
+            continue
+        path = resolve_repo_path(repo_root, value)
+        if not path.exists():
+            errors.append(f"evidence_package artifact {name} is not readable: {value}")
+        elif path.is_dir():
+            errors.append(f"evidence_package artifact {name} must be a file: {value}")
+    return errors
+
+
 def load_next_stage_package(repo_root: Path, package_ref: Any) -> tuple[dict[str, Any] | None, str]:
     if isinstance(package_ref, dict):
         return package_ref, "<inline>"
@@ -203,6 +218,8 @@ def next_stage_evidence_status(repo_root: Path, entry: dict[str, Any], trial: di
     if payload is None:
         return {"present": False, "passed": False, "reason": package_source}
     errors = validate_next_stage_evidence_payload(payload, next_stage, entry, trial)
+    if package_source != "<inline>":
+        errors.extend(validate_next_stage_artifact_files(repo_root, payload))
     return {
         "present": True,
         "passed": not errors,

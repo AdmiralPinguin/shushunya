@@ -667,7 +667,33 @@ def main() -> int:
         weak_next_stage_status = next_stage_evidence_status(tmp_root, weak_next_stage_entry, synthetic_trials[0])
         if weak_next_stage_status.get("passed") is True or "artifacts" not in str(weak_next_stage_status.get("reason", "")):
             raise AssertionError(f"Ceraxia next-stage evidence contract accepted incomplete package: {weak_next_stage_status}")
+        missing_artifact_package = tmp_root / "missing_artifact_package.json"
+        missing_artifact_payload = json.loads(json.dumps(next_stage_entry["next_stage"]["evidence_package"]))
+        missing_artifact_payload["artifacts"] = {
+            "repo_investigation": "missing/repo_investigation.json",
+            "planning": "missing/planning_department.json",
+            "execution": "missing/execution_result.json",
+            "verification": "missing/verification_report.json",
+            "review": "missing/review_gate.json",
+        }
+        missing_artifact_package.write_text(json.dumps(missing_artifact_payload), encoding="utf-8")
+        missing_artifact_entry = json.loads(json.dumps(next_stage_entry))
+        missing_artifact_entry["next_stage"]["evidence_package"] = str(missing_artifact_package)
+        missing_artifact_status = next_stage_evidence_status(tmp_root, missing_artifact_entry, synthetic_trials[0])
+        if missing_artifact_status.get("passed") is True or "not readable" not in str(missing_artifact_status.get("reason", "")):
+            raise AssertionError(f"Ceraxia next-stage evidence contract accepted missing artifact files: {missing_artifact_status}")
         live_package_path = tmp_root / "live_next_stage_package.json"
+        live_artifact_dir = tmp_root / "live_artifacts"
+        live_artifact_dir.mkdir()
+        live_artifacts = {
+            "repo_investigation": live_artifact_dir / "repo_investigation.json",
+            "planning": live_artifact_dir / "planning_department.json",
+            "execution": live_artifact_dir / "execution_result.json",
+            "verification": live_artifact_dir / "verification_report.json",
+            "review": live_artifact_dir / "review_gate.json",
+        }
+        for name, path in live_artifacts.items():
+            path.write_text(json.dumps({"artifact": name, "status": "recorded"}), encoding="utf-8")
         live_builder = subprocess.run(
             [
                 sys.executable,
@@ -687,15 +713,15 @@ def main() -> int:
                 "--changed-file",
                 "tests/test_service.py",
                 "--artifact",
-                "repo_investigation=evidence/repo_investigation.json",
+                f"repo_investigation={live_artifacts['repo_investigation']}",
                 "--artifact",
-                "planning=evidence/planning_department.json",
+                f"planning={live_artifacts['planning']}",
                 "--artifact",
-                "execution=evidence/execution_result.json",
+                f"execution={live_artifacts['execution']}",
                 "--artifact",
-                "verification=evidence/verification_report.json",
+                f"verification={live_artifacts['verification']}",
                 "--artifact",
-                "review=evidence/review_gate.json",
+                f"review={live_artifacts['review']}",
                 "--multi-file-nonfixture",
                 "--verification-passed",
                 "--review-accepted",
@@ -794,11 +820,11 @@ def main() -> int:
                     "review_accepted": True,
                     "postmortem": "",
                     "artifacts": {
-                        "repo_investigation": "evidence/repo_investigation.json",
-                        "planning": "evidence/planning_department.json",
-                        "execution": "evidence/execution_result.json",
-                        "verification": "evidence/verification_report.json",
-                        "review": "evidence/review_gate.json",
+                        "repo_investigation": str(live_artifacts["repo_investigation"]),
+                        "planning": str(live_artifacts["planning"]),
+                        "execution": str(live_artifacts["execution"]),
+                        "verification": str(live_artifacts["verification"]),
+                        "review": str(live_artifacts["review"]),
                     },
                 }
             ),

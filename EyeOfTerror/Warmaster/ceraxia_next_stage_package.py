@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ceraxia_evidence_contract import NEXT_STAGE_PACKAGE_KIND, next_stage_evidence_status
+from ceraxia_evidence_contract import NEXT_STAGE_PACKAGE_KIND, next_stage_evidence_status, validate_next_stage_artifact_files
 
 
 WARMASTER_ROOT = Path(__file__).resolve().parent
@@ -104,6 +104,13 @@ def main() -> int:
         write_json(output_path, package)
     entry = build_entry(args, package, output_path)
     status = next_stage_evidence_status(REPO_ROOT, entry, {"class": args.task_class})
+    if not output_path:
+        artifact_errors = validate_next_stage_artifact_files(REPO_ROOT, package)
+        if artifact_errors:
+            status = dict(status)
+            status["passed"] = False
+            reason = str(status.get("reason") or "")
+            status["reason"] = "; ".join([item for item in [reason, *artifact_errors] if item])
     payload = {
         "package_path": str(output_path) if output_path else "",
         "entry": entry,
