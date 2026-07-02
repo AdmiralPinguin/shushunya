@@ -68,6 +68,17 @@ def main() -> int:
         raise AssertionError(f"Ceraxia next-stage target must reject false success: {next_stage_target}")
     if next_stage_target.get("minimum_multifile_nonfixture_tasks", 0) < 5:
         raise AssertionError(f"Ceraxia next-stage target must require multi-file nonfixture tasks: {next_stage_target}")
+    required_coding_readiness_classes = set(next_stage_target.get("required_coding_readiness_classes", []))
+    expected_readiness_classes = {
+        "api_compatibility",
+        "bugfix_from_failing_tests",
+        "data_compatibility",
+        "docs_contract_sync",
+        "refactor",
+        "subsystem_addition",
+    }
+    if required_coding_readiness_classes != expected_readiness_classes:
+        raise AssertionError(f"Ceraxia next-stage target must pin coding readiness classes: {next_stage_target}")
     if next_stage_target.get("failed_or_blocked_require_postmortem") is not True:
         raise AssertionError(f"Ceraxia next-stage target must require postmortems: {next_stage_target}")
     if next_stage_target.get("track_repaired_successes_separately") is not True or next_stage_target.get("track_honest_blocks_separately") is not True:
@@ -96,6 +107,9 @@ def main() -> int:
     live_classes = {str(item.get("class") or "") for item in live_tasks if isinstance(item, dict)}
     if len(live_classes) < next_stage_target.get("minimum_task_classes", 0):
         raise AssertionError(f"Ceraxia live task catalog does not cover enough classes: {live_classes}")
+    missing_readiness_classes = sorted(required_coding_readiness_classes - live_classes)
+    if missing_readiness_classes:
+        raise AssertionError(f"Ceraxia live task catalog lacks coding readiness classes: {missing_readiness_classes}")
     live_multifile = [
         item for item in live_tasks
         if isinstance(item, dict) and item.get("multi_file_expected") is True
@@ -109,6 +123,18 @@ def main() -> int:
             raise AssertionError(f"Ceraxia live task lacks task/evidence requirements: {live_task}")
         if not isinstance(live_task.get("minimum_changed_files"), int):
             raise AssertionError(f"Ceraxia live task must declare minimum_changed_files: {live_task}")
+    readiness_tasks = [
+        item
+        for item in live_tasks
+        if isinstance(item, dict) and item.get("class") in required_coding_readiness_classes
+    ]
+    for readiness_task in readiness_tasks:
+        if readiness_task.get("multi_file_expected") is not True:
+            raise AssertionError(f"Ceraxia coding readiness task must be multi-file: {readiness_task}")
+        if int(readiness_task.get("minimum_changed_files") or 0) < 2:
+            raise AssertionError(f"Ceraxia coding readiness task needs a real changed-file floor: {readiness_task}")
+        if len(readiness_task.get("required_evidence", [])) < 5:
+            raise AssertionError(f"Ceraxia coding readiness task needs strong evidence requirements: {readiness_task}")
     live_prepare_list = subprocess.run(
         [sys.executable, str(LIVE_TASK_PREPARE), "--list"],
         cwd=str(EYE_ROOT.parent),

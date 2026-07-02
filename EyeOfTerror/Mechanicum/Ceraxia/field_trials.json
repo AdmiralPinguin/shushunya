@@ -16,6 +16,14 @@
     "maximum_false_successes": 0,
     "minimum_multifile_nonfixture_tasks": 5,
     "minimum_task_class_variety": 10,
+    "required_coding_readiness_classes": [
+      "api_compatibility",
+      "bugfix_from_failing_tests",
+      "data_compatibility",
+      "docs_contract_sync",
+      "refactor",
+      "subsystem_addition"
+    ],
     "failed_or_blocked_require_postmortem": true,
     "track_repaired_successes_separately": true,
     "track_honest_blocks_separately": true,
@@ -1103,12 +1111,39 @@
       "multi_file_expected": true
     },
     {
+      "id": "ceraxia-live-bugfix-without-file",
+      "class": "bugfix_from_failing_tests",
+      "difficulty": "high",
+      "task": "Fix a failing behavior where the prompt names only public symptoms, not source files. Ceraxia must infer the source target from tests and repository evidence, preserve tests unless explicitly required, and return focused plus broad verification.",
+      "required_evidence": ["failing behavior reproduction", "source inference trail", "pre-mutation file reads", "focused verification", "broad verification", "review gate"],
+      "minimum_changed_files": 2,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-data-compatibility-migration",
+      "class": "data_compatibility",
+      "difficulty": "large",
+      "task": "Change a persisted or serialized data shape while preserving backward compatibility for old records and updating readers, writers, tests, and reporting notes.",
+      "required_evidence": ["old/new data shape inventory", "backward compatibility proof", "reader/writer caller search", "negative compatibility test", "migration note", "review gate"],
+      "minimum_changed_files": 3,
+      "multi_file_expected": true
+    },
+    {
       "id": "ceraxia-live-docs-contract-sync",
       "class": "docs_contract_sync",
       "difficulty": "small",
       "task": "Synchronize real docs with a machine-readable contract and prove drift would be caught.",
       "required_evidence": ["contract path", "docs path", "drift check", "self-test output", "review gate"],
       "minimum_changed_files": 2,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-refactor-subsystem-boundary",
+      "class": "refactor",
+      "difficulty": "large",
+      "task": "Refactor an internal subsystem boundary while preserving public behavior. Ceraxia must map callers, keep compatibility, avoid unrelated churn, update tests/docs only where behavior contracts require it, and prove behavior before and after.",
+      "required_evidence": ["baseline verification", "caller and dependency map", "public behavior inventory", "minimal refactor diff", "post-refactor regression", "review gate"],
+      "minimum_changed_files": 3,
       "multi_file_expected": true
     },
     {
