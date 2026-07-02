@@ -15,6 +15,8 @@ from ceraxia_field_trial_runner import (
     honest_evidence_summary,
     resolve_run_storage,
 )
+from ceraxia_live_task_prepare import build_task_packet
+from ceraxia_live_task_run import build_live_task_prompt
 from ceraxia_field_trial_report import build_report
 from ceraxia_field_trial_auto_review import principal_evidence_signals, repair_evidence_signals, senior_evidence_signals
 
@@ -141,6 +143,18 @@ def main() -> int:
         or len(live_packet.get("operating_rules", [])) < 5
     ):
         raise AssertionError(f"Ceraxia live task prepare returned weak packet: {live_packet}")
+    live_prompt = build_live_task_prompt(build_task_packet(live_tasks[0], "prompt-self-test", EYE_ROOT.parent))
+    forbidden_prompt_hints = {
+        "repo_survey.json",
+        "planning_department.json",
+        "worker_report.json",
+        "verification_report.json",
+        "review_gate.json",
+        "ceraxia_next_stage_evidence_package.json",
+    }
+    leaked_hints = sorted(item for item in forbidden_prompt_hints if item in live_prompt)
+    if leaked_hints:
+        raise AssertionError(f"Ceraxia live task prompt leaks future artifact filenames as path hints: {leaked_hints}")
     missing_live_prepare = subprocess.run(
         [sys.executable, str(LIVE_TASK_PREPARE), "--task-id", "missing-live-task"],
         cwd=str(EYE_ROOT.parent),

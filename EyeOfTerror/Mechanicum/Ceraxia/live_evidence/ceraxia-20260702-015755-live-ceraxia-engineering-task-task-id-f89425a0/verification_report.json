@@ -1,0 +1,88 @@
+{
+  "kind": "ceraxia_verification_report",
+  "status": "planned_only",
+  "commands_planned": [
+    "python -m py_compile <changed .py files>",
+    "git diff --check",
+    "python -m pytest Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py Mechanicum/worker_services_self_test.py",
+    "python -m py_compile ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py CoreOfMadness/telegram-bot/bot.py"
+  ],
+  "commands_executable": [
+    "git diff --check",
+    "python -m pytest Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py Mechanicum/worker_services_self_test.py",
+    "python -m py_compile ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py CoreOfMadness/telegram-bot/bot.py"
+  ],
+  "commands_executed": [],
+  "output_summary": [],
+  "verification_after_mutation_evidence": {
+    "kind": "ceraxia_verification_after_mutation_evidence",
+    "status": "not_required",
+    "reason": "worker did not report source mutation",
+    "changed_files": [],
+    "commands_executed_count": 0,
+    "blockers": []
+  },
+  "verification_execution": {
+    "kind": "code_brigade_verification_execution",
+    "contract_version": "eye-mechanicum.v1",
+    "status": "planned",
+    "execute": false,
+    "repo_path": "/media/shushunya/SHUSHUNYA/shushunya",
+    "results": [
+      {
+        "command": "git diff --check",
+        "status": "planned",
+        "returncode": null,
+        "stdout": "",
+        "stderr": "",
+        "diagnostics": {
+          "has_traceback": false,
+          "traceback_files": [],
+          "missing_imports": [],
+          "has_assertion_failure": false,
+          "has_syntax_error": false,
+          "has_no_tests_ran": false
+        }
+      },
+      {
+        "command": "python -m pytest Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py Mechanicum/worker_services_self_test.py",
+        "status": "planned",
+        "returncode": null,
+        "stdout": "",
+        "stderr": "",
+        "diagnostics": {
+          "has_traceback": false,
+          "traceback_files": [],
+          "missing_imports": [],
+          "has_assertion_failure": false,
+          "has_syntax_error": false,
+          "has_no_tests_ran": false
+        }
+      },
+      {
+        "command": "python -m py_compile ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py CoreOfMadness/telegram-bot/bot.py",
+        "status": "planned",
+        "returncode": null,
+        "stdout": "",
+        "stderr": "",
+        "diagnostics": {
+          "has_traceback": false,
+          "traceback_files": [],
+          "missing_imports": [],
+          "has_assertion_failure": false,
+          "has_syntax_error": false,
+          "has_no_tests_ran": false
+        }
+      }
+    ],
+    "blockers": []
+  },
+  "negative_tests_required": [
+    "old and new API shape compatibility",
+    "parallel/retry behavior preserves state"
+  ],
+  "broad_verification_required": true,
+  "blockers": [],
+  "dry_run": true,
+  "execute_verification": false
+}

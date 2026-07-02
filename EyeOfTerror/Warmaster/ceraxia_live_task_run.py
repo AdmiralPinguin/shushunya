@@ -57,11 +57,24 @@ def status_from_run(task: dict[str, Any], result: dict[str, Any], run_dir: Path,
 
 
 def build_live_task_prompt(packet: dict[str, Any]) -> str:
+    required_evidence = packet.get("required_evidence") if isinstance(packet.get("required_evidence"), list) else []
+    rules = packet.get("operating_rules") if isinstance(packet.get("operating_rules"), list) else []
     return (
-        "CERAXIA_LIVE_TASK_PACKET:\n"
-        f"{json.dumps(packet, ensure_ascii=False, indent=2)}\n\n"
-        "Execute this as a live Ceraxia engineering task. Preserve evidence for every required artifact. "
-        "Do not claim benchmark success unless the package can be registered through the live task registrar."
+        "Live Ceraxia engineering task.\n"
+        f"Task id: {packet['task_id']}\n"
+        f"Run id: {packet['run_id']}\n"
+        f"Task class: {packet['task_class']}\n"
+        f"Difficulty: {packet['difficulty']}\n"
+        f"Repository root: {packet['repo_root']}\n"
+        f"Requested work: {packet['task']}\n"
+        f"Minimum changed files: {packet['minimum_changed_files']}\n"
+        f"Multi-file expected: {packet['multi_file_expected']}\n"
+        "Required evidence categories:\n"
+        + "\n".join(f"- {item}" for item in required_evidence)
+        + "\nOperating rules:\n"
+        + "\n".join(f"- {item}" for item in rules)
+        + "\nDo not treat future evidence artifact filenames as repository paths to inspect. "
+        "Do not claim benchmark success unless the final evidence package can be registered through the live task registrar."
     )
 
 
