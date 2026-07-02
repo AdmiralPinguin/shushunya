@@ -33,6 +33,7 @@ ACCEPTER = WARMASTER_ROOT / "ceraxia_field_trial_accept.py"
 AUTO_REVIEWER = WARMASTER_ROOT / "ceraxia_field_trial_auto_review.py"
 NEXT_STAGE_BUILDER = WARMASTER_ROOT / "ceraxia_next_stage_package.py"
 LIVE_TASK_REGISTER = WARMASTER_ROOT / "ceraxia_live_task_register.py"
+LIVE_TASK_PREPARE = WARMASTER_ROOT / "ceraxia_live_task_prepare.py"
 
 
 def main() -> int:
@@ -103,6 +104,51 @@ def main() -> int:
             raise AssertionError(f"Ceraxia live task lacks task/evidence requirements: {live_task}")
         if not isinstance(live_task.get("minimum_changed_files"), int):
             raise AssertionError(f"Ceraxia live task must declare minimum_changed_files: {live_task}")
+    live_prepare_list = subprocess.run(
+        [sys.executable, str(LIVE_TASK_PREPARE), "--list"],
+        cwd=str(EYE_ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if live_prepare_list.returncode != 0:
+        raise AssertionError(f"Ceraxia live task prepare list failed: {live_prepare_list.stdout} {live_prepare_list.stderr}")
+    live_prepare_payload = json.loads(live_prepare_list.stdout)
+    if set(live_prepare_payload.get("live_tasks", [])) != live_task_ids:
+        raise AssertionError(f"Ceraxia live task prepare list drifted from catalog: {live_prepare_payload}")
+    live_prepare_packet = subprocess.run(
+        [
+            sys.executable,
+            str(LIVE_TASK_PREPARE),
+            "--task-id",
+            "ceraxia-live-cli-contract-flag",
+            "--run-id",
+            "prepare-self-test",
+        ],
+        cwd=str(EYE_ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if live_prepare_packet.returncode != 0:
+        raise AssertionError(f"Ceraxia live task prepare packet failed: {live_prepare_packet.stdout} {live_prepare_packet.stderr}")
+    live_packet = json.loads(live_prepare_packet.stdout)
+    if (
+        live_packet.get("kind") != "ceraxia_live_task_packet"
+        or live_packet.get("task_id") != "ceraxia-live-cli-contract-flag"
+        or not live_packet.get("artifact_contract", {}).get("next_stage_package")
+        or len(live_packet.get("operating_rules", [])) < 5
+    ):
+        raise AssertionError(f"Ceraxia live task prepare returned weak packet: {live_packet}")
+    missing_live_prepare = subprocess.run(
+        [sys.executable, str(LIVE_TASK_PREPARE), "--task-id", "missing-live-task"],
+        cwd=str(EYE_ROOT.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if missing_live_prepare.returncode == 0:
+        raise AssertionError(f"Ceraxia live task prepare accepted unknown task: {missing_live_prepare.stdout}")
     if len(set(dimensions)) != len(dimensions) or len(dimensions) < 8:
         raise AssertionError(f"Ceraxia dimensions are missing or duplicated: {dimensions}")
     seen: set[str] = set()
