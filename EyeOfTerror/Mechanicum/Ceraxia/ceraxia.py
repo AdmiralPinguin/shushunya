@@ -313,6 +313,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "generic_import_edges": survey.get("generic_import_edges", []),
             "reverse_dependency_index": survey.get("reverse_dependency_index", {}),
             "test_coverage_links": survey.get("test_coverage_links", []),
+            "missing_python_import_hints": survey.get("missing_python_import_hints", []),
             "caller_candidates": survey.get("caller_candidates", []),
             "contract_surface_candidates": survey.get("contract_surface_candidates", []),
             "package_manifest_candidates": survey.get("package_manifest_candidates", []),

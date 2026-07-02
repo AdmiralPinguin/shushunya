@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -398,6 +399,43 @@ def build_test_coverage_links(edges: list[dict[str, str]]) -> list[dict[str, str
     return links[:80]
 
 
+def build_missing_python_import_hints(
+    python_summaries: list[dict[str, Any]],
+    python_files: list[Path],
+    root: Path,
+) -> list[dict[str, str]]:
+    module_to_path = {module_name_for(path, root): str(path.relative_to(root)) for path in python_files}
+    stdlib_modules = getattr(sys, "stdlib_module_names", set())
+    rows: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for summary in python_summaries:
+        source = str(summary.get("path") or "")
+        if not source or not is_test_file(Path(source)):
+            continue
+        imports = summary.get("imports") if isinstance(summary.get("imports"), list) else []
+        for imported in imports:
+            imported_text = str(imported)
+            root_module = imported_text.split(".", 1)[0]
+            if not root_module or root_module in stdlib_modules:
+                continue
+            if root_module in module_to_path or any(module.startswith(root_module + ".") for module in module_to_path):
+                continue
+            suggested_path = root_module.replace(".", "/") + ".py"
+            key = (source, imported_text, suggested_path)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(
+                {
+                    "source": source,
+                    "import": imported_text,
+                    "suggested_path": suggested_path,
+                    "reason": "test imports a local-looking Python module that is not present in the surveyed repo",
+                }
+            )
+    return rows[:80]
+
+
 def build_caller_candidates(candidates: list[str], reverse_dependency_index: dict[str, list[str]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -541,7 +579,9 @@ def build_repository_cartography(
     package_manifest_candidates: list[dict[str, Any]],
     caller_candidates: list[dict[str, Any]],
     recommended_read_order: list[dict[str, str]],
+    missing_python_import_hints: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
+    missing_python_import_hints = missing_python_import_hints or []
     risky_by_path: dict[str, set[str]] = {}
     for row in contract_surface_candidates[:20]:
         path = str(row.get("path") or "")
@@ -564,6 +604,7 @@ def build_repository_cartography(
         "test_inventory": tests[:60],
         "contract_surfaces": contract_surface_candidates[:40],
         "package_manifests": package_manifest_candidates[:40],
+        "missing_python_import_hints": missing_python_import_hints[:40],
         "risky_modules": risky_modules,
         "recommended_read_order": recommended_read_order[:80],
         "summary": {
@@ -571,6 +612,7 @@ def build_repository_cartography(
             "test_count": len(tests),
             "contract_surface_count": len(contract_surface_candidates),
             "package_manifest_count": len(package_manifest_candidates),
+            "missing_python_import_hint_count": len(missing_python_import_hints),
             "risky_module_count": len(risky_modules),
         },
     }
@@ -615,6 +657,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
                 "test_inventory": [],
                 "contract_surfaces": [],
                 "package_manifests": [],
+                "missing_python_import_hints": [],
                 "risky_modules": [],
                 "recommended_read_order": [],
                 "summary": {
@@ -622,9 +665,11 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
                     "test_count": 0,
                     "contract_surface_count": 0,
                     "package_manifest_count": 0,
+                    "missing_python_import_hint_count": 0,
                     "risky_module_count": 0,
                 },
             },
+            "missing_python_import_hints": [],
             "suggested_verification_commands": [],
             "max_files_scanned": MAX_SURVEY_FILES,
             "truncated": False,
@@ -691,6 +736,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     dependency_edges = unique_edges([*python_edges, *generic_edges])[:120]
     reverse_dependency_index = build_reverse_dependency_index(dependency_edges)
     test_coverage_links = build_test_coverage_links(dependency_edges)
+    missing_python_import_hints = build_missing_python_import_hints(python_symbols, python_files, root)
     caller_candidates = build_caller_candidates(candidates, reverse_dependency_index)
     contract_surface_candidates = build_contract_surface_candidates(files, root)
     package_manifest_candidates = build_package_manifest_candidates(files, root)
@@ -702,6 +748,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         package_manifest_candidates,
         caller_candidates,
         recommended_read_order,
+        missing_python_import_hints,
     )
     suggested_commands: list[str] = []
     if tests:
@@ -732,6 +779,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "generic_import_edges": generic_edges,
         "reverse_dependency_index": reverse_dependency_index,
         "test_coverage_links": test_coverage_links,
+        "missing_python_import_hints": missing_python_import_hints,
         "caller_candidates": caller_candidates,
         "contract_surface_candidates": contract_surface_candidates,
         "package_manifest_candidates": package_manifest_candidates,

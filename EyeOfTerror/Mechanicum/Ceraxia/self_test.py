@@ -615,6 +615,38 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertNotIn("deep/target/README.md", survey["missing_path_hints"])
             self.assertIn("deep/target/README.md", [row["path"] for row in survey["recommended_read_order"]])
 
+    def test_repo_survey_reports_missing_python_import_hints_from_tests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "tests").mkdir()
+            (repo / "README.md").write_text("# Acceptance repo\n", encoding="utf-8")
+            (repo / "tests" / "test_acceptance.py").write_text(
+                "from task_tracker import TaskTracker\n\n"
+                "def test_task_tracker_contract():\n"
+                "    assert TaskTracker\n",
+                encoding="utf-8",
+            )
+            packet = build_planning_packet({"task": "Create the module required by the acceptance tests", "repo_path": str(repo)})
+            survey = build_repo_survey(packet)
+            self.assertTrue(
+                any(
+                    row["source"] == "tests/test_acceptance.py" and row["suggested_path"] == "task_tracker.py"
+                    for row in survey["missing_python_import_hints"]
+                )
+            )
+            self.assertEqual(survey["repository_cartography"]["summary"]["missing_python_import_hint_count"], 1)
+            brief = build_implementation_brief(packet, survey)
+            self.assertTrue(
+                any(row["suggested_path"] == "task_tracker.py" for row in brief["repo_survey_evidence"]["missing_python_import_hints"])
+            )
+            self.assertTrue(
+                any(
+                    row["suggested_path"] == "task_tracker.py"
+                    for row in brief["repo_survey_evidence"]["repository_cartography"]["missing_python_import_hints"]
+                )
+            )
+
     def test_missing_repo_blocks_before_claiming_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             result = run_ceraxia(
