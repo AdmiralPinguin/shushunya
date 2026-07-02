@@ -228,6 +228,24 @@ def startup_stages(commands: list[CommandSpec], workers: list[dict[str, object]]
     return stages
 
 
+def brigade_worker_contract(commands: list[CommandSpec], workers: list[dict[str, object]], readiness_urls: list[str]) -> dict[str, object]:
+    return {
+        "kind": "eye_of_terror_brigade_worker_contract",
+        "contract_version": 1,
+        "producer": "start_brigade.py",
+        "consumers": ["warmaster-gateway", "inner-circle-governors", "mechanicum-supervisor"],
+        "top_level_service_required_fields": ["name", "role", "host", "port", "depends_on", "health_url", "command", "env"],
+        "mechanicum_worker_required_fields": ["name", "port", "module_path", "module", "health_url"],
+        "dependency_edges": [
+            {"service": command.name, "depends_on": command.depends_on}
+            for command in commands
+        ],
+        "readiness_url_count": len(readiness_urls),
+        "readiness_urls": readiness_urls,
+        "worker_count": len(workers),
+    }
+
+
 def brigade_plan(
     repo_root: Path,
     host: str,
@@ -241,6 +259,7 @@ def brigade_plan(
     workers = worker_service_plan(repo_root, host)
     top_level_health_urls = {command.name: command.health_url for command in commands if command.health_url}
     worker_health_urls = {str(worker["name"]): str(worker["health_url"]) for worker in workers if worker.get("health_url")}
+    readiness_urls = list(top_level_health_urls.values()) + list(worker_health_urls.values())
     return {
         "ok": True,
         "stack": "EyeOfTerror",
@@ -262,7 +281,8 @@ def brigade_plan(
         "dependencies": {command.name: command.depends_on for command in commands},
         "startup_stages": startup_stages(commands, workers),
         "health_urls": {**top_level_health_urls, **worker_health_urls},
-        "readiness_urls": list(top_level_health_urls.values()) + list(worker_health_urls.values()),
+        "readiness_urls": readiness_urls,
+        "worker_contract": brigade_worker_contract(commands, workers, readiness_urls),
     }
 
 

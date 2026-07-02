@@ -20,3 +20,8 @@ Planned governors:
 Warmaster Gateway must route only to active governors. Planned governors are
 allowed to have docs and contracts, but they must not receive live tasks until
 they have tested pipelines.
+
+`EyeOfTerror/Warmaster/start_brigade.py` publishes
+`worker_contract` in the brigade plan. Orchestrators and governors should use
+that machine-readable contract for service fields, dependency edges, and
+readiness URLs instead of inferring topology from rendered commands.

@@ -78,6 +78,7 @@ def build_audit() -> dict[str, Any]:
     live_register = read(WARM / "ceraxia_live_task_register.py")
     live_learnings = read(WARM / "ceraxia_live_benchmark_learnings.py")
     next_stage_package = read(WARM / "ceraxia_next_stage_package.py")
+    start_brigade = read(WARM / "start_brigade.py")
     auto_review = read(WARM / "ceraxia_field_trial_auto_review.py")
     arena_readme = read(AGENT_ARENA / "README.md") if (AGENT_ARENA / "README.md").exists() else ""
     arena_runner = read(AGENT_ARENA / "scripts" / "run_arena.py") if (AGENT_ARENA / "scripts" / "run_arena.py").exists() else ""
@@ -145,6 +146,7 @@ def build_audit() -> dict[str, Any]:
                 check("accepted_for_next_stage" in live_register and "accepted_for_next_stage" in field_trial_report, "live benchmark requires explicit accepted_for_next_stage", "live benchmark acceptance gate missing"),
                 check("ceraxia_live_benchmark_learnings" in live_learnings and "mandatory_next_actions" in live_learnings, "live benchmark learnings are aggregated into checkable memory", "live benchmark learnings missing"),
                 check("NEXT_STAGE_PACKAGE_KIND" in next_stage_package and "fixture_only" in next_stage_package, "next-stage package builder writes live package contract fields", "next-stage package builder missing"),
+                check("eye_of_terror_brigade_worker_contract" in start_brigade and "dependency_edges" in start_brigade, "start_brigade exposes orchestrator-worker contract", "brigade worker contract missing"),
                 check(int(report.get("fresh_honest_class_count") or 0) >= 8, "report fresh_honest_class_count", "not enough fresh classes"),
                 check(int(report.get("fresh_honest_trial_count") or 0) >= 12, "report fresh_honest_trial_count", "not enough fresh trials"),
                 check("evidence_paths" in read(CERAXIA / "field_trial_ledger.json"), "field_trial_ledger evidence_paths", "ledger evidence paths missing"),

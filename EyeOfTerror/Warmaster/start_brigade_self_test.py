@@ -82,6 +82,19 @@ def main() -> int:
     service_names = {item.get("name") for item in plan.get("services", []) if isinstance(item, dict)}
     if service_names != expected_names:
         raise AssertionError(f"bad brigade service names in JSON plan: {plan}")
+    worker_contract = plan.get("worker_contract", {})
+    if (
+        not isinstance(worker_contract, dict)
+        or worker_contract.get("kind") != "eye_of_terror_brigade_worker_contract"
+        or worker_contract.get("contract_version") != 1
+        or "warmaster-gateway" not in worker_contract.get("consumers", [])
+    ):
+        raise AssertionError(f"bad brigade worker contract header: {worker_contract}")
+    if "health_url" not in worker_contract.get("mechanicum_worker_required_fields", []):
+        raise AssertionError(f"brigade worker contract must require worker health_url: {worker_contract}")
+    contract_edges = {item.get("service"): item.get("depends_on") for item in worker_contract.get("dependency_edges", []) if isinstance(item, dict)}
+    if contract_edges.get("warmaster-gateway") != ["mechanicum-workers", "iskandar-khayon", "ceraxia"]:
+        raise AssertionError(f"brigade worker contract dependency edges drifted: {worker_contract}")
     dependencies = plan.get("dependencies", {})
     if dependencies.get("warmaster-gateway") != ["mechanicum-workers", "iskandar-khayon", "ceraxia"]:
         raise AssertionError(f"bad brigade dependencies: {plan}")
