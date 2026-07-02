@@ -519,6 +519,86 @@ def diagnostic_signals_from_summary_item(item: dict[str, Any]) -> list[str]:
     return signals
 
 
+def failure_classification_from_repair_item(command_status: str, signals: list[str]) -> dict[str, Any]:
+    if "syntax_error" in signals:
+        failure_type = "syntax_error"
+        severity = "high"
+    elif "missing_import" in signals:
+        failure_type = "missing_dependency_or_import"
+        severity = "high"
+    elif "assertion_failure" in signals:
+        failure_type = "behavior_regression_or_unmet_acceptance"
+        severity = "high"
+    elif "no_tests_ran" in signals:
+        failure_type = "verification_command_mismatch"
+        severity = "normal"
+    elif "traceback" in signals:
+        failure_type = "runtime_exception"
+        severity = "high"
+    elif command_status == "blocked":
+        failure_type = "blocked_verification_command"
+        severity = "normal"
+    else:
+        failure_type = "failed_verification_command"
+        severity = "normal"
+    return {
+        "type": failure_type,
+        "severity": severity,
+        "signals": signals,
+        "command_status": command_status,
+    }
+
+
+def repair_hypotheses_from_failure(
+    failure_classification: dict[str, Any],
+    source_candidates: list[str],
+    missing_imports: list[str],
+) -> list[dict[str, Any]]:
+    failure_type = str(failure_classification.get("type") or "")
+    primary = source_candidates[0] if source_candidates else ""
+    if failure_type == "missing_dependency_or_import":
+        return [
+            {
+                "hypothesis": "map missing import to an existing or explicitly planned source module before editing",
+                "source_candidates": source_candidates,
+                "missing_imports": missing_imports,
+                "mutation_allowed_after": "missing import maps to candidate source or allowed create path",
+            }
+        ]
+    if failure_type == "syntax_error":
+        return [
+            {
+                "hypothesis": "repair syntax in the traceback source without changing tests",
+                "source_candidates": source_candidates,
+                "mutation_allowed_after": "traceback file is read and syntax failure is reproduced",
+            }
+        ]
+    if failure_type == "behavior_regression_or_unmet_acceptance":
+        return [
+            {
+                "hypothesis": "repair behavior in candidate source while preserving the test oracle",
+                "primary_candidate": primary,
+                "source_candidates": source_candidates,
+                "mutation_allowed_after": "source candidate and related caller/test evidence are read",
+            }
+        ]
+    if failure_type == "verification_command_mismatch":
+        return [
+            {
+                "hypothesis": "classify zero-test or runner mismatch before source mutation",
+                "source_candidates": source_candidates,
+                "mutation_allowed_after": "verification command is corrected or explicitly blocked",
+            }
+        ]
+    return [
+        {
+            "hypothesis": "inspect diagnostic source candidates before attempting a narrow repair",
+            "source_candidates": source_candidates,
+            "mutation_allowed_after": "failure is mapped to a repo-local source surface",
+        }
+    ]
+
+
 def build_diagnostic_repair_queue(
     brief: dict[str, Any],
     verification_report: dict[str, Any],
@@ -531,6 +611,9 @@ def build_diagnostic_repair_queue(
     stop_conditions = repair_plan.get("stop_conditions") if isinstance(repair_plan.get("stop_conditions"), list) else []
     repair_evidence = repair_plan.get("repair_evidence_required") if isinstance(repair_plan.get("repair_evidence_required"), list) else []
     default_targets = implementation_plan.get("target_files_to_inspect") if isinstance(implementation_plan.get("target_files_to_inspect"), list) else []
+    if not default_targets:
+        repo_evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
+        default_targets = repo_evidence.get("candidate_files") if isinstance(repo_evidence.get("candidate_files"), list) else []
     surface_matrix = brief.get("surface_verification_matrix") if isinstance(brief.get("surface_verification_matrix"), dict) else {}
     surface_rows = surface_matrix.get("rows") if isinstance(surface_matrix.get("rows"), list) else []
     surface_evidence = surface_evidence_rows(surface_rows, verification_report)
@@ -549,6 +632,11 @@ def build_diagnostic_repair_queue(
         concrete_read_targets = [str(path) for path in traceback_files if isinstance(path, str)]
         if not concrete_read_targets:
             concrete_read_targets = [str(path) for path in default_targets if isinstance(path, str)]
+        source_candidates = [
+            str(path).split(":", 1)[0]
+            for path in concrete_read_targets
+            if isinstance(path, str) and path
+        ]
         command = str(item.get("command") or "")
         impacted_surfaces = [
             str(row.get("surface") or "")
@@ -570,16 +658,20 @@ def build_diagnostic_repair_queue(
                 if isinstance(package_id, str)
             }
         )
+        failure_classification = failure_classification_from_repair_item(command_status, signals)
         items.append(
             {
                 "command": command,
                 "status": command_status,
                 "priority": "high" if "traceback" in signals or "syntax_error" in signals else "normal",
+                "failure_classification": failure_classification,
                 "diagnostic_signals": signals,
                 "impacted_surfaces": impacted_surfaces,
                 "package_ids": package_ids,
                 "traceback_files": traceback_files,
                 "missing_imports": missing_imports,
+                "source_candidates": source_candidates,
+                "repair_hypotheses": repair_hypotheses_from_failure(failure_classification, source_candidates, [str(item) for item in missing_imports if isinstance(item, str)]),
                 "read_before_repair": read_before_repair,
                 "concrete_read_targets": concrete_read_targets,
                 "stop_conditions": stop_conditions,
@@ -1955,7 +2047,10 @@ def build_final_next_action(status: dict[str, Any], worker_report: dict[str, Any
 
 def build_maturity_label(worker_report: dict[str, Any], readiness: dict[str, Any]) -> str:
     intent = worker_report.get("execution_intent") if isinstance(worker_report.get("execution_intent"), dict) else {}
+    edit_plan = worker_report.get("edit_plan") if isinstance(worker_report.get("edit_plan"), dict) else {}
     if readiness.get("decision") == "ready_for_real_execution" and worker_report.get("status") == "implemented":
+        if edit_plan.get("controller_execution_mode") == "repo_engineer":
+            return "repo_engineer_controller_with_guarded_code_brigade_execution"
         if intent.get("mode") == "guarded_inferred_patch_execution":
             return "guarded_inferred_patch_execution_controller"
         return "explicit_patch_execution_controller"

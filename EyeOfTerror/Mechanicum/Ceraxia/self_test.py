@@ -1194,6 +1194,11 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertEqual(review["diagnostic_repair_queue"]["item_count"], 1)
         repair_item = review["diagnostic_repair_queue"]["items"][0]
         self.assertIn("assertion_failure", repair_item["diagnostic_signals"])
+        self.assertEqual(repair_item["failure_classification"]["type"], "behavior_regression_or_unmet_acceptance")
+        self.assertEqual(repair_item["failure_classification"]["severity"], "high")
+        self.assertEqual(repair_item["source_candidates"], ["app.py"])
+        self.assertTrue(repair_item["repair_hypotheses"])
+        self.assertIn("test oracle", repair_item["repair_hypotheses"][0]["hypothesis"])
         self.assertIn("source_behavior", repair_item["impacted_surfaces"])
         self.assertIn("minimal_patch_package", repair_item["package_ids"])
         self.assertEqual(repair_item["max_repair_attempts"], brief["diagnostic_repair_plan"]["max_repair_attempts"])
@@ -1373,6 +1378,41 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(worker_report["execution_intent"]["real_execution_supported"])
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["maturity"], "guarded_inferred_patch_execution_controller")
+            self.assertEqual(summary["code_brigade_execution_intent_mode"], "guarded_inferred_patch_execution")
+
+    def test_repo_engineer_mode_has_distinct_controller_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="В файле `app.py` замени `return False` на `return True`.",
+                    repo_path=str(repo),
+                    execution_mode="repo_engineer",
+                    runs_root=Path(tmp) / "runs",
+                    execute_verification=True,
+                    verification_commands=("python -m py_compile app.py",),
+                )
+            )
+            self.assertTrue(result["ok"], result)
+            self.assertTrue(result["ready_for_execution"], result)
+            self.assertEqual(result["execution_mode"], "repo_engineer")
+            self.assertIn("return True", (repo / "app.py").read_text(encoding="utf-8"))
+            run_dir = Path(result["run_dir"])
+            task_json = json.loads((run_dir / "task.json").read_text(encoding="utf-8"))
+            self.assertEqual(task_json["execution_mode"], "repo_engineer")
+            self.assertFalse(task_json["dry_run"])
+            worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(worker_report["status"], "implemented")
+            self.assertEqual(worker_report["edit_plan"]["controller_execution_mode"], "repo_engineer")
+            self.assertEqual(worker_report["execution_policy_status"], "real_execution_adapter_active")
+            self.assertEqual(worker_report["pre_mutation_read_evidence"]["status"], "complete")
+            review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
+            self.assertEqual(review["decision"], "ready")
+            self.assertEqual(review["verification_after_mutation_sufficiency"]["status"], "complete")
+            summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["maturity"], "repo_engineer_controller_with_guarded_code_brigade_execution")
             self.assertEqual(summary["code_brigade_execution_intent_mode"], "guarded_inferred_patch_execution")
 
     def test_non_dry_guarded_inferred_create_file_allows_missing_path_hint(self) -> None:
