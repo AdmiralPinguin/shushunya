@@ -59,6 +59,12 @@ def main() -> int:
         option_path = verification_adapter.run_verification_commands(["pytest --rootdir=/tmp"], str(repo), execute=False)
         if option_path["status"] != "blocked" or "unsafe path token" not in option_path["results"][0]["stderr"]:
             raise AssertionError(f"allowlisted command with absolute option path should be blocked: {option_path}")
+        home_path = verification_adapter.run_verification_commands(["python -m py_compile ~/.ssh/config"], str(repo), execute=False)
+        if home_path["status"] != "blocked" or "unsafe path token" not in home_path["results"][0]["stderr"]:
+            raise AssertionError(f"allowlisted command with home-relative path should be blocked: {home_path}")
+        home_option_path = verification_adapter.run_verification_commands(["pytest --rootdir=~/project"], str(repo), execute=False)
+        if home_option_path["status"] != "blocked" or "unsafe path token" not in home_option_path["results"][0]["stderr"]:
+            raise AssertionError(f"allowlisted command with home-relative option path should be blocked: {home_option_path}")
         pytest_unavailable = verification_adapter.run_verification_commands(
             ["python -m py_compile ok.py", "python -m pytest test_missing.py"],
             str(repo),

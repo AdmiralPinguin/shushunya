@@ -38,15 +38,26 @@ def command_allowed(tokens: list[str]) -> bool:
     return any(tokens[: len(prefix)] == prefix for prefix in ALLOWED_PREFIXES)
 
 
+def is_unsafe_path_value(value: str) -> bool:
+    return (
+        value.startswith("/")
+        or value == "~"
+        or value.startswith("~/")
+        or value == ".."
+        or value.startswith("../")
+        or "/../" in value
+    )
+
+
 def command_has_unsafe_path_tokens(tokens: list[str]) -> bool:
     for token in tokens:
         if "=" in token:
             _, value = token.split("=", 1)
-            if value.startswith("/") or value == ".." or value.startswith("../") or "/../" in value:
+            if is_unsafe_path_value(value):
                 return True
         if token.startswith("-"):
             continue
-        if token.startswith("/") or token == ".." or token.startswith("../") or "/../" in token:
+        if is_unsafe_path_value(token):
             return True
     return False
 

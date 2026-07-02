@@ -1,0 +1,33 @@
+{
+  "kind": "ceraxia_next_stage_evidence_package",
+  "contract_version": 1,
+  "trial_id": "ceraxia-live-negative-test-coverage",
+  "run_id": "ceraxia-20260702-033515-live-ceraxia-engineering-task-task-id-c8bc5bc3",
+  "task_class": "test_discipline",
+  "status": "fully_successful",
+  "attempt_count": 1,
+  "real_repo_task": true,
+  "fixture_only": false,
+  "false_success": false,
+  "multi_file_nonfixture": true,
+  "changed_files": [
+    "EyeOfTerror/Mechanicum/CodeBrigade/verification_adapter.py",
+    "EyeOfTerror/Mechanicum/CodeBrigade/verification_self_test.py"
+  ],
+  "verification_passed": true,
+  "review_accepted": true,
+  "postmortem": "",
+  "summary": {
+    "ceraxia_package_ok": true,
+    "ceraxia_execution_mode": "guarded_patch",
+    "ready_for_execution": true,
+    "run_summary_status": "ceraxia_run_summary"
+  },
+  "artifacts": {
+    "repo_investigation": "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-033515-live-ceraxia-engineering-task-task-id-c8bc5bc3/repo_survey.json",
+    "planning": "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-033515-live-ceraxia-engineering-task-task-id-c8bc5bc3/planning_department.json",
+    "execution": "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-033515-live-ceraxia-engineering-task-task-id-c8bc5bc3/worker_report.json",
+    "verification": "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-033515-live-ceraxia-engineering-task-task-id-c8bc5bc3/verification_report.json",
+    "review": "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-033515-live-ceraxia-engineering-task-task-id-c8bc5bc3/review_gate.json"
+  }
+}
