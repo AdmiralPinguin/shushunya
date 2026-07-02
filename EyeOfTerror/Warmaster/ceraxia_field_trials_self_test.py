@@ -420,6 +420,14 @@ def main() -> int:
         raise AssertionError(f"Ceraxia trial result must expose honest evidence checks: {smoke_payload}")
     if not all(isinstance(item, dict) and item.get("passed") is True for item in honest_checks.values()):
         raise AssertionError(f"Ceraxia honest evidence checks must all pass for accepted smoke trial: {honest}")
+    smoke_next_stage = smoke_payload.get("next_stage") if isinstance(smoke_payload.get("next_stage"), dict) else {}
+    if not smoke_next_stage.get("evidence_package"):
+        raise AssertionError(f"Ceraxia smoke trial must write next-stage evidence package reference: {smoke_payload}")
+    smoke_next_stage_entry = json.loads(json.dumps(smoke_payload))
+    smoke_next_stage_entry["next_stage"]["evidence_package"] = smoke_payload.get("next_stage_evidence_package_payload")
+    smoke_next_stage_status = next_stage_evidence_status(EYE_ROOT.parent, smoke_next_stage_entry, {"class": "runtime_configuration"})
+    if smoke_next_stage_status.get("passed") is True or "real_repo_task" not in str(smoke_next_stage_status.get("reason", "")):
+        raise AssertionError(f"Ceraxia fixture smoke trial must not count as live next-stage evidence: {smoke_next_stage_status}")
     structured_honest = honest_evidence_summary(
         {
             "status": "ready",

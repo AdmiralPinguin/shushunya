@@ -11,12 +11,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ceraxia_evidence_contract import NEXT_STAGE_PACKAGE_KIND
 from eye_of_terror.warmaster_gateway import prepare_task, research_loop_run
 
 
 WARMASTER_ROOT = Path(__file__).resolve().parent
 EYE_ROOT = WARMASTER_ROOT.parent
 LEDGER = EYE_ROOT / "Mechanicum" / "Ceraxia" / "field_trial_ledger.json"
+SPEC = EYE_ROOT / "Mechanicum" / "Ceraxia" / "field_trials.json"
 DEFAULT_FIELD_TRIAL_RUN_ROOT = WARMASTER_ROOT / "runs" / "field_trial_runs"
 REPO_ROOT = EYE_ROOT.parent
 
@@ -2388,33 +2390,110 @@ def ledger_path_text(path: Path) -> str:
         return str(path)
 
 
-def append_draft_ledger_entry(trial_id: str, run_id: str, evidence_paths: list[str]) -> None:
+def trial_spec_by_id(trial_id: str) -> dict[str, Any]:
+    payload = json.loads(SPEC.read_text(encoding="utf-8"))
+    trials = payload.get("trials") if isinstance(payload.get("trials"), list) else []
+    for trial in trials:
+        if isinstance(trial, dict) and trial.get("id") == trial_id:
+            return trial
+    return {}
+
+
+def next_stage_status_from_outcome(trial_outcome: dict[str, Any], manifest: dict[str, Any]) -> str:
+    status = str(trial_outcome.get("status") or "")
+    repair_count = 0
+    verification = manifest.get("verification_summary") if isinstance(manifest.get("verification_summary"), dict) else {}
+    if isinstance(verification.get("repair_count"), int):
+        repair_count = int(verification.get("repair_count") or 0)
+    if status == "passed":
+        return "repaired_success" if repair_count > 0 else "fully_successful"
+    if status == "expected_blocked":
+        return "honest_blocked"
+    return "failed"
+
+
+def build_next_stage_fixture_package(
+    trial_id: str,
+    run_id: str,
+    trial_outcome: dict[str, Any],
+    manifest: dict[str, Any],
+    manifest_path: Path | None,
+    report_path: Path,
+) -> dict[str, Any]:
+    trial = trial_spec_by_id(trial_id)
+    status = next_stage_status_from_outcome(trial_outcome, manifest)
+    changed_files = manifest.get("changed_files") if isinstance(manifest.get("changed_files"), list) else []
+    changed_paths = [str(item.get("path") or "") for item in changed_files if isinstance(item, dict)]
+    verification = manifest.get("verification_summary") if isinstance(manifest.get("verification_summary"), dict) else {}
+    repair_count = int(verification.get("repair_count") or 0) if isinstance(verification.get("repair_count"), int) else 0
+    blocker_count = int(verification.get("blocker_count") or 0) if isinstance(verification.get("blocker_count"), int) else 0
+    next_stage = {
+        "status": status,
+        "attempt_count": max(1, repair_count + 1),
+        "multi_file_nonfixture": False,
+        "false_success": False,
+        "postmortem": str(trial_outcome.get("reason") or ""),
+    }
+    package = {
+        "kind": NEXT_STAGE_PACKAGE_KIND,
+        "contract_version": 1,
+        "trial_id": trial_id,
+        "run_id": run_id,
+        "task_class": str(trial.get("class") or ""),
+        "status": status,
+        "attempt_count": next_stage["attempt_count"],
+        "real_repo_task": False,
+        "fixture_only": True,
+        "false_success": False,
+        "multi_file_nonfixture": False,
+        "changed_files": changed_paths,
+        "verification_passed": status in {"fully_successful", "repaired_success"} and blocker_count == 0,
+        "review_accepted": manifest.get("approved") is True,
+        "postmortem": next_stage["postmortem"],
+        "artifacts": {
+            "repo_investigation": ledger_path_text(report_path),
+            "planning": ledger_path_text(report_path),
+            "execution": ledger_path_text(report_path),
+            "verification": ledger_path_text(report_path),
+            "review": ledger_path_text(manifest_path) if manifest_path else ledger_path_text(report_path),
+        },
+    }
+    return {"next_stage": next_stage, "package": package}
+
+
+def append_draft_ledger_entry(
+    trial_id: str,
+    run_id: str,
+    evidence_paths: list[str],
+    next_stage: dict[str, Any] | None = None,
+) -> None:
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
     entries = ledger.setdefault("entries", [])
-    entries.append(
-        {
-            "trial_id": trial_id,
-            "run_id": run_id,
-            "date": time.strftime("%Y-%m-%d"),
-            "reviewer": "",
-            "scores": {
-                "task_understanding": None,
-                "repository_investigation": None,
-                "multi_file_reasoning": None,
-                "patch_correctness": None,
-                "verification_discipline": None,
-                "self_repair": None,
-                "review_quality": None,
-                "safety": None,
-                "reporting": None,
-            },
-            "evidence_paths": [ledger_path_text(Path(path)) for path in evidence_paths],
-            "human_review_notes": "",
-            "generalizable_failures": [],
-            "follow_up_changes": [],
-            "accepted_for_rolling_score": False,
-        }
-    )
+    entry = {
+        "trial_id": trial_id,
+        "run_id": run_id,
+        "date": time.strftime("%Y-%m-%d"),
+        "reviewer": "",
+        "scores": {
+            "task_understanding": None,
+            "repository_investigation": None,
+            "multi_file_reasoning": None,
+            "patch_correctness": None,
+            "verification_discipline": None,
+            "self_repair": None,
+            "review_quality": None,
+            "safety": None,
+            "reporting": None,
+        },
+        "evidence_paths": [ledger_path_text(Path(path)) for path in evidence_paths],
+        "human_review_notes": "",
+        "generalizable_failures": [],
+        "follow_up_changes": [],
+        "accepted_for_rolling_score": False,
+    }
+    if next_stage:
+        entry["next_stage"] = next_stage
+    entries.append(entry)
     write_json(LEDGER, ledger)
 
 
@@ -2465,12 +2544,21 @@ def run_trial(trial_id: str, root: Path, keep: bool, ledger_draft: bool) -> dict
         "kept": keep,
     }
     report_path = trial_root / "trial_result.json"
-    write_json(report_path, report)
     evidence_paths = [str(report_path)]
     if manifest_path:
         evidence_paths.append(str(manifest_path))
+    next_stage_bundle = build_next_stage_fixture_package(trial_id, run_id, trial_outcome, manifest, manifest_path, report_path)
+    next_stage_package_path = trial_root / "next_stage_evidence_package.json"
+    write_json(next_stage_package_path, next_stage_bundle["package"])
+    next_stage = dict(next_stage_bundle["next_stage"])
+    next_stage["evidence_package"] = ledger_path_text(next_stage_package_path)
+    evidence_paths.append(str(next_stage_package_path))
+    report["next_stage"] = next_stage
+    report["next_stage_evidence_package"] = str(next_stage_package_path)
+    report["next_stage_evidence_package_payload"] = next_stage_bundle["package"]
+    write_json(report_path, report)
     if ledger_draft:
-        append_draft_ledger_entry(trial_id, run_id, evidence_paths)
+        append_draft_ledger_entry(trial_id, run_id, evidence_paths, next_stage=next_stage)
     if not keep:
         report["trial_root"] = ""
         shutil.rmtree(trial_root, ignore_errors=True)
