@@ -106,6 +106,7 @@
         "behavior_evidence_count",
         "broad_evidence_count",
         "blocking_requirement_count",
+        "falsification_review",
         "rows"
       ],
       "properties": {
@@ -138,6 +139,59 @@
         },
         "blocking_requirement_count": {
           "type": "integer"
+        },
+        "falsification_review": {
+          "type": "object",
+          "required": ["kind", "contract_version", "status", "probe_count", "blocking_concern_count", "concerns", "probes"],
+          "properties": {
+            "kind": {
+              "const": "code_brigade_falsification_review"
+            },
+            "contract_version": {
+              "const": "eye-mechanicum.v1"
+            },
+            "status": {
+              "enum": ["passed", "blocked"]
+            },
+            "probe_count": {
+              "type": "integer"
+            },
+            "blocking_concern_count": {
+              "type": "integer"
+            },
+            "concerns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "probes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["requirement", "status", "required_probe", "concerns"],
+                "properties": {
+                  "requirement": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": ["satisfied", "blocked"]
+                  },
+                  "required_probe": {
+                    "type": "string"
+                  },
+                  "concerns": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          },
+          "additionalProperties": true
         },
         "rows": {
           "type": "array",

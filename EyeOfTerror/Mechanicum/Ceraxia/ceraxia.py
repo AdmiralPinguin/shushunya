@@ -1711,6 +1711,16 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "verification contract trace has unproven acceptance requirements"})
     elif contract_trace.get("requirement_count") and int(contract_trace.get("blocking_requirement_count") or 0) > 0:
         warnings.append({"severity": "warning", "finding": "verification contract trace has unproven acceptance requirements"})
+    falsification_review = contract_trace.get("falsification_review") if isinstance(contract_trace.get("falsification_review"), dict) else {}
+    if (
+        falsification_review.get("status") == "blocked"
+        and int(falsification_review.get("blocking_concern_count") or 0) > 0
+        and verification_report.get("status") == "passed"
+        and (brief.get("risk_level") == "high" or verification_report.get("broad_verification_required"))
+    ):
+        findings.append({"severity": "blocker", "finding": "verification falsification review found unresolved counterexample concerns"})
+    elif falsification_review.get("status") == "blocked" and int(falsification_review.get("blocking_concern_count") or 0) > 0:
+        warnings.append({"severity": "warning", "finding": "verification falsification review found unresolved counterexample concerns"})
     repo_evidence = brief.get("repo_survey_evidence") if isinstance(brief.get("repo_survey_evidence"), dict) else {}
     if repo_evidence.get("survey_truncated"):
         warnings.append({"severity": "warning", "finding": "repository survey reached file limit; coverage is partial"})

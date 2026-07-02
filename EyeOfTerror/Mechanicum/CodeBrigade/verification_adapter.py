@@ -108,6 +108,67 @@ def command_matches_requirement(command: str, requirement: str) -> bool:
     return bool(command_words & keywords)
 
 
+def build_falsification_review(rows: list[dict[str, Any]], results: list[dict[str, Any]]) -> dict[str, Any]:
+    probes: list[dict[str, Any]] = []
+    result_commands = [str(result.get("command") or "") for result in results if isinstance(result, dict)]
+    behavior_commands = [command for command in result_commands if command_kind(command) == "behavior"]
+    syntax_commands = [command for command in result_commands if command_kind(command) == "syntax_or_diff"]
+    broad_commands = [
+        command
+        for command in result_commands
+        if "pytest" in command.lower() or "unittest" in command.lower()
+    ]
+    for row in rows:
+        requirement = str(row.get("requirement") or "")
+        status = str(row.get("status") or "")
+        keywords = requirement_keywords(requirement)
+        direct_words = set(re.findall(r"[a-zA-Z0-9_]+", requirement.lower()))
+        concerns: list[str] = []
+        required_probe = "counterexample behavior test"
+        if status != "proven":
+            concerns.append(f"requirement is not proven: {status}")
+        if status == "syntax_only":
+            concerns.append("syntax/diff evidence cannot prove user-visible behavior")
+        if direct_words & {"legacy", "migration", "mixed", "shape", "round", "compatibility"}:
+            required_probe = "old/new compatibility test"
+            if not any(command_matches_requirement(command, "compatibility legacy migration mixed shape round") for command in behavior_commands):
+                concerns.append("compatibility requirement lacks old/new behavior command")
+        if direct_words & {"api", "schema", "request", "response", "caller"}:
+            required_probe = "API caller contract test"
+            if not any(command_matches_requirement(command, "api schema request response caller") for command in behavior_commands):
+                concerns.append("API requirement lacks caller/schema behavior command")
+        if direct_words & {"docs", "documentation"}:
+            required_probe = "documentation drift check"
+            if not any("doc" in command.lower() or "readme" in command.lower() for command in result_commands):
+                concerns.append("documentation requirement lacks docs drift command")
+        if direct_words & {"security", "boundary", "auth", "token", "rejected"}:
+            required_probe = "negative boundary test"
+            if not any(command_matches_requirement(command, "security boundary auth token rejected input") for command in behavior_commands):
+                concerns.append("security requirement lacks negative boundary behavior command")
+        if not behavior_commands and syntax_commands:
+            concerns.append("only syntax/diff commands were available to falsify the claim")
+        if not broad_commands:
+            concerns.append("no broad behavior regression command is present")
+        probes.append(
+            {
+                "requirement": requirement,
+                "status": "blocked" if concerns else "satisfied",
+                "required_probe": required_probe,
+                "concerns": concerns,
+            }
+        )
+    concerns = [concern for probe in probes for concern in probe["concerns"]]
+    return {
+        "kind": "code_brigade_falsification_review",
+        "contract_version": CONTRACT_VERSION,
+        "status": "passed" if not concerns else "blocked",
+        "probe_count": len(probes),
+        "blocking_concern_count": len(concerns),
+        "concerns": concerns,
+        "probes": probes,
+    }
+
+
 def build_verification_contract_trace(results: list[dict[str, Any]], acceptance_requirements: list[str]) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for requirement in acceptance_requirements:
@@ -162,6 +223,7 @@ def build_verification_contract_trace(results: list[dict[str, Any]], acceptance_
         "behavior_evidence_count": sum(1 for result in results if command_kind(str(result.get("command") or "")) == "behavior"),
         "broad_evidence_count": sum(1 for result in results if "pytest" in str(result.get("command") or "").lower() or "unittest" in str(result.get("command") or "").lower()),
         "blocking_requirement_count": sum(1 for row in rows if row["status"] in blocking_statuses),
+        "falsification_review": build_falsification_review(rows, results),
         "rows": rows,
     }
 

@@ -1584,6 +1584,28 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                 "behavior_evidence_count": 0,
                 "broad_evidence_count": 0,
                 "blocking_requirement_count": 1,
+                "falsification_review": {
+                    "kind": "code_brigade_falsification_review",
+                    "contract_version": "eye-mechanicum.v1",
+                    "status": "blocked",
+                    "probe_count": 1,
+                    "blocking_concern_count": 2,
+                    "concerns": [
+                        "syntax/diff evidence cannot prove user-visible behavior",
+                        "no broad behavior regression command is present",
+                    ],
+                    "probes": [
+                        {
+                            "requirement": "changed behavior is covered by targeted verification",
+                            "status": "blocked",
+                            "required_probe": "counterexample behavior test",
+                            "concerns": [
+                                "syntax/diff evidence cannot prove user-visible behavior",
+                                "no broad behavior regression command is present",
+                            ],
+                        }
+                    ],
+                },
                 "rows": [
                     {
                         "requirement": "changed behavior is covered by targeted verification",
@@ -1603,6 +1625,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertEqual(review["decision"], "blocked")
         self.assertTrue(any("partial executed surface evidence" in item["finding"] for item in review["findings"]))
         self.assertTrue(any("verification contract trace has unproven acceptance requirements" in item["finding"] for item in review["findings"]))
+        self.assertTrue(any("verification falsification review" in item["finding"] for item in review["findings"]))
 
     def test_non_dry_run_blocks_until_real_code_brigade_execution_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

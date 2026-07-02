@@ -51,6 +51,33 @@ def main() -> int:
         )
         if behavior_trace["contract_trace"]["status"] != "proven" or behavior_trace["contract_trace"]["behavior_evidence_count"] < 1:
             raise AssertionError(f"behavior command should prove behavior acceptance: {behavior_trace}")
+        if behavior_trace["contract_trace"]["falsification_review"]["status"] != "passed":
+            raise AssertionError(f"behavior command with broad evidence should pass falsification review: {behavior_trace}")
+        compatibility_trace = verification_adapter.run_verification_commands(
+            ["python -m py_compile ok.py"],
+            str(repo),
+            execute=True,
+            acceptance_requirements=["old and new API shape compatibility is preserved"],
+        )
+        falsification = compatibility_trace["contract_trace"]["falsification_review"]
+        if falsification["status"] != "blocked" or not any("compatibility" in concern for concern in falsification["concerns"]):
+            raise AssertionError(f"compatibility requirement should require old/new behavior proof: {compatibility_trace}")
+        docs_trace = verification_adapter.run_verification_commands(
+            ["python -m unittest test_ok.py"],
+            str(repo),
+            execute=True,
+            acceptance_requirements=["documentation contract drift is checked"],
+        )
+        if docs_trace["contract_trace"]["falsification_review"]["status"] != "blocked" or not any("documentation" in concern for concern in docs_trace["contract_trace"]["falsification_review"]["concerns"]):
+            raise AssertionError(f"docs requirement should require docs drift proof: {docs_trace}")
+        security_trace = verification_adapter.run_verification_commands(
+            ["python -m unittest test_ok.py"],
+            str(repo),
+            execute=True,
+            acceptance_requirements=["security token boundary rejects untrusted input"],
+        )
+        if security_trace["contract_trace"]["falsification_review"]["status"] != "blocked" or not any("security" in concern for concern in security_trace["contract_trace"]["falsification_review"]["concerns"]):
+            raise AssertionError(f"security requirement should require negative boundary proof: {security_trace}")
         (repo / "test_fail.py").write_text(
             "import unittest\n\nclass FailTest(unittest.TestCase):\n    def test_fail(self):\n        self.assertEqual(1, 2)\n",
             encoding="utf-8",
