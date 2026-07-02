@@ -30,6 +30,7 @@ from planning_brigade import build_planning_packet  # noqa: E402
 from planning_packet_contract import validate_planning_packet as validate_planning_packet_contract  # noqa: E402
 from code_brigade_adapter import build_worker_report  # noqa: E402
 from diagnostic_repair_contract import execute_diagnostic_repair_request  # noqa: E402
+from engineering_memory import build_engineering_memory_update  # noqa: E402
 from execution_adapter import can_infer_guarded_natural_language_patch  # noqa: E402
 from planning_department import build_planning_department_package  # noqa: E402
 from verification_adapter import run_verification_commands  # noqa: E402
@@ -67,6 +68,7 @@ REQUIRED_RUN_ARTIFACTS = [
     "execution_readiness.json",
     "run_summary.json",
     "evidence_matrix.json",
+    "engineering_memory_update.json",
 ]
 
 
@@ -1606,6 +1608,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
     verification = artifacts["verification_report"]
     readiness = artifacts["execution_readiness"]
     worker_report = artifacts.get("worker_report", {}) if isinstance(artifacts.get("worker_report"), dict) else {}
+    engineering_memory = artifacts.get("engineering_memory_update", {}) if isinstance(artifacts.get("engineering_memory_update"), dict) else {}
     planning_department = artifacts.get("planning_department", {}) if isinstance(artifacts.get("planning_department"), dict) else {}
     planning_department_rfc = planning_department.get("engineering_rfc") if isinstance(planning_department.get("engineering_rfc"), dict) else {}
     planning_department_investigation = planning_department.get("multi_pass_repo_investigation") if isinstance(planning_department.get("multi_pass_repo_investigation"), dict) else {}
@@ -1713,6 +1716,9 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
         f"Execution adapter capability: {execution_intent.get('adapter_capability', '')}",
         f"Scope budget source files: {scope_budget.get('max_source_files_to_edit', 0)}",
         f"Scope budget unrequested test edits: {scope_budget.get('max_test_files_to_edit_without_explicit_user_request', 0)}",
+        f"Engineering memory status: {engineering_memory.get('status', '')}",
+        f"Engineering memory reusable patterns: {len(engineering_memory.get('reusable_patterns', [])) if isinstance(engineering_memory.get('reusable_patterns'), list) else 0}",
+        f"Engineering memory false-success guards: {len(engineering_memory.get('false_success_guards', [])) if isinstance(engineering_memory.get('false_success_guards'), list) else 0}",
         "",
         "## Readiness",
         "",
@@ -1770,6 +1776,7 @@ def final_report_markdown(run_id: str, artifacts: dict[str, dict[str, Any]]) -> 
             "- execution_readiness.json",
             "- run_summary.json",
             "- evidence_matrix.json",
+            "- engineering_memory_update.json",
             "- artifact_manifest.json",
             "- run_audit.json",
             "",
@@ -2172,6 +2179,7 @@ def build_run_summary(
     review: dict[str, Any],
     readiness: dict[str, Any],
     evidence_matrix: dict[str, Any],
+    engineering_memory: dict[str, Any] | None = None,
     planning_feedback_request: dict[str, Any] | None = None,
     package_audit_decision: str = "pending_until_run_audit",
 ) -> dict[str, Any]:
@@ -2200,6 +2208,7 @@ def build_run_summary(
     worker_output_contract_sufficiency = review.get("worker_output_contract_sufficiency") if isinstance(review.get("worker_output_contract_sufficiency"), dict) else {}
     planning_department_sufficiency = review.get("planning_department_sufficiency") if isinstance(review.get("planning_department_sufficiency"), dict) else {}
     planning_feedback = planning_feedback_request if isinstance(planning_feedback_request, dict) else {}
+    memory = engineering_memory if isinstance(engineering_memory, dict) else {}
     planning_feedback_findings = planning_feedback.get("feedback_findings") if isinstance(planning_feedback.get("feedback_findings"), list) else []
     work_packages = brief.get("implementation_work_packages") if isinstance(brief.get("implementation_work_packages"), dict) else {}
     expert_plan = brief.get("expert_quality_plan") if isinstance(brief.get("expert_quality_plan"), dict) else {}
@@ -2315,6 +2324,11 @@ def build_run_summary(
         "scope_budget_max_source_files_to_edit": scope_budget.get("max_source_files_to_edit", 0),
         "scope_budget_max_unrequested_test_files_to_edit": scope_budget.get("max_test_files_to_edit_without_explicit_user_request", 0),
         "scope_budget_replan_trigger_count": len(scope_budget.get("requires_ceraxia_replan_when", [])) if isinstance(scope_budget.get("requires_ceraxia_replan_when"), list) else 0,
+        "engineering_memory_status": memory.get("status", ""),
+        "engineering_memory_failure_pattern_count": len(memory.get("observed_failure_patterns", [])) if isinstance(memory.get("observed_failure_patterns"), list) else 0,
+        "engineering_memory_reusable_pattern_count": len(memory.get("reusable_patterns", [])) if isinstance(memory.get("reusable_patterns"), list) else 0,
+        "engineering_memory_false_success_guard_count": len(memory.get("false_success_guards", [])) if isinstance(memory.get("false_success_guards"), list) else 0,
+        "engineering_memory_dangerous_module_count": len(memory.get("dangerous_modules", [])) if isinstance(memory.get("dangerous_modules"), list) else 0,
         "evidence": {
             "required_count": evidence_matrix.get("required_evidence_count", 0),
             "present_count": evidence_matrix.get("present_count", 0),
@@ -2528,6 +2542,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_json(run_dir / "diagnostic_repair_request.json", repair_request)
     planning_feedback_request = build_planning_feedback_request(run_id, packet, brief, worker_report, verification_report, review)
     write_json(run_dir / "planning_feedback_request.json", planning_feedback_request)
+    engineering_memory_update = build_engineering_memory_update(brief, worker_report, verification_report, review)
+    write_json(run_dir / "engineering_memory_update.json", engineering_memory_update)
     repair_execution_result: dict[str, Any] = {
         "kind": "code_brigade_execution_result",
         "contract_version": CONTRACT_VERSION,
@@ -2557,6 +2573,7 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "diagnostic_repair_request": repair_request,
         "planning_feedback_request": planning_feedback_request,
         "diagnostic_repair_execution_result": repair_execution_result,
+        "engineering_memory_update": engineering_memory_update,
     }
     write_json(run_dir / "status.json", status)
     readiness = build_execution_readiness(status, brief, worker_report, verification_report, review, dry_run)
@@ -2565,7 +2582,18 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
     write_json(run_dir / "execution_readiness.json", readiness)
     evidence_matrix = build_evidence_matrix(brief, worker_report, verification_report, readiness)
     write_json(run_dir / "evidence_matrix.json", evidence_matrix)
-    summary = build_run_summary(run_id, run_dir, status, brief, worker_report, review, readiness, evidence_matrix, planning_feedback_request)
+    summary = build_run_summary(
+        run_id,
+        run_dir,
+        status,
+        brief,
+        worker_report,
+        review,
+        readiness,
+        evidence_matrix,
+        engineering_memory=engineering_memory_update,
+        planning_feedback_request=planning_feedback_request,
+    )
     write_json(run_dir / "run_summary.json", summary)
     manifest = build_artifact_manifest(run_dir)
     write_json(run_dir / "artifact_manifest.json", manifest)
@@ -2580,7 +2608,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         review,
         readiness,
         evidence_matrix,
-        planning_feedback_request,
+        engineering_memory=engineering_memory_update,
+        planning_feedback_request=planning_feedback_request,
         package_audit_decision=str(audit.get("decision") or "blocked"),
     )
     write_json(run_dir / "run_summary.json", summary)

@@ -112,6 +112,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                 "execution_readiness.json",
                 "run_summary.json",
                 "evidence_matrix.json",
+                "engineering_memory_update.json",
                 "artifact_manifest.json",
                 "run_audit.json",
             ]
@@ -426,8 +427,20 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(summary["implementation_work_package_dependency_terminal_count"], 1)
             self.assertGreaterEqual(summary["work_package_status_counts"]["planned"], 1)
             self.assertEqual(summary["work_package_status_counts"]["implemented"], 0)
+            self.assertEqual(summary["engineering_memory_status"], "recorded")
+            self.assertEqual(summary["engineering_memory_failure_pattern_count"], 0)
+            self.assertGreaterEqual(summary["engineering_memory_reusable_pattern_count"], 3)
+            self.assertGreaterEqual(summary["engineering_memory_false_success_guard_count"], 4)
+            self.assertGreaterEqual(summary["engineering_memory_dangerous_module_count"], 1)
             self.assertGreaterEqual(summary["evidence"]["required_count"], 1)
             self.assertGreaterEqual(summary["evidence"]["planned_count"], 1)
+            engineering_memory = json.loads((run_dir / "engineering_memory_update.json").read_text(encoding="utf-8"))
+            self.assertEqual(engineering_memory["kind"], "ceraxia_engineering_memory_update")
+            self.assertEqual(engineering_memory["status"], "recorded")
+            self.assertIn("security", engineering_memory["task_kinds"])
+            self.assertIn("boundary", " ".join(engineering_memory["mandatory_checks_by_task_kind"]["security"]))
+            self.assertIn("review_gate.decision", " ".join(engineering_memory["false_success_guards"]))
+            self.assertIn("app.py", engineering_memory["dangerous_modules"])
             evidence_matrix = json.loads((run_dir / "evidence_matrix.json").read_text(encoding="utf-8"))
             evidence_schema = json.loads((Path(__file__).resolve().parent / "contracts" / "evidence_matrix.schema.json").read_text(encoding="utf-8"))
             missing_evidence_fields = [field for field in evidence_schema["required"] if field not in evidence_matrix]
@@ -489,6 +502,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("Assumptions tracked:", final_report)
             self.assertIn("- planning_department.json", final_report)
             self.assertIn("- evidence_matrix.json", final_report)
+            self.assertIn("- engineering_memory_update.json", final_report)
             self.assertIn("BLOCKER: dry run requested; real CodeBrigade execution was intentionally skipped", final_report)
             self.assertIn("Verification commands planned:", final_report)
             self.assertIn("Verification commands executed: 0", final_report)
@@ -519,6 +533,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("Execution adapter capability: explicit_patch_adapter_only", final_report)
             self.assertIn("Scope budget source files:", final_report)
             self.assertIn("Scope budget unrequested test edits: 0", final_report)
+            self.assertIn("Engineering memory status: recorded", final_report)
+            self.assertIn("Engineering memory reusable patterns:", final_report)
+            self.assertIn("Engineering memory false-success guards:", final_report)
             self.assertIn("WARNING: broad verification is planned but not executed", final_report)
             self.assertIn("- repository survey partial: false", final_report)
             self.assertIn("- python symbol survey partial: false", final_report)

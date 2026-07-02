@@ -97,6 +97,11 @@
     "scope_budget_max_source_files_to_edit",
     "scope_budget_max_unrequested_test_files_to_edit",
     "scope_budget_replan_trigger_count",
+    "engineering_memory_status",
+    "engineering_memory_failure_pattern_count",
+    "engineering_memory_reusable_pattern_count",
+    "engineering_memory_false_success_guard_count",
+    "engineering_memory_dangerous_module_count",
     "evidence",
     "blockers",
     "next_action",
@@ -404,6 +409,21 @@
       "type": "integer"
     },
     "scope_budget_replan_trigger_count": {
+      "type": "integer"
+    },
+    "engineering_memory_status": {
+      "type": "string"
+    },
+    "engineering_memory_failure_pattern_count": {
+      "type": "integer"
+    },
+    "engineering_memory_reusable_pattern_count": {
+      "type": "integer"
+    },
+    "engineering_memory_false_success_guard_count": {
+      "type": "integer"
+    },
+    "engineering_memory_dangerous_module_count": {
       "type": "integer"
     },
     "evidence": {
