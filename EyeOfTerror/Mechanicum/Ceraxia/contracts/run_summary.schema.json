@@ -46,6 +46,9 @@
     "verification_output_diagnostic_counts",
     "diagnostic_repair_queue_status",
     "diagnostic_repair_queue_item_count",
+    "diagnostic_repair_queue_requires_attempt_history",
+    "diagnostic_repair_queue_max_attempts",
+    "diagnostic_repair_queue_replan_trigger_count",
     "investigation_playbook_status",
     "investigation_read_stage_count",
     "investigation_evidence_question_count",
@@ -254,6 +257,15 @@
       "type": "string"
     },
     "diagnostic_repair_queue_item_count": {
+      "type": "integer"
+    },
+    "diagnostic_repair_queue_requires_attempt_history": {
+      "type": "boolean"
+    },
+    "diagnostic_repair_queue_max_attempts": {
+      "type": "integer"
+    },
+    "diagnostic_repair_queue_replan_trigger_count": {
       "type": "integer"
     },
     "investigation_playbook_status": {

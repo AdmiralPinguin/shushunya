@@ -39,6 +39,7 @@ from repo_survey import survey_repository  # noqa: E402
 
 CONTRACT_VERSION = "eye-mechanicum.v1"
 EXECUTION_MODES = {"dry_run", "guarded_patch", "repo_engineer", "review_only"}
+DIAGNOSTIC_REPAIR_MAX_ATTEMPTS = 3
 
 
 LIFECYCLE = [
@@ -620,6 +621,25 @@ def repair_hypotheses_from_failure(
     ]
 
 
+def diagnostic_repair_dedupe_key(
+    command: str,
+    failure_classification: dict[str, Any],
+    source_candidates: list[str],
+    signals: list[str],
+) -> str:
+    source_key = ",".join(source_candidates[:3]) if source_candidates else "unknown-source"
+    signal_key = ",".join(signals) if signals else "no-signal"
+    payload = "|".join(
+        [
+            str(failure_classification.get("type") or "unknown-failure"),
+            command.strip(),
+            source_key,
+            signal_key,
+        ]
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def build_diagnostic_repair_queue(
     brief: dict[str, Any],
     verification_report: dict[str, Any],
@@ -680,6 +700,8 @@ def build_diagnostic_repair_queue(
             }
         )
         failure_classification = failure_classification_from_repair_item(command_status, signals)
+        max_attempts = int(repair_plan.get("max_repair_attempts", DIAGNOSTIC_REPAIR_MAX_ATTEMPTS) or DIAGNOSTIC_REPAIR_MAX_ATTEMPTS)
+        dedupe_key = diagnostic_repair_dedupe_key(command, failure_classification, source_candidates, signals)
         items.append(
             {
                 "command": command,
@@ -697,7 +719,32 @@ def build_diagnostic_repair_queue(
                 "concrete_read_targets": concrete_read_targets,
                 "stop_conditions": stop_conditions,
                 "repair_evidence_required": repair_evidence,
-                "max_repair_attempts": repair_plan.get("max_repair_attempts", 3),
+                "max_repair_attempts": max_attempts,
+                "attempt_history_policy": {
+                    "required": True,
+                    "dedupe_key": dedupe_key,
+                    "max_attempts": max_attempts,
+                    "block_repeat_without_new_evidence": True,
+                    "required_fields": [
+                        "attempt",
+                        "hypothesis",
+                        "changed_files",
+                        "verification_command",
+                        "result",
+                    ],
+                },
+                "replan_required_when": [
+                    "same dedupe_key fails after 2 attempts",
+                    "max attempts reached without passing evidence",
+                    "next attempt repeats the same hypothesis without new source evidence",
+                    "no source candidates remain after repo investigation",
+                ],
+                "escalation_policy": {
+                    "status": "planning_replan_required_after_limit",
+                    "escalate_to": "PlanningBrigade",
+                    "after_attempts": max_attempts,
+                    "requires_new_hypothesis_before_retry": True,
+                },
             }
         )
     return {
@@ -706,6 +753,9 @@ def build_diagnostic_repair_queue(
         "items": items,
         "source": "verification_output_diagnostics",
         "plan_present": bool(repair_plan),
+        "requires_attempt_history": bool(items),
+        "max_attempts_per_item": max((int(item.get("max_repair_attempts", 0)) for item in items), default=0),
+        "replan_trigger_count": sum(len(item.get("replan_required_when", [])) for item in items),
     }
 
 
@@ -2302,6 +2352,9 @@ def build_run_summary(
         "verification_output_diagnostic_counts": verification_sufficiency.get("output_diagnostic_counts", {}),
         "diagnostic_repair_queue_status": repair_queue.get("status", "empty"),
         "diagnostic_repair_queue_item_count": repair_queue.get("item_count", 0),
+        "diagnostic_repair_queue_requires_attempt_history": bool(repair_queue.get("requires_attempt_history")),
+        "diagnostic_repair_queue_max_attempts": repair_queue.get("max_attempts_per_item", 0),
+        "diagnostic_repair_queue_replan_trigger_count": repair_queue.get("replan_trigger_count", 0),
         "investigation_playbook_status": investigation_sufficiency.get("status", ""),
         "investigation_read_stage_count": investigation_sufficiency.get("read_stage_count", 0),
         "investigation_evidence_question_count": investigation_sufficiency.get("evidence_question_count", 0),
