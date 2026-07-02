@@ -65,6 +65,13 @@ def build_engineering_memory_update(
     )
     finding_texts = [str(item.get("finding") or "") for item in findings if isinstance(item, dict)]
     warning_texts = [str(item.get("finding") or "") for item in warnings if isinstance(item, dict)]
+    contract_trace = _dict(verification_report.get("contract_trace"))
+    falsification_review = _dict(contract_trace.get("falsification_review"))
+    commands_executed = _list(verification_report.get("commands_executed"))
+    verification_was_executed = bool(commands_executed) or verification_report.get("status") in {"passed", "failed", "blocked"}
+    falsification_concerns = _strings(falsification_review.get("concerns")) if verification_was_executed else []
+    repair_queue = _dict(review.get("diagnostic_repair_queue"))
+    repair_items = _list(repair_queue.get("items"))
     failure_patterns = [
         {
             "pattern": "review_blocker",
@@ -78,6 +85,43 @@ def build_engineering_memory_update(
                 "pattern": "verification_diagnostic_signal",
                 "evidence": diagnostic_signals,
                 "required_next_check": "classify failing command output before attempting another patch",
+            }
+        )
+    if falsification_concerns:
+        failure_patterns.append(
+            {
+                "pattern": "falsification_concern",
+                "evidence": falsification_concerns,
+                "required_next_check": "add a counterexample probe before accepting the next verification report",
+            }
+        )
+    repair_strategy_rows = []
+    for item in repair_items:
+        if not isinstance(item, dict):
+            continue
+        classification = _dict(item.get("failure_classification"))
+        signals = _strings(item.get("diagnostic_signals"))
+        if "no_tests_ran" in signals:
+            likely_cause = "bad_or_missing_test_oracle"
+            next_hypothesis = "repair or replace verification oracle before source mutation"
+        elif "assertion_failure" in signals or classification.get("type") == "behavior_regression_or_unmet_acceptance":
+            likely_cause = "source_behavior_or_acceptance_gap"
+            next_hypothesis = "read implicated source and test oracle, then patch source or block with evidence"
+        elif "syntax_error" in signals or "traceback" in signals:
+            likely_cause = "runtime_or_syntax_failure"
+            next_hypothesis = "read traceback target and apply minimal source repair"
+        else:
+            likely_cause = "unknown_failure_needs_replan"
+            next_hypothesis = "return to PlanningBrigade with preserved attempt history"
+        repair_strategy_rows.append(
+            {
+                "command": str(item.get("command") or ""),
+                "failure_type": str(classification.get("type") or "unknown"),
+                "diagnostic_signals": signals,
+                "likely_cause": likely_cause,
+                "next_hypothesis": next_hypothesis,
+                "must_preserve": ["attempt_history", "verification output", "read-before-repair evidence"],
+                "must_not_repeat": ["same repair signature without new evidence", "test masking", "syntax-only acceptance"],
             }
         )
     mandatory_checks_by_task_kind = {
@@ -114,6 +158,16 @@ def build_engineering_memory_update(
         ],
         "mandatory_checks_by_task_kind": mandatory_checks_by_task_kind,
         "reuse_plan": reuse_plan,
+        "repair_strategy_memory": {
+            "status": "recorded" if repair_strategy_rows or falsification_concerns else "not_applicable",
+            "rows": repair_strategy_rows,
+            "falsification_concerns": falsification_concerns,
+            "attempt_history_policy": [
+                "preserve failed attempt signatures",
+                "require new source or verification evidence before repeating a repair",
+                "send repeated or maxed repairs back to PlanningBrigade",
+            ],
+        },
         "dangerous_modules": dangerous_modules,
         "false_success_guards": [
             "package_ok must be true before reporting done",

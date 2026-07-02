@@ -24,6 +24,7 @@ from ceraxia import (
     validate_planning_packet,
 )
 from planning_department import build_planning_department_package
+from engineering_memory import build_engineering_memory_update
 import repo_survey as repo_survey_module
 
 import sys
@@ -1523,6 +1524,65 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         review = review_gate(packet, brief, worker_report, verification_report)
         self.assertEqual(review["decision"], "blocked")
         self.assertTrue(any("output contains failure_text" in item["finding"] for item in review["findings"]))
+
+    def test_engineering_memory_records_repair_strategy_from_failed_verification(self) -> None:
+        packet = build_planning_packet({"task": "почини bugfix без указания файла по failing unittest", "repo_path": "."})
+        survey = {
+            "repo_exists": True,
+            "repo_path": ".",
+            "candidate_files": ["app.py"],
+            "test_files": ["test_app.py"],
+            "entrypoint_candidates": [],
+            "python_symbols": [],
+            "source_summaries": [],
+            "local_import_edges": [],
+            "generic_import_edges": [],
+            "recommended_read_order": [{"path": "app.py", "reason": "ranked source/config candidate"}],
+            "suggested_verification_commands": [],
+            "truncated": False,
+            "python_symbols_truncated": False,
+            "source_summaries_truncated": False,
+            "max_files_scanned": 1,
+            "max_python_symbol_files": 1,
+            "max_source_summary_files": 1,
+        }
+        brief = build_implementation_brief(packet, survey)
+        worker_report = {
+            "status": "dry_run_handoff_ready",
+            "dry_run": True,
+            "changed_files": [],
+            "implementation_brief_acknowledged": True,
+            "implementation_plan": {
+                "target_files_to_inspect": ["app.py"],
+            },
+        }
+        verification_report = {
+            "status": "failed",
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "commands_planned": ["python -m unittest test_app.py"],
+            "commands_executed": [{"command": "python -m unittest test_app.py", "status": "failed"}],
+            "output_summary": [
+                {
+                    "command": "python -m unittest test_app.py",
+                    "status": "failed",
+                    "has_assertion_failure": True,
+                    "output_signal": "failure_text",
+                }
+            ],
+            "contract_trace": {
+                "falsification_review": {
+                    "status": "blocked",
+                    "concerns": ["counterexample behavior test failed"],
+                }
+            },
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        memory = build_engineering_memory_update(brief, worker_report, verification_report, review)
+        self.assertEqual(memory["repair_strategy_memory"]["status"], "recorded")
+        self.assertTrue(any(row["likely_cause"] == "source_behavior_or_acceptance_gap" for row in memory["repair_strategy_memory"]["rows"]))
+        self.assertIn("counterexample behavior test failed", memory["repair_strategy_memory"]["falsification_concerns"])
+        self.assertTrue(any(pattern["pattern"] == "falsification_concern" for pattern in memory["observed_failure_patterns"]))
 
     def test_review_gate_blocks_high_risk_partial_surface_execution(self) -> None:
         packet = build_planning_packet(
