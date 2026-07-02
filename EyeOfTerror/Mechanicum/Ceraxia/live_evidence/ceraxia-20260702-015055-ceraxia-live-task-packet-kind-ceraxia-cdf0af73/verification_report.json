@@ -1,0 +1,46 @@
+{
+  "kind": "ceraxia_verification_report",
+  "status": "blocked",
+  "commands_planned": [
+    "python -m py_compile <changed .py files>",
+    "git diff --check",
+    "python -m pytest Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py Mechanicum/worker_services_self_test.py",
+    "python -m py_compile ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py CoreOfMadness/telegram-bot/bot.py"
+  ],
+  "commands_executable": [
+    "git diff --check",
+    "python -m pytest Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py Mechanicum/worker_services_self_test.py",
+    "python -m py_compile ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py CoreOfMadness/telegram-bot/bot.py"
+  ],
+  "commands_executed": [],
+  "output_summary": [],
+  "verification_after_mutation_evidence": {
+    "kind": "ceraxia_verification_after_mutation_evidence",
+    "status": "not_required",
+    "reason": "worker did not report source mutation",
+    "changed_files": [],
+    "commands_executed_count": 0,
+    "blockers": []
+  },
+  "verification_execution": {
+    "kind": "code_brigade_verification_execution",
+    "contract_version": "eye-mechanicum.v1",
+    "status": "blocked",
+    "execute": false,
+    "repo_path": "/media/shushunya/SHUSHUNYA/shushunya",
+    "results": [],
+    "blockers": [
+      "explicit path hints were not found: repo_investigation.json, planning_department.json, execution_result.json, patch_manifest.json, verification_report.json, review_gate.json, ceraxia_next_stage_evidence_package.json, EyeOfTerror/Warmaster/ceraxia_live_task_register.py, EyeOfTerror/Warmaster/ceraxia_next_stage_package.py"
+    ]
+  },
+  "negative_tests_required": [
+    "old and new API shape compatibility",
+    "parallel/retry behavior preserves state"
+  ],
+  "broad_verification_required": true,
+  "blockers": [
+    "explicit path hints were not found: repo_investigation.json, planning_department.json, execution_result.json, patch_manifest.json, verification_report.json, review_gate.json, ceraxia_next_stage_evidence_package.json, EyeOfTerror/Warmaster/ceraxia_live_task_register.py, EyeOfTerror/Warmaster/ceraxia_next_stage_package.py"
+  ],
+  "dry_run": true,
+  "execute_verification": false
+}

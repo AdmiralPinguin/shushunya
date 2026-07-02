@@ -3818,6 +3818,45 @@
       "generalizable_failures": [],
       "follow_up_changes": [],
       "accepted_for_rolling_score": false
+    },
+    {
+      "trial_id": "ceraxia-live-ambiguous-blocker",
+      "run_id": "ceraxia-20260702-015055-ceraxia-live-task-packet-kind-ceraxia-cdf0af73",
+      "date": "2026-07-02",
+      "reviewer": "Codex live harness review",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-015055-ceraxia-live-task-packet-kind-ceraxia-cdf0af73/next_stage_evidence_package.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-015055-ceraxia-live-task-packet-kind-ceraxia-cdf0af73/planning_department.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-015055-ceraxia-live-task-packet-kind-ceraxia-cdf0af73/repo_survey.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-015055-ceraxia-live-task-packet-kind-ceraxia-cdf0af73/review_gate.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-015055-ceraxia-live-task-packet-kind-ceraxia-cdf0af73/verification_report.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-015055-ceraxia-live-task-packet-kind-ceraxia-cdf0af73/worker_report.json"
+      ],
+      "human_review_notes": "Accepted as an honest first live Ceraxia benchmark attempt: the run produced a readable evidence package and a concrete failed/postmortem outcome instead of claiming success.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false,
+      "accepted_for_next_stage": true,
+      "next_stage": {
+        "status": "failed",
+        "attempt_count": 1,
+        "class": "clarification_or_block",
+        "multi_file_nonfixture": false,
+        "false_success": false,
+        "postmortem": "Ceraxia live task ended as failed; package_ok=False; review=blocked; verification=blocked; next_action=inspect blockers.",
+        "evidence_package": "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-015055-ceraxia-live-task-packet-kind-ceraxia-cdf0af73/next_stage_evidence_package.json"
+      }
     }
   ]
 }

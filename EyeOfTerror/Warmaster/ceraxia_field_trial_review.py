@@ -51,11 +51,12 @@ def load_manifest(trial_result: dict[str, Any]) -> tuple[Path | None, dict[str, 
 
 
 def spec_by_trial_id(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {
-        str(item.get("id")): item
-        for item in spec.get("trials", [])
-        if isinstance(item, dict) and item.get("id")
-    }
+    items: dict[str, dict[str, Any]] = {}
+    for section in ("trials", "live_tasks"):
+        for item in spec.get(section, []):
+            if isinstance(item, dict) and item.get("id"):
+                items[str(item["id"])] = item
+    return items
 
 
 def dimensions(spec: dict[str, Any]) -> list[str]:
