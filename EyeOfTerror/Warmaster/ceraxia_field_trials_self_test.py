@@ -169,7 +169,7 @@ def main() -> int:
         capture_output=True,
         check=False,
     )
-    if live_run_help.returncode != 0 or "--execute-verification" not in live_run_help.stdout:
+    if live_run_help.returncode != 0 or "--execute-verification" not in live_run_help.stdout or "--verification-command" not in live_run_help.stdout:
         raise AssertionError(f"Ceraxia live task harness must expose verification execution flag: {live_run_help.stdout} {live_run_help.stderr}")
     missing_live_prepare = subprocess.run(
         [sys.executable, str(LIVE_TASK_PREPARE), "--task-id", "missing-live-task"],

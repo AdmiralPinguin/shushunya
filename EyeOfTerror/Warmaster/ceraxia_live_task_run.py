@@ -89,6 +89,7 @@ def run_ceraxia_for_task(
     mode: str,
     patch_payload: dict[str, Any] | None = None,
     execute_verification: bool = False,
+    verification_commands: list[str] | None = None,
 ) -> dict[str, Any]:
     packet = build_task_packet(task, run_id, repo_root)
     command = [
@@ -105,6 +106,8 @@ def run_ceraxia_for_task(
     ]
     if execute_verification:
         command.append("--execute-verification")
+    for verification_command in verification_commands or []:
+        command.extend(["--verification-command", verification_command])
     completed = subprocess.run(
         command,
         cwd=str(REPO_ROOT),
@@ -201,6 +204,7 @@ def main() -> int:
     parser.add_argument("--mode", choices=["dry_run", "guarded_patch", "repo_engineer", "review_only"], default="dry_run")
     parser.add_argument("--patch-file", type=Path, default=None, help="Optional CERAXIA_PATCH JSON payload for controlled guarded_patch attempts.")
     parser.add_argument("--execute-verification", action="store_true", help="Run Ceraxia allowlisted verification commands during the live task.")
+    parser.add_argument("--verification-command", action="append", default=[], help="Structured verification command to pass to Ceraxia. Can be repeated.")
     parser.add_argument("--ledger", type=Path, default=LEDGER)
     parser.add_argument("--register", action="store_true", help="Append a draft live entry to the ledger.")
     parser.add_argument("--accept-for-next-stage", action="store_true", help="Register and count the entry toward the live benchmark.")
@@ -212,7 +216,16 @@ def main() -> int:
     task = find_live_task(spec, args.task_id)
     run_id = args.run_id or args.task_id
     patch_payload = load_json(args.patch_file) if args.patch_file else None
-    result = run_ceraxia_for_task(task, run_id, args.repo_root.resolve(), args.runs_root, args.mode, patch_payload, args.execute_verification)
+    result = run_ceraxia_for_task(
+        task,
+        run_id,
+        args.repo_root.resolve(),
+        args.runs_root,
+        args.mode,
+        patch_payload,
+        args.execute_verification,
+        list(args.verification_command),
+    )
     run_dir = Path(str(result["run_dir"]))
     package = build_package(task, result, run_dir)
     package_path = run_dir / "next_stage_evidence_package.json"
