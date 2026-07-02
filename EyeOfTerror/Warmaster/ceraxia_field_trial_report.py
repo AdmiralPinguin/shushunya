@@ -34,10 +34,19 @@ def next_stage_package_status(entry: dict[str, Any], trial: dict[str, Any]) -> d
     return next_stage_evidence_status(EYE_ROOT.parent, entry, trial)
 
 
+def task_catalog_by_id(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    catalog: dict[str, dict[str, Any]] = {}
+    for section in ("trials", "live_tasks"):
+        for item in spec.get(section, []):
+            if isinstance(item, dict) and item.get("id"):
+                catalog[str(item["id"])] = item
+    return catalog
+
+
 def validate_ledger(spec: dict[str, Any], ledger: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     dimensions = [str(item) for item in spec.get("dimensions", [])]
-    trial_ids = {str(item.get("id")) for item in spec.get("trials", []) if isinstance(item, dict)}
+    trial_ids = set(task_catalog_by_id(spec))
     entries = ledger.get("entries") if isinstance(ledger.get("entries"), list) else []
     seen_runs: set[str] = set()
     for index, entry in enumerate(entries):
@@ -186,11 +195,7 @@ def build_report(spec: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]
     dimensions = [str(item) for item in spec.get("dimensions", [])]
     target = spec.get("target") if isinstance(spec.get("target"), dict) else {}
     expert_target = spec.get("expert_target") if isinstance(spec.get("expert_target"), dict) else {}
-    trial_by_id = {
-        str(item.get("id")): item
-        for item in spec.get("trials", [])
-        if isinstance(item, dict) and item.get("id")
-    }
+    trial_by_id = task_catalog_by_id(spec)
     entries = [item for item in ledger.get("entries", []) if isinstance(item, dict)]
     accepted = [item for item in entries if item.get("accepted_for_rolling_score") is True]
     next_stage_metrics = build_next_stage_metrics(spec, entries, trial_by_id)

@@ -1002,6 +1002,188 @@
       ]
     }
   ],
+  "live_tasks": [
+    {
+      "id": "ceraxia-live-config-runtime-alias",
+      "class": "runtime_configuration",
+      "difficulty": "small",
+      "task": "Add or repair a real runtime configuration alias in this repository without changing unrelated behavior.",
+      "required_evidence": ["repo map", "planning department handoff", "patch manifest", "verification output", "review gate"],
+      "minimum_changed_files": 1,
+      "multi_file_expected": false
+    },
+    {
+      "id": "ceraxia-live-cli-contract-flag",
+      "class": "cli_contract",
+      "difficulty": "small",
+      "task": "Add a real CLI flag or tighten an existing CLI contract with self-tests and help text.",
+      "required_evidence": ["entrypoint search", "contract impact notes", "patch manifest", "CLI self-test", "review gate"],
+      "minimum_changed_files": 2,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-ledger-validation",
+      "class": "data_contract",
+      "difficulty": "medium",
+      "task": "Strengthen a real ledger or JSON contract validator while preserving existing accepted data.",
+      "required_evidence": ["schema/ledger inventory", "compatibility analysis", "negative test", "reporter output", "review gate"],
+      "minimum_changed_files": 2,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-reporting-surface",
+      "class": "reporting",
+      "difficulty": "medium",
+      "task": "Expose a new real reporting metric across producer, reporter, and self-test surfaces.",
+      "required_evidence": ["producer/consumer map", "impact matrix", "patch manifest", "report sample", "review gate"],
+      "minimum_changed_files": 3,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-review-gate-hardening",
+      "class": "review_gate",
+      "difficulty": "medium",
+      "task": "Harden a real reviewer gate so it blocks a weak artifact and proves the negative case.",
+      "required_evidence": ["gate inventory", "negative case", "positive case", "self-test output", "review gate"],
+      "minimum_changed_files": 2,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-repair-loop-escalation",
+      "class": "repair_loop",
+      "difficulty": "medium",
+      "task": "Improve real repair-loop escalation or repeated-attempt handling without allowing loops.",
+      "required_evidence": ["failure taxonomy", "attempt history", "negative loop test", "self-test output", "review gate"],
+      "minimum_changed_files": 2,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-repo-cartography",
+      "class": "repository_investigation",
+      "difficulty": "medium",
+      "task": "Add a real repository cartography artifact that maps entrypoints, contracts, tests, and risky modules.",
+      "required_evidence": ["repo map", "entrypoint list", "test inventory", "dangerous modules list", "review gate"],
+      "minimum_changed_files": 2,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-planning-department-rfc",
+      "class": "planning_department",
+      "difficulty": "medium",
+      "task": "Improve the real planning department RFC/ADR handoff with alternatives, rollback, risk, and dependency batches.",
+      "required_evidence": ["RFC/ADR payload", "dependency graph", "rollback plan", "self-test output", "review gate"],
+      "minimum_changed_files": 2,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-codebrigade-multifile",
+      "class": "multi_file_executor",
+      "difficulty": "large",
+      "task": "Extend CodeBrigade execution on a real multi-file patch path with manifest, rollback notes, and tests.",
+      "required_evidence": ["diff plan", "patch manifest", "rollback evidence", "self-test output", "review gate"],
+      "minimum_changed_files": 4,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-engineering-memory",
+      "class": "engineering_memory",
+      "difficulty": "medium",
+      "task": "Make engineering memory record and reuse a real failure pattern with mandatory checks by task type.",
+      "required_evidence": ["memory update", "reuse check", "dangerous module note", "self-test output", "review gate"],
+      "minimum_changed_files": 2,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-api-compatibility",
+      "class": "api_compatibility",
+      "difficulty": "large",
+      "task": "Change a real internal API contract and update callers, tests, and reporting surfaces.",
+      "required_evidence": ["caller search", "contract diff", "compatibility note", "broad verification", "review gate"],
+      "minimum_changed_files": 4,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-docs-contract-sync",
+      "class": "docs_contract_sync",
+      "difficulty": "small",
+      "task": "Synchronize real docs with a machine-readable contract and prove drift would be caught.",
+      "required_evidence": ["contract path", "docs path", "drift check", "self-test output", "review gate"],
+      "minimum_changed_files": 2,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-safety-dirty-worktree",
+      "class": "safety",
+      "difficulty": "medium",
+      "task": "Perform a real change while preserving unrelated dirty worktree files and recording conflict risk.",
+      "required_evidence": ["initial git status", "owned changes list", "final diff", "safety note", "review gate"],
+      "minimum_changed_files": 1,
+      "multi_file_expected": false
+    },
+    {
+      "id": "ceraxia-live-ambiguous-blocker",
+      "class": "clarification_or_block",
+      "difficulty": "small",
+      "task": "Correctly block or request clarification for a real underspecified change without inventing scope.",
+      "required_evidence": ["ambiguity analysis", "safe blocker", "no mutation proof", "review note", "postmortem"],
+      "minimum_changed_files": 0,
+      "multi_file_expected": false
+    },
+    {
+      "id": "ceraxia-live-negative-test-coverage",
+      "class": "test_discipline",
+      "difficulty": "medium",
+      "task": "Add a real negative test that fails before the implementation and passes after the minimal fix.",
+      "required_evidence": ["failing negative test", "minimal source diff", "passing focused test", "broad verification", "review gate"],
+      "minimum_changed_files": 2,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-orchestrator-worker-contract",
+      "class": "orchestrator_contract",
+      "difficulty": "large",
+      "task": "Improve a real orchestrator-to-worker contract and update producers, consumers, and contract tests.",
+      "required_evidence": ["producer/consumer map", "contract update", "migration note", "self-test output", "review gate"],
+      "minimum_changed_files": 4,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-http-execution-path",
+      "class": "http_execution",
+      "difficulty": "large",
+      "task": "Improve a real HTTP execution path with durable error reporting and regression coverage.",
+      "required_evidence": ["HTTP path map", "failure reproduction", "patch manifest", "HTTP self-test", "review gate"],
+      "minimum_changed_files": 3,
+      "multi_file_expected": true
+    },
+    {
+      "id": "ceraxia-live-permission-normalization",
+      "class": "repository_hygiene",
+      "difficulty": "small",
+      "task": "Improve real repository hygiene around permissions or generated artifacts without metadata churn.",
+      "required_evidence": ["git status before", "scope note", "patch manifest", "verification output", "review gate"],
+      "minimum_changed_files": 1,
+      "multi_file_expected": false
+    },
+    {
+      "id": "ceraxia-live-large-file-restraint",
+      "class": "large_file_restraint",
+      "difficulty": "medium",
+      "task": "Avoid touching a real large/generated file while fixing the actual source of a failure.",
+      "required_evidence": ["large file hash", "source target rationale", "patch manifest", "verification output", "review gate"],
+      "minimum_changed_files": 1,
+      "multi_file_expected": false
+    },
+    {
+      "id": "ceraxia-live-end-to-end-subsystem",
+      "class": "subsystem_addition",
+      "difficulty": "large",
+      "task": "Add a real small subsystem spanning planner, executor, reporter, docs, and tests.",
+      "required_evidence": ["architecture decision", "impact map", "multi-file patch manifest", "broad verification", "review gate"],
+      "minimum_changed_files": 5,
+      "multi_file_expected": true
+    }
+  ],
   "ledger_template": {
     "trial_id": "",
     "run_id": "",

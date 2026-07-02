@@ -32,6 +32,7 @@ EXPERT_REVIEWER = WARMASTER_ROOT / "ceraxia_expert_review.py"
 ACCEPTER = WARMASTER_ROOT / "ceraxia_field_trial_accept.py"
 AUTO_REVIEWER = WARMASTER_ROOT / "ceraxia_field_trial_auto_review.py"
 NEXT_STAGE_BUILDER = WARMASTER_ROOT / "ceraxia_next_stage_package.py"
+LIVE_TASK_REGISTER = WARMASTER_ROOT / "ceraxia_live_task_register.py"
 
 
 def main() -> int:
@@ -39,6 +40,7 @@ def main() -> int:
     protocol = PROTOCOL.read_text(encoding="utf-8")
     dimensions = data.get("dimensions", [])
     trials = data.get("trials", [])
+    live_tasks = data.get("live_tasks", [])
     target = data.get("target", {})
     next_stage_target = data.get("next_stage_target", {})
     expert_target = data.get("expert_target", {})
@@ -80,6 +82,27 @@ def main() -> int:
         raise AssertionError("plain field trial runs should remain temporary by default")
     if len(trials) < target.get("minimum_representative_trials", 0):
         raise AssertionError(f"Ceraxia field trial suite is undersized: {len(trials)} {target}")
+    if len(live_tasks) < next_stage_target.get("minimum_live_tasks", 0):
+        raise AssertionError(f"Ceraxia live task catalog is undersized: {len(live_tasks)} {next_stage_target}")
+    live_task_ids = {str(item.get("id") or "") for item in live_tasks if isinstance(item, dict)}
+    if len(live_task_ids) != len(live_tasks):
+        raise AssertionError(f"Ceraxia live task catalog has duplicate or invalid ids: {live_tasks}")
+    live_classes = {str(item.get("class") or "") for item in live_tasks if isinstance(item, dict)}
+    if len(live_classes) < next_stage_target.get("minimum_task_classes", 0):
+        raise AssertionError(f"Ceraxia live task catalog does not cover enough classes: {live_classes}")
+    live_multifile = [
+        item for item in live_tasks
+        if isinstance(item, dict) and item.get("multi_file_expected") is True
+    ]
+    if len(live_multifile) < next_stage_target.get("minimum_multifile_nonfixture_tasks", 0):
+        raise AssertionError(f"Ceraxia live task catalog lacks multi-file tasks: {live_multifile}")
+    for live_task in live_tasks:
+        if not isinstance(live_task, dict):
+            raise AssertionError(f"Ceraxia live task must be an object: {live_task}")
+        if not live_task.get("task") or not live_task.get("required_evidence"):
+            raise AssertionError(f"Ceraxia live task lacks task/evidence requirements: {live_task}")
+        if not isinstance(live_task.get("minimum_changed_files"), int):
+            raise AssertionError(f"Ceraxia live task must declare minimum_changed_files: {live_task}")
     if len(set(dimensions)) != len(dimensions) or len(dimensions) < 8:
         raise AssertionError(f"Ceraxia dimensions are missing or duplicated: {dimensions}")
     seen: set[str] = set()
@@ -604,11 +627,11 @@ def main() -> int:
                 sys.executable,
                 str(NEXT_STAGE_BUILDER),
                 "--trial-id",
-                "live-code-task",
+                "ceraxia-live-cli-contract-flag",
                 "--run-id",
                 "live-code-task-001",
                 "--task-class",
-                "live_multi_file_feature",
+                "cli_contract",
                 "--status",
                 "fully_successful",
                 "--attempt-count",
@@ -643,6 +666,34 @@ def main() -> int:
         live_builder_payload = json.loads(live_builder.stdout)
         if live_builder_payload.get("status", {}).get("passed") is not True or not live_package_path.exists():
             raise AssertionError(f"Ceraxia live next-stage builder did not write a valid package: {live_builder_payload}")
+        live_ledger = tmp_root / "live_ledger.json"
+        live_ledger.write_text(json.dumps({"version": 1, "purpose": "test", "entries": []}), encoding="utf-8")
+        live_register = subprocess.run(
+            [
+                sys.executable,
+                str(LIVE_TASK_REGISTER),
+                "--task-id",
+                "ceraxia-live-cli-contract-flag",
+                "--package",
+                str(live_package_path),
+                "--ledger",
+                str(live_ledger),
+                "--reviewer",
+                "self-test",
+                "--notes",
+                "validated live package registration dry run",
+                "--dry-run",
+            ],
+            cwd=str(EYE_ROOT.parent),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if live_register.returncode != 0:
+            raise AssertionError(f"Ceraxia live task registrar rejected valid package: {live_register.stdout} {live_register.stderr}")
+        live_register_payload = json.loads(live_register.stdout)
+        if live_register_payload.get("entry", {}).get("trial_id") != "ceraxia-live-cli-contract-flag":
+            raise AssertionError(f"Ceraxia live task registrar returned malformed entry: {live_register_payload}")
         weak_builder = subprocess.run(
             [
                 sys.executable,
@@ -677,6 +728,55 @@ def main() -> int:
         )
         if weak_builder.returncode == 0:
             raise AssertionError(f"Ceraxia live next-stage builder accepted incomplete package: {weak_builder.stdout}")
+        weak_live_package = tmp_root / "weak_live_package.json"
+        weak_live_package.write_text(
+            json.dumps(
+                {
+                    "kind": NEXT_STAGE_PACKAGE_KIND,
+                    "contract_version": 1,
+                    "trial_id": "ceraxia-live-cli-contract-flag",
+                    "run_id": "live-code-task-003",
+                    "task_class": "cli_contract",
+                    "status": "fully_successful",
+                    "attempt_count": 1,
+                    "real_repo_task": True,
+                    "fixture_only": False,
+                    "false_success": False,
+                    "multi_file_nonfixture": True,
+                    "changed_files": ["app/service.py"],
+                    "verification_passed": True,
+                    "review_accepted": True,
+                    "postmortem": "",
+                    "artifacts": {
+                        "repo_investigation": "evidence/repo_investigation.json",
+                        "planning": "evidence/planning_department.json",
+                        "execution": "evidence/execution_result.json",
+                        "verification": "evidence/verification_report.json",
+                        "review": "evidence/review_gate.json",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        weak_register = subprocess.run(
+            [
+                sys.executable,
+                str(LIVE_TASK_REGISTER),
+                "--task-id",
+                "ceraxia-live-cli-contract-flag",
+                "--package",
+                str(weak_live_package),
+                "--ledger",
+                str(live_ledger),
+                "--dry-run",
+            ],
+            cwd=str(EYE_ROOT.parent),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if weak_register.returncode == 0:
+            raise AssertionError(f"Ceraxia live task registrar accepted too-small package: {weak_register.stdout}")
     expert_suite = subprocess.run(
         [sys.executable, str(EXPERT_SUITE), "--require-all"],
         cwd=str(EYE_ROOT.parent),
