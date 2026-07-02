@@ -9,6 +9,17 @@
     "fresh_window_size": 12,
     "minimum_fresh_classes": 8
   },
+  "next_stage_target": {
+    "minimum_live_tasks": 20,
+    "minimum_task_classes": 10,
+    "minimum_success_rate": 0.7,
+    "maximum_false_successes": 0,
+    "minimum_multifile_nonfixture_tasks": 5,
+    "minimum_task_class_variety": 10,
+    "failed_or_blocked_require_postmortem": true,
+    "track_repaired_successes_separately": true,
+    "track_honest_blocks_separately": true
+  },
   "expert_target": {
     "level": 10,
     "rolling_average_min": 9.5,

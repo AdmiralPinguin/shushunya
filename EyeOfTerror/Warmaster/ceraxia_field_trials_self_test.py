@@ -38,6 +38,7 @@ def main() -> int:
     dimensions = data.get("dimensions", [])
     trials = data.get("trials", [])
     target = data.get("target", {})
+    next_stage_target = data.get("next_stage_target", {})
     expert_target = data.get("expert_target", {})
     if target.get("minimum_representative_trials", 0) < 12:
         raise AssertionError(f"Ceraxia field trials target is too small: {target}")
@@ -47,6 +48,20 @@ def main() -> int:
         raise AssertionError(f"Ceraxia fresh target must require at least 8 classes: {target}")
     if target.get("dimension_sample_min", 0) < 2:
         raise AssertionError(f"Ceraxia dimension sample target is too weak: {target}")
+    if next_stage_target.get("minimum_live_tasks", 0) < 20:
+        raise AssertionError(f"Ceraxia next-stage target must require at least 20 live tasks: {next_stage_target}")
+    if next_stage_target.get("minimum_task_classes", 0) < 10:
+        raise AssertionError(f"Ceraxia next-stage target must require at least 10 task classes: {next_stage_target}")
+    if float(next_stage_target.get("minimum_success_rate") or 0) < 0.7:
+        raise AssertionError(f"Ceraxia next-stage target must require at least 70% success: {next_stage_target}")
+    if int(next_stage_target.get("maximum_false_successes", 1)) != 0:
+        raise AssertionError(f"Ceraxia next-stage target must reject false success: {next_stage_target}")
+    if next_stage_target.get("minimum_multifile_nonfixture_tasks", 0) < 5:
+        raise AssertionError(f"Ceraxia next-stage target must require multi-file nonfixture tasks: {next_stage_target}")
+    if next_stage_target.get("failed_or_blocked_require_postmortem") is not True:
+        raise AssertionError(f"Ceraxia next-stage target must require postmortems: {next_stage_target}")
+    if next_stage_target.get("track_repaired_successes_separately") is not True or next_stage_target.get("track_honest_blocks_separately") is not True:
+        raise AssertionError(f"Ceraxia next-stage target must classify repaired successes and honest blocks: {next_stage_target}")
     if expert_target.get("level") != 10 or expert_target.get("rolling_average_min", 0) < 9.5:
         raise AssertionError(f"Ceraxia expert target must represent a real 10/10 gate: {expert_target}")
     if expert_target.get("minimum_expert_trials", 0) < 6:
