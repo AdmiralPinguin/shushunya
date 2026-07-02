@@ -456,8 +456,23 @@ def is_docs_path(rel_path: str) -> bool:
     return "docs" in parts or suffix in {".md", ".rst", ".txt"}
 
 
+MAX_PATCH_TARGET_BYTES = 512 * 1024
+GENERATED_PATH_PARTS = {"generated", "build", "dist", "runs", "live_evidence", "__pycache__"}
+
+
+def is_generated_or_large_patch_target(repo_path: Path, rel_path: str) -> bool:
+    path = repo_path / rel_path
+    parts = {part.lower() for part in Path(rel_path).parts}
+    if parts & GENERATED_PATH_PARTS:
+        return True
+    if path.exists() and path.is_file() and path.stat().st_size > MAX_PATCH_TARGET_BYTES:
+        return True
+    return False
+
+
 def validate_patch_scope_budget(brief: dict[str, Any], operations: list[Any]) -> None:
     budget = scope_budget(brief)
+    repo_path = Path(str(brief.get("repo_path") or ""))
     max_source_files = int(budget.get("max_source_files_to_edit") or 0)
     max_test_files = int(budget.get("max_test_files_to_edit_without_explicit_user_request") or 0)
     max_docs_files = int(budget.get("max_docs_files_to_edit") or 0)
@@ -471,6 +486,8 @@ def validate_patch_scope_budget(brief: dict[str, Any], operations: list[Any]) ->
         rel_path = str(operation.get("path") or "")
         if not rel_path:
             continue
+        if is_generated_or_large_patch_target(repo_path, rel_path):
+            raise ValueError(f"patch target is generated or too large for direct mutation: {rel_path}")
         if is_test_path(rel_path) and rel_path not in requested_test_paths:
             test_files.add(rel_path)
         elif is_docs_path(rel_path):

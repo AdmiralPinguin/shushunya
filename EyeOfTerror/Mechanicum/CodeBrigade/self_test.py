@@ -1533,6 +1533,43 @@ def main() -> int:
         if any("return 1" in Path(tmp, name).read_text(encoding="utf-8") for name in ["a.py", "b.py", "c.py"]):
             raise AssertionError("over-budget patch should not mutate source files")
     with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "app.py").write_text("def value():\n    return 0\n", encoding="utf-8")
+        Path(tmp, "test_app.py").write_text("def test_placeholder():\n    assert True\n", encoding="utf-8")
+        generated_dir = Path(tmp, "generated")
+        generated_dir.mkdir()
+        bulky = generated_dir / "huge_report.json"
+        bulky.write_text("x" * (600 * 1024), encoding="utf-8")
+        large_file_brief = valid_brief()
+        large_file_brief["repo_path"] = tmp
+        large_file_brief["repo_survey_evidence"]["candidate_files"] = ["app.py", "generated/huge_report.json"]
+        large_file_brief["task"] += "\nCERAXIA_PATCH:\n" + json.dumps(
+            {
+                "operations": [
+                    {"type": "replace", "path": "generated/huge_report.json", "old": "x", "new": "y"}
+                ]
+            }
+        )
+        large_file_report = code_brigade_adapter.build_worker_report(large_file_brief, dry_run=False)
+        if large_file_report["status"] != "blocked" or "generated or too large" not in " ".join(large_file_report["execution_result"]["blockers"]):
+            raise AssertionError(f"explicit patch should reject generated or large files: {large_file_report}")
+        if bulky.read_text(encoding="utf-8") != "x" * (600 * 1024):
+            raise AssertionError("blocked large/generated patch should not mutate bulky artifact")
+        source_fix_brief = valid_brief()
+        source_fix_brief["repo_path"] = tmp
+        source_fix_brief["repo_survey_evidence"]["candidate_files"] = ["app.py", "generated/huge_report.json"]
+        source_fix_brief["task"] += "\nCERAXIA_PATCH:\n" + json.dumps(
+            {
+                "operations": [
+                    {"type": "replace", "path": "app.py", "old": "return 0", "new": "return 1"}
+                ]
+            }
+        )
+        source_fix_report = code_brigade_adapter.build_worker_report(source_fix_brief, dry_run=False)
+        if source_fix_report["status"] != "implemented" or source_fix_report["changed_files"] != ["app.py"]:
+            raise AssertionError(f"source fix beside generated artifact should stay allowed: {source_fix_report}")
+        if "return 1" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("source fix beside generated artifact did not apply")
+    with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
         Path(tmp, "test_app.py").write_text("from app import app\n\ndef test_app():\n    assert app()\n", encoding="utf-8")
         rollback_brief = valid_brief()

@@ -1,0 +1,361 @@
+{
+  "kind": "ceraxia_review_gate",
+  "decision": "ready",
+  "findings": [],
+  "warnings": [
+    {
+      "severity": "warning",
+      "finding": "repository survey reached file limit; coverage is partial"
+    }
+  ],
+  "verification_sufficiency": {
+    "risk_level": "high",
+    "status": "executed",
+    "commands_planned_count": 6,
+    "commands_executed_count": 4,
+    "meaningful_commands_executed_count": 3,
+    "output_summary_count": 4,
+    "output_signal_counts": {
+      "output_empty": 3,
+      "output_present": 1
+    },
+    "output_diagnostic_counts": {
+      "traceback": 0,
+      "assertion_failure": 0,
+      "syntax_error": 0,
+      "no_tests_ran": 0
+    },
+    "negative_tests_required_count": 2,
+    "broad_verification_required": true
+  },
+  "surface_verification_sufficiency": {
+    "planned_complete": true,
+    "status": "executed",
+    "surface_count": 4,
+    "status_counts": {
+      "executed": 4,
+      "partial": 0,
+      "planned_only": 0,
+      "missing": 0,
+      "failed": 0,
+      "blocked": 0
+    },
+    "executed_surface_count": 4,
+    "partial_surface_count": 0,
+    "missing_surface_count": 0,
+    "blocked_surface_count": 0,
+    "blocker_count": 0,
+    "executed_evidence": true,
+    "surface_evidence": [
+      {
+        "surface": "source_behavior",
+        "status": "executed",
+        "reason": "source command executed",
+        "matched_commands": [
+          "python -m py_compile EyeOfTerror/Mechanicum/CodeBrigade/execution_adapter.py EyeOfTerror/Mechanicum/CodeBrigade/self_test.py",
+          "python -m py_compile EyeOfTerror/Mechanicum/CodeBrigade/execution_adapter.py ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py"
+        ],
+        "matched_output_signal_counts": {
+          "output_empty": 2
+        },
+        "matched_output_diagnostic_counts": {
+          "traceback": 0,
+          "assertion_failure": 0,
+          "syntax_error": 0,
+          "no_tests_ran": 0,
+          "missing_import": 0
+        },
+        "covered_by": [
+          "targeted behavior verification",
+          "failing test proves fixed behavior"
+        ],
+        "evidence_needed": [
+          "candidate source files",
+          "targeted behavior verification"
+        ]
+      },
+      {
+        "surface": "test_surface",
+        "status": "executed",
+        "reason": "test command executed",
+        "matched_commands": [
+          "python -m py_compile EyeOfTerror/Mechanicum/CodeBrigade/execution_adapter.py EyeOfTerror/Mechanicum/CodeBrigade/self_test.py"
+        ],
+        "matched_output_signal_counts": {
+          "output_empty": 1
+        },
+        "matched_output_diagnostic_counts": {
+          "traceback": 0,
+          "assertion_failure": 0,
+          "syntax_error": 0,
+          "no_tests_ran": 0,
+          "missing_import": 0
+        },
+        "covered_by": [
+          "failing test proves fixed behavior"
+        ],
+        "evidence_needed": [
+          "existing tests",
+          "test edits avoided unless explicitly requested"
+        ]
+      },
+      {
+        "surface": "public_api_contract",
+        "status": "executed",
+        "reason": "negative or compatibility test command executed",
+        "matched_commands": [
+          "python -m py_compile EyeOfTerror/Mechanicum/CodeBrigade/execution_adapter.py EyeOfTerror/Mechanicum/CodeBrigade/self_test.py"
+        ],
+        "matched_output_signal_counts": {
+          "output_empty": 1
+        },
+        "matched_output_diagnostic_counts": {
+          "traceback": 0,
+          "assertion_failure": 0,
+          "syntax_error": 0,
+          "no_tests_ran": 0,
+          "missing_import": 0
+        },
+        "covered_by": [
+          "public caller or schema compatibility check",
+          "old and new API shape compatibility"
+        ],
+        "evidence_needed": [
+          "request/response compatibility",
+          "caller-facing verification"
+        ]
+      },
+      {
+        "surface": "concurrency_runtime",
+        "status": "executed",
+        "reason": "negative or compatibility test command executed",
+        "matched_commands": [
+          "python -m py_compile EyeOfTerror/Mechanicum/CodeBrigade/execution_adapter.py EyeOfTerror/Mechanicum/CodeBrigade/self_test.py"
+        ],
+        "matched_output_signal_counts": {
+          "output_empty": 1
+        },
+        "matched_output_diagnostic_counts": {
+          "traceback": 0,
+          "assertion_failure": 0,
+          "syntax_error": 0,
+          "no_tests_ran": 0,
+          "missing_import": 0
+        },
+        "covered_by": [
+          "parallel/retry behavior preserves state"
+        ],
+        "evidence_needed": [
+          "parallel/retry behavior",
+          "shared-state or cache invalidation evidence"
+        ]
+      }
+    ]
+  },
+  "package_status_sufficiency": {
+    "package_count": 5,
+    "status_counts": {
+      "planned": 0,
+      "implemented": 5,
+      "blocked": 0
+    },
+    "blocked_package_ids": [],
+    "missing_evidence_source_package_ids": []
+  },
+  "surface_package_sufficiency": {
+    "planned_complete": true,
+    "surface_count": 4,
+    "rows": [
+      {
+        "surface": "source_behavior",
+        "package_ids": [
+          "evidence_survey_package",
+          "minimal_patch_package",
+          "verification_evidence_package"
+        ],
+        "missing_status_package_ids": [],
+        "blockers": []
+      },
+      {
+        "surface": "test_surface",
+        "package_ids": [
+          "evidence_survey_package",
+          "verification_evidence_package"
+        ],
+        "missing_status_package_ids": [],
+        "blockers": []
+      },
+      {
+        "surface": "public_api_contract",
+        "package_ids": [
+          "evidence_survey_package",
+          "compatibility_package",
+          "verification_evidence_package"
+        ],
+        "missing_status_package_ids": [],
+        "blockers": []
+      },
+      {
+        "surface": "concurrency_runtime",
+        "package_ids": [
+          "evidence_survey_package",
+          "concurrency_runtime_package",
+          "verification_evidence_package"
+        ],
+        "missing_status_package_ids": [],
+        "blockers": []
+      }
+    ],
+    "missing_status_package_ids": []
+  },
+  "investigation_sufficiency": {
+    "status": "complete",
+    "read_stage_count": 7,
+    "evidence_question_count": 4,
+    "mutation_blocker_count": 3,
+    "replan_trigger_count": 4,
+    "first_stage": "entrypoints_first",
+    "blockers": []
+  },
+  "change_control_sufficiency": {
+    "status": "complete",
+    "allowed_intent_count": 3,
+    "protected_invariant_count": 5,
+    "mutation_requirement_count": 4,
+    "diff_review_question_count": 4,
+    "rollback_trigger_count": 3,
+    "post_change_proof_count": 5,
+    "blockers": []
+  },
+  "acceptance_trace_sufficiency": {
+    "status": "complete",
+    "row_count": 11,
+    "blocked_row_count": 0,
+    "complete": true,
+    "definition_of_done_complete": true,
+    "definition_of_done_count": 3,
+    "traced_definition_of_done_count": 3,
+    "missing_definition_of_done": [],
+    "blockers": []
+  },
+  "constraint_trace_sufficiency": {
+    "status": "complete",
+    "row_count": 3,
+    "blocked_row_count": 0,
+    "complete": true,
+    "blockers": []
+  },
+  "assumption_sufficiency": {
+    "status": "complete",
+    "assumption_count": 5,
+    "replan_trigger_count": 5,
+    "blockers": []
+  },
+  "worker_output_contract_sufficiency": {
+    "status": "complete",
+    "required_package_count": 5,
+    "reported_package_count": 5,
+    "contract_row_count": 5,
+    "rows_with_acceptance_requirements": 5,
+    "blockers": []
+  },
+  "planning_department_sufficiency": {
+    "status": "complete",
+    "role_count": 5,
+    "phase_count": 4,
+    "package_count": 5,
+    "missing_phase_ids": [],
+    "blockers": []
+  },
+  "pre_mutation_read_sufficiency": {
+    "status": "complete",
+    "evidence_status": "complete",
+    "recorded_read_count": 24,
+    "planned_new_file_count": 0,
+    "required_read_count": 60,
+    "blockers": []
+  },
+  "source_mutation_scope_sufficiency": {
+    "status": "complete",
+    "changed_file_count": 2,
+    "allowed_file_count": 31,
+    "changed_files": [
+      "EyeOfTerror/Mechanicum/CodeBrigade/execution_adapter.py",
+      "EyeOfTerror/Mechanicum/CodeBrigade/self_test.py"
+    ],
+    "allowed_files": [
+      "ArchiveOfHeresy/check-main.sh",
+      "ArchiveOfHeresy/check-memory-gateway.sh",
+      "ArchiveOfHeresy/check-memory.sh",
+      "ArchiveOfHeresy/check-namespace-smoke.py",
+      "ArchiveOfHeresy/main.py",
+      "ArchiveOfHeresy/memory-quality-report.sh",
+      "ArchiveOfHeresy/memory-report.sh",
+      "ArchiveOfHeresy/start-main.sh",
+      "ArchiveOfHeresy/stop-main.sh",
+      "CoreOfMadness/litert-lm/scripts/check-litert-host.sh",
+      "CoreOfMadness/litert-lm/scripts/start-litert-host.sh",
+      "CoreOfMadness/litert-lm/scripts/stop-litert-host.sh",
+      "CoreOfMadness/llm-host/scripts/check-host.sh",
+      "CoreOfMadness/llm-host/scripts/start-host.sh",
+      "CoreOfMadness/llm-host/scripts/stop-host.sh",
+      "CoreOfMadness/telegram-bot/bot.py",
+      "CoreOfMadness/telegram-bot/start-bot.sh",
+      "CoreOfMadness/telegram-bot/stop-bot.sh",
+      "DemonsForge/app.py",
+      "DemonsForge/app_flux.py",
+      "DemonsForge/app_sdxl.py",
+      "DemonsForge/check-forge-api.sh",
+      "DemonsForge/check-forge-memory.sh",
+      "DemonsForge/download-flux.sh",
+      "DemonsForge/download-model.sh",
+      "DemonsForge/download-sdxl.sh",
+      "DemonsForge/download_flux.py",
+      "DemonsForge/download_model.py",
+      "EyeOfTerror/Mechanicum/CodeBrigade/execution_adapter.py",
+      "EyeOfTerror/Mechanicum/CodeBrigade/self_test.py",
+      "Mechanicum/common/__init__.py"
+    ],
+    "unexpected_files": [],
+    "escaping_files": [],
+    "test_edit_budget": 0,
+    "blockers": []
+  },
+  "verification_after_mutation_sufficiency": {
+    "status": "complete",
+    "evidence_status": "complete",
+    "changed_file_count": 2,
+    "commands_executed_count": 4,
+    "blockers": []
+  },
+  "diagnostic_repair_queue": {
+    "status": "empty",
+    "item_count": 0,
+    "items": [],
+    "source": "verification_output_diagnostics",
+    "plan_present": true,
+    "requires_attempt_history": false,
+    "max_attempts_per_item": 0,
+    "replan_trigger_count": 0
+  },
+  "checked_against": [
+    "planning packet completeness",
+    "strategy approval",
+    "scope control",
+    "verification strategy",
+    "surface verification coverage",
+    "surface package ownership",
+    "work package status coverage",
+    "investigation playbook coverage",
+    "change control plan coverage",
+    "acceptance traceability coverage",
+    "constraint traceability coverage",
+    "assumption register coverage",
+    "worker output contract coverage",
+    "planning department RFC and multi-pass handoff coverage",
+    "pre-mutation read evidence",
+    "source mutation scope",
+    "verification after final mutation",
+    "worker report honesty"
+  ]
+}
