@@ -86,7 +86,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["path", "operations", "applied_operation_count", "failed_operation_count", "rollback_touched"],
+            "required": ["path", "operations", "applied_operation_count", "failed_operation_count", "rollback_touched", "before_sha256", "after_sha256"],
             "properties": {
               "path": {
                 "type": "string"
@@ -105,6 +105,12 @@
               },
               "rollback_touched": {
                 "type": "boolean"
+              },
+              "before_sha256": {
+                "type": "string"
+              },
+              "after_sha256": {
+                "type": "string"
               }
             }
           }

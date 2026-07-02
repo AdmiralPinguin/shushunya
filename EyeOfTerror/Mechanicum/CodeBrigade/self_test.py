@@ -1190,6 +1190,10 @@ def main() -> int:
             raise AssertionError(f"multi-file patch manifest should map operations to files: {multi_file_report}")
         if file_rows["app.py"]["applied_operation_count"] != 1 or file_rows["config.py"]["rollback_touched"]:
             raise AssertionError(f"multi-file patch manifest should expose per-file application state: {multi_file_report}")
+        if not file_rows["app.py"]["before_sha256"] or not file_rows["app.py"]["after_sha256"] or file_rows["app.py"]["before_sha256"] == file_rows["app.py"]["after_sha256"]:
+            raise AssertionError(f"multi-file patch manifest should expose changed file digests: {multi_file_report}")
+        if not result["operation_results"][0].get("before_sha256") or not result["operation_results"][0].get("after_sha256"):
+            raise AssertionError(f"operation results should expose before/after digests: {multi_file_report}")
         if "return True" not in Path(tmp, "app.py").read_text(encoding="utf-8") or "ENABLED = True" not in Path(tmp, "config.py").read_text(encoding="utf-8"):
             raise AssertionError("multi-file patch did not apply both files")
     with tempfile.TemporaryDirectory() as tmp:

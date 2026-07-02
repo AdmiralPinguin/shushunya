@@ -75,9 +75,15 @@ def build_patch_manifest(changed_files: list[str], operation_results: list[dict[
                     "applied_operation_count": 0,
                     "failed_operation_count": 0,
                     "rollback_touched": False,
+                    "before_sha256": "",
+                    "after_sha256": "",
                 },
             )
             file_row["operations"].append(operation)
+            if row.get("before_sha256"):
+                file_row["before_sha256"] = str(row.get("before_sha256") or "")
+            if row.get("after_sha256"):
+                file_row["after_sha256"] = str(row.get("after_sha256") or "")
             if status == "applied":
                 file_row["applied_operation_count"] += 1
             if status.startswith("failed"):
@@ -94,6 +100,8 @@ def build_patch_manifest(changed_files: list[str], operation_results: list[dict[
                 "applied_operation_count": 0,
                 "failed_operation_count": 0,
                 "rollback_touched": False,
+                "before_sha256": "",
+                "after_sha256": "",
             },
         )
     return {

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -17,6 +18,10 @@ class PatchApplicationError(ValueError):
         super().__init__(message)
         self.operation_results = operation_results
         self.rollback_notes = rollback_notes
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def extract_explicit_patch(task: str) -> dict[str, Any]:
@@ -629,6 +634,7 @@ def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, A
                 raise ValueError(f"patch operation {index} must be an object")
             op_type = str(operation.get("type") or "")
             rel_path = str(operation.get("path") or "")
+            before_hash = file_sha256(repo / rel_path) if rel_path and (repo / rel_path).is_file() and not (repo / rel_path).is_symlink() else ""
             if op_type == "create_file":
                 if rel_path not in allowed_new_paths:
                     raise ValueError(f"create_file path must be an explicit missing path hint: {rel_path}")
@@ -710,9 +716,19 @@ def apply_patch_operations(repo: Path, brief: dict[str, Any], patch: dict[str, A
                 replace_module_constant_in_file(path, symbol_name, old_literal, new_literal)
             else:
                 raise ValueError(f"unsupported patch operation type: {op_type}")
+            after_hash = file_sha256(path) if path.is_file() and not path.is_symlink() else ""
             if rel_path not in changed:
                 changed.append(rel_path)
-            operation_results.append({"index": index, "operation": op_type, "path": rel_path, "status": "applied"})
+            operation_results.append(
+                {
+                    "index": index,
+                    "operation": op_type,
+                    "path": rel_path,
+                    "status": "applied",
+                    "before_sha256": before_hash,
+                    "after_sha256": after_hash,
+                }
+            )
     except Exception as exc:
         for path, original in originals.items():
             if original is None:
