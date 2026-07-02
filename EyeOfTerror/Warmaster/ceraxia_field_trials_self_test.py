@@ -17,7 +17,7 @@ from ceraxia_field_trial_runner import (
 )
 from ceraxia_live_task_prepare import build_task_packet
 from ceraxia_live_task_run import build_live_task_prompt, build_package
-from ceraxia_field_trial_report import build_report
+from ceraxia_field_trial_report import build_report, validate_ledger
 from ceraxia_field_trial_auto_review import principal_evidence_signals, repair_evidence_signals, senior_evidence_signals
 
 
@@ -167,6 +167,7 @@ def main() -> int:
     ):
         raise AssertionError(f"Ceraxia live task prepare returned weak packet: {live_packet}")
     live_prompt = build_live_task_prompt(build_task_packet(live_tasks[0], "prompt-self-test", EYE_ROOT.parent))
+    ledger_live_prompt = build_live_task_prompt(build_task_packet(next(task for task in live_tasks if task["id"] == "ceraxia-live-ledger-validation"), "prompt-self-test", EYE_ROOT.parent))
     forbidden_prompt_hints = {
         "repo_survey.json",
         "planning_department.json",
@@ -178,6 +179,8 @@ def main() -> int:
     leaked_hints = sorted(item for item in forbidden_prompt_hints if item in live_prompt)
     if leaked_hints:
         raise AssertionError(f"Ceraxia live task prompt leaks future artifact filenames as path hints: {leaked_hints}")
+    if "Explicit test edit requested: yes" not in ledger_live_prompt:
+        raise AssertionError(f"Ceraxia live task prompt must expose catalog-requested test evidence to CodeBrigade: {ledger_live_prompt}")
     patched_live_prompt = build_live_task_prompt(
         build_task_packet(live_tasks[0], "prompt-self-test", EYE_ROOT.parent),
         {"operations": [{"type": "replace", "path": "README.md", "old": "old", "new": "new"}]},
@@ -280,6 +283,24 @@ def main() -> int:
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
     if not isinstance(ledger.get("entries"), list):
         raise AssertionError(f"Ceraxia field trial ledger must expose entries list: {ledger}")
+    ledger_errors = validate_ledger(data, ledger)
+    if ledger_errors:
+        raise AssertionError(f"Ceraxia field trial ledger must validate: {ledger_errors}")
+    accepted_next_stage_entries = [
+        entry for entry in ledger.get("entries", [])
+        if isinstance(entry, dict) and entry.get("accepted_for_next_stage") is True
+    ]
+    if accepted_next_stage_entries:
+        weak_ledger = json.loads(json.dumps(ledger))
+        weak_entry = next(
+            entry for entry in weak_ledger["entries"]
+            if isinstance(entry, dict) and entry.get("accepted_for_next_stage") is True
+        )
+        package_path = weak_entry.get("next_stage", {}).get("evidence_package")
+        weak_entry["evidence_paths"] = [path for path in weak_entry.get("evidence_paths", []) if path != package_path]
+        weak_errors = validate_ledger(data, weak_ledger)
+        if not any("evidence_paths must include next_stage.evidence_package" in error for error in weak_errors):
+            raise AssertionError(f"Ceraxia ledger validation must catch detached next-stage evidence packages: {weak_errors}")
     report = subprocess.run(
         [sys.executable, str(REPORTER)],
         cwd=str(EYE_ROOT.parent),

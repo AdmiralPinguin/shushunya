@@ -81,12 +81,17 @@ def validate_ledger(spec: dict[str, Any], ledger: dict[str, Any]) -> list[str]:
         if accepted_next_stage:
             if not run_id:
                 errors.append(f"accepted next-stage entry {index} must include run_id")
-            if not isinstance(entry.get("next_stage"), dict):
+            next_stage = entry.get("next_stage") if isinstance(entry.get("next_stage"), dict) else {}
+            if not next_stage:
                 errors.append(f"accepted next-stage entry {index} must include next_stage")
             if not entry.get("reviewer"):
                 errors.append(f"accepted next-stage entry {index} must include reviewer")
             if not entry.get("human_review_notes"):
                 errors.append(f"accepted next-stage entry {index} must include human_review_notes")
+            evidence_package = next_stage.get("evidence_package") if isinstance(next_stage, dict) else ""
+            evidence_paths = entry.get("evidence_paths") if isinstance(entry.get("evidence_paths"), list) else []
+            if isinstance(evidence_package, str) and evidence_package and evidence_package not in evidence_paths:
+                errors.append(f"accepted next-stage entry {index} evidence_paths must include next_stage.evidence_package")
     return errors
 
 

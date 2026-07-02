@@ -63,6 +63,7 @@ def status_from_run(task: dict[str, Any], result: dict[str, Any], run_dir: Path,
 def build_live_task_prompt(packet: dict[str, Any], patch_payload: dict[str, Any] | None = None) -> str:
     required_evidence = packet.get("required_evidence") if isinstance(packet.get("required_evidence"), list) else []
     rules = packet.get("operating_rules") if isinstance(packet.get("operating_rules"), list) else []
+    explicit_test_edit = any("test" in str(item).lower() for item in required_evidence)
     prompt = (
         "Live Ceraxia engineering task.\n"
         f"Task id: {packet['task_id']}\n"
@@ -73,6 +74,7 @@ def build_live_task_prompt(packet: dict[str, Any], patch_payload: dict[str, Any]
         f"Requested work: {packet['task']}\n"
         f"Minimum changed files: {packet['minimum_changed_files']}\n"
         f"Multi-file expected: {packet['multi_file_expected']}\n"
+        f"Explicit test edit requested: {'yes' if explicit_test_edit else 'no'}\n"
         "Required evidence categories:\n"
         + "\n".join(f"- {item}" for item in required_evidence)
         + "\nOperating rules:\n"
