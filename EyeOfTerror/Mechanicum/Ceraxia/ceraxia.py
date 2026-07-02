@@ -325,6 +325,75 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
     }
 
 
+def changed_file_paths_from_worker(worker_report: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    values = worker_report.get("changed_files") if isinstance(worker_report.get("changed_files"), list) else []
+    for item in values:
+        if isinstance(item, str) and item:
+            paths.append(item)
+        elif isinstance(item, dict) and isinstance(item.get("path"), str) and item.get("path"):
+            paths.append(item["path"])
+    return paths
+
+
+def verification_after_mutation_evidence(
+    brief: dict[str, Any],
+    worker_report: dict[str, Any],
+    commands_executed: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if worker_report.get("status") != "implemented":
+        return {
+            "kind": "ceraxia_verification_after_mutation_evidence",
+            "status": "not_required",
+            "reason": "worker did not report source mutation",
+            "changed_files": [],
+            "commands_executed_count": len(commands_executed),
+            "blockers": [],
+        }
+    repo = Path(str(brief.get("repo_path") or ""))
+    changed_files = changed_file_paths_from_worker(worker_report)
+    blockers: list[str] = []
+    rows: list[dict[str, Any]] = []
+    for rel_path in changed_files:
+        row: dict[str, Any] = {"path": rel_path}
+        try:
+            path = (repo / rel_path).resolve()
+            path.relative_to(repo.resolve())
+        except ValueError:
+            row.update({"status": "blocked", "reason": "path escapes repo"})
+            blockers.append(f"changed file escapes repo: {rel_path}")
+            rows.append(row)
+            continue
+        if not path.exists() or not path.is_file() or path.is_symlink():
+            row.update({"status": "blocked", "reason": "changed file is missing, not a file, or a symlink"})
+            blockers.append(f"changed file cannot be observed before verification: {rel_path}")
+            rows.append(row)
+            continue
+        data = path.read_bytes()
+        row.update(
+            {
+                "status": "observed_after_worker",
+                "size_bytes": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "mtime_ns": path.stat().st_mtime_ns,
+            }
+        )
+        rows.append(row)
+    if not changed_files:
+        blockers.append("implemented worker report has no changed_files to bind to verification")
+    if not commands_executed:
+        blockers.append("implemented worker report has no executed verification commands after mutation")
+    return {
+        "kind": "ceraxia_verification_after_mutation_evidence",
+        "status": "complete" if not blockers else "blocked",
+        "repo_path": str(repo),
+        "changed_files": rows,
+        "changed_file_count": len(changed_files),
+        "commands_executed_count": len(commands_executed),
+        "blockers": blockers,
+    }
+
+
 def build_verification_report(brief: dict[str, Any], worker_report: dict[str, Any], execute_verification: bool = False) -> dict[str, Any]:
     strategy = brief["required_verification"]
     commands = list(strategy.get("targeted_commands", []))
@@ -354,6 +423,7 @@ def build_verification_report(brief: dict[str, Any], worker_report: dict[str, An
     else:
         status = "planned_only" if dry_run else "requires_execution"
     commands_executed = [item for item in execution.get("results", []) if item.get("status") != "planned"]
+    after_mutation_evidence = verification_after_mutation_evidence(brief, worker_report, commands_executed)
     return {
         "kind": "ceraxia_verification_report",
         "status": status,
@@ -361,6 +431,7 @@ def build_verification_report(brief: dict[str, Any], worker_report: dict[str, An
         "commands_executable": executable_commands,
         "commands_executed": commands_executed,
         "output_summary": summarize_verification_output(commands_executed),
+        "verification_after_mutation_evidence": after_mutation_evidence,
         "verification_execution": execution,
         "negative_tests_required": strategy.get("negative_tests", []),
         "broad_verification_required": bool(strategy.get("broad_verification_required")),
@@ -1103,6 +1174,35 @@ def source_mutation_scope_sufficiency_from_worker(worker_report: dict[str, Any])
     }
 
 
+def verification_after_mutation_sufficiency(
+    worker_report: dict[str, Any],
+    verification_report: dict[str, Any],
+) -> dict[str, Any]:
+    evidence = (
+        verification_report.get("verification_after_mutation_evidence")
+        if isinstance(verification_report.get("verification_after_mutation_evidence"), dict)
+        else {}
+    )
+    commands_executed = verification_report.get("commands_executed") if isinstance(verification_report.get("commands_executed"), list) else []
+    blockers: list[str] = []
+    if worker_report.get("status") == "implemented":
+        if not evidence:
+            blockers.append("verification_after_mutation_evidence is missing")
+        elif evidence.get("status") != "complete":
+            blockers.extend(str(item) for item in evidence.get("blockers", []) if isinstance(item, str))
+            if not blockers:
+                blockers.append("verification_after_mutation_evidence is not complete")
+        if not commands_executed:
+            blockers.append("implemented worker report has no executed verification commands")
+    return {
+        "status": "complete" if not blockers else "blocked",
+        "evidence_status": evidence.get("status", "missing") if evidence else "missing",
+        "changed_file_count": int(evidence.get("changed_file_count") or 0) if evidence else 0,
+        "commands_executed_count": len(commands_executed),
+        "blockers": blockers,
+    }
+
+
 def review_gate(
     packet: dict[str, Any],
     brief: dict[str, Any],
@@ -1203,6 +1303,7 @@ def review_gate(
     worker_output_contract_sufficiency = worker_output_contract_sufficiency_from_worker(worker_report)
     pre_mutation_read_sufficiency = pre_mutation_read_sufficiency_from_worker(worker_report)
     source_mutation_scope_sufficiency = source_mutation_scope_sufficiency_from_worker(worker_report)
+    verification_after_mutation = verification_after_mutation_sufficiency(worker_report, verification_report)
     diagnostic_repair_queue = build_diagnostic_repair_queue(brief, verification_report, worker_report)
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
@@ -1232,6 +1333,8 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "pre-mutation read evidence is incomplete: " + "; ".join(pre_mutation_read_sufficiency["blockers"])})
     if source_mutation_scope_sufficiency["status"] == "blocked":
         findings.append({"severity": "blocker", "finding": "source mutation scope is incomplete: " + "; ".join(source_mutation_scope_sufficiency["blockers"])})
+    if verification_after_mutation["status"] == "blocked":
+        findings.append({"severity": "blocker", "finding": "verification-after-mutation evidence is incomplete: " + "; ".join(verification_after_mutation["blockers"])})
     if worker_report["dry_run"] and package_status_counts["planned"]:
         warnings.append({"severity": "warning", "finding": "work packages are planned but not implemented"})
     if negative_tests and verification_report["status"] not in {"planned_only", "requires_execution", "passed"}:
@@ -1290,6 +1393,7 @@ def review_gate(
         "worker_output_contract_sufficiency": worker_output_contract_sufficiency,
         "pre_mutation_read_sufficiency": pre_mutation_read_sufficiency,
         "source_mutation_scope_sufficiency": source_mutation_scope_sufficiency,
+        "verification_after_mutation_sufficiency": verification_after_mutation,
         "diagnostic_repair_queue": diagnostic_repair_queue,
         "checked_against": [
             "planning packet completeness",
@@ -1307,6 +1411,7 @@ def review_gate(
             "worker output contract coverage",
             "pre-mutation read evidence",
             "source mutation scope",
+            "verification after final mutation",
             "worker report honesty",
         ],
     }

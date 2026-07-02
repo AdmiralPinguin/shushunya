@@ -674,8 +674,11 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "passed")
             self.assertTrue(verification["commands_executed"])
+            self.assertEqual(verification["verification_after_mutation_evidence"]["status"], "complete")
+            self.assertEqual(verification["verification_after_mutation_evidence"]["changed_file_count"], 1)
             review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
             self.assertEqual(review["decision"], "ready")
+            self.assertEqual(review["verification_after_mutation_sufficiency"]["status"], "complete")
             self.assertEqual(review["surface_verification_sufficiency"]["status"], "partial")
             self.assertGreaterEqual(review["package_status_sufficiency"]["status_counts"]["implemented"], 1)
             readiness = json.loads((run_dir / "execution_readiness.json").read_text(encoding="utf-8"))
@@ -899,6 +902,43 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(review["source_mutation_scope_sufficiency"]["status"], "blocked")
             self.assertEqual(review["source_mutation_scope_sufficiency"]["unexpected_files"], ["unexpected.py"])
             self.assertTrue(any("source mutation scope" in item["finding"] for item in review["findings"]))
+
+    def test_review_gate_blocks_implemented_worker_without_after_mutation_verification_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text("def app():\n    return False\n", encoding="utf-8")
+            packet = build_planning_packet(
+                {
+                    "task": "В файле `app.py` замени `return False` на `return True`.",
+                    "repo_path": str(repo),
+                }
+            )
+            survey = build_repo_survey(packet)
+            brief = build_implementation_brief(packet, survey)
+            worker_report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(worker_report["status"], "implemented", worker_report)
+            verification_report = {
+                "status": "passed",
+                "negative_tests_required": [],
+                "broad_verification_required": False,
+                "commands_planned": ["python -m py_compile app.py"],
+                "commands_executable": ["python -m py_compile app.py"],
+                "commands_executed": [{"command": "python -m py_compile app.py", "returncode": 0}],
+                "output_summary": [
+                    {
+                        "command": "python -m py_compile app.py",
+                        "returncode": 0,
+                        "signals": ["output_empty"],
+                        "diagnostics": [],
+                    }
+                ],
+            }
+            review = review_gate(packet, brief, worker_report, verification_report)
+            self.assertEqual(review["decision"], "blocked")
+            self.assertEqual(review["source_mutation_scope_sufficiency"]["status"], "complete")
+            self.assertEqual(review["verification_after_mutation_sufficiency"]["status"], "blocked")
+            self.assertTrue(any("verification-after-mutation evidence" in item["finding"] for item in review["findings"]))
 
     def test_review_gate_blocks_missing_investigation_playbook(self) -> None:
         packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
