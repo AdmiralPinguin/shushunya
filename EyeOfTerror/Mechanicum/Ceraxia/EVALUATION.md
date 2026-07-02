@@ -165,7 +165,9 @@ come from `live_tasks`, carry a valid
 do not count until `accepted_for_next_stage=true`. The strict live command must
 fail until the ledger proves 20 accepted live tasks, 10 classes, at least 70%
 success, zero false successes, required postmortems, and the required
-multi-file nonfixture count.
+multi-file nonfixture count. The report also exposes `unsuccessful_count`, the
+sum of honest blocked, broken, and reviewer-rejected live outcomes, so progress
+can be audited without inferring failures from the success rate alone.
 
 The strict command must fail until the ledger proves the target. This is
 intentional; an empty or draft-only ledger is not evidence of engineering

@@ -180,6 +180,7 @@ def build_next_stage_metrics(spec: dict[str, Any], entries: list[dict[str, Any]]
         and not postmortem_gaps
         and (not require_evidence or not evidence_gaps)
     )
+    unsuccessful_count = honest_blocks + broken + reviewer_rejected
     return {
         "target_met": target_met,
         "target": target,
@@ -193,6 +194,7 @@ def build_next_stage_metrics(spec: dict[str, Any], entries: list[dict[str, Any]]
         "honest_blocked_count": honest_blocks,
         "broken_count": broken,
         "reviewer_rejected_count": reviewer_rejected,
+        "unsuccessful_count": unsuccessful_count,
         "false_success_count": false_successes,
         "success_rate": success_rate,
         "average_attempt_count": average(attempts),

@@ -326,6 +326,7 @@ def main() -> int:
         "honest_blocked_count",
         "broken_count",
         "reviewer_rejected_count",
+        "unsuccessful_count",
         "false_success_count",
         "success_rate",
         "average_attempt_count",
@@ -336,6 +337,13 @@ def main() -> int:
     }:
         if key not in next_stage_metrics:
             raise AssertionError(f"Ceraxia next-stage metrics missing {key}: {next_stage_metrics}")
+    expected_unsuccessful = (
+        int(next_stage_metrics.get("honest_blocked_count") or 0)
+        + int(next_stage_metrics.get("broken_count") or 0)
+        + int(next_stage_metrics.get("reviewer_rejected_count") or 0)
+    )
+    if next_stage_metrics.get("unsuccessful_count") != expected_unsuccessful:
+        raise AssertionError(f"Ceraxia next-stage unsuccessful_count drifted from outcome buckets: {next_stage_metrics}")
     if next_stage_metrics.get("live_task_count", 0) == 0 and report_payload.get("next_stage_target_met") is True:
         raise AssertionError(f"Ceraxia next-stage target cannot pass from legacy reviews: {report_payload}")
     with tempfile.TemporaryDirectory() as learnings_tmp:
@@ -463,6 +471,8 @@ def main() -> int:
     synthetic_next_stage = synthetic_report["next_stage_metrics"]
     if synthetic_report["next_stage_target_met"] is not True:
         raise AssertionError(f"synthetic next-stage target should pass when all requirements are met: {synthetic_next_stage}")
+    if synthetic_next_stage.get("unsuccessful_count") != 0:
+        raise AssertionError(f"synthetic all-success next-stage report must expose zero unsuccessful outcomes: {synthetic_next_stage}")
     draft_next_stage_entries = json.loads(json.dumps(synthetic_entries))
     for entry in draft_next_stage_entries:
         entry["accepted_for_next_stage"] = False

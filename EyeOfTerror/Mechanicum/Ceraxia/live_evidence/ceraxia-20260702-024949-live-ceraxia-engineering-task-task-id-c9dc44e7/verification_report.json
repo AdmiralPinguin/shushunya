@@ -1,0 +1,247 @@
+{
+  "kind": "ceraxia_verification_report",
+  "status": "passed",
+  "commands_planned": [
+    "python -m py_compile <changed .py files>",
+    "git diff --check",
+    "python -m py_compile EyeOfTerror/Warmaster/ceraxia_field_trial_report.py EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py",
+    "python -m pytest EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py",
+    "python -m py_compile EyeOfTerror/Warmaster/ceraxia_field_trial_report.py ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py"
+  ],
+  "commands_executable": [
+    "git diff --check",
+    "python -m py_compile EyeOfTerror/Warmaster/ceraxia_field_trial_report.py EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py",
+    "python -m pytest EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py",
+    "python -m py_compile EyeOfTerror/Warmaster/ceraxia_field_trial_report.py ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py"
+  ],
+  "commands_executed": [
+    {
+      "command": "git diff --check",
+      "status": "passed",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "diagnostics": {
+        "has_traceback": false,
+        "traceback_files": [],
+        "missing_imports": [],
+        "has_assertion_failure": false,
+        "has_syntax_error": false,
+        "has_no_tests_ran": false
+      }
+    },
+    {
+      "command": "python -m py_compile EyeOfTerror/Warmaster/ceraxia_field_trial_report.py EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py",
+      "status": "passed",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "diagnostics": {
+        "has_traceback": false,
+        "traceback_files": [],
+        "missing_imports": [],
+        "has_assertion_failure": false,
+        "has_syntax_error": false,
+        "has_no_tests_ran": false
+      }
+    },
+    {
+      "command": "python -m pytest EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py",
+      "status": "skipped",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "pytest unavailable",
+      "diagnostics": {
+        "has_traceback": false,
+        "traceback_files": [],
+        "missing_imports": [],
+        "has_assertion_failure": false,
+        "has_syntax_error": false,
+        "has_no_tests_ran": false
+      }
+    },
+    {
+      "command": "python -m py_compile EyeOfTerror/Warmaster/ceraxia_field_trial_report.py ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py",
+      "status": "passed",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "diagnostics": {
+        "has_traceback": false,
+        "traceback_files": [],
+        "missing_imports": [],
+        "has_assertion_failure": false,
+        "has_syntax_error": false,
+        "has_no_tests_ran": false
+      }
+    }
+  ],
+  "output_summary": [
+    {
+      "command": "git diff --check",
+      "status": "passed",
+      "returncode": 0,
+      "stdout_nonempty": false,
+      "stderr_nonempty": false,
+      "output_signal": "output_empty",
+      "has_traceback": false,
+      "has_assertion_failure": false,
+      "has_syntax_error": false,
+      "has_no_tests_ran": false,
+      "traceback_files": [],
+      "missing_imports": []
+    },
+    {
+      "command": "python -m py_compile EyeOfTerror/Warmaster/ceraxia_field_trial_report.py EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py",
+      "status": "passed",
+      "returncode": 0,
+      "stdout_nonempty": false,
+      "stderr_nonempty": false,
+      "output_signal": "output_empty",
+      "has_traceback": false,
+      "has_assertion_failure": false,
+      "has_syntax_error": false,
+      "has_no_tests_ran": false,
+      "traceback_files": [],
+      "missing_imports": []
+    },
+    {
+      "command": "python -m pytest EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py",
+      "status": "skipped",
+      "returncode": 1,
+      "stdout_nonempty": false,
+      "stderr_nonempty": true,
+      "output_signal": "output_present",
+      "has_traceback": false,
+      "has_assertion_failure": false,
+      "has_syntax_error": false,
+      "has_no_tests_ran": false,
+      "traceback_files": [],
+      "missing_imports": []
+    },
+    {
+      "command": "python -m py_compile EyeOfTerror/Warmaster/ceraxia_field_trial_report.py ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py",
+      "status": "passed",
+      "returncode": 0,
+      "stdout_nonempty": false,
+      "stderr_nonempty": false,
+      "output_signal": "output_empty",
+      "has_traceback": false,
+      "has_assertion_failure": false,
+      "has_syntax_error": false,
+      "has_no_tests_ran": false,
+      "traceback_files": [],
+      "missing_imports": []
+    }
+  ],
+  "verification_after_mutation_evidence": {
+    "kind": "ceraxia_verification_after_mutation_evidence",
+    "status": "complete",
+    "repo_path": "/media/shushunya/SHUSHUNYA/shushunya",
+    "changed_files": [
+      {
+        "path": "EyeOfTerror/Warmaster/ceraxia_field_trial_report.py",
+        "status": "observed_after_worker",
+        "size_bytes": 38041,
+        "sha256": "c86085b5ccdccdf7f353d084514309df62f6b58dfcb8163dc1ee911aa693aecb",
+        "mtime_ns": 1782960590014182723
+      },
+      {
+        "path": "EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py",
+        "status": "observed_after_worker",
+        "size_bytes": 71963,
+        "sha256": "ee8b7e2ba7feeb2761126041f880078a4f92a465bdc157a4643bcc44c2507196",
+        "mtime_ns": 1782960590019521661
+      },
+      {
+        "path": "EyeOfTerror/Mechanicum/Ceraxia/EVALUATION.md",
+        "status": "observed_after_worker",
+        "size_bytes": 7835,
+        "sha256": "8553f23b62dc2d2c61e6ad1ab00e830bcdb0516d4773ebfb87562b74c8dc73df",
+        "mtime_ns": 1782960590019765045
+      }
+    ],
+    "changed_file_count": 3,
+    "commands_executed_count": 4,
+    "blockers": []
+  },
+  "verification_execution": {
+    "kind": "code_brigade_verification_execution",
+    "contract_version": "eye-mechanicum.v1",
+    "status": "passed",
+    "execute": true,
+    "repo_path": "/media/shushunya/SHUSHUNYA/shushunya",
+    "results": [
+      {
+        "command": "git diff --check",
+        "status": "passed",
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "diagnostics": {
+          "has_traceback": false,
+          "traceback_files": [],
+          "missing_imports": [],
+          "has_assertion_failure": false,
+          "has_syntax_error": false,
+          "has_no_tests_ran": false
+        }
+      },
+      {
+        "command": "python -m py_compile EyeOfTerror/Warmaster/ceraxia_field_trial_report.py EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py",
+        "status": "passed",
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "diagnostics": {
+          "has_traceback": false,
+          "traceback_files": [],
+          "missing_imports": [],
+          "has_assertion_failure": false,
+          "has_syntax_error": false,
+          "has_no_tests_ran": false
+        }
+      },
+      {
+        "command": "python -m pytest EyeOfTerror/Warmaster/ceraxia_field_trials_self_test.py Mechanicum/worker_api_contract_self_test.py Mechanicum/start_all_workers_self_test.py",
+        "status": "skipped",
+        "returncode": 1,
+        "stdout": "",
+        "stderr": "pytest unavailable",
+        "diagnostics": {
+          "has_traceback": false,
+          "traceback_files": [],
+          "missing_imports": [],
+          "has_assertion_failure": false,
+          "has_syntax_error": false,
+          "has_no_tests_ran": false
+        }
+      },
+      {
+        "command": "python -m py_compile EyeOfTerror/Warmaster/ceraxia_field_trial_report.py ArchiveOfHeresy/main.py DemonsForge/app.py Mechanicum/common/__init__.py ArchiveOfHeresy/check-namespace-smoke.py",
+        "status": "passed",
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "diagnostics": {
+          "has_traceback": false,
+          "traceback_files": [],
+          "missing_imports": [],
+          "has_assertion_failure": false,
+          "has_syntax_error": false,
+          "has_no_tests_ran": false
+        }
+      }
+    ],
+    "blockers": []
+  },
+  "negative_tests_required": [
+    "old and new API shape compatibility",
+    "old, new, and mixed records round-trip correctly",
+    "parallel/retry behavior preserves state"
+  ],
+  "broad_verification_required": true,
+  "blockers": [],
+  "dry_run": false,
+  "execute_verification": true
+}
