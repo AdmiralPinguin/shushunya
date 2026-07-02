@@ -16,7 +16,7 @@ from ceraxia_field_trial_runner import (
     resolve_run_storage,
 )
 from ceraxia_live_task_prepare import build_task_packet
-from ceraxia_live_task_run import build_live_task_prompt
+from ceraxia_live_task_run import build_live_task_prompt, build_package
 from ceraxia_field_trial_report import build_report
 from ceraxia_field_trial_auto_review import principal_evidence_signals, repair_evidence_signals, senior_evidence_signals
 
@@ -176,6 +176,8 @@ def main() -> int:
     for documented_flag in ("--execute-verification", "--verification-command"):
         if documented_flag not in readme_text:
             raise AssertionError(f"Ceraxia README drifted from live harness verification flag: {documented_flag}")
+    if "documentation contract" not in readme_text or "CLI/help" not in readme_text:
+        raise AssertionError("Ceraxia README must document the live harness drift guard contract")
     missing_live_prepare = subprocess.run(
         [sys.executable, str(LIVE_TASK_PREPARE), "--task-id", "missing-live-task"],
         cwd=str(EYE_ROOT.parent),
@@ -185,6 +187,20 @@ def main() -> int:
     )
     if missing_live_prepare.returncode == 0:
         raise AssertionError(f"Ceraxia live task prepare accepted unknown task: {missing_live_prepare.stdout}")
+    with tempfile.TemporaryDirectory() as package_tmp:
+        package_run_dir = Path(package_tmp) / "run"
+        package_run_dir.mkdir()
+        (package_run_dir / "worker_report.json").write_text(json.dumps({"changed_files": ["README.md"]}), encoding="utf-8")
+        (package_run_dir / "review_gate.json").write_text(json.dumps({"decision": "ready"}), encoding="utf-8")
+        (package_run_dir / "verification_report.json").write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+        (package_run_dir / "run_summary.json").write_text(json.dumps({"kind": "ceraxia_run_summary"}), encoding="utf-8")
+        ready_package = build_package(
+            {"id": "live-ready", "class": "docs_contract_sync", "minimum_changed_files": 1},
+            {"run_id": "live-ready-run", "package_ok": True, "execution_mode": "guarded_patch", "ready_for_execution": True},
+            package_run_dir,
+        )
+        if ready_package["status"] != "fully_successful" or ready_package["review_accepted"] is not True:
+            raise AssertionError(f"Ceraxia live package builder should accept ready review decisions: {ready_package}")
     with tempfile.TemporaryDirectory() as live_run_tmp:
         live_run = subprocess.run(
             [

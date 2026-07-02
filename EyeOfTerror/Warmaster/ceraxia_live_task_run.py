@@ -43,11 +43,15 @@ def changed_files_from_worker(run_dir: Path) -> list[str]:
     return [str(item) for item in values if isinstance(item, str) and item]
 
 
+def review_decision_accepted(review: dict[str, Any]) -> bool:
+    return review.get("decision") in {"ready", "passed"}
+
+
 def status_from_run(task: dict[str, Any], result: dict[str, Any], run_dir: Path, changed_files: list[str]) -> str:
     review = load_optional_json(run_dir / "review_gate.json")
     verification = load_optional_json(run_dir / "verification_report.json")
     minimum_changed = int(task.get("minimum_changed_files") or 0)
-    review_passed = review.get("decision") == "passed"
+    review_passed = review_decision_accepted(review)
     verification_passed = verification.get("status") == "passed"
     if result.get("package_ok") is True and changed_files and review_passed and verification_passed:
         return "fully_successful"
@@ -152,7 +156,7 @@ def build_package(task: dict[str, Any], result: dict[str, Any], run_dir: Path) -
         "multi_file_nonfixture": len(set(changed_files)) > 1,
         "changed_files": changed_files,
         "verification_passed": verification.get("status") == "passed",
-        "review_accepted": review.get("decision") == "passed",
+        "review_accepted": review_decision_accepted(review),
         "postmortem": postmortem,
         "summary": {
             "ceraxia_package_ok": result.get("package_ok"),

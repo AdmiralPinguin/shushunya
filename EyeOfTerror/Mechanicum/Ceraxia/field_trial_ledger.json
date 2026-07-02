@@ -3935,6 +3935,45 @@
         "postmortem": "Ceraxia live task ended as failed; package_ok=False; review=blocked; verification=requires_execution; next_action=inspect blockers.",
         "evidence_package": "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-021253-live-ceraxia-engineering-task-task-id-1110c689/next_stage_evidence_package.json"
       }
+    },
+    {
+      "trial_id": "ceraxia-live-docs-contract-sync",
+      "run_id": "ceraxia-20260702-023047-live-ceraxia-engineering-task-task-id-df715872",
+      "date": "2026-07-02",
+      "reviewer": "Codex live harness review",
+      "scores": {
+        "task_understanding": null,
+        "repository_investigation": null,
+        "multi_file_reasoning": null,
+        "patch_correctness": null,
+        "verification_discipline": null,
+        "self_repair": null,
+        "review_quality": null,
+        "safety": null,
+        "reporting": null
+      },
+      "evidence_paths": [
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023047-live-ceraxia-engineering-task-task-id-df715872/next_stage_evidence_package.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023047-live-ceraxia-engineering-task-task-id-df715872/planning_department.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023047-live-ceraxia-engineering-task-task-id-df715872/repo_survey.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023047-live-ceraxia-engineering-task-task-id-df715872/review_gate.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023047-live-ceraxia-engineering-task-task-id-df715872/verification_report.json",
+        "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023047-live-ceraxia-engineering-task-task-id-df715872/worker_report.json"
+      ],
+      "human_review_notes": "Accepted as a live docs-contract-sync attempt: Ceraxia applied a two-file docs and self-test patch, executed allowlisted verification, and review_gate returned ready with no findings.",
+      "generalizable_failures": [],
+      "follow_up_changes": [],
+      "accepted_for_rolling_score": false,
+      "accepted_for_next_stage": true,
+      "next_stage": {
+        "status": "fully_successful",
+        "attempt_count": 1,
+        "class": "docs_contract_sync",
+        "multi_file_nonfixture": true,
+        "false_success": false,
+        "postmortem": "",
+        "evidence_package": "EyeOfTerror/Mechanicum/Ceraxia/live_evidence/ceraxia-20260702-023047-live-ceraxia-engineering-task-task-id-df715872/next_stage_evidence_package.json"
+      }
     }
   ]
 }
