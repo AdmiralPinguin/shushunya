@@ -48,6 +48,11 @@ def assert_packet_shape(packet: dict) -> None:
     expected_roles = ["TaskTriage", "RepoSurveyor", "DesignStrategos", "VerificationArchitect", "RiskScribe"]
     if packet.get("roles_completed") != expected_roles:
         raise AssertionError(f"planning packet role order drifted: {packet}")
+    trace = packet.get("role_execution_trace") if isinstance(packet.get("role_execution_trace"), list) else []
+    if [item.get("role") for item in trace if isinstance(item, dict)] != expected_roles:
+        raise AssertionError(f"planning packet must be assembled through role modules in order: {packet}")
+    if not all(isinstance(item, dict) and item.get("module", "").startswith("roles.") and item.get("may_mutate_source") is False for item in trace):
+        raise AssertionError(f"planning role trace must expose read-only role modules: {packet}")
     if packet.get("contract_version") != "eye-mechanicum.v1":
         raise AssertionError(f"planning packet contract version drifted: {packet}")
     if packet.get("next_action", {}).get("owner") != "Ceraxia":

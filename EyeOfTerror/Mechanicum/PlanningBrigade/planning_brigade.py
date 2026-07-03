@@ -10,6 +10,7 @@ from typing import Any
 
 from planning_feedback_contract import build_planning_feedback_intake
 from planning_packet_contract import CONTRACT_VERSION, ROLE_ORDER, validate_planning_packet
+from roles import design_strategos, repo_surveyor, risk_scribe, task_triage as task_triage_role, verification_architect
 
 
 PATH_HINT_PATTERN = re.compile(r"(?<![\w/.-])([\w./-]+\.(?:py|js|ts|tsx|jsx|kt|java|go|rs|sh|json|toml|ya?ml|md|txt))(?![\w/.-])")
@@ -2022,32 +2023,61 @@ def worker_output_contract(
 
 def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
     task = task_text(payload)
-    triage = task_triage(payload)
-    problem = problem_statement(payload, triage)
-    survey = repo_survey_request(payload, triage)
-    assumptions = assumption_register(triage, problem, survey)
-    playbook = investigation_playbook(triage, problem, survey)
-    dependency = dependency_map(triage, survey)
-    breakdown = work_breakdown(triage, dependency)
-    impact = impact_analysis(triage, problem, survey)
-    forecast = execution_forecast(triage, breakdown, impact)
-    expert_plan = expert_quality_plan(triage, impact, forecast)
-    design = design_options(payload, triage)
-    verification = verification_strategy(triage, payload)
-    change_control = change_control_plan(triage, impact, verification, expert_plan)
-    repair_plan = diagnostic_repair_plan(triage, verification, impact, forecast)
-    surface_matrix = surface_verification_matrix(impact, verification)
-    risks = risk_register(triage, survey, design, verification)
-    quality = quality_bar(triage, verification)
-    acceptance = acceptance_contract(problem, triage, verification, quality, surface_matrix, expert_plan)
-    blueprint = implementation_brief_blueprint(triage, design, verification, risks, quality, dependency, breakdown, impact, surface_matrix, forecast, expert_plan, playbook, change_control)
-    work_packages = implementation_work_packages(triage, problem, dependency, impact, verification, risks, forecast)
-    package_matrix = surface_package_matrix(surface_matrix, work_packages)
-    acceptance_trace = acceptance_trace_matrix(problem, quality, acceptance, verification, surface_matrix, work_packages)
-    constraint_trace = constraint_trace_matrix(problem, work_packages, acceptance_trace)
-    output_contract = worker_output_contract(work_packages, acceptance_trace, constraint_trace, repair_plan)
-    review = planning_review_gate(triage, problem, survey, dependency, breakdown, verification, surface_matrix, acceptance, expert_plan, change_control, work_packages, package_matrix, acceptance_trace, constraint_trace)
-    handoff = code_brigade_handoff(triage, verification, quality, work_packages, acceptance_trace, repair_plan, output_contract)
+    helpers = {
+        "task_triage": task_triage,
+        "problem_statement": problem_statement,
+        "repo_survey_request": repo_survey_request,
+        "assumption_register": assumption_register,
+        "investigation_playbook": investigation_playbook,
+        "dependency_map": dependency_map,
+        "work_breakdown": work_breakdown,
+        "impact_analysis": impact_analysis,
+        "execution_forecast": execution_forecast,
+        "expert_quality_plan": expert_quality_plan,
+        "change_control_plan": change_control_plan,
+        "design_options": design_options,
+        "verification_strategy": verification_strategy,
+        "diagnostic_repair_plan": diagnostic_repair_plan,
+        "surface_verification_matrix": surface_verification_matrix,
+        "risk_register": risk_register,
+        "quality_bar": quality_bar,
+        "acceptance_contract": acceptance_contract,
+        "implementation_brief_blueprint": implementation_brief_blueprint,
+        "implementation_work_packages": implementation_work_packages,
+        "surface_package_matrix": surface_package_matrix,
+        "acceptance_trace_matrix": acceptance_trace_matrix,
+        "constraint_trace_matrix": constraint_trace_matrix,
+        "worker_output_contract": worker_output_contract,
+        "planning_review_gate": planning_review_gate,
+        "code_brigade_handoff": code_brigade_handoff,
+    }
+    context: dict[str, Any] = {"payload": payload}
+    role_trace: list[dict[str, Any]] = []
+    for module in (task_triage_role, repo_surveyor, design_strategos, verification_architect):
+        result = module.run(context if module is not task_triage_role else payload, helpers)
+        outputs = result.get("outputs") if isinstance(result.get("outputs"), dict) else {}
+        context.update(outputs)
+        role_trace.append(
+            {
+                "role": result.get("role"),
+                "module": module.__name__,
+                "outputs": sorted(outputs),
+                "may_mutate_source": False,
+            }
+        )
+    context["change_control_plan"] = design_strategos.finalize_change_control(context, helpers)
+    role_trace[2]["outputs"] = sorted([*role_trace[2]["outputs"], "change_control_plan"])
+    risk_result = risk_scribe.run(context, helpers)
+    risk_outputs = risk_result.get("outputs") if isinstance(risk_result.get("outputs"), dict) else {}
+    context.update(risk_outputs)
+    role_trace.append(
+        {
+            "role": risk_result.get("role"),
+            "module": risk_scribe.__name__,
+            "outputs": sorted(risk_outputs),
+            "may_mutate_source": False,
+        }
+    )
     return {
         "ok": bool(task),
         "contract_version": CONTRACT_VERSION,
@@ -2055,32 +2085,33 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "kind": "ceraxia_planning_packet",
         "task": task,
         "roles_completed": ROLE_ORDER,
-        "problem_statement": problem,
-        "task_triage": triage,
-        "repo_survey_request": survey,
-        "assumption_register": assumptions,
-        "investigation_playbook": playbook,
-        "dependency_map": dependency,
-        "work_breakdown": breakdown,
-        "impact_analysis": impact,
-        "execution_forecast": forecast,
-        "expert_quality_plan": expert_plan,
-        "change_control_plan": change_control,
-        "design_options": design,
-        "verification_strategy": verification,
-        "diagnostic_repair_plan": repair_plan,
-        "surface_verification_matrix": surface_matrix,
-        "surface_package_matrix": package_matrix,
-        "risk_register": risks,
-        "quality_bar": quality,
-        "acceptance_contract": acceptance,
-        "acceptance_trace_matrix": acceptance_trace,
-        "constraint_trace_matrix": constraint_trace,
-        "implementation_brief_blueprint": blueprint,
-        "implementation_work_packages": work_packages,
-        "worker_output_contract": output_contract,
-        "planning_review_gate": review,
-        "code_brigade_handoff": handoff,
+        "role_execution_trace": role_trace,
+        "problem_statement": context["problem_statement"],
+        "task_triage": context["task_triage"],
+        "repo_survey_request": context["repo_survey_request"],
+        "assumption_register": context["assumption_register"],
+        "investigation_playbook": context["investigation_playbook"],
+        "dependency_map": context["dependency_map"],
+        "work_breakdown": context["work_breakdown"],
+        "impact_analysis": context["impact_analysis"],
+        "execution_forecast": context["execution_forecast"],
+        "expert_quality_plan": context["expert_quality_plan"],
+        "change_control_plan": context["change_control_plan"],
+        "design_options": context["design_options"],
+        "verification_strategy": context["verification_strategy"],
+        "diagnostic_repair_plan": context["diagnostic_repair_plan"],
+        "surface_verification_matrix": context["surface_verification_matrix"],
+        "surface_package_matrix": context["surface_package_matrix"],
+        "risk_register": context["risk_register"],
+        "quality_bar": context["quality_bar"],
+        "acceptance_contract": context["acceptance_contract"],
+        "acceptance_trace_matrix": context["acceptance_trace_matrix"],
+        "constraint_trace_matrix": context["constraint_trace_matrix"],
+        "implementation_brief_blueprint": context["implementation_brief_blueprint"],
+        "implementation_work_packages": context["implementation_work_packages"],
+        "worker_output_contract": context["worker_output_contract"],
+        "planning_review_gate": context["planning_review_gate"],
+        "code_brigade_handoff": context["code_brigade_handoff"],
         "next_action": {
             "owner": "Ceraxia",
             "action": "approve_or_revise_plan",

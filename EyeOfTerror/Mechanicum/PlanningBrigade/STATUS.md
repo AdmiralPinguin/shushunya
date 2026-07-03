@@ -61,6 +61,10 @@ Current capabilities:
   checklist with a packet-ready `replan_payload`
 - planning review gate with score, blockers, and warnings
 - role contracts for the five planning roles
+- executable in-process role modules for `TaskTriage`, `RepoSurveyor`,
+  `DesignStrategos`, `VerificationArchitect`, and `RiskScribe`; planning
+  packets now include `role_execution_trace` with module names, outputs, and
+  read-only guarantees
 - planned read-only service interface contracts for future role split on
   reserved ports 7111-7115
 - service-port reservation checks against the active EyeOfTerror and
@@ -76,7 +80,7 @@ Current capabilities:
 
 Current boundaries:
 
-- roles are still in-process, not independent services
+- roles are executable in-process modules, not independent HTTP services yet
 - repository evidence is read-only and summarized by Ceraxia
 - non-Python source summaries are still shallow symbol/import-like extraction;
   JS/TS relative imports, barrel exports, and side-effect imports are resolved,
