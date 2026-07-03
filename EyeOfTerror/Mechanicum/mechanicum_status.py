@@ -38,6 +38,8 @@ COMPONENTS = {
             "planning_feedback_intake.schema.json",
             "planning_packet_contract.py",
             "planning_contract.schema.json",
+            "role_service.py",
+            "role_service_self_test.py",
             "role_contracts.json",
             "service_contracts.json",
             "field_trials.json",
@@ -49,7 +51,7 @@ COMPONENTS = {
             "VerificationArchitect/README.md",
             "RiskScribe/README.md",
         ],
-        "maturity": "contracted_planning_department_with_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_definition_of_done_trace_surface_output_evidence_implementation_brief_blueprint_field_trial_coverage_code_work_packages_dependency_execution_batches_worker_output_acceptance_requirement_contracts_and_ceraxia_feedback_intake",
+        "maturity": "contracted_planning_department_with_http_ready_role_services_role_quality_gates_assumption_register_investigation_playbook_change_control_acceptance_trace_definition_of_done_trace_surface_output_evidence_implementation_brief_blueprint_field_trial_coverage_code_work_packages_dependency_execution_batches_worker_output_acceptance_requirement_contracts_and_ceraxia_feedback_intake",
     },
     "CodeBrigade": {
         "kind": "implementation_brigade_contract",
@@ -100,8 +102,8 @@ ROADMAP = [
     },
     {
         "priority": 4,
-        "item": "split PlanningBrigade roles into callable services after more field trials",
-        "reason": "PlanningBrigade now emits problem framing, path hints, assumption registers, investigation playbooks, change-control plans, diagnostic repair plans, acceptance trace matrices with explicit definition-of-done coverage, dependency maps, work breakdown, impact analysis, surface verification matrices, acceptance contracts, CodeBrigade brief blueprints, implementation work packages, and worker-output contracts; role services should wait until these contracts survive more real tasks.",
+        "item": "wire PlanningBrigade role services into Ceraxia runtime dispatch after more field trials",
+        "reason": "PlanningBrigade now exposes HTTP-ready read-only role services for the five planning roles and keeps the in-process packet builder for compatibility; the next step is runtime selection between in-process and HTTP role dispatch once service supervision is stable.",
         "owner": "PlanningBrigade",
     },
 ]

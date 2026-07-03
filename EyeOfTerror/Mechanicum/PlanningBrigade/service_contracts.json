@@ -1,13 +1,14 @@
 {
   "kind": "planning_brigade_service_contracts",
   "contract_version": "eye-mechanicum.v1",
-  "status": "planned_interfaces_in_process_implementation",
+  "status": "active_http_ready_interfaces",
   "base_path": "EyeOfTerror/Mechanicum/PlanningBrigade",
+  "server_module": "role_service.py",
   "port_policy": {
     "host": "127.0.0.1",
     "reserved_range": "7111-7115",
-    "active": false,
-    "reason": "Planning roles stay in-process until field trials prove the service split."
+    "active": true,
+    "reason": "Planning roles expose real read-only HTTP-ready services while the main pipeline can still use in-process execution."
   },
   "shared_endpoints": [
     "GET /health",

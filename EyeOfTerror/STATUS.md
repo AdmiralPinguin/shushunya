@@ -37,6 +37,10 @@
 - The local Mechanicum check now runs focused Ceraxia slices by default; the
   full Ceraxia suite and handoff field trials are opt-in through
   `RUN_FULL_CERAXIA_SELF_TEST=1` and `RUN_CERAXIA_HANDOFF_FIELD_TRIALS=1`.
+- PlanningBrigade roles now expose an executable read-only role-service
+  runtime with `GET /health`, `GET /capabilities`, and `POST /plan`; ports
+  `7111-7115` are active HTTP-ready contracts while the existing in-process
+  packet builder remains available for compatibility.
 - Ceraxia/CodeBrigade handoffs expose implementation work packages, package
   surface coverage, package statuses, and review blocking for blocked packages.
 - CodeBrigade real source mutation for medium/high-risk tasks now requires a

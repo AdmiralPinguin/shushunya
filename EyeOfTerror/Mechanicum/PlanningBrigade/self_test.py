@@ -81,8 +81,10 @@ def assert_role_contracts() -> None:
     port_collisions = {port: active_ports[port] for port in service_ports if port in active_ports}
     if port_collisions:
         raise AssertionError(f"planning service ports collide with active registry ports: {port_collisions}")
-    if service_contracts.get("port_policy", {}).get("active") is not False:
-        raise AssertionError(f"planning service contracts should stay planned until split: {service_contracts}")
+    if service_contracts.get("port_policy", {}).get("active") is not True:
+        raise AssertionError(f"planning service contracts must expose active HTTP-ready role services: {service_contracts}")
+    if service_contracts.get("server_module") != "role_service.py":
+        raise AssertionError(f"planning service contracts must name the executable role service module: {service_contracts}")
     externally_available = {"task", "constraints"}
     produced: set[str] = set(externally_available)
     for role in roles:

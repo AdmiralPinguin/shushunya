@@ -69,8 +69,9 @@ Current capabilities:
   `DesignStrategos`, `VerificationArchitect`, and `RiskScribe`; planning
   packets now include `role_execution_trace` with module names, outputs, and
   read-only guarantees
-- planned read-only service interface contracts for future role split on
-  reserved ports 7111-7115
+- executable read-only role service runtime with `GET /health`,
+  `GET /capabilities`, and `POST /plan` for the five planning roles
+- active HTTP-ready service interface contracts on reserved ports 7111-7115
 - service-port reservation checks against the active EyeOfTerror and
   Mechanicum registries
 - field trials for multiple task shapes, including a high-risk multi-surface
@@ -84,7 +85,8 @@ Current capabilities:
 
 Current boundaries:
 
-- roles are executable in-process modules, not independent HTTP services yet
+- Ceraxia still uses the in-process packet builder by default; role services
+  are available but not yet the default runtime dispatch path
 - repository evidence is read-only and summarized by Ceraxia
 - non-Python source summaries are still shallow symbol/import-like extraction;
   JS/TS relative imports, barrel exports, and side-effect imports are resolved,
@@ -100,7 +102,8 @@ Current boundaries:
 
 Next useful upgrades:
 
-- split role contracts into callable services after more field trials
+- wire Ceraxia runtime dispatch to call PlanningBrigade role services when
+  service supervision is enabled
 - add richer multi-language dependency graphs beyond current JS/TS relative
   import resolution
 - teach review gates to compare command stdout/stderr semantics with each

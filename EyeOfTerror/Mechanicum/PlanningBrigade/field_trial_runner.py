@@ -40,9 +40,13 @@ def require_subset(expected: list[str], actual: list[str], label: str, trial_id:
 def validate_service_contracts_against_packet(packet: dict[str, Any], trial_id: str) -> dict[str, Any]:
     if SERVICE_CONTRACTS.get("contract_version") != CONTRACT_VERSION:
         raise AssertionError(f"{trial_id}: service contract version drifted: {SERVICE_CONTRACTS}")
+    if SERVICE_CONTRACTS.get("status") != "active_http_ready_interfaces":
+        raise AssertionError(f"{trial_id}: planning services must be active HTTP-ready interfaces: {SERVICE_CONTRACTS}")
+    if SERVICE_CONTRACTS.get("server_module") != "role_service.py":
+        raise AssertionError(f"{trial_id}: planning services must name role_service.py runtime: {SERVICE_CONTRACTS}")
     port_policy = SERVICE_CONTRACTS.get("port_policy") if isinstance(SERVICE_CONTRACTS.get("port_policy"), dict) else {}
-    if port_policy.get("active") is not False:
-        raise AssertionError(f"{trial_id}: planning services must stay inactive until split gates pass: {SERVICE_CONTRACTS}")
+    if port_policy.get("active") is not True:
+        raise AssertionError(f"{trial_id}: planning services must be active after role-service split: {SERVICE_CONTRACTS}")
     services = SERVICE_CONTRACTS.get("services") if isinstance(SERVICE_CONTRACTS.get("services"), list) else []
     ports = [int(service.get("port") or 0) for service in services if isinstance(service, dict)]
     if ports != list(range(7111, 7116)):
@@ -800,8 +804,8 @@ def assert_coverage(summary: dict[str, Any]) -> None:
         raise AssertionError(f"field trials must compare planning service ports with the active registry: {summary}")
     if int(summary.get("maximum_planning_service_port_collision_count") or 0) != 0:
         raise AssertionError(f"field trials found planning service port collisions: {summary}")
-    if planning_service_active_values != {"False": summary["trial_count"]}:
-        raise AssertionError(f"field trials must prove planning service contracts stay inactive: {summary}")
+    if planning_service_active_values != {"True": summary["trial_count"]}:
+        raise AssertionError(f"field trials must prove planning service contracts are active HTTP-ready interfaces: {summary}")
     if int(summary.get("minimum_planning_service_split_gate_count") or 0) < 5:
         raise AssertionError(f"field trials have too few planning service split gates: {summary}")
 
