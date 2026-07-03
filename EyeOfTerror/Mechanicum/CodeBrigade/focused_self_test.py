@@ -336,6 +336,29 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["semantic_review"]["status"], "passed", review)
             self.assertEqual(review["status"], "passed", review)
 
+    def test_project_creation_notes_api_implements_task_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай FastAPI notes API `notes-demo` для заметок.")
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "python_fastapi_service")
+            self.assertTrue(any(feature["id"] == "notes_api" for feature in project["acceptance_features"]))
+            self.assertIn("reject empty note titles", json.dumps(project["module_contracts"], ensure_ascii=False))
+            source = (repo / "app/main.py").read_text(encoding="utf-8")
+            self.assertIn("def create_note", source)
+            self.assertIn("@app.post('/notes')", source)
+            self.assertIn("@app.delete('/notes/{note_id}')", source)
+            tests = (repo / "tests/test_health.py").read_text(encoding="utf-8")
+            self.assertIn("test_create_list_and_get_note", tests)
+            self.assertIn("test_delete_note", tests)
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
     def test_greenfield_project_brief_contract_and_templates(self) -> None:
         cli = build_greenfield_project_brief("Создай новый CLI проект `forge-tool`.")
         api = build_greenfield_project_brief("Создай FastAPI backend service `api-demo`.")
@@ -375,6 +398,9 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         todo = build_greenfield_project_brief("Создай static frontend website todo list `todo-demo`.")
         self.assertTrue(any(feature["id"] == "todo_list" for feature in todo["acceptance_features"]))
         self.assertGreaterEqual(len(todo["module_contracts"]), 3)
+        notes = build_greenfield_project_brief("Создай FastAPI notes API `notes-demo`.")
+        self.assertTrue(any(feature["id"] == "notes_api" for feature in notes["acceptance_features"]))
+        self.assertGreaterEqual(len(notes["module_contracts"]), 2)
 
 
 if __name__ == "__main__":

@@ -42,7 +42,10 @@
   generic `ready` scaffolds, starting with Python CLI calculator behavior,
   argument parsing, arithmetic tests, and division-by-zero rejection, and now
   static browser todo-list behavior with DOM controls, add/complete/delete
-  logic, localStorage persistence, module contracts, and structure tests;
+  logic, localStorage persistence, module contracts, and structure tests, plus
+  FastAPI-compatible notes-service behavior with create/list/get/delete logic,
+  route wiring, invalid-title handling, and tests that do not require a live
+  server;
   GreenfieldArchitect now writes first-class plan artifacts
   `architecture_plan.json`, `file_tree_plan.json`, `module_contracts.json`, and
   `verification_plan.json` into generated projects;
