@@ -9,6 +9,7 @@ from pathlib import Path
 import code_brigade_adapter
 from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_diagnostic_repair_request
 from greenfield_architect import build_greenfield_project_brief as architect_build_greenfield_project_brief
+from greenfield_dependency_worker import dependency_manager_status
 from greenfield_feature_worker import infer_acceptance_features
 from greenfield_project import build_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_templates import available_templates
@@ -236,6 +237,14 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(project["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
         self.assertIn("architecture_plan.json", project["expected_files"])
         self.assertTrue(project["implementation_plan"]["module_sequence"])
+
+    def test_greenfield_dependency_worker_reports_manager_status(self) -> None:
+        none_status = dependency_manager_status("none")
+        self.assertFalse(none_status["required"])
+        self.assertTrue(none_status["available"])
+        pip_status = dependency_manager_status("pip")
+        self.assertTrue(pip_status["required"])
+        self.assertEqual(pip_status["binary"], "python")
 
     def test_greenfield_verification_loop_repairs_missing_template_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

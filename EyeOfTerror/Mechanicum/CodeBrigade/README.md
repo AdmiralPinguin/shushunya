@@ -147,7 +147,9 @@ project type inference, architecture/file/module/verification plan artifacts,
 and the implementation-plan trace rows.
 `greenfield_feature_worker.py` owns task-derived ImplementationWorker behavior,
 including functional requirement detection and feature-specific file/contract
-overrides, so the greenfield orchestrator does not become a single role pile. The current
+overrides. `greenfield_dependency_worker.py` owns DependencyWorker package
+manager discovery, manifest checks, install allowlisting, and lockfile
+snapshots, so the greenfield orchestrator does not become a single role pile. The current
 templates cover `python_cli_basic`, `python_fastapi_service`, `python_library`,
 `node_vite_app`, `static_site`, `telegram_bot_python`, `data_processing_tool`,
 and `local_agent_tool`; each records stack, entrypoints, expected files, install

@@ -33,8 +33,10 @@
   model-brain guidance. GreenfieldArchitect project-brief creation, project
   type inference, plan artifact construction, and implementation trace planning
   now live in `greenfield_architect.py`; task-derived ImplementationWorker
-  feature generation now lives in `greenfield_feature_worker.py` instead of
-  being buried in the greenfield orchestrator. The template registry now covers Python CLI, FastAPI,
+  feature generation now lives in `greenfield_feature_worker.py`; DependencyWorker
+  package-manager discovery, manifest checks, install allowlisting, and lockfile
+  snapshots now live in `greenfield_dependency_worker.py` instead of being
+  buried in the greenfield orchestrator. The template registry now covers Python CLI, FastAPI,
   Python library, Vite frontend, static site, Telegram bot, data-processing
   tool, and local agent tool scaffolds. Greenfield reports now also preserve
   reviewer/repair model guidance and a `greenfield_memory_record` with chosen
