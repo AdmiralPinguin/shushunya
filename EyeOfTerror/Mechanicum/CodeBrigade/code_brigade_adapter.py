@@ -15,6 +15,7 @@ from execution_preflight import build_execution_preflight
 from implementation_brief_contract import validate_implementation_brief
 
 REAL_EXECUTION_STATUS = "blocked_until_adapter_is_wired"
+PLANNING_HANDOFF_REQUIRED_RISKS = {"medium", "high"}
 
 
 def repo_path_from_brief(brief: dict[str, Any]) -> Path:
@@ -50,6 +51,42 @@ def build_edit_plan(brief: dict[str, Any], implementation_plan: dict[str, Any], 
         },
         "acceptance_criteria": implementation_plan.get("acceptance_evidence_required", []),
         "verification_commands": implementation_plan.get("verification_commands", []),
+    }
+
+
+def build_planning_handoff_gate(brief: dict[str, Any]) -> dict[str, Any]:
+    risk_level = str(brief.get("risk_level") or "high")
+    required = risk_level in PLANNING_HANDOFF_REQUIRED_RISKS
+    planning_department = brief.get("planning_department") if isinstance(brief.get("planning_department"), dict) else {}
+    work_handoff = brief.get("planning_department_handoff") if isinstance(brief.get("planning_department_handoff"), dict) else {}
+    brigade_handoff = planning_department.get("brigade_handoff_contract") if isinstance(planning_department.get("brigade_handoff_contract"), dict) else {}
+    rfc = planning_department.get("engineering_rfc") if isinstance(planning_department.get("engineering_rfc"), dict) else {}
+    investigation = planning_department.get("multi_pass_repo_investigation") if isinstance(planning_department.get("multi_pass_repo_investigation"), dict) else {}
+    blockers: list[str] = []
+    if required:
+        if planning_department.get("status") != "ready_for_code_brigade":
+            blockers.append("planning_department.status must be ready_for_code_brigade")
+        if work_handoff.get("status") != "ready":
+            blockers.append("planning_department_handoff.status must be ready")
+        if brigade_handoff.get("status") != "ready":
+            blockers.append("brigade_handoff_contract.status must be ready")
+        if rfc.get("status") != "accepted_for_code_brigade_handoff":
+            blockers.append("engineering_rfc.status must be accepted_for_code_brigade_handoff")
+        if investigation.get("status") != "complete":
+            blockers.append("multi_pass_repo_investigation.status must be complete")
+    return {
+        "kind": "code_brigade_planning_handoff_gate",
+        "contract_version": CONTRACT_VERSION,
+        "required": required,
+        "risk_level": risk_level,
+        "decision": "blocked" if blockers else "passed",
+        "required_before_source_mutation": required,
+        "planning_department_status": str(planning_department.get("status") or ""),
+        "work_package_handoff_status": str(work_handoff.get("status") or ""),
+        "brigade_handoff_contract_status": str(brigade_handoff.get("status") or ""),
+        "engineering_rfc_status": str(rfc.get("status") or ""),
+        "multi_pass_investigation_status": str(investigation.get("status") or ""),
+        "blockers": blockers,
     }
 
 
@@ -157,6 +194,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
     planning_review = brief.get("planning_review_gate") if isinstance(brief.get("planning_review_gate"), dict) else {}
     planning_department = brief.get("planning_department") if isinstance(brief.get("planning_department"), dict) else {}
     planning_department_handoff = brief.get("planning_department_handoff") if isinstance(brief.get("planning_department_handoff"), dict) else {}
+    planning_role_trace = brief.get("planning_role_execution_trace") if isinstance(brief.get("planning_role_execution_trace"), list) else []
     dependency = brief.get("planning_dependency_map") if isinstance(brief.get("planning_dependency_map"), dict) else {}
     breakdown = brief.get("work_breakdown") if isinstance(brief.get("work_breakdown"), dict) else {}
     impact = brief.get("impact_analysis") if isinstance(brief.get("impact_analysis"), dict) else {}
@@ -202,6 +240,7 @@ def build_implementation_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "planning_review_score": planning_review.get("score", 0),
         "planning_department_status": planning_department.get("status", ""),
         "planning_department_roles": planning_department.get("roles", []) if isinstance(planning_department.get("roles"), list) else [],
+        "planning_role_execution_trace": planning_role_trace,
         "brigade_handoff_contract": planning_department.get("brigade_handoff_contract", {}) if isinstance(planning_department.get("brigade_handoff_contract"), dict) else {},
         "engineering_rfc_status": planning_department.get("engineering_rfc", {}).get("status", "") if isinstance(planning_department.get("engineering_rfc"), dict) else "",
         "multi_pass_investigation_status": planning_department.get("multi_pass_repo_investigation", {}).get("status", "") if isinstance(planning_department.get("multi_pass_repo_investigation"), dict) else "",
@@ -530,6 +569,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     controller_mode = str(brief.get("controller_execution_mode") or "dry_run")
     review_only = controller_mode == "review_only"
     edit_plan = build_edit_plan(brief, implementation_plan, execution_intent)
+    planning_handoff_gate = build_planning_handoff_gate(brief)
     task = str(brief.get("task") or "")
     has_explicit_patch = "CERAXIA_PATCH:" in task
     has_guarded_inferred_patch = False
@@ -571,6 +611,8 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     notes: list[str] = []
     read_evidence = collect_pre_mutation_read_evidence(brief, edit_plan)
     preflight_blockers = [] if dry_run else mutation_preflight_blockers(implementation_plan, edit_plan)
+    if not dry_run and not review_only and planning_handoff_gate["decision"] == "blocked":
+        preflight_blockers.extend(f"PlanningBrigade handoff blocked: {blocker}" for blocker in planning_handoff_gate["blockers"])
     if not dry_run and read_evidence["blockers"]:
         preflight_blockers.extend(read_evidence["blockers"])
     if validation_problems:
@@ -636,6 +678,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "dry_run": dry_run,
         "changed_files": changed_files,
         "execution_intent": execution_intent,
+        "planning_handoff_gate": planning_handoff_gate,
         "edit_plan": edit_plan,
         "pre_mutation_read_evidence": read_evidence,
         "autonomous_execution_request": build_autonomous_execution_request(brief, implementation_plan, execution_intent),

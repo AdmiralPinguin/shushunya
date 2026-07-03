@@ -205,6 +205,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "implementation_work_packages": packet.get("implementation_work_packages", {}),
         "worker_output_contract": packet.get("worker_output_contract", {}),
         "planning_review_gate": planning_review,
+        "planning_role_execution_trace": packet.get("role_execution_trace", []) if isinstance(packet.get("role_execution_trace"), list) else [],
         "planning_dependency_map": packet.get("dependency_map", {}),
         "work_breakdown": packet.get("work_breakdown", {}),
         "impact_analysis": packet.get("impact_analysis", {}),

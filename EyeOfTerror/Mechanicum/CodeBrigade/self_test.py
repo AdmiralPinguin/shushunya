@@ -735,6 +735,39 @@ def valid_brief() -> dict:
                 "blockers": [],
             },
         },
+        "planning_department": {
+            "kind": "ceraxia_planning_department_package",
+            "contract_version": "eye-mechanicum.v1",
+            "owner": "Ceraxia",
+            "status": "ready_for_code_brigade",
+            "engineering_rfc": {"status": "accepted_for_code_brigade_handoff"},
+            "multi_pass_repo_investigation": {"status": "complete", "phases": []},
+            "code_brigade_work_package_handoff": {
+                "status": "ready",
+                "packages": [
+                    {"id": "evidence_survey_package"},
+                    {"id": "minimal_patch_package"},
+                    {"id": "verification_evidence_package"},
+                ],
+            },
+            "brigade_handoff_contract": {
+                "status": "ready",
+                "package_ids": [
+                    "evidence_survey_package",
+                    "minimal_patch_package",
+                    "verification_evidence_package",
+                ],
+            },
+            "blockers": [],
+        },
+        "planning_department_handoff": {
+            "status": "ready",
+            "packages": [
+                {"id": "evidence_survey_package"},
+                {"id": "minimal_patch_package"},
+                {"id": "verification_evidence_package"},
+            ],
+        },
         "blocked": False,
         "blockers": [],
     }
@@ -752,6 +785,8 @@ def main() -> int:
         raise AssertionError(f"execution policy must require brief validation before mutation: {policy}")
     if "implementation_plan lists target files, test files, caller candidates, contract surfaces, dependency edges, and refusal conditions" not in policy["mutation_preconditions"]:
         raise AssertionError(f"execution policy must require caller and contract evidence before mutation: {policy}")
+    if "medium and high risk source mutation requires a ready PlanningBrigade planning_department handoff" not in policy["mutation_preconditions"]:
+        raise AssertionError(f"execution policy must require PlanningBrigade handoff before mutation: {policy}")
     if "execution preflight passes before source mutation" not in policy["mutation_preconditions"]:
         raise AssertionError(f"execution policy must require preflight before mutation: {policy}")
     if "investigation playbook read stages are acknowledged before source mutation" not in policy["mutation_preconditions"]:
@@ -1138,9 +1173,21 @@ def main() -> int:
             "blockers": [],
             "required_next_adapter": "",
         }
+        missing_handoff_brief = dict(patch_brief)
+        missing_handoff_brief.pop("planning_department", None)
+        missing_handoff_brief.pop("planning_department_handoff", None)
+        missing_handoff_report = code_brigade_adapter.build_worker_report(missing_handoff_brief, dry_run=False)
+        if (
+            missing_handoff_report["status"] != "blocked"
+            or missing_handoff_report["planning_handoff_gate"]["decision"] != "blocked"
+            or not any("PlanningBrigade handoff blocked" in note for note in missing_handoff_report["notes"])
+        ):
+            raise AssertionError(f"real source mutation must require PlanningBrigade handoff: {missing_handoff_report}")
         patch_report = code_brigade_adapter.build_worker_report(patch_brief, dry_run=False)
         if patch_report["status"] != "implemented" or patch_report["changed_files"] != ["app.py"]:
             raise AssertionError(f"explicit patch execution should report implemented changed files: {patch_report}")
+        if patch_report["planning_handoff_gate"]["decision"] != "passed":
+            raise AssertionError(f"explicit patch execution should pass PlanningBrigade handoff gate: {patch_report}")
         if patch_report["execution_intent"]["mode"] != "explicit_patch_execution" or not patch_report["execution_intent"]["real_execution_supported"]:
             raise AssertionError(f"explicit patch execution should expose executable intent: {patch_report}")
         if patch_report["autonomous_execution_request"]["status"] != "not_required":

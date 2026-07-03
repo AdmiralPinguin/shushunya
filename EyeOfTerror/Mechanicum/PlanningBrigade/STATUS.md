@@ -49,6 +49,10 @@ Current capabilities:
   covered by at least one implementation work package
 - Ceraxia review evidence maps impacted surfaces to matched executed
   verification commands when execution is enabled
+- CodeBrigade enforces the PlanningBrigade/Ceraxia planning handoff before
+  medium/high-risk real source mutation: execution blocks unless the attached
+  `planning_department` package has accepted RFC, complete multi-pass
+  investigation, ready work-package handoff, and ready brigade handoff contract
 - Ceraxia summarizes verification stdout/stderr into output signals and blocks
   inconsistent passed reports that contain failure or traceback evidence
 - verification diagnostics now preserve traceback, assertion, syntax, and

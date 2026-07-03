@@ -6,6 +6,7 @@
   "mutation_preconditions": [
     "implementation_brief validates against the CodeBrigade contract",
     "implementation_plan lists target files, test files, caller candidates, contract surfaces, dependency edges, and refusal conditions",
+    "medium and high risk source mutation requires a ready PlanningBrigade planning_department handoff",
     "investigation playbook read stages are acknowledged before source mutation",
     "change control protected invariants are acknowledged before source mutation",
     "execution preflight passes before source mutation",

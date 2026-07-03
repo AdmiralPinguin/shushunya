@@ -68,6 +68,11 @@ execution boundary does not depend on the full worker-report adapter.
 `execution_preflight.py` performs read-only mutation preflight checks for the
 future real executor: repo availability, scope evidence, survey candidates or
 explicit allowed new files, and verification command counts.
+For medium and high risk tasks, real source mutation also requires
+`planning_handoff_gate.decision=passed`: Ceraxia must attach a
+`planning_department` package with accepted RFC, complete multi-pass
+investigation, ready work-package handoff, and ready brigade handoff contract.
+Dry-run reports still expose the gate, but real execution blocks without it.
 The worker report must include `implementation_plan`, which preserves survey
 candidate files, test files, local dependency edges, investigation playbook
 read stages, caller candidates, contract surface candidates, change-control

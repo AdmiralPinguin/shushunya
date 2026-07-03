@@ -17,6 +17,9 @@
   two-argument unittest assertion when the candidate is unique and verified.
 - Ceraxia/CodeBrigade handoffs expose implementation work packages, package
   surface coverage, package statuses, and review blocking for blocked packages.
+- CodeBrigade real source mutation for medium/high-risk tasks now requires a
+  ready PlanningBrigade/Ceraxia planning handoff package before execution; dry
+  runs expose the same gate diagnostically.
 
 ## Working
 
