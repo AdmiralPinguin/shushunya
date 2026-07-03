@@ -104,6 +104,11 @@ def _feature_scenarios(feature: dict[str, Any]) -> list[dict[str, Any]]:
             _scenario("todo_lifecycle", "Todo UI adds, completes, deletes, and renders tasks", ["create a todo", "mark it complete", "delete it", "render visible state"], ["addTodo", "renderTodos", "complete", "delete"], ["index.html", "app.js", "tests/test_static_site.py"]),
             _scenario("todo_persistence", "Todo UI persists state locally", ["write state", "load state on next render"], ["localStorage", "saveTodos", "loadTodos"], ["app.js", "tests/test_static_site.py"]),
         ],
+        "kanban_board_frontend": [
+            _scenario("kanban_card_lifecycle", "Kanban UI creates cards and moves them through board statuses", ["create a card", "move it to doing", "move it to done"], ["createCard", "moveCard", "backlog", "doing", "done"], ["state.js", "board.js", "app.js", "tests/test_kanban_board.py"]),
+            _scenario("kanban_filter_metrics", "Kanban UI filters cards and reports board metrics", ["filter visible cards", "count status totals", "render metrics"], ["filterCards", "boardMetrics", "renderMetrics", "activeFilter"], ["state.js", "board.js", "tests/test_kanban_board.py"]),
+            _scenario("kanban_persistence_wiring", "Kanban UI persists board state and wires browser interactions", ["load persisted state", "save after mutations", "wire form submit"], ["localStorage", "loadBoard", "saveBoard", "addEventListener", "renderBoard"], ["state.js", "app.js", "tests/test_kanban_board.py"]),
+        ],
         "notes_api": [
             _scenario("notes_crud", "Notes API creates, lists, reads, and deletes notes", ["create note", "list notes", "get note", "delete note"], ["create_note", "list_notes", "get_note", "delete_note"], ["app/main.py", "tests/test_health.py"]),
             _scenario("notes_validation", "Notes API rejects invalid input and missing notes", ["reject empty title", "return not-found behavior"], ["note title is required", "note not found", "KeyError"], ["app/main.py", "tests/test_health.py"]),

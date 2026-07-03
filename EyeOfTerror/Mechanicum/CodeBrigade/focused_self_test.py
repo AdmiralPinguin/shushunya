@@ -294,8 +294,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(any("calculator_error_handling" in blocker for blocker in review["blockers"]))
 
     def test_greenfield_feature_worker_detects_task_features(self) -> None:
-        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api issue tracker todo calculator csv summary sales analytics pipeline local agent tool router telegram bot /start /help vite counter app text utils library")}
-        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "issue_tracker_api", "csv_summary", "sales_analytics_pipeline", "local_agent_command_router", "telegram_command_bot", "vite_counter_app", "python_text_utils_library"})
+        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api issue tracker todo kanban project board calculator csv summary sales analytics pipeline local agent tool router telegram bot /start /help vite counter app text utils library")}
+        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "kanban_board_frontend", "notes_api", "issue_tracker_api", "csv_summary", "sales_analytics_pipeline", "local_agent_command_router", "telegram_command_bot", "vite_counter_app", "python_text_utils_library"})
 
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.")
@@ -825,6 +825,42 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["semantic_review"]["status"], "passed", review)
             self.assertEqual(review["status"], "passed", review)
 
+    def test_project_creation_kanban_board_frontend_implements_multi_workflow_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай static frontend website kanban board `kanban-demo` с карточками, колонками, фильтрами и метриками.")
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "static_site")
+            self.assertTrue(any(feature["id"] == "kanban_board_frontend" for feature in project["acceptance_features"]))
+            self.assertIn("kanban_board_frontend", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertGreaterEqual(len(project["module_contracts"]), 5)
+            self.assertGreaterEqual(project["scenario_plan"]["scenario_count"], 3)
+            expected = {"index.html", "state.js", "board.js", "app.js", "tests/test_kanban_board.py"}
+            self.assertTrue(expected.issubset(set(project["expected_files"])))
+            self.assertIn("kanban-form", (repo / "index.html").read_text(encoding="utf-8"))
+            self.assertIn("function createCard", (repo / "state.js").read_text(encoding="utf-8"))
+            self.assertIn("function moveCard", (repo / "state.js").read_text(encoding="utf-8"))
+            self.assertIn("function filterCards", (repo / "state.js").read_text(encoding="utf-8"))
+            self.assertIn("function renderBoard", (repo / "board.js").read_text(encoding="utf-8"))
+            self.assertIn("function renderMetrics", (repo / "board.js").read_text(encoding="utf-8"))
+            self.assertIn("addEventListener", (repo / "app.js").read_text(encoding="utf-8"))
+            tests = (repo / "tests/test_kanban_board.py").read_text(encoding="utf-8")
+            self.assertIn("test_state_module_owns_board_workflows", tests)
+            self.assertIn("test_render_and_app_modules_wire_interactions", tests)
+            module_rows = {row["path"]: row for row in project["implementation_plan"]["module_sequence"]}
+            for module_path in ("state.js", "board.js", "app.js"):
+                self.assertEqual(module_rows[module_path]["paired_tests"], ["tests/test_kanban_board.py"])
+            trace_rows = project["implementation_trace"]["rows"]
+            self.assertTrue(all(row["verification_files"] == ["tests/test_kanban_board.py"] for row in trace_rows if row["file"] in {"state.js", "board.js", "app.js"}))
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["scenario_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
     def test_project_creation_notes_api_implements_task_feature(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -1084,6 +1120,10 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         todo = build_greenfield_project_brief("Создай static frontend website todo list `todo-demo`.")
         self.assertTrue(any(feature["id"] == "todo_list" for feature in todo["acceptance_features"]))
         self.assertGreaterEqual(len(todo["module_contracts"]), 3)
+        kanban = build_greenfield_project_brief("Создай static frontend website kanban board `kanban-demo`.")
+        self.assertTrue(any(feature["id"] == "kanban_board_frontend" for feature in kanban["acceptance_features"]))
+        self.assertGreaterEqual(len(kanban["module_contracts"]), 5)
+        self.assertGreaterEqual(kanban["scenario_plan"]["scenario_count"], 3)
         notes = build_greenfield_project_brief("Создай FastAPI notes API `notes-demo`.")
         self.assertTrue(any(feature["id"] == "notes_api" for feature in notes["acceptance_features"]))
         self.assertGreaterEqual(len(notes["module_contracts"]), 2)
