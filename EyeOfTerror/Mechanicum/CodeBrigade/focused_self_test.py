@@ -166,7 +166,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             brief["suggested_verification_commands"] = ["python -m unittest test_app.py"]
             report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
             self.assertEqual(report["status"], "implemented", report)
-            self.assertEqual(sorted(report["changed_files"]), [".ceraxia_greenfield_workspace", "app.py", "greenfield_project_brief.json", "test_app.py"])
+            self.assertEqual(sorted(report["changed_files"]), [".ceraxia_greenfield_workspace", "README.md", "app.py", "greenfield_project_brief.json", "test_app.py"])
             self.assertEqual(report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
             project_brief = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")

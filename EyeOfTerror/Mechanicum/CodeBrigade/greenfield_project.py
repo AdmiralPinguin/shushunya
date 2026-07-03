@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import re
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -118,7 +120,7 @@ def fastapi_service_template(project_name: str) -> dict[str, Any]:
     module_name = project_name.replace("-", "_")
     files = [
         {"path": GREENFIELD_MARKER, "content": "created-by=ceraxia-code-brigade\n"},
-        {"path": "README.md", "content": "# " + project_name + "\n\n## Run\n\n```bash\nuvicorn app.main:app --reload\n```\n\n## Test\n\n```bash\npython -m unittest discover tests\n```\n"},
+        {"path": "README.md", "content": "# " + project_name + "\n\n## Run\n\n```bash\nuvicorn app.main:app --reload\n```\n\n## Test\n\n```bash\npython -m unittest discover tests\n```\n\n```bash\npython -m py_compile app/main.py\n```\n"},
         {"path": "requirements.txt", "content": "fastapi\nuvicorn\n"},
         {"path": "app/__init__.py", "content": ""},
         {"path": "app/main.py", "content": "try:\n    from fastapi import FastAPI\nexcept ModuleNotFoundError:\n    FastAPI = None\n\n\ndef health() -> dict[str, bool]:\n    return {\"ok\": True}\n\n\nif FastAPI is not None:\n    app = FastAPI(title=\"Ceraxia Service\")\n\n    @app.get(\"/health\")\n    def health_endpoint() -> dict[str, bool]:\n        return health()\nelse:\n    app = None\n"},
@@ -132,6 +134,7 @@ def fastapi_service_template(project_name: str) -> dict[str, Any]:
         "verification_commands": ["python -m unittest discover tests", "python -m py_compile app/main.py"],
         "module_contracts": [
             {"module": "app.main", "path": "app/main.py", "responsibility": "HTTP app and health behavior", "requirements": ["health returns ok true", "FastAPI app is exposed when dependency is installed"]},
+            {"module": "tests.test_health", "path": "tests/test_health.py", "responsibility": "service behavior verification", "requirements": ["prove health contract without requiring a live server"]},
         ],
     }
 
@@ -139,7 +142,7 @@ def fastapi_service_template(project_name: str) -> dict[str, Any]:
 def static_site_template(project_name: str) -> dict[str, Any]:
     files = [
         {"path": GREENFIELD_MARKER, "content": "created-by=ceraxia-code-brigade\n"},
-        {"path": "README.md", "content": f"# {project_name}\n\nOpen `index.html` in a browser or serve the folder with any static server.\n"},
+        {"path": "README.md", "content": f"# {project_name}\n\n## Run\n\n```bash\nopen index.html\n```\n\n## Test\n\n```bash\npython -m unittest discover tests\n```\n"},
         {"path": "index.html", "content": "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>Ceraxia Site</title>\n  <link rel=\"stylesheet\" href=\"styles.css\">\n</head>\n<body>\n  <main>\n    <h1>Ceraxia Site</h1>\n    <p id=\"status\">ready</p>\n  </main>\n  <script src=\"app.js\"></script>\n</body>\n</html>\n"},
         {"path": "styles.css", "content": "body { margin: 0; font-family: system-ui, sans-serif; background: #f6f7f9; color: #17191f; }\nmain { max-width: 760px; margin: 10vh auto; padding: 24px; }\n"},
         {"path": "app.js", "content": "document.documentElement.dataset.ceraxia = 'ready';\n"},
@@ -173,13 +176,41 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         project_type = "automation_tool"
     template_id = str(payload.get("template_id") or template_id_for_project_type(project_type, task))
     template = template_for(template_id, project_name)
-    files = payload.get("files") if isinstance(payload.get("files"), list) and payload.get("files") else template["files"]
+    files = list(payload.get("files") if isinstance(payload.get("files"), list) and payload.get("files") else template["files"])
     verification_commands = payload.get("verification_commands") if isinstance(payload.get("verification_commands"), list) else template["verification_commands"]
-    run_commands = payload.get("run_commands") if isinstance(payload.get("run_commands"), list) else template["run_commands"]
-    entrypoints = payload.get("entrypoints") if isinstance(payload.get("entrypoints"), list) else template["entrypoints"]
+    file_paths = [str(item.get("path") or "") for item in files if isinstance(item, dict) and item.get("path")]
+    default_entrypoints = template["entrypoints"]
+    default_run_commands = template["run_commands"]
+    if isinstance(payload.get("files"), list) and "app.py" in file_paths:
+        default_entrypoints = [{"name": "app", "command": "python app.py", "path": "app.py"}]
+        default_run_commands = ["python app.py"]
+    run_commands = payload.get("run_commands") if isinstance(payload.get("run_commands"), list) else default_run_commands
+    entrypoints = payload.get("entrypoints") if isinstance(payload.get("entrypoints"), list) else default_entrypoints
     stack = payload.get("stack") if isinstance(payload.get("stack"), dict) else STACK_DEFAULTS.get(template_id, STACK_DEFAULTS["python_cli_basic"])
+    if "README.md" not in file_paths:
+        files.append(
+            {
+                "path": "README.md",
+                "content": (
+                    f"# {project_name}\n\n## Run\n\n"
+                    + "\n".join(f"```bash\n{command}\n```" for command in run_commands)
+                    + "\n\n## Test\n\n"
+                    + "\n".join(f"```bash\n{command}\n```" for command in verification_commands)
+                    + "\n"
+                ),
+            }
+        )
+        file_paths.append("README.md")
     expected_files = [str(item.get("path") or "") for item in files if isinstance(item, dict) and item.get("path")]
-    module_contracts = payload.get("module_contracts") if isinstance(payload.get("module_contracts"), list) else template["module_contracts"]
+    if isinstance(payload.get("module_contracts"), list):
+        module_contracts = payload["module_contracts"]
+    elif isinstance(payload.get("files"), list) and "app.py" in file_paths:
+        module_contracts = [
+            {"module": "app", "path": "app.py", "responsibility": "application entrypoint and behavior", "requirements": ["run without syntax errors"]},
+            {"module": "test_app", "path": "test_app.py", "responsibility": "behavior verification", "requirements": ["prove app behavior"]},
+        ]
+    else:
+        module_contracts = template["module_contracts"]
     definition_of_done = payload.get("definition_of_done") if isinstance(payload.get("definition_of_done"), list) else [
         "expected files are created inside the assigned workspace",
         "entrypoints named in the project brief exist",
@@ -394,6 +425,141 @@ def validate_greenfield_project_brief(brief: dict[str, Any]) -> list[str]:
     return problems
 
 
+def run_dependency_worker(repo: Path, project_brief: dict[str, Any]) -> dict[str, Any]:
+    dependency_plan = project_brief.get("dependency_plan") if isinstance(project_brief.get("dependency_plan"), dict) else {}
+    package_manager = str(dependency_plan.get("package_manager") or "none")
+    manifest_files = [str(path) for path in dependency_plan.get("manifest_files", []) if isinstance(path, str)]
+    install_commands = [str(command) for command in dependency_plan.get("install_commands", []) if isinstance(command, str) and command.strip()]
+    rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    for rel_path in manifest_files:
+        path = repo / rel_path
+        rows.append({"path": rel_path, "exists": path.exists() and path.is_file(), "size_bytes": path.stat().st_size if path.exists() and path.is_file() else 0})
+        if not path.exists() or not path.is_file():
+            blockers.append(f"dependency manifest is missing: {rel_path}")
+    command_results: list[dict[str, Any]] = []
+    allowed_prefixes = [
+        ["python", "-m", "pip", "install"],
+        ["python3", "-m", "pip", "install"],
+        ["npm", "install"],
+    ]
+    for command in install_commands:
+        tokens = shlex.split(command)
+        if not any(tokens[: len(prefix)] == prefix for prefix in allowed_prefixes):
+            blockers.append(f"dependency install command is not allowlisted: {command}")
+            command_results.append({"command": command, "status": "blocked", "returncode": None, "stdout": "", "stderr": "not allowlisted"})
+            continue
+        try:
+            completed = subprocess.run(tokens, cwd=repo, text=True, capture_output=True, timeout=120, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            blockers.append(f"dependency install command failed to execute: {command}")
+            command_results.append({"command": command, "status": "failed", "returncode": None, "stdout": "", "stderr": str(exc)})
+            continue
+        status = "passed" if completed.returncode == 0 else "failed"
+        if status == "failed":
+            blockers.append(f"dependency install command failed: {command}")
+        command_results.append({"command": command, "status": status, "returncode": completed.returncode, "stdout": completed.stdout[-4000:], "stderr": completed.stderr[-4000:]})
+    if blockers:
+        status = "blocked"
+    elif install_commands:
+        status = "installed"
+    elif package_manager == "none":
+        status = "not_required"
+    else:
+        status = "manifest_recorded"
+    return {
+        "kind": "code_brigade_greenfield_dependency_report",
+        "contract_version": "eye-mechanicum.v1",
+        "status": status,
+        "package_manager": package_manager,
+        "manifest_files": rows,
+        "install_commands": install_commands,
+        "command_results": command_results,
+        "lockfile_policy": str(dependency_plan.get("lockfile_policy") or ""),
+        "blockers": blockers,
+    }
+
+
+def entrypoint_exists(repo: Path, entrypoint: dict[str, Any]) -> bool:
+    path = str(entrypoint.get("path") or "")
+    return bool(path) and (repo / path).exists() and (repo / path).is_file()
+
+
+def review_greenfield_project(repo: Path, project_brief: dict[str, Any], dependency_report: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
+    blockers: list[str] = []
+    warnings: list[str] = []
+    expected_files = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str)]
+    for rel_path in expected_files:
+        path = repo / rel_path
+        if not path.exists() or not path.is_file():
+            blockers.append(f"expected file is missing: {rel_path}")
+    readme = repo / "README.md"
+    readme_text = readme.read_text(encoding="utf-8") if readme.exists() and readme.is_file() else ""
+    if not readme_text:
+        blockers.append("README.md is missing or empty")
+    for command in project_brief.get("run_commands", []):
+        if isinstance(command, str) and command and command not in readme_text:
+            blockers.append(f"README.md does not document run command: {command}")
+    for command in project_brief.get("verification_commands", []):
+        if isinstance(command, str) and command and command not in readme_text:
+            warnings.append(f"README.md does not document verification command: {command}")
+    entrypoints = project_brief.get("entrypoints") if isinstance(project_brief.get("entrypoints"), list) else []
+    if not entrypoints:
+        blockers.append("greenfield project has no entrypoints")
+    for entrypoint in entrypoints:
+        if isinstance(entrypoint, dict) and not entrypoint_exists(repo, entrypoint):
+            blockers.append(f"entrypoint file is missing: {entrypoint.get('path')}")
+    if dependency_report.get("status") == "blocked":
+        blockers.extend(str(item) for item in dependency_report.get("blockers", []))
+    if verification.get("status") not in {"passed", "planned"}:
+        blockers.append(f"verification did not pass: {verification.get('status')}")
+    module_contracts = project_brief.get("module_contracts") if isinstance(project_brief.get("module_contracts"), list) else []
+    if len(module_contracts) < 2 and project_brief.get("project_type") not in {"web_app"}:
+        blockers.append("non-trivial greenfield project must not collapse to a single module contract")
+    return {
+        "kind": "code_brigade_greenfield_review",
+        "contract_version": "eye-mechanicum.v1",
+        "status": "blocked" if blockers else "passed",
+        "definition_of_done": project_brief.get("definition_of_done", []),
+        "expected_file_count": len(expected_files),
+        "entrypoint_count": len(entrypoints),
+        "module_contract_count": len(module_contracts),
+        "dependency_status": dependency_report.get("status", ""),
+        "verification_status": verification.get("status", ""),
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
+def run_greenfield_verification_loop(repo: Path, commands: list[str], max_cycles: int = 2) -> dict[str, Any]:
+    attempts: list[dict[str, Any]] = []
+    previous_signature = ""
+    final_verification: dict[str, Any] = {}
+    for cycle in range(1, max_cycles + 1):
+        verification = run_verification_commands(commands, str(repo), execute=True)
+        final_verification = verification
+        signature = json.dumps(
+            [
+                {
+                    "command": item.get("command"),
+                    "status": item.get("status"),
+                    "stderr": str(item.get("stderr") or "")[-500:],
+                }
+                for item in verification.get("results", [])
+                if isinstance(item, dict)
+            ],
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        attempts.append({"cycle": cycle, "status": verification.get("status", ""), "failure_signature": signature if verification.get("status") != "passed" else ""})
+        if verification.get("status") == "passed":
+            return {"kind": "code_brigade_greenfield_verification_loop", "status": "passed", "attempts": attempts, "final_verification": verification, "stop_reason": "verification passed"}
+        if signature and signature == previous_signature:
+            return {"kind": "code_brigade_greenfield_verification_loop", "status": "blocked", "attempts": attempts, "final_verification": verification, "stop_reason": "same verification failure repeats"}
+        previous_signature = signature
+    return {"kind": "code_brigade_greenfield_verification_loop", "status": "blocked", "attempts": attempts, "final_verification": final_verification, "stop_reason": "max verification cycles reached"}
+
+
 def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
     repo = Path(str(brief.get("repo_path") or ""))
     workspace = greenfield_workspace_status(repo)
@@ -456,8 +622,11 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
             operation_results,
             build_patch_manifest([], operation_results, f"rolled back {len(originals)} greenfield files"),
         )
+    dependency_report = run_dependency_worker(repo, project_brief)
     commands = spec.get("verification_commands") if isinstance(spec.get("verification_commands"), list) else []
-    verification = run_verification_commands([str(command) for command in commands if isinstance(command, str)], str(repo), execute=True)
+    verification_loop = run_greenfield_verification_loop(repo, [str(command) for command in commands if isinstance(command, str)])
+    verification = verification_loop.get("final_verification", {}) if isinstance(verification_loop.get("final_verification"), dict) else {}
+    greenfield_review = review_greenfield_project(repo, project_brief, dependency_report, verification)
     result = build_implemented_execution_result(
         changed_files,
         f"created {len(changed_files)} greenfield project files from {spec.get('source')}",
@@ -476,6 +645,9 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         "module_contracts": project_brief.get("module_contracts", []) if isinstance(project_brief, dict) else [],
         "dependency_plan": project_brief.get("dependency_plan", {}) if isinstance(project_brief, dict) else {},
         "verification_plan": project_brief.get("verification_plan", {}) if isinstance(project_brief, dict) else {},
+        "dependency_report": dependency_report,
+        "verification_loop": verification_loop,
+        "greenfield_review": greenfield_review,
         "verification": verification,
     }
     result["verification_commands_executed"] = [
@@ -483,7 +655,13 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         for item in verification.get("results", [])
         if isinstance(item, dict) and item.get("status") in {"passed", "failed", "blocked", "skipped"}
     ]
-    if verification.get("status") not in {"passed", "planned"}:
+    if dependency_report.get("status") == "blocked":
+        result["status"] = "blocked"
+        result["blockers"] = ["greenfield dependency worker blocked"]
+    elif greenfield_review.get("status") == "blocked":
+        result["status"] = "blocked"
+        result["blockers"] = ["greenfield review blocked"]
+    elif verification.get("status") not in {"passed", "planned"}:
         result["status"] = "blocked"
         result["blockers"] = ["greenfield project verification failed"]
     return result
