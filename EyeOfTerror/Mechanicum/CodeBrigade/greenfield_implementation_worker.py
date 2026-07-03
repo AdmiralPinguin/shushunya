@@ -44,6 +44,15 @@ def build_implementation_worker_plan(
                 for requirement in requirements
             ],
             "paired_tests": [test for test in test_files if paired_test_matches(path, test)] or test_files[:1],
+            "code_synthesis_contract": build_module_code_synthesis_contract(
+                task=task,
+                template_id=template_id,
+                module=str(contract.get("module") or ""),
+                path=path,
+                responsibility=str(contract.get("responsibility") or ""),
+                requirements=requirements,
+                test_files=[test for test in test_files if paired_test_matches(path, test)] or test_files[:1],
+            ),
             "status": "planned_for_implementation",
         }
         rows.append(row)
@@ -70,8 +79,20 @@ def build_implementation_worker_plan(
         "milestones": [
             {"name": "scaffold", "exit_gate": "workspace marker, manifests, README, entrypoints, and test folders exist"},
             {"name": "module_implementation", "exit_gate": "each module contract has source code and requirement trace"},
+            {"name": "module_synthesis_validation", "exit_gate": "each module has code_synthesis_contract, validation gates, and rollback scope"},
             {"name": "verification", "exit_gate": "allowlisted tests/build/smoke commands pass or return a clear blocker"},
         ],
+        "synthesis_policy": {
+            "mode": "module_by_module_llm_contract",
+            "model_output_format": "json_object",
+            "required_output_fields": ["path", "content", "requirements_satisfied", "tests_to_update", "notes"],
+            "reject_when": [
+                "output path differs from module contract path",
+                "requirements_satisfied omits any module requirement",
+                "content contains forbidden placeholder markers",
+                "tests_to_update omits paired tests when tests exist",
+            ],
+        },
         "anti_stub_policy": {
             "forbidden_markers": ["TODO", "pass #", "NotImplementedError", "placeholder"],
             "minimum_nonempty_source_files": len(source_files),
@@ -80,6 +101,48 @@ def build_implementation_worker_plan(
         "source_files": source_files,
         "test_files": test_files,
         "model_guidance": implementation_guidance,
+    }
+
+
+def build_module_code_synthesis_contract(
+    task: str,
+    template_id: str,
+    module: str,
+    path: str,
+    responsibility: str,
+    requirements: list[str],
+    test_files: list[str],
+) -> dict[str, Any]:
+    return {
+        "kind": "code_brigade_greenfield_module_synthesis_contract",
+        "contract_version": "eye-mechanicum.v1",
+        "role": "GreenfieldImplementationWorker",
+        "template_id": template_id,
+        "task_excerpt": task[:500],
+        "module": module,
+        "path": path,
+        "responsibility": responsibility,
+        "requirements": requirements,
+        "paired_tests": test_files,
+        "model_request": {
+            "instructions": "Implement exactly this module contract. Return JSON only. Do not include unrelated files or placeholders.",
+            "output_schema": {
+                "type": "object",
+                "required": ["path", "content", "requirements_satisfied", "tests_to_update", "notes"],
+            },
+        },
+        "validation_gates": [
+            "path matches module contract path",
+            "content is non-empty",
+            "all requirements are listed in requirements_satisfied",
+            "paired tests are listed in tests_to_update when tests exist",
+            "forbidden placeholder markers are absent",
+        ],
+        "rollback_scope": {
+            "max_source_files": 1,
+            "allowed_source_files": [path] if path else [],
+            "allowed_test_files": test_files,
+        },
     }
 
 
@@ -102,6 +165,7 @@ def build_implementation_trace(implementation_plan: dict[str, Any]) -> dict[str,
                     "function_or_component": str(trace.get("function_or_component") or ""),
                     "verification_files": [str(path) for path in trace.get("verification_files", []) if isinstance(path, str)],
                     "paired_tests": paired_tests,
+                    "synthesis_contract_kind": module.get("code_synthesis_contract", {}).get("kind", "") if isinstance(module.get("code_synthesis_contract"), dict) else "",
                     "status": "planned",
                 }
             )

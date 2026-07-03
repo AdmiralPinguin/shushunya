@@ -196,10 +196,14 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
             self.assertEqual(project_brief["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
             self.assertEqual(project_brief["implementation_plan"]["role"], "GreenfieldImplementationWorker")
+            self.assertEqual(project_brief["implementation_plan"]["synthesis_policy"]["mode"], "module_by_module_llm_contract")
             self.assertEqual(project_brief["implementation_feature_report"]["kind"], "code_brigade_greenfield_implementation_feature_report")
             self.assertEqual(project_brief["implementation_trace"]["kind"], "code_brigade_greenfield_implementation_trace")
             self.assertGreater(project_brief["implementation_trace"]["requirement_trace_count"], 0)
             self.assertTrue(project_brief["implementation_plan"]["module_sequence"])
+            first_module = project_brief["implementation_plan"]["module_sequence"][0]
+            self.assertEqual(first_module["code_synthesis_contract"]["kind"], "code_brigade_greenfield_module_synthesis_contract")
+            self.assertEqual(first_module["code_synthesis_contract"]["path"], first_module["path"])
             memory = report["execution_result"]["greenfield_project"]["greenfield_memory_record"]
             self.assertEqual(memory["kind"], "code_brigade_greenfield_memory_record")
             self.assertEqual(memory["template_id"], project_brief["template_id"])
@@ -265,12 +269,14 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(project["architecture_plan"]["selected_template"], "python_cli_basic")
         self.assertEqual(project["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
         self.assertEqual(project["implementation_plan"]["role"], "GreenfieldImplementationWorker")
+        self.assertEqual(project["implementation_plan"]["synthesis_policy"]["mode"], "module_by_module_llm_contract")
         self.assertEqual(project["implementation_feature_report"]["kind"], "code_brigade_greenfield_implementation_feature_report")
         self.assertEqual(project["implementation_trace"]["kind"], "code_brigade_greenfield_implementation_trace")
         self.assertGreater(project["implementation_trace"]["requirement_trace_count"], 0)
         self.assertIn("architecture_plan.json", project["expected_files"])
         self.assertIn("implementation_trace.json", project["expected_files"])
         self.assertTrue(project["implementation_plan"]["module_sequence"])
+        self.assertTrue(all("code_synthesis_contract" in row for row in project["implementation_plan"]["module_sequence"]))
 
     def test_greenfield_dependency_worker_reports_manager_status(self) -> None:
         none_status = dependency_manager_status("none")
@@ -293,11 +299,25 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(plan["kind"], "code_brigade_greenfield_implementation_plan")
         self.assertEqual(plan["role"], "GreenfieldImplementationWorker")
         self.assertEqual(plan["model_guidance"]["status"], "not_requested")
+        self.assertEqual(plan["synthesis_policy"]["mode"], "module_by_module_llm_contract")
         self.assertEqual(plan["module_sequence"][0]["paired_tests"], ["tests/test_library.py"])
+        self.assertEqual(plan["module_sequence"][0]["code_synthesis_contract"]["kind"], "code_brigade_greenfield_module_synthesis_contract")
+        self.assertEqual(plan["module_sequence"][0]["code_synthesis_contract"]["rollback_scope"]["allowed_source_files"], ["demo/core.py"])
         trace = worker_build_implementation_trace(plan)
         self.assertEqual(trace["kind"], "code_brigade_greenfield_implementation_trace")
         self.assertEqual(trace["status"], "complete")
         self.assertGreaterEqual(trace["requirement_trace_count"], 2)
+        self.assertTrue(all(row["synthesis_contract_kind"] == "code_brigade_greenfield_module_synthesis_contract" for row in trace["rows"]))
+
+    def test_greenfield_contract_requires_module_synthesis_contracts(self) -> None:
+        project = architect_build_greenfield_project_brief("Создай CLI калькулятор `contract-calc`.")
+        self.assertEqual(validate_greenfield_project_brief(project), [])
+        broken_plan = json.loads(json.dumps(project, ensure_ascii=False))
+        broken_plan["implementation_plan"]["module_sequence"][0].pop("code_synthesis_contract", None)
+        self.assertTrue(any("module synthesis contract is required" in item for item in validate_greenfield_project_brief(broken_plan)))
+        broken_trace = json.loads(json.dumps(project, ensure_ascii=False))
+        broken_trace["implementation_trace"]["rows"][0].pop("synthesis_contract_kind", None)
+        self.assertTrue(any("implementation_trace synthesis contract is required" in item for item in validate_greenfield_project_brief(broken_trace)))
 
     def test_greenfield_verification_worker_builds_stable_failure_signature(self) -> None:
         signature = verification_failure_signature(
@@ -723,9 +743,14 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn("implementation_plan", required)
         self.assertIn("implementation_trace", required)
         self.assertIn("implementation_feature_report", required)
-        self.assertIn("role", schema["properties"]["implementation_plan"]["required"])
+        implementation_required = set(schema["properties"]["implementation_plan"]["required"])
+        self.assertTrue({"role", "synthesis_policy", "module_sequence"}.issubset(implementation_required))
+        module_required = set(schema["properties"]["implementation_plan"]["properties"]["module_sequence"]["items"]["required"])
+        self.assertIn("code_synthesis_contract", module_required)
         trace_required = set(schema["properties"]["implementation_trace"]["required"])
         self.assertTrue({"kind", "contract_version", "status", "requirement_trace_count", "module_count", "rows"}.issubset(trace_required))
+        trace_row_required = set(schema["properties"]["implementation_trace"]["properties"]["rows"]["items"]["required"])
+        self.assertIn("synthesis_contract_kind", trace_row_required)
         feature_required = set(schema["properties"]["implementation_feature_report"]["required"])
         self.assertTrue({"kind", "recognized_feature_ids", "changed_file_paths", "changed_module_contract_paths", "implementation_strategy"}.issubset(feature_required))
 

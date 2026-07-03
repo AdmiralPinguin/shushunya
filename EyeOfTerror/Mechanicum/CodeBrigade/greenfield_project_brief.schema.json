@@ -106,7 +106,51 @@
     },
     "implementation_plan": {
       "type": "object",
-      "required": ["kind", "role", "module_sequence", "milestones", "anti_stub_policy", "source_files", "test_files"]
+      "required": ["kind", "role", "module_sequence", "milestones", "synthesis_policy", "anti_stub_policy", "source_files", "test_files"],
+      "properties": {
+        "kind": {
+          "const": "code_brigade_greenfield_implementation_plan"
+        },
+        "role": {
+          "const": "GreenfieldImplementationWorker"
+        },
+        "synthesis_policy": {
+          "type": "object",
+          "required": ["mode", "model_output_format", "required_output_fields", "reject_when"],
+          "properties": {
+            "mode": {
+              "const": "module_by_module_llm_contract"
+            },
+            "model_output_format": {
+              "const": "json_object"
+            }
+          }
+        },
+        "module_sequence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["module", "path", "requirements", "paired_tests", "code_synthesis_contract", "status"],
+            "properties": {
+              "code_synthesis_contract": {
+                "type": "object",
+                "required": ["kind", "contract_version", "role", "path", "model_request", "validation_gates", "rollback_scope"],
+                "properties": {
+                  "kind": {
+                    "const": "code_brigade_greenfield_module_synthesis_contract"
+                  },
+                  "contract_version": {
+                    "const": "eye-mechanicum.v1"
+                  },
+                  "role": {
+                    "const": "GreenfieldImplementationWorker"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "implementation_trace": {
       "type": "object",
@@ -133,7 +177,12 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["module", "requirement", "file", "function_or_component", "verification_files", "paired_tests", "status"]
+            "required": ["module", "requirement", "file", "function_or_component", "verification_files", "paired_tests", "synthesis_contract_kind", "status"],
+            "properties": {
+              "synthesis_contract_kind": {
+                "const": "code_brigade_greenfield_module_synthesis_contract"
+              }
+            }
           }
         }
       }

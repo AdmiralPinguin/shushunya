@@ -230,6 +230,20 @@ def validate_greenfield_project_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("greenfield_project_brief implementation_plan is required")
     elif implementation_plan.get("role") != "GreenfieldImplementationWorker":
         problems.append("greenfield_project_brief implementation_plan role is required")
+    else:
+        synthesis_policy = implementation_plan.get("synthesis_policy") if isinstance(implementation_plan.get("synthesis_policy"), dict) else {}
+        if synthesis_policy.get("mode") != "module_by_module_llm_contract":
+            problems.append("greenfield_project_brief implementation_plan synthesis_policy is required")
+        module_sequence = implementation_plan.get("module_sequence") if isinstance(implementation_plan.get("module_sequence"), list) else []
+        for module in module_sequence:
+            if not isinstance(module, dict):
+                continue
+            path = str(module.get("path") or "")
+            synthesis_contract = module.get("code_synthesis_contract") if isinstance(module.get("code_synthesis_contract"), dict) else {}
+            if synthesis_contract.get("kind") != "code_brigade_greenfield_module_synthesis_contract":
+                problems.append(f"greenfield_project_brief module synthesis contract is required: {path}")
+            elif synthesis_contract.get("path") != path:
+                problems.append(f"greenfield_project_brief module synthesis contract path mismatch: {path}")
     implementation_trace = brief.get("implementation_trace") if isinstance(brief.get("implementation_trace"), dict) else {}
     if not implementation_trace:
         problems.append("greenfield_project_brief implementation_trace is required")
@@ -237,6 +251,12 @@ def validate_greenfield_project_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("greenfield_project_brief implementation_trace kind is required")
     elif not isinstance(implementation_trace.get("rows"), list):
         problems.append("greenfield_project_brief implementation_trace rows are required")
+    else:
+        for row in implementation_trace.get("rows", []):
+            if not isinstance(row, dict):
+                continue
+            if row.get("synthesis_contract_kind") != "code_brigade_greenfield_module_synthesis_contract":
+                problems.append(f"greenfield_project_brief implementation_trace synthesis contract is required: {row.get('file') or ''}")
     if not isinstance(brief.get("implementation_feature_report"), dict) or not brief.get("implementation_feature_report"):
         problems.append("greenfield_project_brief implementation_feature_report is required")
     if not isinstance(brief.get("verification_plan"), dict) or not brief.get("verification_plan"):

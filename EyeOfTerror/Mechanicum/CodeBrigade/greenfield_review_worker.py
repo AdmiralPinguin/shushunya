@@ -73,6 +73,10 @@ def semantic_review_greenfield_files(repo: Path, project_brief: dict[str, Any]) 
             blockers.append(f"module contract path is missing: {rel_path}")
         if requirements and not traced:
             blockers.append(f"module contract has no implementation trace: {rel_path}")
+        for trace_row in traced:
+            synthesis_contract = trace_row.get("code_synthesis_contract") if isinstance(trace_row.get("code_synthesis_contract"), dict) else {}
+            if synthesis_contract.get("kind") != "code_brigade_greenfield_module_synthesis_contract":
+                blockers.append(f"module contract has no module synthesis contract: {rel_path}")
         module_rows.append({"path": rel_path, "exists": exists, "requirement_count": len(requirements), "trace_count": len(traced)})
     trace = project_brief.get("implementation_trace") if isinstance(project_brief.get("implementation_trace"), dict) else {}
     trace_rows_raw = trace.get("rows") if isinstance(trace.get("rows"), list) else []
@@ -93,6 +97,8 @@ def semantic_review_greenfield_files(repo: Path, project_brief: dict[str, Any]) 
             blockers.append(f"implementation trace source file is missing: {rel_path}")
         if test_files and not verification_exists:
             blockers.append(f"implementation trace row has no existing verification file: {rel_path}")
+        if trace_row.get("synthesis_contract_kind") != "code_brigade_greenfield_module_synthesis_contract":
+            blockers.append(f"implementation trace row has no synthesis contract: {rel_path}")
         trace_rows.append(
             {
                 "requirement": str(trace_row.get("requirement") or ""),
