@@ -11,6 +11,8 @@ from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_d
 from greenfield_architect import build_greenfield_project_brief as architect_build_greenfield_project_brief
 from greenfield_dependency_worker import dependency_manager_status
 from greenfield_feature_worker import infer_acceptance_features
+from greenfield_implementation_worker import build_implementation_trace as worker_build_implementation_trace
+from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
 from greenfield_memory_worker import build_greenfield_memory_record
 from greenfield_project import build_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_review_worker import python_source_semantic_status
@@ -193,6 +195,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             project_brief = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
             self.assertEqual(project_brief["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
+            self.assertEqual(project_brief["implementation_plan"]["role"], "GreenfieldImplementationWorker")
             self.assertEqual(project_brief["implementation_feature_report"]["kind"], "code_brigade_greenfield_implementation_feature_report")
             self.assertEqual(project_brief["implementation_trace"]["kind"], "code_brigade_greenfield_implementation_trace")
             self.assertGreater(project_brief["implementation_trace"]["requirement_trace_count"], 0)
@@ -254,6 +257,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(project["kind"], "code_brigade_greenfield_project_brief")
         self.assertEqual(project["architecture_plan"]["selected_template"], "python_cli_basic")
         self.assertEqual(project["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
+        self.assertEqual(project["implementation_plan"]["role"], "GreenfieldImplementationWorker")
         self.assertEqual(project["implementation_feature_report"]["kind"], "code_brigade_greenfield_implementation_feature_report")
         self.assertEqual(project["implementation_trace"]["kind"], "code_brigade_greenfield_implementation_trace")
         self.assertGreater(project["implementation_trace"]["requirement_trace_count"], 0)
@@ -268,6 +272,25 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         pip_status = dependency_manager_status("pip")
         self.assertTrue(pip_status["required"])
         self.assertEqual(pip_status["binary"], "python")
+
+    def test_greenfield_implementation_worker_owns_plan_and_trace(self) -> None:
+        plan = worker_build_implementation_worker_plan(
+            "Создай библиотеку.",
+            "python_library",
+            [
+                {"module": "demo.core", "path": "demo/core.py", "responsibility": "library logic", "requirements": ["normalize whitespace"]},
+                {"module": "tests.test_library", "path": "tests/test_library.py", "responsibility": "verification", "requirements": ["prove normalization"]},
+            ],
+            ["demo/core.py", "tests/test_library.py"],
+        )
+        self.assertEqual(plan["kind"], "code_brigade_greenfield_implementation_plan")
+        self.assertEqual(plan["role"], "GreenfieldImplementationWorker")
+        self.assertEqual(plan["model_guidance"]["status"], "not_requested")
+        self.assertEqual(plan["module_sequence"][0]["paired_tests"], ["tests/test_library.py"])
+        trace = worker_build_implementation_trace(plan)
+        self.assertEqual(trace["kind"], "code_brigade_greenfield_implementation_trace")
+        self.assertEqual(trace["status"], "complete")
+        self.assertGreaterEqual(trace["requirement_trace_count"], 2)
 
     def test_greenfield_verification_worker_builds_stable_failure_signature(self) -> None:
         signature = verification_failure_signature(
@@ -693,6 +716,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn("implementation_plan", required)
         self.assertIn("implementation_trace", required)
         self.assertIn("implementation_feature_report", required)
+        self.assertIn("role", schema["properties"]["implementation_plan"]["required"])
         trace_required = set(schema["properties"]["implementation_trace"]["required"])
         self.assertTrue({"kind", "contract_version", "status", "requirement_trace_count", "module_count", "rows"}.issubset(trace_required))
         feature_required = set(schema["properties"]["implementation_feature_report"]["required"])

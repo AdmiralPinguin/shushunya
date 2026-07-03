@@ -106,7 +106,7 @@
     },
     "implementation_plan": {
       "type": "object",
-      "required": ["kind", "module_sequence", "milestones", "anti_stub_policy", "source_files", "test_files"]
+      "required": ["kind", "role", "module_sequence", "milestones", "anti_stub_policy", "source_files", "test_files"]
     },
     "implementation_trace": {
       "type": "object",

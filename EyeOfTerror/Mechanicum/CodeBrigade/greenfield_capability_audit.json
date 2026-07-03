@@ -42,7 +42,8 @@
       "objective_item": 4,
       "status": "partial",
       "evidence": [
-        "greenfield_architect.py build_implementation_worker_plan creates module_sequence, milestones, anti_stub_policy, source_files, test_files, and model guidance",
+        "greenfield_implementation_worker.py owns build_implementation_worker_plan and build_implementation_trace as a separate role module",
+        "greenfield_architect.py delegates module_sequence, milestones, anti_stub_policy, source_files, test_files, and model guidance into GreenfieldImplementationWorker",
         "greenfield_feature_worker.py applies task-derived feature implementations for calculator, todo, notes API, CSV summary, local agent tool, Telegram bot, Vite counter, and text utils library",
         "implementation_trace.json records requirement to file/function/test mapping and GreenfieldReview checks it"
       ],

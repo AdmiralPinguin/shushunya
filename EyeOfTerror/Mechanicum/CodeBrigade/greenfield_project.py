@@ -163,8 +163,11 @@ def validate_greenfield_project_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("greenfield_project_brief file_tree_plan is required")
     if not isinstance(brief.get("module_contracts"), list) or not brief.get("module_contracts"):
         problems.append("greenfield_project_brief module_contracts are required")
-    if not isinstance(brief.get("implementation_plan"), dict) or not brief.get("implementation_plan"):
+    implementation_plan = brief.get("implementation_plan") if isinstance(brief.get("implementation_plan"), dict) else {}
+    if not implementation_plan:
         problems.append("greenfield_project_brief implementation_plan is required")
+    elif implementation_plan.get("role") != "GreenfieldImplementationWorker":
+        problems.append("greenfield_project_brief implementation_plan role is required")
     implementation_trace = brief.get("implementation_trace") if isinstance(brief.get("implementation_trace"), dict) else {}
     if not implementation_trace:
         problems.append("greenfield_project_brief implementation_trace is required")
