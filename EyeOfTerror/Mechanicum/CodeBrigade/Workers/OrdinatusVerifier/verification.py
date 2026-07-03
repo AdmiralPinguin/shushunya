@@ -5,6 +5,13 @@ from __future__ import annotations
 from common.codewright_core import *  # noqa: F403 - role modules use the shared Codewright helper surface.
 
 
+from model_repair import (
+    apply_model_repair_operations_atomically,
+    merge_changed_files,
+    patch_payload_from_model_repair_content,
+    run_full_verification_pass,
+    run_model_repair_attempt,
+)
 
 
 def diagnostic_extraction_from_execution(
@@ -643,10 +650,12 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
     repo_root = target_repo_root(request)
     changed_files = patch.get("changed_files") if isinstance(patch.get("changed_files"), list) else []
     repairs: list[dict[str, Any]] = []
+    model_repair_attempts: list[dict[str, Any]] = []
     blocked_repairs: list[dict[str, Any]] = []
     candidate_source_paths: list[str] = []
     ranked_survey_sources = ranked_source_candidates_from_survey(workspace_root, output_path)
     repairs_allowed = role_policy_allows_source_mutation(role_policy)
+    raw_commands = patch.get("verification_commands") if isinstance(patch.get("verification_commands"), list) else []
     if patch.get("status") == "applied":
         py_files = [
             str(item.get("path"))
@@ -707,7 +716,6 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
             )
             if completed.returncode != 0:
                 blockers.append("git diff --check failed")
-        raw_commands = patch.get("verification_commands") if isinstance(patch.get("verification_commands"), list) else []
         for raw_command in raw_commands:
             if not isinstance(raw_command, str) or not raw_command.strip():
                 blockers.append("verification command must be a non-empty string")
@@ -745,6 +753,58 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
                     executed.append(result)
                 if result.get("returncode") != 0:
                     blockers.append(f"verification command failed: {raw_command}")
+        if blockers and repairs_allowed:
+            repair_diagnostics = diagnostic_extraction_from_execution(patch, executed, candidate_source_paths, repo_root)
+            model_attempt = run_model_repair_attempt(
+                request=request,
+                patch=patch,
+                executed=executed,
+                blockers=blockers,
+                candidate_source_paths=candidate_source_paths,
+                repo_root=repo_root,
+                diagnostic_extraction=repair_diagnostics,
+            )
+            model_repair_attempts.append(model_attempt)
+            if model_attempt.get("applied"):
+                repairs.append(model_attempt)
+                changed_files = merge_changed_files(changed_files, model_attempt.get("changed_files", []))
+                patch["changed_files"] = changed_files
+                patch.setdefault("warnings", [])
+                if isinstance(patch.get("warnings"), list):
+                    patch["warnings"].append("verification model repair mutated source after failed verification")
+                patch["verification_model_repair"] = {
+                    "status": "applied",
+                    "operation_count": model_attempt.get("operation_count", 0),
+                    "changed_files": model_attempt.get("changed_files", []),
+                    "diagnostics": model_attempt.get("diagnostics", {}),
+                }
+                write_json(workspace_root, sibling_artifact(output_path, "patch_manifest.json"), patch)
+                py_files = [
+                    str(item.get("path"))
+                    for item in changed_files
+                    if isinstance(item, dict) and str(item.get("path") or "").endswith(".py")
+                ]
+                rerun = run_full_verification_pass(repo_root, py_files, raw_commands, run_verification_command)
+                rerun_executed = rerun.get("executed") if isinstance(rerun.get("executed"), list) else []
+                executed.extend(rerun_executed)
+                for item in rerun_executed:
+                    if not isinstance(item, dict) or int(item.get("returncode") or 0) == 0:
+                        continue
+                    output = f"{item.get('stdout', '')}\n{item.get('stderr', '')}"
+                    for candidate in source_candidates_from_traceback_text(output, repo_root):
+                        if candidate not in candidate_source_paths:
+                            candidate_source_paths.append(candidate)
+                blockers = [str(item) for item in rerun.get("blockers", []) if item]
+            else:
+                blocked_repairs.append(
+                    {
+                        "kind": "model_repair",
+                        "reason": model_attempt.get("reason", "model repair did not apply"),
+                        "status": model_attempt.get("decision", {}).get("status", "") if isinstance(model_attempt.get("decision"), dict) else "",
+                    }
+                )
+        elif blockers and not repairs_allowed:
+            model_repair_attempts.append({"applied": False, "kind": "model_repair", "reason": "role_policy forbids source mutation repair"})
     report = {
         "status": "blocked" if blockers else "passed",
         "task_id": request.get("task_id"),
@@ -775,6 +835,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         ],
         "executed": executed,
         "repairs": repairs,
+        "model_repair_attempts": model_repair_attempts,
         "model_guidance": model_guidance,
         "blockers": blockers,
         "warnings": patch.get("warnings", []),
@@ -793,6 +854,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         "worker_brief": worker_brief,
         "repairs_allowed": repairs_allowed,
         "repair_attempts": repairs,
+        "model_repair_attempts": model_repair_attempts,
         "model_guidance": model_guidance,
         "blocked_repairs": blocked_repairs,
         "commands_executed_count": len(executed),

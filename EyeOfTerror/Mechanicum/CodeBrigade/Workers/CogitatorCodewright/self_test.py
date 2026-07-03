@@ -9,7 +9,9 @@ import tempfile
 from pathlib import Path
 
 from cogitator_codewright import (
+    apply_model_repair_operations_atomically,
     extracted_assertion_diagnostics_from_text,
+    patch_payload_from_model_repair_content,
     runtime_minimal_patch_candidates_from_failures,
     runtime_test_failures_from_traceback,
     runtime_verification_commands_from_goal,
@@ -588,6 +590,38 @@ CERAXIA_VERIFY: python -m unittest test_sample.py
 
 def main() -> int:
     assert_role_module_split()
+    parsed_repair = patch_payload_from_model_repair_content(
+        'CERAXIA_PATCH: {"operations": [{"type": "replace", "path": "sample.py", "old": "return 1", "new": "return 2"}]}'
+    )
+    if parsed_repair.get("operations", [{}])[0].get("path") != "sample.py":
+        raise AssertionError(f"model repair parser should extract CERAXIA_PATCH payload: {parsed_repair}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        repo = root / "repo"
+        repo.mkdir()
+        target = repo / "sample.py"
+        target.write_text("def value():\n    return 1\n", encoding="utf-8")
+        changed = apply_model_repair_operations_atomically(
+            repo,
+            [{"type": "replace", "path": "sample.py", "old": "return 1", "new": "return 2"}],
+        )
+        if changed[0].get("path") != "sample.py" or "return 2" not in target.read_text(encoding="utf-8"):
+            raise AssertionError(f"model repair operations should mutate the intended file: {changed}")
+        before = target.read_text(encoding="utf-8")
+        try:
+            apply_model_repair_operations_atomically(
+                repo,
+                [
+                    {"type": "replace", "path": "sample.py", "old": "return 2", "new": "return 3"},
+                    {"type": "replace", "path": "../escape.py", "old": "x", "new": "y"},
+                ],
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("model repair operations should reject path escapes")
+        if target.read_text(encoding="utf-8") != before:
+            raise AssertionError("model repair rollback should restore earlier operations after a later failure")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         final = run_pipeline(root)
