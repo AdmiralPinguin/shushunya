@@ -757,7 +757,7 @@ def paired_tests_for_module(source_path: str, requirements: list[str], test_file
     integration_tests = [
         test
         for test in test_files
-        if any(marker in Path(test).stem.lower() for marker in ("integration", "workflow", "pipeline", "contract"))
+        if any(marker in Path(test).stem.lower() for marker in ("integration", "workflow", "pipeline", "contract", "tracker"))
     ]
     if integration_tests:
         return integration_tests

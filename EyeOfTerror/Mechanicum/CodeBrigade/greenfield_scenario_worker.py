@@ -108,6 +108,11 @@ def _feature_scenarios(feature: dict[str, Any]) -> list[dict[str, Any]]:
             _scenario("notes_crud", "Notes API creates, lists, reads, and deletes notes", ["create note", "list notes", "get note", "delete note"], ["create_note", "list_notes", "get_note", "delete_note"], ["app/main.py", "tests/test_health.py"]),
             _scenario("notes_validation", "Notes API rejects invalid input and missing notes", ["reject empty title", "return not-found behavior"], ["note title is required", "note not found", "KeyError"], ["app/main.py", "tests/test_health.py"]),
         ],
+        "issue_tracker_api": [
+            _scenario("issue_domain_workflow", "Issue tracker creates, assigns, and transitions issues", ["create issue", "assign issue", "transition issue"], ["create_issue", "assign_issue", "transition_issue", "resolved"], ["app/domain.py", "tests/test_issue_tracker.py"]),
+            _scenario("issue_store_filtering", "Issue tracker stores and filters issues by assignee and status", ["store issues", "filter by assignee", "filter by status"], ["IssueStore", "assignee", "status", "in_progress"], ["app/store.py", "tests/test_issue_tracker.py"]),
+            _scenario("issue_route_adapters", "Issue tracker exposes route adapter helpers and FastAPI router wiring", ["create route response", "assign route response", "transition route response", "include router"], ["create_issue_response", "assign_issue_response", "transition_issue_response", "include_router"], ["app/routes.py", "app/main.py", "tests/test_issue_tracker.py"]),
+        ],
         "csv_summary": [
             _scenario("csv_summary_metrics", "CSV tool reports rows, columns, sums, and averages", ["parse CSV", "count rows", "summarize numeric columns"], ["summarize_rows", "numeric_sums", "numeric_averages", "columns"], ["tests/test_processor.py"]),
             _scenario("csv_cli", "CSV tool exposes file-based CLI output", ["read input file", "print JSON summary"], ["Path", "json.dumps", "input csv path required"], []),
