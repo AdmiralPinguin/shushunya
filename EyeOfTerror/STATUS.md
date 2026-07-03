@@ -38,6 +38,9 @@
   commands, failure fixes, and reusable learnings. The Greenfield
   ImplementationWorker now records module sequence, requirement-to-file and
   function/component traces, paired tests, milestones, and anti-stub policy;
+  it also implements recognized task-derived features instead of returning only
+  generic `ready` scaffolds, starting with Python CLI calculator behavior,
+  argument parsing, arithmetic tests, and division-by-zero rejection;
   GreenfieldArchitect now writes first-class plan artifacts
   `architecture_plan.json`, `file_tree_plan.json`, `module_contracts.json`, and
   `verification_plan.json` into generated projects;

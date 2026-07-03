@@ -296,6 +296,22 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertGreaterEqual(len(project["module_contracts"]), 2)
             self.assertEqual(report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
 
+    def test_project_creation_calculator_cli_implements_task_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай CLI калькулятор `calc-tool` со сложением вычитанием умножением и делением.")
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "python_cli_basic")
+            self.assertTrue(any(feature["id"] == "calculator_operations" for feature in project["acceptance_features"]))
+            self.assertIn("reject division by zero", json.dumps(project["module_contracts"], ensure_ascii=False))
+            self.assertIn("calculate", (repo / "calc_tool/core.py").read_text(encoding="utf-8"))
+            self.assertIn("test_division_by_zero_is_rejected", (repo / "tests/test_core.py").read_text(encoding="utf-8"))
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            self.assertEqual(report["execution_result"]["greenfield_project"]["greenfield_review"]["semantic_review"]["status"], "passed")
+
     def test_greenfield_project_brief_contract_and_templates(self) -> None:
         cli = build_greenfield_project_brief("Создай новый CLI проект `forge-tool`.")
         api = build_greenfield_project_brief("Создай FastAPI backend service `api-demo`.")

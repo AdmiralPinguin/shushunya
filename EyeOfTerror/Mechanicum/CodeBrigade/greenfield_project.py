@@ -96,6 +96,132 @@ def infer_project_type(task: str) -> str:
     return "cli_tool"
 
 
+def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
+    lowered = task.lower()
+    features: list[dict[str, Any]] = []
+    if any(word in lowered for word in ("calculator", "calculate", "калькулятор", "слож", "вычит", "умнож", "делен", "делить")):
+        features.append(
+            {
+                "id": "calculator_operations",
+                "kind": "functional_requirement",
+                "description": "perform basic arithmetic operations through core logic and CLI entrypoint",
+                "operations": ["add", "subtract", "multiply", "divide"],
+            }
+        )
+    return features
+
+
+def apply_task_feature_overrides(
+    task: str,
+    template_id: str,
+    project_name: str,
+    files: list[Any],
+    module_contracts: list[Any],
+) -> tuple[list[Any], list[Any], list[dict[str, Any]]]:
+    features = infer_acceptance_features(task)
+    if not features:
+        return files, module_contracts, []
+    if template_id == "python_cli_basic" and any(feature.get("id") == "calculator_operations" for feature in features):
+        return apply_python_cli_calculator_feature(project_name, files), calculator_module_contracts(project_name), features
+    return files, module_contracts, features
+
+
+def replace_project_file(files: list[Any], rel_path: str, content: str) -> list[Any]:
+    replaced = False
+    rows: list[Any] = []
+    for item in files:
+        if isinstance(item, dict) and item.get("path") == rel_path:
+            rows.append({"path": rel_path, "content": content})
+            replaced = True
+        else:
+            rows.append(item)
+    if not replaced:
+        rows.append({"path": rel_path, "content": content})
+    return rows
+
+
+def apply_python_cli_calculator_feature(project_name: str, files: list[Any]) -> list[Any]:
+    package = project_name.replace("-", "_")
+    core = (
+        "def calculate(left: float, operator: str, right: float) -> float:\n"
+        "    if operator == 'add':\n"
+        "        return left + right\n"
+        "    if operator == 'subtract':\n"
+        "        return left - right\n"
+        "    if operator == 'multiply':\n"
+        "        return left * right\n"
+        "    if operator == 'divide':\n"
+        "        if right == 0:\n"
+        "            raise ValueError('division by zero')\n"
+        "        return left / right\n"
+        "    raise ValueError(f'unsupported operator: {operator}')\n\n\n"
+        "def run() -> str:\n"
+        "    return 'calculator ready'\n"
+    )
+    cli = (
+        "import argparse\n\n"
+        "from .core import calculate\n\n\n"
+        "def build_parser() -> argparse.ArgumentParser:\n"
+        "    parser = argparse.ArgumentParser(description='Run a basic calculator operation')\n"
+        "    parser.add_argument('operator', choices=['add', 'subtract', 'multiply', 'divide'])\n"
+        "    parser.add_argument('left', type=float)\n"
+        "    parser.add_argument('right', type=float)\n"
+        "    return parser\n\n\n"
+        "def main(argv: list[str] | None = None) -> None:\n"
+        "    args = build_parser().parse_args(argv)\n"
+        "    print(calculate(args.left, args.operator, args.right))\n\n\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"
+    )
+    tests = (
+        f"import unittest\n\nfrom {package}.core import calculate, run\n\n\n"
+        "class CalculatorTests(unittest.TestCase):\n"
+        "    def test_operations(self):\n"
+        "        self.assertEqual(calculate(2, 'add', 3), 5)\n"
+        "        self.assertEqual(calculate(5, 'subtract', 2), 3)\n"
+        "        self.assertEqual(calculate(4, 'multiply', 3), 12)\n"
+        "        self.assertEqual(calculate(8, 'divide', 2), 4)\n\n"
+        "    def test_division_by_zero_is_rejected(self):\n"
+        "        with self.assertRaises(ValueError):\n"
+        "            calculate(1, 'divide', 0)\n\n"
+        "    def test_run_status(self):\n"
+        "        self.assertEqual(run(), 'calculator ready')\n"
+    )
+    readme = (
+        f"# {project_name}\n\n## Run\n\n```bash\npython -m {package}.cli add 2 3\n```\n\n"
+        "## Test\n\n```bash\npython -m unittest discover tests\n```\n"
+    )
+    rows = replace_project_file(files, f"{package}/core.py", core)
+    rows = replace_project_file(rows, f"{package}/cli.py", cli)
+    rows = replace_project_file(rows, "tests/test_core.py", tests)
+    rows = replace_project_file(rows, "README.md", readme)
+    return rows
+
+
+def calculator_module_contracts(project_name: str) -> list[dict[str, Any]]:
+    package = project_name.replace("-", "_")
+    return [
+        {
+            "module": f"{package}.core",
+            "path": f"{package}/core.py",
+            "responsibility": "calculator arithmetic behavior",
+            "requirements": ["add numbers", "subtract numbers", "multiply numbers", "divide numbers", "reject division by zero"],
+        },
+        {
+            "module": f"{package}.cli",
+            "path": f"{package}/cli.py",
+            "responsibility": "command-line calculator entrypoint",
+            "requirements": ["parse operator and operands", "print calculated result"],
+        },
+        {
+            "module": "tests.test_core",
+            "path": "tests/test_core.py",
+            "responsibility": "calculator behavior verification",
+            "requirements": ["prove arithmetic operations", "prove division by zero rejection"],
+        },
+    ]
+
+
 def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or {}
     project_name = str(payload.get("project_name") or project_name_from_task(task))
@@ -139,6 +265,12 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         ]
     else:
         module_contracts = template["module_contracts"]
+    files, module_contracts, acceptance_features = apply_task_feature_overrides(task, template_id, project_name, files, module_contracts)
+    if any(feature.get("id") == "calculator_operations" for feature in acceptance_features):
+        package = project_name.replace("-", "_")
+        run_commands = [f"python -m {package}.cli add 2 3"]
+        entrypoints = [{"name": "cli", "command": run_commands[0], "path": f"{package}/cli.py"}]
+    expected_files = [str(item.get("path") or "") for item in files if isinstance(item, dict) and item.get("path")]
     definition_of_done = payload.get("definition_of_done") if isinstance(payload.get("definition_of_done"), list) else [
         "expected files are created inside the assigned workspace",
         "entrypoints named in the project brief exist",
@@ -153,6 +285,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
             "template_id": template_id,
             "expected_files": expected_files,
             "module_contracts": module_contracts,
+            "acceptance_features": acceptance_features,
             "definition_of_done": definition_of_done,
         },
         "Review the greenfield architecture plan, identify missing modules, verification gaps, and scaffold risks. Return concise guidance.",
@@ -192,11 +325,12 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
             "forbidden_when": ["target directory has user files and no greenfield marker"],
         },
         "definition_of_done": definition_of_done,
+        "acceptance_features": acceptance_features,
         "architecture_plan": {
             "summary": str(payload.get("summary") or template.get("summary") or f"{template_id} scaffold"),
             "selected_template": template_id,
             "selection_reason": "deterministic GreenfieldArchitect selected the smallest template matching task type",
-            "mvp_boundaries": ["working entrypoint", "focused tests", "README with real commands"],
+            "mvp_boundaries": ["working entrypoint", "focused tests", "README with real commands", "task-derived acceptance features implemented when detected"],
             "anti_stub_policy": "non-trivial projects must expose separate entrypoint, implementation module, and tests",
             "model_guidance": model_guidance,
         },

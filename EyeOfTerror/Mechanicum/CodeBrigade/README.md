@@ -153,7 +153,10 @@ project artifacts: `architecture_plan.json`, `file_tree_plan.json`,
 `module_contracts.json`, and `verification_plan.json`. The implementation plan
 records module order, requirement-to-file and
 function/component trace rows, paired tests, milestones, source/test file lists,
-and an anti-stub policy. Greenfield review reads generated artifacts back from
+and an anti-stub policy. For recognized task features, ImplementationWorker can
+override the generic scaffold with task-specific behavior; the first covered
+case is a Python CLI calculator with arithmetic operations, CLI argument
+parsing, division-by-zero rejection, and focused tests. Greenfield review reads generated artifacts back from
 disk and records a semantic review that blocks missing files, empty generated
 files, placeholder markers, missing module traces, and source-without-test
 scaffolds. Guarded inference for
