@@ -1,0 +1,120 @@
+{
+  "kind": "code_brigade_greenfield_capability_audit",
+  "contract_version": "eye-mechanicum.v1",
+  "status": "in_progress",
+  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, and memory. The remaining risk is depth: the implementation worker is still mostly template/feature driven and should become more autonomous for arbitrary large projects before this objective is complete.",
+  "requirements": [
+    {
+      "id": "greenfield_contract",
+      "objective_item": 1,
+      "status": "implemented",
+      "evidence": [
+        "greenfield_project_brief.schema.json requires project metadata, stack, entrypoints, expected_files, artifact_contract, workspace_policy, definition_of_done, implementation_trace, verification_plan, and dependency_plan",
+        "greenfield_project.py validate_greenfield_project_brief enforces the runtime contract",
+        "focused_self_test.py test_greenfield_project_brief_schema_tracks_runtime_contract covers schema/runtime sync"
+      ],
+      "remaining_risk": "Schema is still permissive with additionalProperties=true for forward compatibility."
+    },
+    {
+      "id": "greenfield_architect",
+      "objective_item": 2,
+      "status": "implemented",
+      "evidence": [
+        "greenfield_architect.py owns project type inference, template selection, stack, architecture_plan, file_tree_plan, module_contracts, implementation_plan, implementation_trace, and verification_plan",
+        "architecture_plan.json, file_tree_plan.json, module_contracts.json, implementation_trace.json, and verification_plan.json are attached as project artifacts",
+        "focused_self_test.py test_greenfield_architect_owns_project_brief_and_plan covers the role boundary"
+      ],
+      "remaining_risk": "Stack selection is deterministic with short LLM guidance, not yet a fully exploratory architect for unknown domains."
+    },
+    {
+      "id": "scaffold_worker",
+      "objective_item": 3,
+      "status": "implemented",
+      "evidence": [
+        "greenfield_scaffold_worker.py normalizes paths, writes directories/files, enforces .ceraxia_greenfield_workspace, and blocks unowned nonempty workspaces",
+        "greenfield_templates.py provides templates for Python CLI/API/library, Node/Vite, static site, Telegram bot, data tool, and local agent tool",
+        "focused_self_test.py covers scaffold writes and unowned workspace blocking"
+      ],
+      "remaining_risk": "Android is intentionally not implemented yet; objective text says Android is later/heavier."
+    },
+    {
+      "id": "implementation_worker",
+      "objective_item": 4,
+      "status": "partial",
+      "evidence": [
+        "greenfield_architect.py build_implementation_worker_plan creates module_sequence, milestones, anti_stub_policy, source_files, test_files, and model guidance",
+        "greenfield_feature_worker.py applies task-derived feature implementations for calculator, todo, notes API, CSV summary, local agent tool, Telegram bot, Vite counter, and text utils library",
+        "implementation_trace.json records requirement to file/function/test mapping and GreenfieldReview checks it"
+      ],
+      "remaining_risk": "Implementation is still driven by curated feature overrides/templates; arbitrary large project decomposition and code synthesis are not yet strong enough to call this complete."
+    },
+    {
+      "id": "dependency_worker",
+      "objective_item": 5,
+      "status": "implemented",
+      "evidence": [
+        "greenfield_dependency_worker.py reads stack dependency_plan, checks package manager availability, records manifests with ecosystem/sha/status, blocks unsafe install paths, records lockfile snapshots, and reports blockers",
+        "focused_self_test.py covers Node manifest recording and workspace escape install blocking"
+      ],
+      "remaining_risk": "Install execution remains explicit/allowlisted by design; default behavior records manifests without installing."
+    },
+    {
+      "id": "verification_loop",
+      "objective_item": 6,
+      "status": "implemented",
+      "evidence": [
+        "greenfield_verification_worker.py runs verification, calls GreenfieldRepairWorker guidance, applies bounded repairs, reruns, and records stop_condition_evidence",
+        "focused_self_test.py covers missing template file repair and repeated failure stop condition"
+      ],
+      "remaining_risk": "Repair execution is intentionally bounded to missing generated files and README command repair; deeper semantic repair is still future work."
+    },
+    {
+      "id": "greenfield_review",
+      "objective_item": 7,
+      "status": "implemented",
+      "evidence": [
+        "greenfield_review_worker.py checks expected files, README run/test commands, entrypoints, dependency status, verification status, module contracts, placeholders, source/test presence, and implementation_trace",
+        "focused_self_test.py covers placeholder blocking and semantic review status"
+      ],
+      "remaining_risk": "Generated artifact meaning is checked by contract/semantic heuristics, not a deep domain-specific reviewer for every possible application."
+    },
+    {
+      "id": "project_templates",
+      "objective_item": 8,
+      "status": "implemented",
+      "evidence": [
+        "greenfield_templates.py registers python_cli_basic, python_fastapi_service, python_library, node_vite_app, static_site, telegram_bot_python, data_processing_tool, and local_agent_tool",
+        "focused_self_test.py test_greenfield_project_brief_contract_and_templates validates the full template set"
+      ],
+      "remaining_risk": "Templates are intentionally compact; larger domain templates should be added as Ceraxia learns."
+    },
+    {
+      "id": "model_integration",
+      "objective_item": 9,
+      "status": "partial",
+      "evidence": [
+        "greenfield_architect.py request_greenfield_model_guidance calls model_brain for GreenfieldArchitect and GreenfieldImplementationWorker",
+        "greenfield_review_worker.py calls model guidance for GreenfieldReviewer",
+        "greenfield_verification_worker.py calls model guidance for GreenfieldRepairWorker"
+      ],
+      "remaining_risk": "LLM calls currently provide bounded guidance around deterministic workers; they do not yet own arbitrary module code generation."
+    },
+    {
+      "id": "reports_and_memory",
+      "objective_item": 10,
+      "status": "implemented",
+      "evidence": [
+        "greenfield_memory_worker.py records stack, dependencies, verification, stop evidence, repaired files, review status, acceptance features, and reusable learnings",
+        "greenfield_project.py writes greenfield_memory_record.json and greenfield_run_report.json after each run",
+        "focused_self_test.py and Ceraxia self tests verify report artifacts"
+      ],
+      "remaining_risk": "Memory is file-based per run; no long-term retrieval/ranking layer is implemented yet."
+    }
+  ],
+  "next_recommended_work": [
+    "Promote ImplementationWorker from curated feature overrides to module-by-module LLM code synthesis with strict validation and rollback.",
+    "Add deeper generated artifact review for frontend/API behavior beyond static contract checks.",
+    "Add a long-form integration test that creates a larger multi-module app and verifies several independent workflows.",
+    "Decide whether Android/game templates belong in this goal now or should remain explicitly deferred."
+  ]
+}

@@ -698,6 +698,19 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         feature_required = set(schema["properties"]["implementation_feature_report"]["required"])
         self.assertTrue({"kind", "recognized_feature_ids", "changed_file_paths", "changed_module_contract_paths", "implementation_strategy"}.issubset(feature_required))
 
+    def test_greenfield_capability_audit_tracks_objective_scope(self) -> None:
+        audit_path = Path(__file__).with_name("greenfield_capability_audit.json")
+        audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        self.assertEqual(audit["kind"], "code_brigade_greenfield_capability_audit")
+        self.assertEqual(audit["status"], "in_progress")
+        rows = audit["requirements"]
+        self.assertEqual({row["objective_item"] for row in rows}, set(range(1, 11)))
+        by_id = {row["id"]: row for row in rows}
+        self.assertEqual(by_id["implementation_worker"]["status"], "partial")
+        self.assertEqual(by_id["model_integration"]["status"], "partial")
+        self.assertTrue(all(row["evidence"] for row in rows))
+        self.assertTrue(audit["next_recommended_work"])
+
 
 if __name__ == "__main__":
     unittest.main()
