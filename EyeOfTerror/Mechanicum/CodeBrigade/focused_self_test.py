@@ -13,6 +13,7 @@ from greenfield_dependency_worker import dependency_manager_status
 from greenfield_feature_worker import infer_acceptance_features
 from greenfield_project import build_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_review_worker import python_source_semantic_status
+from greenfield_verification_worker import verification_failure_signature
 from greenfield_templates import available_templates
 from self_test import valid_brief
 
@@ -250,6 +251,19 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         pip_status = dependency_manager_status("pip")
         self.assertTrue(pip_status["required"])
         self.assertEqual(pip_status["binary"], "python")
+
+    def test_greenfield_verification_worker_builds_stable_failure_signature(self) -> None:
+        signature = verification_failure_signature(
+            {
+                "results": [
+                    {"command": "python -m unittest", "status": "failed", "stderr": "x" * 700},
+                    {"command": "python -m py_compile app.py", "status": "passed", "stderr": ""},
+                ]
+            }
+        )
+        self.assertIn("python -m unittest", signature)
+        self.assertIn('"status": "failed"', signature)
+        self.assertLess(len(signature), 800)
 
     def test_greenfield_verification_loop_repairs_missing_template_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
