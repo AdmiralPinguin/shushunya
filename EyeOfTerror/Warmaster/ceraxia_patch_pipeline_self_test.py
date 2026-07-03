@@ -2,13 +2,32 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKERS_ROOT = REPO_ROOT / "EyeOfTerror" / "Mechanicum" / "CodeBrigade" / "Workers"
+FERRUM_ROOT = REPO_ROOT / "EyeOfTerror" / "Mechanicum" / "CodeBrigade" / "Workers" / "FerrumPatchwright"
+if str(WORKERS_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKERS_ROOT))
+if str(FERRUM_ROOT) not in sys.path:
+    sys.path.insert(0, str(FERRUM_ROOT))
+
+from implementation import patch_payload_from_model_content, patch_spec_resolution_from_request
 from eye_of_terror.warmaster_gateway import prepare_task, research_loop_run
 
 
 def main() -> int:
+    model_payload = patch_payload_from_model_content(
+        'CERAXIA_PATCH:\n{"operations":[{"type":"replace","path":"sample.py","old":"return 1","new":"return 2"}],"verification_commands":["python -m py_compile sample.py"]}'
+    )
+    model_resolution = patch_spec_resolution_from_request({"task_id": "model-patch-contract"}, model_patch_spec=model_payload)
+    if (
+        model_resolution.get("selected_candidate", {}).get("source") != "model_generated_patch"
+        or model_resolution.get("patch_spec", {}).get("operations", [{}])[0].get("path") != "sample.py"
+    ):
+        raise AssertionError(f"model-generated patch candidate contract drifted: {model_resolution}")
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
         target_repo = temp_root / "repo"

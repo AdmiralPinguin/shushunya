@@ -453,7 +453,84 @@ def normalize_patch_payload(payload: dict[str, Any], source: str) -> dict[str, A
     return payload
 
 
-def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any]:
+def patch_payload_from_model_content(content: str) -> dict[str, Any]:
+    text = content.strip()
+    if not text:
+        return {}
+    if "CERAXIA_PATCH:" in text:
+        return extract_json_after_marker(text, "CERAXIA_PATCH:")
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if "```" in lines:
+            lines = lines[:lines.index("```")]
+        text = "\n".join(lines).strip()
+    try:
+        payload = json.JSONDecoder().raw_decode(text)[0]
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def model_generated_patch_spec(
+    request: dict[str, Any],
+    survey: dict[str, Any],
+    excerpts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    context = dict(request)
+    context["model_patch_generation"] = {
+        "goal": request_goal(request),
+        "candidate_files": survey.get("candidate_files", [])[:30] if isinstance(survey.get("candidate_files"), list) else [],
+        "test_files": survey.get("test_files", [])[:30] if isinstance(survey.get("test_files"), list) else [],
+        "repo_map": survey.get("repo_map", {}) if isinstance(survey.get("repo_map"), dict) else {},
+        "source_excerpts": [
+            {
+                "path": item.get("path", ""),
+                "status": item.get("status", ""),
+                "excerpt": str(item.get("excerpt") or "")[:6000],
+            }
+            for item in excerpts
+            if isinstance(item, dict)
+        ],
+        "required_shape": {
+            "operations": [
+                {"type": "replace", "path": "relative/file.py", "old": "exact old text", "new": "exact new text"}
+            ],
+            "verification_commands": ["python -m py_compile relative/file.py"],
+            "diagnostics": {"reason": "why this patch satisfies the task"},
+        },
+    }
+    decision = request_model_decision(
+        "FerrumPatchwright",
+        "CodeBrigade implementation worker",
+        context,
+        layer="code_worker_patch_generation",
+        instructions=(
+            "Generate one concrete CERAXIA_PATCH JSON object for the target repository. "
+            "Use only relative paths and exact text from supplied excerpts. "
+            "Prefer replace operations over rewrites. Include verification_commands. "
+            "Return only CERAXIA_PATCH: followed by JSON."
+        ),
+    )
+    payload = patch_payload_from_model_content(str(decision.get("content") or ""))
+    if not payload:
+        return {"patch_spec": {}, "decision": decision, "diagnostic": "model did not return a parseable CERAXIA_PATCH"}
+    try:
+        normalized = normalize_patch_payload(payload, "model_generated_patch")
+    except ValueError as exc:
+        return {"patch_spec": {}, "decision": decision, "diagnostic": str(exc)}
+    normalized.setdefault("source", "model_generated_patch")
+    normalized.setdefault("diagnostics", {})
+    if isinstance(normalized.get("diagnostics"), dict):
+        normalized["diagnostics"]["model_decision_status"] = decision.get("status", "")
+    return {"patch_spec": normalized, "decision": decision, "diagnostic": ""}
+
+
+def patch_spec_resolution_from_request(
+    request: dict[str, Any],
+    model_patch_spec: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     goal = request_goal(request)
     candidate_builders: list[tuple[str, Any]] = [
         ("explicit_json_patch", lambda: extract_json_after_marker(goal, "CERAXIA_PATCH:")),
@@ -474,6 +551,8 @@ def patch_spec_resolution_from_request(request: dict[str, Any]) -> dict[str, Any
         ("runtime_diagnostic_return_mismatch", lambda: infer_runtime_diagnostic_return_mismatch_from_tests(request)),
         ("test_inferred_missing_function", lambda: infer_missing_function_from_tests(request)),
     ]
+    if model_patch_spec:
+        candidate_builders.append(("model_generated_patch", lambda: model_patch_spec))
     candidates: list[dict[str, Any]] = []
     for source, builder in candidate_builders:
         try:
@@ -680,9 +759,15 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
     ambiguity_analysis: dict[str, Any] = {}
     ast_patch_plan: dict[str, Any] = {}
     model_guidance = code_model_guidance(request, "implementation patch selection, mutation safety, and handoff blockers")
+    model_patch_generation: dict[str, Any] = {}
     try:
         patch_resolution = patch_spec_resolution_from_request(request)
         patch_spec = patch_resolution["patch_spec"] if isinstance(patch_resolution.get("patch_spec"), dict) else {}
+        if not patch_spec:
+            model_patch_generation = model_generated_patch_spec(request, survey, excerpts)
+            model_patch_spec = model_patch_generation.get("patch_spec") if isinstance(model_patch_generation.get("patch_spec"), dict) else {}
+            patch_resolution = patch_spec_resolution_from_request(request, model_patch_spec=model_patch_spec)
+            patch_spec = patch_resolution["patch_spec"] if isinstance(patch_resolution.get("patch_spec"), dict) else {}
         if patch_spec:
             ast_patch_plan = ast_patch_plan_from_spec(repo_root, patch_spec)
             for blocker in ast_patch_plan.get("blockers", []) if isinstance(ast_patch_plan.get("blockers"), list) else []:
@@ -740,6 +825,11 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "patch_spec_present": bool(patch_spec),
         "patch_source": str(patch_spec.get("source") or "explicit_json_patch") if patch_spec else "",
         "patch_candidates": patch_resolution.get("candidates", []) if isinstance(patch_resolution.get("candidates"), list) else [],
+        "model_patch_generation": {
+            "status": model_patch_generation.get("decision", {}).get("status", "") if isinstance(model_patch_generation.get("decision"), dict) else "",
+            "diagnostic": model_patch_generation.get("diagnostic", ""),
+            "selected": str(patch_spec.get("source") or "") == "model_generated_patch",
+        },
         "selected_patch_candidate": patch_resolution.get("selected_candidate", {})
         if isinstance(patch_resolution.get("selected_candidate"), dict)
         else {},

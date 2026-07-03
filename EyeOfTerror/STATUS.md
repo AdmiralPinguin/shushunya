@@ -30,6 +30,9 @@
   model guidance in the mutation decision record, verification preserves it in
   diagnostic/repair artifacts, review records it as advisory critique, and the
   final manifest carries the model-guidance trail.
+- FerrumPatchwright can now request a model-generated `CERAXIA_PATCH` when no
+  explicit or guarded inferred patch exists, then apply it through the normal
+  patch/verification/review pipeline.
 - `EyeOfTerror/Warmaster/start_brigade.py` enables model-backed service runs by
   default with `EYE_MODEL_ENABLED=1`,
   `EYE_MODEL_BASE_URL=http://127.0.0.1:8080/v1`, and
