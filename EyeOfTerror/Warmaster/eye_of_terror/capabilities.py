@@ -1,7 +1,15 @@
 """Gateway capability descriptor for client bootstrap."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from EyeOfTerror.model_brain import model_contract
 
 from .actions import gateway_actions
 from .brigade import governor_registry_snapshot, registry_summary, worker_registry_snapshot
@@ -22,6 +30,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "governors": registry_summary(governors),
             "workers": registry_summary(workers),
         },
+        "model_brain": model_contract("WarmasterGateway", "top-level orchestration gateway", layer="gateway_service"),
         "display": {
             "headline": "Warmaster Gateway capabilities",
             "detail": f"{len(governors)} governors, {len(workers)} workers, {len(actions.get('preferred_task_flow', []))} preferred task-flow steps",
@@ -30,6 +39,7 @@ def gateway_capabilities() -> dict[str, Any]:
         "next_action": next_action,
         "client_action": executable_client_action("", next_action),
         "capabilities": [
+            "model_backed_gateway_orchestration",
             "task_routing",
             "task_preflight",
             "task_prepare_orchestration",

@@ -498,6 +498,7 @@ def main() -> int:
                 raise AssertionError(f"bad health: {health}")
             capabilities = request_json(base + "/capabilities")
             required_capabilities = {
+                "model_backed_gateway_orchestration",
                 "background_execution",
                 "worker_registry",
                 "worker_cancel_fanout",
@@ -536,6 +537,7 @@ def main() -> int:
                 or capabilities.get("summary", {}).get("workers", {}).get("active", 0) < 1
                 or capabilities.get("display", {}).get("headline") != "Warmaster Gateway capabilities"
                 or capabilities.get("client_action", {}).get("path") != "/state"
+                or capabilities.get("model_brain", {}).get("kind") != "eye_of_terror_model_brain"
             ):
                 raise AssertionError(f"gateway capabilities did not expose task action hints: {capabilities}")
             brigade_plan = request_json(base + "/brigade_plan")
@@ -647,6 +649,7 @@ def main() -> int:
                 or code_task.get("status", {}).get("steps", [])[0].get("worker") != "LogisRepository"
                 or code_task.get("status", {}).get("steps", [])[0].get("port") != 7015
                 or code_task.get("actions", {}).get("next_action", {}).get("kind") != "preflight_run"
+                or code_task.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"code route should create a Ceraxia run: {code_task}")
             try:
@@ -729,6 +732,7 @@ def main() -> int:
                 or preflight.get("phase") != "task_ready"
                 or preflight.get("decision", {}).get("can_create_task") is not True
                 or preflight.get("display", {}).get("headline") != "Task is ready"
+                or preflight.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"task preflight should not create a run: {preflight}")
             if "brigade_readiness" in preflight:
@@ -768,6 +772,7 @@ def main() -> int:
                 or orchestrated.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/start_local"
                 or orchestrated_ledger.get("status") != "created"
                 or not any(item.get("type") == "run_preflight_recorded" for item in orchestrated_ledger.get("events", []))
+                or orchestrated.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"prepare orchestration did not stop at a start recommendation: {orchestrated}")
             orchestrated_state = request_json(base + "/runs/warmaster-orchestrate-test/orchestration?events_after=0")
@@ -792,6 +797,7 @@ def main() -> int:
                 or orchestrated_start.get("next_action", {}).get("kind") != "poll"
                 or orchestrated_start.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/snapshot"
                 or orchestrated_start.get("snapshot", {}).get("task_id") != "warmaster-orchestrate-test"
+                or orchestrated_start.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"orchestrated start did not return a polling snapshot: {orchestrated_start}")
             orchestrated_start_events = request_json(base + "/runs/warmaster-orchestrate-test/events")
@@ -817,6 +823,7 @@ def main() -> int:
                 or not isinstance(orchestrated_run.get("decision"), dict)
                 or not isinstance(orchestrated_run.get("display_events"), list)
                 or "{task_id}" in str(orchestrated_run.get("client_action", {}).get("path") or "")
+                or orchestrated_run.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"one-shot orchestration did not prepare and start a run: {orchestrated_run}")
             orchestrated_run_events = request_json(base + "/runs/warmaster-orchestrate-run-test/events")
@@ -844,6 +851,7 @@ def main() -> int:
                 or not isinstance(orchestrated_retry.get("decision"), dict)
                 or not isinstance(orchestrated_retry.get("display_events"), list)
                 or orchestrated_retry.get("prepare", {}).get("task_preflight", {}).get("error_code") != "task_exists"
+                or orchestrated_retry.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"one-shot orchestration retry did not reuse existing run: {orchestrated_retry}")
             task = request_json(

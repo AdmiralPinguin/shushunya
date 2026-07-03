@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import shutil
+import sys
 import threading
 import urllib.error
 import urllib.request
@@ -12,6 +13,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from EyeOfTerror.model_brain import attach_model_brain, request_model_decision
 
 from .contracts import validate_task_contract_payload
 from .inner_circle.ceraxia import plan_code_task
@@ -172,6 +180,18 @@ from .runtime_state import (
     REPO_ROOT,
     TASK_ID_RE,
 )
+
+
+def gateway_model_decision(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+    request = dict(payload)
+    request["operation"] = operation
+    return request_model_decision(
+        "WarmasterGateway",
+        "top-level orchestration gateway",
+        request,
+        layer="gateway_service",
+        instructions="Route and supervise the task at gateway level. Identify the governor, execution path, and immediate orchestration risk without doing worker-specific work.",
+    )
 
 
 def gateway_state(run_root: Path, run_limit: int = 20, include_health: bool = False, host: str = "127.0.0.1") -> dict[str, Any]:
@@ -535,6 +555,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
             try:
                 payload = read_payload(self)
                 if self.path == "/orchestrate":
+                    model_decision = gateway_model_decision("orchestrate", payload)
                     message = str(payload.get("message") or payload.get("task") or "").strip()
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
@@ -557,9 +578,11 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         timeout_sec=timeout_sec,
                         include_brigade_health=include_brigade_health,
                     )
+                    prepared = attach_model_brain(prepared, model_decision)
                     response(self, 200 if prepared.get("ok") else 409, prepared)
                     return
                 if self.path == "/orchestrate_start":
+                    model_decision = gateway_model_decision("orchestrate_start", payload)
                     task_id = str(payload.get("task_id") or "").strip()
                     if not task_id:
                         response(self, 400, {"ok": False, "error": "task_id is required"})
@@ -578,9 +601,11 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         timeout_sec=timeout_sec,
                         force=bool(payload.get("force")),
                     )
+                    started = attach_model_brain(started, model_decision)
                     response(self, 202 if started.get("ok") else 409, started)
                     return
                 if self.path == "/orchestrate_run":
+                    model_decision = gateway_model_decision("orchestrate_run", payload)
                     message = str(payload.get("message") or payload.get("task") or "").strip()
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
@@ -607,12 +632,14 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         force=bool(payload.get("force")),
                         reuse_existing=bool(payload.get("reuse_existing", True)),
                     )
+                    submitted = attach_model_brain(submitted, model_decision)
                     if submitted.get("ok") and submitted.get("phase") == "started":
                         response(self, 202, submitted)
                     else:
                         response(self, 200 if submitted.get("ok") else 409, submitted)
                     return
                 if self.path == "/task":
+                    model_decision = gateway_model_decision("task", payload)
                     message = str(payload.get("message") or payload.get("task") or "").strip()
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
@@ -622,9 +649,11 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
                     prepared = prepare_task(message, task_id, run_root, governor_transport=governor_transport, governor_host=governor_host)
                     prepared = payload_with_task_view(prepared, fallback_task_id=task_id or "")
+                    prepared = attach_model_brain(prepared, model_decision)
                     response(self, 409 if prepared.get("error_code") == "task_exists" else (200 if prepared.get("ok") else 400), prepared)
                     return
                 if self.path == "/task_preflight":
+                    model_decision = gateway_model_decision("task_preflight", payload)
                     message = str(payload.get("message") or payload.get("task") or "").strip()
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
@@ -642,6 +671,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         include_brigade_health=include_brigade_health,
                     )
                     preflight = payload_with_task_view(preflight, fallback_task_id=task_id or "")
+                    preflight = attach_model_brain(preflight, model_decision)
                     response(self, 409 if preflight.get("error_code") == "task_exists" else (200 if preflight.get("ok") else 400), preflight)
                     return
                 if self.path == "/recover_stale":
