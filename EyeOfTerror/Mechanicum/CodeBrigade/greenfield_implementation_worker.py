@@ -31,6 +31,7 @@ def build_implementation_worker_plan(
             continue
         path = str(contract.get("path") or "")
         requirements = [str(item) for item in contract.get("requirements", []) if isinstance(item, str)]
+        paired_tests = paired_tests_for_module(path, requirements, test_files)
         row = {
             "sequence": index,
             "module": str(contract.get("module") or ""),
@@ -42,11 +43,11 @@ def build_implementation_worker_plan(
                     "requirement": requirement,
                     "file": path,
                     "function_or_component": infer_symbol_name(path, requirement),
-                    "verification_files": test_files,
+                    "verification_files": paired_tests,
                 }
                 for requirement in requirements
             ],
-            "paired_tests": [test for test in test_files if paired_test_matches(path, test)] or test_files[:1],
+            "paired_tests": paired_tests,
             "code_synthesis_contract": build_module_code_synthesis_contract(
                 task=task,
                 template_id=template_id,
@@ -54,7 +55,7 @@ def build_implementation_worker_plan(
                 path=path,
                 responsibility=str(contract.get("responsibility") or ""),
                 requirements=requirements,
-                test_files=[test for test in test_files if paired_test_matches(path, test)] or test_files[:1],
+                test_files=paired_tests,
             ),
             "status": "planned_for_implementation",
         }
@@ -730,3 +731,34 @@ def paired_test_matches(source_path: str, test_path: str) -> bool:
     source_name = Path(source_path).stem.lower()
     test_name = Path(test_path).stem.lower()
     return source_name in test_name or source_name in test_path.lower()
+
+
+def paired_tests_for_module(source_path: str, requirements: list[str], test_files: list[str]) -> list[str]:
+    if not test_files:
+        return []
+    if source_path in test_files:
+        return [source_path]
+    direct = [test for test in test_files if paired_test_matches(source_path, test)]
+    if direct:
+        return direct
+    requirement_tokens = {
+        token
+        for requirement in requirements
+        for token in requirement.lower().replace("_", " ").replace("-", " ").split()
+        if len(token) >= 5 and token not in {"prove", "support", "return", "print", "build", "handle"}
+    }
+    keyword_matches = [
+        test
+        for test in test_files
+        if any(token in test.lower().replace("_", " ").replace("-", " ") for token in requirement_tokens)
+    ]
+    if keyword_matches:
+        return keyword_matches
+    integration_tests = [
+        test
+        for test in test_files
+        if any(marker in Path(test).stem.lower() for marker in ("integration", "workflow", "pipeline", "contract"))
+    ]
+    if integration_tests:
+        return integration_tests
+    return test_files[:1]

@@ -346,6 +346,26 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertGreaterEqual(trace["requirement_trace_count"], 2)
         self.assertTrue(all(row["synthesis_contract_kind"] == "code_brigade_greenfield_module_synthesis_contract" for row in trace["rows"]))
 
+    def test_greenfield_implementation_trace_uses_precise_workflow_tests(self) -> None:
+        plan = worker_build_implementation_worker_plan(
+            "Создай sales analytics pipeline.",
+            "data_processing_tool",
+            [
+                {"module": "sales.loader", "path": "sales/loader.py", "responsibility": "load records", "requirements": ["parse CSV rows"]},
+                {"module": "sales.analyzer", "path": "sales/analyzer.py", "responsibility": "analyze records", "requirements": ["group totals by region"]},
+                {"module": "tests.test_sales_pipeline", "path": "tests/test_sales_pipeline.py", "responsibility": "workflow verification", "requirements": ["prove load filter group workflow"]},
+            ],
+            ["sales/loader.py", "sales/analyzer.py", "tests/test_processor.py", "tests/test_sales_pipeline.py"],
+        )
+        by_path = {row["path"]: row for row in plan["module_sequence"]}
+        self.assertEqual(by_path["sales/loader.py"]["paired_tests"], ["tests/test_sales_pipeline.py"])
+        self.assertEqual(by_path["sales/analyzer.py"]["paired_tests"], ["tests/test_sales_pipeline.py"])
+        self.assertEqual(by_path["tests/test_sales_pipeline.py"]["paired_tests"], ["tests/test_sales_pipeline.py"])
+        trace = worker_build_implementation_trace(plan)
+        for row in trace["rows"]:
+            if row["file"] in {"sales/loader.py", "sales/analyzer.py"}:
+                self.assertEqual(row["verification_files"], ["tests/test_sales_pipeline.py"])
+
     def test_greenfield_module_synthesis_applies_valid_model_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -879,6 +899,11 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertIn("test_load_filter_and_group_workflow", tests)
             self.assertIn("test_summary_and_markdown_report_workflow", tests)
             self.assertIn("test_cli_json_output_workflow", tests)
+            module_rows = {row["path"]: row for row in project["implementation_plan"]["module_sequence"]}
+            for module_path in ("sales_demo/loader.py", "sales_demo/analyzer.py", "sales_demo/report.py", "sales_demo/cli.py"):
+                self.assertEqual(module_rows[module_path]["paired_tests"], ["tests/test_sales_pipeline.py"])
+            trace_rows = project["implementation_trace"]["rows"]
+            self.assertTrue(all(row["verification_files"] == ["tests/test_sales_pipeline.py"] for row in trace_rows if row["file"].startswith("sales_demo/") and not row["file"].endswith("__init__.py")))
             verification = report["execution_result"]["greenfield_project"]["verification"]
             self.assertEqual(verification["status"], "passed", verification)
             review = report["execution_result"]["greenfield_project"]["greenfield_review"]

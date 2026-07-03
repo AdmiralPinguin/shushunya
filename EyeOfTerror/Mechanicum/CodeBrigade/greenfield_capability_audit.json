@@ -48,10 +48,12 @@
         "greenfield_implementation_worker.py execute_module_synthesis_contracts calls the GreenfieldImplementationWorker model path per module and writes source only after JSON, path, requirement, test, placeholder, and workspace validation",
         "greenfield_implementation_worker.py generated_file_quality rejects weak generated Python source and assertionless generated tests before writing model output",
         "greenfield_implementation_worker.py domain_specific_quality_findings adds template-aware checks for FastAPI, frontend, Telegram bot, data processing, and local agent tool outputs",
+        "greenfield_implementation_worker.py paired_tests_for_module keeps module requirement traces tied to direct, keyword, or workflow tests instead of every project test",
         "greenfield_scenario_worker.py builds scenario_plan rows from task-derived acceptance features and GreenfieldReview blocks missing behavior markers",
         "greenfield_verification_worker.py can call verification_repair module synthesis with failure context when bounded template repair is not applicable",
         "greenfield_feature_worker.py applies task-derived feature implementations for calculator, todo, notes API, CSV summary, sales analytics pipeline, local agent tool, Telegram bot, Vite counter, and text utils library",
         "focused_self_test.py test_project_creation_sales_analytics_pipeline_implements_multi_workflow_feature verifies a five-module data project with load/filter/group/report/CLI workflows",
+        "focused_self_test.py test_greenfield_implementation_trace_uses_precise_workflow_tests proves multi-module source contracts pair with the relevant workflow test",
         "implementation_trace.json records requirement to file/function/test mapping with synthesis_contract_kind and GreenfieldReview checks it"
       ],
       "remaining_risk": "Implementation now has executable validated LLM file-set synthesis, module synthesis, verification-driven synthesis repair, semantic/domain quality gates, scenario scoring, and one multi-workflow integration trial, but curated feature overrides/templates still provide the reliable baseline; arbitrary large code synthesis still needs additional long-form real-world integration trials."
