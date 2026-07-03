@@ -30,7 +30,9 @@
   project type, stack, entrypoints, expected files, artifact contract,
   workspace policy, definition of done, architecture/file/module/dependency/
   verification plans, template contract metadata, common failure fixes, and
-  model-brain guidance. The template registry now covers Python CLI, FastAPI,
+  model-brain guidance. Task-derived ImplementationWorker feature generation
+  now lives in `greenfield_feature_worker.py` instead of being buried in the
+  greenfield orchestrator. The template registry now covers Python CLI, FastAPI,
   Python library, Vite frontend, static site, Telegram bot, data-processing
   tool, and local agent tool scaffolds. Greenfield reports now also preserve
   reviewer/repair model guidance and a `greenfield_memory_record` with chosen

@@ -141,7 +141,10 @@ inside an empty directory or a directory marked with
 `CERAXIA_PROJECT` or deterministic GreenfieldArchitect templates, reruns
 allowlisted verification, and reports the created files through the same patch
 manifest and review gates. `greenfield_templates.py` owns the template registry
-so the scaffold catalog is not buried inside the executor. The current
+so the scaffold catalog is not buried inside the executor.
+`greenfield_feature_worker.py` owns task-derived ImplementationWorker behavior,
+including functional requirement detection and feature-specific file/contract
+overrides, so the greenfield orchestrator does not become a single role pile. The current
 templates cover `python_cli_basic`, `python_fastapi_service`, `python_library`,
 `node_vite_app`, `static_site`, `telegram_bot_python`, `data_processing_tool`,
 and `local_agent_tool`; each records stack, entrypoints, expected files, install
