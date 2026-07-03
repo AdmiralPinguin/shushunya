@@ -167,7 +167,20 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             brief["suggested_verification_commands"] = ["python -m unittest test_app.py"]
             report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
             self.assertEqual(report["status"], "implemented", report)
-            self.assertEqual(sorted(report["changed_files"]), [".ceraxia_greenfield_workspace", "README.md", "app.py", "greenfield_project_brief.json", "test_app.py"])
+            self.assertEqual(
+                sorted(report["changed_files"]),
+                [
+                    ".ceraxia_greenfield_workspace",
+                    "README.md",
+                    "app.py",
+                    "architecture_plan.json",
+                    "file_tree_plan.json",
+                    "greenfield_project_brief.json",
+                    "module_contracts.json",
+                    "test_app.py",
+                    "verification_plan.json",
+                ],
+            )
             self.assertEqual(report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
             project_brief = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
@@ -310,6 +323,10 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertTrue({"python_cli_basic", "python_fastapi_service", "python_library", "node_vite_app", "static_site", "telegram_bot_python", "data_processing_tool", "local_agent_tool"}.issubset(set(available_templates())))
         self.assertTrue(any(path.endswith("cli.py") for path in cli["expected_files"]))
         self.assertIn("requirements.txt", api["expected_files"])
+        self.assertIn("architecture_plan.json", cli["expected_files"])
+        self.assertIn("file_tree_plan.json", cli["expected_files"])
+        self.assertIn("module_contracts.json", cli["expected_files"])
+        self.assertIn("verification_plan.json", cli["expected_files"])
         self.assertIn("package.json", vite["expected_files"])
         self.assertIn("requirements.txt", bot["expected_files"])
         self.assertIn("pyproject.toml", data_tool["expected_files"])

@@ -985,13 +985,39 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(result["package_ok"], result)
             self.assertTrue(result["ready_for_execution"], result)
             self.assertEqual(result["execution_mode"], "project_creation")
-            self.assertEqual(sorted(path.name for path in repo.iterdir() if path.name != "__pycache__"), [".ceraxia_greenfield_workspace", "README.md", "app.py", "greenfield_project_brief.json", "test_app.py"])
+            self.assertEqual(
+                sorted(path.name for path in repo.iterdir() if path.name != "__pycache__"),
+                [
+                    ".ceraxia_greenfield_workspace",
+                    "README.md",
+                    "app.py",
+                    "architecture_plan.json",
+                    "file_tree_plan.json",
+                    "greenfield_project_brief.json",
+                    "module_contracts.json",
+                    "test_app.py",
+                    "verification_plan.json",
+                ],
+            )
             run_dir = Path(result["run_dir"])
             worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
             self.assertEqual(worker_report["status"], "implemented")
             self.assertEqual(worker_report["execution_intent"]["mode"], "greenfield_project_creation")
             self.assertEqual(worker_report["edit_plan"]["controller_execution_mode"], "project_creation")
-            self.assertEqual(sorted(worker_report["changed_files"]), [".ceraxia_greenfield_workspace", "README.md", "app.py", "greenfield_project_brief.json", "test_app.py"])
+            self.assertEqual(
+                sorted(worker_report["changed_files"]),
+                [
+                    ".ceraxia_greenfield_workspace",
+                    "README.md",
+                    "app.py",
+                    "architecture_plan.json",
+                    "file_tree_plan.json",
+                    "greenfield_project_brief.json",
+                    "module_contracts.json",
+                    "test_app.py",
+                    "verification_plan.json",
+                ],
+            )
             self.assertEqual(worker_report["greenfield_implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["greenfield_review"]["semantic_review"]["status"], "passed")
@@ -1000,6 +1026,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
             self.assertEqual(project_brief["project_type"], "cli_tool")
             self.assertTrue(project_brief["definition_of_done"])
+            self.assertEqual(json.loads((repo / "architecture_plan.json").read_text(encoding="utf-8")), project_brief["architecture_plan"])
+            self.assertEqual(json.loads((repo / "module_contracts.json").read_text(encoding="utf-8")), project_brief["module_contracts"])
+            self.assertEqual(json.loads((repo / "verification_plan.json").read_text(encoding="utf-8")), project_brief["verification_plan"])
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "passed")
             self.assertEqual([row["command"] for row in verification["commands_executed"]], ["python -m unittest test_app.py"])

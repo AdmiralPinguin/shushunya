@@ -38,6 +38,9 @@
   commands, failure fixes, and reusable learnings. The Greenfield
   ImplementationWorker now records module sequence, requirement-to-file and
   function/component traces, paired tests, milestones, and anti-stub policy;
+  GreenfieldArchitect now writes first-class plan artifacts
+  `architecture_plan.json`, `file_tree_plan.json`, `module_contracts.json`, and
+  `verification_plan.json` into generated projects;
   GreenfieldReview reads generated artifacts back from disk and blocks missing
   files, empty generated files, placeholder markers, missing module traces, and
   source-without-test scaffolds. The greenfield verification loop can now apply

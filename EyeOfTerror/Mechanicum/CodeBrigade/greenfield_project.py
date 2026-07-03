@@ -158,7 +158,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         "Review the greenfield architecture plan, identify missing modules, verification gaps, and scaffold risks. Return concise guidance.",
     )
     implementation_plan = build_implementation_worker_plan(task, template_id, module_contracts, expected_files)
-    return {
+    brief = {
         "kind": "code_brigade_greenfield_project_brief",
         "contract_version": "eye-mechanicum.v1",
         "project_name": project_name,
@@ -227,6 +227,48 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
             },
         },
     }
+    attach_greenfield_plan_artifacts(brief)
+    return brief
+
+
+def attach_greenfield_plan_artifacts(brief: dict[str, Any]) -> None:
+    artifact_specs = [
+        ("architecture_plan.json", "architecture_plan"),
+        ("file_tree_plan.json", "file_tree_plan"),
+        ("module_contracts.json", "module_contracts"),
+        ("verification_plan.json", "verification_plan"),
+    ]
+    files = brief.get("files") if isinstance(brief.get("files"), list) else []
+    existing_paths = {str(item.get("path") or "") for item in files if isinstance(item, dict)}
+    plan_paths: list[str] = []
+    for rel_path, _key in artifact_specs:
+        plan_paths.append(rel_path)
+    expected_files = [str(path) for path in brief.get("expected_files", []) if isinstance(path, str)]
+    for rel_path in plan_paths:
+        if rel_path not in expected_files:
+            expected_files.append(rel_path)
+    brief["expected_files"] = expected_files
+    file_tree_plan = brief.get("file_tree_plan") if isinstance(brief.get("file_tree_plan"), list) else []
+    planned_paths = {str(row.get("path") or "") for row in file_tree_plan if isinstance(row, dict)}
+    for rel_path in plan_paths:
+        if rel_path not in planned_paths:
+            file_tree_plan.append({"path": rel_path, "role": "greenfield_plan_artifact"})
+    brief["file_tree_plan"] = file_tree_plan
+    template_contract = brief.get("template_contract") if isinstance(brief.get("template_contract"), dict) else {}
+    template_contract["required_files"] = expected_files
+    template_contract["expected_tree"] = expected_files
+    brief["template_contract"] = template_contract
+    artifact_contract = brief.get("artifact_contract") if isinstance(brief.get("artifact_contract"), dict) else {}
+    required = [str(path) for path in artifact_contract.get("required", []) if isinstance(path, str)]
+    for rel_path in plan_paths:
+        if rel_path not in required:
+            required.append(rel_path)
+    artifact_contract["required"] = required
+    brief["artifact_contract"] = artifact_contract
+    for rel_path, key in artifact_specs:
+        if rel_path not in existing_paths:
+            files.append({"path": rel_path, "content": json.dumps(brief.get(key, {}), ensure_ascii=False, indent=2, sort_keys=True) + "\n"})
+    brief["files"] = files
 
 
 def build_implementation_worker_plan(

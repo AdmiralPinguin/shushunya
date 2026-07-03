@@ -148,7 +148,10 @@ and `local_agent_tool`; each records stack, entrypoints, expected files, install
 commands, run commands, verification commands, artifact contract, workspace
 policy, definition of done, architecture plan, file tree plan, module contracts,
 implementation plan, dependency plan, common failure fixes, and model-brain
-guidance. The implementation plan records module order, requirement-to-file and
+guidance. GreenfieldArchitect plan outputs are also written as first-class
+project artifacts: `architecture_plan.json`, `file_tree_plan.json`,
+`module_contracts.json`, and `verification_plan.json`. The implementation plan
+records module order, requirement-to-file and
 function/component trace rows, paired tests, milestones, source/test file lists,
 and an anti-stub policy. Greenfield review reads generated artifacts back from
 disk and records a semantic review that blocks missing files, empty generated
