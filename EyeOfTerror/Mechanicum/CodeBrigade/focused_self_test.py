@@ -12,6 +12,7 @@ from greenfield_architect import build_greenfield_project_brief as architect_bui
 from greenfield_dependency_worker import dependency_manager_status
 from greenfield_feature_worker import infer_acceptance_features
 from greenfield_project import build_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
+from greenfield_review_worker import python_source_semantic_status
 from greenfield_templates import available_templates
 from self_test import valid_brief
 
@@ -225,6 +226,10 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
     def test_placeholder_marker_does_not_confuse_todo_domain_word(self) -> None:
         self.assertEqual(forbidden_placeholder_markers_found("function addTodo() { return true; }", ["TODO"]), [])
         self.assertEqual(forbidden_placeholder_markers_found("# TODO replace this generated placeholder", ["TODO", "placeholder"]), ["TODO", "placeholder"])
+
+    def test_greenfield_review_worker_scores_python_source_strength(self) -> None:
+        self.assertEqual(python_source_semantic_status("VALUE = 1\n"), "weak")
+        self.assertEqual(python_source_semantic_status("def run():\n    return 'ready'\n\nif True:\n    run()\n"), "ok")
 
     def test_greenfield_feature_worker_detects_task_features(self) -> None:
         feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator")}

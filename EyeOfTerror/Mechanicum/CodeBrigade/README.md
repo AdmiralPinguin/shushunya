@@ -149,7 +149,10 @@ and the implementation-plan trace rows.
 including functional requirement detection and feature-specific file/contract
 overrides. `greenfield_dependency_worker.py` owns DependencyWorker package
 manager discovery, manifest checks, install allowlisting, and lockfile
-snapshots, so the greenfield orchestrator does not become a single role pile. The current
+snapshots. `greenfield_review_worker.py` owns GreenfieldReview launchability,
+README, entrypoint, verification-status, module-contract, semantic anti-stub,
+and reviewer model-guidance gates, so the greenfield orchestrator does not
+become a single role pile. The current
 templates cover `python_cli_basic`, `python_fastapi_service`, `python_library`,
 `node_vite_app`, `static_site`, `telegram_bot_python`, `data_processing_tool`,
 and `local_agent_tool`; each records stack, entrypoints, expected files, install
