@@ -153,8 +153,10 @@ snapshots. `greenfield_review_worker.py` owns GreenfieldReview launchability,
 README, entrypoint, verification-status, module-contract, semantic anti-stub,
 and reviewer model-guidance gates. `greenfield_verification_worker.py` owns the
 greenfield verification loop, failure signatures, GreenfieldRepairWorker model
-guidance, bounded template repairs, reruns, and semantic stop reasons, so the
-greenfield orchestrator does not become a single role pile. The current
+guidance, bounded template repairs, reruns, and semantic stop reasons.
+`greenfield_memory_worker.py` owns the run memory record, repaired-file history,
+command history, review findings, and reusable learnings, so the greenfield
+orchestrator does not become a single role pile. The current
 templates cover `python_cli_basic`, `python_fastapi_service`, `python_library`,
 `node_vite_app`, `static_site`, `telegram_bot_python`, `data_processing_tool`,
 and `local_agent_tool`; each records stack, entrypoints, expected files, install

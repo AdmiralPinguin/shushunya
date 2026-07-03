@@ -41,6 +41,8 @@
   `greenfield_review_worker.py`; the greenfield verification loop, failure
   signatures, GreenfieldRepairWorker model guidance, bounded template repairs,
   reruns, and semantic stop reasons now live in `greenfield_verification_worker.py`
+  and run memory records, repaired-file history, command history, review
+  findings, and reusable learnings now live in `greenfield_memory_worker.py`
   instead of being buried in the greenfield orchestrator. The template registry now covers Python CLI, FastAPI,
   Python library, Vite frontend, static site, Telegram bot, data-processing
   tool, and local agent tool scaffolds. Greenfield reports now also preserve

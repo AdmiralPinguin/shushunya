@@ -11,6 +11,7 @@ from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_d
 from greenfield_architect import build_greenfield_project_brief as architect_build_greenfield_project_brief
 from greenfield_dependency_worker import dependency_manager_status
 from greenfield_feature_worker import infer_acceptance_features
+from greenfield_memory_worker import build_greenfield_memory_record
 from greenfield_project import build_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_review_worker import python_source_semantic_status
 from greenfield_verification_worker import verification_failure_signature
@@ -264,6 +265,17 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn("python -m unittest", signature)
         self.assertIn('"status": "failed"', signature)
         self.assertLess(len(signature), 800)
+
+    def test_greenfield_memory_worker_records_repair_learning(self) -> None:
+        memory = build_greenfield_memory_record(
+            {"project_name": "demo", "project_type": "cli_tool", "template_id": "python_cli_basic", "stack": {}, "dependency_plan": {}, "run_commands": ["python -m demo.cli"], "verification_commands": ["python -m unittest"]},
+            {"status": "not_required", "blockers": [], "warnings": [], "manager_status": {}, "new_lockfiles": []},
+            {"status": "passed", "stop_reason": "verification passed", "attempts": [{"repair_execution": {"repaired_files": [{"path": "README.md"}]}}]},
+            {"status": "passed", "blockers": [], "warnings": [], "semantic_review": {"status": "passed", "blockers": []}},
+        )
+        self.assertEqual(memory["kind"], "code_brigade_greenfield_memory_record")
+        self.assertEqual(memory["repaired_files"], ["README.md"])
+        self.assertTrue(memory["reusable_learnings"])
 
     def test_greenfield_verification_loop_repairs_missing_template_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
