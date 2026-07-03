@@ -14,6 +14,7 @@ from typing import Any
 
 from execution_contract import build_blocked_execution_result, build_implemented_execution_result, build_patch_manifest
 from execution_preflight import is_repo_relative_path
+from greenfield_templates import GREENFIELD_MARKER, PROJECT_TYPES, STACK_DEFAULTS, template_for, template_id_for_project_type
 from verification_adapter import run_verification_commands
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -21,15 +22,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from EyeOfTerror.model_brain import request_model_decision  # noqa: E402
-
-
-GREENFIELD_MARKER = ".ceraxia_greenfield_workspace"
-PROJECT_TYPES = {"web_app", "api_service", "cli_tool", "library", "bot", "android_app", "game", "automation_tool"}
-STACK_DEFAULTS = {
-    "python_cli_basic": {"language": "python", "framework": "stdlib", "package_manager": "none", "runtime": "python"},
-    "python_fastapi_service": {"language": "python", "framework": "fastapi", "package_manager": "pip", "runtime": "uvicorn"},
-    "static_site": {"language": "html_css_js", "framework": "none", "package_manager": "none", "runtime": "browser"},
-}
 
 
 def file_sha256(path: Path) -> str:
@@ -79,93 +71,6 @@ def infer_project_type(task: str) -> str:
     if any(word in lowered for word in ("game", "игр")):
         return "game"
     return "cli_tool"
-
-
-def template_id_for_project_type(project_type: str, task: str) -> str:
-    lowered = task.lower()
-    if project_type == "api_service":
-        return "python_fastapi_service"
-    if project_type == "web_app":
-        return "static_site"
-    if "data" in lowered or "данн" in lowered:
-        return "python_cli_basic"
-    return "python_cli_basic"
-
-
-def python_cli_template(project_name: str) -> dict[str, Any]:
-    module_name = project_name.replace("-", "_")
-    files = [
-        {"path": GREENFIELD_MARKER, "content": "created-by=ceraxia-code-brigade\n"},
-        {"path": "README.md", "content": f"# {project_name}\n\n## Run\n\n```bash\npython -m {module_name}.cli\n```\n\n## Test\n\n```bash\npython -m unittest discover tests\n```\n"},
-        {"path": f"{module_name}/__init__.py", "content": f"__all__ = [\"run\"]\n\nfrom .core import run\n"},
-        {"path": f"{module_name}/core.py", "content": "def run() -> str:\n    return \"ready\"\n"},
-        {"path": f"{module_name}/cli.py", "content": "from .core import run\n\n\ndef main() -> None:\n    print(run())\n\n\nif __name__ == \"__main__\":\n    main()\n"},
-        {"path": "tests/test_core.py", "content": f"import unittest\n\nfrom {module_name}.core import run\n\n\nclass CoreTests(unittest.TestCase):\n    def test_run(self):\n        self.assertEqual(run(), \"ready\")\n"},
-        {"path": "pyproject.toml", "content": f"[project]\nname = \"{project_name}\"\nversion = \"0.1.0\"\ndescription = \"Generated Ceraxia Python CLI project\"\nrequires-python = \">=3.10\"\n"},
-    ]
-    return {
-        "template_id": "python_cli_basic",
-        "files": files,
-        "entrypoints": [{"name": "cli", "command": f"python -m {module_name}.cli", "path": f"{module_name}/cli.py"}],
-        "run_commands": [f"python -m {module_name}.cli"],
-        "verification_commands": ["python -m unittest discover tests", f"python -m py_compile {module_name}/core.py {module_name}/cli.py"],
-        "module_contracts": [
-            {"module": f"{module_name}.core", "path": f"{module_name}/core.py", "responsibility": "domain behavior", "requirements": ["return stable ready result"]},
-            {"module": f"{module_name}.cli", "path": f"{module_name}/cli.py", "responsibility": "command-line entrypoint", "requirements": ["print core result"]},
-        ],
-    }
-
-
-def fastapi_service_template(project_name: str) -> dict[str, Any]:
-    module_name = project_name.replace("-", "_")
-    files = [
-        {"path": GREENFIELD_MARKER, "content": "created-by=ceraxia-code-brigade\n"},
-        {"path": "README.md", "content": "# " + project_name + "\n\n## Run\n\n```bash\nuvicorn app.main:app --reload\n```\n\n## Test\n\n```bash\npython -m unittest discover tests\n```\n\n```bash\npython -m py_compile app/main.py\n```\n"},
-        {"path": "requirements.txt", "content": "fastapi\nuvicorn\n"},
-        {"path": "app/__init__.py", "content": ""},
-        {"path": "app/main.py", "content": "try:\n    from fastapi import FastAPI\nexcept ModuleNotFoundError:\n    FastAPI = None\n\n\ndef health() -> dict[str, bool]:\n    return {\"ok\": True}\n\n\nif FastAPI is not None:\n    app = FastAPI(title=\"Ceraxia Service\")\n\n    @app.get(\"/health\")\n    def health_endpoint() -> dict[str, bool]:\n        return health()\nelse:\n    app = None\n"},
-        {"path": "tests/test_health.py", "content": "import unittest\n\nfrom app.main import health\n\n\nclass HealthTests(unittest.TestCase):\n    def test_health(self):\n        self.assertEqual(health(), {\"ok\": True})\n"},
-    ]
-    return {
-        "template_id": "python_fastapi_service",
-        "files": files,
-        "entrypoints": [{"name": "http", "command": "uvicorn app.main:app --reload", "path": "app/main.py"}],
-        "run_commands": ["uvicorn app.main:app --reload"],
-        "verification_commands": ["python -m unittest discover tests", "python -m py_compile app/main.py"],
-        "module_contracts": [
-            {"module": "app.main", "path": "app/main.py", "responsibility": "HTTP app and health behavior", "requirements": ["health returns ok true", "FastAPI app is exposed when dependency is installed"]},
-            {"module": "tests.test_health", "path": "tests/test_health.py", "responsibility": "service behavior verification", "requirements": ["prove health contract without requiring a live server"]},
-        ],
-    }
-
-
-def static_site_template(project_name: str) -> dict[str, Any]:
-    files = [
-        {"path": GREENFIELD_MARKER, "content": "created-by=ceraxia-code-brigade\n"},
-        {"path": "README.md", "content": f"# {project_name}\n\n## Run\n\n```bash\nopen index.html\n```\n\n## Test\n\n```bash\npython -m unittest discover tests\n```\n"},
-        {"path": "index.html", "content": "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>Ceraxia Site</title>\n  <link rel=\"stylesheet\" href=\"styles.css\">\n</head>\n<body>\n  <main>\n    <h1>Ceraxia Site</h1>\n    <p id=\"status\">ready</p>\n  </main>\n  <script src=\"app.js\"></script>\n</body>\n</html>\n"},
-        {"path": "styles.css", "content": "body { margin: 0; font-family: system-ui, sans-serif; background: #f6f7f9; color: #17191f; }\nmain { max-width: 760px; margin: 10vh auto; padding: 24px; }\n"},
-        {"path": "app.js", "content": "document.documentElement.dataset.ceraxia = 'ready';\n"},
-        {"path": "tests/test_static_site.py", "content": "from pathlib import Path\nimport unittest\n\n\nclass StaticSiteTests(unittest.TestCase):\n    def test_entrypoint_references_assets(self):\n        html = Path('index.html').read_text(encoding='utf-8')\n        self.assertIn('styles.css', html)\n        self.assertIn('app.js', html)\n        self.assertIn('ready', html)\n"},
-    ]
-    return {
-        "template_id": "static_site",
-        "files": files,
-        "entrypoints": [{"name": "browser", "command": "open index.html", "path": "index.html"}],
-        "run_commands": ["open index.html"],
-        "verification_commands": ["python -m unittest discover tests"],
-        "module_contracts": [
-            {"module": "static_page", "path": "index.html", "responsibility": "first screen content", "requirements": ["loads stylesheet and script", "shows ready state"]},
-        ],
-    }
-
-
-def template_for(template_id: str, project_name: str) -> dict[str, Any]:
-    if template_id == "python_fastapi_service":
-        return fastapi_service_template(project_name)
-    if template_id == "static_site":
-        return static_site_template(project_name)
-    return python_cli_template(project_name)
 
 
 def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -245,6 +150,16 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         "project_name": project_name,
         "project_type": project_type,
         "template_id": template_id,
+        "template_contract": {
+            "template_id": template_id,
+            "required_files": expected_files,
+            "optional_files": template.get("optional_files", []),
+            "install_commands": payload.get("install_commands", []),
+            "run_commands": run_commands,
+            "verification_commands": verification_commands,
+            "expected_tree": expected_files,
+            "common_failure_fixes": template.get("common_failure_fixes", []),
+        },
         "stack": stack,
         "entrypoints": entrypoints,
         "expected_files": expected_files,

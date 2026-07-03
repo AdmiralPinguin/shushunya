@@ -140,11 +140,15 @@ inside an empty directory or a directory marked with
 `greenfield_project_brief.json`, creates the planned file tree from
 `CERAXIA_PROJECT` or deterministic GreenfieldArchitect templates, reruns
 allowlisted verification, and reports the created files through the same patch
-manifest and review gates. The current templates cover `python_cli_basic`,
-`python_fastapi_service`, and `static_site`; each records stack, entrypoints,
-expected files, run commands, verification commands, artifact contract,
-workspace policy, definition of done, architecture plan, file tree plan, module
-contracts, dependency plan, and model-brain guidance. Guarded inference for
+manifest and review gates. `greenfield_templates.py` owns the template registry
+so the scaffold catalog is not buried inside the executor. The current
+templates cover `python_cli_basic`, `python_fastapi_service`, `python_library`,
+`node_vite_app`, `static_site`, `telegram_bot_python`, `data_processing_tool`,
+and `local_agent_tool`; each records stack, entrypoints, expected files, install
+commands, run commands, verification commands, artifact contract, workspace
+policy, definition of done, architecture plan, file tree plan, module contracts,
+dependency plan, common failure fixes, and model-brain guidance. Guarded
+inference for
 existing repositories remains intentionally narrow: it only accepts explicit
 backtick-delimited file paths and edit literals for simple replacement or
 Python add-function operations.

@@ -29,7 +29,10 @@
   Greenfield runs now write a contracted `greenfield_project_brief.json` with
   project type, stack, entrypoints, expected files, artifact contract,
   workspace policy, definition of done, architecture/file/module/dependency/
-  verification plans, and model-brain guidance.
+  verification plans, template contract metadata, common failure fixes, and
+  model-brain guidance. The template registry now covers Python CLI, FastAPI,
+  Python library, Vite frontend, static site, Telegram bot, data-processing
+  tool, and local agent tool scaffolds.
 - Warmaster gateway HTTP-governor preparation now has a focused live self-test;
   the old monolithic gateway self-test is opt-in through
   `RUN_MONOLITHIC_GATEWAY_SELF_TEST=1` so normal checks do not hang on one huge

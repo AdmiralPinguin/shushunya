@@ -8,6 +8,7 @@
     "project_name",
     "project_type",
     "template_id",
+    "template_contract",
     "stack",
     "entrypoints",
     "expected_files",
@@ -40,6 +41,10 @@
     "template_id": {
       "type": "string",
       "minLength": 1
+    },
+    "template_contract": {
+      "type": "object",
+      "required": ["template_id", "required_files", "optional_files", "install_commands", "run_commands", "verification_commands", "expected_tree", "common_failure_fixes"]
     },
     "stack": {
       "type": "object",
