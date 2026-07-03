@@ -993,6 +993,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(worker_report["edit_plan"]["controller_execution_mode"], "project_creation")
             self.assertEqual(sorted(worker_report["changed_files"]), [".ceraxia_greenfield_workspace", "README.md", "app.py", "greenfield_project_brief.json", "test_app.py"])
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
+            self.assertEqual(worker_report["greenfield_memory_record"]["kind"], "code_brigade_greenfield_memory_record")
             project_brief = json.loads((repo / "greenfield_project_brief.json").read_text(encoding="utf-8"))
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
             self.assertEqual(project_brief["project_type"], "cli_tool")

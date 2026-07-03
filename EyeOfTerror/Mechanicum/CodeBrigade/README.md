@@ -152,6 +152,13 @@ inference for
 existing repositories remains intentionally narrow: it only accepts explicit
 backtick-delimited file paths and edit literals for simple replacement or
 Python add-function operations.
+
+Greenfield reports also expose role-specific model guidance for
+`GreenfieldArchitect`, `GreenfieldReviewer`, and failed verification
+`GreenfieldRepairWorker` attempts. Each run returns a
+`greenfield_memory_record` with the chosen stack, template, dependency status,
+verification attempts, review blockers/warnings, commands, template failure
+fixes, and reusable learnings for later Ceraxia runs.
 Adapter results must satisfy
 `execution_result.schema.json`: status, changed files, patch summary, executed
 verification commands, blockers, rollback notes, and per-operation patch

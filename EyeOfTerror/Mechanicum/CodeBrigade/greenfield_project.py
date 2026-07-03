@@ -24,6 +24,25 @@ if str(PROJECT_ROOT) not in sys.path:
 from EyeOfTerror.model_brain import request_model_decision  # noqa: E402
 
 
+def request_greenfield_model_guidance(role: str, payload: dict[str, Any], instructions: str) -> dict[str, Any]:
+    previous_timeout = os.environ.get("EYE_MODEL_TIMEOUT_SEC")
+    if previous_timeout is None:
+        os.environ["EYE_MODEL_TIMEOUT_SEC"] = "3"
+    try:
+        return request_model_decision(
+            "CodeBrigade",
+            role,
+            payload,
+            layer="code_worker",
+            instructions=instructions,
+        )
+    finally:
+        if previous_timeout is None:
+            os.environ.pop("EYE_MODEL_TIMEOUT_SEC", None)
+        else:
+            os.environ["EYE_MODEL_TIMEOUT_SEC"] = previous_timeout
+
+
 def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -122,28 +141,18 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         "allowlisted verification commands pass or blockers are explicit",
         "README documents real run and verification commands",
     ]
-    previous_timeout = os.environ.get("EYE_MODEL_TIMEOUT_SEC")
-    if previous_timeout is None:
-        os.environ["EYE_MODEL_TIMEOUT_SEC"] = "3"
-    try:
-        model_guidance = request_model_decision(
-            "CodeBrigade",
-            "GreenfieldArchitect",
-            {
-                "task": task,
-                "project_type": project_type,
-                "template_id": template_id,
-                "expected_files": expected_files,
-                "definition_of_done": definition_of_done,
-            },
-            layer="code_worker",
-            instructions="Review the greenfield architecture plan, identify missing modules, verification gaps, and scaffold risks. Return concise guidance.",
-        )
-    finally:
-        if previous_timeout is None:
-            os.environ.pop("EYE_MODEL_TIMEOUT_SEC", None)
-        else:
-            os.environ["EYE_MODEL_TIMEOUT_SEC"] = previous_timeout
+    model_guidance = request_greenfield_model_guidance(
+        "GreenfieldArchitect",
+        {
+            "task": task,
+            "project_type": project_type,
+            "template_id": template_id,
+            "expected_files": expected_files,
+            "module_contracts": module_contracts,
+            "definition_of_done": definition_of_done,
+        },
+        "Review the greenfield architecture plan, identify missing modules, verification gaps, and scaffold risks. Return concise guidance.",
+    )
     return {
         "kind": "code_brigade_greenfield_project_brief",
         "contract_version": "eye-mechanicum.v1",
@@ -431,6 +440,20 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
     module_contracts = project_brief.get("module_contracts") if isinstance(project_brief.get("module_contracts"), list) else []
     if len(module_contracts) < 2 and project_brief.get("project_type") not in {"web_app"}:
         blockers.append("non-trivial greenfield project must not collapse to a single module contract")
+    reviewer_guidance = request_greenfield_model_guidance(
+        "GreenfieldReviewer",
+        {
+            "project_name": project_brief.get("project_name"),
+            "project_type": project_brief.get("project_type"),
+            "template_id": project_brief.get("template_id"),
+            "expected_files": expected_files,
+            "dependency_status": dependency_report.get("status"),
+            "verification_status": verification.get("status"),
+            "blockers": blockers,
+            "warnings": warnings,
+        },
+        "Critique the finished greenfield project against definition of done. Flag missing launchability, fake stubs, weak tests, and template mismatch.",
+    )
     return {
         "kind": "code_brigade_greenfield_review",
         "contract_version": "eye-mechanicum.v1",
@@ -443,10 +466,26 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
         "verification_status": verification.get("status", ""),
         "blockers": blockers,
         "warnings": warnings,
+        "model_guidance": reviewer_guidance,
     }
 
 
-def run_greenfield_verification_loop(repo: Path, commands: list[str], max_cycles: int = 2) -> dict[str, Any]:
+def repair_guidance_for_verification(project_brief: dict[str, Any], verification: dict[str, Any], signature: str) -> dict[str, Any]:
+    return request_greenfield_model_guidance(
+        "GreenfieldRepairWorker",
+        {
+            "project_name": project_brief.get("project_name"),
+            "template_id": project_brief.get("template_id"),
+            "verification_status": verification.get("status"),
+            "verification_results": verification.get("results", []),
+            "failure_signature": signature,
+            "common_failure_fixes": project_brief.get("template_contract", {}).get("common_failure_fixes", []),
+        },
+        "Given the failed greenfield verification output, propose a bounded repair hypothesis or a blocker. Do not invent unrelated scope.",
+    )
+
+
+def run_greenfield_verification_loop(repo: Path, commands: list[str], project_brief: dict[str, Any], max_cycles: int = 2) -> dict[str, Any]:
     attempts: list[dict[str, Any]] = []
     previous_signature = ""
     final_verification: dict[str, Any] = {}
@@ -466,13 +505,50 @@ def run_greenfield_verification_loop(repo: Path, commands: list[str], max_cycles
             ensure_ascii=False,
             sort_keys=True,
         )
-        attempts.append({"cycle": cycle, "status": verification.get("status", ""), "failure_signature": signature if verification.get("status") != "passed" else ""})
         if verification.get("status") == "passed":
+            attempts.append({"cycle": cycle, "status": verification.get("status", ""), "failure_signature": "", "repair_guidance": {}})
             return {"kind": "code_brigade_greenfield_verification_loop", "status": "passed", "attempts": attempts, "final_verification": verification, "stop_reason": "verification passed"}
+        repair_guidance = repair_guidance_for_verification(project_brief, verification, signature)
+        attempts.append({"cycle": cycle, "status": verification.get("status", ""), "failure_signature": signature, "repair_guidance": repair_guidance})
         if signature and signature == previous_signature:
             return {"kind": "code_brigade_greenfield_verification_loop", "status": "blocked", "attempts": attempts, "final_verification": verification, "stop_reason": "same verification failure repeats"}
         previous_signature = signature
     return {"kind": "code_brigade_greenfield_verification_loop", "status": "blocked", "attempts": attempts, "final_verification": final_verification, "stop_reason": "max verification cycles reached"}
+
+
+def build_greenfield_memory_record(
+    project_brief: dict[str, Any],
+    dependency_report: dict[str, Any],
+    verification_loop: dict[str, Any],
+    greenfield_review: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "kind": "code_brigade_greenfield_memory_record",
+        "contract_version": "eye-mechanicum.v1",
+        "project_name": project_brief.get("project_name", ""),
+        "project_type": project_brief.get("project_type", ""),
+        "template_id": project_brief.get("template_id", ""),
+        "stack": project_brief.get("stack", {}),
+        "dependency_status": dependency_report.get("status", ""),
+        "dependency_blockers": dependency_report.get("blockers", []),
+        "verification_status": verification_loop.get("status", ""),
+        "verification_stop_reason": verification_loop.get("stop_reason", ""),
+        "verification_attempt_count": len(verification_loop.get("attempts", [])) if isinstance(verification_loop.get("attempts"), list) else 0,
+        "review_status": greenfield_review.get("status", ""),
+        "review_blockers": greenfield_review.get("blockers", []),
+        "review_warnings": greenfield_review.get("warnings", []),
+        "commands": {
+            "install": project_brief.get("dependency_plan", {}).get("install_commands", []),
+            "run": project_brief.get("run_commands", []),
+            "verification": project_brief.get("verification_commands", []),
+        },
+        "template_failure_fixes": project_brief.get("template_contract", {}).get("common_failure_fixes", []),
+        "reusable_learnings": [
+            "preserve greenfield workspace marker before writing generated files",
+            "keep README commands identical to run_commands and verification_commands",
+            "keep implementation modules and tests separate for non-trivial projects",
+        ],
+    }
 
 
 def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
@@ -539,9 +615,10 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         )
     dependency_report = run_dependency_worker(repo, project_brief)
     commands = spec.get("verification_commands") if isinstance(spec.get("verification_commands"), list) else []
-    verification_loop = run_greenfield_verification_loop(repo, [str(command) for command in commands if isinstance(command, str)])
+    verification_loop = run_greenfield_verification_loop(repo, [str(command) for command in commands if isinstance(command, str)], project_brief)
     verification = verification_loop.get("final_verification", {}) if isinstance(verification_loop.get("final_verification"), dict) else {}
     greenfield_review = review_greenfield_project(repo, project_brief, dependency_report, verification)
+    greenfield_memory_record = build_greenfield_memory_record(project_brief, dependency_report, verification_loop, greenfield_review)
     result = build_implemented_execution_result(
         changed_files,
         f"created {len(changed_files)} greenfield project files from {spec.get('source')}",
@@ -563,6 +640,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         "dependency_report": dependency_report,
         "verification_loop": verification_loop,
         "greenfield_review": greenfield_review,
+        "greenfield_memory_record": greenfield_memory_record,
         "verification": verification,
     }
     result["verification_commands_executed"] = [

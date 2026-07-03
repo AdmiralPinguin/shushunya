@@ -32,7 +32,10 @@
   verification plans, template contract metadata, common failure fixes, and
   model-brain guidance. The template registry now covers Python CLI, FastAPI,
   Python library, Vite frontend, static site, Telegram bot, data-processing
-  tool, and local agent tool scaffolds.
+  tool, and local agent tool scaffolds. Greenfield reports now also preserve
+  reviewer/repair model guidance and a `greenfield_memory_record` with chosen
+  stack, template, dependency outcome, verification attempts, review findings,
+  commands, failure fixes, and reusable learnings.
 - Warmaster gateway HTTP-governor preparation now has a focused live self-test;
   the old monolithic gateway self-test is opt-in through
   `RUN_MONOLITHIC_GATEWAY_SELF_TEST=1` so normal checks do not hang on one huge

@@ -171,6 +171,12 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
             project_brief = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
+            memory = report["execution_result"]["greenfield_project"]["greenfield_memory_record"]
+            self.assertEqual(memory["kind"], "code_brigade_greenfield_memory_record")
+            self.assertEqual(memory["template_id"], project_brief["template_id"])
+            self.assertTrue(memory["reusable_learnings"])
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertIn("model_guidance", review)
             self.assertIn("module_contracts", project_brief)
             self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), 'def main():\n    return "ready"\n')
 
