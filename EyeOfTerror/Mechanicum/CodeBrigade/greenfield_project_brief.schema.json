@@ -21,6 +21,7 @@
     "architecture_plan",
     "file_tree_plan",
     "module_contracts",
+    "implementation_plan",
     "verification_plan",
     "dependency_plan"
   ],
@@ -100,6 +101,10 @@
     "module_contracts": {
       "type": "array",
       "minItems": 1
+    },
+    "implementation_plan": {
+      "type": "object",
+      "required": ["kind", "module_sequence", "milestones", "anti_stub_policy", "source_files", "test_files"]
     },
     "verification_plan": {
       "type": "object",

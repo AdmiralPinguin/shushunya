@@ -35,7 +35,12 @@
   tool, and local agent tool scaffolds. Greenfield reports now also preserve
   reviewer/repair model guidance and a `greenfield_memory_record` with chosen
   stack, template, dependency outcome, verification attempts, review findings,
-  commands, failure fixes, and reusable learnings.
+  commands, failure fixes, and reusable learnings. The Greenfield
+  ImplementationWorker now records module sequence, requirement-to-file and
+  function/component traces, paired tests, milestones, and anti-stub policy;
+  GreenfieldReview reads generated artifacts back from disk and blocks missing
+  files, empty generated files, placeholder markers, missing module traces, and
+  source-without-test scaffolds.
 - Warmaster gateway HTTP-governor preparation now has a focused live self-test;
   the old monolithic gateway self-test is opt-in through
   `RUN_MONOLITHIC_GATEWAY_SELF_TEST=1` so normal checks do not hang on one huge

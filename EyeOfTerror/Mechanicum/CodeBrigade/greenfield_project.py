@@ -153,6 +153,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         },
         "Review the greenfield architecture plan, identify missing modules, verification gaps, and scaffold risks. Return concise guidance.",
     )
+    implementation_plan = build_implementation_worker_plan(task, template_id, module_contracts, expected_files)
     return {
         "kind": "code_brigade_greenfield_project_brief",
         "contract_version": "eye-mechanicum.v1",
@@ -197,6 +198,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         },
         "file_tree_plan": [{"path": path, "role": "planned_project_file"} for path in expected_files],
         "module_contracts": module_contracts,
+        "implementation_plan": implementation_plan,
         "verification_plan": {
             "commands": verification_commands,
             "run_commands": run_commands,
@@ -215,6 +217,103 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
             "lockfile_policy": "preserve lock files only when package manager generates them inside workspace",
         },
     }
+
+
+def build_implementation_worker_plan(
+    task: str,
+    template_id: str,
+    module_contracts: list[Any],
+    expected_files: list[str],
+) -> dict[str, Any]:
+    source_files = [path for path in expected_files if path.endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css")) and "/tests/" not in f"/{path}" and not Path(path).name.startswith("test_")]
+    test_files = [path for path in expected_files if "test" in Path(path).name.lower() or "/tests/" in f"/{path}"]
+    rows: list[dict[str, Any]] = []
+    for index, contract in enumerate(module_contracts, start=1):
+        if not isinstance(contract, dict):
+            continue
+        path = str(contract.get("path") or "")
+        requirements = [str(item) for item in contract.get("requirements", []) if isinstance(item, str)]
+        row = {
+            "sequence": index,
+            "module": str(contract.get("module") or ""),
+            "path": path,
+            "responsibility": str(contract.get("responsibility") or ""),
+            "requirements": requirements,
+            "requirement_trace": [
+                {
+                    "requirement": requirement,
+                    "file": path,
+                    "function_or_component": infer_symbol_name(path, requirement),
+                    "verification_files": test_files,
+                }
+                for requirement in requirements
+            ],
+            "paired_tests": [test for test in test_files if paired_test_matches(path, test)] or test_files[:1],
+            "status": "planned_for_implementation",
+        }
+        rows.append(row)
+    implementation_guidance = request_greenfield_model_guidance(
+        "GreenfieldImplementationWorker",
+        {
+            "task": task,
+            "template_id": template_id,
+            "module_contracts": module_contracts,
+            "source_files": source_files,
+            "test_files": test_files,
+        },
+        "Plan module-by-module implementation from contracts. Preserve requirement to file/function/test trace and reject empty placeholder work.",
+    )
+    return {
+        "kind": "code_brigade_greenfield_implementation_plan",
+        "contract_version": "eye-mechanicum.v1",
+        "template_id": template_id,
+        "module_sequence": rows,
+        "milestones": [
+            {"name": "scaffold", "exit_gate": "workspace marker, manifests, README, entrypoints, and test folders exist"},
+            {"name": "module_implementation", "exit_gate": "each module contract has source code and requirement trace"},
+            {"name": "verification", "exit_gate": "allowlisted tests/build/smoke commands pass or return a clear blocker"},
+        ],
+        "anti_stub_policy": {
+            "forbidden_markers": ["TODO", "pass #", "NotImplementedError", "placeholder"],
+            "minimum_nonempty_source_files": len(source_files),
+            "minimum_test_files": len(test_files),
+        },
+        "source_files": source_files,
+        "test_files": test_files,
+        "model_guidance": implementation_guidance,
+    }
+
+
+def infer_symbol_name(path: str, requirement: str) -> str:
+    name = Path(path).stem
+    lowered = f"{path} {requirement}".lower()
+    if path.endswith((".html", ".css")):
+        return name
+    if path.endswith((".js", ".jsx", ".ts", ".tsx")):
+        if "component" in lowered or "render" in lowered:
+            return "component"
+        return name
+    if "cli" in lowered:
+        return "main"
+    if "health" in lowered:
+        return "health"
+    if "reply" in lowered:
+        return "build_reply"
+    if "summary" in lowered or "csv" in lowered:
+        return "summarize_rows"
+    if "structured" in lowered:
+        return "build_tool_result"
+    if "describe" in lowered:
+        return "describe"
+    if "ready" in lowered or "result" in lowered:
+        return "run"
+    return name
+
+
+def paired_test_matches(source_path: str, test_path: str) -> bool:
+    source_name = Path(source_path).stem.lower()
+    test_name = Path(test_path).stem.lower()
+    return source_name in test_name or source_name in test_path.lower()
 
 
 def extract_project_spec(task: str) -> dict[str, Any]:
@@ -344,6 +443,8 @@ def validate_greenfield_project_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("greenfield_project_brief file_tree_plan is required")
     if not isinstance(brief.get("module_contracts"), list) or not brief.get("module_contracts"):
         problems.append("greenfield_project_brief module_contracts are required")
+    if not isinstance(brief.get("implementation_plan"), dict) or not brief.get("implementation_plan"):
+        problems.append("greenfield_project_brief implementation_plan is required")
     if not isinstance(brief.get("verification_plan"), dict) or not brief.get("verification_plan"):
         problems.append("greenfield_project_brief verification_plan is required")
     return problems
@@ -409,6 +510,94 @@ def entrypoint_exists(repo: Path, entrypoint: dict[str, Any]) -> bool:
     return bool(path) and (repo / path).exists() and (repo / path).is_file()
 
 
+def semantic_review_greenfield_files(repo: Path, project_brief: dict[str, Any]) -> dict[str, Any]:
+    artifact_contract = project_brief.get("artifact_contract") if isinstance(project_brief.get("artifact_contract"), dict) else {}
+    implementation_plan = project_brief.get("implementation_plan") if isinstance(project_brief.get("implementation_plan"), dict) else {}
+    source_files = [str(path) for path in artifact_contract.get("source_files", []) if isinstance(path, str)]
+    test_files = [str(path) for path in artifact_contract.get("test_files", []) if isinstance(path, str)]
+    manifest_files = [str(path) for path in artifact_contract.get("manifest_files", []) if isinstance(path, str)]
+    forbidden_markers = [str(item).lower() for item in implementation_plan.get("anti_stub_policy", {}).get("forbidden_markers", []) if isinstance(item, str)]
+    rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    warnings: list[str] = []
+    ignored_empty = {GREENFIELD_MARKER}
+    for rel_path in sorted(set(source_files + test_files + manifest_files + ["README.md"])):
+        path = repo / rel_path
+        row: dict[str, Any] = {"path": rel_path, "exists": path.exists() and path.is_file()}
+        if not path.exists() or not path.is_file():
+            row.update({"status": "missing", "size_bytes": 0, "line_count": 0, "forbidden_markers": []})
+            blockers.append(f"semantic review file is missing: {rel_path}")
+            rows.append(row)
+            continue
+        text = path.read_text(encoding="utf-8")
+        stripped = text.strip()
+        markers = [marker for marker in forbidden_markers if marker and marker in text.lower()]
+        status = "ok"
+        if not stripped and rel_path not in ignored_empty and Path(rel_path).name != "__init__.py":
+            status = "blocked"
+            blockers.append(f"semantic review found empty generated file: {rel_path}")
+        elif markers:
+            status = "blocked"
+            blockers.append(f"semantic review found placeholder marker in {rel_path}: {', '.join(markers)}")
+        elif rel_path in source_files and rel_path.endswith(".py"):
+            status = python_source_semantic_status(text)
+            if status == "weak":
+                warnings.append(f"semantic review found very weak Python source: {rel_path}")
+        row.update(
+            {
+                "status": status,
+                "size_bytes": len(text.encode("utf-8")),
+                "line_count": len(text.splitlines()),
+                "forbidden_markers": markers,
+            }
+        )
+        rows.append(row)
+    module_rows: list[dict[str, Any]] = []
+    for contract in project_brief.get("module_contracts", []):
+        if not isinstance(contract, dict):
+            continue
+        rel_path = str(contract.get("path") or "")
+        exists = bool(rel_path) and (repo / rel_path).is_file()
+        requirements = [str(item) for item in contract.get("requirements", []) if isinstance(item, str)]
+        traced = [
+            row
+            for row in implementation_plan.get("module_sequence", [])
+            if isinstance(row, dict) and row.get("path") == rel_path
+        ]
+        if not exists:
+            blockers.append(f"module contract path is missing: {rel_path}")
+        if requirements and not traced:
+            blockers.append(f"module contract has no implementation trace: {rel_path}")
+        module_rows.append({"path": rel_path, "exists": exists, "requirement_count": len(requirements), "trace_count": len(traced)})
+    if source_files and not test_files:
+        blockers.append("semantic review found source files without test files")
+    return {
+        "kind": "code_brigade_greenfield_semantic_review",
+        "contract_version": "eye-mechanicum.v1",
+        "status": "blocked" if blockers else "passed",
+        "source_file_count": len(source_files),
+        "test_file_count": len(test_files),
+        "manifest_file_count": len(manifest_files),
+        "rows": rows,
+        "module_contract_rows": module_rows,
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
+def python_source_semantic_status(text: str) -> str:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return "blocked"
+    executable_nodes = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Assign, ast.Return, ast.Expr, ast.If, ast.For, ast.While, ast.Try))
+    ]
+    return "ok" if len(executable_nodes) >= 2 else "weak"
+
+
 def review_greenfield_project(repo: Path, project_brief: dict[str, Any], dependency_report: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -440,6 +629,10 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
     module_contracts = project_brief.get("module_contracts") if isinstance(project_brief.get("module_contracts"), list) else []
     if len(module_contracts) < 2 and project_brief.get("project_type") not in {"web_app"}:
         blockers.append("non-trivial greenfield project must not collapse to a single module contract")
+    semantic_review = semantic_review_greenfield_files(repo, project_brief)
+    if semantic_review.get("status") == "blocked":
+        blockers.extend(str(item) for item in semantic_review.get("blockers", []))
+    warnings.extend(str(item) for item in semantic_review.get("warnings", []))
     reviewer_guidance = request_greenfield_model_guidance(
         "GreenfieldReviewer",
         {
@@ -449,6 +642,7 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
             "expected_files": expected_files,
             "dependency_status": dependency_report.get("status"),
             "verification_status": verification.get("status"),
+            "semantic_review": semantic_review,
             "blockers": blockers,
             "warnings": warnings,
         },
@@ -464,6 +658,7 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
         "module_contract_count": len(module_contracts),
         "dependency_status": dependency_report.get("status", ""),
         "verification_status": verification.get("status", ""),
+        "semantic_review": semantic_review,
         "blockers": blockers,
         "warnings": warnings,
         "model_guidance": reviewer_guidance,
@@ -537,6 +732,8 @@ def build_greenfield_memory_record(
         "review_status": greenfield_review.get("status", ""),
         "review_blockers": greenfield_review.get("blockers", []),
         "review_warnings": greenfield_review.get("warnings", []),
+        "semantic_review_status": greenfield_review.get("semantic_review", {}).get("status", ""),
+        "semantic_review_blockers": greenfield_review.get("semantic_review", {}).get("blockers", []),
         "commands": {
             "install": project_brief.get("dependency_plan", {}).get("install_commands", []),
             "run": project_brief.get("run_commands", []),
@@ -635,6 +832,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         "architecture_plan": project_brief.get("architecture_plan", {}) if isinstance(project_brief, dict) else {},
         "file_tree_plan": project_brief.get("file_tree_plan", []) if isinstance(project_brief, dict) else [],
         "module_contracts": project_brief.get("module_contracts", []) if isinstance(project_brief, dict) else [],
+        "implementation_plan": project_brief.get("implementation_plan", {}) if isinstance(project_brief, dict) else {},
         "dependency_plan": project_brief.get("dependency_plan", {}) if isinstance(project_brief, dict) else {},
         "verification_plan": project_brief.get("verification_plan", {}) if isinstance(project_brief, dict) else {},
         "dependency_report": dependency_report,

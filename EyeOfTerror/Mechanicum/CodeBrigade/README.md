@@ -147,8 +147,13 @@ templates cover `python_cli_basic`, `python_fastapi_service`, `python_library`,
 and `local_agent_tool`; each records stack, entrypoints, expected files, install
 commands, run commands, verification commands, artifact contract, workspace
 policy, definition of done, architecture plan, file tree plan, module contracts,
-dependency plan, common failure fixes, and model-brain guidance. Guarded
-inference for
+implementation plan, dependency plan, common failure fixes, and model-brain
+guidance. The implementation plan records module order, requirement-to-file and
+function/component trace rows, paired tests, milestones, source/test file lists,
+and an anti-stub policy. Greenfield review reads generated artifacts back from
+disk and records a semantic review that blocks missing files, empty generated
+files, placeholder markers, missing module traces, and source-without-test
+scaffolds. Guarded inference for
 existing repositories remains intentionally narrow: it only accepts explicit
 backtick-delimited file paths and edit literals for simple replacement or
 Python add-function operations.

@@ -171,14 +171,40 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
             project_brief = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
+            self.assertEqual(project_brief["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
+            self.assertTrue(project_brief["implementation_plan"]["module_sequence"])
             memory = report["execution_result"]["greenfield_project"]["greenfield_memory_record"]
             self.assertEqual(memory["kind"], "code_brigade_greenfield_memory_record")
             self.assertEqual(memory["template_id"], project_brief["template_id"])
+            self.assertEqual(memory["semantic_review_status"], "passed")
             self.assertTrue(memory["reusable_learnings"])
             review = report["execution_result"]["greenfield_project"]["greenfield_review"]
             self.assertIn("model_guidance", review)
-            self.assertIn("module_contracts", project_brief)
-            self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), 'def main():\n    return "ready"\n')
+            self.assertEqual(review["semantic_review"]["status"], "passed")
+
+    def test_project_creation_blocks_placeholder_semantics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(
+                repo,
+                "Создай новый минимальный python проект `demo`.\nCERAXIA_PROJECT:\n"
+                + json.dumps(
+                    {
+                        "summary": "placeholder demo",
+                        "files": [
+                            {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                            {"path": "app.py", "content": "def main():\n    # TODO replace generated placeholder\n    return \"ready\"\n"},
+                            {"path": "test_app.py", "content": "import unittest\nimport app\n\n\nclass AppTests(unittest.TestCase):\n    def test_main(self):\n        self.assertEqual(app.main(), \"ready\")\n"},
+                        ],
+                        "verification_commands": ["python -m unittest test_app.py"],
+                    }
+                ),
+            )
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "blocked", report)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "blocked")
+            self.assertTrue(any("placeholder marker" in item for item in review["semantic_review"]["blockers"]))
 
     def test_project_creation_mode_blocks_nonempty_unowned_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

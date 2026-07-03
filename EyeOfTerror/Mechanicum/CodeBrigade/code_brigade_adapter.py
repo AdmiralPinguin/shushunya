@@ -735,6 +735,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         if greenfield:
             report["greenfield_project_brief"] = greenfield.get("greenfield_project_brief", {})
             report["greenfield_architecture_plan"] = greenfield.get("architecture_plan", {})
+            report["greenfield_implementation_plan"] = greenfield.get("implementation_plan", {})
             report["greenfield_dependency_plan"] = greenfield.get("dependency_plan", {})
             report["greenfield_verification_plan"] = greenfield.get("verification_plan", {})
             report["greenfield_memory_record"] = greenfield.get("greenfield_memory_record", {})
