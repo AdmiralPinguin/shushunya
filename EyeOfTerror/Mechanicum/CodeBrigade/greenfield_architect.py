@@ -200,7 +200,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         "dependency_plan": {
             "package_manager": stack.get("package_manager", "none"),
             "install_commands": payload.get("install_commands", []),
-            "manifest_files": [path for path in expected_files if Path(path).name in {"pyproject.toml", "requirements.txt", "package.json"}],
+            "manifest_files": [path for path in expected_files if Path(path).name in {"pyproject.toml", "requirements.txt", "package.json", "build.gradle", "settings.gradle", "gradle.properties"}],
             "lockfile_policy": "preserve lock files only when package manager generates them inside workspace",
             "dependency_strategy": {
                 "package_manager_required": stack.get("package_manager", "none") != "none",

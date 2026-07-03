@@ -10,6 +10,9 @@ from typing import Any
 
 
 LOCKFILE_NAMES = {"requirements.lock", "uv.lock", "poetry.lock", "Pipfile.lock", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock"}
+PYTHON_MANIFESTS = {"pyproject.toml", "requirements.txt", "setup.cfg", "setup.py"}
+NODE_MANIFESTS = {"package.json"}
+ANDROID_MANIFESTS = {"build.gradle", "settings.gradle", "gradle.properties"}
 
 
 def file_sha256(path: Path) -> str:
@@ -45,6 +48,17 @@ def dependency_manager_status(package_manager: str) -> dict[str, Any]:
     return {"package_manager": package_manager, "required": True, "binary": binary, "available": bool(path), "path": path or ""}
 
 
+def manifest_ecosystem(rel_path: str) -> str:
+    name = Path(rel_path).name
+    if name in PYTHON_MANIFESTS:
+        return "python"
+    if name in NODE_MANIFESTS:
+        return "node"
+    if name in ANDROID_MANIFESTS:
+        return "android"
+    return "unknown"
+
+
 def command_stays_inside_workspace(repo: Path, command: str) -> bool:
     try:
         tokens = shlex.split(command)
@@ -74,8 +88,18 @@ def run_dependency_worker(repo: Path, project_brief: dict[str, Any]) -> dict[str
     warnings: list[str] = []
     for rel_path in manifest_files:
         path = repo / rel_path
-        rows.append({"path": rel_path, "exists": path.exists() and path.is_file(), "size_bytes": path.stat().st_size if path.exists() and path.is_file() else 0})
-        if not path.exists() or not path.is_file():
+        exists = path.exists() and path.is_file()
+        rows.append(
+            {
+                "path": rel_path,
+                "exists": exists,
+                "status": "present" if exists else "missing",
+                "ecosystem": manifest_ecosystem(rel_path),
+                "size_bytes": path.stat().st_size if exists else 0,
+                "sha256": file_sha256(path) if exists else "",
+            }
+        )
+        if not exists:
             blockers.append(f"dependency manifest is missing: {rel_path}")
     if manager_status["required"] and not manager_status["available"] and install_commands:
         blockers.append(f"package manager is unavailable: {package_manager}")
@@ -119,6 +143,13 @@ def run_dependency_worker(repo: Path, project_brief: dict[str, Any]) -> dict[str
         status = "not_required"
     else:
         status = "manifest_recorded"
+    manifest_status = "complete" if rows and all(row["exists"] for row in rows) else "not_required" if not rows else "blocked"
+    install_policy_evidence = {
+        "explicit_install_requested": bool(install_commands),
+        "allowlisted_command_count": sum(1 for row in command_results if row.get("status") in {"passed", "failed"}),
+        "blocked_command_count": sum(1 for row in command_results if row.get("status") == "blocked"),
+        "execution_policy": "only explicit allowlisted install commands inside greenfield workspace",
+    }
     return {
         "kind": "code_brigade_greenfield_dependency_report",
         "contract_version": "eye-mechanicum.v1",
@@ -126,13 +157,17 @@ def run_dependency_worker(repo: Path, project_brief: dict[str, Any]) -> dict[str
         "package_manager": package_manager,
         "manager_status": manager_status,
         "manifest_files": rows,
+        "manifest_status": manifest_status,
+        "manifest_count": len(rows),
         "install_commands": install_commands,
         "command_results": command_results,
+        "install_policy_evidence": install_policy_evidence,
         "lockfile_policy": str(dependency_plan.get("lockfile_policy") or ""),
         "dependency_strategy": dependency_plan.get("dependency_strategy", {}),
         "lockfiles_before": lockfiles_before,
         "lockfiles_after": lockfiles_after,
         "new_lockfiles": new_lockfiles,
+        "lockfile_status": "new_lockfiles_recorded" if new_lockfiles else "unchanged",
         "blockers": blockers,
         "warnings": warnings,
     }

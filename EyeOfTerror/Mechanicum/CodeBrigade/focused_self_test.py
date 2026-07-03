@@ -354,8 +354,16 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(report["package_manager"], "npm")
             self.assertEqual(report["manager_status"]["binary"], "npm")
             self.assertIn("package.json", [row["path"] for row in report["manifest_files"]])
+            package_manifest = next(row for row in report["manifest_files"] if row["path"] == "package.json")
+            self.assertEqual(package_manifest["status"], "present")
+            self.assertEqual(package_manifest["ecosystem"], "node")
+            self.assertTrue(package_manifest["sha256"])
+            self.assertEqual(report["manifest_status"], "complete")
+            self.assertEqual(report["manifest_count"], 1)
             self.assertEqual(report["dependency_strategy"]["install_default"], "record_manifest_only")
+            self.assertFalse(report["install_policy_evidence"]["explicit_install_requested"])
             self.assertEqual(report["new_lockfiles"], [])
+            self.assertEqual(report["lockfile_status"], "unchanged")
 
     def test_greenfield_dependency_worker_blocks_workspace_escape_install(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -371,6 +379,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             report = run_dependency_worker(repo, project)
             self.assertEqual(report["status"], "blocked", report)
             self.assertTrue(any("outside workspace" in item for item in report["blockers"]))
+            self.assertEqual(report["install_policy_evidence"]["blocked_command_count"], 1)
+            self.assertEqual(report["manifest_status"], "complete")
 
     def test_project_creation_mode_blocks_nonempty_unowned_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
