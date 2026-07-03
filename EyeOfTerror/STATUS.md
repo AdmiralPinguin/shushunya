@@ -43,6 +43,9 @@
   reruns, and semantic stop reasons now live in `greenfield_verification_worker.py`
   and run memory records, repaired-file history, command history, review
   findings, and reusable learnings now live in `greenfield_memory_worker.py`
+  while ScaffoldWorker workspace policy checks, file normalization, directory
+  creation, generated file writes, rollback, operation reports, and patch
+  manifests now live in `greenfield_scaffold_worker.py`
   instead of being buried in the greenfield orchestrator. The template registry now covers Python CLI, FastAPI,
   Python library, Vite frontend, static site, Telegram bot, data-processing
   tool, and local agent tool scaffolds. Greenfield reports now also preserve

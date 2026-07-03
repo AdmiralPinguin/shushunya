@@ -1,48 +1,19 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import ast
-import hashlib
 import json
 import re
 from pathlib import Path
 from typing import Any
 
 from execution_contract import build_blocked_execution_result, build_implemented_execution_result, build_patch_manifest
-from execution_preflight import is_repo_relative_path
 from greenfield_architect import build_greenfield_project_brief
 from greenfield_dependency_worker import run_dependency_worker
 from greenfield_memory_worker import build_greenfield_memory_record
 from greenfield_review_worker import forbidden_placeholder_markers_found, review_greenfield_project
+from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
 from greenfield_templates import GREENFIELD_MARKER, PROJECT_TYPES
 from greenfield_verification_worker import run_greenfield_verification_loop
-
-
-def file_sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def repo_entries(repo: Path) -> list[Path]:
-    if not repo.exists() or not repo.is_dir():
-        return []
-    return [path for path in repo.iterdir() if path.name not in {".git", "__pycache__"}]
-
-
-def greenfield_workspace_status(repo: Path) -> dict[str, Any]:
-    entries = repo_entries(repo)
-    marker = repo / GREENFIELD_MARKER
-    owned = marker.exists() and marker.is_file()
-    return {
-        "kind": "code_brigade_greenfield_workspace_status",
-        "repo_path": str(repo),
-        "repo_exists": repo.exists(),
-        "repo_is_dir": repo.is_dir(),
-        "marker": GREENFIELD_MARKER,
-        "owned_by_ceraxia": owned,
-        "top_level_entry_count": len(entries),
-        "top_level_entries": sorted(path.name for path in entries)[:40],
-        "greenfield_allowed": repo.exists() and repo.is_dir() and (owned or len(entries) == 0),
-    }
 
 
 def extract_project_spec(task: str) -> dict[str, Any]:
@@ -119,29 +90,6 @@ def infer_minimal_project_spec(task: str) -> dict[str, Any]:
     }
 
 
-def normalize_project_file_rows(files: Any) -> list[dict[str, str]]:
-    if not isinstance(files, list):
-        raise ValueError("project files must be a list")
-    rows: list[dict[str, str]] = []
-    for index, item in enumerate(files):
-        if not isinstance(item, dict):
-            raise ValueError(f"project file {index} must be an object")
-        rel_path = str(item.get("path") or "").strip()
-        content = item.get("content")
-        if not is_repo_relative_path(rel_path):
-            raise ValueError(f"project file path must be repo-relative: {rel_path}")
-        if Path(rel_path).parts and Path(rel_path).parts[0] in {".git", "__pycache__"}:
-            raise ValueError(f"project file path targets forbidden workspace metadata: {rel_path}")
-        if not isinstance(content, str):
-            raise ValueError(f"project file content must be a string: {rel_path}")
-        if rel_path.endswith(".py"):
-            ast.parse(content)
-        rows.append({"path": rel_path, "content": content})
-    if not rows:
-        raise ValueError("project file list is empty")
-    return rows
-
-
 def validate_greenfield_project_brief(brief: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if brief.get("kind") != "code_brigade_greenfield_project_brief":
@@ -201,46 +149,11 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         rows = normalize_project_file_rows(files)
     except (ValueError, SyntaxError, json.JSONDecodeError) as exc:
         return build_blocked_execution_result([str(exc)], workspace)
-    operation_results: list[dict[str, Any]] = []
-    changed_files: list[str] = []
-    originals: dict[Path, str | None] = {}
-    try:
-        for index, row in enumerate(rows):
-            rel_path = row["path"]
-            path = repo / rel_path
-            before_hash = file_sha256(path) if path.exists() and path.is_file() and not path.is_symlink() else ""
-            if path.exists() and not path.is_file():
-                raise ValueError(f"project file target exists and is not a file: {rel_path}")
-            if path.exists() and not workspace["owned_by_ceraxia"] and rel_path != GREENFIELD_MARKER:
-                raise ValueError(f"project file target already exists in unowned greenfield workspace: {rel_path}")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            originals[path] = path.read_text(encoding="utf-8") if path.exists() else None
-            path.write_text(row["content"], encoding="utf-8")
-            after_hash = file_sha256(path)
-            changed_files.append(rel_path)
-            operation_results.append(
-                {
-                    "index": index,
-                    "operation": "greenfield_create_or_update_file",
-                    "path": rel_path,
-                    "status": "applied",
-                    "before_sha256": before_hash,
-                    "after_sha256": after_hash,
-                }
-            )
-    except Exception as exc:
-        for path, original in originals.items():
-            if original is None:
-                path.unlink(missing_ok=True)
-            else:
-                path.write_text(original, encoding="utf-8")
-        return build_blocked_execution_result(
-            [str(exc)],
-            workspace,
-            f"rolled back {len(originals)} greenfield files",
-            operation_results,
-            build_patch_manifest([], operation_results, f"rolled back {len(originals)} greenfield files"),
-        )
+    scaffold_report = scaffold_greenfield_files(repo, rows, workspace)
+    if scaffold_report.get("status") != "implemented":
+        return scaffold_report
+    operation_results = scaffold_report.get("operation_results", []) if isinstance(scaffold_report.get("operation_results"), list) else []
+    changed_files = [str(path) for path in scaffold_report.get("changed_files", []) if isinstance(path, str)]
     dependency_report = run_dependency_worker(repo, project_brief)
     commands = spec.get("verification_commands") if isinstance(spec.get("verification_commands"), list) else []
     verification_loop = run_greenfield_verification_loop(repo, [str(command) for command in commands if isinstance(command, str)], project_brief)
@@ -252,7 +165,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         f"created {len(changed_files)} greenfield project files from {spec.get('source')}",
         workspace,
         operation_results,
-        build_patch_manifest(changed_files, operation_results, ""),
+        scaffold_report.get("patch_manifest", build_patch_manifest(changed_files, operation_results, "")),
     )
     result["greenfield_project"] = {
         "kind": "code_brigade_greenfield_project_result",

@@ -14,6 +14,7 @@ from greenfield_feature_worker import infer_acceptance_features
 from greenfield_memory_worker import build_greenfield_memory_record
 from greenfield_project import build_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_review_worker import python_source_semantic_status
+from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
 from greenfield_verification_worker import verification_failure_signature
 from greenfield_templates import available_templates
 from self_test import valid_brief
@@ -276,6 +277,22 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(memory["kind"], "code_brigade_greenfield_memory_record")
         self.assertEqual(memory["repaired_files"], ["README.md"])
         self.assertTrue(memory["reusable_learnings"])
+
+    def test_greenfield_scaffold_worker_writes_files_and_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            rows = normalize_project_file_rows(
+                [
+                    {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                    {"path": "pkg/app.py", "content": "def run():\n    return 'ready'\n"},
+                    {"path": "tests/test_app.py", "content": "import unittest\n"},
+                ]
+            )
+            report = scaffold_greenfield_files(repo, rows, greenfield_workspace_status(repo))
+            self.assertEqual(report["status"], "implemented", report)
+            self.assertTrue((repo / ".ceraxia_greenfield_workspace").exists())
+            self.assertTrue((repo / "pkg/app.py").exists())
+            self.assertIn("pkg/app.py", report["changed_files"])
 
     def test_greenfield_verification_loop_repairs_missing_template_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
