@@ -6,11 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from greenfield_architect import request_greenfield_model_guidance
+from greenfield_implementation_worker import execute_module_synthesis_contracts
 from verification_adapter import run_verification_commands
 
 
-def repair_guidance_for_verification(project_brief: dict[str, Any], verification: dict[str, Any], signature: str) -> dict[str, Any]:
-    return request_greenfield_model_guidance(
+def repair_guidance_for_verification(project_brief: dict[str, Any], verification: dict[str, Any], signature: str, request_guidance=request_greenfield_model_guidance) -> dict[str, Any]:
+    return request_guidance(
         "GreenfieldRepairWorker",
         {
             "project_name": project_brief.get("project_name"),
@@ -21,6 +22,20 @@ def repair_guidance_for_verification(project_brief: dict[str, Any], verification
             "common_failure_fixes": project_brief.get("template_contract", {}).get("common_failure_fixes", []),
         },
         "Given the failed greenfield verification output, propose a bounded repair hypothesis or a blocker. Do not invent unrelated scope.",
+    )
+
+
+def apply_greenfield_synthesis_repair(repo: Path, project_brief: dict[str, Any], verification: dict[str, Any], signature: str, request_guidance=request_greenfield_model_guidance) -> dict[str, Any]:
+    return execute_module_synthesis_contracts(
+        repo,
+        project_brief,
+        request_guidance,
+        synthesis_stage="verification_repair",
+        verification_context={
+            "status": verification.get("status", ""),
+            "failure_signature": signature,
+            "results": verification.get("results", []),
+        },
     )
 
 
@@ -139,7 +154,7 @@ def verification_loop_result(
     }
 
 
-def run_greenfield_verification_loop(repo: Path, commands: list[str], project_brief: dict[str, Any], max_cycles: int = 2) -> dict[str, Any]:
+def run_greenfield_verification_loop(repo: Path, commands: list[str], project_brief: dict[str, Any], max_cycles: int = 2, request_guidance=request_greenfield_model_guidance) -> dict[str, Any]:
     attempts: list[dict[str, Any]] = []
     previous_signature = ""
     final_verification: dict[str, Any] = {}
@@ -153,8 +168,27 @@ def run_greenfield_verification_loop(repo: Path, commands: list[str], project_br
         if signature and signature == previous_signature:
             attempts.append({"cycle": cycle, "status": verification.get("status", ""), "failure_signature": signature, "repair_guidance": {}, "repair_execution": {"status": "skipped_repeat_failure", "repaired_files": [], "blockers": ["same verification failure repeats"]}})
             return verification_loop_result("blocked", attempts, verification, "same verification failure repeats", repeated_signature=True)
-        repair_guidance = repair_guidance_for_verification(project_brief, verification, signature)
+        repair_guidance = repair_guidance_for_verification(project_brief, verification, signature, request_guidance)
         repair_execution = apply_greenfield_repair(repo, project_brief, verification)
+        if repair_execution.get("status") != "applied":
+            synthesis_repair = apply_greenfield_synthesis_repair(repo, project_brief, verification, signature, request_guidance)
+            repair_execution = {
+                "kind": "code_brigade_greenfield_repair_execution",
+                "contract_version": "eye-mechanicum.v1",
+                "status": "applied" if synthesis_repair.get("status") == "applied" else "not_applicable",
+                "repair_strategy": "module_synthesis_repair",
+                "repaired_files": [{"path": path, "repair": "verification_repair_module_synthesis"} for path in synthesis_repair.get("changed_files", []) if isinstance(path, str)],
+                "blockers": [
+                    *[str(item) for item in repair_execution.get("blockers", []) if isinstance(item, str)],
+                    *[
+                        f"{row.get('path')}: {'; '.join(str(item) for item in row.get('blockers', []) if isinstance(item, str))}"
+                        for row in synthesis_repair.get("rows", [])
+                        if isinstance(row, dict) and row.get("blockers")
+                    ],
+                ],
+                "verification_status_before": verification.get("status", ""),
+                "synthesis_repair_report": synthesis_repair,
+            }
         attempts.append(
             {
                 "cycle": cycle,

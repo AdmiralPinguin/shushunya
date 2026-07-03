@@ -467,6 +467,55 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(any(row["path"] == "repair_demo/core.py" for row in repair["repaired_files"]))
             self.assertTrue((repo / "repair_demo/core.py").exists())
 
+    def test_greenfield_verification_loop_repairs_failed_module_with_synthesis(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай новый CLI проект `synthesis-repair-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "app.py", "content": "def main():\n    return 'broken'\n"},
+                        {
+                            "path": "test_app.py",
+                            "content": "import unittest\nimport app\n\nclass AppTests(unittest.TestCase):\n    def test_main(self):\n        self.assertEqual(app.main(), 'ready')\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_app.py"],
+                    "module_contracts": [{"module": "app", "path": "app.py", "responsibility": "return ready", "requirements": ["return ready"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                contract = payload.get("module_synthesis_contract", {})
+                if not contract:
+                    return {"ok": True, "status": "answered", "content": "{\"hypothesis\":\"repair app.py from failing assertion\"}"}
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "path": contract["path"],
+                            "content": "def main():\n    return 'ready'\n",
+                            "requirements_satisfied": contract["requirements"],
+                            "tests_to_update": contract["paired_tests"],
+                            "notes": "fixed from verification context",
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2, request_guidance=guidance)
+            self.assertEqual(loop["status"], "passed", loop)
+            self.assertEqual(loop["stop_condition_evidence"]["reason"], "verification passed")
+            repair = loop["attempts"][0]["repair_execution"]
+            self.assertEqual(repair["repair_strategy"], "module_synthesis_repair")
+            self.assertEqual(repair["synthesis_repair_report"]["synthesis_stage"], "verification_repair")
+            self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "def main():\n    return 'ready'\n")
+
     def test_greenfield_verification_loop_records_repeated_failure_stop_condition(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

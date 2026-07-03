@@ -53,6 +53,11 @@ def build_greenfield_memory_record(
         for row in (attempt.get("repaired_files", []) if isinstance(attempt.get("repaired_files"), list) else [])
         if isinstance(row, dict) and row.get("path")
     ]
+    synthesis_repair_attempts = [
+        attempt
+        for attempt in repair_attempts
+        if attempt.get("repair_strategy") == "module_synthesis_repair"
+    ]
     feature_ids = _feature_ids(project_brief)
     dod_status = _definition_of_done_status(project_brief, verification_loop, greenfield_review)
     return {
@@ -85,6 +90,7 @@ def build_greenfield_memory_record(
         "verification_stop_condition_evidence": verification_loop.get("stop_condition_evidence", {}),
         "verification_attempt_count": len(verification_loop.get("attempts", [])) if isinstance(verification_loop.get("attempts"), list) else 0,
         "repair_attempt_count": len(repair_attempts),
+        "synthesis_repair_attempt_count": len(synthesis_repair_attempts),
         "repaired_files": repaired_files,
         "review_status": greenfield_review.get("status", ""),
         "review_blockers": greenfield_review.get("blockers", []),

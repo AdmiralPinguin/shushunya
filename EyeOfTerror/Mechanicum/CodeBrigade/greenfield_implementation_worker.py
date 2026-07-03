@@ -262,6 +262,9 @@ def execute_module_synthesis_contracts(
     repo: Path,
     project_brief: dict[str, Any],
     request_guidance: GuidanceFn | None = None,
+    *,
+    synthesis_stage: str = "initial_module_synthesis",
+    verification_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     implementation_plan = project_brief.get("implementation_plan") if isinstance(project_brief.get("implementation_plan"), dict) else {}
     module_sequence = implementation_plan.get("module_sequence") if isinstance(implementation_plan.get("module_sequence"), list) else []
@@ -281,6 +284,7 @@ def execute_module_synthesis_contracts(
         row: dict[str, Any] = {
             "module": str(module.get("module") or ""),
             "path": rel_path,
+            "synthesis_stage": synthesis_stage,
             "status": "skipped",
             "model_guidance_status": "not_requested",
             "blockers": [],
@@ -304,8 +308,14 @@ def execute_module_synthesis_contracts(
                 "template_id": project_brief.get("template_id"),
                 "module_synthesis_contract": synthesis_contract,
                 "existing_content": target.read_text(encoding="utf-8") if target.exists() and target.is_file() else "",
+                "verification_context": verification_context or {},
             },
-            "Implement this single module synthesis contract. Return JSON only with path, content, requirements_satisfied, tests_to_update, and notes.",
+            (
+                "Repair this single module using the verification failure context. Return JSON only with path, content, "
+                "requirements_satisfied, tests_to_update, and notes. Preserve the module contract and do not edit unrelated files."
+                if synthesis_stage == "verification_repair"
+                else "Implement this single module synthesis contract. Return JSON only with path, content, requirements_satisfied, tests_to_update, and notes."
+            ),
         )
         row["model_guidance_status"] = str(guidance.get("status") or "")
         row["model_guidance_ok"] = bool(guidance.get("ok"))
@@ -367,6 +377,8 @@ def execute_module_synthesis_contracts(
     return {
         "kind": "code_brigade_greenfield_module_synthesis_report",
         "contract_version": "eye-mechanicum.v1",
+        "synthesis_stage": synthesis_stage,
+        "verification_context_status": str((verification_context or {}).get("status") or ""),
         "status": status,
         "module_count": len(rows),
         "applied_count": applied_count,
