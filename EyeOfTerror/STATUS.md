@@ -40,13 +40,16 @@
   function/component traces, paired tests, milestones, and anti-stub policy;
   it also implements recognized task-derived features instead of returning only
   generic `ready` scaffolds, starting with Python CLI calculator behavior,
-  argument parsing, arithmetic tests, and division-by-zero rejection;
+  argument parsing, arithmetic tests, and division-by-zero rejection, and now
+  static browser todo-list behavior with DOM controls, add/complete/delete
+  logic, localStorage persistence, module contracts, and structure tests;
   GreenfieldArchitect now writes first-class plan artifacts
   `architecture_plan.json`, `file_tree_plan.json`, `module_contracts.json`, and
   `verification_plan.json` into generated projects;
   GreenfieldReview reads generated artifacts back from disk and blocks missing
   files, empty generated files, placeholder markers, missing module traces, and
-  source-without-test scaffolds. The greenfield verification loop can now apply
+  source-without-test scaffolds while avoiding false positives for domain words
+  such as todo-list applications. The greenfield verification loop can now apply
   bounded repairs before rerunning: it restores missing files only from the
   selected template contract and adds missing README command blocks when those
   commands are declared in the project brief. DependencyWorker now records

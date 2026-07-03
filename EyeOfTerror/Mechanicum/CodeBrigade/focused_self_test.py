@@ -8,7 +8,7 @@ from pathlib import Path
 
 import code_brigade_adapter
 from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_diagnostic_repair_request
-from greenfield_project import build_greenfield_project_brief, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
+from greenfield_project import build_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_templates import available_templates
 from self_test import valid_brief
 
@@ -219,6 +219,10 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["semantic_review"]["status"], "blocked")
             self.assertTrue(any("placeholder marker" in item for item in review["semantic_review"]["blockers"]))
 
+    def test_placeholder_marker_does_not_confuse_todo_domain_word(self) -> None:
+        self.assertEqual(forbidden_placeholder_markers_found("function addTodo() { return true; }", ["TODO"]), [])
+        self.assertEqual(forbidden_placeholder_markers_found("# TODO replace this generated placeholder", ["TODO", "placeholder"]), ["TODO", "placeholder"])
+
     def test_greenfield_verification_loop_repairs_missing_template_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -312,6 +316,26 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(verification["status"], "passed", verification)
             self.assertEqual(report["execution_result"]["greenfield_project"]["greenfield_review"]["semantic_review"]["status"], "passed")
 
+    def test_project_creation_static_todo_site_implements_task_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай static frontend website todo list `todo-demo` со списком задач.")
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "static_site")
+            self.assertTrue(any(feature["id"] == "todo_list" for feature in project["acceptance_features"]))
+            self.assertIn("persist tasks in localStorage", json.dumps(project["module_contracts"], ensure_ascii=False))
+            self.assertIn("todo-input", (repo / "index.html").read_text(encoding="utf-8"))
+            self.assertIn("function addTodo", (repo / "app.js").read_text(encoding="utf-8"))
+            self.assertIn("function renderTodos", (repo / "app.js").read_text(encoding="utf-8"))
+            self.assertIn("test_script_implements_todo_behaviors", (repo / "tests/test_static_site.py").read_text(encoding="utf-8"))
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
     def test_greenfield_project_brief_contract_and_templates(self) -> None:
         cli = build_greenfield_project_brief("Создай новый CLI проект `forge-tool`.")
         api = build_greenfield_project_brief("Создай FastAPI backend service `api-demo`.")
@@ -348,6 +372,9 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn("pyproject.toml", data_tool["expected_files"])
         self.assertIn("pyproject.toml", agent_tool["expected_files"])
         self.assertIn("tests/test_static_site.py", static["expected_files"])
+        todo = build_greenfield_project_brief("Создай static frontend website todo list `todo-demo`.")
+        self.assertTrue(any(feature["id"] == "todo_list" for feature in todo["acceptance_features"]))
+        self.assertGreaterEqual(len(todo["module_contracts"]), 3)
 
 
 if __name__ == "__main__":

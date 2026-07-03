@@ -108,6 +108,15 @@ def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
                 "operations": ["add", "subtract", "multiply", "divide"],
             }
         )
+    if any(word in lowered for word in ("todo", "to-do", "task list", "задачник", "список задач", "список дел", "тасклист")):
+        features.append(
+            {
+                "id": "todo_list",
+                "kind": "functional_requirement",
+                "description": "provide a browser todo list with add, complete, delete, and persistent state behavior",
+                "operations": ["add", "complete", "delete", "persist"],
+            }
+        )
     return features
 
 
@@ -123,6 +132,8 @@ def apply_task_feature_overrides(
         return files, module_contracts, []
     if template_id == "python_cli_basic" and any(feature.get("id") == "calculator_operations" for feature in features):
         return apply_python_cli_calculator_feature(project_name, files), calculator_module_contracts(project_name), features
+    if template_id == "static_site" and any(feature.get("id") == "todo_list" for feature in features):
+        return apply_static_site_todo_feature(project_name, files), static_todo_module_contracts(), features
     return files, module_contracts, features
 
 
@@ -218,6 +229,161 @@ def calculator_module_contracts(project_name: str) -> list[dict[str, Any]]:
             "path": "tests/test_core.py",
             "responsibility": "calculator behavior verification",
             "requirements": ["prove arithmetic operations", "prove division by zero rejection"],
+        },
+    ]
+
+
+def apply_static_site_todo_feature(project_name: str, files: list[Any]) -> list[Any]:
+    html = (
+        "<!doctype html>\n"
+        "<html lang=\"en\">\n"
+        "<head>\n"
+        "  <meta charset=\"utf-8\">\n"
+        "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+        f"  <title>{project_name} Todo</title>\n"
+        "  <link rel=\"stylesheet\" href=\"styles.css\">\n"
+        "</head>\n"
+        "<body>\n"
+        "  <main class=\"todo-shell\">\n"
+        "    <header>\n"
+        f"      <h1>{project_name} Todo</h1>\n"
+        "      <p id=\"status\">ready</p>\n"
+        "    </header>\n"
+        "    <form id=\"todo-form\" class=\"todo-form\">\n"
+        "      <label for=\"todo-input\">New task</label>\n"
+        "      <div class=\"todo-entry\">\n"
+        "        <input id=\"todo-input\" name=\"todo\" type=\"text\" autocomplete=\"off\" required>\n"
+        "        <button id=\"todo-add\" type=\"submit\">Add</button>\n"
+        "      </div>\n"
+        "    </form>\n"
+        "    <ul id=\"todo-list\" class=\"todo-list\" aria-live=\"polite\"></ul>\n"
+        "  </main>\n"
+        "  <script src=\"app.js\"></script>\n"
+        "</body>\n"
+        "</html>\n"
+    )
+    css = (
+        ":root { color-scheme: light; font-family: Inter, system-ui, sans-serif; }\n"
+        "body { margin: 0; background: #f3f5f8; color: #17191f; }\n"
+        ".todo-shell { max-width: 720px; margin: 8vh auto; padding: 24px; }\n"
+        "header { margin-bottom: 24px; }\n"
+        "h1 { margin: 0 0 8px; font-size: 2rem; font-weight: 700; }\n"
+        "#status { margin: 0; color: #526070; }\n"
+        ".todo-form { display: grid; gap: 8px; margin-bottom: 20px; }\n"
+        ".todo-entry { display: grid; grid-template-columns: 1fr auto; gap: 8px; }\n"
+        "input, button { font: inherit; border-radius: 6px; border: 1px solid #c8d0da; padding: 10px 12px; }\n"
+        "button { background: #243b55; color: white; cursor: pointer; }\n"
+        ".todo-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }\n"
+        ".todo-item { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; background: white; border: 1px solid #d8dee8; border-radius: 8px; padding: 10px; }\n"
+        ".todo-item.is-complete span { color: #657386; text-decoration: line-through; }\n"
+    )
+    js = (
+        "const STORAGE_KEY = 'ceraxia.todo.items';\n"
+        "let todos = loadTodos();\n\n"
+        "function loadTodos() {\n"
+        "  try {\n"
+        "    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');\n"
+        "  } catch (_error) {\n"
+        "    return [];\n"
+        "  }\n"
+        "}\n\n"
+        "function saveTodos() {\n"
+        "  localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));\n"
+        "}\n\n"
+        "function addTodo(title) {\n"
+        "  const cleanTitle = title.trim();\n"
+        "  if (!cleanTitle) return null;\n"
+        "  const item = { id: Date.now().toString(36), title: cleanTitle, complete: false };\n"
+        "  todos = [...todos, item];\n"
+        "  saveTodos();\n"
+        "  renderTodos();\n"
+        "  return item;\n"
+        "}\n\n"
+        "function toggleTodo(id) {\n"
+        "  todos = todos.map((item) => item.id === id ? { ...item, complete: !item.complete } : item);\n"
+        "  saveTodos();\n"
+        "  renderTodos();\n"
+        "}\n\n"
+        "function deleteTodo(id) {\n"
+        "  todos = todos.filter((item) => item.id !== id);\n"
+        "  saveTodos();\n"
+        "  renderTodos();\n"
+        "}\n\n"
+        "function renderTodos() {\n"
+        "  const list = document.querySelector('#todo-list');\n"
+        "  list.innerHTML = '';\n"
+        "  for (const item of todos) {\n"
+        "    const row = document.createElement('li');\n"
+        "    row.className = `todo-item${item.complete ? ' is-complete' : ''}`;\n"
+        "    row.dataset.todoId = item.id;\n"
+        "    row.innerHTML = `<input type=\"checkbox\" ${item.complete ? 'checked' : ''} aria-label=\"Complete task\"><span></span><button type=\"button\">Delete</button>`;\n"
+        "    row.querySelector('span').textContent = item.title;\n"
+        "    row.querySelector('input').addEventListener('change', () => toggleTodo(item.id));\n"
+        "    row.querySelector('button').addEventListener('click', () => deleteTodo(item.id));\n"
+        "    list.appendChild(row);\n"
+        "  }\n"
+        "  document.querySelector('#status').textContent = `${todos.length} task${todos.length === 1 ? '' : 's'}`;\n"
+        "}\n\n"
+        "document.querySelector('#todo-form').addEventListener('submit', (event) => {\n"
+        "  event.preventDefault();\n"
+        "  const input = document.querySelector('#todo-input');\n"
+        "  addTodo(input.value);\n"
+        "  input.value = '';\n"
+        "  input.focus();\n"
+        "});\n\n"
+        "renderTodos();\n"
+    )
+    tests = (
+        "from pathlib import Path\n"
+        "import unittest\n\n\n"
+        "class StaticTodoSiteTests(unittest.TestCase):\n"
+        "    def test_entrypoint_contains_todo_ui(self):\n"
+        "        html = Path('index.html').read_text(encoding='utf-8')\n"
+        "        self.assertIn('todo-form', html)\n"
+        "        self.assertIn('todo-input', html)\n"
+        "        self.assertIn('todo-list', html)\n"
+        "        self.assertIn('styles.css', html)\n"
+        "        self.assertIn('app.js', html)\n\n"
+        "    def test_script_implements_todo_behaviors(self):\n"
+        "        script = Path('app.js').read_text(encoding='utf-8')\n"
+        "        self.assertIn('function addTodo', script)\n"
+        "        self.assertIn('function toggleTodo', script)\n"
+        "        self.assertIn('function deleteTodo', script)\n"
+        "        self.assertIn('function renderTodos', script)\n"
+        "        self.assertIn('localStorage', script)\n"
+    )
+    readme = (
+        f"# {project_name}\n\nA browser todo list with add, complete, delete, and local persistence behavior.\n\n"
+        "## Run\n\n```bash\nopen index.html\n```\n\n"
+        "## Test\n\n```bash\npython -m unittest discover tests\n```\n"
+    )
+    rows = replace_project_file(files, "index.html", html)
+    rows = replace_project_file(rows, "styles.css", css)
+    rows = replace_project_file(rows, "app.js", js)
+    rows = replace_project_file(rows, "tests/test_static_site.py", tests)
+    rows = replace_project_file(rows, "README.md", readme)
+    return rows
+
+
+def static_todo_module_contracts() -> list[dict[str, Any]]:
+    return [
+        {
+            "module": "static_page",
+            "path": "index.html",
+            "responsibility": "todo application document and accessible controls",
+            "requirements": ["load stylesheet and script", "provide task input", "provide todo list region"],
+        },
+        {
+            "module": "todo_script",
+            "path": "app.js",
+            "responsibility": "browser todo behavior",
+            "requirements": ["add tasks", "toggle completed state", "delete tasks", "persist tasks in localStorage", "render current list"],
+        },
+        {
+            "module": "tests.test_static_site",
+            "path": "tests/test_static_site.py",
+            "responsibility": "static todo structure and behavior-contract verification",
+            "requirements": ["prove required HTML controls", "prove JavaScript exposes todo behaviors"],
         },
     ]
 
@@ -769,7 +935,7 @@ def semantic_review_greenfield_files(repo: Path, project_brief: dict[str, Any]) 
     source_files = [str(path) for path in artifact_contract.get("source_files", []) if isinstance(path, str)]
     test_files = [str(path) for path in artifact_contract.get("test_files", []) if isinstance(path, str)]
     manifest_files = [str(path) for path in artifact_contract.get("manifest_files", []) if isinstance(path, str)]
-    forbidden_markers = [str(item).lower() for item in implementation_plan.get("anti_stub_policy", {}).get("forbidden_markers", []) if isinstance(item, str)]
+    forbidden_markers = [str(item) for item in implementation_plan.get("anti_stub_policy", {}).get("forbidden_markers", []) if isinstance(item, str)]
     rows: list[dict[str, Any]] = []
     blockers: list[str] = []
     warnings: list[str] = []
@@ -784,7 +950,7 @@ def semantic_review_greenfield_files(repo: Path, project_brief: dict[str, Any]) 
             continue
         text = path.read_text(encoding="utf-8")
         stripped = text.strip()
-        markers = [marker for marker in forbidden_markers if marker and marker in text.lower()]
+        markers = forbidden_placeholder_markers_found(text, forbidden_markers)
         status = "ok"
         if not stripped and rel_path not in ignored_empty and Path(rel_path).name != "__init__.py":
             status = "blocked"
@@ -849,6 +1015,21 @@ def python_source_semantic_status(text: str) -> str:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Assign, ast.Return, ast.Expr, ast.If, ast.For, ast.While, ast.Try))
     ]
     return "ok" if len(executable_nodes) >= 2 else "weak"
+
+
+def forbidden_placeholder_markers_found(text: str, markers: list[str]) -> list[str]:
+    found: list[str] = []
+    lowered = text.lower()
+    for marker in markers:
+        if not marker:
+            continue
+        if marker == "TODO":
+            if re.search(r"(?<![A-Za-z0-9_])TODO(?![A-Za-z0-9_])", text):
+                found.append(marker)
+            continue
+        if marker.lower() in lowered:
+            found.append(marker)
+    return found
 
 
 def review_greenfield_project(repo: Path, project_brief: dict[str, Any], dependency_report: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
