@@ -162,8 +162,9 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
   import-like evidence for common source files; Python still has the deeper
   AST symbol/import path used for local dependency edges.
 - `repo_survey.json.generic_import_edges` resolves local relative JS/TS/TSX/JSX
-  imports, barrel exports, and side-effect imports to repository files and
-  passes them through the CodeBrigade handoff.
+  imports, barrel exports, side-effect imports, and Go module imports rooted in
+  `go.mod` to repository files, then passes them through the CodeBrigade
+  handoff.
 - `repo_survey.json.caller_candidates` groups reverse dependency callers for
   candidate files, and `contract_surface_candidates` flags likely API, schema,
   route, endpoint, or contract files for compatibility review.

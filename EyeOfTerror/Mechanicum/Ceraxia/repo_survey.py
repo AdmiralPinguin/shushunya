@@ -340,6 +340,68 @@ def build_generic_import_edges(source_summaries: list[dict[str, Any]], rel_to_pa
     return edges[:80]
 
 
+def go_module_path(root: Path) -> str:
+    go_mod = root / "go.mod"
+    try:
+        text = go_mod.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+    match = re.search(r"(?m)^\s*module\s+([^\s]+)", text)
+    return match.group(1).strip() if match else ""
+
+
+def go_import_paths(path: Path) -> list[str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    text = re.sub(r"//.*", "", text)
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    imports: list[str] = []
+    for match in re.finditer(r"(?m)^\s*import\s+(?:[._A-Za-z][\w.]*\s+)?\"([^\"]+)\"", text):
+        imports.append(match.group(1))
+    for block in re.finditer(r"(?ms)^\s*import\s*\((.*?)\)", text):
+        for match in re.finditer(r"(?:^|\s)(?:[._A-Za-z][\w.]*\s+)?\"([^\"]+)\"", block.group(1)):
+            imports.append(match.group(1))
+    return unique(imports)
+
+
+def build_go_module_import_edges(go_files: list[Path], root: Path) -> list[dict[str, str]]:
+    module = go_module_path(root)
+    if not module:
+        return []
+    package_files: dict[str, list[str]] = {}
+    for path in go_files:
+        rel = str(path.relative_to(root))
+        package_dir = str(path.relative_to(root).parent)
+        if package_dir == ".":
+            package_dir = ""
+        package_files.setdefault(package_dir, []).append(rel)
+    for rows in package_files.values():
+        rows.sort(key=lambda rel: (is_test_file(Path(rel)), rel))
+    edges: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for path in sorted(go_files, key=lambda item: str(item.relative_to(root))):
+        source = str(path.relative_to(root))
+        for imported in go_import_paths(path):
+            if imported == module:
+                package_dir = ""
+            elif imported.startswith(module + "/"):
+                package_dir = imported.removeprefix(module + "/").strip("/")
+            else:
+                continue
+            targets = package_files.get(package_dir) or []
+            target = next((item for item in targets if item != source), "")
+            if not target:
+                continue
+            key = (source, imported, target)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append({"source": source, "import": imported, "target": target, "language": "go"})
+    return edges[:80]
+
+
 def build_recommended_read_order(
     existing_path_hints: list[str],
     entrypoints: list[str],
@@ -732,7 +794,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     source_summaries_truncated = len(all_source_files) > MAX_SOURCE_SUMMARY_FILES
     source_summaries = [generic_source_summary(path, root) for path in all_source_files[:MAX_SOURCE_SUMMARY_FILES]]
     python_edges = build_local_import_edges(python_symbols, python_files, root)
-    generic_edges = build_generic_import_edges(source_summaries, rel_to_path, root)
+    go_edges = build_go_module_import_edges([path for path in all_source_files if path.suffix.lower() == ".go"], root)
+    generic_edges = unique_edges([*build_generic_import_edges(source_summaries, rel_to_path, root), *go_edges])[:120]
     dependency_edges = unique_edges([*python_edges, *generic_edges])[:120]
     reverse_dependency_index = build_reverse_dependency_index(dependency_edges)
     test_coverage_links = build_test_coverage_links(dependency_edges)

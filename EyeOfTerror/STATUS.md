@@ -25,6 +25,9 @@
 - Ceraxia review gate now treats matched surface verification output with
   diagnostic failure semantics, including `no_tests_ran`, as failed surface
   evidence even when the command/report claims `passed`.
+- Ceraxia repository survey now resolves Go module imports rooted in `go.mod`
+  into local dependency edges, so CodeBrigade handoffs and reverse dependency
+  indexes can see Go package impact instead of only JS/TS/Python edges.
 - Ceraxia/CodeBrigade handoffs expose implementation work packages, package
   surface coverage, package statuses, and review blocking for blocked packages.
 - CodeBrigade real source mutation for medium/high-risk tasks now requires a

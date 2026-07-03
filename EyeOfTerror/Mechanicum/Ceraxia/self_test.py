@@ -69,6 +69,17 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             (repo / "barrel.ts").write_text("export { api } from './api';\n", encoding="utf-8")
             (repo / "client.ts").write_text("import { api } from './api';\nexport function client() { return api(); }\n", encoding="utf-8")
             (repo / "client.spec.ts").write_text("import './setup';\nimport { client } from './client';\ntest('client', () => client());\n", encoding="utf-8")
+            (repo / "go.mod").write_text("module example.com/demo\n\ngo 1.22\n", encoding="utf-8")
+            (repo / "cmd" / "demo").mkdir(parents=True)
+            (repo / "internal" / "auth").mkdir(parents=True)
+            (repo / "cmd" / "demo" / "main.go").write_text(
+                'package main\n\nimport "example.com/demo/internal/auth"\n\nfunc main() { _ = auth.Enabled() }\n',
+                encoding="utf-8",
+            )
+            (repo / "internal" / "auth" / "auth.go").write_text(
+                "package auth\n\nfunc Enabled() bool { return true }\n",
+                encoding="utf-8",
+            )
             (repo / "package.json").write_text(
                 json.dumps({"name": "demo", "dependencies": {"axios": "^1.0.0"}, "devDependencies": {"vitest": "^1.0.0"}, "scripts": {"test": "vitest"}}),
                 encoding="utf-8",
@@ -287,9 +298,21 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any(edge["source"] == "client.ts" and edge["target"] == "api.ts" for edge in implementation_plan["dependency_edges_to_check"]))
             self.assertTrue(any(edge["source"] == "barrel.ts" and edge["target"] == "api.ts" for edge in implementation_plan["dependency_edges_to_check"]))
             self.assertTrue(any(edge["source"] == "client.spec.ts" and edge["target"] == "setup.ts" for edge in implementation_plan["dependency_edges_to_check"]))
+            self.assertTrue(
+                any(
+                    edge["source"] == "cmd/demo/main.go" and edge["target"] == "internal/auth/auth.go"
+                    for edge in implementation_plan["dependency_edges_to_check"]
+                )
+            )
             self.assertTrue(any(edge["source"] == "client.ts" and edge["target"] == "api.ts" for edge in implementation_plan["generic_dependency_edges_to_check"]))
             self.assertTrue(any(edge["source"] == "barrel.ts" and edge["target"] == "api.ts" for edge in implementation_plan["generic_dependency_edges_to_check"]))
             self.assertTrue(any(edge["source"] == "client.spec.ts" and edge["target"] == "setup.ts" for edge in implementation_plan["generic_dependency_edges_to_check"]))
+            self.assertTrue(
+                any(
+                    edge["source"] == "cmd/demo/main.go" and edge["target"] == "internal/auth/auth.go"
+                    for edge in implementation_plan["generic_dependency_edges_to_check"]
+                )
+            )
             self.assertIn("test_app.py", implementation_plan["reverse_dependency_index"]["app.py"])
             self.assertTrue(any(link["test"] == "test_app.py" and link["target"] == "app.py" for link in implementation_plan["test_coverage_links"]))
             self.assertTrue(any(row["target"] == "app.py" and "test_app.py" in row["callers"] for row in implementation_plan["caller_candidates"]))
@@ -319,15 +342,18 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(any(edge["source"] == "client.ts" and edge["target"] == "api.ts" for edge in survey["local_import_edges"]))
             self.assertTrue(any(edge["source"] == "barrel.ts" and edge["target"] == "api.ts" for edge in survey["local_import_edges"]))
             self.assertTrue(any(edge["source"] == "client.spec.ts" and edge["target"] == "setup.ts" for edge in survey["local_import_edges"]))
+            self.assertTrue(any(edge["source"] == "cmd/demo/main.go" and edge["target"] == "internal/auth/auth.go" for edge in survey["local_import_edges"]))
             self.assertTrue(any(edge["source"] == "client.ts" and edge["target"] == "api.ts" for edge in survey["generic_import_edges"]))
             self.assertTrue(any(edge["source"] == "barrel.ts" and edge["target"] == "api.ts" for edge in survey["generic_import_edges"]))
             self.assertTrue(any(edge["source"] == "client.spec.ts" and edge["target"] == "setup.ts" for edge in survey["generic_import_edges"]))
+            self.assertTrue(any(edge["source"] == "cmd/demo/main.go" and edge["target"] == "internal/auth/auth.go" for edge in survey["generic_import_edges"]))
             self.assertIn("test_app.py", survey["reverse_dependency_index"]["app.py"])
             self.assertTrue(any(link["test"] == "test_app.py" and link["target"] == "app.py" for link in survey["test_coverage_links"]))
             self.assertTrue(any(row["target"] == "app.py" and "test_app.py" in row["callers"] for row in survey["caller_candidates"]))
             self.assertTrue(any(row["path"] == "api.ts" for row in survey["contract_surface_candidates"]))
             self.assertTrue(any(row["path"] == "package.json" and row["script_count"] == 1 for row in survey["package_manifest_candidates"]))
             self.assertTrue(any(row["path"] == "pyproject.toml" and row["dev_dependency_count"] == 1 for row in survey["package_manifest_candidates"]))
+            self.assertTrue(any(row["path"] == "go.mod" and row["package_name"] == "example.com/demo" for row in survey["package_manifest_candidates"]))
             cartography = survey["repository_cartography"]
             self.assertEqual(cartography["kind"], "ceraxia_repository_cartography")
             self.assertIn("app.py", cartography["entrypoints"])
@@ -646,6 +672,42 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     for row in brief["repo_survey_evidence"]["repository_cartography"]["missing_python_import_hints"]
                 )
             )
+
+    def test_repo_survey_resolves_go_module_block_import_edges(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "go.mod").write_text("module example.com/forge\n\ngo 1.22\n", encoding="utf-8")
+            (repo / "cmd" / "forge").mkdir(parents=True)
+            (repo / "internal" / "audit").mkdir(parents=True)
+            (repo / "pkg" / "config").mkdir(parents=True)
+            (repo / "cmd" / "forge" / "main.go").write_text(
+                "package main\n\n"
+                "import (\n"
+                '    audit "example.com/forge/internal/audit"\n'
+                '    _ "example.com/forge/pkg/config"\n'
+                ")\n\n"
+                "func main() { _ = audit.Ready() }\n",
+                encoding="utf-8",
+            )
+            (repo / "internal" / "audit" / "audit.go").write_text("package audit\n\nfunc Ready() bool { return true }\n", encoding="utf-8")
+            (repo / "pkg" / "config" / "config.go").write_text("package config\n\nconst Name = \"forge\"\n", encoding="utf-8")
+            packet = build_planning_packet({"task": "Inspect Go package dependency impact", "repo_path": str(repo)})
+            survey = build_repo_survey(packet)
+            self.assertTrue(
+                any(
+                    edge["source"] == "cmd/forge/main.go" and edge["target"] == "internal/audit/audit.go"
+                    for edge in survey["local_import_edges"]
+                )
+            )
+            self.assertTrue(
+                any(
+                    edge["source"] == "cmd/forge/main.go" and edge["target"] == "pkg/config/config.go"
+                    for edge in survey["generic_import_edges"]
+                )
+            )
+            self.assertIn("cmd/forge/main.go", survey["reverse_dependency_index"]["internal/audit/audit.go"])
+            self.assertTrue(any(row["path"] == "go.mod" and row["package_name"] == "example.com/forge" for row in survey["package_manifest_candidates"]))
 
     def test_missing_repo_blocks_before_claiming_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
