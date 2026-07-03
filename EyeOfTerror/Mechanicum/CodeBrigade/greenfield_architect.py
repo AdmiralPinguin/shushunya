@@ -102,6 +102,8 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         ]
     else:
         module_contracts = template["module_contracts"]
+    base_file_paths = [str(item.get("path") or "") for item in files if isinstance(item, dict) and item.get("path")]
+    base_contract_paths = [str(item.get("path") or "") for item in module_contracts if isinstance(item, dict) and item.get("path")]
     files, module_contracts, acceptance_features = apply_task_feature_overrides(task, template_id, project_name, files, module_contracts)
     if any(feature.get("id") == "calculator_operations" for feature in acceptance_features):
         package = project_name.replace("-", "_")
@@ -128,6 +130,15 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         "Review the greenfield architecture plan, identify missing modules, verification gaps, and scaffold risks. Return concise guidance.",
     )
     implementation_plan = build_implementation_worker_plan(task, template_id, module_contracts, expected_files)
+    implementation_feature_report = build_implementation_feature_report(
+        task,
+        template_id,
+        acceptance_features,
+        base_file_paths,
+        files,
+        base_contract_paths,
+        module_contracts,
+    )
     brief = {
         "kind": "code_brigade_greenfield_project_brief",
         "contract_version": "eye-mechanicum.v1",
@@ -174,6 +185,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         "file_tree_plan": [{"path": path, "role": "planned_project_file"} for path in expected_files],
         "module_contracts": module_contracts,
         "implementation_plan": implementation_plan,
+        "implementation_feature_report": implementation_feature_report,
         "verification_plan": {
             "commands": verification_commands,
             "run_commands": run_commands,
@@ -200,6 +212,48 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
     }
     attach_greenfield_plan_artifacts(brief)
     return brief
+
+
+def build_implementation_feature_report(
+    task: str,
+    template_id: str,
+    acceptance_features: list[dict[str, Any]],
+    base_file_paths: list[str],
+    files: list[Any],
+    base_contract_paths: list[str],
+    module_contracts: list[Any],
+) -> dict[str, Any]:
+    generated_paths = [str(item.get("path") or "") for item in files if isinstance(item, dict) and item.get("path")]
+    contract_paths = [str(item.get("path") or "") for item in module_contracts if isinstance(item, dict) and item.get("path")]
+    feature_ids = [str(feature.get("id") or "") for feature in acceptance_features if isinstance(feature, dict) and feature.get("id")]
+    changed_contract_paths = sorted(set(contract_paths) - set(base_contract_paths)) or sorted(set(contract_paths) if feature_ids else [])
+    changed_file_paths = sorted(set(generated_paths) - set(base_file_paths))
+    if feature_ids and not changed_file_paths:
+        changed_file_paths = sorted(set(generated_paths))
+    guidance = request_greenfield_model_guidance(
+        "GreenfieldImplementationWorker",
+        {
+            "task": task,
+            "template_id": template_id,
+            "recognized_feature_ids": feature_ids,
+            "generated_file_paths": generated_paths,
+            "changed_file_paths": changed_file_paths,
+            "module_contract_paths": contract_paths,
+        },
+        "Review task-derived implementation features. Identify missing behavior, generated files, paired tests, and risks before verification.",
+    )
+    return {
+        "kind": "code_brigade_greenfield_implementation_feature_report",
+        "contract_version": "eye-mechanicum.v1",
+        "template_id": template_id,
+        "recognized_feature_ids": feature_ids,
+        "feature_count": len(feature_ids),
+        "features": acceptance_features,
+        "changed_file_paths": changed_file_paths,
+        "changed_module_contract_paths": changed_contract_paths,
+        "implementation_strategy": "task-derived feature override" if feature_ids else "template scaffold without task-derived override",
+        "model_guidance": guidance,
+    }
 
 
 def attach_greenfield_plan_artifacts(brief: dict[str, Any]) -> None:

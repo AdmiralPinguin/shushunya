@@ -64,7 +64,10 @@
   server;
   GreenfieldArchitect now writes first-class plan artifacts
   `architecture_plan.json`, `file_tree_plan.json`, `module_contracts.json`, and
-  `verification_plan.json` into generated projects;
+  `verification_plan.json` into generated projects; ImplementationWorker now
+  also records an `implementation_feature_report` with recognized task-derived
+  feature ids, changed generated files, changed module contracts, strategy, and
+  role-specific model guidance;
   GreenfieldReview reads generated artifacts back from disk and blocks missing
   files, empty generated files, placeholder markers, missing module traces, and
   source-without-test scaffolds while avoiding false positives for domain words

@@ -192,6 +192,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             project_brief = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
             self.assertEqual(project_brief["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
+            self.assertEqual(project_brief["implementation_feature_report"]["kind"], "code_brigade_greenfield_implementation_feature_report")
             self.assertTrue(project_brief["implementation_plan"]["module_sequence"])
             memory = report["execution_result"]["greenfield_project"]["greenfield_memory_record"]
             self.assertEqual(memory["kind"], "code_brigade_greenfield_memory_record")
@@ -243,6 +244,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(project["kind"], "code_brigade_greenfield_project_brief")
         self.assertEqual(project["architecture_plan"]["selected_template"], "python_cli_basic")
         self.assertEqual(project["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
+        self.assertEqual(project["implementation_feature_report"]["kind"], "code_brigade_greenfield_implementation_feature_report")
         self.assertIn("architecture_plan.json", project["expected_files"])
         self.assertTrue(project["implementation_plan"]["module_sequence"])
 
@@ -380,6 +382,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
             self.assertEqual(project["template_id"], "python_cli_basic")
             self.assertTrue(any(feature["id"] == "calculator_operations" for feature in project["acceptance_features"]))
+            self.assertIn("calculator_operations", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertIn("model_guidance", project["implementation_feature_report"])
             self.assertIn("reject division by zero", json.dumps(project["module_contracts"], ensure_ascii=False))
             self.assertIn("calculate", (repo / "calc_tool/core.py").read_text(encoding="utf-8"))
             self.assertIn("test_division_by_zero_is_rejected", (repo / "tests/test_core.py").read_text(encoding="utf-8"))
@@ -396,6 +400,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
             self.assertEqual(project["template_id"], "static_site")
             self.assertTrue(any(feature["id"] == "todo_list" for feature in project["acceptance_features"]))
+            self.assertIn("todo_list", project["implementation_feature_report"]["recognized_feature_ids"])
             self.assertIn("persist tasks in localStorage", json.dumps(project["module_contracts"], ensure_ascii=False))
             self.assertIn("todo-input", (repo / "index.html").read_text(encoding="utf-8"))
             self.assertIn("function addTodo", (repo / "app.js").read_text(encoding="utf-8"))
@@ -416,6 +421,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
             self.assertEqual(project["template_id"], "python_fastapi_service")
             self.assertTrue(any(feature["id"] == "notes_api" for feature in project["acceptance_features"]))
+            self.assertIn("notes_api", project["implementation_feature_report"]["recognized_feature_ids"])
             self.assertIn("reject empty note titles", json.dumps(project["module_contracts"], ensure_ascii=False))
             source = (repo / "app/main.py").read_text(encoding="utf-8")
             self.assertIn("def create_note", source)
