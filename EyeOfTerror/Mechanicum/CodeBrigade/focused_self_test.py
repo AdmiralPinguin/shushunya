@@ -236,8 +236,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(python_source_semantic_status("def run():\n    return 'ready'\n\nif True:\n    run()\n"), "ok")
 
     def test_greenfield_feature_worker_detects_task_features(self) -> None:
-        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator csv summary")}
-        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "csv_summary"})
+        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator csv summary local agent tool router")}
+        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "csv_summary", "local_agent_command_router"})
 
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.")
@@ -458,6 +458,33 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["semantic_review"]["status"], "passed", review)
             self.assertEqual(review["status"], "passed", review)
 
+    def test_project_creation_local_agent_tool_implements_command_router_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай local agent tool router `agent-demo` для команд status echo summarize.")
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "local_agent_tool")
+            self.assertTrue(any(feature["id"] == "local_agent_command_router" for feature in project["acceptance_features"]))
+            self.assertIn("local_agent_command_router", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertIn("reject unknown actions", json.dumps(project["module_contracts"], ensure_ascii=False))
+            source = (repo / "agent_demo/contract.py").read_text(encoding="utf-8")
+            self.assertIn("ACTION_REGISTRY", source)
+            self.assertIn("def available_actions", source)
+            self.assertIn("unsupported action", source)
+            cli = (repo / "agent_demo/tool.py").read_text(encoding="utf-8")
+            self.assertIn("json.loads", cli)
+            self.assertIn("build_parser", cli)
+            tests = (repo / "tests/test_contract.py").read_text(encoding="utf-8")
+            self.assertIn("test_unknown_action_is_rejected", tests)
+            self.assertIn("test_cli_prints_json", tests)
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
     def test_greenfield_project_brief_contract_and_templates(self) -> None:
         cli = build_greenfield_project_brief("Создай новый CLI проект `forge-tool`.")
         api = build_greenfield_project_brief("Создай FastAPI backend service `api-demo`.")
@@ -503,6 +530,9 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         csv_summary = build_greenfield_project_brief("Создай data csv summary tool `csv-demo`.")
         self.assertTrue(any(feature["id"] == "csv_summary" for feature in csv_summary["acceptance_features"]))
         self.assertGreaterEqual(len(csv_summary["module_contracts"]), 3)
+        agent_router = build_greenfield_project_brief("Создай local agent tool router `agent-demo`.")
+        self.assertTrue(any(feature["id"] == "local_agent_command_router" for feature in agent_router["acceptance_features"]))
+        self.assertGreaterEqual(len(agent_router["module_contracts"]), 3)
 
 
 if __name__ == "__main__":

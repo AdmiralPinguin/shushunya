@@ -43,6 +43,15 @@ def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
                 "operations": ["count_rows", "list_columns", "sum_numeric_columns", "average_numeric_columns"],
             }
         )
+    if any(word in lowered for word in ("tool router", "command router", "agent tool", "local agent tool", "локальный агент", "инструмент агента", "роутер команд")):
+        features.append(
+            {
+                "id": "local_agent_command_router",
+                "kind": "functional_requirement",
+                "description": "route named local agent tool actions through a registry, validate JSON payloads, and reject unknown actions",
+                "operations": ["status", "echo", "summarize", "reject_unknown_action"],
+            }
+        )
     return features
 
 
@@ -64,6 +73,8 @@ def apply_task_feature_overrides(
         return apply_fastapi_notes_feature(project_name, files), fastapi_notes_module_contracts(), features
     if template_id == "data_processing_tool" and any(feature.get("id") == "csv_summary" for feature in features):
         return apply_data_processing_csv_summary_feature(project_name, files), csv_summary_module_contracts(project_name), features
+    if template_id == "local_agent_tool" and any(feature.get("id") == "local_agent_command_router" for feature in features):
+        return apply_local_agent_command_router_feature(project_name, files), local_agent_command_router_module_contracts(project_name), features
     return files, module_contracts, features
 
 
@@ -530,5 +541,132 @@ def csv_summary_module_contracts(project_name: str) -> list[dict[str, Any]]:
             "path": "tests/test_processor.py",
             "responsibility": "CSV summary behavior verification",
             "requirements": ["prove row and column summary", "prove numeric sums and averages", "prove non-numeric values are ignored"],
+        },
+    ]
+
+
+def apply_local_agent_command_router_feature(project_name: str, files: list[Any]) -> list[Any]:
+    package = project_name.replace("-", "_")
+    contract = (
+        "from collections.abc import Callable\n"
+        "from typing import Any\n\n\n"
+        "ToolHandler = Callable[[dict[str, Any]], dict[str, Any]]\n\n\n"
+        "def _status(_payload: dict[str, Any]) -> dict[str, Any]:\n"
+        "    return {'status': 'ok', 'capabilities': sorted(ACTION_REGISTRY)}\n\n\n"
+        "def _echo(payload: dict[str, Any]) -> dict[str, Any]:\n"
+        "    message = str(payload.get('message', '')).strip()\n"
+        "    if not message:\n"
+        "        raise ValueError('message is required')\n"
+        "    return {'status': 'ok', 'message': message}\n\n\n"
+        "def _summarize(payload: dict[str, Any]) -> dict[str, Any]:\n"
+        "    text = str(payload.get('text', '')).strip()\n"
+        "    if not text:\n"
+        "        raise ValueError('text is required')\n"
+        "    words = [word for word in text.split() if word]\n"
+        "    return {'status': 'ok', 'characters': len(text), 'words': len(words), 'preview': text[:80]}\n\n\n"
+        "ACTION_REGISTRY: dict[str, ToolHandler] = {\n"
+        "    'status': _status,\n"
+        "    'echo': _echo,\n"
+        "    'summarize': _summarize,\n"
+        "}\n\n\n"
+        "def available_actions() -> list[str]:\n"
+        "    return sorted(ACTION_REGISTRY)\n\n\n"
+        "def build_tool_result(action: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:\n"
+        "    clean_action = action.strip().lower()\n"
+        "    if clean_action not in ACTION_REGISTRY:\n"
+        "        raise ValueError(f'unsupported action: {action}')\n"
+        "    if payload is None:\n"
+        "        payload = {}\n"
+        "    if not isinstance(payload, dict):\n"
+        "        raise TypeError('payload must be a JSON object')\n"
+        "    return ACTION_REGISTRY[clean_action](payload)\n"
+    )
+    tool = (
+        "import argparse\n"
+        "import json\n"
+        "import sys\n\n"
+        "from .contract import available_actions, build_tool_result\n\n\n"
+        "def _load_payload(raw_payload: str) -> dict[str, object]:\n"
+        "    try:\n"
+        "        payload = json.loads(raw_payload)\n"
+        "    except json.JSONDecodeError as exc:\n"
+        "        raise SystemExit(f'invalid JSON payload: {exc}') from exc\n"
+        "    if not isinstance(payload, dict):\n"
+        "        raise SystemExit('payload must be a JSON object')\n"
+        "    return payload\n\n\n"
+        "def build_parser() -> argparse.ArgumentParser:\n"
+        "    parser = argparse.ArgumentParser(description='Run a local agent tool action')\n"
+        "    parser.add_argument('action', nargs='?', default='status', choices=available_actions())\n"
+        "    parser.add_argument('--payload', default='{}', help='JSON object payload for the selected action')\n"
+        "    return parser\n\n\n"
+        "def main(argv: list[str] | None = None) -> None:\n"
+        "    args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)\n"
+        "    result = build_tool_result(args.action, _load_payload(args.payload))\n"
+        "    print(json.dumps(result, ensure_ascii=False, sort_keys=True))\n\n\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"
+    )
+    tests = (
+        f"import json\nimport unittest\n\nfrom {package}.contract import available_actions, build_tool_result\nfrom {package}.tool import main\n\n\n"
+        "class LocalAgentToolTests(unittest.TestCase):\n"
+        "    def test_status_reports_capabilities(self):\n"
+        "        result = build_tool_result('status')\n"
+        "        self.assertEqual(result['status'], 'ok')\n"
+        "        self.assertEqual(result['capabilities'], ['echo', 'status', 'summarize'])\n"
+        "        self.assertEqual(available_actions(), result['capabilities'])\n\n"
+        "    def test_echo_validates_payload(self):\n"
+        "        self.assertEqual(build_tool_result('echo', {'message': ' ping '})['message'], 'ping')\n"
+        "        with self.assertRaises(ValueError):\n"
+        "            build_tool_result('echo', {})\n\n"
+        "    def test_summarize_counts_text(self):\n"
+        "        result = build_tool_result('summarize', {'text': 'alpha beta gamma'})\n"
+        "        self.assertEqual(result['words'], 3)\n"
+        "        self.assertEqual(result['characters'], len('alpha beta gamma'))\n\n"
+        "    def test_unknown_action_is_rejected(self):\n"
+        "        with self.assertRaises(ValueError):\n"
+        "            build_tool_result('delete_everything', {})\n\n"
+        "    def test_cli_prints_json(self):\n"
+        "        from io import StringIO\n"
+        "        import contextlib\n\n"
+        "        output = StringIO()\n"
+        "        with contextlib.redirect_stdout(output):\n"
+        "            main(['echo', '--payload', json.dumps({'message': 'hello'})])\n"
+        "        self.assertEqual(json.loads(output.getvalue())['message'], 'hello')\n"
+    )
+    readme = (
+        f"# {project_name}\n\nA local agent tool with a command router, JSON payload validation, and structured JSON output.\n\n"
+        "## Run\n\n```bash\npython -m "
+        f"{package}.tool status\n```\n\n"
+        "```bash\npython -m "
+        f"{package}.tool echo --payload '{{\"message\":\"hello\"}}'\n```\n\n"
+        "## Test\n\n```bash\npython -m unittest discover tests\n```\n"
+    )
+    rows = replace_project_file(files, f"{package}/contract.py", contract)
+    rows = replace_project_file(rows, f"{package}/tool.py", tool)
+    rows = replace_project_file(rows, "tests/test_contract.py", tests)
+    rows = replace_project_file(rows, "README.md", readme)
+    return rows
+
+
+def local_agent_command_router_module_contracts(project_name: str) -> list[dict[str, Any]]:
+    package = project_name.replace("-", "_")
+    return [
+        {
+            "module": f"{package}.contract",
+            "path": f"{package}/contract.py",
+            "responsibility": "local agent tool action registry and payload validation",
+            "requirements": ["list available actions", "route status action", "route echo action", "route summarize action", "reject unknown actions", "reject invalid payloads"],
+        },
+        {
+            "module": f"{package}.tool",
+            "path": f"{package}/tool.py",
+            "responsibility": "JSON command-line interface for local agent tool actions",
+            "requirements": ["parse action", "parse JSON payload", "print structured JSON result"],
+        },
+        {
+            "module": "tests.test_contract",
+            "path": "tests/test_contract.py",
+            "responsibility": "local agent tool behavior verification",
+            "requirements": ["prove routed actions", "prove validation failures", "prove CLI JSON output"],
         },
     ]
