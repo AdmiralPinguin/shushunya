@@ -4,6 +4,36 @@ from __future__ import annotations
 from typing import Any
 
 
+def _feature_ids(project_brief: dict[str, Any]) -> list[str]:
+    return [
+        str(feature.get("id") or "")
+        for feature in (project_brief.get("acceptance_features", []) if isinstance(project_brief.get("acceptance_features"), list) else [])
+        if isinstance(feature, dict) and feature.get("id")
+    ]
+
+
+def _verification_results(verification_loop: dict[str, Any]) -> list[dict[str, str]]:
+    final_verification = verification_loop.get("final_verification", {})
+    rows = final_verification.get("results", []) if isinstance(final_verification, dict) else []
+    return [
+        {
+            "command": str(row.get("command") or ""),
+            "status": str(row.get("status") or ""),
+        }
+        for row in rows
+        if isinstance(row, dict) and row.get("command")
+    ]
+
+
+def _definition_of_done_status(project_brief: dict[str, Any], verification_loop: dict[str, Any], greenfield_review: dict[str, Any]) -> dict[str, Any]:
+    items = [str(item) for item in project_brief.get("definition_of_done", []) if isinstance(item, str)]
+    passed = verification_loop.get("status") == "passed" and greenfield_review.get("status") == "passed"
+    return {
+        "status": "passed" if passed else "blocked",
+        "items": [{"item": item, "status": "passed" if passed else "needs_review"} for item in items],
+    }
+
+
 def build_greenfield_memory_record(
     project_brief: dict[str, Any],
     dependency_report: dict[str, Any],
@@ -21,6 +51,8 @@ def build_greenfield_memory_record(
         for row in (attempt.get("repaired_files", []) if isinstance(attempt.get("repaired_files"), list) else [])
         if isinstance(row, dict) and row.get("path")
     ]
+    feature_ids = _feature_ids(project_brief)
+    dod_status = _definition_of_done_status(project_brief, verification_loop, greenfield_review)
     return {
         "kind": "code_brigade_greenfield_memory_record",
         "contract_version": "eye-mechanicum.v1",
@@ -28,6 +60,14 @@ def build_greenfield_memory_record(
         "project_type": project_brief.get("project_type", ""),
         "template_id": project_brief.get("template_id", ""),
         "stack": project_brief.get("stack", {}),
+        "acceptance_feature_ids": feature_ids,
+        "acceptance_feature_count": len(feature_ids),
+        "acceptance_feature_coverage": {
+            "status": "covered" if feature_ids and greenfield_review.get("status") == "passed" else "not_applicable" if not feature_ids else "needs_review",
+            "feature_ids": feature_ids,
+            "implementation_strategy": project_brief.get("implementation_feature_report", {}).get("implementation_strategy", ""),
+        },
+        "definition_of_done_status": dod_status,
         "dependency_status": dependency_report.get("status", ""),
         "dependency_blockers": dependency_report.get("blockers", []),
         "dependency_warnings": dependency_report.get("warnings", []),
@@ -43,6 +83,7 @@ def build_greenfield_memory_record(
         "review_warnings": greenfield_review.get("warnings", []),
         "semantic_review_status": greenfield_review.get("semantic_review", {}).get("status", ""),
         "semantic_review_blockers": greenfield_review.get("semantic_review", {}).get("blockers", []),
+        "verification_results": _verification_results(verification_loop),
         "commands": {
             "install": project_brief.get("dependency_plan", {}).get("install_commands", []),
             "run": project_brief.get("run_commands", []),

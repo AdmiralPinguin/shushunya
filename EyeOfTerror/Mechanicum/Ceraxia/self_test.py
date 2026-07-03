@@ -993,7 +993,9 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     "app.py",
                     "architecture_plan.json",
                     "file_tree_plan.json",
+                    "greenfield_memory_record.json",
                     "greenfield_project_brief.json",
+                    "greenfield_run_report.json",
                     "module_contracts.json",
                     "test_app.py",
                     "verification_plan.json",
@@ -1022,6 +1024,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["greenfield_review"]["semantic_review"]["status"], "passed")
             self.assertEqual(worker_report["greenfield_memory_record"]["kind"], "code_brigade_greenfield_memory_record")
+            self.assertEqual(worker_report["greenfield_memory_record"]["definition_of_done_status"]["status"], "passed")
+            run_report = json.loads((repo / "greenfield_run_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(run_report["kind"], "code_brigade_greenfield_run_report")
+            self.assertEqual(run_report["definition_of_done_status"]["status"], "passed")
             project_brief = json.loads((repo / "greenfield_project_brief.json").read_text(encoding="utf-8"))
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
             self.assertEqual(project_brief["project_type"], "cli_tool")

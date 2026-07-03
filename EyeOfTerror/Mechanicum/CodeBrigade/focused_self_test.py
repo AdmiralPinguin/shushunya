@@ -198,7 +198,13 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(memory["kind"], "code_brigade_greenfield_memory_record")
             self.assertEqual(memory["template_id"], project_brief["template_id"])
             self.assertEqual(memory["semantic_review_status"], "passed")
+            self.assertEqual(memory["definition_of_done_status"]["status"], "passed")
             self.assertTrue(memory["reusable_learnings"])
+            self.assertTrue((repo / "greenfield_memory_record.json").exists())
+            self.assertTrue((repo / "greenfield_run_report.json").exists())
+            run_report = json.loads((repo / "greenfield_run_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(run_report["kind"], "code_brigade_greenfield_run_report")
+            self.assertEqual(run_report["definition_of_done_status"]["status"], "passed")
             review = report["execution_result"]["greenfield_project"]["greenfield_review"]
             self.assertIn("model_guidance", review)
             self.assertEqual(review["semantic_review"]["status"], "passed")
@@ -271,13 +277,33 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
 
     def test_greenfield_memory_worker_records_repair_learning(self) -> None:
         memory = build_greenfield_memory_record(
-            {"project_name": "demo", "project_type": "cli_tool", "template_id": "python_cli_basic", "stack": {}, "dependency_plan": {}, "run_commands": ["python -m demo.cli"], "verification_commands": ["python -m unittest"]},
+            {
+                "project_name": "demo",
+                "project_type": "cli_tool",
+                "template_id": "python_cli_basic",
+                "stack": {},
+                "dependency_plan": {},
+                "run_commands": ["python -m demo.cli"],
+                "verification_commands": ["python -m unittest"],
+                "acceptance_features": [{"id": "calculator_operations"}],
+                "implementation_feature_report": {"implementation_strategy": "task-derived feature override"},
+                "definition_of_done": ["tests pass", "README documents commands"],
+            },
             {"status": "not_required", "blockers": [], "warnings": [], "manager_status": {}, "new_lockfiles": []},
-            {"status": "passed", "stop_reason": "verification passed", "attempts": [{"repair_execution": {"repaired_files": [{"path": "README.md"}]}}]},
+            {
+                "status": "passed",
+                "stop_reason": "verification passed",
+                "final_verification": {"results": [{"command": "python -m unittest", "status": "passed"}]},
+                "attempts": [{"repair_execution": {"repaired_files": [{"path": "README.md"}]}}],
+            },
             {"status": "passed", "blockers": [], "warnings": [], "semantic_review": {"status": "passed", "blockers": []}},
         )
         self.assertEqual(memory["kind"], "code_brigade_greenfield_memory_record")
         self.assertEqual(memory["repaired_files"], ["README.md"])
+        self.assertEqual(memory["acceptance_feature_ids"], ["calculator_operations"])
+        self.assertEqual(memory["acceptance_feature_coverage"]["status"], "covered")
+        self.assertEqual(memory["definition_of_done_status"]["status"], "passed")
+        self.assertEqual(memory["verification_results"], [{"command": "python -m unittest", "status": "passed"}])
         self.assertTrue(memory["reusable_learnings"])
 
     def test_greenfield_scaffold_worker_writes_files_and_marker(self) -> None:

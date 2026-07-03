@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -14,6 +15,47 @@ from greenfield_review_worker import forbidden_placeholder_markers_found, review
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
 from greenfield_templates import GREENFIELD_MARKER, PROJECT_TYPES
 from greenfield_verification_worker import run_greenfield_verification_loop
+
+
+def write_greenfield_json_artifact(repo: Path, rel_path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    path = repo / rel_path
+    before = path.read_bytes() if path.exists() else b""
+    content = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    after = content.encode("utf-8")
+    return {
+        "operation": "write_greenfield_report_artifact",
+        "path": rel_path,
+        "status": "applied",
+        "before_sha256": hashlib.sha256(before).hexdigest() if before else "",
+        "after_sha256": hashlib.sha256(after).hexdigest(),
+    }
+
+
+def build_greenfield_run_report(
+    project_brief: dict[str, Any],
+    dependency_report: dict[str, Any],
+    verification_loop: dict[str, Any],
+    greenfield_review: dict[str, Any],
+    memory_record: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "kind": "code_brigade_greenfield_run_report",
+        "contract_version": "eye-mechanicum.v1",
+        "project_name": project_brief.get("project_name", ""),
+        "project_type": project_brief.get("project_type", ""),
+        "template_id": project_brief.get("template_id", ""),
+        "acceptance_feature_ids": memory_record.get("acceptance_feature_ids", []),
+        "definition_of_done_status": memory_record.get("definition_of_done_status", {}),
+        "dependency_status": dependency_report.get("status", ""),
+        "verification_status": verification_loop.get("status", ""),
+        "verification_stop_reason": verification_loop.get("stop_reason", ""),
+        "review_status": greenfield_review.get("status", ""),
+        "semantic_review_status": greenfield_review.get("semantic_review", {}).get("status", ""),
+        "commands": memory_record.get("commands", {}),
+        "reusable_learnings": memory_record.get("reusable_learnings", []),
+    }
 
 
 def extract_project_spec(task: str) -> dict[str, Any]:
@@ -162,6 +204,12 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
     verification = verification_loop.get("final_verification", {}) if isinstance(verification_loop.get("final_verification"), dict) else {}
     greenfield_review = review_greenfield_project(repo, project_brief, dependency_report, verification)
     greenfield_memory_record = build_greenfield_memory_record(project_brief, dependency_report, verification_loop, greenfield_review)
+    greenfield_run_report = build_greenfield_run_report(project_brief, dependency_report, verification_loop, greenfield_review, greenfield_memory_record)
+    for artifact_path, artifact_payload in (
+        ("greenfield_memory_record.json", greenfield_memory_record),
+        ("greenfield_run_report.json", greenfield_run_report),
+    ):
+        operation_results.append(write_greenfield_json_artifact(repo, artifact_path, artifact_payload))
     result = build_implemented_execution_result(
         changed_files,
         f"created {len(changed_files)} greenfield project files from {spec.get('source')}",
@@ -186,6 +234,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         "verification_loop": verification_loop,
         "greenfield_review": greenfield_review,
         "greenfield_memory_record": greenfield_memory_record,
+        "greenfield_run_report": greenfield_run_report,
         "verification": verification,
     }
     result["verification_commands_executed"] = [
