@@ -136,12 +136,18 @@ requests, and switches to `real_execution_adapter_active` only when the explicit
 or guarded inferred patch adapter reports implemented changes. `project_creation`
 is a separate greenfield path: `greenfield_project.py` creates a new project
 inside an empty directory or a directory marked with
-`.ceraxia_greenfield_workspace`, writes the planned file tree from
-`CERAXIA_PROJECT` or a minimal inferred Python scaffold, reruns allowlisted
-verification, and reports the created files through the same patch manifest and
-review gates. Guarded inference for existing repositories remains intentionally
-narrow: it only accepts explicit backtick-delimited file paths and edit literals
-for simple replacement or Python add-function operations.
+`.ceraxia_greenfield_workspace`, writes a contracted
+`greenfield_project_brief.json`, creates the planned file tree from
+`CERAXIA_PROJECT` or deterministic GreenfieldArchitect templates, reruns
+allowlisted verification, and reports the created files through the same patch
+manifest and review gates. The current templates cover `python_cli_basic`,
+`python_fastapi_service`, and `static_site`; each records stack, entrypoints,
+expected files, run commands, verification commands, artifact contract,
+workspace policy, definition of done, architecture plan, file tree plan, module
+contracts, dependency plan, and model-brain guidance. Guarded inference for
+existing repositories remains intentionally narrow: it only accepts explicit
+backtick-delimited file paths and edit literals for simple replacement or
+Python add-function operations.
 Adapter results must satisfy
 `execution_result.schema.json`: status, changed files, patch summary, executed
 verification commands, blockers, rollback notes, and per-operation patch

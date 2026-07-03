@@ -41,7 +41,10 @@ That path routes CodeBrigade through the greenfield project adapter instead of
 the existing-repo repair adapter: the target directory must be empty or already
 marked with `.ceraxia_greenfield_workspace`, `CERAXIA_PROJECT` may provide the
 planned file tree and verification commands, and the resulting run still goes
-through verification, review, readiness, and artifact audit.
+through verification, review, readiness, and artifact audit. When no explicit
+`CERAXIA_PROJECT` is supplied, the deterministic GreenfieldArchitect currently
+selects one of the first templates: Python CLI, FastAPI-like API service, or
+static frontend site.
 
 ## Mechanicum Controller
 

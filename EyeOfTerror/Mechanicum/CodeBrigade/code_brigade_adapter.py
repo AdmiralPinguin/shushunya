@@ -41,6 +41,8 @@ def build_edit_plan(brief: dict[str, Any], implementation_plan: dict[str, Any], 
             from greenfield_project import extract_project_spec, normalize_project_file_rows
 
             project_files = [row["path"] for row in normalize_project_file_rows(extract_project_spec(str(brief.get("task") or "")).get("files"))]
+            if "greenfield_project_brief.json" not in project_files:
+                project_files.append("greenfield_project_brief.json")
             allowed_new_files = list(dict.fromkeys([*(allowed_new_files if isinstance(allowed_new_files, list) else []), *project_files]))
         except Exception:
             allowed_new_files = allowed_new_files if isinstance(allowed_new_files, list) else []
@@ -729,6 +731,12 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         report["code_worker_pipeline"] = code_worker_pipeline
     if "execution_result" in locals():
         report["execution_result"] = execution_result
+        greenfield = execution_result.get("greenfield_project") if isinstance(execution_result.get("greenfield_project"), dict) else {}
+        if greenfield:
+            report["greenfield_project_brief"] = greenfield.get("greenfield_project_brief", {})
+            report["greenfield_architecture_plan"] = greenfield.get("architecture_plan", {})
+            report["greenfield_dependency_plan"] = greenfield.get("dependency_plan", {})
+            report["greenfield_verification_plan"] = greenfield.get("verification_plan", {})
     elif status == "blocked":
         report["execution_result"] = build_blocked_execution_result(notes)
     return report

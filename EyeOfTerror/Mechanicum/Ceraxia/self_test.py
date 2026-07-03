@@ -985,14 +985,18 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertTrue(result["package_ok"], result)
             self.assertTrue(result["ready_for_execution"], result)
             self.assertEqual(result["execution_mode"], "project_creation")
-            self.assertEqual(sorted(path.name for path in repo.iterdir() if path.name != "__pycache__"), [".ceraxia_greenfield_workspace", "app.py", "test_app.py"])
+            self.assertEqual(sorted(path.name for path in repo.iterdir() if path.name != "__pycache__"), [".ceraxia_greenfield_workspace", "app.py", "greenfield_project_brief.json", "test_app.py"])
             run_dir = Path(result["run_dir"])
             worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
             self.assertEqual(worker_report["status"], "implemented")
             self.assertEqual(worker_report["execution_intent"]["mode"], "greenfield_project_creation")
             self.assertEqual(worker_report["edit_plan"]["controller_execution_mode"], "project_creation")
-            self.assertEqual(sorted(worker_report["changed_files"]), [".ceraxia_greenfield_workspace", "app.py", "test_app.py"])
+            self.assertEqual(sorted(worker_report["changed_files"]), [".ceraxia_greenfield_workspace", "app.py", "greenfield_project_brief.json", "test_app.py"])
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
+            project_brief = json.loads((repo / "greenfield_project_brief.json").read_text(encoding="utf-8"))
+            self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
+            self.assertEqual(project_brief["project_type"], "cli_tool")
+            self.assertTrue(project_brief["definition_of_done"])
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "passed")
             self.assertEqual([row["command"] for row in verification["commands_executed"]], ["python -m unittest test_app.py"])
@@ -1001,6 +1005,57 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(review["surface_verification_sufficiency"]["status"], "executed")
             audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
             self.assertEqual(audit["decision"], "passed")
+
+    def test_project_creation_mode_builds_api_service_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "api_project"
+            repo.mkdir()
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="Создай FastAPI backend service `api-demo`.",
+                    repo_path=str(repo),
+                    execution_mode="project_creation",
+                    dry_run=False,
+                    execute_verification=True,
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            self.assertTrue(result["ok"], result)
+            run_dir = Path(result["run_dir"])
+            project_brief = json.loads((repo / "greenfield_project_brief.json").read_text(encoding="utf-8"))
+            self.assertEqual(project_brief["project_type"], "api_service")
+            self.assertEqual(project_brief["template_id"], "python_fastapi_service")
+            self.assertIn("requirements.txt", project_brief["expected_files"])
+            self.assertTrue((repo / "app/main.py").exists())
+            worker_report = json.loads((run_dir / "worker_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(worker_report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
+            review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
+            self.assertEqual(review["decision"], "ready")
+
+    def test_project_creation_mode_builds_static_frontend_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "site_project"
+            repo.mkdir()
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="Создай static frontend website `site-demo`.",
+                    repo_path=str(repo),
+                    execution_mode="project_creation",
+                    dry_run=False,
+                    execute_verification=True,
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            self.assertTrue(result["ok"], result)
+            run_dir = Path(result["run_dir"])
+            project_brief = json.loads((repo / "greenfield_project_brief.json").read_text(encoding="utf-8"))
+            self.assertEqual(project_brief["project_type"], "web_app")
+            self.assertEqual(project_brief["template_id"], "static_site")
+            self.assertIn("index.html", project_brief["expected_files"])
+            self.assertIn("tests/test_static_site.py", project_brief["expected_files"])
+            verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(verification["status"], "passed")
+            self.assertEqual([row["command"] for row in verification["commands_executed"]], ["python -m unittest discover tests"])
 
     def test_review_only_mode_builds_review_package_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -67,6 +67,7 @@ COMPONENTS = {
             "execution_preflight.py",
             "execution_preflight.schema.json",
             "greenfield_project.py",
+            "greenfield_project_brief.schema.json",
             "implementation_brief_contract.py",
             "execution_policy.schema.json",
             "execution_result.schema.json",

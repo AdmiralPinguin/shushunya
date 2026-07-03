@@ -26,6 +26,10 @@
   greenfield project adapter: it can create a new file tree in an empty or
   Ceraxia-marked workspace, run allowlisted verification, and pass the normal
   review/audit pipeline instead of being limited to repairing existing repos.
+  Greenfield runs now write a contracted `greenfield_project_brief.json` with
+  project type, stack, entrypoints, expected files, artifact contract,
+  workspace policy, definition of done, architecture/file/module/dependency/
+  verification plans, and model-brain guidance.
 - Warmaster gateway HTTP-governor preparation now has a focused live self-test;
   the old monolithic gateway self-test is opt-in through
   `RUN_MONOLITHIC_GATEWAY_SELF_TEST=1` so normal checks do not hang on one huge
@@ -49,6 +53,8 @@
   greenfield project creation workspace boundaries; the large historical
   self-test is opt-in from the local Mechanicum check through
   `RUN_FULL_CODE_BRIGADE_SELF_TEST=1`.
+- Ceraxia's fast local check now includes greenfield integration scenarios for
+  Python CLI, FastAPI-like API service, and static frontend site creation.
 - The local Mechanicum check now runs focused Ceraxia slices by default; the
   full Ceraxia suite and handoff field trials are opt-in through
   `RUN_FULL_CERAXIA_SELF_TEST=1` and `RUN_CERAXIA_HANDOFF_FIELD_TRIALS=1`.

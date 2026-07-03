@@ -83,6 +83,20 @@ def project_verification_commands_from_task(task: str) -> list[str]:
     return [str(command).strip() for command in commands if isinstance(command, str) and command.strip()]
 
 
+def inferred_greenfield_verification_commands(task: str) -> list[str]:
+    lowered = task.lower()
+    if any(word in lowered for word in ("static", "frontend", "website", "html", "css", "сайт", "страниц")):
+        return ["python -m unittest discover tests"]
+    if any(word in lowered for word in ("fastapi", "api", "http", "server", "сервер", "апи", "endpoint")):
+        return ["python -m unittest discover tests", "python -m py_compile app/main.py"]
+    project_name = "ceraxia_project"
+    name_match = re.search(r"`([^`/\\]+)`", task)
+    if name_match:
+        project_name = re.sub(r"[^A-Za-z0-9_-]+", "-", name_match.group(1)).strip("-") or project_name
+    module_name = project_name.replace("-", "_")
+    return ["python -m unittest discover tests", f"python -m py_compile {module_name}/core.py {module_name}/cli.py"]
+
+
 def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
     triage = packet.get("task_triage") if isinstance(packet.get("task_triage"), dict) else {}
     task_kinds = set(triage.get("task_kinds", []) if isinstance(triage.get("task_kinds"), list) else [])
@@ -189,6 +203,8 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
     planning_review = packet.get("planning_review_gate") if isinstance(packet.get("planning_review_gate"), dict) else {}
     survey_quality = build_survey_quality_gate(packet, survey)
     project_verification_commands = project_verification_commands_from_task(str(packet.get("task") or ""))
+    if packet.get("execution_mode") == "project_creation" and not project_verification_commands:
+        project_verification_commands = inferred_greenfield_verification_commands(str(packet.get("task") or ""))
     required_verification = dict(verification)
     if packet.get("execution_mode") == "project_creation" and project_verification_commands:
         required_verification["targeted_commands"] = project_verification_commands

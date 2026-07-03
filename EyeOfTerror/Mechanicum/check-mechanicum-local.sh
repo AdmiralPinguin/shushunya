@@ -16,7 +16,7 @@ PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade
 PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade:EyeOfTerror/Mechanicum/CodeBrigade python3 -m unittest EyeOfTerror/Mechanicum/Ceraxia/self_test.py -k full_dry_run_pipeline
 PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade:EyeOfTerror/Mechanicum/CodeBrigade python3 -m unittest EyeOfTerror/Mechanicum/Ceraxia/self_test.py -k go_module_block_import_edges
 PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade:EyeOfTerror/Mechanicum/CodeBrigade python3 -m unittest EyeOfTerror/Mechanicum/Ceraxia/self_test.py -k normalized_dependency_graph
-PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade:EyeOfTerror/Mechanicum/CodeBrigade python3 -m unittest EyeOfTerror/Mechanicum/Ceraxia/self_test.py -k project_creation_mode_builds_greenfield_project
+PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade:EyeOfTerror/Mechanicum/CodeBrigade python3 -m unittest EyeOfTerror/Mechanicum/Ceraxia/self_test.py -k project_creation_mode_builds
 PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade:EyeOfTerror/Mechanicum/CodeBrigade python3 -m unittest EyeOfTerror/Mechanicum/Ceraxia/self_test.py -k passed_report_with_no_tests_ran_surface_output
 PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade:EyeOfTerror/Mechanicum/CodeBrigade python3 -m unittest EyeOfTerror/Mechanicum/Ceraxia/self_test.py -k run_audit_blocks_missing_artifact
 if [[ "${RUN_FULL_CERAXIA_SELF_TEST:-0}" == "1" ]]; then

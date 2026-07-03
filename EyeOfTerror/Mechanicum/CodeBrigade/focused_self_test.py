@@ -8,6 +8,7 @@ from pathlib import Path
 
 import code_brigade_adapter
 from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_diagnostic_repair_request
+from greenfield_project import build_greenfield_project_brief, validate_greenfield_project_brief
 from self_test import valid_brief
 
 
@@ -53,6 +54,30 @@ def diagnostic_repair_request(repo: Path, signals: list[str] | None = None, max_
         "attempt_history": [],
         "return_contract": ["worker_report.json", "verification_report.json"],
     }
+
+
+def project_creation_brief(repo: Path, task: str) -> dict:
+    brief = valid_brief()
+    brief["repo_path"] = str(repo)
+    brief["risk_level"] = "low"
+    brief["controller_execution_mode"] = "project_creation"
+    brief["task"] = task
+    brief["execution_intent"] = {
+        "kind": "ceraxia_code_brigade_execution_intent",
+        "contract_version": "eye-mechanicum.v1",
+        "mode": "greenfield_project_creation",
+        "adapter_capability": "greenfield_project_scaffold_adapter",
+        "explicit_patch_present": False,
+        "real_execution_supported": True,
+        "dry_run_requested": False,
+        "blockers": [],
+        "required_next_adapter": "",
+    }
+    brief["repo_survey_evidence"]["candidate_files"] = []
+    brief["repo_survey_evidence"]["test_files"] = []
+    brief["repo_survey_evidence"]["recommended_read_order"] = []
+    brief["suggested_verification_commands"] = []
+    return brief
 
 
 class CodeBrigadeFocusedTests(unittest.TestCase):
@@ -128,11 +153,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
     def test_project_creation_mode_creates_greenfield_project(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            brief = valid_brief()
-            brief["repo_path"] = str(repo)
-            brief["risk_level"] = "low"
-            brief["controller_execution_mode"] = "project_creation"
-            brief["task"] = (
+            brief = project_creation_brief(
+                repo,
                 "Создай новый минимальный python проект. "
                 "CERAXIA_PROJECT: "
                 '{"summary":"demo app","files":['
@@ -141,55 +163,56 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                 '{"path":"test_app.py","content":"import unittest\\nimport app\\n\\nclass AppTests(unittest.TestCase):\\n    def test_main(self):\\n        self.assertEqual(app.main(), \\"ready\\")\\n"}'
                 '],"verification_commands":["python -m unittest test_app.py"]}'
             )
-            brief["execution_intent"] = {
-                "kind": "ceraxia_code_brigade_execution_intent",
-                "contract_version": "eye-mechanicum.v1",
-                "mode": "greenfield_project_creation",
-                "adapter_capability": "greenfield_project_scaffold_adapter",
-                "explicit_patch_present": False,
-                "real_execution_supported": True,
-                "dry_run_requested": False,
-                "blockers": [],
-                "required_next_adapter": "",
-            }
-            brief["repo_survey_evidence"]["candidate_files"] = []
-            brief["repo_survey_evidence"]["test_files"] = []
-            brief["repo_survey_evidence"]["recommended_read_order"] = []
             brief["suggested_verification_commands"] = ["python -m unittest test_app.py"]
             report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
             self.assertEqual(report["status"], "implemented", report)
-            self.assertEqual(sorted(report["changed_files"]), [".ceraxia_greenfield_workspace", "app.py", "test_app.py"])
+            self.assertEqual(sorted(report["changed_files"]), [".ceraxia_greenfield_workspace", "app.py", "greenfield_project_brief.json", "test_app.py"])
             self.assertEqual(report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
+            project_brief = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
+            self.assertIn("module_contracts", project_brief)
             self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), 'def main():\n    return "ready"\n')
 
     def test_project_creation_mode_blocks_nonempty_unowned_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             (repo / "important.py").write_text("VALUE = 1\n", encoding="utf-8")
-            brief = valid_brief()
-            brief["repo_path"] = str(repo)
-            brief["risk_level"] = "low"
-            brief["controller_execution_mode"] = "project_creation"
-            brief["task"] = "Создай новый минимальный python проект."
-            brief["execution_intent"] = {
-                "kind": "ceraxia_code_brigade_execution_intent",
-                "contract_version": "eye-mechanicum.v1",
-                "mode": "greenfield_project_creation",
-                "adapter_capability": "greenfield_project_scaffold_adapter",
-                "explicit_patch_present": False,
-                "real_execution_supported": True,
-                "dry_run_requested": False,
-                "blockers": [],
-                "required_next_adapter": "",
-            }
-            brief["repo_survey_evidence"]["candidate_files"] = []
-            brief["repo_survey_evidence"]["test_files"] = []
-            brief["repo_survey_evidence"]["recommended_read_order"] = []
-            brief["suggested_verification_commands"] = ["python -m unittest test_app.py"]
+            brief = project_creation_brief(repo, "Создай новый минимальный python проект.")
             report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
             self.assertEqual(report["status"], "blocked", report)
             self.assertIn("empty directory", " ".join(report["execution_result"]["blockers"]))
             self.assertFalse((repo / "app.py").exists())
+
+    def test_project_creation_inferred_cli_uses_real_project_structure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай новый CLI проект `forge-tool`.")
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            changed = set(report["changed_files"])
+            self.assertIn("forge_tool/core.py", changed)
+            self.assertIn("forge_tool/cli.py", changed)
+            self.assertIn("tests/test_core.py", changed)
+            self.assertIn("greenfield_project_brief.json", changed)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["project_type"], "cli_tool")
+            self.assertEqual(project["template_id"], "python_cli_basic")
+            self.assertGreaterEqual(len(project["module_contracts"]), 2)
+            self.assertEqual(report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
+
+    def test_greenfield_project_brief_contract_and_templates(self) -> None:
+        cli = build_greenfield_project_brief("Создай новый CLI проект `forge-tool`.")
+        api = build_greenfield_project_brief("Создай FastAPI backend service `api-demo`.")
+        static = build_greenfield_project_brief("Создай static frontend website `site-demo`.")
+        self.assertEqual(validate_greenfield_project_brief(cli), [])
+        self.assertEqual(validate_greenfield_project_brief(api), [])
+        self.assertEqual(validate_greenfield_project_brief(static), [])
+        self.assertEqual(cli["project_type"], "cli_tool")
+        self.assertEqual(api["project_type"], "api_service")
+        self.assertEqual(static["template_id"], "static_site")
+        self.assertTrue(any(path.endswith("cli.py") for path in cli["expected_files"]))
+        self.assertIn("requirements.txt", api["expected_files"])
+        self.assertIn("tests/test_static_site.py", static["expected_files"])
 
 
 if __name__ == "__main__":
