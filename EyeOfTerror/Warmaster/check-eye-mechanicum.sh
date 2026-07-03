@@ -38,7 +38,10 @@ PYTHONPATH=LegacyMechanicum python3 LegacyMechanicum/worker_services_self_test.p
 PYTHONPATH=LegacyMechanicum python3 LegacyMechanicum/start_all_workers_self_test.py
 EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent/scripts/check-agent-offline.sh
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/iskandar_service_self_test.py
-PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/warmaster_gateway_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/warmaster_gateway_governor_http_self_test.py
+if [[ "${RUN_MONOLITHIC_GATEWAY_SELF_TEST:-0}" == "1" ]]; then
+  PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/warmaster_gateway_self_test.py
+fi
 PYTHONPATH=EyeOfTerror/Warmaster:Mechanicum python3 EyeOfTerror/Warmaster/warmaster_http_execution_self_test.py
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/local_executor_self_test.py
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/http_executor_self_test.py

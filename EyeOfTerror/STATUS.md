@@ -18,6 +18,10 @@
 - CodeBrigade diagnostic repair requests now support `name_error` as a guarded
   repair signal when preserved tests expose a single safe missing symbol and
   literal expectation.
+- Warmaster gateway HTTP-governor preparation now has a focused live self-test;
+  the old monolithic gateway self-test is opt-in through
+  `RUN_MONOLITHIC_GATEWAY_SELF_TEST=1` so normal checks do not hang on one huge
+  scenario bundle.
 - Ceraxia/CodeBrigade handoffs expose implementation work packages, package
   surface coverage, package statuses, and review blocking for blocked packages.
 - CodeBrigade real source mutation for medium/high-risk tasks now requires a
