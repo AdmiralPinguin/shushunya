@@ -294,8 +294,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(any("calculator_error_handling" in blocker for blocker in review["blockers"]))
 
     def test_greenfield_feature_worker_detects_task_features(self) -> None:
-        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator csv summary local agent tool router telegram bot /start /help vite counter app text utils library")}
-        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "csv_summary", "local_agent_command_router", "telegram_command_bot", "vite_counter_app", "python_text_utils_library"})
+        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator csv summary sales analytics pipeline local agent tool router telegram bot /start /help vite counter app text utils library")}
+        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "csv_summary", "sales_analytics_pipeline", "local_agent_command_router", "telegram_command_bot", "vite_counter_app", "python_text_utils_library"})
 
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.")
@@ -851,6 +851,41 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["semantic_review"]["status"], "passed", review)
             self.assertEqual(review["status"], "passed", review)
 
+    def test_project_creation_sales_analytics_pipeline_implements_multi_workflow_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай data sales analytics pipeline `sales-demo` для CSV с фильтрацией, группировкой и отчетом.")
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "data_processing_tool")
+            self.assertTrue(any(feature["id"] == "sales_analytics_pipeline" for feature in project["acceptance_features"]))
+            self.assertIn("sales_analytics_pipeline", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertGreaterEqual(len(project["module_contracts"]), 5)
+            self.assertGreaterEqual(project["scenario_plan"]["scenario_count"], 3)
+            source_paths = {
+                "sales_demo/loader.py",
+                "sales_demo/analyzer.py",
+                "sales_demo/report.py",
+                "sales_demo/cli.py",
+                "tests/test_sales_pipeline.py",
+            }
+            self.assertTrue(source_paths.issubset(set(project["expected_files"])))
+            self.assertIn("def load_records", (repo / "sales_demo/loader.py").read_text(encoding="utf-8"))
+            self.assertIn("def group_region_totals", (repo / "sales_demo/analyzer.py").read_text(encoding="utf-8"))
+            self.assertIn("def render_markdown_report", (repo / "sales_demo/report.py").read_text(encoding="utf-8"))
+            self.assertIn("def run_pipeline", (repo / "sales_demo/cli.py").read_text(encoding="utf-8"))
+            tests = (repo / "tests/test_sales_pipeline.py").read_text(encoding="utf-8")
+            self.assertIn("test_load_filter_and_group_workflow", tests)
+            self.assertIn("test_summary_and_markdown_report_workflow", tests)
+            self.assertIn("test_cli_json_output_workflow", tests)
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["scenario_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
     def test_project_creation_local_agent_tool_implements_command_router_feature(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -997,6 +1032,10 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         csv_summary = build_greenfield_project_brief("Создай data csv summary tool `csv-demo`.")
         self.assertTrue(any(feature["id"] == "csv_summary" for feature in csv_summary["acceptance_features"]))
         self.assertGreaterEqual(len(csv_summary["module_contracts"]), 3)
+        sales_pipeline = build_greenfield_project_brief("Создай data sales analytics pipeline `sales-demo` для CSV.")
+        self.assertTrue(any(feature["id"] == "sales_analytics_pipeline" for feature in sales_pipeline["acceptance_features"]))
+        self.assertGreaterEqual(len(sales_pipeline["module_contracts"]), 5)
+        self.assertGreaterEqual(sales_pipeline["scenario_plan"]["scenario_count"], 3)
         agent_router = build_greenfield_project_brief("Создай local agent tool router `agent-demo`.")
         self.assertTrue(any(feature["id"] == "local_agent_command_router" for feature in agent_router["acceptance_features"]))
         self.assertGreaterEqual(len(agent_router["module_contracts"]), 3)

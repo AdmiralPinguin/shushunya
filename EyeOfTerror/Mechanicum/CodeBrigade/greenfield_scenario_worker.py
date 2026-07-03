@@ -112,6 +112,11 @@ def _feature_scenarios(feature: dict[str, Any]) -> list[dict[str, Any]]:
             _scenario("csv_summary_metrics", "CSV tool reports rows, columns, sums, and averages", ["parse CSV", "count rows", "summarize numeric columns"], ["summarize_rows", "numeric_sums", "numeric_averages", "columns"], ["tests/test_processor.py"]),
             _scenario("csv_cli", "CSV tool exposes file-based CLI output", ["read input file", "print JSON summary"], ["Path", "json.dumps", "input csv path required"], []),
         ],
+        "sales_analytics_pipeline": [
+            _scenario("sales_pipeline_load_analyze", "Sales analytics pipeline loads, filters, groups, and selects top region", ["load CSV records", "filter by amount and channel", "group totals by region", "select top region"], ["load_records", "filter_records", "group_region_totals", "top_region"], ["tests/test_sales_pipeline.py"]),
+            _scenario("sales_pipeline_report", "Sales analytics pipeline builds structured and markdown reports", ["build summary dictionary", "render markdown report", "include region totals and top region"], ["build_summary", "render_markdown_report", "Sales Analytics Report", "Top region"], ["tests/test_sales_pipeline.py"]),
+            _scenario("sales_pipeline_cli", "Sales analytics pipeline exposes CLI JSON and markdown output", ["read CSV path", "apply filters", "print JSON", "print markdown"], ["build_parser", "run_pipeline", "json.dumps", "--format"], ["tests/test_sales_pipeline.py"]),
+        ],
         "local_agent_command_router": [
             _scenario("agent_router_actions", "Local agent tool routes status, echo, and summarize actions", ["validate action", "call registry handler", "return structured result"], ["ACTION_REGISTRY", "status", "echo", "summarize"], ["tests/test_contract.py"]),
             _scenario("agent_router_rejection", "Local agent tool rejects unknown actions and bad payloads", ["reject unknown action", "reject non-object payload"], ["unsupported action", "payload must be", "json.loads"], ["tests/test_contract.py"]),
