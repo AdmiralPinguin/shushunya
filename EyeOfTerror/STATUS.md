@@ -50,7 +50,9 @@
 - PlanningBrigade roles now expose an executable read-only role-service
   runtime with `GET /health`, `GET /capabilities`, and `POST /plan`; ports
   `7111-7115` are active HTTP-ready contracts while the existing in-process
-  packet builder remains available for compatibility.
+  packet builder remains available for compatibility. `start_role_services.py`
+  now prints the supervisor manifest or launches all five role services
+  together on their reserved ports.
 - Ceraxia/CodeBrigade handoffs expose implementation work packages, package
   surface coverage, package statuses, and review blocking for blocked packages.
 - CodeBrigade real source mutation for medium/high-risk tasks now requires a

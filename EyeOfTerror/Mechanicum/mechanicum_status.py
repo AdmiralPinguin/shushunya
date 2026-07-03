@@ -40,6 +40,7 @@ COMPONENTS = {
             "planning_contract.schema.json",
             "role_service.py",
             "role_service_self_test.py",
+            "start_role_services.py",
             "role_contracts.json",
             "service_contracts.json",
             "field_trials.json",
@@ -103,7 +104,7 @@ ROADMAP = [
     {
         "priority": 4,
         "item": "wire PlanningBrigade role services into Ceraxia runtime dispatch after more field trials",
-        "reason": "PlanningBrigade now exposes HTTP-ready read-only role services for the five planning roles and keeps the in-process packet builder for compatibility; the next step is runtime selection between in-process and HTTP role dispatch once service supervision is stable.",
+        "reason": "PlanningBrigade now exposes HTTP-ready read-only role services for the five planning roles, plus a supervisor manifest/launcher for ports 7111-7115, and keeps the in-process packet builder for compatibility; the next step is runtime selection between in-process and HTTP role dispatch inside Ceraxia.",
         "owner": "PlanningBrigade",
     },
 ]

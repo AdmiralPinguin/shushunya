@@ -4,6 +4,7 @@
   "status": "active_http_ready_interfaces",
   "base_path": "EyeOfTerror/Mechanicum/PlanningBrigade",
   "server_module": "role_service.py",
+  "supervisor_module": "start_role_services.py",
   "port_policy": {
     "host": "127.0.0.1",
     "reserved_range": "7111-7115",

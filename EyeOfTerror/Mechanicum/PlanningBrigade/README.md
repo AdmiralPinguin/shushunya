@@ -19,7 +19,9 @@ gates, handoff, and read-only boundary. `role_service.py` exposes those same
 roles as read-only HTTP-ready services with `GET /health`, `GET /capabilities`,
 and `POST /plan`. The in-process packet builder remains the default
 compatibility path until Ceraxia runtime dispatch is explicitly switched.
-`service_contracts.json` assigns the role services to stable ports 7111-7115.
+`service_contracts.json` assigns the role services to stable ports 7111-7115,
+and `start_role_services.py` is the supervisor entrypoint that prints the
+service manifest or launches all five read-only HTTP services together.
 Self-tests and field trials compare those reservations with
 `EyeOfTerror/Warmaster/registry/ports.json` and `LegacyMechanicum/worker_services.json` so the
 service split cannot silently collide with active workers.
@@ -97,6 +99,8 @@ python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --task "по�
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_feedback_contract.py path/to/planning_feedback_request.json
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/planning_brigade.py --feedback-request path/to/planning_feedback_request.json --feedback-replan-packet --validate
 python3 EyeOfTerror/Mechanicum/PlanningBrigade/role_service.py --role TaskTriage --port 7111
+python3 EyeOfTerror/Mechanicum/PlanningBrigade/start_role_services.py --manifest
+python3 EyeOfTerror/Mechanicum/PlanningBrigade/start_role_services.py
 PYTHONPATH=EyeOfTerror/Mechanicum/PlanningBrigade python3 EyeOfTerror/Mechanicum/PlanningBrigade/role_service_self_test.py
 ```
 

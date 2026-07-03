@@ -11,6 +11,7 @@ from typing import Any
 import planning_brigade
 from planning_packet_contract import REQUIRED_PACKET_OBJECTS, ROLE_ORDER
 from role_service import make_handler, role_capabilities, run_role_plan
+from start_role_services import build_supervisor_manifest
 
 
 def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -77,6 +78,20 @@ class PlanningRoleServiceTests(unittest.TestCase):
         self.assertIn("POST /plan", capabilities["endpoints"])
         self.assertEqual(capabilities["service_contract"]["port"], 7115)
         self.assertFalse(capabilities["service_contract"]["may_mutate_source"])
+
+    def test_supervisor_manifest_starts_all_roles_on_reserved_ports(self) -> None:
+        manifest = build_supervisor_manifest()
+        self.assertEqual(manifest["kind"], "planning_brigade_role_service_supervisor_manifest")
+        self.assertEqual(manifest["service_count"], 5)
+        self.assertEqual(manifest["role_order"], ROLE_ORDER)
+        self.assertEqual(manifest["ports"], [7111, 7112, 7113, 7114, 7115])
+        self.assertTrue(manifest["ports_unique"])
+        self.assertTrue(manifest["read_only"])
+        by_role = {service["role"]: service for service in manifest["services"]}
+        self.assertEqual(by_role["TaskTriage"]["plan_url"], "http://127.0.0.1:7111/plan")
+        self.assertEqual(by_role["RiskScribe"]["handoff_to"], "Ceraxia")
+        for role in ROLE_ORDER:
+            self.assertIn("role_service.py", " ".join(by_role[role]["command"]))
 
 
 if __name__ == "__main__":
