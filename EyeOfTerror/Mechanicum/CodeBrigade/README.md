@@ -108,9 +108,18 @@ Ceraxia handoff, so diagnostic repair cannot bypass package-status auditing.
 Diagnostic repair scope budgets are normalized with required replan triggers,
 so partial request budgets cannot accidentally bypass the implementation brief
 contract.
+`execute_diagnostic_repair_loop()` is the active bounded repair loop: it
+executes the guarded repair request, reruns the allowlisted failed verification
+command, records attempt history, and returns a replan packet instead of
+retrying the same repair signature when verification still fails. This is the
+current autonomous CodeBrigade execution boundary: it can repair narrow
+test-oracle source failures and preserve proof, while broader edits must return
+to Ceraxia/PlanningBrigade with the failed attempt history attached.
 `focused_self_test.py` covers the fast non-LLM contract smoke for the active
-adapter gates: medium/high-risk mutation requires a ready planning handoff, and
-NameError diagnostic repair still routes through guarded source repair. The
+adapter gates: medium/high-risk mutation requires a ready planning handoff,
+NameError diagnostic repair still routes through guarded source repair, and the
+diagnostic repair loop verifies successful repairs or requests replan after a
+failed repeat. The
 large historical `self_test.py` remains available through
 `RUN_FULL_CODE_BRIGADE_SELF_TEST=1` for opt-in full regression runs.
 Use it directly when inspecting a run package:
@@ -118,6 +127,7 @@ Use it directly when inspecting a run package:
 ```bash
 python3 EyeOfTerror/Mechanicum/CodeBrigade/diagnostic_repair_contract.py path/to/diagnostic_repair_request.json
 python3 EyeOfTerror/Mechanicum/CodeBrigade/diagnostic_repair_contract.py --execute path/to/diagnostic_repair_request.json
+python3 EyeOfTerror/Mechanicum/CodeBrigade/diagnostic_repair_contract.py --execute-loop --max-cycles 2 path/to/diagnostic_repair_request.json
 ```
 
 It also includes `execution_policy_status`; this remains

@@ -76,7 +76,7 @@ COMPONENTS = {
             "focused_self_test.py",
             "self_test.py",
         ],
-        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_worker_output_contract_preflight_explicit_text_ast_guarded_natural_language_test_inferred_literal_patch_adapter_package_statuses_allowlisted_verification_focused_contract_smoke_diagnostic_repair_intake_executor_support_classification_and_guarded_assertion_failed_command_traceback_missing_import_name_error_repair_executor",
+        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_worker_output_contract_preflight_explicit_text_ast_guarded_natural_language_test_inferred_literal_patch_adapter_package_statuses_allowlisted_verification_focused_contract_smoke_diagnostic_repair_intake_executor_support_classification_guarded_assertion_failed_command_traceback_missing_import_name_error_repair_executor_and_bounded_verified_repair_loop",
     },
 }
 
@@ -85,7 +85,7 @@ ROADMAP = [
     {
         "priority": 1,
         "item": "expand CodeBrigade from guarded inference to diagnostic autonomous source edits",
-        "reason": "PlanningBrigade now emits diagnostic repair and worker-output contracts, Ceraxia writes diagnostic repair request artifacts and audits worker-output sufficiency, and CodeBrigade validates repair intake plus executes narrow assertion-failure guarded repairs, but the broader source-edit adapter still needs to handle more diagnostic classes against repo evidence, verification feedback, scope budgets, and refusal controls.",
+        "reason": "PlanningBrigade now emits diagnostic repair and worker-output contracts, Ceraxia writes diagnostic repair request artifacts and audits worker-output sufficiency, and CodeBrigade validates repair intake, executes narrow guarded repairs, reruns allowlisted verification, records attempt history, and returns replan packets on repeated failed signatures. Broader source-edit adapters still need more diagnostic classes against repo evidence, verification feedback, scope budgets, and refusal controls.",
         "owner": "CodeBrigade",
     },
     {

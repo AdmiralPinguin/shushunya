@@ -18,6 +18,10 @@
 - CodeBrigade diagnostic repair requests now support `name_error` as a guarded
   repair signal when preserved tests expose a single safe missing symbol and
   literal expectation.
+- CodeBrigade now has a bounded diagnostic repair loop: it applies the guarded
+  source repair, reruns the allowlisted failed verification command, records
+  attempt history, and returns a Ceraxia/Planning replan packet instead of
+  repeating the same failed repair signature.
 - Warmaster gateway HTTP-governor preparation now has a focused live self-test;
   the old monolithic gateway self-test is opt-in through
   `RUN_MONOLITHIC_GATEWAY_SELF_TEST=1` so normal checks do not hang on one huge
@@ -35,9 +39,10 @@
 - Ceraxia run-package audit now compares saved artifact manifest hashes and
   sizes against current artifacts, and a focused run-report self-test covers
   that drift check without running the whole Ceraxia suite.
-- CodeBrigade has a focused self-test for active planning handoff and
-  diagnostic NameError repair gates; the large historical self-test is opt-in
-  from the local Mechanicum check through `RUN_FULL_CODE_BRIGADE_SELF_TEST=1`.
+- CodeBrigade has a focused self-test for active planning handoff, diagnostic
+  NameError repair gates, and bounded repair-loop verification/replan behavior;
+  the large historical self-test is opt-in from the local Mechanicum check
+  through `RUN_FULL_CODE_BRIGADE_SELF_TEST=1`.
 - The local Mechanicum check now runs focused Ceraxia slices by default; the
   full Ceraxia suite and handoff field trials are opt-in through
   `RUN_FULL_CERAXIA_SELF_TEST=1` and `RUN_CERAXIA_HANDOFF_FIELD_TRIALS=1`.

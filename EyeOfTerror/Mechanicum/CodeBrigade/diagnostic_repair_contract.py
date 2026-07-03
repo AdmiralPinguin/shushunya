@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -600,15 +601,157 @@ def execute_diagnostic_repair_request(request: dict[str, Any]) -> dict[str, Any]
     return execute_implementation_brief(build_repair_execution_brief(request, intake))
 
 
+def verification_commands_from_intake(intake: dict[str, Any]) -> list[str]:
+    commands: list[str] = []
+    for item in intake.get("attempt_plan", []):
+        if not isinstance(item, dict):
+            continue
+        command = str(item.get("command") or "").strip()
+        if command and command not in commands:
+            commands.append(command)
+    return commands
+
+
+def build_repair_attempt_history_entry(
+    attempt: dict[str, Any],
+    execution_result: dict[str, Any],
+    verification_result: dict[str, Any],
+) -> dict[str, Any]:
+    changed_files = execution_result.get("changed_files") if isinstance(execution_result.get("changed_files"), list) else []
+    blockers = execution_result.get("blockers") if isinstance(execution_result.get("blockers"), list) else []
+    verification_status = str(verification_result.get("status") or "")
+    return {
+        "attempt_id": str(attempt.get("attempt_id") or ""),
+        "command": str(attempt.get("command") or ""),
+        "repair_signature": str(attempt.get("repair_signature") or ""),
+        "execution_status": str(execution_result.get("status") or ""),
+        "verification_status": verification_status,
+        "changed_files": [str(path) for path in changed_files if isinstance(path, str)],
+        "blockers": [str(blocker) for blocker in blockers if isinstance(blocker, str)],
+        "verification_command_count": len(verification_result.get("results", [])) if isinstance(verification_result.get("results"), list) else 0,
+        "requires_replan": verification_status not in {"passed", "planned"} or execution_result.get("status") != "implemented",
+    }
+
+
+def execute_diagnostic_repair_loop(request: dict[str, Any], max_cycles: int | None = None, verification_timeout_sec: int = 30) -> dict[str, Any]:
+    from verification_adapter import run_verification_commands
+
+    current_request = copy.deepcopy(request)
+    requested_budget = current_request.get("scope_budget") if isinstance(current_request.get("scope_budget"), dict) else {}
+    queue = current_request.get("diagnostic_repair_queue") if isinstance(current_request.get("diagnostic_repair_queue"), dict) else {}
+    items = queue.get("items") if isinstance(queue.get("items"), list) else []
+    item_max_attempts = [int(item.get("max_repair_attempts") or 1) for item in items if isinstance(item, dict)]
+    cycle_limit = max_cycles if isinstance(max_cycles, int) and max_cycles > 0 else max([1, *item_max_attempts])
+    cycle_limit = min(cycle_limit, int(requested_budget.get("max_repair_cycles") or cycle_limit or 1))
+    attempts: list[dict[str, Any]] = []
+    execution_results: list[dict[str, Any]] = []
+    verification_results: list[dict[str, Any]] = []
+    final_replan_packet: dict[str, Any] = {}
+
+    for cycle_index in range(cycle_limit):
+        intake = build_diagnostic_repair_intake(current_request)
+        if intake["status"] == "blocked":
+            final_replan_packet = intake.get("replan_packet", {}) if isinstance(intake.get("replan_packet"), dict) else {}
+            return {
+                "kind": "code_brigade_diagnostic_repair_loop_result",
+                "contract_version": CONTRACT_VERSION,
+                "status": "blocked",
+                "cycle_count": cycle_index,
+                "attempts": attempts,
+                "execution_results": execution_results,
+                "verification_results": verification_results,
+                "replan_packet": final_replan_packet,
+                "blockers": intake.get("blockers", []),
+            }
+        if intake["status"] == "not_required":
+            return {
+                "kind": "code_brigade_diagnostic_repair_loop_result",
+                "contract_version": CONTRACT_VERSION,
+                "status": "not_required",
+                "cycle_count": cycle_index,
+                "attempts": attempts,
+                "execution_results": execution_results,
+                "verification_results": verification_results,
+                "replan_packet": {},
+                "blockers": ["diagnostic repair request is not required"],
+            }
+
+        execution_result = execute_diagnostic_repair_request(current_request)
+        execution_results.append(execution_result)
+        commands = verification_commands_from_intake(intake)
+        verification_result = run_verification_commands(
+            commands,
+            str(current_request.get("repo_path") or ""),
+            execute=True,
+            timeout_sec=verification_timeout_sec,
+            acceptance_requirements=["failed behavior is repaired or explicitly blocked"],
+        )
+        verification_results.append(verification_result)
+        for attempt in intake.get("attempt_plan", []):
+            if isinstance(attempt, dict):
+                attempts.append(build_repair_attempt_history_entry(attempt, execution_result, verification_result))
+        if execution_result.get("status") == "implemented" and verification_result.get("status") == "passed":
+            return {
+                "kind": "code_brigade_diagnostic_repair_loop_result",
+                "contract_version": CONTRACT_VERSION,
+                "status": "passed",
+                "cycle_count": cycle_index + 1,
+                "attempts": attempts,
+                "execution_results": execution_results,
+                "verification_results": verification_results,
+                "replan_packet": {},
+                "blockers": [],
+            }
+
+        current_request["attempt_history"] = [
+            *(current_request.get("attempt_history") if isinstance(current_request.get("attempt_history"), list) else []),
+            *attempts[-len(intake.get("attempt_plan", [])) :],
+        ]
+        next_intake = build_diagnostic_repair_intake(current_request)
+        final_replan_packet = next_intake.get("replan_packet", {}) if isinstance(next_intake.get("replan_packet"), dict) else {}
+        if next_intake.get("replan_required") or next_intake.get("status") == "blocked":
+            return {
+                "kind": "code_brigade_diagnostic_repair_loop_result",
+                "contract_version": CONTRACT_VERSION,
+                "status": "replan_required",
+                "cycle_count": cycle_index + 1,
+                "attempts": attempts,
+                "execution_results": execution_results,
+                "verification_results": verification_results,
+                "replan_packet": final_replan_packet,
+                "blockers": next_intake.get("blockers", []),
+            }
+
+    final_intake = build_diagnostic_repair_intake(current_request)
+    final_replan_packet = final_intake.get("replan_packet", {}) if isinstance(final_intake.get("replan_packet"), dict) else {}
+    return {
+        "kind": "code_brigade_diagnostic_repair_loop_result",
+        "contract_version": CONTRACT_VERSION,
+        "status": "replan_required",
+        "cycle_count": cycle_limit,
+        "attempts": attempts,
+        "execution_results": execution_results,
+        "verification_results": verification_results,
+        "replan_packet": final_replan_packet,
+        "blockers": ["diagnostic repair loop reached max cycles without passing verification"],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate a Ceraxia diagnostic repair request for CodeBrigade.")
     parser.add_argument("request", help="Path to diagnostic_repair_request.json")
     parser.add_argument("--execute", action="store_true", help="Execute the narrow guarded diagnostic repair adapter.")
+    parser.add_argument("--execute-loop", action="store_true", help="Execute the bounded diagnostic repair loop with verification and attempt history.")
+    parser.add_argument("--max-cycles", type=int, default=None, help="Optional repair cycle cap for --execute-loop.")
     args = parser.parse_args()
     payload = json.loads(Path(args.request).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         print(json.dumps({"status": "blocked", "blockers": ["request payload must be an object"]}, ensure_ascii=False, indent=2))
         return 2
+    if args.execute_loop:
+        result = execute_diagnostic_repair_loop(payload, max_cycles=args.max_cycles)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result.get("status") == "passed" else 2
     if args.execute:
         result = execute_diagnostic_repair_request(payload)
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
