@@ -2,7 +2,7 @@
   "kind": "code_brigade_greenfield_capability_audit",
   "contract_version": "eye-mechanicum.v1",
   "status": "in_progress",
-  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, memory, coordinated file-set synthesis for source/test sets, mandatory module-by-module synthesis contracts, executable module synthesis, verification-driven module synthesis repair, and semantic quality gates for generated source/tests. The remaining risk is depth: curated templates/features still provide the baseline source, and arbitrary large project code synthesis needs broader domain-specific scoring before this objective is complete.",
+  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, memory, coordinated file-set synthesis for source/test sets, mandatory module-by-module synthesis contracts, executable module synthesis, verification-driven module synthesis repair, and semantic/domain quality gates for generated source/tests. The remaining risk is depth: curated templates/features still provide the baseline source, and arbitrary large project code synthesis needs richer scoring and real-world scenario coverage before this objective is complete.",
   "requirements": [
     {
       "id": "greenfield_contract",
@@ -47,11 +47,12 @@
         "greenfield_implementation_worker.py execute_file_set_synthesis_contract can apply a coordinated model-generated source/test file set after validating allowed paths, requirements, placeholders, and workspace boundaries",
         "greenfield_implementation_worker.py execute_module_synthesis_contracts calls the GreenfieldImplementationWorker model path per module and writes source only after JSON, path, requirement, test, placeholder, and workspace validation",
         "greenfield_implementation_worker.py generated_file_quality rejects weak generated Python source and assertionless generated tests before writing model output",
+        "greenfield_implementation_worker.py domain_specific_quality_findings adds template-aware checks for FastAPI, frontend, Telegram bot, data processing, and local agent tool outputs",
         "greenfield_verification_worker.py can call verification_repair module synthesis with failure context when bounded template repair is not applicable",
         "greenfield_feature_worker.py applies task-derived feature implementations for calculator, todo, notes API, CSV summary, local agent tool, Telegram bot, Vite counter, and text utils library",
         "implementation_trace.json records requirement to file/function/test mapping with synthesis_contract_kind and GreenfieldReview checks it"
       ],
-      "remaining_risk": "Implementation now has executable validated LLM file-set synthesis, module synthesis, verification-driven synthesis repair, and basic semantic quality gates, but curated feature overrides/templates still provide the reliable baseline; arbitrary large code synthesis still needs domain-specific scoring."
+      "remaining_risk": "Implementation now has executable validated LLM file-set synthesis, module synthesis, verification-driven synthesis repair, and semantic/domain quality gates, but curated feature overrides/templates still provide the reliable baseline; arbitrary large code synthesis still needs real-world scenario scoring."
     },
     {
       "id": "dependency_worker",
@@ -107,7 +108,7 @@
         "greenfield_verification_worker.py calls model guidance for GreenfieldRepairWorker",
         "greenfield_project.py writes greenfield_model_guidance_ledger.json so each run records role, stage, and guidance status"
       ],
-      "remaining_risk": "LLM file-set and module code generation are executable and validated with basic quality gates, but the system still needs broader domain-specific quality scoring before it can rely on arbitrary synthesis as the primary implementation path."
+      "remaining_risk": "LLM file-set and module code generation are executable and validated with semantic/domain quality gates, but the system still needs real-world scenario coverage before it can rely on arbitrary synthesis as the primary implementation path."
     },
     {
       "id": "reports_and_memory",
@@ -122,7 +123,7 @@
     }
   ],
   "next_recommended_work": [
-    "Strengthen ImplementationWorker synthesis with domain-specific quality scoring for API, frontend, bot, data-tool, and local-agent outputs.",
+    "Strengthen ImplementationWorker synthesis with real-world scenario coverage and richer acceptance traces for larger generated applications.",
     "Add deeper generated artifact review for frontend/API behavior beyond static contract checks.",
     "Add a long-form integration test that creates a larger multi-module app and verifies several independent workflows.",
     "Decide whether Android/game templates belong in this goal now or should remain explicitly deferred."

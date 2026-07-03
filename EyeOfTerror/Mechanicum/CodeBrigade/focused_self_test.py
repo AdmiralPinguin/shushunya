@@ -482,6 +482,28 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(report["status"], "blocked", report)
             self.assertTrue(any("semantic quality blocked" in "; ".join(row["blockers"]) for row in report["rows"] if row["blockers"]))
 
+    def test_greenfield_domain_quality_blocks_bad_domain_outputs(self) -> None:
+        self.assertEqual(
+            generated_file_quality("app/main.py", "def run():\n    return True\n", ["health"], {"template_id": "python_fastapi_service"})["status"],
+            "blocked",
+        )
+        self.assertEqual(
+            generated_file_quality("bot_demo/bot.py", "def main():\n    print('ready')\n", ["bot"], {"template_id": "telegram_bot_python"})["status"],
+            "blocked",
+        )
+        self.assertEqual(
+            generated_file_quality("data_demo/processor.py", "def summarize_rows(text):\n    return {'rows': 0}\n", ["parse CSV"], {"template_id": "data_processing_tool"})["status"],
+            "blocked",
+        )
+        self.assertEqual(
+            generated_file_quality("agent_demo/contract.py", "def build_tool_result(task):\n    return 'ready'\n", ["structured result"], {"template_id": "local_agent_tool"})["status"],
+            "blocked",
+        )
+        self.assertEqual(
+            generated_file_quality("src/main.jsx", "const value = 1;\n", ["render ready"], {"template_id": "node_vite_app"})["status"],
+            "blocked",
+        )
+
     def test_greenfield_contract_requires_module_synthesis_contracts(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `contract-calc`.")
         self.assertEqual(validate_greenfield_project_brief(project), [])

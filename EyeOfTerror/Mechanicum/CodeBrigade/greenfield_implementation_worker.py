@@ -230,10 +230,12 @@ def safe_repo_relative_path(repo: Path, rel_path: str) -> Path | None:
     return target
 
 
-def generated_file_quality(path: str, content: str, requirements: list[str]) -> dict[str, Any]:
+def generated_file_quality(path: str, content: str, requirements: list[str], project_brief: dict[str, Any] | None = None) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
     score = 100
+    project_brief = project_brief or {}
+    template_id = str(project_brief.get("template_id") or "")
     stripped = content.strip()
     path_lower = path.lower()
     is_test = "test" in Path(path).name.lower() or "/tests/" in f"/{path_lower}"
@@ -275,6 +277,10 @@ def generated_file_quality(path: str, content: str, requirements: list[str]) -> 
         if "<" not in content or ">" not in content:
             blockers.append("generated HTML has no markup")
             score -= 50
+    domain_blockers, domain_warnings, domain_penalty = domain_specific_quality_findings(template_id, path, content, is_test)
+    blockers.extend(domain_blockers)
+    warnings.extend(domain_warnings)
+    score -= domain_penalty
     return {
         "status": "blocked" if blockers or score < 50 else "passed",
         "score": max(0, min(100, score)),
@@ -283,10 +289,63 @@ def generated_file_quality(path: str, content: str, requirements: list[str]) -> 
     }
 
 
+def domain_specific_quality_findings(template_id: str, path: str, content: str, is_test: bool) -> tuple[list[str], list[str], int]:
+    blockers: list[str] = []
+    warnings: list[str] = []
+    penalty = 0
+    lowered = content.lower()
+    if template_id == "python_fastapi_service" and path == "app/main.py":
+        if "fastapi" not in lowered and "app =" not in lowered:
+            blockers.append("FastAPI service source does not expose an app")
+            penalty += 50
+        if "/health" not in content and "health" not in lowered:
+            blockers.append("FastAPI service source has no health route or health function")
+            penalty += 40
+    if template_id in {"static_site", "node_vite_app"} and not is_test:
+        if path.endswith(".html") and ("<main" not in lowered and "<body" not in lowered):
+            blockers.append("frontend HTML lacks a renderable body/main surface")
+            penalty += 40
+        if path.endswith((".js", ".jsx", ".ts", ".tsx")) and all(marker not in content for marker in ("document", "createRoot", "addEventListener", "useState", "render", "return <")):
+            blockers.append("frontend script lacks render or interaction behavior")
+            penalty += 40
+        if path.endswith(".css") and "{" not in content:
+            warnings.append("frontend stylesheet has no rule block")
+            penalty += 10
+    if template_id == "telegram_bot_python" and path.endswith("/bot.py"):
+        if "token" not in lowered and "telegram_bot_token" not in lowered:
+            blockers.append("Telegram bot runtime does not handle token configuration")
+            penalty += 40
+        if not any(marker in lowered for marker in ("build_reply", "handle", "/start", "/help", "command")):
+            blockers.append("Telegram bot source lacks testable command/reply handling")
+            penalty += 40
+    if template_id == "data_processing_tool" and (path.endswith("/processor.py") or path.endswith("/cli.py")):
+        if path.endswith("/processor.py") and "csv" not in lowered:
+            blockers.append("data processor does not parse CSV data")
+            penalty += 45
+        if path.endswith("/processor.py") and not any(marker in lowered for marker in ("summary", "summarize", "rows", "columns")):
+            blockers.append("data processor does not produce a summary")
+            penalty += 35
+        if path.endswith("/cli.py") and not any(marker in content for marker in ("sys.argv", "argparse", "Path(")):
+            warnings.append("data CLI has weak argument/file handling")
+            penalty += 15
+    if template_id == "local_agent_tool" and (path.endswith("/contract.py") or path.endswith("/tool.py")):
+        if path.endswith("/contract.py") and "dict" not in content and "{" not in content:
+            blockers.append("local agent contract does not return structured data")
+            penalty += 45
+        if path.endswith("/contract.py") and not any(marker in lowered for marker in ("status", "action", "task", "result")):
+            blockers.append("local agent contract lacks status/action/task/result semantics")
+            penalty += 35
+        if path.endswith("/tool.py") and not any(marker in lowered for marker in ("main", "print", "json", "build_tool_result")):
+            warnings.append("local agent tool entrypoint has weak executable behavior")
+            penalty += 15
+    return blockers, warnings, penalty
+
+
 def validate_module_synthesis_output(
     output: dict[str, Any],
     module_contract: dict[str, Any],
     forbidden_markers: list[str],
+    project_brief: dict[str, Any] | None = None,
 ) -> list[str]:
     problems: list[str] = []
     expected_path = str(module_contract.get("path") or "")
@@ -303,7 +362,7 @@ def validate_module_synthesis_output(
     if missing:
         problems.append("requirements_satisfied is incomplete: " + ", ".join(missing))
     if isinstance(content, str):
-        quality = generated_file_quality(expected_path, content, requirements)
+        quality = generated_file_quality(expected_path, content, requirements, project_brief)
         if quality["status"] == "blocked":
             problems.append("semantic quality blocked: " + "; ".join(str(item) for item in quality["blockers"]))
     paired_tests = [str(item) for item in module_contract.get("paired_tests", []) if isinstance(item, str)]
@@ -370,7 +429,7 @@ def validate_file_set_synthesis_output(
             if missing:
                 problems.append(f"requirements_satisfied is incomplete for {path}: " + ", ".join(missing))
         if isinstance(content, str):
-            quality = generated_file_quality(path, content, requirements)
+            quality = generated_file_quality(path, content, requirements, project_brief)
             if quality["status"] == "blocked":
                 problems.append(f"semantic quality blocked for {path}: " + "; ".join(str(item) for item in quality["blockers"]))
     return problems
@@ -450,7 +509,7 @@ def execute_module_synthesis_contracts(
             row["blockers"].append(f"model output is not valid JSON object: {exc}")
             rows.append(row)
             continue
-        problems = validate_module_synthesis_output(output, module, forbidden_markers)
+        problems = validate_module_synthesis_output(output, module, forbidden_markers, project_brief)
         if problems:
             row["status"] = "rejected"
             row["blockers"].extend(problems)
@@ -476,7 +535,7 @@ def execute_module_synthesis_contracts(
                 "status": "applied",
                 "requirements_satisfied": output.get("requirements_satisfied", []),
                 "tests_to_update": output.get("tests_to_update", []),
-                "semantic_quality": generated_file_quality(rel_path, rendered_content, [str(item) for item in module.get("requirements", []) if isinstance(item, str)]),
+                "semantic_quality": generated_file_quality(rel_path, rendered_content, [str(item) for item in module.get("requirements", []) if isinstance(item, str)], project_brief),
                 "notes": str(output.get("notes") or ""),
             }
         )
@@ -614,7 +673,7 @@ def execute_file_set_synthesis_contract(
         target.write_text(rendered_content, encoding="utf-8")
         after = rendered_content.encode("utf-8")
         changed_files.append(path)
-        quality_rows.append({"path": path, **generated_file_quality(path, rendered_content, requirements_by_path.get(path, []))})
+        quality_rows.append({"path": path, **generated_file_quality(path, rendered_content, requirements_by_path.get(path, []), project_brief)})
         operation_results.append(
             {
                 "operation": "greenfield_file_set_synthesis_write",
