@@ -236,8 +236,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(python_source_semantic_status("def run():\n    return 'ready'\n\nif True:\n    run()\n"), "ok")
 
     def test_greenfield_feature_worker_detects_task_features(self) -> None:
-        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator csv summary local agent tool router")}
-        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "csv_summary", "local_agent_command_router"})
+        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator csv summary local agent tool router telegram bot /start /help")}
+        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "csv_summary", "local_agent_command_router", "telegram_command_bot"})
 
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.")
@@ -485,6 +485,30 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["semantic_review"]["status"], "passed", review)
             self.assertEqual(review["status"], "passed", review)
 
+    def test_project_creation_telegram_bot_implements_command_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай telegram bot `bot-demo` с командами /start /help /status /echo.")
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "telegram_bot_python")
+            self.assertTrue(any(feature["id"] == "telegram_command_bot" for feature in project["acceptance_features"]))
+            self.assertIn("telegram_command_bot", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertIn("handle echo command", json.dumps(project["module_contracts"], ensure_ascii=False))
+            source = (repo / "bot_demo/bot.py").read_text(encoding="utf-8")
+            self.assertIn("COMMANDS", source)
+            self.assertIn("def command_list", source)
+            self.assertIn("TELEGRAM_BOT_TOKEN is required", source)
+            tests = (repo / "tests/test_bot.py").read_text(encoding="utf-8")
+            self.assertIn("test_start_help_and_status", tests)
+            self.assertIn("test_runtime_requires_token", tests)
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
     def test_greenfield_project_brief_contract_and_templates(self) -> None:
         cli = build_greenfield_project_brief("Создай новый CLI проект `forge-tool`.")
         api = build_greenfield_project_brief("Создай FastAPI backend service `api-demo`.")
@@ -533,6 +557,9 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         agent_router = build_greenfield_project_brief("Создай local agent tool router `agent-demo`.")
         self.assertTrue(any(feature["id"] == "local_agent_command_router" for feature in agent_router["acceptance_features"]))
         self.assertGreaterEqual(len(agent_router["module_contracts"]), 3)
+        command_bot = build_greenfield_project_brief("Создай telegram bot `bot-demo` с командами /start /help.")
+        self.assertTrue(any(feature["id"] == "telegram_command_bot" for feature in command_bot["acceptance_features"]))
+        self.assertGreaterEqual(len(command_bot["module_contracts"]), 2)
 
 
 if __name__ == "__main__":
