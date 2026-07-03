@@ -98,6 +98,47 @@ def verification_failure_signature(verification: dict[str, Any]) -> str:
     )
 
 
+def build_stop_condition_evidence(
+    reason: str,
+    attempts: list[dict[str, Any]],
+    final_verification: dict[str, Any],
+    repeated_signature: bool = False,
+) -> dict[str, Any]:
+    combined_error = "\n".join(
+        str(row.get("stderr") or "")
+        for row in final_verification.get("results", [])
+        if isinstance(row, dict)
+    ).lower()
+    return {
+        "kind": "code_brigade_greenfield_stop_condition_evidence",
+        "reason": reason,
+        "attempt_count": len(attempts),
+        "repair_attempt_count": sum(1 for attempt in attempts if isinstance(attempt.get("repair_execution"), dict)),
+        "repeated_failure_signature": repeated_signature,
+        "dependency_unavailable_hint": "module not found" in combined_error or "no module named" in combined_error,
+        "secret_required_hint": "token" in combined_error or "api key" in combined_error or "secret" in combined_error,
+        "system_package_hint": "command not found" in combined_error or "no such file or directory" in combined_error,
+        "final_status": final_verification.get("status", ""),
+    }
+
+
+def verification_loop_result(
+    status: str,
+    attempts: list[dict[str, Any]],
+    final_verification: dict[str, Any],
+    stop_reason: str,
+    repeated_signature: bool = False,
+) -> dict[str, Any]:
+    return {
+        "kind": "code_brigade_greenfield_verification_loop",
+        "status": status,
+        "attempts": attempts,
+        "final_verification": final_verification,
+        "stop_reason": stop_reason,
+        "stop_condition_evidence": build_stop_condition_evidence(stop_reason, attempts, final_verification, repeated_signature),
+    }
+
+
 def run_greenfield_verification_loop(repo: Path, commands: list[str], project_brief: dict[str, Any], max_cycles: int = 2) -> dict[str, Any]:
     attempts: list[dict[str, Any]] = []
     previous_signature = ""
@@ -108,7 +149,10 @@ def run_greenfield_verification_loop(repo: Path, commands: list[str], project_br
         signature = verification_failure_signature(verification)
         if verification.get("status") == "passed":
             attempts.append({"cycle": cycle, "status": verification.get("status", ""), "failure_signature": "", "repair_guidance": {}})
-            return {"kind": "code_brigade_greenfield_verification_loop", "status": "passed", "attempts": attempts, "final_verification": verification, "stop_reason": "verification passed"}
+            return verification_loop_result("passed", attempts, verification, "verification passed")
+        if signature and signature == previous_signature:
+            attempts.append({"cycle": cycle, "status": verification.get("status", ""), "failure_signature": signature, "repair_guidance": {}, "repair_execution": {"status": "skipped_repeat_failure", "repaired_files": [], "blockers": ["same verification failure repeats"]}})
+            return verification_loop_result("blocked", attempts, verification, "same verification failure repeats", repeated_signature=True)
         repair_guidance = repair_guidance_for_verification(project_brief, verification, signature)
         repair_execution = apply_greenfield_repair(repo, project_brief, verification)
         attempts.append(
@@ -121,8 +165,6 @@ def run_greenfield_verification_loop(repo: Path, commands: list[str], project_br
             }
         )
         if repair_execution.get("status") != "applied":
-            return {"kind": "code_brigade_greenfield_verification_loop", "status": "blocked", "attempts": attempts, "final_verification": verification, "stop_reason": "no bounded repair applicable"}
-        if signature and signature == previous_signature:
-            return {"kind": "code_brigade_greenfield_verification_loop", "status": "blocked", "attempts": attempts, "final_verification": verification, "stop_reason": "same verification failure repeats"}
+            return verification_loop_result("blocked", attempts, verification, "no bounded repair applicable")
         previous_signature = signature
-    return {"kind": "code_brigade_greenfield_verification_loop", "status": "blocked", "attempts": attempts, "final_verification": final_verification, "stop_reason": "max verification cycles reached"}
+    return verification_loop_result("blocked", attempts, final_verification, "max verification cycles reached")

@@ -75,6 +75,7 @@ def build_greenfield_memory_record(
         "dependency_new_lockfiles": dependency_report.get("new_lockfiles", []),
         "verification_status": verification_loop.get("status", ""),
         "verification_stop_reason": verification_loop.get("stop_reason", ""),
+        "verification_stop_condition_evidence": verification_loop.get("stop_condition_evidence", {}),
         "verification_attempt_count": len(verification_loop.get("attempts", [])) if isinstance(verification_loop.get("attempts"), list) else 0,
         "repair_attempt_count": len(repair_attempts),
         "repaired_files": repaired_files,

@@ -51,6 +51,7 @@ def build_greenfield_run_report(
         "dependency_status": dependency_report.get("status", ""),
         "verification_status": verification_loop.get("status", ""),
         "verification_stop_reason": verification_loop.get("stop_reason", ""),
+        "verification_stop_condition_evidence": verification_loop.get("stop_condition_evidence", {}),
         "review_status": greenfield_review.get("status", ""),
         "semantic_review_status": greenfield_review.get("semantic_review", {}).get("status", ""),
         "commands": memory_record.get("commands", {}),

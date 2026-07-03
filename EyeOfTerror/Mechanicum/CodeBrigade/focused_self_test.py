@@ -300,6 +300,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             {
                 "status": "passed",
                 "stop_reason": "verification passed",
+                "stop_condition_evidence": {"reason": "verification passed", "attempt_count": 1},
                 "final_verification": {"results": [{"command": "python -m unittest", "status": "passed"}]},
                 "attempts": [{"repair_execution": {"repaired_files": [{"path": "README.md"}]}}],
             },
@@ -311,6 +312,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(memory["acceptance_feature_coverage"]["status"], "covered")
         self.assertEqual(memory["definition_of_done_status"]["status"], "passed")
         self.assertEqual(memory["verification_results"], [{"command": "python -m unittest", "status": "passed"}])
+        self.assertEqual(memory["verification_stop_condition_evidence"]["reason"], "verification passed")
         self.assertTrue(memory["reusable_learnings"])
 
     def test_greenfield_scaffold_worker_writes_files_and_marker(self) -> None:
@@ -342,11 +344,35 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                 path.write_text(item["content"], encoding="utf-8")
             loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2)
             self.assertEqual(loop["status"], "passed", loop)
+            self.assertEqual(loop["stop_condition_evidence"]["reason"], "verification passed")
+            self.assertEqual(loop["stop_condition_evidence"]["attempt_count"], 2)
+            self.assertFalse(loop["stop_condition_evidence"]["repeated_failure_signature"])
             self.assertEqual(len(loop["attempts"]), 2)
             repair = loop["attempts"][0]["repair_execution"]
             self.assertEqual(repair["status"], "applied")
             self.assertTrue(any(row["path"] == "repair_demo/core.py" for row in repair["repaired_files"]))
             self.assertTrue((repo / "repair_demo/core.py").exists())
+
+    def test_greenfield_verification_loop_records_repeated_failure_stop_condition(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "broken.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+            project = build_greenfield_project_brief(
+                "Создай новый CLI проект `repeat-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "broken.py", "content": "def value():\n    return 1\n"},
+                    ],
+                    "verification_commands": ["python missing_test.py"],
+                    "module_contracts": [{"module": "broken", "path": "broken.py", "responsibility": "broken repeat demo", "requirements": ["run missing test"]}],
+                },
+            )
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2)
+            self.assertEqual(loop["status"], "blocked", loop)
+            self.assertEqual(loop["stop_reason"], "same verification failure repeats")
+            self.assertTrue(loop["stop_condition_evidence"]["repeated_failure_signature"])
+            self.assertEqual(loop["stop_condition_evidence"]["reason"], "same verification failure repeats")
 
     def test_greenfield_dependency_worker_records_node_strategy_without_install(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
