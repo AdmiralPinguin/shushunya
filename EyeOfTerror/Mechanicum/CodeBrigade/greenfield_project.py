@@ -53,6 +53,7 @@ def build_greenfield_run_report(
         "acceptance_feature_ids": memory_record.get("acceptance_feature_ids", []),
         "file_set_synthesis_status": file_set_synthesis_report.get("status", ""),
         "file_set_synthesis_changed_file_count": file_set_synthesis_report.get("changed_file_count", 0),
+        "file_set_synthesis_semantic_quality_status": file_set_synthesis_report.get("semantic_quality_status", ""),
         "implementation_synthesis_status": implementation_synthesis_report.get("status", ""),
         "implementation_synthesis_applied_count": implementation_synthesis_report.get("applied_count", 0),
         "implementation_synthesis_model_unavailable_count": implementation_synthesis_report.get("model_unavailable_count", 0),

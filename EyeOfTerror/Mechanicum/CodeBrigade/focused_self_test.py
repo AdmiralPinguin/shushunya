@@ -11,7 +11,7 @@ from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_d
 from greenfield_architect import build_greenfield_project_brief as architect_build_greenfield_project_brief
 from greenfield_dependency_worker import dependency_manager_status
 from greenfield_feature_worker import infer_acceptance_features
-from greenfield_implementation_worker import execute_file_set_synthesis_contract, execute_module_synthesis_contracts
+from greenfield_implementation_worker import execute_file_set_synthesis_contract, execute_module_synthesis_contracts, generated_file_quality
 from greenfield_implementation_worker import build_implementation_trace as worker_build_implementation_trace
 from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
 from greenfield_memory_worker import build_greenfield_memory_record
@@ -327,13 +327,18 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
 
             def guidance(role: str, payload: dict, instructions: str) -> dict:
                 contract = payload["module_synthesis_contract"]
+                is_test = "test" in Path(contract["path"]).name.lower() or "/tests/" in f"/{contract['path']}"
                 return {
                     "ok": True,
                     "status": "answered",
                     "content": json.dumps(
                         {
                             "path": contract["path"],
-                            "content": "def main():\n    return 'model-generated'\n",
+                            "content": (
+                                "import unittest\n\nclass GeneratedTests(unittest.TestCase):\n    def test_generated(self):\n        self.assertTrue(True)\n"
+                                if is_test
+                                else "def main():\n    return 'model-generated'\n"
+                            ),
                             "requirements_satisfied": contract["requirements"],
                             "tests_to_update": contract["paired_tests"],
                             "notes": "valid module synthesis",
@@ -449,6 +454,33 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(report["status"], "blocked", report)
             self.assertEqual(path.read_text(encoding="utf-8"), "def keep():\n    return 'safe'\n")
             self.assertTrue(any(row["status"] == "rejected" for row in report["rows"]))
+
+    def test_greenfield_synthesis_quality_blocks_weak_source_and_assertionless_tests(self) -> None:
+        self.assertEqual(generated_file_quality("app.py", "VALUE = 1\n", ["return ready"])["status"], "blocked")
+        self.assertEqual(generated_file_quality("tests/test_app.py", "def test_ready():\n    pass\n", ["prove ready"])["status"], "blocked")
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = architect_build_greenfield_project_brief("Создай CLI калькулятор `quality-calc`.")
+            source_module = next(row for row in project["implementation_plan"]["module_sequence"] if row["path"] in project["implementation_plan"]["source_files"])
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "path": source_module["path"],
+                            "content": "VALUE = 1\n",
+                            "requirements_satisfied": source_module["requirements"],
+                            "tests_to_update": source_module["paired_tests"],
+                            "notes": "weak",
+                        }
+                    ),
+                }
+
+            report = execute_module_synthesis_contracts(repo, project, guidance)
+            self.assertEqual(report["status"], "blocked", report)
+            self.assertTrue(any("semantic quality blocked" in "; ".join(row["blockers"]) for row in report["rows"] if row["blockers"]))
 
     def test_greenfield_contract_requires_module_synthesis_contracts(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `contract-calc`.")

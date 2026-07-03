@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import ast
 from pathlib import Path
 from typing import Any, Callable
 
@@ -229,6 +230,59 @@ def safe_repo_relative_path(repo: Path, rel_path: str) -> Path | None:
     return target
 
 
+def generated_file_quality(path: str, content: str, requirements: list[str]) -> dict[str, Any]:
+    blockers: list[str] = []
+    warnings: list[str] = []
+    score = 100
+    stripped = content.strip()
+    path_lower = path.lower()
+    is_test = "test" in Path(path).name.lower() or "/tests/" in f"/{path_lower}"
+    if not stripped:
+        blockers.append("generated file is empty")
+        score -= 80
+    if len(stripped.splitlines()) < 2 and requirements:
+        warnings.append("generated file is very short for a requirement-bearing contract")
+        score -= 20
+    if is_test:
+        assertion_markers = ("assert", "expect(", "pytest.raises", "unittest")
+        test_markers = ("def test_", "it(", "test(")
+        if not any(marker in content for marker in assertion_markers):
+            blockers.append("generated test file has no assertion")
+            score -= 60
+        if not any(marker in content for marker in test_markers):
+            warnings.append("generated test file has no explicit test case marker")
+            score -= 20
+    elif path.endswith(".py"):
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            blockers.append("generated Python source has syntax error")
+            score -= 80
+        else:
+            executable_nodes = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Assign, ast.Return, ast.If, ast.For, ast.While, ast.Try))
+            ]
+            if len(executable_nodes) < 2 and requirements:
+                blockers.append("generated Python source is semantically too weak")
+                score -= 50
+    elif path.endswith((".js", ".jsx", ".ts", ".tsx")):
+        if all(marker not in content for marker in ("function", "=>", "export", "class", "const ", "let ")):
+            blockers.append("generated JavaScript/TypeScript source has no executable structure")
+            score -= 50
+    elif path.endswith(".html"):
+        if "<" not in content or ">" not in content:
+            blockers.append("generated HTML has no markup")
+            score -= 50
+    return {
+        "status": "blocked" if blockers or score < 50 else "passed",
+        "score": max(0, min(100, score)),
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
 def validate_module_synthesis_output(
     output: dict[str, Any],
     module_contract: dict[str, Any],
@@ -248,6 +302,10 @@ def validate_module_synthesis_output(
     missing = [requirement for requirement in requirements if requirement not in satisfied]
     if missing:
         problems.append("requirements_satisfied is incomplete: " + ", ".join(missing))
+    if isinstance(content, str):
+        quality = generated_file_quality(expected_path, content, requirements)
+        if quality["status"] == "blocked":
+            problems.append("semantic quality blocked: " + "; ".join(str(item) for item in quality["blockers"]))
     paired_tests = [str(item) for item in module_contract.get("paired_tests", []) if isinstance(item, str)]
     tests_to_update = [str(item) for item in output.get("tests_to_update", []) if isinstance(item, str)] if isinstance(output.get("tests_to_update"), list) else []
     if paired_tests and not tests_to_update:
@@ -311,6 +369,10 @@ def validate_file_set_synthesis_output(
             missing = [requirement for requirement in requirements if requirement not in satisfied]
             if missing:
                 problems.append(f"requirements_satisfied is incomplete for {path}: " + ", ".join(missing))
+        if isinstance(content, str):
+            quality = generated_file_quality(path, content, requirements)
+            if quality["status"] == "blocked":
+                problems.append(f"semantic quality blocked for {path}: " + "; ".join(str(item) for item in quality["blockers"]))
     return problems
 
 
@@ -414,6 +476,7 @@ def execute_module_synthesis_contracts(
                 "status": "applied",
                 "requirements_satisfied": output.get("requirements_satisfied", []),
                 "tests_to_update": output.get("tests_to_update", []),
+                "semantic_quality": generated_file_quality(rel_path, rendered_content, [str(item) for item in module.get("requirements", []) if isinstance(item, str)]),
                 "notes": str(output.get("notes") or ""),
             }
         )
@@ -538,6 +601,8 @@ def execute_file_set_synthesis_contract(
         }
     changed_files: list[str] = []
     operation_results: list[dict[str, Any]] = []
+    quality_rows: list[dict[str, Any]] = []
+    requirements_by_path = module_requirements_by_path(project_brief)
     for row in output.get("files", []):
         path = str(row.get("path") or "")
         target = safe_repo_relative_path(repo, path)
@@ -549,6 +614,7 @@ def execute_file_set_synthesis_contract(
         target.write_text(rendered_content, encoding="utf-8")
         after = rendered_content.encode("utf-8")
         changed_files.append(path)
+        quality_rows.append({"path": path, **generated_file_quality(path, rendered_content, requirements_by_path.get(path, []))})
         operation_results.append(
             {
                 "operation": "greenfield_file_set_synthesis_write",
@@ -565,6 +631,8 @@ def execute_file_set_synthesis_contract(
         "changed_files": sorted(set(changed_files)),
         "changed_file_count": len(set(changed_files)),
         "allowed_paths": allowed_paths,
+        "semantic_quality_rows": quality_rows,
+        "semantic_quality_status": "passed" if quality_rows and all(row.get("status") == "passed" for row in quality_rows) else "blocked" if quality_rows else "skipped",
         "operation_results": operation_results,
         "blockers": [],
         "warnings": [],

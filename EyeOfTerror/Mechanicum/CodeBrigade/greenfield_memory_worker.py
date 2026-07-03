@@ -84,6 +84,7 @@ def build_greenfield_memory_record(
         "file_set_synthesis_status": file_set_synthesis_report.get("status", ""),
         "file_set_synthesis_changed_files": file_set_synthesis_report.get("changed_files", []),
         "file_set_synthesis_changed_file_count": file_set_synthesis_report.get("changed_file_count", 0),
+        "file_set_synthesis_semantic_quality_status": file_set_synthesis_report.get("semantic_quality_status", ""),
         "definition_of_done_status": dod_status,
         "dependency_status": dependency_report.get("status", ""),
         "dependency_blockers": dependency_report.get("blockers", []),
@@ -115,5 +116,6 @@ def build_greenfield_memory_record(
             "keep implementation modules and tests separate for non-trivial projects",
             "treat module synthesis as applied only when model JSON passes path, requirement, test, and placeholder validation",
             "prefer coordinated file-set synthesis when source and tests must evolve together",
+            "reject generated source/test sets when semantic quality gates identify weak source or assertionless tests",
         ],
     }
