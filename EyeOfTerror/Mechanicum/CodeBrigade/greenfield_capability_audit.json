@@ -96,7 +96,8 @@
       "evidence": [
         "greenfield_architect.py request_greenfield_model_guidance calls model_brain for GreenfieldArchitect and GreenfieldImplementationWorker",
         "greenfield_review_worker.py calls model guidance for GreenfieldReviewer",
-        "greenfield_verification_worker.py calls model guidance for GreenfieldRepairWorker"
+        "greenfield_verification_worker.py calls model guidance for GreenfieldRepairWorker",
+        "greenfield_project.py writes greenfield_model_guidance_ledger.json so each run records role, stage, and guidance status"
       ],
       "remaining_risk": "LLM calls currently provide bounded guidance around deterministic workers; they do not yet own arbitrary module code generation."
     },

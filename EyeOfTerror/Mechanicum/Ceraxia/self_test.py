@@ -994,6 +994,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     "architecture_plan.json",
                     "file_tree_plan.json",
                     "greenfield_memory_record.json",
+                    "greenfield_model_guidance_ledger.json",
                     "greenfield_project_brief.json",
                     "greenfield_run_report.json",
                     "implementation_trace.json",
@@ -1028,10 +1029,15 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["greenfield_review"]["semantic_review"]["status"], "passed")
             self.assertEqual(worker_report["greenfield_memory_record"]["kind"], "code_brigade_greenfield_memory_record")
+            self.assertEqual(worker_report["greenfield_model_guidance_ledger"]["kind"], "code_brigade_greenfield_model_guidance_ledger")
+            self.assertIn("GreenfieldImplementationWorker", worker_report["greenfield_model_guidance_ledger"]["roles"])
             self.assertEqual(worker_report["greenfield_memory_record"]["definition_of_done_status"]["status"], "passed")
+            ledger = json.loads((repo / "greenfield_model_guidance_ledger.json").read_text(encoding="utf-8"))
+            self.assertEqual(ledger["kind"], "code_brigade_greenfield_model_guidance_ledger")
             run_report = json.loads((repo / "greenfield_run_report.json").read_text(encoding="utf-8"))
             self.assertEqual(run_report["kind"], "code_brigade_greenfield_run_report")
             self.assertEqual(run_report["definition_of_done_status"]["status"], "passed")
+            self.assertEqual(run_report["model_guidance_ledger_status"], ledger["status"])
             project_brief = json.loads((repo / "greenfield_project_brief.json").read_text(encoding="utf-8"))
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
             self.assertEqual(project_brief["project_type"], "cli_tool")

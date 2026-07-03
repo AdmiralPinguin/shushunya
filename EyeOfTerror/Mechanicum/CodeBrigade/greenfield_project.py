@@ -39,6 +39,7 @@ def build_greenfield_run_report(
     verification_loop: dict[str, Any],
     greenfield_review: dict[str, Any],
     memory_record: dict[str, Any],
+    model_guidance_ledger: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "kind": "code_brigade_greenfield_run_report",
@@ -55,7 +56,68 @@ def build_greenfield_run_report(
         "review_status": greenfield_review.get("status", ""),
         "semantic_review_status": greenfield_review.get("semantic_review", {}).get("status", ""),
         "commands": memory_record.get("commands", {}),
+        "model_guidance_ledger_status": model_guidance_ledger.get("status", ""),
+        "model_guidance_role_count": model_guidance_ledger.get("role_count", 0),
         "reusable_learnings": memory_record.get("reusable_learnings", []),
+    }
+
+
+def _guidance_status(payload: Any) -> str:
+    if not isinstance(payload, dict) or not payload:
+        return "missing"
+    return str(payload.get("status") or payload.get("decision") or "recorded")
+
+
+def build_greenfield_model_guidance_ledger(
+    project_brief: dict[str, Any],
+    verification_loop: dict[str, Any],
+    greenfield_review: dict[str, Any],
+) -> dict[str, Any]:
+    repair_entries = [
+        attempt.get("repair_guidance")
+        for attempt in verification_loop.get("attempts", [])
+        if isinstance(attempt, dict) and isinstance(attempt.get("repair_guidance"), dict) and attempt.get("repair_guidance")
+    ]
+    entries = [
+        {
+            "role": "GreenfieldArchitect",
+            "stage": "architecture_plan",
+            "status": _guidance_status(project_brief.get("architecture_plan", {}).get("model_guidance", {})),
+        },
+        {
+            "role": "GreenfieldImplementationWorker",
+            "stage": "implementation_plan",
+            "status": _guidance_status(project_brief.get("implementation_plan", {}).get("model_guidance", {})),
+        },
+        {
+            "role": "GreenfieldImplementationWorker",
+            "stage": "implementation_feature_report",
+            "status": _guidance_status(project_brief.get("implementation_feature_report", {}).get("model_guidance", {})),
+        },
+        {
+            "role": "GreenfieldReviewer",
+            "stage": "greenfield_review",
+            "status": _guidance_status(greenfield_review.get("model_guidance", {})),
+        },
+    ]
+    for index, repair_guidance in enumerate(repair_entries, start=1):
+        entries.append(
+            {
+                "role": "GreenfieldRepairWorker",
+                "stage": f"repair_attempt_{index}",
+                "status": _guidance_status(repair_guidance),
+            }
+        )
+    roles = sorted({entry["role"] for entry in entries})
+    missing = [entry for entry in entries if entry["status"] == "missing"]
+    return {
+        "kind": "code_brigade_greenfield_model_guidance_ledger",
+        "contract_version": "eye-mechanicum.v1",
+        "status": "complete" if not missing else "partial",
+        "role_count": len(roles),
+        "roles": roles,
+        "entries": entries,
+        "missing_entry_count": len(missing),
     }
 
 
@@ -215,9 +277,11 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
     verification = verification_loop.get("final_verification", {}) if isinstance(verification_loop.get("final_verification"), dict) else {}
     greenfield_review = review_greenfield_project(repo, project_brief, dependency_report, verification)
     greenfield_memory_record = build_greenfield_memory_record(project_brief, dependency_report, verification_loop, greenfield_review)
-    greenfield_run_report = build_greenfield_run_report(project_brief, dependency_report, verification_loop, greenfield_review, greenfield_memory_record)
+    greenfield_model_guidance_ledger = build_greenfield_model_guidance_ledger(project_brief, verification_loop, greenfield_review)
+    greenfield_run_report = build_greenfield_run_report(project_brief, dependency_report, verification_loop, greenfield_review, greenfield_memory_record, greenfield_model_guidance_ledger)
     for artifact_path, artifact_payload in (
         ("greenfield_memory_record.json", greenfield_memory_record),
+        ("greenfield_model_guidance_ledger.json", greenfield_model_guidance_ledger),
         ("greenfield_run_report.json", greenfield_run_report),
     ):
         operation_results.append(write_greenfield_json_artifact(repo, artifact_path, artifact_payload))
@@ -246,6 +310,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         "verification_loop": verification_loop,
         "greenfield_review": greenfield_review,
         "greenfield_memory_record": greenfield_memory_record,
+        "greenfield_model_guidance_ledger": greenfield_model_guidance_ledger,
         "greenfield_run_report": greenfield_run_report,
         "verification": verification,
     }

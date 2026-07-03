@@ -740,6 +740,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
             report["greenfield_dependency_plan"] = greenfield.get("dependency_plan", {})
             report["greenfield_verification_plan"] = greenfield.get("verification_plan", {})
             report["greenfield_memory_record"] = greenfield.get("greenfield_memory_record", {})
+            report["greenfield_model_guidance_ledger"] = greenfield.get("greenfield_model_guidance_ledger", {})
     elif status == "blocked":
         report["execution_result"] = build_blocked_execution_result(notes)
     return report
