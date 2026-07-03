@@ -131,6 +131,8 @@ def main() -> int:
                 or capabilities.get("worker_availability", {}).get("ok") is not True
                 or len(capabilities.get("worker_specialization_briefs", [])) != 6
                 or "write_file" not in capabilities.get("patch_contract", {}).get("operation_types", [])
+                or "model_backed_governor_planning" not in capabilities.get("capabilities", [])
+                or capabilities.get("model_brain", {}).get("kind") != "eye_of_terror_model_brain"
             ):
                 raise AssertionError(f"bad capabilities: {capabilities}")
             plan = request_json(base + "/plan", {"task": "почини python приложение", "task_id": "ceraxia-http-test"})
@@ -149,6 +151,7 @@ def main() -> int:
                 or "test_inferred_missing_function" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or "test_inferred_arithmetic_return" not in plan.get("patch_contract", {}).get("synthesis_modes", [])
                 or plan.get("resolved_workers", {}).get("FerrumPatchwright", {}).get("role_contract", {}).get("owned_step") != "implementation"
+                or plan.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"bad plan: {plan}")
             callable_contract = request_json(
@@ -168,6 +171,7 @@ def main() -> int:
                 or "patch_package" not in required_final_fields
                 or "pr_summary" not in required_final_fields
                 or callable_contract.get("next_action", {}).get("endpoint") != "POST /prepare_run"
+                or callable_contract.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"bad callable contract: {callable_contract}")
             run_dir = root / "runs" / "custom-run"
@@ -180,6 +184,7 @@ def main() -> int:
                 or prepared.get("governor") != "Ceraxia"
                 or not (run_dir / "dispatch" / "repository_survey.json").exists()
                 or not (run_dir / "oversight.json").exists()
+                or prepared.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"bad prepared run: {prepared}")
             implementation_dispatch = json.loads((run_dir / "dispatch" / "implementation.json").read_text(encoding="utf-8"))

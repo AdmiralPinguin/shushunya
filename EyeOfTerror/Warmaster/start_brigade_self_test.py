@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -70,6 +71,9 @@ def main() -> int:
     missing = [item for item in required if item not in rendered]
     if missing:
         raise AssertionError(f"brigade command plan missing entries: {missing}\n{rendered}")
+    expected_model_enabled = os.environ.get("EYE_MODEL_ENABLED", "1")
+    if not all(command.env.get("EYE_MODEL_ENABLED") == expected_model_enabled and command.env.get("EYE_MODEL_BASE_URL", "").endswith("/v1") for command in commands):
+        raise AssertionError(f"brigade commands must enable model brain by default: {[command.env for command in commands]}")
     plan = brigade_plan(
         repo_root=repo_root,
         host="127.0.0.1",
@@ -79,6 +83,8 @@ def main() -> int:
     )
     if plan.get("mode") != "service-separated" or plan.get("ports", {}).get("warmaster_gateway") != 7000 or plan.get("ports", {}).get("ceraxia") != 7104:
         raise AssertionError(f"bad brigade JSON plan: {plan}")
+    if plan.get("model_brain", {}).get("enabled") != expected_model_enabled or not plan.get("model_brain", {}).get("model"):
+        raise AssertionError(f"brigade plan did not expose model brain defaults: {plan}")
     service_names = {item.get("name") for item in plan.get("services", []) if isinstance(item, dict)}
     if service_names != expected_names:
         raise AssertionError(f"bad brigade service names in JSON plan: {plan}")

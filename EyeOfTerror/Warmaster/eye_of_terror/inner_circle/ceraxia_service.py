@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from EyeOfTerror.model_brain import model_contract, request_model_decision
 
 from ..contracts import build_code_task_contract, code_worker_plan
 from ..pipeline import write_pipeline_run
@@ -100,6 +107,7 @@ def callable_contract_payload(task: str, task_id: str | None, repo_path: str = "
         "governor": "Ceraxia",
         "api_version": 1,
         "callable_kind": "specialized_code_brigade",
+        "model_brain": model_contract("Ceraxia", "Inner Circle code task governor", layer="governor_callable"),
         "task_id": plan_payload.get("contract", {}).get("task_id", task_id or ""),
         "normalized_task": normalized_task,
         "input_contract": {
@@ -152,6 +160,7 @@ def service_capabilities() -> dict[str, Any]:
             "unavailable_workers": capability_plan.get("unavailable_workers", []),
             "resolved_workers": capability_plan.get("resolved_workers", {}),
         },
+        "model_brain": model_contract("Ceraxia", "Inner Circle code task governor", layer="governor_service"),
         "pipeline": pipeline,
         "patch_contract": patch_contract_capabilities(),
         "oversight": oversight,
@@ -175,6 +184,7 @@ def service_capabilities() -> dict[str, Any]:
         "next_action": next_action,
         "client_action": executable_client_action("", next_action),
         "capabilities": [
+            "model_backed_governor_planning",
             "code_task_planning",
             "repository_survey",
             "patch_manifest_preparation",
@@ -231,13 +241,24 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 task_id = str(payload.get("task_id") or "").strip() or None
                 plan = plan_code_task(task, task_id=task_id)
+                model_decision = request_model_decision(
+                    "Ceraxia",
+                    "Inner Circle code task governor",
+                    payload,
+                    layer="governor_service",
+                    instructions="Plan a software engineering brigade task, identify implementation and verification risks, and keep the answer scoped to governor oversight.",
+                )
                 if self.path == "/plan":
-                    response(self, 200, payload_with_plan_view(plan.to_dict()))
+                    plan_payload = payload_with_plan_view(plan.to_dict())
+                    plan_payload["model_brain"] = model_decision
+                    response(self, 200, plan_payload)
                     return
                 if self.path == "/callable_contract":
                     repo_path = str(payload.get("repo_path") or "").strip()
                     constraints = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
-                    response(self, 200, callable_contract_payload(task, task_id, repo_path=repo_path, constraints=constraints))
+                    contract_payload = callable_contract_payload(task, task_id, repo_path=repo_path, constraints=constraints)
+                    contract_payload["model_brain"] = model_decision
+                    response(self, 200, contract_payload)
                     return
                 if self.path == "/prepare_run":
                     run_dir = resolve_run_dir(default_run_root, str(payload.get("run_dir") or ""), plan.contract.task_id)
@@ -248,6 +269,7 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                         {
                             "ok": status["ok"],
                             "governor": "Ceraxia",
+                            "model_brain": model_decision,
                             "status": status,
                             "phase": "run_prepared" if status.get("ok") else "prepare_failed",
                             "decision": {

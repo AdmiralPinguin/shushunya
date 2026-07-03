@@ -47,6 +47,16 @@ def pythonpath(repo_root: Path) -> str:
     return os.pathsep.join([str(repo_root / "EyeOfTerror" / "Warmaster"), str(repo_root / "LegacyMechanicum")])
 
 
+def model_env_defaults() -> dict[str, str]:
+    return {
+        "EYE_MODEL_ENABLED": os.environ.get("EYE_MODEL_ENABLED", "1"),
+        "EYE_MODEL_BASE_URL": os.environ.get("EYE_MODEL_BASE_URL", os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8080/v1")),
+        "EYE_MODEL_NAME": os.environ.get("EYE_MODEL_NAME", os.environ.get("LLM_MODEL", os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"))),
+        "EYE_MODEL_TIMEOUT_SEC": os.environ.get("EYE_MODEL_TIMEOUT_SEC", "45"),
+        "EYE_MODEL_MAX_TOKENS": os.environ.get("EYE_MODEL_MAX_TOKENS", "512"),
+    }
+
+
 def worker_service_plan(repo_root: Path, host: str) -> list[dict[str, object]]:
     path = repo_root / "LegacyMechanicum" / "worker_services.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -103,7 +113,7 @@ def brigade_commands(
     iskandar_run_root: Path,
     ceraxia_run_root: Path | None = None,
 ) -> list[CommandSpec]:
-    env = {"PYTHONPATH": pythonpath(repo_root)}
+    env = {"PYTHONPATH": pythonpath(repo_root), **model_env_defaults()}
     warmaster_port = registry_port(repo_root, "eye_of_terror", "WarmasterGateway", 7000)
     iskandar_port = registry_port(repo_root, "eye_of_terror", "IskandarKhayon", 7101)
     ceraxia_port = registry_port(repo_root, "eye_of_terror", "Ceraxia", 7104)
@@ -283,7 +293,19 @@ def brigade_plan(
         "health_urls": {**top_level_health_urls, **worker_health_urls},
         "readiness_urls": readiness_urls,
         "worker_contract": brigade_worker_contract(commands, workers, readiness_urls),
+        "model_brain": {
+            "enabled": env_value(commands, "EYE_MODEL_ENABLED"),
+            "base_url": env_value(commands, "EYE_MODEL_BASE_URL"),
+            "model": env_value(commands, "EYE_MODEL_NAME"),
+        },
     }
+
+
+def env_value(commands: list[CommandSpec], key: str) -> str:
+    for command in commands:
+        if key in command.env:
+            return command.env[key]
+    return ""
 
 
 def url_is_ready(url: str, timeout_sec: float = 1.0) -> bool:

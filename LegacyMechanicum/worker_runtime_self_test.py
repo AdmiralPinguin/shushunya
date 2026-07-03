@@ -38,12 +38,15 @@ def main() -> int:
                 raise AssertionError(f"bad health response: {health}")
             if "GET /tasks" not in health.get("endpoints", []):
                 raise AssertionError(f"health did not advertise worker API endpoints: {health}")
+            if health.get("metadata", {}).get("model_brain", {}).get("kind") != "eye_of_terror_model_brain":
+                raise AssertionError(f"health did not advertise model brain contract: {health}")
             capabilities = request_json(base + "/capabilities")
             if (
                 capabilities.get("worker") != "NoosphericExtractor"
                 or not isinstance(capabilities.get("capabilities"), list)
                 or capabilities.get("display", {}).get("headline") != "NoosphericExtractor is ready"
                 or capabilities.get("client_action", {}).get("path") != "/capabilities"
+                or capabilities.get("metadata", {}).get("model_brain", {}).get("response_field") != "model_brain"
             ):
                 raise AssertionError(f"bad capabilities response: {capabilities}")
             try:
@@ -82,6 +85,7 @@ def main() -> int:
                 not result.get("ok")
                 or result.get("display", {}).get("headline") != "NoosphericExtractor task completed"
                 or result.get("client_action", {}).get("path") != "/tasks/runtime-test"
+                or result.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"bad run response: {result}")
             task = request_json(base + "/tasks/runtime-test")

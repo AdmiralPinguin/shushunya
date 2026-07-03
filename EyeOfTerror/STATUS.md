@@ -20,6 +20,16 @@
 
 ## Working
 
+- Shared model-backed decisions are centralized in `EyeOfTerror/model_brain.py`.
+  Worker HTTP services, local pipeline execution, and the Iskandar/Ceraxia
+  governor services expose a `model_brain` contract and attach a
+  `model_brain` status object to task results/plans.
+- `EyeOfTerror/Warmaster/start_brigade.py` enables model-backed service runs by
+  default with `EYE_MODEL_ENABLED=1`,
+  `EYE_MODEL_BASE_URL=http://127.0.0.1:8080/v1`, and
+  `EYE_MODEL_NAME=gemma-4-12b-it-UD-Q5_K_XL.gguf`. Self-tests keep model calls
+  disabled unless explicitly enabled so test runs do not depend on a live LLM
+  host.
 - Iskandar Khayon can build lore reconstruction task contracts and dispatch packets.
 - Dispatch packets propagate dependency output artifacts as worker
   `input_artifacts`.

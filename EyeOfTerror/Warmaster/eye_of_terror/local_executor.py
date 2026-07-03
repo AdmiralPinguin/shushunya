@@ -9,6 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from EyeOfTerror.model_brain import attach_model_brain, request_model_decision
+
 from .ledger import TaskLedger
 from .pipeline import write_json_atomic
 
@@ -179,16 +185,20 @@ def write_revision_dispatch(dispatch_path: Path, packet: dict[str, Any], revisio
     request = dict(enriched.get("request") if isinstance(enriched.get("request"), dict) else {})
     request["revision_context"] = revision_context
     enriched["request"] = request
+    return write_execution_dispatch(dispatch_path, enriched)
+
+
+def write_execution_dispatch(dispatch_path: Path, packet: dict[str, Any]) -> Path:
     handle = tempfile.NamedTemporaryFile(
         "w",
         encoding="utf-8",
-        prefix=f".{dispatch_path.stem}.revision.",
+        prefix=f".{dispatch_path.stem}.execution.",
         suffix=".json",
         dir=str(dispatch_path.parent),
         delete=False,
     )
     with handle:
-        json.dump(enriched, handle, ensure_ascii=False, indent=2)
+        json.dump(packet, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
     return Path(handle.name)
 
@@ -231,9 +241,21 @@ def run_step(
     env["PYTHONPATH"] = str(repo_root / pythonpath)
     execution_dispatch_path = dispatch_path
     temp_dispatch_path: Path | None = None
+    execution_packet = dict(packet)
+    execution_request = dict(request)
     if revision_context:
-        temp_dispatch_path = write_revision_dispatch(dispatch_path, packet, revision_context)
-        execution_dispatch_path = temp_dispatch_path
+        execution_request["revision_context"] = revision_context
+    model_decision = request_model_decision(
+        worker,
+        worker,
+        execution_request,
+        layer="local_executor",
+        instructions="You are the model brain for a local pipeline worker subprocess. Stay inside the worker role and return guidance for this exact step.",
+    )
+    execution_request["model_brain"] = model_decision
+    execution_packet["request"] = execution_request
+    temp_dispatch_path = write_execution_dispatch(dispatch_path, execution_packet)
+    execution_dispatch_path = temp_dispatch_path
     timed_out: subprocess.TimeoutExpired | None = None
     completed: subprocess.CompletedProcess[str] | None = None
     attempts = 0
@@ -285,11 +307,12 @@ def run_step(
                 ],
             },
         }
-        return StepResult(step_id, worker, 124, False, payload, stdout[-4000:], stderr[-4000:])
+        return StepResult(step_id, worker, 124, False, attach_model_brain(payload, model_decision), stdout[-4000:], stderr[-4000:])
     if completed is None:
         payload = {"ok": False, "worker": worker, "task_id": str(request.get("task_id") or ""), "status": "failed", "error": "worker process did not start"}
-        return StepResult(step_id, worker, 2, False, payload, "", payload["error"])
+        return StepResult(step_id, worker, 2, False, attach_model_brain(payload, model_decision), "", payload["error"])
     payload = parse_worker_stdout(completed.stdout)
+    payload = attach_model_brain(payload, model_decision)
     ok = completed.returncode == 0 and bool(payload.get("ok"))
     return StepResult(step_id, worker, completed.returncode, ok, payload, completed.stdout, completed.stderr)
 

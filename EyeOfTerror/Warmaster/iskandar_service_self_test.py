@@ -74,6 +74,11 @@ def main() -> int:
             capabilities = request_json(base + "/capabilities")
             if "dispatch_packet_preparation" not in capabilities.get("capabilities", []):
                 raise AssertionError(f"bad capabilities: {capabilities}")
+            if (
+                "model_backed_governor_planning" not in capabilities.get("capabilities", [])
+                or capabilities.get("model_brain", {}).get("kind") != "eye_of_terror_model_brain"
+            ):
+                raise AssertionError(f"capabilities did not expose Iskandar model brain: {capabilities}")
             if capabilities.get("required_workers", [])[0] != "CorpusIngestor" or "FabricatorFinalis" not in capabilities.get("required_workers", []):
                 raise AssertionError(f"capabilities did not expose required workers: {capabilities}")
             if (
@@ -118,6 +123,7 @@ def main() -> int:
                 or plan.get("decision", {}).get("can_prepare_run") is not True
                 or plan.get("display", {}).get("headline") != "Plan is ready"
                 or plan.get("client_action", {}).get("path") != "/prepare_run"
+                or plan.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"bad plan: {plan}")
             run_dir = root / "runs" / "custom-run"
@@ -134,6 +140,7 @@ def main() -> int:
                 or prepared.get("decision", {}).get("can_handoff_to_warmaster") is not True
                 or prepared.get("display", {}).get("headline") != "Run package prepared"
                 or prepared.get("client_action") != {}
+                or prepared.get("model_brain", {}).get("status") != "disabled"
             ):
                 raise AssertionError(f"bad prepared run: {prepared}")
             prepared_oversight = json.loads((run_dir / "oversight.json").read_text(encoding="utf-8"))

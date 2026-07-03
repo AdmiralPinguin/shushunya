@@ -12,6 +12,13 @@ from typing import Any, Callable
 from urllib.parse import unquote, urlparse
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from EyeOfTerror.model_brain import attach_model_brain, model_contract, request_model_decision
+
+
 WorkerRun = Callable[[dict[str, Any], Path], dict[str, Any]]
 
 
@@ -129,6 +136,8 @@ def load_worker_metadata(module_path: Path, worker_name: str) -> dict[str, Any]:
     metadata.setdefault("name", worker_name)
     metadata.setdefault("capabilities", [])
     metadata.setdefault("api_contract", "EyeOfTerror/Warmaster/contracts/worker_api.md")
+    role = str(metadata.get("role") or metadata.get("description") or worker_name)
+    metadata.setdefault("model_brain", model_contract(worker_name, role, layer="worker_service"))
     return metadata
 
 
@@ -222,6 +231,8 @@ def make_handler(
     worker_metadata.setdefault("name", worker_name)
     worker_metadata.setdefault("capabilities", [])
     worker_metadata.setdefault("api_contract", "EyeOfTerror/Warmaster/contracts/worker_api.md")
+    worker_role = str(worker_metadata.get("role") or worker_metadata.get("description") or worker_name)
+    worker_metadata.setdefault("model_brain", model_contract(worker_name, worker_role, layer="worker_service"))
     tasks: dict[str, dict[str, Any]] = {}
     tasks_lock = threading.RLock()
     terminal_statuses = {"completed", "ready", "passed", "passed_with_warnings", "failed", "blocked", "needs_revision", "cancelled"}
@@ -364,7 +375,16 @@ def make_handler(
                             task["result"] = result
                     response(self, 400, payload_with_worker_view(result, worker_name, task_id=task_id, status="failed"))
                     return
-                result = run_worker(request, workspace_root)
+                model_decision = request_model_decision(
+                    worker_name,
+                    worker_role,
+                    request,
+                    layer="worker_service",
+                    instructions="You are the model brain for this worker. Stay within its worker.json role contract and identify the next role-scoped action.",
+                )
+                request = dict(request)
+                request["model_brain"] = model_decision
+                result = attach_model_brain(run_worker(request, workspace_root), model_decision)
                 if task_id:
                     with tasks_lock:
                         task = ensure_task(task_id)

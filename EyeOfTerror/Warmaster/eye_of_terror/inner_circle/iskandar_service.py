@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from EyeOfTerror.model_brain import model_contract, request_model_decision
 
 from ..contracts import build_lore_reconstruction_contract, lore_worker_plan
 from .iskandar import executable_client_action, oversight_plan, payload_with_plan_view, plan_lore_reconstruction
@@ -86,6 +93,7 @@ def service_capabilities() -> dict[str, Any]:
             "unavailable_workers": capability_plan.get("unavailable_workers", []),
             "resolved_workers": capability_plan.get("resolved_workers", {}),
         },
+        "model_brain": model_contract("IskandarKhayon", "Inner Circle lore reconstruction governor", layer="governor_service"),
         "pipeline": pipeline,
         "oversight": oversight,
         "summary": {
@@ -105,6 +113,7 @@ def service_capabilities() -> dict[str, Any]:
         "next_action": next_action,
         "client_action": executable_client_action("", next_action),
         "capabilities": [
+            "model_backed_governor_planning",
             "lore_reconstruction_planning",
             "worker_plan_resolution",
             "dispatch_packet_preparation",
@@ -162,8 +171,17 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 task_id = str(payload.get("task_id") or "").strip() or None
                 plan = plan_lore_reconstruction(task, task_id=task_id)
+                model_decision = request_model_decision(
+                    "IskandarKhayon",
+                    "Inner Circle lore reconstruction governor",
+                    payload,
+                    layer="governor_service",
+                    instructions="Plan a research/reconstruction brigade task, identify source coverage risks, and keep the answer scoped to governor oversight.",
+                )
                 if self.path == "/plan":
-                    response(self, 200, payload_with_plan_view(plan.to_dict()))
+                    plan_payload = payload_with_plan_view(plan.to_dict())
+                    plan_payload["model_brain"] = model_decision
+                    response(self, 200, plan_payload)
                     return
                 if self.path == "/prepare_run":
                     run_dir = resolve_run_dir(default_run_root, str(payload.get("run_dir") or ""), plan.contract.task_id)
@@ -174,6 +192,7 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                         {
                             "ok": status["ok"],
                             "governor": "IskandarKhayon",
+                            "model_brain": model_decision,
                             "status": status,
                             "phase": "run_prepared" if status.get("ok") else "prepare_failed",
                             "decision": {
