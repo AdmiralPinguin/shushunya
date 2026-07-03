@@ -258,6 +258,62 @@ def validate_module_synthesis_output(
     return problems
 
 
+def file_set_allowed_paths(project_brief: dict[str, Any]) -> set[str]:
+    implementation_plan = project_brief.get("implementation_plan") if isinstance(project_brief.get("implementation_plan"), dict) else {}
+    source_files = [str(path) for path in implementation_plan.get("source_files", []) if isinstance(path, str)]
+    test_files = [str(path) for path in implementation_plan.get("test_files", []) if isinstance(path, str)]
+    return set(source_files + test_files)
+
+
+def module_requirements_by_path(project_brief: dict[str, Any]) -> dict[str, list[str]]:
+    implementation_plan = project_brief.get("implementation_plan") if isinstance(project_brief.get("implementation_plan"), dict) else {}
+    module_sequence = implementation_plan.get("module_sequence") if isinstance(implementation_plan.get("module_sequence"), list) else []
+    requirements: dict[str, list[str]] = {}
+    for module in module_sequence:
+        if not isinstance(module, dict):
+            continue
+        path = str(module.get("path") or "")
+        if path:
+            requirements[path] = [str(item) for item in module.get("requirements", []) if isinstance(item, str)]
+    return requirements
+
+
+def validate_file_set_synthesis_output(
+    output: dict[str, Any],
+    project_brief: dict[str, Any],
+    forbidden_markers: list[str],
+) -> list[str]:
+    problems: list[str] = []
+    rows = output.get("files")
+    if not isinstance(rows, list) or not rows:
+        return ["files list is required"]
+    allowed_paths = file_set_allowed_paths(project_brief)
+    requirements_by_path = module_requirements_by_path(project_brief)
+    seen: set[str] = set()
+    for index, row in enumerate(rows, start=1):
+        if not isinstance(row, dict):
+            problems.append(f"file row is not an object: {index}")
+            continue
+        path = str(row.get("path") or "")
+        if path not in allowed_paths:
+            problems.append(f"file path is outside file-set synthesis scope: {path}")
+        if path in seen:
+            problems.append(f"file path is duplicated: {path}")
+        seen.add(path)
+        content = row.get("content")
+        if not isinstance(content, str) or not content.strip():
+            problems.append(f"content is required: {path}")
+        elif forbidden_markers_found(content, forbidden_markers):
+            problems.append(f"content contains forbidden placeholder marker: {path}")
+        requirements = requirements_by_path.get(path, [])
+        if requirements:
+            satisfied = [str(item) for item in row.get("requirements_satisfied", []) if isinstance(item, str)] if isinstance(row.get("requirements_satisfied"), list) else []
+            missing = [requirement for requirement in requirements if requirement not in satisfied]
+            if missing:
+                problems.append(f"requirements_satisfied is incomplete for {path}: " + ", ".join(missing))
+    return problems
+
+
 def execute_module_synthesis_contracts(
     repo: Path,
     project_brief: dict[str, Any],
@@ -387,6 +443,133 @@ def execute_module_synthesis_contracts(
         "changed_files": sorted(set(changed_files)),
         "operation_results": operation_results,
         "rows": rows,
+    }
+
+
+def execute_file_set_synthesis_contract(
+    repo: Path,
+    project_brief: dict[str, Any],
+    request_guidance: GuidanceFn | None = None,
+) -> dict[str, Any]:
+    implementation_plan = project_brief.get("implementation_plan") if isinstance(project_brief.get("implementation_plan"), dict) else {}
+    forbidden_markers = [
+        str(item)
+        for item in implementation_plan.get("anti_stub_policy", {}).get("forbidden_markers", [])
+        if isinstance(item, str)
+    ]
+    allowed_paths = sorted(file_set_allowed_paths(project_brief))
+    if not allowed_paths:
+        return {
+            "kind": "code_brigade_greenfield_file_set_synthesis_report",
+            "contract_version": "eye-mechanicum.v1",
+            "status": "skipped",
+            "changed_files": [],
+            "operation_results": [],
+            "blockers": ["no source or test files are available for file-set synthesis"],
+            "warnings": [],
+        }
+    if request_guidance is None:
+        return {
+            "kind": "code_brigade_greenfield_file_set_synthesis_report",
+            "contract_version": "eye-mechanicum.v1",
+            "status": "skipped",
+            "changed_files": [],
+            "operation_results": [],
+            "blockers": [],
+            "warnings": ["no model guidance callback supplied"],
+        }
+    existing_files = {
+        path: (repo / path).read_text(encoding="utf-8") if (repo / path).exists() and (repo / path).is_file() else ""
+        for path in allowed_paths
+        if safe_repo_relative_path(repo, path) is not None
+    }
+    guidance = request_guidance(
+        "GreenfieldImplementationWorker",
+        {
+            "project_name": project_brief.get("project_name"),
+            "project_type": project_brief.get("project_type"),
+            "template_id": project_brief.get("template_id"),
+            "synthesis_contract": {
+                "kind": "code_brigade_greenfield_file_set_synthesis_contract",
+                "allowed_paths": allowed_paths,
+                "module_sequence": implementation_plan.get("module_sequence", []),
+                "required_output_fields": ["files", "notes"],
+                "file_row_required_fields": ["path", "content", "requirements_satisfied", "notes"],
+            },
+            "existing_files": existing_files,
+        },
+        "Implement a coordinated source-and-test file set. Return JSON only with files:[{path, content, requirements_satisfied, notes}] and notes. Do not include paths outside allowed_paths.",
+    )
+    if not guidance.get("ok"):
+        return {
+            "kind": "code_brigade_greenfield_file_set_synthesis_report",
+            "contract_version": "eye-mechanicum.v1",
+            "status": "model_unavailable",
+            "changed_files": [],
+            "operation_results": [],
+            "blockers": [str(guidance.get("error") or "model guidance unavailable")],
+            "warnings": [],
+            "model_guidance_status": str(guidance.get("status") or ""),
+        }
+    try:
+        output = extract_json_object(str(guidance.get("content") or ""))
+    except (ValueError, json.JSONDecodeError) as exc:
+        return {
+            "kind": "code_brigade_greenfield_file_set_synthesis_report",
+            "contract_version": "eye-mechanicum.v1",
+            "status": "rejected",
+            "changed_files": [],
+            "operation_results": [],
+            "blockers": [f"model output is not valid JSON object: {exc}"],
+            "warnings": [],
+            "model_guidance_status": str(guidance.get("status") or ""),
+        }
+    problems = validate_file_set_synthesis_output(output, project_brief, forbidden_markers)
+    if problems:
+        return {
+            "kind": "code_brigade_greenfield_file_set_synthesis_report",
+            "contract_version": "eye-mechanicum.v1",
+            "status": "rejected",
+            "changed_files": [],
+            "operation_results": [],
+            "blockers": problems,
+            "warnings": [],
+            "model_guidance_status": str(guidance.get("status") or ""),
+        }
+    changed_files: list[str] = []
+    operation_results: list[dict[str, Any]] = []
+    for row in output.get("files", []):
+        path = str(row.get("path") or "")
+        target = safe_repo_relative_path(repo, path)
+        if target is None:
+            continue
+        before = target.read_bytes() if target.exists() else b""
+        rendered_content = str(row.get("content") or "")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(rendered_content, encoding="utf-8")
+        after = rendered_content.encode("utf-8")
+        changed_files.append(path)
+        operation_results.append(
+            {
+                "operation": "greenfield_file_set_synthesis_write",
+                "path": path,
+                "status": "applied",
+                "before_sha256": hashlib.sha256(before).hexdigest() if before else "",
+                "after_sha256": hashlib.sha256(after).hexdigest(),
+            }
+        )
+    return {
+        "kind": "code_brigade_greenfield_file_set_synthesis_report",
+        "contract_version": "eye-mechanicum.v1",
+        "status": "applied" if changed_files else "skipped",
+        "changed_files": sorted(set(changed_files)),
+        "changed_file_count": len(set(changed_files)),
+        "allowed_paths": allowed_paths,
+        "operation_results": operation_results,
+        "blockers": [],
+        "warnings": [],
+        "model_guidance_status": str(guidance.get("status") or ""),
+        "notes": str(output.get("notes") or ""),
     }
 
 

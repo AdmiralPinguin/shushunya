@@ -40,8 +40,10 @@ def build_greenfield_memory_record(
     verification_loop: dict[str, Any],
     greenfield_review: dict[str, Any],
     implementation_synthesis_report: dict[str, Any] | None = None,
+    file_set_synthesis_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     implementation_synthesis_report = implementation_synthesis_report or {}
+    file_set_synthesis_report = file_set_synthesis_report or {}
     repair_attempts = [
         attempt.get("repair_execution", {})
         for attempt in verification_loop.get("attempts", [])
@@ -79,6 +81,9 @@ def build_greenfield_memory_record(
         "implementation_synthesis_changed_files": implementation_synthesis_report.get("changed_files", []),
         "implementation_synthesis_model_unavailable_count": implementation_synthesis_report.get("model_unavailable_count", 0),
         "implementation_synthesis_blocked_count": implementation_synthesis_report.get("blocked_count", 0),
+        "file_set_synthesis_status": file_set_synthesis_report.get("status", ""),
+        "file_set_synthesis_changed_files": file_set_synthesis_report.get("changed_files", []),
+        "file_set_synthesis_changed_file_count": file_set_synthesis_report.get("changed_file_count", 0),
         "definition_of_done_status": dod_status,
         "dependency_status": dependency_report.get("status", ""),
         "dependency_blockers": dependency_report.get("blockers", []),
@@ -109,5 +114,6 @@ def build_greenfield_memory_record(
             "keep README commands identical to run_commands and verification_commands",
             "keep implementation modules and tests separate for non-trivial projects",
             "treat module synthesis as applied only when model JSON passes path, requirement, test, and placeholder validation",
+            "prefer coordinated file-set synthesis when source and tests must evolve together",
         ],
     }

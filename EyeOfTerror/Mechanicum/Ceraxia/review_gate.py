@@ -972,6 +972,7 @@ def source_mutation_scope_sufficiency_from_worker(worker_report: dict[str, Any])
             {
                 "architecture_plan.json",
                 "file_tree_plan.json",
+                "greenfield_file_set_synthesis_report.json",
                 "greenfield_memory_record.json",
                 "greenfield_model_guidance_ledger.json",
                 "greenfield_module_synthesis_report.json",

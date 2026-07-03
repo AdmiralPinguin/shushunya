@@ -11,7 +11,7 @@ from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_d
 from greenfield_architect import build_greenfield_project_brief as architect_build_greenfield_project_brief
 from greenfield_dependency_worker import dependency_manager_status
 from greenfield_feature_worker import infer_acceptance_features
-from greenfield_implementation_worker import execute_module_synthesis_contracts
+from greenfield_implementation_worker import execute_file_set_synthesis_contract, execute_module_synthesis_contracts
 from greenfield_implementation_worker import build_implementation_trace as worker_build_implementation_trace
 from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
 from greenfield_memory_worker import build_greenfield_memory_record
@@ -185,6 +185,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                     "app.py",
                     "architecture_plan.json",
                     "file_tree_plan.json",
+                    "greenfield_file_set_synthesis_report.json",
                     "greenfield_module_synthesis_report.json",
                     "greenfield_project_brief.json",
                     "implementation_trace.json",
@@ -214,6 +215,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(memory["reusable_learnings"])
             self.assertTrue((repo / "greenfield_memory_record.json").exists())
             self.assertTrue((repo / "greenfield_model_guidance_ledger.json").exists())
+            self.assertTrue((repo / "greenfield_file_set_synthesis_report.json").exists())
             self.assertTrue((repo / "greenfield_module_synthesis_report.json").exists())
             self.assertTrue((repo / "greenfield_run_report.json").exists())
             ledger = json.loads((repo / "greenfield_model_guidance_ledger.json").read_text(encoding="utf-8"))
@@ -223,6 +225,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertIn("GreenfieldReviewer", ledger["roles"])
             run_report = json.loads((repo / "greenfield_run_report.json").read_text(encoding="utf-8"))
             self.assertEqual(run_report["kind"], "code_brigade_greenfield_run_report")
+            self.assertIn(run_report["file_set_synthesis_status"], {"applied", "model_unavailable", "skipped", "rejected"})
             self.assertIn(run_report["implementation_synthesis_status"], {"applied", "model_unavailable", "skipped"})
             self.assertEqual(run_report["definition_of_done_status"]["status"], "passed")
             self.assertEqual(run_report["model_guidance_ledger_status"], ledger["status"])
@@ -343,6 +346,80 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(report["applied_count"], len(project["implementation_plan"]["module_sequence"]))
             self.assertIn(module["path"], report["changed_files"])
             self.assertEqual(path.read_text(encoding="utf-8"), "def main():\n    return 'model-generated'\n")
+
+    def test_greenfield_file_set_synthesis_applies_source_and_tests_together(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = architect_build_greenfield_project_brief("Создай CLI калькулятор `file-set-calc`.")
+            source_module = next(row for row in project["implementation_plan"]["module_sequence"] if row["path"] in project["implementation_plan"]["source_files"])
+            test_module = next(row for row in project["implementation_plan"]["module_sequence"] if row["path"] in project["implementation_plan"]["test_files"])
+            source_path = source_module["path"]
+            test_path = test_module["path"]
+            for rel_path in (source_path, test_path):
+                path = repo / rel_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("old\n", encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                source_requirements = source_module["requirements"]
+                test_requirements = test_module["requirements"]
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "files": [
+                                {
+                                    "path": source_path,
+                                    "content": "def main():\n    return 'ready'\n",
+                                    "requirements_satisfied": source_requirements,
+                                    "notes": "source",
+                                },
+                                {
+                                    "path": test_path,
+                                    "content": "import unittest\n\nclass GeneratedTests(unittest.TestCase):\n    def test_ready(self):\n        self.assertTrue(True)\n",
+                                    "requirements_satisfied": test_requirements,
+                                    "notes": "tests",
+                                },
+                            ],
+                            "notes": "coordinated source and tests",
+                        }
+                    ),
+                }
+
+            report = execute_file_set_synthesis_contract(repo, project, guidance)
+            self.assertEqual(report["status"], "applied", report)
+            self.assertEqual(set(report["changed_files"]), {source_path, test_path})
+            self.assertIn("return 'ready'", (repo / source_path).read_text(encoding="utf-8"))
+            self.assertIn("GeneratedTests", (repo / test_path).read_text(encoding="utf-8"))
+
+    def test_greenfield_file_set_synthesis_rejects_out_of_scope_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = architect_build_greenfield_project_brief("Создай CLI калькулятор `bad-file-set-calc`.")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "files": [
+                                {
+                                    "path": "outside.py",
+                                    "content": "print('bad')\n",
+                                    "requirements_satisfied": [],
+                                    "notes": "outside",
+                                }
+                            ],
+                            "notes": "bad",
+                        }
+                    ),
+                }
+
+            report = execute_file_set_synthesis_contract(repo, project, guidance)
+            self.assertEqual(report["status"], "rejected", report)
+            self.assertFalse((repo / "outside.py").exists())
 
     def test_greenfield_module_synthesis_rejects_bad_model_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

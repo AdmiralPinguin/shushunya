@@ -2,7 +2,7 @@
   "kind": "code_brigade_greenfield_capability_audit",
   "contract_version": "eye-mechanicum.v1",
   "status": "in_progress",
-  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, memory, mandatory module-by-module synthesis contracts, executable module synthesis, and verification-driven module synthesis repair. The remaining risk is depth: curated templates/features still provide the baseline source, and arbitrary large project code synthesis needs stronger multi-file coordination before this objective is complete.",
+  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, memory, coordinated file-set synthesis for source/test sets, mandatory module-by-module synthesis contracts, executable module synthesis, and verification-driven module synthesis repair. The remaining risk is depth: curated templates/features still provide the baseline source, and arbitrary large project code synthesis needs stronger semantic scoring before this objective is complete.",
   "requirements": [
     {
       "id": "greenfield_contract",
@@ -44,12 +44,13 @@
       "evidence": [
         "greenfield_implementation_worker.py owns build_implementation_worker_plan and build_implementation_trace as a separate role module",
         "greenfield_architect.py delegates module_sequence, milestones, synthesis_policy, per-module code_synthesis_contract, anti_stub_policy, source_files, test_files, and model guidance into GreenfieldImplementationWorker",
+        "greenfield_implementation_worker.py execute_file_set_synthesis_contract can apply a coordinated model-generated source/test file set after validating allowed paths, requirements, placeholders, and workspace boundaries",
         "greenfield_implementation_worker.py execute_module_synthesis_contracts calls the GreenfieldImplementationWorker model path per module and writes source only after JSON, path, requirement, test, placeholder, and workspace validation",
         "greenfield_verification_worker.py can call verification_repair module synthesis with failure context when bounded template repair is not applicable",
         "greenfield_feature_worker.py applies task-derived feature implementations for calculator, todo, notes API, CSV summary, local agent tool, Telegram bot, Vite counter, and text utils library",
         "implementation_trace.json records requirement to file/function/test mapping with synthesis_contract_kind and GreenfieldReview checks it"
       ],
-      "remaining_risk": "Implementation now has executable validated LLM module synthesis and verification-driven synthesis repair, but curated feature overrides/templates still provide the reliable baseline; arbitrary large multi-file code synthesis is not yet strong enough to call this complete."
+      "remaining_risk": "Implementation now has executable validated LLM file-set synthesis, module synthesis, and verification-driven synthesis repair, but curated feature overrides/templates still provide the reliable baseline; arbitrary large code synthesis still needs stronger semantic scoring."
     },
     {
       "id": "dependency_worker",
@@ -98,13 +99,14 @@
       "evidence": [
         "greenfield_architect.py request_greenfield_model_guidance calls model_brain for GreenfieldArchitect and GreenfieldImplementationWorker",
         "greenfield_implementation_worker.py emits per-module code_synthesis_contract objects that define model_request, JSON output fields, validation_gates, and rollback_scope",
+        "greenfield_project.py executes a GreenfieldImplementationWorker coordinated file-set synthesis stage and records greenfield_file_set_synthesis_report.json",
         "greenfield_project.py executes GreenfieldImplementationWorker module synthesis before dependency and verification, and records greenfield_module_synthesis_report.json",
         "greenfield_verification_worker.py passes verification failure signatures and results into GreenfieldImplementationWorker synthesis repair",
         "greenfield_review_worker.py calls model guidance for GreenfieldReviewer",
         "greenfield_verification_worker.py calls model guidance for GreenfieldRepairWorker",
         "greenfield_project.py writes greenfield_model_guidance_ledger.json so each run records role, stage, and guidance status"
       ],
-      "remaining_risk": "LLM module code generation is executable and validated, but the system still needs stronger multi-file coordination and quality scoring before it can rely on arbitrary synthesis as the primary implementation path."
+      "remaining_risk": "LLM file-set and module code generation are executable and validated, but the system still needs stronger semantic quality scoring before it can rely on arbitrary synthesis as the primary implementation path."
     },
     {
       "id": "reports_and_memory",
@@ -119,7 +121,7 @@
     }
   ],
   "next_recommended_work": [
-    "Strengthen ImplementationWorker module synthesis with multi-file coordination and semantic scoring across source/test sets.",
+    "Strengthen ImplementationWorker synthesis with semantic quality scoring across generated source/test sets.",
     "Add deeper generated artifact review for frontend/API behavior beyond static contract checks.",
     "Add a long-form integration test that creates a larger multi-module app and verifies several independent workflows.",
     "Decide whether Android/game templates belong in this goal now or should remain explicitly deferred."
