@@ -228,7 +228,7 @@ def run_test_inferred_return_mismatch_trial(root: Path) -> dict[str, Any]:
     require(result["ok"], "test-inferred return-mismatch handoff should complete", result)
     require(result["ready_for_execution"], "test-inferred return-mismatch handoff should be ready after real adapter execution", result)
     require("return 42" in (repo / "app.py").read_text(encoding="utf-8"), "test-inferred return mismatch should mutate app.py")
-    require("test_inferred_return_mismatch" in artifacts["worker"]["execution_result"]["patch_summary"], "worker result should expose return-mismatch patch source", artifacts["worker"])
+    require("runtime_diagnostic_return_mismatch" in artifacts["worker"]["execution_result"]["patch_summary"], "worker result should expose return-mismatch patch source", artifacts["worker"])
     require(artifacts["summary"]["surface_verification_status"] == "executed", "return-mismatch trial should execute source and test verification", artifacts["summary"])
     return {"id": "test-inferred-return-mismatch-execution", "result": result, "intent": artifacts["worker"]["execution_intent"]}
 

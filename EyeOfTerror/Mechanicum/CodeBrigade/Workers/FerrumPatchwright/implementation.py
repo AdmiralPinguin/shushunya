@@ -208,6 +208,37 @@ def count_function_ifs(node: ast.FunctionDef) -> int:
     return sum(1 for child in ast.walk(node) if isinstance(child, ast.If))
 
 
+def task_allows_test_file_edits(goal: str) -> bool:
+    lowered = goal.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "update `test",
+            "edit `test",
+            "change `test",
+            "обнови `test",
+            "измени `test",
+            "редактир",
+            "repo-grade",
+            "реальный repo-grade pr",
+            "across source/tests",
+            "source/tests/docs",
+            "ceraxia_files:",
+            "ceraxia_feature:",
+            "ceraxia_integration_contract:",
+            "ceraxia_public_api_compat:",
+            "ceraxia_config_runtime:",
+            "ceraxia_edge_fix:",
+            "ceraxia_data_migration:",
+        )
+    )
+
+
+def docs_like_path(path: str) -> bool:
+    lowered = path.lower()
+    return lowered.endswith((".md", ".rst", ".txt")) or "/docs/" in lowered or lowered.startswith("docs/")
+
+
 def ast_patch_plan_from_spec(repo_root: Path, patch_spec: dict[str, Any]) -> dict[str, Any]:
     patch_source = str(patch_spec.get("source") or "")
     operations = patch_spec.get("operations") if isinstance(patch_spec.get("operations"), list) else []
@@ -546,9 +577,12 @@ def patch_spec_resolution_from_request(
         ("test_inferred_self_repair_seed", lambda: infer_self_repair_seed_from_tests(request)),
         ("natural_language_simple_replace", lambda: infer_simple_replace_patch_spec(request)),
         ("natural_language_add_function", lambda: infer_add_function_patch_spec(request)),
+        ("natural_language_create_file", lambda: infer_create_file_patch_spec(request)),
         ("test_inferred_arithmetic_return", lambda: infer_arithmetic_return_from_tests(request)),
-        ("test_inferred_return_mismatch", lambda: infer_return_mismatch_from_tests(request)),
         ("runtime_diagnostic_return_mismatch", lambda: infer_runtime_diagnostic_return_mismatch_from_tests(request)),
+        ("test_inferred_return_mismatch", lambda: infer_return_mismatch_from_tests(request)),
+        ("test_inferred_constant_mismatch", lambda: infer_constant_mismatch_from_tests(request)),
+        ("test_inferred_missing_constant", lambda: infer_missing_constant_from_tests(request)),
         ("test_inferred_missing_function", lambda: infer_missing_function_from_tests(request)),
     ]
     if model_patch_spec:
@@ -616,6 +650,27 @@ def apply_patch_operation(repo_root: Path, operation: dict[str, Any]) -> dict[st
         if not old_expression or not new_expression:
             raise ValueError("replace_return_expression requires old_expression and new_expression")
         replace_return_expression_in_file(path, function_name, old_expression, new_expression)
+    elif op_type == "replace_python_constant":
+        if not before_exists:
+            raise ValueError(f"replace_python_constant target does not exist: {operation.get('path')}")
+        symbol_name = str(operation.get("symbol_name") or "").strip()
+        old_literal = str(operation.get("old_literal") or "").strip()
+        new_literal = str(operation.get("new_literal") or "").strip()
+        if not symbol_name:
+            raise ValueError("replace_python_constant requires symbol_name")
+        if not old_literal or not new_literal:
+            raise ValueError("replace_python_constant requires old_literal and new_literal")
+        if path.suffix != ".py":
+            raise ValueError("replace_python_constant only supports Python files")
+        replace_module_constant_in_file(path, symbol_name, old_literal, new_literal)
+    elif op_type == "create_file":
+        if before_exists:
+            raise ValueError(f"create_file target already exists: {operation.get('path')}")
+        content = operation.get("content")
+        if not isinstance(content, str):
+            raise ValueError("create_file operation requires string content")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
     elif op_type == "write_file":
         content = operation.get("content")
         if not isinstance(content, str):
@@ -657,7 +712,7 @@ def apply_patch_operation(repo_root: Path, operation: dict[str, Any]) -> dict[st
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", function_name):
                 raise ValueError("append operation python_function_name must be a valid identifier")
             if re.search(rf"^\s*def\s+{re.escape(function_name)}\s*\(", current, flags=re.MULTILINE):
-                raise ValueError(f"append operation would duplicate existing function: {function_name}")
+                raise ValueError(f"function already exists: {function_name}")
         separator = "" if current.endswith("\n") or not current else "\n"
         path.write_text(f"{current}{separator}{content}", encoding="utf-8")
     else:
@@ -778,18 +833,85 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
                 blockers.append("role_policy forbids source mutation for this step")
             elif not blockers:
                 operations = patch_spec["operations"] if isinstance(patch_spec.get("operations"), list) else []
+                implementation_plan = (
+                    worker_brief.get("implementation_plan")
+                    if isinstance(worker_brief.get("implementation_plan"), dict)
+                    else {}
+                )
+                allowed_new_files = {
+                    str(item)
+                    for item in implementation_plan.get("missing_path_hints", [])
+                    if isinstance(item, str)
+                }
+                allowed_new_files.update(
+                    str(item)
+                    for item in implementation_plan.get("allowed_new_files", [])
+                    if isinstance(item, str)
+                )
+                for operation in operations:
+                    if not isinstance(operation, dict) or operation.get("type") != "create_file":
+                        continue
+                    create_path = str(operation.get("path") or "")
+                    if create_path not in allowed_new_files:
+                        blockers.append(f"create_file requires explicit missing path hint: {create_path}")
+                test_edit_paths = [
+                    str(operation.get("path") or "")
+                    for operation in operations
+                    if isinstance(operation, dict) and test_like_path(str(operation.get("path") or ""))
+                ]
+                if test_edit_paths and not task_allows_test_file_edits(request_goal(request)):
+                    blockers.append(f"explicit patch cannot mutate test files without an explicit test-edit request: {', '.join(test_edit_paths)}")
+                scope_budget = (
+                    implementation_plan.get("scope_budget")
+                    if isinstance(implementation_plan.get("scope_budget"), dict)
+                    else {}
+                )
+                max_source_files = int(scope_budget.get("max_source_files_to_edit") or 0)
+                source_edit_paths = sorted(
+                    {
+                        str(operation.get("path") or "")
+                        for operation in operations
+                        if isinstance(operation, dict)
+                        and str(operation.get("path") or "")
+                        and not test_like_path(str(operation.get("path") or ""))
+                        and not docs_like_path(str(operation.get("path") or ""))
+                    }
+                )
+                if max_source_files and len(source_edit_paths) > max_source_files:
+                    blockers.append(
+                        f"source edits exceed scope budget: {len(source_edit_paths)} files requested, max_source_files_to_edit={max_source_files}"
+                    )
+                for operation in operations:
+                    if not isinstance(operation, dict):
+                        continue
+                    op_path = str(operation.get("path") or "")
+                    if not op_path:
+                        continue
+                    target_path = safe_repo_path(repo_root, op_path)
+                    generated_path = "generated/" in op_path or op_path.startswith("generated/")
+                    too_large = target_path.exists() and target_path.is_file() and target_path.stat().st_size > 512 * 1024
+                    if generated_path or too_large:
+                        blockers.append(f"refusing to mutate generated or too large file: {op_path}")
                 dirty_worktree = git_dirty_target_evidence(repo_root, operations)
                 dirty_targets = dirty_worktree.get("dirty_targets") if isinstance(dirty_worktree.get("dirty_targets"), list) else []
                 if dirty_targets:
                     dirty_paths = ", ".join(str(item.get("path")) for item in dirty_targets if isinstance(item, dict))
                     blockers.append(f"target file has uncommitted user changes; refusing source mutation: {dirty_paths}")
-                else:
+                elif not blockers:
                     changed_files.extend(apply_patch_operations_atomically(repo_root, operations))
         else:
             ambiguity_analysis = ambiguity_analysis_from_goal(request_goal(request), repo_root)
             if ambiguity_analysis:
                 blockers.append("Ambiguous code task requires clarification before source mutation.")
             else:
+                blocked_candidate_details = [
+                    str(candidate.get("diagnostic"))
+                    for candidate in patch_resolution.get("candidates", [])
+                    if isinstance(candidate, dict)
+                    and candidate.get("status") == "blocked"
+                    and str(candidate.get("diagnostic") or "")
+                ]
+                blockers.extend(detail for detail in blocked_candidate_details if detail not in blockers)
                 blockers.append(
                     "No patch candidate could be selected from explicit contract, task text, or test evidence."
                 )

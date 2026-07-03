@@ -75,9 +75,53 @@ def infer_add_function_patch_spec(request: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def infer_create_file_patch_spec(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    patterns = [
+        r"(?:создай|create)\s+(?:python\s+)?(?:файл|file)\s+`(?P<path>[^`]+)`\s+(?:с\s+содержимым|with\s+content)\s+`(?P<content>[^`]+)`",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, goal, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        path = match.group("path").strip()
+        content = match.group("content")
+        if "\x00" in content:
+            raise ValueError("inferred create-file patch cannot contain NUL bytes")
+        worker_brief = worker_brief_from_request(request)
+        implementation_plan = (
+            worker_brief.get("implementation_plan") if isinstance(worker_brief.get("implementation_plan"), dict) else {}
+        )
+        allowed_new_files = {
+            str(item)
+            for item in implementation_plan.get("missing_path_hints", [])
+            if isinstance(item, str)
+        }
+        allowed_new_files.update(
+            str(item)
+            for item in implementation_plan.get("allowed_new_files", [])
+            if isinstance(item, str)
+        )
+        if path not in allowed_new_files:
+            raise ValueError(f"inferred create-file requires explicit missing path hint: {path}")
+        return {
+            "source": "natural_language_create_file",
+            "operations": [
+                {
+                    "type": "write_file",
+                    "path": path,
+                    "content": content,
+                }
+            ],
+            "verification_commands": verification_commands_from_natural_goal(goal),
+        }
+    return {}
+
+
 def ast_return_literal_for_function(source_path: Path, function_name: str) -> str:
     try:
-        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+        text = source_path.read_text(encoding="utf-8")
+        tree = ast.parse(text, filename=str(source_path))
     except (OSError, SyntaxError, UnicodeDecodeError):
         return ""
     for node in tree.body:
@@ -87,15 +131,9 @@ def ast_return_literal_for_function(source_path: Path, function_name: str) -> st
         if len(returns) != 1:
             return ""
         value = returns[0].value
-        if isinstance(value, ast.Constant):
-            if isinstance(value.value, bool):
-                return "True" if value.value else "False"
-            if value.value is None:
-                return "None"
-            if isinstance(value.value, int):
-                return str(value.value)
-            if isinstance(value.value, str):
-                return repr(value.value)
+        literal = safe_literal_from_node(text, value)
+        if literal:
+            return literal
     return ""
 
 
@@ -121,10 +159,7 @@ def infer_return_mismatch_from_tests(request: dict[str, Any]) -> dict[str, Any]:
     if len(candidates) != 1:
         raise ValueError(f"test-inferred return mismatch requires exactly one candidate, found {len(candidates)}")
     candidate = candidates[0]
-    commands = verification_commands_from_natural_goal(goal)
-    if not commands:
-        test_module = candidate["test_path"][:-3].replace("/", ".")
-        commands = [f"python -m unittest {test_module}"]
+    commands = verification_commands_for_test_candidate(repo_root, goal, candidate["test_path"])
     return {
         "source": "test_inferred_return_mismatch",
         "diagnostics": {
@@ -179,10 +214,7 @@ def infer_self_repair_seed_from_tests(request: dict[str, Any]) -> dict[str, Any]
     if len(candidates) != 1:
         raise ValueError(f"test-inferred self-repair seed requires exactly one candidate, found {len(candidates)}")
     candidate = candidates[0]
-    commands = verification_commands_from_natural_goal(goal)
-    if not commands:
-        test_module = candidate["test_path"][:-3].replace("/", ".")
-        commands = [f"python -m unittest {test_module}"]
+    commands = verification_commands_for_test_candidate(repo_root, goal, candidate["test_path"])
     return {
         "source": "test_inferred_self_repair_seed",
         "diagnostics": {
@@ -349,10 +381,7 @@ def infer_arithmetic_return_from_tests(request: dict[str, Any]) -> dict[str, Any
     if len(candidates) != 1:
         raise ValueError(f"test-inferred arithmetic return requires exactly one candidate, found {len(candidates)}")
     candidate = candidates[0]
-    commands = verification_commands_from_natural_goal(goal)
-    if not commands:
-        test_module = str(candidate["test_path"])[:-3].replace("/", ".")
-        commands = [f"python -m unittest {test_module}"]
+    commands = verification_commands_for_test_candidate(repo_root, goal, str(candidate["test_path"]))
     return {
         "source": "test_inferred_arithmetic_return",
         "diagnostics": {
@@ -398,10 +427,7 @@ def infer_missing_function_from_tests(request: dict[str, Any]) -> dict[str, Any]
     candidate = candidates[0]
     function_name = candidate["function_name"]
     content = f"\n\ndef {function_name}():\n    return {candidate['literal']}\n"
-    commands = verification_commands_from_natural_goal(goal)
-    if not commands:
-        test_module = candidate["test_path"][:-3].replace("/", ".")
-        commands = [f"python -m unittest {test_module}"]
+    commands = verification_commands_for_test_candidate(repo_root, goal, candidate["test_path"])
     return {
         "source": "test_inferred_missing_function",
         "diagnostics": {
@@ -420,6 +446,87 @@ def infer_missing_function_from_tests(request: dict[str, Any]) -> dict[str, Any]
             }
         ],
         "verification_commands": commands,
+    }
+
+
+def infer_missing_constant_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    candidates: list[dict[str, str]] = []
+    for candidate in test_constant_expectation_candidates(repo_root, goal):
+        source_path = safe_repo_path(repo_root, candidate["module_path"])
+        symbol_name = candidate["symbol_name"]
+        if python_module_constant_exists(source_path, symbol_name):
+            continue
+        candidates.append(candidate)
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred missing constant requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    symbol_name = candidate["symbol_name"]
+    literal = candidate["literal"]
+    content = f"\n{symbol_name} = {literal}\n"
+    return {
+        "source": "test_inferred_missing_constant",
+        "diagnostics": {
+            "kind": "test_inferred_missing_constant",
+            "test_path": candidate["test_path"],
+            "module_path": candidate["module_path"],
+            "symbol_name": symbol_name,
+            "expected": literal,
+        },
+        "operations": [
+            {
+                "type": "append",
+                "path": candidate["module_path"],
+                "content": content,
+                "python_symbol_name": symbol_name,
+            }
+        ],
+        "verification_commands": verification_commands_for_test_candidate(repo_root, goal, candidate["test_path"]),
+    }
+
+
+def infer_constant_mismatch_from_tests(request: dict[str, Any]) -> dict[str, Any]:
+    goal = request_goal(request)
+    repo_root = target_repo_root(request)
+    candidates: list[dict[str, str]] = []
+    for candidate in test_constant_expectation_candidates(repo_root, goal):
+        source_path = safe_repo_path(repo_root, candidate["module_path"])
+        symbol_name = candidate["symbol_name"]
+        current = simple_module_constant_segment(source_path, symbol_name)
+        actual = str(current.get("literal") or "")
+        expected = candidate["literal"]
+        if not actual or actual == expected:
+            continue
+        candidates.append({**candidate, "actual": actual})
+    if not candidates:
+        return {}
+    if len(candidates) != 1:
+        raise ValueError(f"test-inferred constant mismatch requires exactly one candidate, found {len(candidates)}")
+    candidate = candidates[0]
+    symbol_name = candidate["symbol_name"]
+    return {
+        "source": "test_inferred_constant_mismatch",
+        "diagnostics": {
+            "kind": "test_inferred_constant_mismatch",
+            "test_path": candidate["test_path"],
+            "module_path": candidate["module_path"],
+            "symbol_name": symbol_name,
+            "actual": candidate["actual"],
+            "expected": candidate["literal"],
+        },
+        "operations": [
+            {
+                "type": "replace_python_constant",
+                "path": candidate["module_path"],
+                "symbol_name": symbol_name,
+                "old_literal": candidate["actual"],
+                "new_literal": candidate["literal"],
+            }
+        ],
+        "verification_commands": verification_commands_for_test_candidate(repo_root, goal, candidate["test_path"]),
     }
 
 
@@ -569,7 +676,7 @@ def infer_config_runtime_from_tests(request: dict[str, Any]) -> dict[str, Any]:
         f"python -m {loader_module}\n"
     )
     if not commands:
-        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+        commands = [verification_command_for_test_path(repo_root, str(candidate["test_path"]))]
     return {
         "source": "test_inferred_config_runtime",
         "diagnostics": {
@@ -702,7 +809,7 @@ def infer_api_deprecation_from_tests(request: dict[str, Any]) -> dict[str, Any]:
     )
     operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
     if not commands:
-        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+        commands = [verification_command_for_test_path(repo_root, str(candidate["test_path"]))]
     if not any("unittest discover" in command for command in commands):
         commands.append("python -m unittest discover -s tests")
     return {
@@ -826,7 +933,7 @@ def infer_data_migration_from_tests(request: dict[str, Any]) -> dict[str, Any]:
         )
         operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
     if not commands:
-        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+        commands = [verification_command_for_test_path(repo_root, str(candidate["test_path"]))]
     return {
         "source": "test_inferred_data_migration",
         "diagnostics": {
@@ -931,7 +1038,7 @@ def infer_security_boundary_from_tests(request: dict[str, Any]) -> dict[str, Any
         )
         operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
     if not commands:
-        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+        commands = [verification_command_for_test_path(repo_root, str(candidate["test_path"]))]
     return {
         "source": "test_inferred_security_boundary",
         "diagnostics": {
@@ -1038,7 +1145,7 @@ def infer_design_choice_tax_from_tests(request: dict[str, Any]) -> dict[str, Any
         "Rejected options: hardcoding fixture values would not generalize; broad rewrite would add unnecessary churn.\n"
     )
     if not commands:
-        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+        commands = [verification_command_for_test_path(repo_root, str(candidate["test_path"]))]
     if not any("unittest discover" in command for command in commands):
         commands.append("python -m unittest discover -s tests")
     return {
@@ -1149,7 +1256,7 @@ def infer_cache_concurrency_from_tests(request: dict[str, Any]) -> dict[str, Any
         )
         operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
     if not commands:
-        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+        commands = [verification_command_for_test_path(repo_root, str(candidate["test_path"]))]
     return {
         "source": "test_inferred_cache_concurrency",
         "diagnostics": {
@@ -1241,7 +1348,7 @@ def infer_flaky_ordering_from_tests(request: dict[str, Any]) -> dict[str, Any]:
         )
         operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
     if not commands:
-        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+        commands = [verification_command_for_test_path(repo_root, str(candidate["test_path"]))]
     return {
         "source": "test_inferred_flaky_ordering",
         "diagnostics": {
@@ -1340,7 +1447,7 @@ def infer_retry_policy_from_tests(request: dict[str, Any]) -> dict[str, Any]:
         )
         operations.append({"type": "write_file", "path": docs_path, "content": docs_content, "overwrite": True})
     if not commands:
-        commands = [f"python -m unittest {str(candidate['test_path'])[:-3].replace('/', '.')}"]
+        commands = [verification_command_for_test_path(repo_root, str(candidate["test_path"]))]
     return {
         "source": "test_inferred_retry_policy",
         "diagnostics": {
@@ -1374,6 +1481,20 @@ def runtime_verification_commands_from_goal(repo_root: Path, goal: str) -> list[
         if command not in inferred:
             inferred.append(command)
     return inferred[:5]
+
+
+def verification_command_for_test_path(repo_root: Path, test_path: str) -> str:
+    if pytest_style_test_file(repo_root, test_path):
+        return f"python -m pytest {test_path}"
+    module = test_path[:-3].replace("/", ".") if test_path.endswith(".py") else test_path.replace("/", ".")
+    return f"python -m unittest {module}"
+
+
+def verification_commands_for_test_candidate(repo_root: Path, goal: str, test_path: str) -> list[str]:
+    commands = verification_commands_from_natural_goal(goal)
+    if commands:
+        return commands[:5]
+    return [verification_command_for_test_path(repo_root, test_path)]
 
 
 def infer_runtime_diagnostic_return_mismatch_from_tests(request: dict[str, Any]) -> dict[str, Any]:

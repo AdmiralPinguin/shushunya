@@ -1300,7 +1300,7 @@ def main() -> int:
         return_mismatch_report = code_brigade_adapter.build_worker_report(return_mismatch_brief, dry_run=False)
         if return_mismatch_report["status"] != "implemented" or return_mismatch_report["changed_files"] != ["app.py"]:
             raise AssertionError(f"test-inferred return mismatch should report implemented changed files: {return_mismatch_report}")
-        if "test_inferred_return_mismatch" not in return_mismatch_report["execution_result"]["patch_summary"]:
+        if "runtime_diagnostic_return_mismatch" not in return_mismatch_report["execution_result"]["patch_summary"]:
             raise AssertionError(f"test-inferred return mismatch should expose patch source: {return_mismatch_report}")
         if "return 42" not in Path(tmp, "app.py").read_text(encoding="utf-8"):
             raise AssertionError("test-inferred return mismatch did not update app.py")

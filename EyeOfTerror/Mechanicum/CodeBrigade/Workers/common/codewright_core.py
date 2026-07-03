@@ -577,6 +577,143 @@ def pytest_style_test_file(repo_root: Path, test_path: str) -> bool:
     return any(isinstance(node, ast.FunctionDef) and node.name.startswith("test") for node in tree.body)
 
 
+def normalized_safe_literal(raw: str) -> str:
+    try:
+        value = ast.literal_eval(raw.strip())
+    except (SyntaxError, ValueError) as exc:
+        detail = exc.msg if isinstance(exc, SyntaxError) else str(exc)
+        raise ValueError(f"unsupported inferred return literal: {detail}") from exc
+    if not isinstance(value, (str, int, float, bool, type(None), list, tuple, dict)):
+        raise ValueError(f"unsupported inferred return literal type: {type(value).__name__}")
+    return repr(value)
+
+
+def safe_literal_from_node(source_text: str, node: ast.AST | None) -> str:
+    if node is None:
+        return ""
+    segment = ast.get_source_segment(source_text, node)
+    if not segment:
+        return ""
+    try:
+        return safe_return_literal(segment)
+    except ValueError:
+        return ""
+
+
+def imported_function_calls_from_tree(tree: ast.AST) -> dict[str, str]:
+    imports: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            imports[alias.asname or alias.name] = node.module
+    return imports
+
+
+def imported_module_aliases_from_tree(tree: ast.AST) -> dict[str, str]:
+    imports: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Import):
+            continue
+        for alias in node.names:
+            if not alias.name:
+                continue
+            imports[alias.asname or alias.name.split(".")[0]] = alias.name
+    return imports
+
+
+def zero_arg_call_name(node: ast.AST | None) -> str:
+    if not isinstance(node, ast.Call) or node.args or node.keywords:
+        return ""
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    return ""
+
+
+def zero_arg_call_ref(node: ast.AST | None) -> tuple[str, str]:
+    if not isinstance(node, ast.Call) or node.args or node.keywords:
+        return "", ""
+    if isinstance(node.func, ast.Name):
+        return "", node.func.id
+    if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+        return node.func.value.id, node.func.attr
+    return "", ""
+
+
+def symbol_ref(node: ast.AST | None) -> tuple[str, str]:
+    if isinstance(node, ast.Name):
+        return "", node.id
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return node.value.id, node.attr
+    return "", ""
+
+
+def assert_expected_literal_nodes(func_node: ast.FunctionDef) -> list[tuple[str, str, ast.AST]]:
+    candidates: list[tuple[str, str, ast.AST]] = []
+    for node in ast.walk(func_node):
+        if isinstance(node, ast.Assert) and isinstance(node.test, ast.Compare):
+            compare = node.test
+            if len(compare.ops) != 1 or len(compare.comparators) != 1:
+                continue
+            if not isinstance(compare.ops[0], (ast.Eq, ast.Is)):
+                continue
+            module_alias, call_name = zero_arg_call_ref(compare.left)
+            if call_name:
+                candidates.append((module_alias, call_name, compare.comparators[0]))
+                continue
+            module_alias, call_name = zero_arg_call_ref(compare.comparators[0])
+            if call_name:
+                candidates.append((module_alias, call_name, compare.left))
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "assertEqual":
+            continue
+        if len(node.args) < 2:
+            continue
+        module_alias, call_name = zero_arg_call_ref(node.args[0])
+        if call_name:
+            candidates.append((module_alias, call_name, node.args[1]))
+            continue
+        module_alias, call_name = zero_arg_call_ref(node.args[1])
+        if call_name:
+            candidates.append((module_alias, call_name, node.args[0]))
+    return candidates
+
+
+def assert_symbol_expected_literal_nodes(func_node: ast.FunctionDef) -> list[tuple[str, str, ast.AST]]:
+    candidates: list[tuple[str, str, ast.AST]] = []
+    for node in ast.walk(func_node):
+        if isinstance(node, ast.Assert) and isinstance(node.test, ast.Compare):
+            compare = node.test
+            if len(compare.ops) != 1 or len(compare.comparators) != 1:
+                continue
+            if not isinstance(compare.ops[0], (ast.Eq, ast.Is)):
+                continue
+            module_alias, symbol_name = symbol_ref(compare.left)
+            if symbol_name:
+                candidates.append((module_alias, symbol_name, compare.comparators[0]))
+                continue
+            module_alias, symbol_name = symbol_ref(compare.comparators[0])
+            if symbol_name:
+                candidates.append((module_alias, symbol_name, compare.left))
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "assertEqual":
+            continue
+        if len(node.args) < 2:
+            continue
+        module_alias, symbol_name = symbol_ref(node.args[0])
+        if symbol_name:
+            candidates.append((module_alias, symbol_name, node.args[1]))
+            continue
+        module_alias, symbol_name = symbol_ref(node.args[1])
+        if symbol_name:
+            candidates.append((module_alias, symbol_name, node.args[0]))
+    return candidates
+
+
 def test_expectation_candidates(repo_root: Path, goal: str) -> list[dict[str, str]]:
     candidates: list[dict[str, str]] = []
     for test_path in discovered_test_paths(repo_root, goal):
@@ -584,8 +721,48 @@ def test_expectation_candidates(repo_root: Path, goal: str) -> list[dict[str, st
         if not path.exists():
             continue
         text = path.read_text(encoding="utf-8")
-        imports = re.findall(r"^\s*from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", text, flags=re.MULTILINE)
-        for module_name, function_name in imports:
+        try:
+            tree = ast.parse(text, filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        imports = imported_function_calls_from_tree(tree)
+        module_aliases = imported_module_aliases_from_tree(tree)
+        ast_candidates_added = False
+        for _class_name, func_node in test_function_nodes_from_tree(tree):
+            function_expectations: dict[tuple[str, str], str] = {}
+            for module_alias, function_name, expected_node in assert_expected_literal_nodes(func_node):
+                module_name = module_aliases.get(module_alias) if module_alias else imports.get(function_name)
+                if not module_name:
+                    continue
+                literal = safe_literal_from_node(text, expected_node)
+                if not literal:
+                    continue
+                key = (module_name, function_name)
+                previous = function_expectations.get(key)
+                if previous and previous != literal:
+                    function_expectations[key] = ""
+                    continue
+                function_expectations[key] = literal
+            for (module_name, function_name), literal in function_expectations.items():
+                if not literal:
+                    continue
+                module_path = f"{module_name.replace('.', '/')}.py"
+                source_path = safe_repo_path(repo_root, module_path)
+                if not source_path.exists():
+                    continue
+                candidates.append(
+                    {
+                        "test_path": test_path,
+                        "module_path": module_path,
+                        "function_name": function_name,
+                        "literal": literal,
+                    }
+                )
+                ast_candidates_added = True
+        if ast_candidates_added:
+            continue
+        imports_regex = re.findall(r"^\s*from\s+([A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", text, flags=re.MULTILINE)
+        for module_name, function_name in imports_regex:
             expected_values = re.findall(
                 rf"assertEqual\(\s*{re.escape(function_name)}\(\)\s*,\s*([+-]?\d+|True|False|None|'[^'\\]*(?:\\.[^'\\]*)*'|\"[^\"\\]*(?:\\.[^\"\\]*)*\")\s*\)",
                 text,
@@ -606,13 +783,60 @@ def test_expectation_candidates(repo_root: Path, goal: str) -> list[dict[str, st
             )
     return candidates
 
+
+def test_constant_expectation_candidates(repo_root: Path, goal: str) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    for test_path in discovered_test_paths(repo_root, goal):
+        path = safe_repo_path(repo_root, test_path)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(text, filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        imports = imported_function_calls_from_tree(tree)
+        module_aliases = imported_module_aliases_from_tree(tree)
+        for _class_name, func_node in test_function_nodes_from_tree(tree):
+            symbol_expectations: dict[tuple[str, str], str] = {}
+            for module_alias, symbol_name, expected_node in assert_symbol_expected_literal_nodes(func_node):
+                module_name = module_aliases.get(module_alias) if module_alias else imports.get(symbol_name)
+                if not module_name:
+                    continue
+                if not symbol_name or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", symbol_name):
+                    continue
+                literal = safe_literal_from_node(text, expected_node)
+                if not literal:
+                    continue
+                key = (module_name, symbol_name)
+                previous = symbol_expectations.get(key)
+                if previous and previous != literal:
+                    symbol_expectations[key] = ""
+                    continue
+                symbol_expectations[key] = literal
+            for (module_name, symbol_name), literal in symbol_expectations.items():
+                if not literal:
+                    continue
+                module_path = f"{module_name.replace('.', '/')}.py"
+                source_path = safe_repo_path(repo_root, module_path)
+                if not source_path.exists():
+                    continue
+                candidates.append(
+                    {
+                        "test_path": test_path,
+                        "module_path": module_path,
+                        "symbol_name": symbol_name,
+                        "literal": literal,
+                    }
+                )
+    return candidates
+
+
 def safe_return_literal(raw: str) -> str:
     value = raw.strip()
-    if re.fullmatch(r"[+-]?\d+", value) or value in {"True", "False", "None"}:
-        return value
-    if re.fullmatch(r"'[^'\\]*(?:\\.[^'\\]*)*'", value) or re.fullmatch(r'"[^"\\]*(?:\\.[^"\\]*)*"', value):
-        return value
-    raise ValueError(f"unsupported inferred return literal: {raw}")
+    if "\n" in value or "\r" in value:
+        raise ValueError(f"unsupported inferred return literal: {raw}")
+    return normalized_safe_literal(value)
 
 
 
@@ -658,6 +882,63 @@ def simple_function_return_segment(source_path: Path, function_name: str) -> dic
             return {}
         return {"args": args, "return_expr": segment, "line": returns[0].lineno}
     return {}
+
+
+def simple_module_constant_segment(source_path: Path, symbol_name: str) -> dict[str, Any]:
+    if not source_path.exists() or source_path.suffix != ".py":
+        return {}
+    text = source_path.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(text, filename=str(source_path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return {}
+    matches: list[ast.Assign | ast.AnnAssign] = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = [target.id for target in node.targets if isinstance(target, ast.Name)]
+            if targets == [symbol_name] and isinstance(node.value, ast.Constant):
+                matches.append(node)
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == symbol_name
+            and isinstance(node.value, ast.Constant)
+        ):
+            matches.append(node)
+    if len(matches) != 1:
+        return {}
+    node = matches[0]
+    value = node.value
+    literal = ast.get_source_segment(text, value) or repr(value.value)
+    return {"line": node.lineno, "literal": literal.strip()}
+
+
+def python_module_constant_exists(source_path: Path, symbol_name: str) -> bool:
+    return bool(simple_module_constant_segment(source_path, symbol_name))
+
+
+def replace_module_constant_in_file(source_path: Path, symbol_name: str, old_literal: str, new_literal: str) -> None:
+    text = source_path.read_text(encoding="utf-8")
+    constant = simple_module_constant_segment(source_path, symbol_name)
+    if constant.get("literal") != old_literal:
+        raise ValueError(f"current literal for {symbol_name} does not match expected literal")
+    try:
+        ast.parse(new_literal, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"new literal is not valid Python: {exc.msg}") from exc
+    line_number = int(constant.get("line") or 0)
+    lines = text.splitlines(keepends=True)
+    if line_number < 1 or line_number > len(lines):
+        raise ValueError(f"assignment line for {symbol_name} is out of range")
+    line = lines[line_number - 1]
+    match = re.match(rf"^(\s*{re.escape(symbol_name)}(?:\s*:\s*[^=]+)?\s*=\s*)(.+?)(\r?\n)?$", line)
+    if not match:
+        raise ValueError(f"assignment line for {symbol_name} is not a simple single-line assignment")
+    if match.group(2).strip() != old_literal:
+        raise ValueError(f"assignment line for {symbol_name} does not match expected literal")
+    newline = match.group(3) or ""
+    lines[line_number - 1] = f"{match.group(1)}{new_literal}{newline}"
+    source_path.write_text("".join(lines), encoding="utf-8")
 
 
 

@@ -337,7 +337,7 @@ CERAXIA_TARGET_REPO: {target_repo}
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest.get("status") != "ready":
             raise AssertionError(f"Ceraxia test-inferred return manifest should be ready: {manifest}")
-        if manifest.get("patch_source") != "test_inferred_return_mismatch" or manifest.get("operation_count") != 1:
+        if manifest.get("patch_source") != "runtime_diagnostic_return_mismatch" or manifest.get("operation_count") != 1:
             raise AssertionError(f"Ceraxia test-inferred return manifest should expose patch audit fields: {manifest}")
         if manifest.get("diagnostics", {}).get("actual") != "1" or manifest.get("diagnostics", {}).get("expected") != "42":
             raise AssertionError(f"Ceraxia test-inferred return manifest should expose diagnostics: {manifest}")

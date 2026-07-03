@@ -1598,7 +1598,7 @@ def main() -> int:
         final = run_pipeline(root / "work", goal=test_inferred_missing_function_goal(), target_repo_root=target_repo)
         if final.get("status") != "ready":
             raise AssertionError(f"test-inferred return mismatch task should be ready: {final}")
-        if final.get("patch_source") != "test_inferred_return_mismatch" or final.get("operation_count") != 1:
+        if final.get("patch_source") != "runtime_diagnostic_return_mismatch" or final.get("operation_count") != 1:
             raise AssertionError(f"test-inferred return mismatch should expose patch audit fields: {final}")
         if final.get("diagnostics", {}).get("actual") != "1" or final.get("diagnostics", {}).get("expected") != "42":
             raise AssertionError(f"test-inferred return mismatch should expose diagnostics: {final}")

@@ -4,10 +4,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from execution_contract import CONTRACT_VERSION, build_blocked_execution_result
+from execution_contract import build_implemented_execution_result, build_patch_manifest
+from execution_preflight import build_execution_preflight
 from implementation_brief_contract import validate_implementation_brief
 
 REAL_EXECUTION_STATUS = "blocked_until_adapter_is_wired"
@@ -330,6 +334,195 @@ def build_autonomous_execution_request(brief: dict[str, Any], implementation_pla
     }
 
 
+def code_worker_request(step_id: str, artifact: str, brief: dict[str, Any]) -> dict[str, Any]:
+    implementation_plan = build_implementation_plan(brief)
+    role_policies = {
+        "repository_survey": {"role": "repository_mapper", "authority": "read_only_repository_mapping", "may_mutate_source": False},
+        "change_planning": {"role": "change_strategist", "authority": "scoped_plan_from_repository_evidence", "may_mutate_source": False},
+        "implementation": {
+            "role": "patchwright",
+            "authority": "scoped_source_mutation_from_patch_contract_or_safe_inference",
+            "may_mutate_source": True,
+        },
+        "verification": {"role": "verifier", "authority": "allowlisted_verification_and_narrow_repairs", "may_mutate_source": True},
+        "code_review": {"role": "critic", "authority": "read_only_package_review_and_revision_ordering", "may_mutate_source": False},
+        "finalize": {"role": "final_packager", "authority": "read_only_final_manifest_packaging", "may_mutate_source": False},
+    }
+    request = {
+        "task_id": f"ceraxia-code-worker:{step_id}",
+        "goal": str(brief.get("task") or ""),
+        "target_repo_root": str(brief.get("repo_path") or ""),
+        "step": {"step_id": step_id, "expected_artifacts": [artifact]},
+        "quality_expectations": {
+            "step_quality": {
+                "step_id": step_id,
+                "role_policy": role_policies[step_id],
+            },
+            "task_profile": {
+                "task_kinds": brief.get("task_kinds", []),
+                "risk_level": brief.get("risk_level", ""),
+            },
+            "worker_brief": {
+                "selected_strategy": brief.get("selected_strategy", ""),
+                "acceptance_contract": brief.get("acceptance_contract", {}),
+                "required_verification": brief.get("required_verification", {}),
+                "implementation_plan": implementation_plan,
+            },
+        },
+    }
+    return request
+
+
+def load_pipeline_artifacts(workspace_root: Path) -> dict[str, Any]:
+    code_dir = workspace_root / "code"
+
+    def load(name: str) -> dict[str, Any]:
+        path = code_dir / name
+        if not path.exists():
+            return {}
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+
+    return {
+        "repo_survey": load("repo_survey.json"),
+        "problem_statement": load("problem_statement.json"),
+        "architecture_options": load("architecture_options.json"),
+        "patch_manifest": load("patch_manifest.json"),
+        "verification_report": load("verification_report.json"),
+        "repair_loop_state": load("repair_loop_state.json"),
+        "diagnostic_extraction": load("diagnostic_extraction.json"),
+        "code_review": load("code_review.json"),
+        "final_manifest": load("final_manifest.json"),
+    }
+
+
+def operation_results_from_pipeline(changed_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, item in enumerate(changed_files):
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        if not path:
+            continue
+        rows.append(
+            {
+                "index": index,
+                "operation": str(item.get("operation") or "code_worker_pipeline"),
+                "path": path,
+                "status": "applied" if item.get("changed", True) else "unchanged",
+                "before_sha256": str(item.get("before_sha256") or ""),
+                "after_sha256": str(item.get("after_sha256") or ""),
+            }
+        )
+    return rows
+
+
+def verification_commands_from_pipeline(verification_report: dict[str, Any]) -> list[dict[str, Any]]:
+    executed = verification_report.get("executed") if isinstance(verification_report.get("executed"), list) else []
+    rows: list[dict[str, Any]] = []
+    for item in executed:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            {
+                "command": str(item.get("command") or ""),
+                "returncode": item.get("returncode"),
+                "status": "passed" if int(item.get("returncode") or 0) == 0 else "failed",
+            }
+        )
+    return rows
+
+
+def code_worker_pipeline_paths() -> Path:
+    worker_path = Path(__file__).resolve().parent / "Workers" / "CogitatorCodewright"
+    if str(worker_path) not in sys.path:
+        sys.path.insert(0, str(worker_path))
+    return worker_path
+
+
+def execute_worker_pipeline_brief(brief: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    validation_problems = validate_implementation_brief(brief)
+    if validation_problems:
+        return build_blocked_execution_result([f"invalid implementation brief: {problem}" for problem in validation_problems]), {}
+    preflight = build_execution_preflight(brief)
+    if not preflight["ok"]:
+        return build_blocked_execution_result(preflight["blockers"], preflight), {}
+    code_worker_pipeline_paths()
+    from cogitator_codewright import run as run_code_worker  # noqa: WPS433 - loaded lazily to keep dry-run imports cheap.
+
+    steps = [
+        ("repository_survey", "/work/code/repo_survey.json"),
+        ("change_planning", "/work/code/change_plan.md"),
+        ("implementation", "/work/code/patch_manifest.json"),
+        ("verification", "/work/code/verification_report.json"),
+        ("code_review", "/work/code/code_review.json"),
+        ("finalize", "/work/code/final_manifest.json"),
+    ]
+    with tempfile.TemporaryDirectory(prefix="ceraxia-code-worker-") as temp_dir:
+        workspace_root = Path(temp_dir) / "work"
+        step_results: list[dict[str, Any]] = []
+        for step_id, artifact in steps:
+            result = run_code_worker(code_worker_request(step_id, artifact, brief), workspace_root)
+            step_results.append(result if isinstance(result, dict) else {"ok": False, "error": "worker returned non-object"})
+            if not result.get("ok") and result.get("status") not in {"blocked", "needs_revision", "passed_with_warnings"}:
+                artifacts = load_pipeline_artifacts(workspace_root)
+                artifacts["step_results"] = step_results
+                return build_blocked_execution_result([f"{step_id} failed: {result}"], preflight), artifacts
+        artifacts = load_pipeline_artifacts(workspace_root)
+        artifacts["step_results"] = step_results
+    final = artifacts.get("final_manifest") if isinstance(artifacts.get("final_manifest"), dict) else {}
+    patch = artifacts.get("patch_manifest") if isinstance(artifacts.get("patch_manifest"), dict) else {}
+    verification = artifacts.get("verification_report") if isinstance(artifacts.get("verification_report"), dict) else {}
+    blockers = [str(item) for item in final.get("blockers", [])] if isinstance(final.get("blockers"), list) else []
+    if final.get("status") != "ready":
+        if not blockers:
+            blockers = ["CodeBrigade worker pipeline did not produce a ready final manifest"]
+        rollback = patch.get("rollback") if isinstance(patch.get("rollback"), dict) else {}
+        rollback_files = rollback.get("files") if isinstance(rollback.get("files"), list) else []
+        if rollback.get("applied") and rollback_files:
+            rollback_notes = f"rolled back {len(rollback_files)} touched files after patch failure"
+            rollback_operations = [
+                {
+                    "index": index,
+                    "operation": "rollback",
+                    "path": str(item.get("path") or ""),
+                    "status": "failed_rolled_back",
+                    "before_sha256": "",
+                    "after_sha256": "",
+                }
+                for index, item in enumerate(rollback_files)
+                if isinstance(item, dict) and item.get("path")
+            ]
+            return (
+                build_blocked_execution_result(
+                    blockers,
+                    preflight,
+                    rollback_notes,
+                    rollback_operations,
+                    build_patch_manifest([], rollback_operations, rollback_notes),
+                ),
+                artifacts,
+            )
+        return build_blocked_execution_result(blockers, preflight), artifacts
+    changed_files = [
+        str(item.get("path"))
+        for item in final.get("changed_files", [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    operation_results = operation_results_from_pipeline(final.get("changed_files", []) if isinstance(final.get("changed_files"), list) else [])
+    patch_source = str(final.get("patch_source") or patch.get("patch_source") or "code_worker_pipeline")
+    execution_result = build_implemented_execution_result(
+        changed_files,
+        f"{patch_source} via CogitatorCodewright worker pipeline",
+        preflight,
+        operation_results,
+        build_patch_manifest(changed_files, operation_results, ""),
+    )
+    execution_result["verification_commands_executed"] = verification_commands_from_pipeline(verification)
+    execution_result["code_worker_pipeline_status"] = "ready"
+    return execution_result, artifacts
+
+
 def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     validation_problems = validate_implementation_brief(brief)
     implementation_plan = build_implementation_plan(brief)
@@ -397,14 +590,14 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         status = "dry_run_handoff_ready"
         notes.append("CodeBrigade adapter accepted the implementation brief without source mutation")
     else:
-        from execution_adapter import execute_implementation_brief
-
-        execution_result = execute_implementation_brief(brief)
+        execution_result, code_worker_pipeline = execute_worker_pipeline_brief(brief)
         status = "implemented" if execution_result.get("status") == "implemented" else "blocked"
         notes.extend(str(item) for item in execution_result.get("blockers", []))
         if status == "implemented":
             changed_files = execution_result.get("changed_files", []) if isinstance(execution_result.get("changed_files"), list) else []
-            notes.append("CodeBrigade guarded execution adapter applied the requested changes")
+            notes.append("CogitatorCodewright worker pipeline applied the requested changes")
+        elif execution_intent.get("real_execution_supported") is False:
+            notes.append("future CodeBrigade autonomous execution adapter remains required when the worker pipeline cannot shape the task")
     if status == "implemented":
         package_status = "implemented"
         package_evidence = "execution_result"
@@ -454,6 +647,8 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         "validation_problems": validation_problems,
         "adapter": "EyeOfTerror/Mechanicum/CodeBrigade/code_brigade_adapter.py",
     }
+    if "code_worker_pipeline" in locals():
+        report["code_worker_pipeline"] = code_worker_pipeline
     if "execution_result" in locals():
         report["execution_result"] = execution_result
     elif status == "blocked":
